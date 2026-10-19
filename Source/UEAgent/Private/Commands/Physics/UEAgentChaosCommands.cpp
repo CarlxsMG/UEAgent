@@ -380,7 +380,7 @@ TSharedPtr<FJsonObject> HandleCreateGeometryCollection(const TSharedPtr<FJsonObj
 // ---------------------------------------------------------------------------
 // 2. get_geometry_collection_info
 // ---------------------------------------------------------------------------
-// MCP:get_geometry_collection_info - Reads a UGeometryCollection asset without changing it: material, source and damage-threshold counts, damage model ("Threshold", "MaterialStrength" or "Unknown"), mass settings and element counts (transforms, vertices, faces, geometry; 0 without collection data). Use get_gc_hierarchy_info for the bone tree.
+// MCP:get_geometry_collection_info - Reads a UGeometryCollection asset without changing it: material, source and damage-threshold counts, damage model ("Threshold", "MaterialStrength" or "Unknown"), mass settings and element counts (transforms, vertices, faces, geometry; 0 without collection data). Use get_geometry_collection_hierarchy for the bone tree.
 //   @param geometry_collection_path - Full asset path, e.g. /Game/Chaos/GC_Wall
 //   @returns { asset_path: string, num_materials: int, num_geometry_sources: int, damage_model: string, num_damage_thresholds: int, is_empty: bool, num_transforms: int, num_vertices: int, num_faces: int, num_geometry: int, mass: float, mass_as_density: bool, minimum_mass_clamp: float, density_from_physics_material: bool, has_physics_material: bool }
 TSharedPtr<FJsonObject> HandleGetGeometryCollectionInfo(const TSharedPtr<FJsonObject>& Params)
@@ -630,7 +630,7 @@ TSharedPtr<FJsonObject> HandleClusterGeometryCollection(const TSharedPtr<FJsonOb
 // ---------------------------------------------------------------------------
 // 5. set_geometry_collection_damage
 // ---------------------------------------------------------------------------
-// MCP:set_geometry_collection_damage - Set the damage model and/or the per-level damage thresholds of a UGeometryCollection asset in an undo transaction, then save it. Only the fields given change; damage_thresholds overwrites the whole threshold list, skipping entries that are not numbers. Succeeds only when the package reaches disk; a failed save leaves the change in memory only (saved false, save_error). The reply reads back damage_model ("Threshold", "MaterialStrength" or "Unknown") and num_thresholds; get_geometry_collection_info shows them later. Mass: set_geometry_collection_mass; clustering: set_gc_connection_settings.
+// MCP:set_geometry_collection_damage - Set the damage model and/or the per-level damage thresholds of a UGeometryCollection asset in an undo transaction, then save it. Only the fields given change; damage_thresholds overwrites the whole threshold list, skipping entries that are not numbers. Succeeds only when the package reaches disk; a failed save leaves the change in memory only (saved false, save_error). The reply reads back damage_model ("Threshold", "MaterialStrength" or "Unknown") and num_thresholds; get_geometry_collection_info shows them later. Mass: set_geometry_collection_mass; clustering: set_geometry_collection_connection_settings.
 //   @param geometry_collection_path - Full asset path to the UGeometryCollection
 //   @param damage_model - Threshold (alias UserDefined) or Simple (alias Material, the material-strength model), case-insensitive; any other text means Threshold, and leaving it out keeps the current model.
 //   @param damage_thresholds - Optional array of per-level damage threshold floats
@@ -926,9 +926,9 @@ TSharedPtr<FJsonObject> HandleRemoveGeometryCollectionSource(const TSharedPtr<FJ
 }
 
 // ---------------------------------------------------------------------------
-// plane_cut_fracture
+// cut_geometry_collection_with_planes
 // ---------------------------------------------------------------------------
-// MCP:plane_cut_fracture - Cuts all transforms of a UGeometryCollection asset with num_planes random planes inside its bounds (no noise, islands split by default), then saves it. new_fracture_count is the number of new pieces, measured as the transforms the cut added; the call fails when it added none (an empty collection, or planes that miss every piece) or when the save fails.
+// MCP:cut_geometry_collection_with_planes - Cuts all transforms of a UGeometryCollection asset with num_planes random planes inside its bounds (no noise, islands split by default), then saves it. new_fracture_count is the number of new pieces, measured as the transforms the cut added; the call fails when it added none (an empty collection, or planes that miss every piece) or when the save fails.
 //   @param geometry_collection_path - Asset path of the UGeometryCollection
 //   @param num_planes - Number of random cutting planes to generate, minimum 1, default 3
 //   @param random_seed - Optional seed for plane generation, default 1337
@@ -1002,15 +1002,15 @@ TSharedPtr<FJsonObject> HandlePlaneCutFracture(const TSharedPtr<FJsonObject>& Pa
     Result->SetNumberField(TEXT("num_planes"), NumPlanes);
     Result->SetNumberField(TEXT("new_fracture_count"), NumTransformsAfter - NumTransformsBefore);
     Result->SetNumberField(TEXT("transform_count"), NumTransformsAfter);
-    return Chaos_EditReply(Result, NumTransformsAfter - NumTransformsBefore, bSaved, SaveError, TEXT("plane_cut_fracture"),
+    return Chaos_EditReply(Result, NumTransformsAfter - NumTransformsBefore, bSaved, SaveError, TEXT("cut_geometry_collection_with_planes"),
         FString::Printf(TEXT("nothing was cut (the collection kept its %d transforms): an empty collection, or planes that ")
             TEXT("miss every piece, cut nothing."), NumTransformsBefore));
 }
 
 // ---------------------------------------------------------------------------
-// slice_fracture
+// slice_geometry_collection
 // ---------------------------------------------------------------------------
-// MCP:slice_fracture - Slices all transforms of a UGeometryCollection asset with a regular grid of slices_x by slices_y by slices_z cuts across its bounds (no angle or offset variation, islands split), then saves it. new_fracture_count is the number of new pieces, measured as the transforms the slicing added; the call fails when it added none (an empty collection, or all three slice counts 0) or when the save fails.
+// MCP:slice_geometry_collection - Slices all transforms of a UGeometryCollection asset with a regular grid of slices_x by slices_y by slices_z cuts across its bounds (no angle or offset variation, islands split), then saves it. new_fracture_count is the number of new pieces, measured as the transforms the slicing added; the call fails when it added none (an empty collection, or all three slice counts 0) or when the save fails.
 //   @param geometry_collection_path - Asset path of the UGeometryCollection
 //   @param slices_x - Number of evenly spaced X slices, default 2
 //   @param slices_y - Number of evenly spaced Y slices, default 2
@@ -1095,15 +1095,15 @@ TSharedPtr<FJsonObject> HandleSliceFracture(const TSharedPtr<FJsonObject>& Param
     Result->SetNumberField(TEXT("slices_z"), SlicesZ);
     Result->SetNumberField(TEXT("new_fracture_count"), NumTransformsAfter - NumTransformsBefore);
     Result->SetNumberField(TEXT("transform_count"), NumTransformsAfter);
-    return Chaos_EditReply(Result, NumTransformsAfter - NumTransformsBefore, bSaved, SaveError, TEXT("slice_fracture"),
+    return Chaos_EditReply(Result, NumTransformsAfter - NumTransformsBefore, bSaved, SaveError, TEXT("slice_geometry_collection"),
         FString::Printf(TEXT("nothing was sliced (the collection kept its %d transforms): an empty collection, or slices_x, ")
             TEXT("slices_y and slices_z all 0, cut nothing."), NumTransformsBefore));
 }
 
 // ---------------------------------------------------------------------------
-// compute_gc_proximity
+// compute_geometry_collection_proximity
 // ---------------------------------------------------------------------------
-// MCP:compute_gc_proximity - Rebuilds the proximity (adjacency) graph of a UGeometryCollection asset in place and saves it; undoable. Returns proximity_pairs (unordered pairs of neighboring pieces, from a precise proximity pass), transform_count, success and saved; fails when the save fails. Afterwards get_gc_hierarchy_info reports proximity_computed true.
+// MCP:compute_geometry_collection_proximity - Rebuilds the proximity (adjacency) graph of a UGeometryCollection asset in place and saves it; undoable. Returns proximity_pairs (unordered pairs of neighboring pieces, from a precise proximity pass), transform_count, success and saved; fails when the save fails. Afterwards get_geometry_collection_hierarchy reports proximity_computed true.
 //   @param geometry_collection_path - Asset path of the UGeometryCollection
 //   @returns { geometry_collection_path: string, proximity_pairs: int, transform_count: int, success: bool, saved: bool }
 TSharedPtr<FJsonObject> HandleComputeGCProximity(const TSharedPtr<FJsonObject>& Params)
@@ -1143,13 +1143,13 @@ TSharedPtr<FJsonObject> HandleComputeGCProximity(const TSharedPtr<FJsonObject>& 
     Result->SetNumberField(TEXT("proximity_pairs"), ProximityPairs);
     Result->SetNumberField(TEXT("transform_count"), NumTransforms);
     Result->SetBoolField(TEXT("success"), true);
-    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("compute_gc_proximity"));
+    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("compute_geometry_collection_proximity"));
 }
 
 // ---------------------------------------------------------------------------
-// set_gc_connection_settings
+// set_geometry_collection_connection_settings
 // ---------------------------------------------------------------------------
-// MCP:set_gc_connection_settings - Write the five clustering and connection-graph properties of a UGeometryCollection asset (cluster connection type, EnableClustering, ClusterGroupIndex, MaxClusterLevel, bounds filtering margin) in an undo transaction, invalidate it and save it; a failed save makes success false. Every field is written on each call, so an omitted one goes back to its listed default, and an unrecognized connection type becomes PointImplicit. The bone hierarchy is not rebuilt: cluster_geometry_collection builds clusters and compute_gc_proximity the proximity graph. The reply reads back the type, enable_clustering and max_cluster_level.
+// MCP:set_geometry_collection_connection_settings - Write the five clustering and connection-graph properties of a UGeometryCollection asset (cluster connection type, EnableClustering, ClusterGroupIndex, MaxClusterLevel, bounds filtering margin) in an undo transaction, invalidate it and save it; a failed save makes success false. Every field is written on each call, so an omitted one goes back to its listed default, and an unrecognized connection type becomes PointImplicit. The bone hierarchy is not rebuilt: cluster_geometry_collection builds clusters and compute_geometry_collection_proximity the proximity graph. The reply reads back the type, enable_clustering and max_cluster_level.
 //   @param geometry_collection_path - Asset path of the UGeometryCollection
 //   @param cluster_connection_type - PointImplicit, DelaunayTriangulation, MinimalSpanningSubsetDelaunayTriangulation, BoundsOverlapFilteredDelaunayTriangulation, PointImplicitAugmentedWithMinimalDelaunay, or None, default PointImplicit
 //   @param enable_clustering - If true, enable cluster graph generation, default true
@@ -1210,15 +1210,15 @@ TSharedPtr<FJsonObject> HandleSetGCConnectionSettings(const TSharedPtr<FJsonObje
     Result->SetBoolField(TEXT("enable_clustering"), GC->EnableClustering);
     Result->SetNumberField(TEXT("max_cluster_level"), GC->MaxClusterLevel);
     Result->SetBoolField(TEXT("success"), true);
-    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("set_gc_connection_settings"));
+    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("set_geometry_collection_connection_settings"));
 }
 
 // ---------------------------------------------------------------------------
-// get_gc_hierarchy_info
+// get_geometry_collection_hierarchy
 // ---------------------------------------------------------------------------
-// MCP:get_gc_hierarchy_info - Reads the bone hierarchy of a UGeometryCollection asset: transform_count, root_indices, and per bone its level, name and simulation type ("Rigid", "Clustered" or "None"), plus proximity_computed. Generates the Level attribute in memory if needed, without saving. For parent indices use list_geometry_collection_bones.
+// MCP:get_geometry_collection_hierarchy - Reads the bone hierarchy of a UGeometryCollection asset: transform_count, root_indices and root_count, and per bone (parallel arrays in transform index order) its level, name, parent index (-1 for a root) and simulation type ("Rigid", "Clustered" or "None"), plus proximity_computed. Generates the Level attribute in memory if needed, without saving. A path that does not load or a collection without geometry data is an error. For damage, mass and source settings use get_geometry_collection_info.
 //   @param geometry_collection_path - Asset path of the UGeometryCollection
-//   @returns { geometry_collection_path: string, transform_count: int, root_indices: [int], levels: [int], bone_names: [string], simulation_types: [string], proximity_computed: bool, success: bool }
+//   @returns { geometry_collection_path: string, transform_count: int, root_indices: [int], root_count: int, levels: [int], bone_names: [string], parents: [int], simulation_types: [string], proximity_computed: bool, success: bool }
 TSharedPtr<FJsonObject> HandleGetGCHierarchyInfo(const TSharedPtr<FJsonObject>& Params)
 {
     FString GCPath;
@@ -1252,17 +1252,27 @@ TSharedPtr<FJsonObject> HandleGetGCHierarchyInfo(const TSharedPtr<FJsonObject>& 
     // Per-bone arrays: levels, bone names, simulation types.
     TArray<TSharedPtr<FJsonValue>> LevelsJson;
     TArray<TSharedPtr<FJsonValue>> BoneNamesJson;
+    TArray<TSharedPtr<FJsonValue>> ParentsJson;
     TArray<TSharedPtr<FJsonValue>> SimTypesJson;
 
     const TManagedArray<FString>& BoneNames = FGC->BoneName;
+    const TManagedArray<int32>& Parents = FGC->Parent;
     const TManagedArray<int32>& SimTypes = FGC->SimulationType;
 
+    // A bone with no parent entry, or INDEX_NONE as parent, is a root.
+    int32 RootCount = 0;
     for (int32 i = 0; i < NumTransforms; ++i)
     {
         const int32 Level = Hierarchy.IsValid() ? Hierarchy.GetInitialLevel(i) : INDEX_NONE;
         LevelsJson.Add(MakeShared<FJsonValueNumber>(Level));
 
         BoneNamesJson.Add(MakeShared<FJsonValueString>(BoneNames.IsValidIndex(i) ? BoneNames[i] : FString()));
+        const int32 Parent = Parents.IsValidIndex(i) ? Parents[i] : INDEX_NONE;
+        ParentsJson.Add(MakeShared<FJsonValueNumber>(Parent));
+        if (Parent == INDEX_NONE)
+        {
+            ++RootCount;
+        }
         SimTypesJson.Add(MakeShared<FJsonValueString>(Chaos_SimulationTypeName(SimTypes, i)));
     }
 
@@ -1271,77 +1281,35 @@ TSharedPtr<FJsonObject> HandleGetGCHierarchyInfo(const TSharedPtr<FJsonObject>& 
     TSharedPtr<FJsonObject> Result = Chaos_StartReply(GCPath);
     Result->SetNumberField(TEXT("transform_count"), NumTransforms);
     Result->SetArrayField(TEXT("root_indices"), RootIndicesJson);
+    Result->SetNumberField(TEXT("root_count"), RootCount);
     Result->SetArrayField(TEXT("levels"), LevelsJson);
     Result->SetArrayField(TEXT("bone_names"), BoneNamesJson);
+    Result->SetArrayField(TEXT("parents"), ParentsJson);
     Result->SetArrayField(TEXT("simulation_types"), SimTypesJson);
     Result->SetBoolField(TEXT("proximity_computed"), bProximityComputed);
     Result->SetBoolField(TEXT("success"), true);
     return mcp_common::MakeOkReply(Result);
 }
 
-// ============================================================================
-// Single read primitive (list_geometry_collection_bones).
 // The state-mutation commands (set_state, crumble, recombine) were dropped: the
 // state enum names changed in UE 5.8 and authoring bone state on the asset has
 // no runtime effect (managed by UGeometryCollectionComponent at runtime).
-// ============================================================================
-
-// MCP:list_geometry_collection_bones - List every bone (transform) of a UGeometryCollection asset in index order with its name, parent index (-1 for a root) and simulation type ("Rigid", "Clustered" or "None"), plus transform_count and root_count. Read-only: nothing is generated or saved. A path that does not load or a collection without geometry data is an error. For levels, root indices and whether proximity is computed use get_gc_hierarchy_info; for damage, mass and source settings use get_geometry_collection_info.
-//   @param geometry_collection_path - Asset path of the UGeometryCollection, as a package path (/Game/Chaos/GC_Rock) or an object path (/Game/Chaos/GC_Rock.GC_Rock); required.
-//   @returns { geometry_collection_path, transform_count, root_count, bones: [{name, parent, sim_type}] }
-TSharedPtr<FJsonObject> HandleListGeometryCollectionBones(const TSharedPtr<FJsonObject>& Params)
-{
-    FString Path;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("geometry_collection_path"), Path)) { return Missing; }
-    UGeometryCollection* GC = LoadGeometryCollection(Path);
-    if (!GC)
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Cannot load geometry collection: %s"), *Path));
-    }
-    TSharedPtr<FGeometryCollection, ESPMode::ThreadSafe> FGC = GC->GetGeometryCollection();
-    if (!FGC.IsValid())
-    {
-        return mcp_common::MakeErrorReply(TEXT("Geometry collection has no FGeometryCollection data"));
-    }
-    const TManagedArray<FString>& BoneNames = FGC->BoneName;
-    const TManagedArray<int32>& Parents = FGC->Parent;
-    const TManagedArray<int32>& SimTypes = FGC->SimulationType;
-    const int32 NumTransforms = FGC->NumElements(FGeometryCollection::TransformGroup);
-    TArray<TSharedPtr<FJsonValue>> Arr;
-    int32 Roots = 0;
-    for (int32 i = 0; i < NumTransforms; ++i)
-    {
-        TSharedPtr<FJsonObject> B = MakeShared<FJsonObject>();
-        B->SetStringField(TEXT("name"), BoneNames.IsValidIndex(i) ? BoneNames[i] : FString());
-        const int32 Parent = Parents.IsValidIndex(i) ? Parents[i] : INDEX_NONE;
-        B->SetNumberField(TEXT("parent"), Parent);
-        if (i >= Parents.Num() || Parent == INDEX_NONE) { ++Roots; }
-        B->SetStringField(TEXT("sim_type"), Chaos_SimulationTypeName(SimTypes, i));
-        Arr.Add(MakeShared<FJsonValueObject>(B));
-    }
-    TSharedPtr<FJsonObject> R = Chaos_StartReply(Path);
-    R->SetNumberField(TEXT("transform_count"), NumTransforms);
-    R->SetNumberField(TEXT("root_count"), Roots);
-    R->SetArrayField(TEXT("bones"), Arr);
-    return mcp_common::MakeOkReply(R);
-}
 
 const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("add_geometry_collection_source"), &HandleAddGeometryCollectionSource },
     { TEXT("cluster_geometry_collection"), &HandleClusterGeometryCollection },
-    { TEXT("compute_gc_proximity"), &HandleComputeGCProximity },
+    { TEXT("compute_geometry_collection_proximity"), &HandleComputeGCProximity },
     { TEXT("create_geometry_collection"), &HandleCreateGeometryCollection },
     { TEXT("fracture_geometry_collection"), &HandleFractureGeometryCollection },
-    { TEXT("get_gc_hierarchy_info"), &HandleGetGCHierarchyInfo },
+    { TEXT("get_geometry_collection_hierarchy"), &HandleGetGCHierarchyInfo },
     { TEXT("get_geometry_collection_info"), &HandleGetGeometryCollectionInfo },
-    { TEXT("list_geometry_collection_bones"), &HandleListGeometryCollectionBones },
-    { TEXT("plane_cut_fracture"), &HandlePlaneCutFracture },
+    { TEXT("cut_geometry_collection_with_planes"), &HandlePlaneCutFracture },
     { TEXT("remove_geometry_collection_source"), &HandleRemoveGeometryCollectionSource },
-    { TEXT("set_gc_connection_settings"), &HandleSetGCConnectionSettings },
+    { TEXT("set_geometry_collection_connection_settings"), &HandleSetGCConnectionSettings },
     { TEXT("set_geometry_collection_damage"), &HandleSetGeometryCollectionDamage },
     { TEXT("set_geometry_collection_mass"), &HandleSetGeometryCollectionMass },
-    { TEXT("slice_fracture"), &HandleSliceFracture },
+    { TEXT("slice_geometry_collection"), &HandleSliceFracture },
 };
 } // namespace UEAgentChaosCommands
 

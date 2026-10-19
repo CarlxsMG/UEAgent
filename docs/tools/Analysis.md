@@ -2,7 +2,25 @@
 
 # Analysis
 
-20 tools. Back to the [index](README.md).
+13 tools. Back to the [index](README.md).
+
+## `capture_object_snapshot`
+
+*Destructive.*
+
+Capture the properties and components of one object into a named in-memory snapshot (read-only) for a later diff_object_snapshots: before vs after an action, editor vs PIE, or "server" vs "client" via world. persist=true also writes Saved/MCPAudits/snapshots/&lt;handle>.json to survive a restart. compare_objects diffs two live objects instead.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `object_path` | string | yes | Object path or dotted "Actor[.Component[.Subobject]]" (name or editor label for the first segment). |
+| `world` | string | no | Optional world selector: absent/'editor' (default) \| 'server' (the PIE world with authority) \| 'client' \| 'pie:N' \| 'pie'/'game'/'runtime' (ambiguous: PlayWorld, else the first PIE/Game context) to resolve a live runtime instance. |
+| `handle` | string | no | Optional handle to store under (overwrites); auto-generated when omitted (alias: snapshot_id). |
+| `persist` | boolean | no | Also write the snapshot to Saved/MCPAudits/snapshots/&lt;handle>.json so it SURVIVES an editor restart. The in-memory store is a process-lifetime map: without this, a baseline captured before a mandatory restart is gone exactly when you need to compare against it. Default false. |
+| `return_snapshot` | boolean | no | Return the full snapshot inline in the response (so the caller can hold it and pass it back as diff_object_snapshots' snapshot_a/snapshot_b). Default false. |
+| `include_component_templates` | boolean | no | For a Blueprint / BPGC / Blueprint CDO target, also capture the SCS + ICH component TEMPLATES (a Blueprint CDO owns ONLY its native components, so without this a CDO snapshot cannot verify a single SCS/ICH override). Default true. |
+| `snapshot_id` | string | no | Alias of handle: the name to store the snapshot under, used only when handle is absent or empty; an existing snapshot with that name is overwritten |
+
+**Returns:** `{ handle, object_path, resolved_path, class, world (the coarse "pie"/"editor" family label the snapshot itself carries), world_selector (what was asked for), property_count, component_count, component_template_count, persisted, snapshot_path?, persist_error?, snapshot?, world_name, world_package, world_type, net_mode, pie_instance }`
 
 ## `check_asset_circular_dependency`
 
@@ -23,78 +41,51 @@ Depth-first search of an asset's dependency graph looking for a CYCLE, returning
 
 *Read-only.*
 
-Compare the COMPONENT trees of two Blueprints (or of one Blueprint against a components[] array captured earlier from get_blueprint_scs_tree) and report which components were added, removed or changed, where "changed" means the class, attach_parent, attach_socket, source or relative transform (0.01 tolerance) differ. It reuses get_blueprint_scs_tree's full enumeration, so native + own SCS + inherited components are all in scope, most-derived-wins. Use it for "did a reparent or a merge lose a component?" -- feeding a pre-change scs_tree as components_b makes it a before/after check without a second asset. removed = in A only, added = in B only. Read-only. diff_blueprints covers components AND graphs AND variables; get_blueprint_component_overrides goes deeper into ONE component's per-property provenance.
+Compare the COMPONENT trees of two Blueprints (or of one Blueprint against a components[] array captured earlier from get_blueprint_components) and report which components were added, removed or changed, where "changed" means the class, attach_parent, attach_socket, source or relative transform (0.01 tolerance) differ. It reuses get_blueprint_components's full enumeration, so native + own SCS + inherited components are all in scope, most-derived-wins. Use it for "did a reparent or a merge lose a component?" -- feeding a pre-change scs_tree as components_b makes it a before/after check without a second asset. removed = in A only, added = in B only. Read-only. diff_blueprints covers components AND graphs AND variables; get_blueprint_component_overrides goes deeper into ONE component's per-property provenance.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `blueprint_a` | string | yes | First Blueprint asset path or short name (the "before" / baseline side). |
 | `blueprint_b` | string | no | Second Blueprint (the "after" side). Omit if passing components_b. |
-| `components_b` | array | no | Alternative to blueprint_b: a prior get_blueprint_scs_tree components array (snapshot). A snapshot without transforms reads every transform as changed. |
+| `components_b` | array | no | Alternative to blueprint_b: a prior get_blueprint_components components array (snapshot). A snapshot without transforms reads every transform as changed. |
 | `include_native` | boolean | no | Include native/CDO components on the live side(s) (default true). |
 | `include_inherited` | boolean | no | Include components inherited from ancestor Blueprints (default true). |
 | `max_results` | number | no | Cap on components enumerated per live side, 1..10000 (default 2000). |
 
 **Returns:** `{ blueprint_a, a_path, blueprint_b, b_path, side_b_source, added:[record], removed:[record], changed:[{name, class, changes:{class?:{a,b}, attach_parent?:{a,b}, attach_socket?:{a,b}, source?:{a,b}, transform?:{a,b}}}], unchanged_count, counts_a:{native,scs,inherited}, counts_b:{...}, truncated, total_differences }`
 
-## `diff_blueprint_graphs`
-
-*Read-only.*
-
-Diff ONE named graph across two Blueprints or AnimBlueprints: which nodes were added, removed and changed, with per-pin default-value and link changes and, for AnimGraph nodes, the FAnimNode config and property-binding differences. The focused, far cheaper subset of diff_blueprints for when you already know the single graph you care about (an "AnimGraph", a function, a collapsed composite). Same NodeGuid matching caveat: it compares a fork against its original meaningfully, but two independently authored Blueprints show every node as added/removed. Read-only.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `blueprint_a` | string | yes | First Blueprint asset path or short name. |
-| `blueprint_b` | string | yes | Second Blueprint asset path or short name. |
-| `graph_name` | string | no | Graph to diff (deep-resolved: function/event/macro/AnimGraph or a collapsed composite by title). Defaults to the event graph. |
-| `max_nodes` | number | no | Cap on GUID-matched nodes examined (default 20000). |
-
-**Returns:** `{ blueprint_a, blueprint_b, graph_name, resolved_graph_a, resolved_graph_b, node_count_a, node_count_b, nodes_added, nodes_removed, nodes_changed, truncated, nodes_examined_a, nodes_examined_b, total_differences }`
-
 ## `diff_blueprints`
 
 *Read-only.*
 
-Structural diff of TWO Blueprints (or AnimBlueprints): parent class, SCS components, variables, functions, and per graph a node-by-node diff of what was added, removed and changed, where a changed node reports its title, per-pin default-value and link changes and -- for AnimGraph nodes -- the internal FAnimNode config and property-binding differences. WARNING: nodes are matched by NodeGuid, which duplicating or forking an asset PRESERVES: this is built to compare a fork against its original, and two independently authored Blueprints will show every single node as added/removed, which is noise, not a finding. Read-only. Siblings: diff_blueprint_graphs for ONE named graph, diff_blueprint_components for components only, get_blueprint_component_overrides for per-property provenance, compare_objects for two LIVE UObjects instead of authored structure. Watch `graphs_not_examined[]` -- when the node budget runs out the remaining graphs are listed there instead of being reported as identical.
+Structural diff of TWO Blueprints (or AnimBlueprints): parent class, SCS components, variables, functions, and per graph a node-by-node diff of what was added, removed and changed, where a changed node reports its title, per-pin default-value and link changes and -- for AnimGraph nodes -- the internal FAnimNode config and property-binding differences. With graph_name it diffs ONE graph pair only -- far cheaper when you already know the graph you care about (an "AnimGraph", a function, a collapsed composite by title). WARNING: nodes are matched by NodeGuid, which duplicating or forking an asset PRESERVES: this is built to compare a fork against its original, and two independently authored Blueprints will show every single node as added/removed, which is noise, not a finding. Read-only. Siblings: diff_blueprint_components for components only, get_blueprint_component_overrides for per-property provenance, compare_objects for two LIVE UObjects instead of authored structure. Watch `graphs_not_examined[]` -- when the node budget runs out the remaining graphs are listed there instead of being reported as identical.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `blueprint_a` | string | yes | First Blueprint asset path or short name. |
 | `blueprint_b` | string | yes | Second Blueprint asset path or short name. |
+| `graph_name` | string | no | Optional: diff only this graph, resolved deep on each side (function/event/macro/AnimGraph, a collapsed composite by title, or a path form 'EventGraph > Title'); an empty string means the event graph. A graph missing on either side is an error. |
 | `max_nodes` | number | no | TOTAL cap on nodes examined across every graph (default 20000). When it runs out, the remaining graphs are listed in graphs_not_examined[] instead of being silently reported as identical. |
 | `max_nodes_per_graph` | number | no | Per-graph cap so one fat graph cannot starve the rest (default = max_nodes). |
 
-**Returns:** `{ blueprint_a, blueprint_b, a_path, b_path, a_class, b_class, parent_class:{a,b,changed}, components:{added,removed,changed}, variables:{added,removed,changed}, functions:{added,removed,common}, graphs:[{graph_name, nodes_added, nodes_removed, nodes_changed, node_count_a, node_count_b, nodes_examined_a, nodes_examined_b, truncated}], graphs_identical:[string], graphs_not_examined:[{graph_name, reason}], graphs_only_in_a, graphs_only_in_b, truncated, max_nodes, max_nodes_per_graph, nodes_examined, total_differences }`
+**Returns:** `{ blueprint_a, blueprint_b, a_path, b_path, a_class, b_class, parent_class:{a,b,changed}, components:{added,removed,changed}, variables:{added,removed,changed}, functions:{added,removed,common}, graphs:[{graph_name, nodes_added, nodes_removed, nodes_changed, node_count_a, node_count_b, nodes_examined_a, nodes_examined_b, truncated}], graphs_identical:[string], graphs_not_examined:[{graph_name, reason}], graphs_only_in_a, graphs_only_in_b, truncated, max_nodes, max_nodes_per_graph, nodes_examined, total_differences } -- with graph_name the reply is that one pair instead: { blueprint_a, blueprint_b, a_path, b_path, a_class, b_class, graph_name, resolved_graph_a, resolved_graph_b, node_count_a, node_count_b, nodes_added, nodes_removed, nodes_changed, nodes_examined_a, nodes_examined_b, truncated, max_nodes, total_differences }.`
 
 ## `diff_object_snapshots`
 
 *Read-only.*
 
-Compare two snapshots taken by snapshot_object and report which properties were added, removed or CHANGED, at the object level and per component, with both values side by side. The second half of the before/after measurement: capture a baseline, run the action, capture again, and this tells you what actually moved -- instead of trusting the acting call's own success flag. Also the way to diff editor-vs-PIE and, in co-op, SERVER-vs-CLIENT state for the same actor, which is the only proof that a value really replicated. Sides can be given as stored handles, as inline snapshot objects (from snapshot_object(return_snapshot=true)), or as paths to persisted snapshot files; `a_origin`/`b_origin` report which route each side came from. compare_objects is the same idea for two LIVE objects at one instant.
+Compare two snapshots taken by capture_object_snapshot and report which properties were added, removed or CHANGED, at the object level and per component, with both values side by side. The second half of the before/after measurement: capture a baseline, run the action, capture again, and this tells you what actually moved -- instead of trusting the acting call's own success flag. Also the way to diff editor-vs-PIE and, in co-op, SERVER-vs-CLIENT state for the same actor, which is the only proof that a value really replicated. Sides can be given as stored handles, as inline snapshot objects (from capture_object_snapshot(return_snapshot=true)), or as paths to persisted snapshot files; `a_origin`/`b_origin` report which route each side came from. compare_objects is the same idea for two LIVE objects at one instant.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `handle_a` | string | no | Handle of the first (baseline) snapshot (aliases: a, snapshot_a). Resolved from the in-memory store first, then from the persisted Saved/MCPAudits/snapshots/&lt;handle>.json copy. |
 | `handle_b` | string | no | Handle of the second snapshot (aliases: b, snapshot_b). Same resolution. |
-| `snapshot_a` | string | no | The baseline snapshot INLINE (a JSON object, e.g. what snapshot_object(return_snapshot=true) handed back). A STRING here is read as a handle. |
+| `snapshot_a` | string | no | The baseline snapshot INLINE (a JSON object, e.g. what capture_object_snapshot(return_snapshot=true) handed back). A STRING here is read as a handle. |
 | `snapshot_b` | string | no | The second snapshot INLINE (a JSON object). A STRING here is read as a handle. |
 | `path_a` | string | no | Path to a persisted baseline snapshot file (bare handles resolve under Saved/MCPAudits/snapshots/). |
 | `path_b` | string | no | Path to a persisted second snapshot file. |
 
 **Returns:** `{ handle_a, handle_b, a_origin, b_origin, a_object_path, b_object_path, a_class, b_class, a_world, b_world, properties:{added,removed,changed}, components:{added,removed,changed:[{component, properties:{added,removed,changed}}]}, total_differences }`
-
-## `find_blueprint_assets_by_class`
-
-*Read-only.*
-
-Search a content path for every Blueprint ASSET whose generated class derives from a target UClass, returning asset name, asset path, generated class and the deepest NATIVE parent -- "give me every Blueprint that is a Pawn / a Widget / an ActorComponent" without hand-scanning folders. Use get_blueprint_children when the base is itself a Blueprint rather than a C++ class, list_derived_classes for classes instead of assets, and get_assets_by_tag when you want a registry tag rather than an inheritance test. WARNING: it LOADS every Blueprint under package_path to read its GeneratedClass, so scope the path narrowly on a big project rather than sweeping all of /Game.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `class_name` | string | yes | UClass short name or /Script/ path (e.g. "Pawn", "/Script/Engine.Pawn"); a bare name is also retried with a "U" prefix. An unresolvable name is an error, not an empty result. |
-| `package_path` | string | no | Content path to scan, recursive (default "/Game"). Narrow it: every Blueprint underneath gets loaded. |
-
-**Returns:** `{ class_name, target_class, package_path, total, assets:[{ asset_name, asset_path, generated_class, native_parent }] }`
 
 ## `find_erroring_blueprints`
 
@@ -117,7 +108,7 @@ Scan a content path for Blueprints and AnimBlueprints sitting in a compile ERROR
 
 *Read-only.*
 
-List every package an asset DEPENDS ON (its outgoing edges), each with its class and loaded state -- "what does this asset drag in with it?", the input to a migration or import budget. Direction matters: this is what the asset NEEDS; get_asset_dependents / get_asset_referencers answer who needs IT. Use get_asset_dependencies_recursive for the transitive closure and check_asset_circular_dependency to detect cycles. WARNING: these are PACKAGE-level edges from the Asset Registry: they cannot tell you WHICH node or property creates the edge (that is find_blueprint_node_references), and a name built at runtime or resolved through a DataRegistry produces no edge at all.
+List every package an asset DEPENDS ON (its outgoing edges), each with its class and loaded state -- "what does this asset drag in with it?", the input to a migration or import budget. Direction matters: this is what the asset NEEDS; get_asset_referencers answers who needs IT. Use get_asset_dependencies_recursive for the transitive closure and check_asset_circular_dependency to detect cycles. WARNING: these are PACKAGE-level edges from the Asset Registry: they cannot tell you WHICH node or property creates the edge (that is find_blueprint_node_references), and a name built at runtime or resolved through a DataRegistry produces no edge at all.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -128,53 +119,28 @@ List every package an asset DEPENDS ON (its outgoing edges), each with its class
 
 **Returns:** `{ asset_name: string, asset_path: string, dependencies: [object], dependencies_count: int, total_dependencies: int, max_results: int, results_truncated: bool, exclude_engine: bool, dependency_type: string }`
 
-## `get_asset_dependents`
-
-*Read-only.*
-
-List every package that REFERENCES an asset (its incoming edges), each with its class and loaded state -- "who breaks if I delete or move this?", addressed by asset NAME. Direction matters: this is who needs IT; get_asset_dependencies is what it needs. Nearly the same query as get_asset_referencers -- prefer THAT one when the name could be ambiguous (it refuses to guess and echoes `resolved_package`, while this one silently takes the first /Game match), and prefer this one when you want the hard/soft split via dependency_type. Package-level edges only: use find_blueprint_node_references to find call sites inside graphs.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `asset_name` | string | yes | Exact asset name or full package name; the bare-name fallback scans /Game only and stops at the FIRST match, without reporting that others existed |
-| `max_results` | number | no | Maximum dependents to return, 1..50000 (default 5000). Read `results_truncated`: `total_dependents` counts the RAW registry edges before exclude_engine, so it can exceed dependents_count with nothing cut. |
-| `exclude_engine` | boolean | no | Skip /Engine and /Script referencers, default true. Filtered entries do NOT consume the max_results budget, but they ARE counted in total_dependents. |
-| `dependency_type` | string | no | Filter by dependency kind: "hard", "soft", or "all" (case-insensitive), default "all" |
-
-**Returns:** `{ asset_name: string, asset_path: string, dependents: [object], dependents_count: int, total_dependents: int, max_results: int, results_truncated: bool, exclude_engine: bool, dependency_type: string }`
-
 ## `get_asset_referencers`
 
 *Read-only.*
 
-List every asset that REFERENCES a target asset -- "who breaks if I delete, move or rename this?" -- wrapping AssetRegistry::GetReferencers over the Package category and returning each referencing package with its primary asset's name, path and class. It accepts an object path, a package path or a bare name, echoes `resolved_package` so you can confirm it queried the package you meant, and REFUSES an ambiguous bare name with the candidate list instead of picking one. Hard references only by default (the "what keeps this loaded" audit); set include_soft_references=true to include TSoftObjectPtr / FSoftObjectPath edges. Its mirror is get_asset_dependencies (what this asset needs); get_asset_dependents answers the same direction as this one from a bare asset name, and find_blueprint_node_references finds call sites INSIDE graphs, which package-level references cannot see.
+List every asset that REFERENCES a target asset -- "who breaks if I delete, move or rename this?" -- wrapping AssetRegistry::GetReferencers over the Package category and returning each referencing package with its primary asset's name, path, class and loaded state. It accepts an object path, a package path or a bare name, echoes `resolved_package` so you can confirm it queried the package you meant, and REFUSES an ambiguous bare name with the candidate list instead of picking one. Hard references only by default (the "what keeps this loaded" audit); dependency_type='soft' or 'all' (or include_soft_references=true) brings in TSoftObjectPtr / FSoftObjectPath edges, and exclude_engine=true drops /Engine and /Script referencers. Works for any asset type, a MetaSound included. Its mirror is get_asset_dependencies (what this asset needs), and find_blueprint_node_references finds call sites INSIDE graphs, which package-level references cannot see.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `asset_path` | string | yes | Target asset: an object path ('/Game/X/DT_ItemRows.DT_ItemRows'), a package path ('/Game/X/DT_ItemRows'), or an unambiguous bare asset name ('DT_ItemRows'). An ambiguous bare name is an error listing the candidates, never a silent pick. |
-| `include_soft_references` | boolean | no | If true, also include soft referencers (default false -> hard-only). |
+| `asset_name` | string | no | Alias of asset_path. |
+| `dependency_type` | string | no | Optional 'hard' \| 'soft' \| 'all' (case-insensitive): which edges count. When given it wins over include_soft_references; when absent, include_soft_references decides (hard, or all). |
+| `include_soft_references` | boolean | no | If true, also include soft referencers (default false -> hard-only). Shorthand for dependency_type='all'. |
+| `exclude_engine` | boolean | no | Optional bool (default false): skip /Engine and /Script referencers. They do not count against max_results, but they do count in total. |
 | `max_results` | number | no | Cap on number of returned referencers (1..50000); defaults to 5000. |
 
-**Returns:** `{ asset_path, resolved_package, include_soft_references, total, returned, results_truncated, referencers:[{ package_name, asset_name?, asset_path?, asset_class? }] }`
-
-## `get_blueprint_children`
-
-*Read-only.*
-
-List every Blueprint asset that inherits from a given Blueprint -- the "what breaks if I change this base class?" blast-radius query, and the inverse of get_blueprint_parent. Use find_blueprint_assets_by_class when the base is a NATIVE C++ class rather than a Blueprint, get_class_hierarchy to walk upwards instead, and get_asset_referencers for references that are not inheritance at all.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `blueprint_name` | string | yes | Blueprint asset short name (exact) or full package name; an ambiguous bare name resolves to the first hit and lists the rest in `ambiguous_matches` |
-| `max_results` | number | no | Maximum children to return, 1..10000 (default 1000); compare with children_count and results_truncated |
-
-**Returns:** `{ blueprint_name: string, blueprint_path: string, children: [object], children_count: int, max_results: int, results_truncated: bool, parent_blueprint_valid: bool, ambiguous_matches?: [string] }`
+**Returns:** `{ asset_path, resolved_package, include_soft_references, dependency_type, exclude_engine, total, returned, results_truncated, referencers:[{ package_name, asset_name?, asset_path?, asset_class?, is_loaded? }] } -- total counts every referencer the registry returned, engine ones included; results_truncated says a referencer that would have been listed was left out by max_results; is_loaded is whether the referencing asset is loaded now.`
 
 ## `get_blueprint_component_overrides`
 
 *Read-only.*
 
-Per-property PROVENANCE on a Blueprint's component templates: which values this Blueprint actually OVERRODE and which it merely inherits. Over the same components as get_blueprint_scs_tree (native CDO + own SCS + inherited chain) it resolves the effective template down the SCS -> child ICH override -> ancestor SCS -> native CDO cascade, never minting an ICH override, and compares each editable property against a baseline -- the archetype by default, or the same-named template in `other_blueprint` for the "fork vs original" question -- with the ENGINE's equality (FProperty::Identical, PPF_DeepComparison) instead of exported text. Each result is CLASSIFIED (identical | real_override | text_localization_metadata_only | object_outer_only | export_text_only | type_mismatch | no_baseline), so FText localization and object-outer noise stop masquerading as edits. WARNING: component templates can go STALE in memory (values can flip just from an editor restart): pass verify_on_disk to cross-check the raw .uasset bytes -- for anything not string-ish it answers found:null / applicable:false, never a misleading false. Read-only. list_instance_overrides asks the same question about a PLACED ACTOR.
+Per-property PROVENANCE on a Blueprint's component templates: which values this Blueprint actually OVERRODE and which it merely inherits. Over the same components as get_blueprint_components (native CDO + own SCS + inherited chain) it resolves the effective template down the SCS -> child ICH override -> ancestor SCS -> native CDO cascade, never minting an ICH override, and compares each editable property against a baseline -- the archetype by default, or the same-named template in `other_blueprint` for the "fork vs original" question -- with the ENGINE's equality (FProperty::Identical, PPF_DeepComparison) instead of exported text. Each result is CLASSIFIED (identical | real_override | text_localization_metadata_only | object_outer_only | export_text_only | type_mismatch | no_baseline), so FText localization and object-outer noise stop masquerading as edits. WARNING: component templates can go STALE in memory (values can flip just from an editor restart): pass verify_on_disk to cross-check the raw .uasset bytes -- for anything not string-ish it answers found:null / applicable:false, never a misleading false. Read-only. list_instance_overrides asks the same question about a PLACED ACTOR.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -192,25 +158,27 @@ Per-property PROVENANCE on a Blueprint's component templates: which values this 
 
 **Returns:** `{ blueprint_name, blueprint_path, other_blueprint?, other_blueprint_path?, baseline_mode, components:[{component, resolved, template_name, template_path, scs_variable_name, component_key_guid, matched_by_scs_node, component_class, source, declaring_class, resolved_from_class, authored_here, baseline_source, baseline_path, baseline_class, component_class_mismatch, properties:[{component, property, property_display, value, baseline_value, inherited_value, inherited_value_available, authored_here, declaring_class, resolved_from_class, template_source, baseline_source, kind, differs, identical_deep, export_text_equal, export_text_value, export_text_baseline, note, on_disk?}], properties_reported, properties_examined, properties_truncated}], components_examined, components_truncated, properties_examined, override_count, noise_count, identical_count, no_baseline_count, on_disk:{found,not_found,not_applicable}, templates_may_be_stale, success }`
 
-## `get_blueprint_components_list`
+## `get_blueprint_components`
 
 *Read-only.*
 
-List the components a Blueprint declares in its OWN Simple Construction Script, each with class, root flag, scene/primitive flags, mobility, physics and collision state, and static-mesh path + material count when it has one. WARNING: it shows ONLY this Blueprint's own SCS: components inherited from a parent Blueprint and native components from the C++ CDO are INVISIBLE here, so a short list is not proof the component is missing -- get_blueprint_scs_tree returns native + own SCS + inherited, source-classified, and is the right call whenever the answer matters. Use get_actor_components for a live actor instance instead of an asset.
+Enumerate the COMPLETE component tree of a Blueprint asset -- native components from the C++ CDO, its own SCS nodes, and everything inherited down the ancestor chain -- each classified by source with its class, attach parent/socket, children, transform and template facts (mobility, physics and collision state, static mesh + material count), most-derived-wins. include_native=false + include_inherited=false narrows it to the Blueprint's OWN construction script. `component_class` filters by class OR ANY SUBCLASS across all three sources, which Actor::GetComponentsByClass cannot do (it only ever sees a constructed instance's OwnedComponents, never SCS templates on a Blueprint nobody instantiated). WARNING: before concluding a component does not exist, read `omitted_total`, NOT results_truncated: null templates and name-shadowed ancestor entries are dropped without setting it, and omitted_duplicate_names[]/omitted_null_templates[] name what disappeared (counted before the component_class filter). `scs_cdo_desync` / `generated_property_exists` flag an SCS that disagrees with the compiled class -- the fingerprint of a half-reverted asset. See diff_blueprint_components to compare two trees, get_actor_components for a live instance.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `blueprint_name` | string | yes | Blueprint asset short name (exact) or full package name; an ambiguous bare name resolves to the first hit and lists the rest in `ambiguous_matches` |
-| `max_results` | number | no | Maximum components to return, 1..10000 (default 1000) |
-| `include_inherited` | boolean | no | IGNORED: accepted and parsed but never used. Inherited components are never included here whatever you pass -- call get_blueprint_scs_tree for those. |
+| `blueprint_name` | string | yes | Blueprint or AnimBlueprint asset short name (exact) or full /Game path; a bare name that matches more than one Blueprint asset resolves to one of them and lists the others in `ambiguous_matches`, so pass the path when it matters |
+| `include_native` | boolean | no | Include C++/native components from the CDO (default true) |
+| `include_inherited` | boolean | no | Include components inherited from ancestor Blueprint classes (default true) |
+| `component_class` | string | no | Optional class filter (short name, /Script/Module.Class, or /Game/... Blueprint path). Matches this class OR ANY SUBCLASS of it (same semantics as the engine's own GetComponentsByClass), evaluated against every source (native CDO, own SCS, inherited SCS) -- unlike Actor::GetComponentsByClass/K2_GetComponentsByClass, which only ever see a live actor's already-constructed OwnedComponents and are blind to SCS node templates on a Blueprint that hasn't been instantiated yet. |
+| `max_results` | number | no | Cap on components returned, 1..10000 (default 1000) |
 
-**Returns:** `{ blueprint_name: string, blueprint_path: string, components: [object], components_count: int, max_results: int, results_truncated: bool, has_simple_construction_script: bool, blueprint_valid: bool, ambiguous_matches?: [string] }`
+**Returns:** `{ blueprint_name: string, blueprint_path: string, blueprint_valid: bool, ambiguous_matches?: [string], parent_class: string, parent_class_path: string, components: [{ name, source, class, class_path, owner_class, is_root, is_scene_component, attach_parent, attach_socket, parent_is_native, ich_overridden?, transform?: {loc, rot, scale}, children: [string], category, mobility?, simulates_physics?, collision_enabled?, has_static_mesh?, static_mesh_path?, material_count?, generated_property_exists, scs_cdo_desync }], components_count: int, counts: object, has_simple_construction_script: bool, results_truncated: bool, max_results: int, component_class_filter: string|null, component_class_resolved: bool, desync_count: int, blueprint_status: string, generated_class_available: bool, omitted_duplicate_names: [{name, source, owner_class, shadowed_by?}], omitted_duplicate_count: int, omitted_null_templates: [{name, source, owner_class}], omitted_null_template_count: int, omitted_total: int } -- children names the components attached under a record (same SCS tree, or the CDO's own attach children for a native one); category is the text before the first underscore of the name; mobility only on scene components, simulates_physics/collision_enabled on primitives, has_static_mesh/static_mesh_path/material_count on static mesh components. generated_property_exists (bool|null) and scs_cdo_desync (bool|null): the compiler mints one FObjectProperty per SCS node with the SAME FName as the node (SCS_Node.h, KismetCompiler.cpp), so a MISSING property means the SCS and the compiled class disagree -- the fingerprint of an asset left half-reverted. This tool emits Node->GetVariableName() VERBATIM; it does NOT normalize a trailing digit.`
 
 ## `get_blueprint_exec_path`
 
 *Read-only.*
 
-Report which exec nodes and BRANCHES actually RAN inside a Blueprint at runtime -- which Branch went true, which FunctionResult fired -- read from the editor's Blueprint-debugger trace stack. Unlike trace_blueprint_execution and profile_blueprint_execution, which are STATIC and list every node that exists, this reflects real execution, so it answers "did that path run at all?" when a graph fails silently. WARNING: two-phase by construction: the VM only records the trace for the object currently being DEBUGGED, so call it ONCE with object_path to arm recording (SetObjectBeingDebugged), then drive the PIE scenario, then call it AGAIN to read the recorded path -- a single call returns nothing and that is not a bug. Requires a running PIE session with Blueprint debugging; `world` (including 'server' / 'client' / 'pie:N') selects which instance gets armed, and the response stamps which world it was.
+Report which exec nodes and BRANCHES actually RAN inside a Blueprint at runtime -- which Branch went true, which FunctionResult fired -- read from the editor's Blueprint-debugger trace stack. Unlike the static reader get_blueprint_debug_info, which lists every node that exists, this reflects real execution, so it answers "did that path run at all?" when a graph fails silently. WARNING: two-phase by construction: the VM only records the trace for the object currently being DEBUGGED, so call it ONCE with object_path to arm recording (SetObjectBeingDebugged), then drive the PIE scenario, then call it AGAIN to read the recorded path -- a single call returns nothing and that is not a bug. Requires a running PIE session with Blueprint debugging; `world` (including 'server' / 'client' / 'pie:N') selects which instance gets armed, and the response stamps which world it was.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -223,28 +191,11 @@ Report which exec nodes and BRANCHES actually RAN inside a Blueprint at runtime 
 
 **Returns:** `{ blueprint_name, blueprint_path, debug_object_set, object_path, trace_stack_size, filtered_count, path:[{index, node_id, node_class, node_title, graph, function, context, is_branch, is_function_result, observation_time}], note, world_selector, world_name, world_package, world_type, net_mode, pie_instance (the world of the ARMED debug object; nulls when none was armed) }`
 
-## `get_blueprint_functions_list`
-
-*Read-only.*
-
-List every graph a Blueprint AUTHORED -- function graphs, MACROS, interface implementation graphs, event graphs and ubergraph pages -- each with its node count and a REAL is_override (resolved against the parent class chain AND every implemented interface, reporting the declaring class) and is_pure (read from the graph's UK2Node_FunctionEntry FUNC_BlueprintPure flag, not guessed). The map to read before get_graph_nodes, which needs an exact graph name. WARNING: `ubergraph_pages` is the authored EventGraph you actually see in the editor; `event_graphs` are the TRANSIENT compiled graphs and come back EMPTY on a Blueprint that has not compiled this session -- an empty event_graphs is not an absence of events. Use get_class_functions for the compiled class surface (including inherited and native functions) instead of the authored graphs, and get_function_info for one function's signature.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `blueprint_name` | string | yes | Blueprint asset short name (exact) or full package name; an ambiguous bare name resolves to the first hit and lists the rest in `ambiguous_matches` |
-| `max_results` | number | no | Maximum entries to return, 1..10000 (default 1000) |
-| `filter_type` | string | no | Filter to 'all', 'functions', or 'events'. 'functions' covers Function/Macro/Interface graphs; 'events' covers Event/Ubergraph pages. Case-insensitive, and the singular ('function', 'event') is accepted as the same value. |
-| `include_macros` | boolean | no | Include MacroGraphs (type 'Macro'). Default true. |
-| `include_interface_graphs` | boolean | no | Include ImplementedInterfaces[].Graphs (type 'Interface'). Default true. |
-| `include_ubergraph_pages` | boolean | no | Include UbergraphPages (type 'Ubergraph'). Default true. |
-
-**Returns:** `{ blueprint_name: string, blueprint_path: string, functions: [{name, type, nodes_count, is_pure?, is_override?, override_declaring_class?, interface_class?}], functions_count: int, function_graphs_count: int, event_graphs_count: int, macro_graphs_count: int, interface_graphs_count: int, ubergraph_pages_count: int, override_count: int, filter_type: string, max_results: int, results_truncated: bool, blueprint_valid: bool, ambiguous_matches?: [string] }`
-
 ## `get_blueprint_parent`
 
 *Read-only.*
 
-Read which class a Blueprint ASSET inherits from: parent class name and path, whether that parent is native C++ or another Blueprint, and the Blueprint's own type (Normal / Interface / MacroLibrary / FunctionLibrary / LevelScript / Const). The first question to ask about an unfamiliar Blueprint, and the way to tell whether a library class sneaked into the parent chain. It returns ONE level -- get_class_hierarchy walks the whole ancestor chain of the compiled class, get_blueprint_children lists descendants, and verify_reparent_success checks the chain against an expectation after a reparent. WARNING: an ambiguous bare name still resolves to the FIRST match and only lists the rest in `ambiguous_matches` (the other match is often a dated backup copy that backup_asset wrote under /Game/MCP_Backups), so run resolve_asset_by_name first or pass the full path.
+Read which class a Blueprint ASSET inherits from: parent class name and path, whether that parent is native C++ or another Blueprint, and the Blueprint's own type (Normal / Interface / MacroLibrary / FunctionLibrary / LevelScript / Const). The first question to ask about an unfamiliar Blueprint, and the way to tell whether a library class sneaked into the parent chain. It returns ONE level -- get_class_hierarchy walks the whole ancestor chain of the compiled class, list_derived_classes lists descendants, and verify_reparent_success checks the chain against an expectation after a reparent. WARNING: an ambiguous bare name still resolves to the FIRST match and only lists the rest in `ambiguous_matches` (the other match is often a dated backup copy that backup_asset wrote under /Game/MCP_Backups), so run resolve_asset_by_name first or pass the full path.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -252,58 +203,11 @@ Read which class a Blueprint ASSET inherits from: parent class name and path, wh
 
 **Returns:** `{ blueprint_name: string, blueprint_path: string, blueprint_valid: bool, parent_class: string, parent_class_path: string, has_parent: bool, parent_is_native: bool, blueprint_type: string, ambiguous_matches?: [string] }`
 
-## `get_blueprint_scs_tree`
-
-*Read-only.*
-
-Enumerate the COMPLETE component tree of a Blueprint asset -- native components from the C++ CDO, its own SCS nodes, and everything inherited down the ancestor chain -- each classified by source with its class, attach parent/socket and transform, most-derived-wins. The component listing to use by default: get_blueprint_components_list sees ONLY the Blueprint's own SCS and silently omits native and inherited ones. `component_class` filters by class OR ANY SUBCLASS across all three sources, which Actor::GetComponentsByClass cannot do (it only ever sees a constructed instance's OwnedComponents, never SCS templates on a Blueprint nobody instantiated). WARNING: before concluding a component does not exist, read `omitted_total`, NOT results_truncated: null templates and name-shadowed ancestor entries are dropped without setting it, and omitted_duplicate_names[]/omitted_null_templates[] name what disappeared (counted before the component_class filter). `scs_cdo_desync` / `generated_property_exists` flag an SCS that disagrees with the compiled class -- the fingerprint of a half-reverted asset. See diff_blueprint_components to compare two trees, get_actor_components for a live instance.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `blueprint_name` | string | yes | Blueprint or AnimBlueprint asset short name (exact) or full /Game path; an ambiguous bare name resolves to one match without saying which, so pass the path when it matters |
-| `include_native` | boolean | no | Include C++/native components from the CDO (default true) |
-| `include_inherited` | boolean | no | Include components inherited from ancestor Blueprint classes (default true) |
-| `component_class` | string | no | Optional class filter (short name, /Script/Module.Class, or /Game/... Blueprint path). Matches this class OR ANY SUBCLASS of it (same semantics as the engine's own GetComponentsByClass), evaluated against every source (native CDO, own SCS, inherited SCS) -- unlike Actor::GetComponentsByClass/K2_GetComponentsByClass, which only ever see a live actor's already-constructed OwnedComponents and are blind to SCS node templates on a Blueprint that hasn't been instantiated yet. |
-| `max_results` | number | no | Cap on components returned, 1..10000 (default 1000) |
-
-**Returns:** `{ blueprint_name: string, blueprint_path: string, blueprint_valid: bool, parent_class: string, parent_class_path: string, components: [object], components_count: int, counts: object, has_simple_construction_script: bool, results_truncated: bool, max_results: int, component_class_filter: string|null, component_class_resolved: bool, desync_count: int, blueprint_status: string, generated_class_available: bool, omitted_duplicate_names: [{name, source, owner_class, shadowed_by?}], omitted_duplicate_count: int, omitted_null_templates: [{name, source, owner_class}], omitted_null_template_count: int, omitted_total: int } -- each component record also carries generated_property_exists (bool|null) and scs_cdo_desync (bool|null): the compiler mints one FObjectProperty per SCS node with the SAME FName as the node (SCS_Node.h, KismetCompiler.cpp), so a MISSING property means the SCS and the compiled class disagree -- the fingerprint of an asset left half-reverted. This tool emits Node->GetVariableName() VERBATIM; it does NOT normalize a trailing digit.`
-
-## `get_blueprint_variables_list`
-
-*Read-only.*
-
-List the variables a Blueprint AUTHORED itself (UBlueprint::NewVariables) with name, pin category, category, tooltip and the flags that matter for co-op and UI work: is_public (BlueprintVisible), is_editable, is_blueprint_read_only, is_replicated (CPF_Net) and is_expose_on_spawn. The quick "what state does this Blueprint own, and is it replicated?" listing. WARNING: own variables only: inherited variables, native C++ UPROPERTYs and component-backed variables are NOT here -- use get_class_properties on the generated class (..._C) for the full property surface, or get_blueprint_variable_detailed_info for one variable's full descriptor and default value.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `blueprint_name` | string | yes | Blueprint asset short name (exact) or full package name; an ambiguous bare name resolves to the first hit and lists the rest in `ambiguous_matches` |
-| `max_results` | number | no | Maximum variables to return, 1..10000 (default 1000) |
-
-**Returns:** `{ blueprint_name: string, blueprint_path: string, variables: [object], variables_count: int, max_results: int, results_truncated: bool, blueprint_valid: bool, ambiguous_matches?: [string] }`
-
-## `snapshot_object`
-
-*Destructive.*
-
-Capture the properties and components of one object into a named in-memory snapshot (read-only) for a later diff_object_snapshots: before vs after an action, editor vs PIE, or "server" vs "client" via world. persist=true also writes Saved/MCPAudits/snapshots/&lt;handle>.json to survive a restart. compare_objects diffs two live objects instead.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `object_path` | string | yes | Object path or dotted "Actor[.Component[.Subobject]]" (name or editor label for the first segment). |
-| `world` | string | no | Optional world selector: absent/'editor' (default) \| 'server' (the PIE world with authority) \| 'client' \| 'pie:N' \| 'pie'/'game'/'runtime' (ambiguous: PlayWorld, else the first PIE/Game context) to resolve a live runtime instance. |
-| `handle` | string | no | Optional handle to store under (overwrites); auto-generated when omitted (alias: snapshot_id). |
-| `persist` | boolean | no | Also write the snapshot to Saved/MCPAudits/snapshots/&lt;handle>.json so it SURVIVES an editor restart. The in-memory store is a process-lifetime map: without this, a baseline captured before a mandatory restart is gone exactly when you need to compare against it. Default false. |
-| `return_snapshot` | boolean | no | Return the full snapshot inline in the response (so the caller can hold it and pass it back as diff_object_snapshots' snapshot_a/snapshot_b). Default false. |
-| `include_component_templates` | boolean | no | For a Blueprint / BPGC / Blueprint CDO target, also capture the SCS + ICH component TEMPLATES (a Blueprint CDO owns ONLY its native components, so without this a CDO snapshot cannot verify a single SCS/ICH override). Default true. |
-| `snapshot_id` | string | no | Alias of handle: the name to store the snapshot under, used only when handle is absent or empty; an existing snapshot with that name is overwritten |
-
-**Returns:** `{ handle, object_path, resolved_path, class, world (the coarse "pie"/"editor" family label the snapshot itself carries), world_selector (what was asked for), property_count, component_count, component_template_count, persisted, snapshot_path?, persist_error?, snapshot?, world_name, world_package, world_type, net_mode, pie_instance }`
-
 ## `verify_reparent_success`
 
 *Destructive.*
 
-Check, after a reparent_blueprint, that the Blueprint really ended up where you wanted: it confirms the parent class against an expectation, reports the compile status, and -- when you feed it counts captured BEFOREHAND -- verifies no components or variables were lost, listing every failed invariant in `regressions[]`. This is the oracle for a reparent, because reparent_blueprint's own return value says nothing about whether the class survived it. WARNING: read-only by default, which means it reports the CACHED Blueprint->Status: pass force_compile=true to recompile and get the real status plus the compiler messages (compile_messages[] is empty without it, and `compile_ran` tells you which mode you got). Component count comes from the compiled CDO (native + SCS + inherited). Omit the expected_* counts to skip those invariants; get_blueprint_scs_tree or get_blueprint_variables_list before the reparent is where they come from.
+Check, after a reparent_blueprint, that the Blueprint really ended up where you wanted: it confirms the parent class against an expectation, reports the compile status, and -- when you feed it counts captured BEFOREHAND -- verifies no components or variables were lost, listing every failed invariant in `regressions[]`. This is the oracle for a reparent, because reparent_blueprint's own return value says nothing about whether the class survived it. WARNING: read-only by default, which means it reports the CACHED Blueprint->Status: pass force_compile=true to recompile and get the real status plus the compiler messages (compile_messages[] is empty without it, and `compile_ran` tells you which mode you got). Component count comes from the compiled CDO (native + SCS + inherited). Omit the expected_* counts to skip those invariants; get_blueprint_components or get_blueprint_variables before the reparent is where they come from.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

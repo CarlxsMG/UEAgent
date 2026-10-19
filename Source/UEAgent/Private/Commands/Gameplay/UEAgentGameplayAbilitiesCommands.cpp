@@ -17,7 +17,6 @@
 #include "AssetRegistry/IAssetRegistry.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "UObject/SavePackage.h"
-#include "UObject/UObjectIterator.h"
 #include "Engine/Blueprint.h"                // UBlueprint::GeneratedClass (blueprint-authored GE resolution)
 #include "Engine/DataTable.h"                // UDataTable (FAttributeMetaData DataTable)
 #include "UObject/StructOnScope.h"           // FStructOnScope for FAttributeMetaData row memory
@@ -878,7 +877,7 @@ TSharedPtr<FJsonObject> HandleSetAttributeBaseValue(const TSharedPtr<FJsonObject
 }
 
 // ---------------------------------------------------------------------------
-// Ability task runtime + GameplayEffect container authoring.
+// Ability task listing + GameplayEffect asset authoring.
 // ---------------------------------------------------------------------------
 
 namespace
@@ -954,101 +953,15 @@ namespace
 
 }
 
-// Ability tasks are created on the primary instance of a granted ability and listed from the actor's
-// GameplayTasksComponent. GameplayEffect assets can be created, have their duration policy changed, have
-// their modifiers read back, or be applied in batches. Engine entry points:
-//   UAbilityTask::NewAbilityTask                               Abilities/Tasks/AbilityTask.h
+// Gameplay tasks are listed from the actor's GameplayTasksComponents. GameplayEffect assets can be created,
+// have their modifiers read back, or be applied in batches. Engine entry points:
+//   UGameplayTasksComponent::GetKnownTaskIterator              GameplayTasksComponent.h
 //   UGameplayEffect, EGameplayEffectDurationType               GameplayEffect.h
 //   UAbilitySystemComponent::ApplyGameplayEffectSpecToSelf     AbilitySystemComponent.h
 
-// MCP:add_ability_task - Create an ability task on the primary instance of an ability already granted to an editor-world actor; the task is initialized (AwaitingActivation), never activated. task_class is only validated: it always builds the abstract base UAbilityTask, which logs a warning and an ensure.
+// MCP:get_ability_tasks - List the gameplay tasks the GameplayTasksComponents of an editor-world actor (its ability system component counts) know about, without changing anything: the tasks activated and not yet ended (the component's KnownTasks), plus any queued waiting for task resources. Each has task_name, task_class, task_state (Uninitialized, AwaitingActivation, Active, Paused or Finished), is_ability_task and owner_name (the object that started it, e.g. an ability instance); counts split ability tasks from other gameplay tasks. A task that was created but never activated is not known to the component and is not listed. An actor that is not found, or has no ability system component, is an error.
 //   @param actor_name - Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names
-//   @param ability_class - Class path of an ability already granted to the actor, e.g. "/Game/Abilities/GA_Jump.GA_Jump_C"; it must be instanced (have a primary instance)
-//   @param task_class - Class path of a UAbilityTask subclass, e.g. "/Script/GameplayAbilities.AbilityTask_WaitDelay"; checked, but not used to build the task
-//   @param instance_name - Name for the new task instance (default "Default")
-//   @returns { actor_name, ability_class, task_class, instance_name, task_name, added, task_state }
-TSharedPtr<FJsonObject> HandleAddAbilityTask(const TSharedPtr<FJsonObject>& Params)
-{
-    UE_LOG(LogTemp, Verbose, TEXT("[UEAgent] add_ability_task: enter"));
-    namespace Impl = UEAgentGameplayAbilitiesImpl;
-
-    FString ActorName, AbilityClassPath, TaskClassPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("actor_name"), ActorName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("ability_class"), AbilityClassPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("task_class"), TaskClassPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    FString InstanceName;
-    Params->TryGetStringField(TEXT("instance_name"), InstanceName);
-    if (InstanceName.IsEmpty())
-    {
-        InstanceName = TEXT("Default");
-    }
-
-    const Impl::FAbilityOwner Owner = Impl::ResolveAbilityOwner(ActorName);
-    if (Owner.Error.IsValid())
-    {
-        return Owner.Error;
-    }
-    UAbilitySystemComponent* ASC = Owner.Asc;
-
-    UClass* AbilityClass = LoadClass<UGameplayAbility>(nullptr, *AbilityClassPath);
-    if (!AbilityClass)
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Ability class not found: %s"), *AbilityClassPath));
-    }
-    UClass* TaskClass = LoadClass<UAbilityTask>(nullptr, *TaskClassPath);
-    if (!TaskClass)
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Task class not found or not a UAbilityTask: %s"), *TaskClassPath));
-    }
-
-    // Resolve the ability spec for this class on the ASC.
-    FGameplayAbilitySpec* Spec = ASC->FindAbilitySpecFromClass(AbilityClass);
-    if (!Spec)
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(
-            TEXT("Ability class not granted on actor %s: %s"), *ActorName, *AbilityClassPath));
-    }
-
-    // The spec's primary UGameplayAbility instance; null for a non-instanced spec (refused below).
-    UGameplayAbility* AbilityInstance = Spec->GetPrimaryInstance();
-    if (!AbilityInstance)
-    {
-        // Non-instanced ability — create a transient instance via AbilityClass CDO is
-        // not safe for task attachment. Refuse with a clean error rather than guessing.
-        return mcp_common::MakeErrorReply(FString::Printf(
-            TEXT("Ability spec for %s has no per-instance UGameplayAbility (non-instanced policy). Grant the ability with InstancingPolicy=InstancedPerExecution first."),
-            *AbilityClassPath));
-    }
-
-    // UAbilityTask::NewAbilityTask<T>(UGameplayAbility*, FName) is the canonical factory
-    // (Abilities/Tasks/AbilityTask.h). It NewObject's the task and calls InitTask.
-    UAbilityTask* NewTask = UAbilityTask::NewAbilityTask<UAbilityTask>(
-        AbilityInstance, FName(*InstanceName));
-    if (!NewTask)
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(
-            TEXT("UAbilityTask::NewAbilityTask returned null for %s on %s"), *TaskClassPath, *AbilityClassPath));
-    }
-
-    // Register with the ability's GameplayTasksComponent so it appears in KnownTasks
-    // and receives ticks. UAbilityTask::InitTask already does this for the owning
-    // ability's tasks component (Abilities/Tasks/AbilityTask.h). No additional wiring
-    // required — the task will be listed by get_ability_tasks immediately.
-
-    TSharedPtr<FJsonObject> ResultObj = Impl::NewActorReply(ActorName, TEXT("ability_class"), AbilityClassPath);
-    ResultObj->SetStringField(TEXT("task_class"), TaskClassPath);
-    ResultObj->SetStringField(TEXT("instance_name"), InstanceName);
-    ResultObj->SetStringField(TEXT("task_name"), NewTask->GetName());
-    ResultObj->SetBoolField(TEXT("added"), true);
-    ResultObj->SetStringField(TEXT("task_state"), NewTask->GetTaskStateName());
-    UE_LOG(LogTemp, Verbose, TEXT("[UEAgent] add_ability_task: created %s on %s"),
-        *NewTask->GetName(), *ActorName);
-    return ResultObj;
-}
-
-// MCP:get_ability_tasks - List the UGameplayTask objects outered to a GameplayTasksComponent of an editor-world actor (its ability system component counts): task_name, task_class, task_state, is_ability_task, plus counts. Tasks built by NewAbilityTask, add_ability_task included, are outered to the transient package and are not listed.
-//   @param actor_name - Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names
-//   @returns { task_name, task_class, task_state, is_ability_task, actor_name, task_count, ability_task_count, generic_task_count, tasks }
+//   @returns { actor_name, task_count, ability_task_count, generic_task_count, tasks: [{ task_name, task_class, task_state, is_ability_task, owner_name }] }
 TSharedPtr<FJsonObject> HandleGetAbilityTasks(const TSharedPtr<FJsonObject>& Params)
 {
     UE_LOG(LogTemp, Verbose, TEXT("[UEAgent] get_ability_tasks: enter"));
@@ -1063,53 +976,46 @@ TSharedPtr<FJsonObject> HandleGetAbilityTasks(const TSharedPtr<FJsonObject>& Par
     }
     AActor* Actor = Owner.Actor;
 
-    // Iterate the ASC's GameplayTasksComponent::KnownTasks (TArray<TObjectPtr<UGameplayTask>>,
-    // GameplayTasksComponent.h). UAbilityTask is a UGameplayTask subclass, so every
-    // active ability task appears here.
+    // Every engine task factory (UGameplayTask::NewTask, UAbilityTask::NewAbilityTask, UAITask) outers its task
+    // to the transient package, so a task is found through the component that runs it, not through its outer:
+    // the component's KnownTasks (added on activation, removed when the task ends), and its priority queue,
+    // which also holds tasks still waiting for their resources. A task in both is listed once.
     TArray<TSharedPtr<FJsonValue>> TasksJson;
     int32 AbilityTaskCount = 0;
     int32 GenericTaskCount = 0;
+    TSet<const UGameplayTask*> Listed;
 
-    TArray<UActorComponent*> GTComps;
-    Actor->GetComponents(UGameplayTasksComponent::StaticClass(), GTComps);
-    for (UActorComponent* Comp : GTComps)
+    const auto AddTask = [&](const UGameplayTask* Task)
     {
-        UGameplayTasksComponent* GTComp = Cast<UGameplayTasksComponent>(Comp);
-        if (!GTComp)
+        if (!Task || Listed.Contains(Task))
         {
-            continue;
+            return;
         }
-        // KnownTasks is protected (GameplayTasksComponent.h). Walk the tasks
-        // reflected on this component by iterating through owned gameplay tasks via
-        // GetKnownTaskSnapshot / similar public surface; fall back to the description
-        // accessor when individual entries are not exposed.
-        FString KnownDesc = GTComp->GetKnownTasksDescription();
-        UE_LOG(LogTemp, Verbose, TEXT("[UEAgent] get_ability_tasks: KnownTasks=%s"), *KnownDesc);
+        Listed.Add(Task);
+        const bool bIsAbilityTask = Task->IsA<UAbilityTask>();
+        IGameplayTaskOwnerInterface* const OwnerInterface = Task->GetTaskOwner();
+        const UObject* TaskOwner = OwnerInterface ? Cast<UObject>(OwnerInterface) : nullptr;
+        TSharedPtr<FJsonObject> TaskObj = MakeShared<FJsonObject>();
+        TaskObj->SetStringField(TEXT("task_name"), Task->GetName());
+        TaskObj->SetStringField(TEXT("task_class"), Task->GetClass()->GetName());
+        TaskObj->SetStringField(TEXT("task_state"), Task->GetTaskStateName());
+        TaskObj->SetBoolField(TEXT("is_ability_task"), bIsAbilityTask);
+        TaskObj->SetStringField(TEXT("owner_name"), TaskOwner ? TaskOwner->GetName() : FString());
+        ++(bIsAbilityTask ? AbilityTaskCount : GenericTaskCount);
+        TasksJson.Add(MakeShared<FJsonValueObject>(TaskObj));
+    };
 
-        // Iterate owned gameplay tasks using GetActiveTasks equivalent via ForEachObject.
-        // KnownTasks is TArray<TObjectPtr<UGameplayTask>> (protected), so use TObjectIterator
-        // scoped to this component's outer + class filter.
-        for (TObjectIterator<UGameplayTask> It; It; ++It)
+    TArray<UGameplayTasksComponent*> GTComps;
+    Actor->GetComponents<UGameplayTasksComponent>(GTComps);
+    for (const UGameplayTasksComponent* GTComp : GTComps)
+    {
+        for (auto It = GTComp->GetKnownTaskIterator(); It; ++It)
         {
-            UGameplayTask* Task = *It;
-            if (!Task || !Task->IsValidLowLevel() || Task->GetOuter() != GTComp)
-            {
-                continue;
-            }
-            TSharedPtr<FJsonObject> TaskObj = MakeShared<FJsonObject>();
-            TaskObj->SetStringField(TEXT("task_name"), Task->GetName());
-            TaskObj->SetStringField(TEXT("task_class"), Task->GetClass()->GetName());
-            TaskObj->SetStringField(TEXT("task_state"), Task->GetTaskStateName());
-            TaskObj->SetBoolField(TEXT("is_ability_task"), Task->IsA<UAbilityTask>());
-            if (Task->IsA<UAbilityTask>())
-            {
-                ++AbilityTaskCount;
-            }
-            else
-            {
-                ++GenericTaskCount;
-            }
-            TasksJson.Add(MakeShared<FJsonValueObject>(TaskObj));
+            AddTask(*It);
+        }
+        for (auto It = GTComp->GetPriorityQueueIterator(); It; ++It)
+        {
+            AddTask(*It);
         }
     }
 
@@ -1123,7 +1029,7 @@ TSharedPtr<FJsonObject> HandleGetAbilityTasks(const TSharedPtr<FJsonObject>& Par
     return ResultObj;
 }
 
-// MCP:create_gameplay_effect_container - Create and save a native UGameplayEffect asset (despite the name, not a container and not a Blueprint) at package_path/name. An existing asset there is returned untouched (already_existed=true). apply_gameplay_effect needs a class, so use create_gameplay_effect_blueprint for an effect it can apply.
+// MCP:create_gameplay_effect_asset - Create and save a native UGameplayEffect asset (despite the name, not a container and not a Blueprint) at package_path/name. An existing asset there is returned untouched (already_existed=true). apply_gameplay_effect needs a class, so use create_gameplay_effect_blueprint for an effect it can apply.
 //   @param name - Asset name without a path, e.g. "GE_Damage"
 //   @param package_path - Target content package path where the asset is created (default /Game/GameplayEffects)
 //   @param duration_policy - Duration type, case-insensitive: Instant, HasDuration or Infinite (default Instant)
@@ -1131,12 +1037,13 @@ TSharedPtr<FJsonObject> HandleGetAbilityTasks(const TSharedPtr<FJsonObject>& Par
 //   @returns { name, asset_path, already_existed, duration_policy, duration_magnitude, created }
 TSharedPtr<FJsonObject> HandleCreateGameplayEffectContainer(const TSharedPtr<FJsonObject>& Params)
 {
-    UE_LOG(LogTemp, Verbose, TEXT("[UEAgent] create_gameplay_effect_container: enter"));
+    UE_LOG(LogTemp, Verbose, TEXT("[UEAgent] create_gameplay_effect_asset: enter"));
 
     FString Name;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("name"), Name, mcp_common::EAllowEmpty::Yes)) { return Missing; }
     FString PackagePath = TEXT("/Game/GameplayEffects");
     Params->TryGetStringField(TEXT("package_path"), PackagePath);
+    PackagePath.RemoveFromEnd(TEXT("/"));
 
     FString DurationPolicyStr = TEXT("Instant");
     Params->TryGetStringField(TEXT("duration_policy"), DurationPolicyStr);
@@ -1151,8 +1058,10 @@ TSharedPtr<FJsonObject> HandleCreateGameplayEffectContainer(const TSharedPtr<FJs
             TEXT("Unknown duration_policy: %s (expected Instant|HasDuration|Infinite)"), *DurationPolicyStr));
     }
 
-    // Idempotent: if asset already exists at the resolved path, return it.
-    const FString AssetPath = FString::Printf(TEXT("%s/%s.%s"), *PackagePath, *Name, *Name);
+    // Idempotent: if asset already exists at the resolved path, return it. The asset's own package is
+    // package_path/name; asset_path is the object path inside it.
+    const FString PackageName = FString::Printf(TEXT("%s/%s"), *PackagePath, *Name);
+    const FString AssetPath = FString::Printf(TEXT("%s.%s"), *PackageName, *Name);
     if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(AssetPath)) { return Invalid; }
     if (UGameplayEffect* Existing = LoadGameplayEffectAsset(AssetPath))
     {
@@ -1172,7 +1081,7 @@ TSharedPtr<FJsonObject> HandleCreateGameplayEffectContainer(const TSharedPtr<FJs
     // Create the package + asset. UGameplayEffect inherits UObject (not a Blueprint) so
     // NewObject + Initialize is sufficient; no factory required.
     FString PackageError;
-    UPackage* Package = mcp_common::CreateAssetPackage(*PackagePath, FName(*Name), UGameplayEffect::StaticClass(), PackageError);
+    UPackage* Package = mcp_common::CreateAssetPackage(PackageName, Name, UGameplayEffect::StaticClass(), PackageError);
     if (!Package)
     {
         return mcp_common::MakeErrorReply(PackageError);
@@ -1209,7 +1118,7 @@ TSharedPtr<FJsonObject> HandleCreateGameplayEffectContainer(const TSharedPtr<FJs
     ResultObj->SetBoolField(TEXT("already_existed"), false);
     ResultObj->SetStringField(TEXT("duration_policy"), DurationPolicyStr);
     ResultObj->SetNumberField(TEXT("duration_magnitude"), DurationMagnitude);
-    UE_LOG(LogTemp, Verbose, TEXT("[UEAgent] create_gameplay_effect_container: created %s (policy=%s)"),
+    UE_LOG(LogTemp, Verbose, TEXT("[UEAgent] create_gameplay_effect_asset: created %s (policy=%s)"),
         *AssetPath, *DurationPolicyStr);
     return ResultObj;
 }
@@ -1305,63 +1214,6 @@ TSharedPtr<FJsonObject> HandleApplyMultipleGameplayEffects(const TSharedPtr<FJso
     ResultObj->SetArrayField(TEXT("failed"), FailedJson);
     UE_LOG(LogTemp, Verbose, TEXT("[UEAgent] apply_multiple_gameplay_effects: %d/%d applied on %s"),
         AppliedCount, EffectClassesArrayPtr->Num(), *ActorName);
-    return ResultObj;
-}
-
-// MCP:set_gameplay_effect_duration_policy - Set DurationPolicy on a GameplayEffect asset (a native UGameplayEffect asset, or the class default object of a Blueprint GE) and save its package; with HasDuration it also sets a constant DurationMagnitude. Returns old_duration_policy and duration_policy. Fails while PIE runs, because the save is refused.
-//   @param effect_path - GameplayEffect asset path: a Blueprint GE ("/Game/Effects/GE_Burn") or a native UGameplayEffect asset
-//   @param duration_policy - One of "Instant", "HasDuration" or "Infinite", any case ("duration" alone is refused)
-//   @param duration_magnitude - Duration in seconds, applied when policy is HasDuration (default 0.0)
-//   @returns { effect_path, old_duration_policy, duration_policy, duration_magnitude, set }
-TSharedPtr<FJsonObject> HandleSetGameplayEffectDurationPolicy(const TSharedPtr<FJsonObject>& Params)
-{
-    UE_LOG(LogTemp, Verbose, TEXT("[UEAgent] set_gameplay_effect_duration_policy: enter"));
-
-    FString EffectPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("effect_path"), EffectPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    FString PolicyStr;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("duration_policy"), PolicyStr, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    float DurationMagnitude = 0.0f;
-    Params->TryGetNumberField(TEXT("duration_magnitude"), DurationMagnitude);
-
-    UGameplayEffect* Effect = LoadGameplayEffectAsset(EffectPath);
-    if (!Effect)
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(
-            TEXT("UGameplayEffect asset not found: %s"), *EffectPath));
-    }
-
-    EGameplayEffectDurationType NewPolicy = EGameplayEffectDurationType::Instant;
-    if (!GameplayAbilities_ParseDurationPolicy(PolicyStr, NewPolicy))
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(
-            TEXT("Unknown duration_policy: %s (expected Instant|HasDuration|Infinite)"), *PolicyStr));
-    }
-
-    const EGameplayEffectDurationType OldPolicy = Effect->DurationPolicy;
-    Effect->DurationPolicy = NewPolicy;
-    if (NewPolicy == EGameplayEffectDurationType::HasDuration)
-    {
-        Effect->DurationMagnitude = FGameplayEffectModifierMagnitude(FScalableFloat(DurationMagnitude));
-    }
-
-    // Save the asset package so the change persists.
-    UPackage* Pkg = Effect->GetOutermost();
-    FString SaveError;
-    if (!mcp_common::SaveAssetPackage(Pkg, Effect, SaveError))
-    {
-        return mcp_common::MakeErrorReply(SaveError);
-    }
-
-    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-    ResultObj->SetStringField(TEXT("effect_path"), EffectPath);
-    ResultObj->SetStringField(TEXT("old_duration_policy"), GameplayAbilities_DurationPolicyName(OldPolicy));
-    ResultObj->SetStringField(TEXT("duration_policy"), PolicyStr);
-    if (NewPolicy == EGameplayEffectDurationType::HasDuration)
-    {
-        ResultObj->SetNumberField(TEXT("duration_magnitude"), DurationMagnitude);
-    }
-    ResultObj->SetBoolField(TEXT("set"), true);
     return ResultObj;
 }
 
@@ -2042,11 +1894,10 @@ TSharedPtr<FJsonObject> HandleUnregisterGameplayTagEvent(const TSharedPtr<FJsonO
 const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("activate_ability"), &HandleActivateAbility },
-    { TEXT("add_ability_task"), &HandleAddAbilityTask },
     { TEXT("apply_gameplay_effect"), &HandleApplyGameplayEffect },
     { TEXT("apply_multiple_gameplay_effects"), &HandleApplyMultipleGameplayEffects },
     { TEXT("cancel_ability"), &HandleCancelAbility },
-    { TEXT("create_gameplay_effect_container"), &HandleCreateGameplayEffectContainer },
+    { TEXT("create_gameplay_effect_asset"), &HandleCreateGameplayEffectContainer },
     { TEXT("get_ability_info"), &HandleGetAbilityInfo },
     { TEXT("get_ability_system_component"), &HandleGetAbilitySystemComponent },
     { TEXT("get_ability_tasks"), &HandleGetAbilityTasks },
@@ -2065,7 +1916,6 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("send_gameplay_event_to_actor"), &HandleSendGameplayEventToActor },
     { TEXT("set_attribute_base_value"), &HandleSetAttributeBaseValue },
     { TEXT("set_attribute_meta_on_set_class"), &HandleSetAttributeMetaOnSetClass },
-    { TEXT("set_gameplay_effect_duration_policy"), &HandleSetGameplayEffectDurationPolicy },
     { TEXT("unregister_gameplay_tag_event"), &HandleUnregisterGameplayTagEvent },
 };
 } // namespace UEAgentGameplayAbilitiesCommands

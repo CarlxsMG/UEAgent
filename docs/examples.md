@@ -18,13 +18,13 @@ itself: the lists only show what each task touches. Every tool is described in t
 |---|---|
 | "Light this level as a sunny outdoor scene: sun, sky and a light fog." | `spawn_actor`, `set_light_intensity`, `spawn_sky_atmosphere`, `spawn_sky_light`, `spawn_exponential_height_fog` |
 | "Make a terrain from D:/Heightmaps/island.png." | `create_landscape`, `import_landscape_heightmap` |
-| "Place five BP_Crate in a row in front of the player start and take a high-resolution screenshot." | `spawn_blueprint_actor`, `high_res_screenshot` |
+| "Place five BP_Crate in a row in front of the player start and take a high-resolution screenshot." | `spawn_blueprint_actor`, `capture_high_res_screenshot` |
 
 ## Materials
 
 | Ask | Tools |
 |---|---|
-| "Make a red variant of M_Base and put it on the crates in this level." | `create_material_instance`, `set_material_instance_param`, `get_actors_by_class`, `set_actor_material` |
+| "Make a red variant of M_Base and put it on the crates in this level." | `create_material_instance`, `set_material_instance_parameter`, `get_actors_by_class`, `set_actor_material` |
 
 ## Animation and VFX
 
@@ -40,7 +40,7 @@ itself: the lists only show what each task touches. Every tool is described in t
 |---|---|
 | "Add a Jump action bound to Space and Gamepad A in IMC_Default." | `create_input_action`, `add_mapping_to_context` |
 | "Create the tags Status.Stunned and Status.Burning." | `create_gameplay_tag` |
-| "Make an enemy that patrols between points and chases the player when it sees them." | `create_blackboard_data`, `add_blackboard_key`, `create_behavior_tree`, `add_bt_composite_child`, `add_bt_task_child`, `create_ai_controller_blueprint`, `build_blueprint_graph` |
+| "Make an enemy that patrols between points and chases the player when it sees them." | `create_blackboard_data`, `add_blackboard_key`, `create_behavior_tree`, `add_behavior_tree_child`, `create_ai_controller_blueprint`, `build_blueprint_graph` |
 | "Create DT_Weapons from this CSV, with FWeaponRow as its row." | `create_data_table`, `import_data_table_csv`, `get_data_table_rows` |
 
 ## Cinematics and testing
@@ -61,7 +61,7 @@ itself: the lists only show what each task touches. Every tool is described in t
 ## When no tool fits
 
 - `execute_python` runs Python in the editor, with Unreal's Python API.
-- `batch` runs several calls in one pass on the game thread, without a round trip each.
+- `execute_batch` runs several calls in one pass on the game thread, without a round trip each.
 
 ## Tips
 

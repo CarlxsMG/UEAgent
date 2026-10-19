@@ -51,7 +51,7 @@
      "probes": {},
      "expect": {
       "refused": true,
-      "message": "The foliage tools CRASH THE EDITOR PROCESS (EXCEPTION_ACCESS_VIOLATION in FoliageEdit.dll); splitting the work or lowering the count does not help -- a single instance crashes it too. There is no workaround through these tools. WHAT WORKS: place the instances as an InstancedStaticMeshComponent on a placed actor, with add_instanced_static_mesh_component + add_ism_instance."
+      "message": "The foliage tools CRASH THE EDITOR PROCESS (EXCEPTION_ACCESS_VIOLATION in FoliageEdit.dll); splitting the work or lowering the count does not help -- a single instance crashes it too. There is no workaround through these tools. WHAT WORKS: place the instances as an InstancedStaticMeshComponent on a placed actor, with add_instanced_static_mesh_component + add_instanced_static_mesh_instance."
      },
      "expect_probe_calls": []
     }
@@ -70,7 +70,7 @@
      "probes": {},
      "expect": {
       "refused": true,
-      "message": "The foliage tools CRASH THE EDITOR PROCESS (EXCEPTION_ACCESS_VIOLATION in FoliageEdit.dll); splitting the work or lowering the count does not help -- a single instance crashes it too. There is no workaround through these tools. WHAT WORKS: place the instances as an InstancedStaticMeshComponent on a placed actor, with add_instanced_static_mesh_component + add_ism_instance."
+      "message": "The foliage tools CRASH THE EDITOR PROCESS (EXCEPTION_ACCESS_VIOLATION in FoliageEdit.dll); splitting the work or lowering the count does not help -- a single instance crashes it too. There is no workaround through these tools. WHAT WORKS: place the instances as an InstancedStaticMeshComponent on a placed actor, with add_instanced_static_mesh_component + add_instanced_static_mesh_instance."
      },
      "expect_probe_calls": []
     }
@@ -473,12 +473,12 @@
       "asset_path": "/Game/MyGame/MH/MHC_Default"
      },
      "probes": {
-      "get_asset_metadata": {
-       "class": "MetaHumanCharacter"
-      },
       "get_assets_in_folder": {
        "total_found": 12,
        "count": 12
+      },
+      "get_asset_by_name": {
+       "class": "/Script/MetaHumanCharacter.MetaHumanCharacter"
       }
      },
      "expect": {
@@ -487,9 +487,10 @@
      },
      "expect_probe_calls": [
       [
-       "get_asset_metadata",
+       "get_asset_by_name",
        {
-        "asset_name": "MyGame/MH/MHC_Default"
+        "asset_name": "/Game/MyGame/MH/MHC_Default",
+        "load_full_data": false
        }
       ],
       [
@@ -514,12 +515,12 @@
       "asset_path": "/Game/MyGame/MH/MHC_Default"
      },
      "probes": {
-      "get_asset_metadata": {
-       "class": "MetaHumanCharacter"
-      },
       "get_assets_in_folder": {
        "total_found": 0,
        "count": 0
+      },
+      "get_asset_by_name": {
+       "class": "/Script/MetaHumanCharacter.MetaHumanCharacter"
       }
      },
      "expect": {
@@ -528,9 +529,10 @@
      },
      "expect_probe_calls": [
       [
-       "get_asset_metadata",
+       "get_asset_by_name",
        {
-        "asset_name": "MyGame/MH/MHC_Default"
+        "asset_name": "/Game/MyGame/MH/MHC_Default",
+        "load_full_data": false
        }
       ],
       [
@@ -555,8 +557,8 @@
       "asset_path": "/Game/MyGame/SM_X"
      },
      "probes": {
-      "get_asset_metadata": {
-       "class": "StaticMesh"
+      "get_asset_by_name": {
+       "class": "/Script/Engine.StaticMesh"
       }
      },
      "expect": {
@@ -565,9 +567,10 @@
      },
      "expect_probe_calls": [
       [
-       "get_asset_metadata",
+       "get_asset_by_name",
        {
-        "asset_name": "MyGame/SM_X"
+        "asset_name": "/Game/MyGame/SM_X",
+        "load_full_data": false
        }
       ]
      ]
@@ -584,7 +587,7 @@
       "asset_path": "/Game/MyGame/SM_X"
      },
      "probes": {
-      "get_asset_metadata": {
+      "get_asset_by_name": {
        "success": false,
        "error": "boom"
       }
@@ -595,9 +598,10 @@
      },
      "expect_probe_calls": [
       [
-       "get_asset_metadata",
+       "get_asset_by_name",
        {
-        "asset_name": "MyGame/SM_X"
+        "asset_name": "/Game/MyGame/SM_X",
+        "load_full_data": false
        }
       ]
      ]
@@ -614,12 +618,12 @@
       "asset_path": "/Game/MyGame/MH/MHC_Default"
      },
      "probes": {
-      "get_asset_metadata": {
-       "class": "MetaHumanCharacter"
-      },
       "get_assets_in_folder": {
        "success": false,
        "error": "boom"
+      },
+      "get_asset_by_name": {
+       "class": "/Script/MetaHumanCharacter.MetaHumanCharacter"
       }
      },
      "expect": {
@@ -628,9 +632,10 @@
      },
      "expect_probe_calls": [
       [
-       "get_asset_metadata",
+       "get_asset_by_name",
        {
-        "asset_name": "MyGame/MH/MHC_Default"
+        "asset_name": "/Game/MyGame/MH/MHC_Default",
+        "load_full_data": false
        }
       ],
       [
@@ -655,11 +660,11 @@
       "asset_path": "/Game/MyGame/MH/MHC_X"
      },
      "probes": {
-      "get_asset_metadata": {
-       "class": "MetaHumanCharacter"
-      },
       "get_assets_in_folder": {
        "count": 2
+      },
+      "get_asset_by_name": {
+       "class": "/Script/MetaHumanCharacter.MetaHumanCharacter"
       }
      },
      "expect": {
@@ -668,9 +673,10 @@
      },
      "expect_probe_calls": [
       [
-       "get_asset_metadata",
+       "get_asset_by_name",
        {
-        "asset_name": "MyGame/MH/MHC_X"
+        "asset_name": "/Game/MyGame/MH/MHC_X",
+        "load_full_data": false
        }
       ],
       [
@@ -695,12 +701,12 @@
       "asset_path": "MHC_X"
      },
      "probes": {
-      "get_asset_metadata": {
-       "class": "MetaHumanCharacter"
-      },
       "get_assets_in_folder": {
        "total_found": 1,
        "count": 1
+      },
+      "get_asset_by_name": {
+       "class": "/Script/MetaHumanCharacter.MetaHumanCharacter"
       }
      },
      "expect": {
@@ -709,9 +715,10 @@
      },
      "expect_probe_calls": [
       [
-       "get_asset_metadata",
+       "get_asset_by_name",
        {
-        "asset_name": "MHC_X"
+        "asset_name": "MHC_X",
+        "load_full_data": false
        }
       ],
       [
@@ -736,9 +743,9 @@
       "asset_path": "/Game/MyGame/Map/MainMap"
      },
      "probes": {
-      "get_asset_metadata": {
+      "get_asset_by_name": {
        "name": "MainMap",
-       "class": "World"
+       "class": "/Script/Engine.World"
       }
      },
      "expect": {
@@ -747,9 +754,10 @@
      },
      "expect_probe_calls": [
       [
-       "get_asset_metadata",
+       "get_asset_by_name",
        {
-        "asset_name": "MyGame/Map/MainMap"
+        "asset_name": "/Game/MyGame/Map/MainMap",
+        "load_full_data": false
        }
       ]
      ]
@@ -766,9 +774,9 @@
       "asset_path": "/Game/MyGame/Core/BP_X"
      },
      "probes": {
-      "get_asset_metadata": {
+      "get_asset_by_name": {
        "name": "BP_X",
-       "class": "Blueprint"
+       "class": "/Script/Engine.Blueprint"
       }
      },
      "expect": {
@@ -777,9 +785,10 @@
      },
      "expect_probe_calls": [
       [
-       "get_asset_metadata",
+       "get_asset_by_name",
        {
-        "asset_name": "MyGame/Core/BP_X"
+        "asset_name": "/Game/MyGame/Core/BP_X",
+        "load_full_data": false
        }
       ]
      ]
@@ -816,7 +825,7 @@
       "delegate_name": "OnTakeAnyDamage"
      },
      "probes": {
-      "get_object_class": {
+      "inspect_object": {
        "success": false,
        "error": "does not resolve"
       }
@@ -827,9 +836,10 @@
      },
      "expect_probe_calls": [
       [
-       "get_object_class",
+       "inspect_object",
        {
-        "object_path": "BP_X_0"
+        "object_path": "BP_X_0",
+        "include_properties": false
        }
       ]
      ]
@@ -847,12 +857,12 @@
       "delegate_name": "OnTakeAnyDamage"
      },
      "probes": {
-      "get_object_class": {
-       "class_name": "BP_X_C",
-       "class_path": "/Game/Main/BP_X.BP_X_C"
-      },
       "get_event_dispatchers": {
        "dispatchers": []
+      },
+      "inspect_object": {
+       "class_name": "BP_X_C",
+       "class_path": "/Game/Main/BP_X.BP_X_C"
       }
      },
      "expect": {
@@ -861,9 +871,10 @@
      },
      "expect_probe_calls": [
       [
-       "get_object_class",
+       "inspect_object",
        {
-        "object_path": "BP_X_0"
+        "object_path": "BP_X_0",
+        "include_properties": false
        }
       ],
       [
@@ -888,10 +899,6 @@
       "delegate_name": "OnTakeAnyDamage"
      },
      "probes": {
-      "get_object_class": {
-       "class_name": "BP_Sensor_Range_C",
-       "class_path": "/Game/MyGame/Gameplay/BP_Sensor_Range.BP_Sensor_Range_C"
-      },
       "get_event_dispatchers": {
        "dispatchers": [
         {
@@ -899,6 +906,10 @@
          "is_inherited": false
         }
        ]
+      },
+      "inspect_object": {
+       "class_name": "BP_Sensor_Range_C",
+       "class_path": "/Game/MyGame/Gameplay/BP_Sensor_Range.BP_Sensor_Range_C"
       }
      },
      "expect": {
@@ -907,9 +918,10 @@
      },
      "expect_probe_calls": [
       [
-       "get_object_class",
+       "inspect_object",
        {
-        "object_path": "S_0"
+        "object_path": "S_0",
+        "include_properties": false
        }
       ],
       [
@@ -934,10 +946,6 @@
       "delegate_name": "OnTakeAnyDamage"
      },
      "probes": {
-      "get_object_class": {
-       "class_name": "AC_Stats_C",
-       "class_path": "/Game/VendorPack/AC_Stats.AC_Stats_C"
-      },
       "get_event_dispatchers": {
        "dispatchers": [
         {
@@ -945,6 +953,10 @@
          "is_inherited": false
         }
        ]
+      },
+      "inspect_object": {
+       "class_name": "AC_Stats_C",
+       "class_path": "/Game/VendorPack/AC_Stats.AC_Stats_C"
       }
      },
      "expect": {
@@ -953,9 +965,10 @@
      },
      "expect_probe_calls": [
       [
-       "get_object_class",
+       "inspect_object",
        {
-        "object_path": "BP_X.AC_Stats"
+        "object_path": "BP_X.AC_Stats",
+        "include_properties": false
        }
       ],
       [
@@ -980,10 +993,6 @@
       "delegate_name": "OnTakeAnyDamage"
      },
      "probes": {
-      "get_object_class": {
-       "class_name": "BP_Sensor_Range_C",
-       "class_path": "/Game/Main/BP_Sensor_Range.BP_Sensor_Range_C"
-      },
       "get_event_dispatchers": {
        "dispatchers": [
         {
@@ -995,6 +1004,10 @@
          "is_inherited": true
         }
        ]
+      },
+      "inspect_object": {
+       "class_name": "BP_Sensor_Range_C",
+       "class_path": "/Game/Main/BP_Sensor_Range.BP_Sensor_Range_C"
       }
      },
      "expect": {
@@ -1003,9 +1016,10 @@
      },
      "expect_probe_calls": [
       [
-       "get_object_class",
+       "inspect_object",
        {
-        "object_path": "S_0"
+        "object_path": "S_0",
+        "include_properties": false
        }
       ],
       [
@@ -1030,7 +1044,7 @@
       "delegate_name": "OnActorHit"
      },
      "probes": {
-      "get_object_class": {
+      "inspect_object": {
        "class_name": "PlayerStart",
        "class_path": "/Script/Engine.PlayerStart"
       }
@@ -1041,9 +1055,10 @@
      },
      "expect_probe_calls": [
       [
-       "get_object_class",
+       "inspect_object",
        {
-        "object_path": "PlayerStart_0"
+        "object_path": "PlayerStart_0",
+        "include_properties": false
        }
       ]
      ]
@@ -1061,15 +1076,15 @@
       "delegate_name": "OnDestroyed"
      },
      "probes": {
-      "get_object_class": {
-       "class_name": "BP_Y_C"
-      },
       "get_event_dispatchers": {
        "dispatchers": [
         {
          "name": "OnDestroyed"
         }
        ]
+      },
+      "inspect_object": {
+       "class_name": "BP_Y_C"
       }
      },
      "expect": {
@@ -1078,9 +1093,10 @@
      },
      "expect_probe_calls": [
       [
-       "get_object_class",
+       "inspect_object",
        {
-        "object_path": "Y_0"
+        "object_path": "Y_0",
+        "include_properties": false
        }
       ],
       [
@@ -2464,7 +2480,7 @@
    "steps": [
     {
      "op": "check",
-     "command": "batch",
+     "command": "execute_batch",
      "params": {
       "commands": [
        {
@@ -2571,7 +2587,7 @@
    "steps": [
     {
      "op": "check",
-     "command": "batch",
+     "command": "execute_batch",
      "params": {
       "commands": [
        {
@@ -2807,7 +2823,7 @@
    "steps": [
     {
      "op": "check",
-     "command": "set_bp_variable_metadata",
+     "command": "set_blueprint_variable_metadata",
      "params": {
       "blueprint_name": "/Game/MyGame/BP_Door",
       "variable_name": "Health",
@@ -2867,13 +2883,14 @@
    "steps": [
     {
      "op": "check",
-     "command": "batch",
+     "command": "execute_batch",
      "params": {
       "commands": [
        {
-        "command_type": "get_asset_metadata",
+        "command_type": "get_asset_by_name",
         "params": {
-         "asset_name": "MyGame/BP_Door"
+         "asset_name": "/Game/MyGame/BP_Door",
+         "load_full_data": false
         }
        },
        {
@@ -2885,7 +2902,7 @@
      "probes": {},
      "expect": {
       "refused": true,
-      "message": "batch: commands[1].command_type is 1024 characters long. An FName holds at most 1023 characters, and the engine aborts the editor when it builds one from a longer string (UnrealNames.cpp, NAME_SIZE); every command type becomes one before its item runs, and no tool has a name that long. Refused before any item ran: nothing was changed. WHAT WORKS: the name of a tool, as tools/list gives it."
+      "message": "execute_batch: commands[1].command_type is 1024 characters long. An FName holds at most 1023 characters, and the engine aborts the editor when it builds one from a longer string (UnrealNames.cpp, NAME_SIZE); every command type becomes one before its item runs, and no tool has a name that long. Refused before any item ran: nothing was changed. WHAT WORKS: the name of a tool, as tools/list gives it."
      },
      "expect_probe_calls": []
     }
@@ -2896,13 +2913,14 @@
    "steps": [
     {
      "op": "check",
-     "command": "batch",
+     "command": "execute_batch",
      "params": {
       "commands": [
        {
-        "command_type": "get_asset_metadata",
+        "command_type": "get_asset_by_name",
         "params": {
-         "asset_name": "MyGame/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+         "asset_name": "/Game/MyGame/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+         "load_full_data": false
         }
        }
       ]
@@ -2921,7 +2939,7 @@
    "steps": [
     {
      "op": "check",
-     "command": "bulk_rename_assets",
+     "command": "rename_assets",
      "params": {
       "assets": [
        {
@@ -2933,7 +2951,7 @@
      "probes": {},
      "expect": {
       "refused": true,
-      "message": "bulk_rename_assets: assets[0].new_name is 960 characters long. An FName holds at most 1023 characters, and the engine aborts the editor when it builds one from a longer string (UnrealNames.cpp, NAME_SIZE); a tool may add a prefix or suffix of up to 64 characters to a name before it builds one, so a name or path of 960 characters or more is refused. Refused before the tool ran: nothing was changed. WHAT WORKS: a name or path of at most 959 characters."
+      "message": "rename_assets: assets[0].new_name is 960 characters long. An FName holds at most 1023 characters, and the engine aborts the editor when it builds one from a longer string (UnrealNames.cpp, NAME_SIZE); a tool may add a prefix or suffix of up to 64 characters to a name before it builds one, so a name or path of 960 characters or more is refused. Refused before the tool ran: nothing was changed. WHAT WORKS: a name or path of at most 959 characters."
      },
      "expect_probe_calls": []
     }
@@ -2944,7 +2962,7 @@
    "steps": [
     {
      "op": "check",
-     "command": "bulk_rename_assets",
+     "command": "rename_assets",
      "params": {
       "assets": [
        {
@@ -3025,7 +3043,7 @@
    "steps": [
     {
      "op": "check",
-     "command": "bulk_rename_assets",
+     "command": "rename_assets",
      "params": {
       "assets": [
        {
@@ -3190,7 +3208,7 @@
    "steps": [
     {
      "op": "check",
-     "command": "bulk_rename_assets",
+     "command": "rename_assets",
      "params": {
       "assets": [
        {
@@ -3202,7 +3220,7 @@
      "probes": {},
      "expect": {
       "refused": true,
-      "message": "bulk_rename_assets: assets[0].newName is 960 characters long. An FName holds at most 1023 characters, and the engine aborts the editor when it builds one from a longer string (UnrealNames.cpp, NAME_SIZE); a tool may add a prefix or suffix of up to 64 characters to a name before it builds one, so a name or path of 960 characters or more is refused. Refused before the tool ran: nothing was changed. WHAT WORKS: a name or path of at most 959 characters."
+      "message": "rename_assets: assets[0].newName is 960 characters long. An FName holds at most 1023 characters, and the engine aborts the editor when it builds one from a longer string (UnrealNames.cpp, NAME_SIZE); a tool may add a prefix or suffix of up to 64 characters to a name before it builds one, so a name or path of 960 characters or more is refused. Refused before the tool ran: nothing was changed. WHAT WORKS: a name or path of at most 959 characters."
      },
      "expect_probe_calls": []
     }
@@ -3213,7 +3231,7 @@
    "steps": [
     {
      "op": "check",
-     "command": "bulk_rename_assets",
+     "command": "rename_assets",
      "params": {
       "assets": [
        {
@@ -3582,19 +3600,20 @@
    "steps": [
     {
      "op": "check",
-     "command": "add_branch_node",
+     "command": "add_graph_node",
      "params": {
       "blueprint_name": "/Game/MyGame/BP_Door",
       "node_position": [
        10,
        20,
        30
-      ]
+      ],
+      "node_type": "branch"
      },
      "probes": {},
      "expect": {
       "refused": true,
-      "message": "add_branch_node: node_position is an array of 3 elements, not an array of 2 numbers. The tool reads node_position as [X, Y], and any other value would have been read as something the call did not ask for (most of them as 0, 0) with no error. Refused before the tool ran: nothing was changed. WHAT WORKS: an array of 2 numbers, [X, Y], or leave node_position out for its default."
+      "message": "add_graph_node: node_position is an array of 3 elements, not an array of 2 numbers. The tool reads node_position as [X, Y], and any other value would have been read as something the call did not ask for (most of them as 0, 0) with no error. Refused before the tool ran: nothing was changed. WHAT WORKS: an array of 2 numbers, [X, Y], or leave node_position out for its default."
      },
      "expect_probe_calls": []
     }
@@ -3605,13 +3624,14 @@
    "steps": [
     {
      "op": "check",
-     "command": "add_branch_node",
+     "command": "add_graph_node",
      "params": {
       "blueprint_name": "/Game/MyGame/BP_Door",
       "node_position": [
        10,
        20
-      ]
+      ],
+      "node_type": "branch"
      },
      "probes": {},
      "expect": {
@@ -3646,7 +3666,7 @@
    "steps": [
     {
      "op": "check",
-     "command": "batch",
+     "command": "execute_batch",
      "params": {
       "commands": [
        {

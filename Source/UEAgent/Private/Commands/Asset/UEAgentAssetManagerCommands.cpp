@@ -58,7 +58,24 @@ namespace
         return Dirs;
     }
 
-    /** Build the JSON view of a single FPrimaryAssetTypeInfo config entry. */
+    /** The short name of a stored cook rule, as get_primary_asset_types and set_primary_asset_cook_rule report it. */
+    FString CookRuleToString(EPrimaryAssetCookRule In)
+    {
+        // Return user-friendly aliases (not the raw enum names) so callers
+        // can pass them back to set_primary_asset_cook_rule.
+        switch (In)
+        {
+        case EPrimaryAssetCookRule::Unknown:                                       return TEXT("Unknown");
+        case EPrimaryAssetCookRule::NeverCook:                                     return TEXT("Never");
+        case EPrimaryAssetCookRule::ProductionNeverCook:                           return TEXT("ProductionNeverCook");
+        case EPrimaryAssetCookRule::DevelopmentAlwaysProductionNeverCook:          return TEXT("DevelopmentAlways");
+        case EPrimaryAssetCookRule::DevelopmentAlwaysProductionUnknownCook:       return TEXT("DevelopmentAlwaysProductionUnknownCook");
+        case EPrimaryAssetCookRule::AlwaysCook:                                    return TEXT("Always");
+        default:                                                                    return TEXT("Unknown");
+        }
+    }
+
+    /** Build the JSON view of a single FPrimaryAssetTypeInfo config entry, its cook rules included. */
     TSharedPtr<FJsonObject> PrimaryAssetTypeInfoToJson(const FPrimaryAssetTypeInfo& Info)
     {
         TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
@@ -68,6 +85,10 @@ namespace
         Obj->SetBoolField(TEXT("is_editor_only"), Info.bIsEditorOnly);
         Obj->SetArrayField(TEXT("directories"), AssetManager_DirectoriesToJson(Info));
         Obj->SetNumberField(TEXT("num_specific_assets"), Info.GetSpecificAssets().Num());
+        Obj->SetStringField(TEXT("cook_rule"), CookRuleToString(Info.Rules.CookRule));
+        Obj->SetNumberField(TEXT("priority"), Info.Rules.Priority);
+        Obj->SetNumberField(TEXT("chunk_id"), Info.Rules.ChunkId);
+        Obj->SetBoolField(TEXT("apply_recursively"), Info.Rules.bApplyRecursively);
         return Obj;
     }
 }
@@ -189,12 +210,19 @@ TSharedPtr<FJsonObject> HandleAddPrimaryAssetRule(const TSharedPtr<FJsonObject>&
 
 // ---------------------------------------------------------------------------
 // get_primary_asset_types
-//   Read UAssetManagerSettings::PrimaryAssetTypesToScan -> types[] + count.
+//   Read UAssetManagerSettings::PrimaryAssetTypesToScan -> types[] + count,
+//   optionally only the entries of one type.
 // ---------------------------------------------------------------------------
-// MCP:get_primary_asset_types - Read the configured Primary Asset Types from the Asset Manager settings.
-//   @returns { types, type_count }
+// MCP:get_primary_asset_types - Read the PrimaryAssetTypesToScan rules configured in the Asset Manager project settings, read-only: each entry with its type, base_class, has_blueprint_classes, is_editor_only, directories, num_specific_assets and its cook rules (cook_rule, priority, chunk_id, apply_recursively), optionally only the entries of one primary_asset_type. The running Asset Manager is not consulted, so a type only registered by game code is not listed: get_all_primary_asset_types reads the live registry. cook_rule comes back as Unknown, Never, ProductionNeverCook, DevelopmentAlways, DevelopmentAlwaysProductionUnknownCook or Always, each accepted back by set_primary_asset_cook_rule.
+//   @param primary_asset_type - Optional type name (e.g. "Item", matched without case): list only the rules of that type; a type with no configured rule is an error.
+//   @returns { types: [{ type, base_class, has_blueprint_classes, is_editor_only, directories: [string], num_specific_assets, cook_rule, priority, chunk_id, apply_recursively }], type_count, primary_asset_type? }
 TSharedPtr<FJsonObject> HandleGetPrimaryAssetTypes(const TSharedPtr<FJsonObject>& Params)
 {
+    FString FilterType;
+    Params->TryGetStringField(TEXT("primary_asset_type"), FilterType);
+    const bool bHasFilter = !FilterType.IsEmpty();
+    const FName FilterTypeName(*FilterType);
+
     const UAssetManagerSettings* Settings = GetDefault<UAssetManagerSettings>();
     if (!Settings)
         return mcp_common::MakeErrorReply(TEXT("Could not get UAssetManagerSettings"));
@@ -202,12 +230,26 @@ TSharedPtr<FJsonObject> HandleGetPrimaryAssetTypes(const TSharedPtr<FJsonObject>
     TArray<TSharedPtr<FJsonValue>> Types;
     for (const FPrimaryAssetTypeInfo& Info : Settings->PrimaryAssetTypesToScan)
     {
+        if (bHasFilter && Info.PrimaryAssetType != FilterTypeName)
+        {
+            continue;
+        }
         Types.Add(MakeShared<FJsonValueObject>(PrimaryAssetTypeInfoToJson(Info)));
+    }
+    if (bHasFilter && Types.Num() == 0)
+    {
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("Primary asset type '%s' not found among the configured PrimaryAssetTypesToScan rules"), *FilterType));
     }
 
     TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
     Resp->SetArrayField(TEXT("types"), Types);
-    Resp->SetNumberField(TEXT("type_count"), Settings->PrimaryAssetTypesToScan.Num());
+    // The entries listed: every configured rule, or the rules of primary_asset_type.
+    Resp->SetNumberField(TEXT("type_count"), Types.Num());
+    if (bHasFilter)
+    {
+        Resp->SetStringField(TEXT("primary_asset_type"), FilterType);
+    }
     return mcp_common::MakeOkReply(Resp);
 }
 
@@ -216,7 +258,7 @@ TSharedPtr<FJsonObject> HandleGetPrimaryAssetTypes(const TSharedPtr<FJsonObject>
 //   UAssetManager::Get().GetPrimaryAssetIdForPath(FSoftObjectPath(path)).
 //   Invalid is a real, correct answer for a non-primary asset.
 // ---------------------------------------------------------------------------
-// MCP:get_primary_asset_id - Look up the registered Primary Asset Id ("Type:Name") of an asset path: primary_asset_id, is_valid and, when valid, primary_asset_type and primary_asset_name. A non-primary or unscanned asset gives is_valid=false, not an error. get_primary_asset_id_from_path is the same lookup without the split fields.
+// MCP:get_primary_asset_id - Look up the registered Primary Asset Id ("Type:Name") of an asset path: primary_asset_id, is_valid and, when valid, primary_asset_type and primary_asset_name. A non-primary or unscanned asset gives is_valid=false, not an error; an uninitialized Asset Manager is an error. All ids of one type: get_primary_asset_ids_by_type; to make a type scannable, add_primary_asset_rule then scan_primary_assets.
 //   @param asset_path - Full object path including the object name, e.g. /Game/MyGame/M_Example.M_Example; a package-only path does not match.
 //   @returns { asset_path, primary_asset_id, is_valid, primary_asset_type, primary_asset_name }
 TSharedPtr<FJsonObject> HandleGetPrimaryAssetId(const TSharedPtr<FJsonObject>& Params)
@@ -378,44 +420,6 @@ TSharedPtr<FJsonObject> HandleScanPrimaryAssets(const TSharedPtr<FJsonObject>& P
 // Asset Manager advanced commands
 
 // ---------------------------------------------------------------------------
-// get_primary_asset_type_info
-//   UAssetManager::Get().GetPrimaryAssetTypeInfo(FPrimaryAssetType, Info).
-//   Returns detailed info about a specific primary asset type.
-// ---------------------------------------------------------------------------
-// MCP:get_primary_asset_type_info - Read what the running Asset Manager holds for one primary asset type: asset_class, has_blueprint_classes, is_editor_only, num_assets from the last scan and its directories. found=false for a type it does not know, not an error; get_primary_asset_types reads the configured rules instead.
-//   @param asset_type_name - Name of the primary asset type (e.g. "Item")
-//   @returns { asset_type_name, found, asset_class, has_blueprint_classes, is_editor_only, num_assets, directories }
-TSharedPtr<FJsonObject> HandleGetPrimaryAssetTypeInfo(const TSharedPtr<FJsonObject>& Params)
-{
-    FString AssetTypeName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("asset_type_name"), AssetTypeName)) { return Missing; }
-
-    if (!UAssetManager::IsInitialized())
-        return mcp_common::MakeErrorReply(TEXT("AssetManager singleton is not initialized"));
-
-    UAssetManager& Manager = UAssetManager::Get();
-    const FPrimaryAssetType TypeName(*AssetTypeName);
-    
-    FPrimaryAssetTypeInfo Info;
-    const bool bFound = Manager.GetPrimaryAssetTypeInfo(TypeName, Info);
-
-    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
-    Resp->SetStringField(TEXT("asset_type_name"), AssetTypeName);
-    Resp->SetBoolField(TEXT("found"), bFound);
-    
-    if (bFound)
-    {
-        Resp->SetStringField(TEXT("asset_class"), Info.GetAssetBaseClass().ToString());
-        Resp->SetBoolField(TEXT("has_blueprint_classes"), Info.bHasBlueprintClasses);
-        Resp->SetBoolField(TEXT("is_editor_only"), Info.bIsEditorOnly);
-        Resp->SetNumberField(TEXT("num_assets"), Info.NumberOfAssets);
-        Resp->SetArrayField(TEXT("directories"), AssetManager_DirectoriesToJson(Info));
-    }
-    
-    return mcp_common::MakeOkReply(Resp);
-}
-
-// ---------------------------------------------------------------------------
 // get_primary_asset_ids_by_type
 //   UAssetManager::Get().GetPrimaryAssetIdList(Type, Ids, Filter).
 //   Returns all primary asset IDs of a given type.
@@ -512,17 +516,35 @@ TSharedPtr<FJsonObject> HandleGetAssetBundleEntry(const TSharedPtr<FJsonObject>&
 //   UAssetManager::Get().GetPrimaryAssetTypeInfoList(InfoList).
 //   Returns all registered primary asset types.
 // ---------------------------------------------------------------------------
-// MCP:get_all_primary_asset_types - List every primary asset type the running Asset Manager has registered, read-only: each entry of types holds the type name, its asset_class (base class path) and num_assets from the last scan, and count says how many types there are. This is the live registry, not the project settings, so it includes types registered by game code and its counts cover scanned assets only (rescan with scan_primary_assets); the configured PrimaryAssetTypesToScan rules with their directories are get_primary_asset_types. There is no filter or paging; an uninitialized Asset Manager is an error. One type in detail: get_primary_asset_type_info; its asset ids: get_primary_asset_ids_by_type; its cook rules: get_primary_asset_cook_rules.
-//   @returns { types: [{ name, asset_class, num_assets }], count }
+// MCP:get_all_primary_asset_types - List the primary asset types the running Asset Manager has registered, read-only: each entry of types holds the type name, its asset_class (base class path), num_assets from the last scan, has_blueprint_classes, is_editor_only and its directories, and count says how many entries there are. asset_type_name narrows it to one type, with found false (and an empty list) for a type the manager does not know, not an error. This is the live registry, not the project settings, so it includes types registered by game code and its counts cover scanned assets only (rescan with scan_primary_assets); the configured PrimaryAssetTypesToScan rules with their cook rules are get_primary_asset_types. An uninitialized Asset Manager is an error. A type's asset ids: get_primary_asset_ids_by_type.
+//   @param asset_type_name - Optional name of one primary asset type (e.g. "Item") to read alone; omitted lists every registered type.
+//   @returns { types: [{ name, asset_class, num_assets, has_blueprint_classes, is_editor_only, directories: [string] }], count, asset_type_name?, found? }
 TSharedPtr<FJsonObject> HandleGetAllPrimaryAssetTypes(const TSharedPtr<FJsonObject>& Params)
 {
+    FString AssetTypeName;
+    Params->TryGetStringField(TEXT("asset_type_name"), AssetTypeName);
+    const bool bHasFilter = !AssetTypeName.IsEmpty();
+
     if (!UAssetManager::IsInitialized())
         return mcp_common::MakeErrorReply(TEXT("AssetManager singleton is not initialized"));
 
     UAssetManager& Manager = UAssetManager::Get();
-    
+
     TArray<FPrimaryAssetTypeInfo> InfoList;
-    Manager.GetPrimaryAssetTypeInfoList(InfoList);
+    bool bFound = false;
+    if (bHasFilter)
+    {
+        FPrimaryAssetTypeInfo Info;
+        bFound = Manager.GetPrimaryAssetTypeInfo(FPrimaryAssetType(*AssetTypeName), Info);
+        if (bFound)
+        {
+            InfoList.Add(Info);
+        }
+    }
+    else
+    {
+        Manager.GetPrimaryAssetTypeInfoList(InfoList);
+    }
 
     TArray<TSharedPtr<FJsonValue>> Types;
     for (const FPrimaryAssetTypeInfo& Info : InfoList)
@@ -531,50 +553,29 @@ TSharedPtr<FJsonObject> HandleGetAllPrimaryAssetTypes(const TSharedPtr<FJsonObje
         TypeObj->SetStringField(TEXT("name"), Info.PrimaryAssetType.ToString());
         TypeObj->SetStringField(TEXT("asset_class"), Info.GetAssetBaseClass().ToString());
         TypeObj->SetNumberField(TEXT("num_assets"), Info.NumberOfAssets);
+        TypeObj->SetBoolField(TEXT("has_blueprint_classes"), Info.bHasBlueprintClasses);
+        TypeObj->SetBoolField(TEXT("is_editor_only"), Info.bIsEditorOnly);
+        TypeObj->SetArrayField(TEXT("directories"), AssetManager_DirectoriesToJson(Info));
         Types.Add(MakeShared<FJsonValueObject>(TypeObj));
     }
 
     TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
     Resp->SetArrayField(TEXT("types"), Types);
     Resp->SetNumberField(TEXT("count"), InfoList.Num());
-    return mcp_common::MakeOkReply(Resp);
-}
-
-// ---------------------------------------------------------------------------
-// get_primary_asset_id_from_path
-//   UAssetManager::Get().GetPrimaryAssetIdForPath(FSoftObjectPath(path)).
-//   Returns the primary asset ID for a given object path.
-// ---------------------------------------------------------------------------
-// MCP:get_primary_asset_id_from_path - Look up the Primary Asset Id (Type:Name) that the running Asset Manager has registered for an object path, read-only: primary_asset_id and is_valid. A path that is not a scanned primary asset, or a package-only path, gives is_valid=false and an empty primary_asset_id, not an error; an uninitialized Asset Manager is an error. Same lookup as get_primary_asset_id, which also returns the type and name split apart; all ids of one type: get_primary_asset_ids_by_type; to make a type scannable, add_primary_asset_rule then scan_primary_assets.
-//   @param object_path - Full object path including the object name (e.g. /Game/MyAsset.MyAsset); a package-only path does not match
-//   @returns { object_path, primary_asset_id, is_valid }
-TSharedPtr<FJsonObject> HandleGetPrimaryAssetIdFromPath(const TSharedPtr<FJsonObject>& Params)
-{
-    FString ObjectPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("object_path"), ObjectPath)) { return Missing; }
-
-    if (!UAssetManager::IsInitialized())
-        return mcp_common::MakeErrorReply(TEXT("AssetManager singleton is not initialized"));
-
-    UAssetManager& Manager = UAssetManager::Get();
-    const FSoftObjectPath SoftPath(ObjectPath);
-    const FPrimaryAssetId PrimaryId = Manager.GetPrimaryAssetIdForPath(SoftPath);
-
-    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
-    Resp->SetStringField(TEXT("object_path"), ObjectPath);
-    Resp->SetStringField(TEXT("primary_asset_id"), PrimaryId.ToString());
-    Resp->SetBoolField(TEXT("is_valid"), PrimaryId.IsValid());
+    if (bHasFilter)
+    {
+        Resp->SetStringField(TEXT("asset_type_name"), AssetTypeName);
+        Resp->SetBoolField(TEXT("found"), bFound);
+    }
     return mcp_common::MakeOkReply(Resp);
 }
 
 // ===========================================================================
 // Asset Manager cook rules + per-rule mutators, all headless. They mutate the
-// persisted UAssetManagerSettings::PrimaryAssetTypesToScan array (or read from it).
+// persisted UAssetManagerSettings::PrimaryAssetTypesToScan array; get_primary_asset_types reads it.
 //   1. set_primary_asset_cook_rule -- set CookRule (and optional ChunkId /
 //      bApplyRecursively) on an existing type entry.
-//   2. get_primary_asset_cook_rules -- read Priority / ChunkId /
-//      bApplyRecursively / CookRule for a single type.
-//   3. remove_primary_asset_rule -- drop a type entry from the persisted
+//   2. remove_primary_asset_rule -- drop a type entry from the persisted
 //      PrimaryAssetTypesToScan (writes DefaultGame.ini).
 // Engine APIs used:
 //   FPrimaryAssetTypeInfo::Rules                      AssetManagerTypes.h
@@ -602,23 +603,8 @@ namespace
         if (L == TEXT("always")     || L == TEXT("alwayscook"))                   { Out = EPrimaryAssetCookRule::AlwaysCook; return true; }
         return false;
     }
-    FString CookRuleToString(EPrimaryAssetCookRule In)
-    {
-        // Return user-friendly aliases (not the raw enum names) so callers
-        // can use the same names they passed to set_primary_asset_cook_rule.
-        switch (In)
-        {
-        case EPrimaryAssetCookRule::Unknown:                                       return TEXT("Unknown");
-        case EPrimaryAssetCookRule::NeverCook:                                     return TEXT("Never");
-        case EPrimaryAssetCookRule::ProductionNeverCook:                           return TEXT("ProductionNeverCook");
-        case EPrimaryAssetCookRule::DevelopmentAlwaysProductionNeverCook:          return TEXT("DevelopmentAlways");
-        case EPrimaryAssetCookRule::DevelopmentAlwaysProductionUnknownCook:       return TEXT("DevelopmentAlwaysProductionUnknownCook");
-        case EPrimaryAssetCookRule::AlwaysCook:                                    return TEXT("Always");
-        default:                                                                    return TEXT("Unknown");
-        }
-    }
 
-    /** The cook rules of PrimaryAssetType as set_primary_asset_cook_rule and get_primary_asset_cook_rules report them. */
+    /** The cook rules of PrimaryAssetType as set_primary_asset_cook_rule reports them. */
     TSharedPtr<FJsonObject> AssetManager_CookRulesReply(const FString& PrimaryAssetType, const FPrimaryAssetRules& Rules)
     {
         TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
@@ -631,7 +617,7 @@ namespace
     }
 }
 
-// MCP:set_primary_asset_cook_rule - Set the CookRule of an existing PrimaryAssetTypesToScan rule in the Asset Manager project settings, plus ChunkId and bApplyRecursively when given, then write DefaultGame.ini (no undo); a failed write makes success false. An unknown type (add it with add_primary_asset_rule) or cook_rule is an error before any change. Priority is not touched here; add_primary_asset_rule sets it. Nothing is rescanned. Read the rules back with get_primary_asset_cook_rules; the reply's cook_rule is the short name of the stored rule.
+// MCP:set_primary_asset_cook_rule - Set the CookRule of an existing PrimaryAssetTypesToScan rule in the Asset Manager project settings, plus ChunkId and bApplyRecursively when given, then write DefaultGame.ini (no undo); a failed write makes success false. An unknown type (add it with add_primary_asset_rule) or cook_rule is an error before any change. Priority is not touched here; add_primary_asset_rule sets it. Nothing is rescanned. Read the rules back with get_primary_asset_types (primary_asset_type); the reply's cook_rule is the short name of the stored rule.
 //   @param primary_asset_type - Name of the primary asset type (e.g. "Item").
 //   @param cook_rule - One of "Unknown" / "Never" / "Development" / "DevelopmentAlways" / "Always", case-insensitive; "Development" stores ProductionNeverCook, and the EPrimaryAssetCookRule names (e.g. "AlwaysCook", "DevelopmentAlwaysProductionUnknownCook") are accepted too.
 //   @param chunk_id - Optional chunk ID override for the rule
@@ -684,30 +670,6 @@ TSharedPtr<FJsonObject> HandleSetPrimaryAssetCookRule(const TSharedPtr<FJsonObje
         TEXT("set_primary_asset_cook_rule"));
 }
 
-// MCP:get_primary_asset_cook_rules - Read the rules of one primary asset type as configured in the Asset Manager project settings, read-only: cook_rule, priority, chunk_id and apply_recursively of the first PrimaryAssetTypesToScan entry of that type, matched by name without case. The running Asset Manager is not consulted, so a type only registered by game code is not found, and a type with no configured rule is an error. cook_rule comes back as Unknown, Never, ProductionNeverCook, DevelopmentAlways, DevelopmentAlwaysProductionUnknownCook or Always, each accepted back by set_primary_asset_cook_rule. Change them with set_primary_asset_cook_rule (priority: add_primary_asset_rule); every configured rule: get_primary_asset_types; what the running manager holds: get_primary_asset_type_info.
-//   @param primary_asset_type - Name of the primary asset type as configured in PrimaryAssetTypesToScan (e.g. "Item").
-//   @returns { primary_asset_type, cook_rule, priority, chunk_id, apply_recursively }
-TSharedPtr<FJsonObject> HandleGetPrimaryAssetCookRules(const TSharedPtr<FJsonObject>& Params)
-{
-    FString PrimaryAssetType;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("primary_asset_type"), PrimaryAssetType)) { return Missing; }
-    const UAssetManagerSettings* Settings = GetDefault<UAssetManagerSettings>();
-    if (!Settings)
-    {
-        return mcp_common::MakeErrorReply(TEXT("Could not get UAssetManagerSettings"));
-    }
-    const FName TypeName(*PrimaryAssetType);
-    const FPrimaryAssetTypeInfo* Found = Settings->PrimaryAssetTypesToScan.FindByPredicate(
-        [&TypeName](const FPrimaryAssetTypeInfo& I) { return I.PrimaryAssetType == TypeName; });
-    if (!Found)
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Primary asset type '%s' not found"), *PrimaryAssetType));
-    }
-
-    return mcp_common::MakeOkReply(AssetManager_CookRulesReply(PrimaryAssetType, Found->Rules));
-}
-
 // MCP:remove_primary_asset_rule - Remove every PrimaryAssetTypesToScan entry of one type from the Asset Manager project settings and write DefaultGame.ini; an unknown type is an error. Returns removed_count, type_count_after and saved. The running Asset Manager is not refreshed, so its scanned data for the type remains.
 //   @param primary_asset_type - Name of the primary asset type to remove, e.g. "Item".
 //   @returns { primary_asset_type, removed_count, type_count_after, saved }
@@ -744,11 +706,8 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("get_all_primary_asset_types"), &HandleGetAllPrimaryAssetTypes },
     { TEXT("get_asset_bundle_data"), &HandleGetAssetBundleData },
     { TEXT("get_asset_bundle_entry"), &HandleGetAssetBundleEntry },
-    { TEXT("get_primary_asset_cook_rules"), &HandleGetPrimaryAssetCookRules },
     { TEXT("get_primary_asset_id"), &HandleGetPrimaryAssetId },
-    { TEXT("get_primary_asset_id_from_path"), &HandleGetPrimaryAssetIdFromPath },
     { TEXT("get_primary_asset_ids_by_type"), &HandleGetPrimaryAssetIdsByType },
-    { TEXT("get_primary_asset_type_info"), &HandleGetPrimaryAssetTypeInfo },
     { TEXT("get_primary_asset_types"), &HandleGetPrimaryAssetTypes },
     { TEXT("remove_primary_asset_rule"), &HandleRemovePrimaryAssetRule },
     { TEXT("scan_primary_assets"), &HandleScanPrimaryAssets },

@@ -39,7 +39,7 @@ assets, and launch processes. Keep the project under source control, and list ve
 ## Can I undo what the agent did?
 
 Yes. Every tool call is one undo step, named after the tool ("UEAgent: spawn_actor"), so Ctrl+Z, or
-**Edit > Undo History**, reverts it; a `batch` is one step. Undo restores the editor's state: a file
+**Edit > Undo History**, reverts it; a `execute_batch` is one step. Undo restores the editor's state: a file
 the call saved stays saved until you save again. `mcp.UndoStepPerCall 0` in the editor console
 leaves undo to each tool.
 
@@ -54,7 +54,7 @@ first, each with its time, duration, outcome (OK, a readback warning, failed or 
 Any MCP client that speaks Streamable HTTP. [Clients](clients.md) has the setup for Claude Code,
 Cursor, VS Code, Windsurf, Claude Desktop, Gemini CLI and Codex.
 
-## My client cannot take 2,000 tools
+## My client cannot take 1,700 tools
 
 Connect it with `?tools=compact` at the end of the URL: it then lists three tools that search,
 describe and run the rest. See [Compact tool list](clients.md#compact-tool-list).

@@ -6,14 +6,14 @@
 
 <p align="center">
   <b>The MCP server for Unreal Engine 5, built into the editor.</b><br>
-  More than 2,000 tools that let Claude Code, Cursor or any MCP client build in Unreal,<br>
+  More than 1,700 tools that let Claude Code, Cursor or any MCP client build in Unreal,<br>
   with every change checked before it runs and read back after.
 </p>
 
 <p align="center">
   <img alt="Unreal Engine 5.8" src="https://img.shields.io/badge/Unreal%20Engine-5.8-0E1128?logo=unrealengine&logoColor=white">
   <img alt="MCP: Streamable HTTP" src="https://img.shields.io/badge/MCP-Streamable%20HTTP-6E56CF">
-  <img alt="2,000+ tools" src="https://img.shields.io/badge/tools-2%2C000%2B-2EA44F">
+  <img alt="1,700+ tools" src="https://img.shields.io/badge/tools-1%2C700%2B-2EA44F">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
   <a href="https://github.com/CarlxsMG/UEAgent/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/CarlxsMG/UEAgent/actions/workflows/ci.yml/badge.svg"></a>
   <a href="https://carlxsmg.github.io/UEAgent/"><img alt="Docs" src="https://img.shields.io/badge/docs-carlxsmg.github.io%2FUEAgent-6E56CF"></a>
@@ -51,7 +51,7 @@ Streamable HTTP from inside the editor, with no Python or Node process in betwee
 flowchart LR
     A["AI agent<br/>Claude Code, Cursor, ..."] -- "MCP over HTTP" --> P
     subgraph E["Unreal Editor + UEAgent"]
-        P["Preconditions<br/>refuse known crashes"] --> H["Tool<br/>2,000+ of them"] --> R["Readback<br/>re-read the state"]
+        P["Preconditions<br/>refuse known crashes"] --> H["Tool<br/>1,700+ of them"] --> R["Readback<br/>re-read the state"]
     end
     R -- "verified result" --> A
 ```

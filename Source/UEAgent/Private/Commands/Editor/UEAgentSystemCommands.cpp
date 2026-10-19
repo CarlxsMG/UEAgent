@@ -1,6 +1,5 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
-#include "Commands/Asset/AssetCommandHelpers.h"
 
 #include "Editor.h"
 #include "EditorAssetLibrary.h"
@@ -18,14 +17,8 @@
 #include "Interfaces/IProjectManager.h"
 #include "Interfaces/IPluginManager.h"
 #include "Subsystems/EditorAssetSubsystem.h"
-#include "Kismet2/KismetEditorUtilities.h"
-#include "Kismet2/CompilerResultsLog.h"
-#include "Logging/TokenizedMessage.h"
-#include "Engine/Blueprint.h"
-#include "Engine/Texture2D.h"
 #include "Modules/ModuleManager.h"
 #include "Factories/Factory.h"
-#include "Factories/TextureFactory.h"
 #include "HAL/FileManager.h"
 #include "Misc/Paths.h"
 #include "Misc/PackageName.h"
@@ -41,9 +34,8 @@
 #include "UObject/UObjectHash.h"              // ForEachObjectWithPackage (resolve the AActor behind an OFPA hash package name)
 #include "GameFramework/Actor.h"              // AActor::GetActorLabel (makes __ExternalActors__/<hash> readable)
 
-/** Project/system commands: console, directories, asset and font import, redirectors, plugins,
- *  Blueprint compile diagnostics, saving assets, and the in-memory package-state tools
- *  (dirty-package audit + non-interactive package reload). */
+/** Project/system commands: console, directories, font import, redirectors, plugins, saving assets,
+ *  and the in-memory package-state tools (dirty-package audit + non-interactive package reload). */
 namespace UEAgentSystemCommands
 {
 
@@ -88,7 +80,7 @@ TSharedPtr<FJsonObject> HandleCreateDirectory(const TSharedPtr<FJsonObject>& Par
     return Result;
 }
 
-// MCP:delete_directory - DESTRUCTIVE: removes a content-browser folder AND every asset inside it, recursively, with no dry-run and no referencer check (unlike bulk_delete_assets, which defaults to dry_run and refuses vendored roots). Driven through UEditorAssetSubsystem, which is the pair that works headless. Idempotent: an already-absent folder answers already_absent:true. Verify afterwards with `git status` on the corresponding Content/ path -- never with the `deleted` flag alone.
+// MCP:delete_directory - DESTRUCTIVE: removes a content-browser folder AND every asset inside it, recursively, with no dry-run and no referencer check (unlike delete_assets, which defaults to dry_run and refuses vendored roots). Driven through UEditorAssetSubsystem, which is the pair that works headless. Idempotent: an already-absent folder answers already_absent:true. Verify afterwards with `git status` on the corresponding Content/ path -- never with the `deleted` flag alone.
 //   @param path - UE long path of the folder to delete, e.g. /Game/Scratch. Must start with '/'. Everything under it goes.
 //   @returns { path: string, already_absent: bool, deleted: bool }
 TSharedPtr<FJsonObject> HandleDeleteDirectory(const TSharedPtr<FJsonObject>& Params)
@@ -118,84 +110,6 @@ TSharedPtr<FJsonObject> HandleDeleteDirectory(const TSharedPtr<FJsonObject>& Par
     Result->SetStringField(TEXT("path"), Path);
     Result->SetBoolField(TEXT("already_absent"), bAlreadyAbsent);
     Result->SetBoolField(TEXT("deleted"), bDeleted);
-    return Result;
-}
-
-// MCP:import_asset - Import an IMAGE file from disk into a content folder as a Texture2D, driving the texture factory inline (it deliberately avoids IAssetTools::ImportAssets, which asserts when re-entered from the engine tick) and returning the created object path. It always overwrites an asset of the same name -- `replace_existing` is accepted and ignored. Images ONLY -- png/jpg/jpeg/bmp/tga/dds/exr/hdr/tif/tiff/psd/pcx: any other extension is a clean error naming the dedicated handler to use instead (import_texture_file for images, import_sound_file for .wav, import_landscape_heightmap for terrain, interchange_import_asset for FBX/glTF meshes). A missing source file or a destination that is not a /Game long path also errors before anything is touched.
-//   @param source_file_path - Absolute path to the image on disk; its existence is checked before any work starts.
-//   @param destination_path - UE long path of the target content folder, e.g. /Game/Imported. Must start with '/'.
-//   @param replace_existing - ACCEPTED AND IGNORED: the tool reads this flag and never uses it. The underlying import suppresses the overwrite dialog and re-imports over an existing asset of the same name regardless of what you pass, so neither value changes anything.
-//   @returns { source_file_path: string, destination_path: string, imported_object_paths: [string] }
-TSharedPtr<FJsonObject> HandleImportAsset(const TSharedPtr<FJsonObject>& Params)
-{
-    FString SourceFilePath, DestinationPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("source_file_path"), SourceFilePath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("destination_path"), DestinationPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-    bool bReplaceExisting = false;
-    Params->TryGetBoolField(TEXT("replace_existing"), bReplaceExisting);
-
-    // Honest, real wiring: the source file must actually exist on disk before we attempt anything.
-    if (!FPaths::FileExists(SourceFilePath))
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Source file does not exist: %s"), *SourceFilePath));
-
-    if (!DestinationPath.StartsWith(TEXT("/")))
-        return mcp_common::MakeErrorReply(TEXT("destination_path must be a UE long path, e.g. /Game/Foo"));
-
-    // -------------------------------------------------------------------------
-    // CRITICAL: this command runs inside the bridge's FTSTicker drain, which
-    // sits inside the engine tick on the game thread. We deliberately avoid
-    // IAssetTools::ImportAssets / ImportAssetTasks: those pump the game-thread
-    // task graph and trip a RecursionGuard assertion when re-entering from a
-    // tick.
-    //
-    // Instead we drive UFactory::FactoryCreateBinary directly -- inline on the
-    // calling thread with no task-graph dependency. The shared helper
-    // mcp_common::FactoryCreateBinaryImport owns the package
-    // create / fully-load / AssetCreated / MarkPackageDirty / SavePackage flow
-    // and returns the imported object path (or empty + OutError on failure).
-    //
-    // For non-texture extensions this command returns an honest error
-    // because this path has no general-purpose factory dispatcher. The
-    // dedicated import_texture_file / import_sound_file handlers cover the
-    // other supported file types via their explicit factories.
-    // -------------------------------------------------------------------------
-    const FString Extension = FPaths::GetExtension(SourceFilePath).ToLower();
-    static const TSet<FString> TextureExtensions = {
-        TEXT("png"), TEXT("jpg"), TEXT("jpeg"), TEXT("bmp"), TEXT("tga"),
-        TEXT("dds"), TEXT("exr"), TEXT("hdr"), TEXT("tif"), TEXT("tiff"),
-        TEXT("psd"), TEXT("pcx")
-    };
-
-    if (!TextureExtensions.Contains(Extension))
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(
-            TEXT("import_asset only supports image extensions through the legacy non-Interchange path. "
-                 "For .%s files use the dedicated handler (e.g. import_texture_file for images, "
-                 "import_sound_file for .wav). See the Asset domain for type-specific importers."),
-            *Extension));
-    }
-
-    UTextureFactory* TexFactory = NewObject<UTextureFactory>();
-    TexFactory->bEditorImport = true;
-
-    FString Error;
-    const FString ImportedPath = mcp_common::FactoryCreateBinaryImport(
-        SourceFilePath, DestinationPath, FString(), TexFactory, UTexture2D::StaticClass(), Error);
-
-    if (ImportedPath.IsEmpty())
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(
-            TEXT("Import produced no assets from: %s (%s)"), *SourceFilePath, *Error));
-    }
-
-    TArray<TSharedPtr<FJsonValue>> ImportedPaths;
-    ImportedPaths.Add(MakeShared<FJsonValueString>(ImportedPath));
-
-    TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-    Result->SetStringField(TEXT("source_file_path"), SourceFilePath);
-    Result->SetStringField(TEXT("destination_path"), DestinationPath);
-    Result->SetArrayField(TEXT("imported_object_paths"), ImportedPaths);
     return Result;
 }
 
@@ -628,13 +542,16 @@ TSharedPtr<FJsonObject> HandleFixupRedirectors(const TSharedPtr<FJsonObject>& Pa
     return Result;
 }
 
-// MCP:enable_plugin - Turn a plugin on in the .uproject and save the project file to disk. WARNING: `enabled:true` is hardcoded on the write succeeding, and the plugin's MODULES are not loaded by this call -- the editor has to be restarted before its classes, assets or MCP tools actually exist. So do not treat a following "class not found" as a failure of this command; check project_saved and then restart. A plugin the .uproject already has enabled is a no-op: project_saved=false and nothing saved; a .uproject that cannot be saved makes success false. A name this editor has not discovered as a plugin is an error, and nothing is written to the .uproject. Use get_plugin_status to read the current state and disable_plugin for the inverse.
+// MCP:set_plugin_enabled - Turn a plugin on (or off, with enabled=false) in the .uproject and save the project file to disk. WARNING: `enabled` echoes the requested state once the .uproject write succeeded, and the plugin's MODULES are not loaded or unloaded by this call -- the editor has to be restarted before an enabled plugin's classes, assets or MCP tools actually exist, and a disabled plugin's classes keep working until then. So do not treat a following "class not found", or a still-working feature, as a failure of this command; check project_saved and then restart. A plugin the .uproject already has in that state is a no-op: project_saved=false and nothing saved; a .uproject that cannot be saved makes success false. A name this editor has not discovered as a plugin is an error, and nothing is written to the .uproject. WARNING: disabling a plugin whose assets are referenced leaves those references broken on the next start; check get_plugin_status and the referencers first. Use get_plugin_status to read the current state.
 //   @param plugin_name - Plugin name exactly as in its .uplugin file (e.g. 'PythonScriptPlugin'), not a path.
-//   @returns { plugin_name: string (the plugin's own spelling), enabled: bool (hardcoded true when the .uproject write succeeded), project_saved: bool, note: string about the required restart, or that nothing changed }
-TSharedPtr<FJsonObject> HandleEnablePlugin(const TSharedPtr<FJsonObject>& Params)
+//   @param enabled - Optional bool (default true): true enables the plugin, false disables it.
+//   @returns { plugin_name: string (the plugin's own spelling), enabled: bool (the requested state, set when the .uproject write succeeded), project_saved: bool, note: string about the required restart, or that nothing changed }
+TSharedPtr<FJsonObject> HandleSetPluginEnabled(const TSharedPtr<FJsonObject>& Params)
 {
     FString PluginName;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("plugin_name"), PluginName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+    bool bEnable = true;
+    Params->TryGetBoolField(TEXT("enabled"), bEnable);
 
     // SetPluginEnabled writes any name into the .uproject without checking it, and a reference to a plugin that
     // does not exist can stop the project from opening: an unknown name is refused before anything is written.
@@ -643,14 +560,15 @@ TSharedPtr<FJsonObject> HandleEnablePlugin(const TSharedPtr<FJsonObject>& Params
     if (!Plugin.IsValid())
     {
         return mcp_common::MakeErrorReply(FString::Printf(
-            TEXT("enable_plugin: no plugin named '%s' is known to this editor (IPluginManager::FindPlugin found none); nothing was ")
+            TEXT("set_plugin_enabled: no plugin named '%s' is known to this editor (IPluginManager::FindPlugin found none); nothing was ")
             TEXT("written to the .uproject. get_plugin_status reads a plugin by its .uplugin name."), *PluginName));
     }
     PluginName = Plugin->GetName();
 
     FText FailReason;
-    if (!IProjectManager::Get().SetPluginEnabled(PluginName, true, FailReason))
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Failed to enable plugin '%s': %s"), *PluginName, *FailReason.ToString()));
+    if (!IProjectManager::Get().SetPluginEnabled(PluginName, bEnable, FailReason))
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Failed to %s plugin '%s': %s"),
+            bEnable ? TEXT("enable") : TEXT("disable"), *PluginName, *FailReason.ToString()));
 
     // SetPluginEnabled dirties the project only when the .uproject changes: a project that is not dirty
     // already has the plugin in that state, and there is nothing to save.
@@ -663,100 +581,19 @@ TSharedPtr<FJsonObject> HandleEnablePlugin(const TSharedPtr<FJsonObject>& Params
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("plugin_name"), PluginName);
-    Result->SetBoolField(TEXT("enabled"), true);
+    Result->SetBoolField(TEXT("enabled"), bEnable);
     Result->SetBoolField(TEXT("project_saved"), bSaved);
     Result->SetStringField(TEXT("note"), bNeedsSave
-        ? TEXT("An editor restart is usually required to load a newly-enabled plugin's modules.")
-        : TEXT("The .uproject already has the plugin enabled; nothing changed, nothing saved."));
+        ? (bEnable ? TEXT("An editor restart is usually required to load a newly-enabled plugin's modules.")
+                   : TEXT("An editor restart is usually required to fully unload a newly-disabled plugin's modules."))
+        : (bEnable ? TEXT("The .uproject already has the plugin enabled; nothing changed, nothing saved.")
+                   : TEXT("The .uproject already has the plugin disabled; nothing changed, nothing saved.")));
     if (bNeedsSave && !bSaved)
     {
         Result->SetBoolField(TEXT("success"), false);
         Result->SetStringField(TEXT("error"), FString::Printf(
-            TEXT("enable_plugin: the .uproject was changed in memory but not saved to disk: %s"), *FailReason.ToString()));
+            TEXT("set_plugin_enabled: the .uproject was changed in memory but not saved to disk: %s"), *FailReason.ToString()));
     }
-    return Result;
-}
-
-// MCP:disable_plugin - Turn a plugin off in the .uproject and save the project file to disk. WARNING: `enabled:false` is hardcoded on the write succeeding and the modules stay LOADED for this session -- the plugin's classes keep working until the editor restarts, so a still-functioning feature is not evidence the call failed. A plugin the .uproject already has disabled is a no-op: project_saved=false and nothing saved; a .uproject that cannot be saved makes success false. A name this editor has not discovered as a plugin is an error, and nothing is written to the .uproject. WARNING: disabling a plugin whose assets are referenced leaves those references broken on the next start; check get_plugin_status and the referencers first.
-//   @param plugin_name - Plugin name exactly as in its .uplugin file, not a path.
-//   @returns { plugin_name: string (the plugin's own spelling), enabled: bool (hardcoded false when the .uproject write succeeded), project_saved: bool, note: string about the required restart, or that nothing changed }
-TSharedPtr<FJsonObject> HandleDisablePlugin(const TSharedPtr<FJsonObject>& Params)
-{
-    FString PluginName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("plugin_name"), PluginName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-    // SetPluginEnabled writes any name into the .uproject without checking it, and a reference to a plugin that
-    // does not exist can stop the project from opening: an unknown name is refused before anything is written.
-    // The plugin's own name is used from here on, so the .uproject gets its exact spelling.
-    const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(PluginName);
-    if (!Plugin.IsValid())
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(
-            TEXT("disable_plugin: no plugin named '%s' is known to this editor (IPluginManager::FindPlugin found none); nothing was ")
-            TEXT("written to the .uproject. get_plugin_status reads a plugin by its .uplugin name."), *PluginName));
-    }
-    PluginName = Plugin->GetName();
-
-    FText FailReason;
-    if (!IProjectManager::Get().SetPluginEnabled(PluginName, false, FailReason))
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Failed to disable plugin '%s': %s"), *PluginName, *FailReason.ToString()));
-
-    // SetPluginEnabled dirties the project only when the .uproject changes: a project that is not dirty
-    // already has the plugin in that state, and there is nothing to save.
-    const bool bNeedsSave = IProjectManager::Get().IsCurrentProjectDirty();
-    bool bSaved = false;
-    if (bNeedsSave)
-    {
-        bSaved = IProjectManager::Get().SaveCurrentProjectToDisk(FailReason);
-    }
-
-    TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-    Result->SetStringField(TEXT("plugin_name"), PluginName);
-    Result->SetBoolField(TEXT("enabled"), false);
-    Result->SetBoolField(TEXT("project_saved"), bSaved);
-    Result->SetStringField(TEXT("note"), bNeedsSave
-        ? TEXT("An editor restart is usually required to fully unload a newly-disabled plugin's modules.")
-        : TEXT("The .uproject already has the plugin disabled; nothing changed, nothing saved."));
-    if (bNeedsSave && !bSaved)
-    {
-        Result->SetBoolField(TEXT("success"), false);
-        Result->SetStringField(TEXT("error"), FString::Printf(
-            TEXT("disable_plugin: the .uproject was changed in memory but not saved to disk: %s"), *FailReason.ToString()));
-    }
-    return Result;
-}
-
-// MCP:get_compile_errors - WARNING: despite the get_ prefix this COMPILES the Blueprint (silently) and then returns its error/warning count and every message with severity -- it is a mutation, not a read: compiling dirties the package, can cascade into other packages, and can knock a Blueprint's placed OFPA instances out of the world in memory (get_actors_by_class then returns 0 in editor AND PIE; load_level of the same map brings them back). Use it as the honest oracle for "does this BP build" -- num_errors and the message list are real, read off the compiler results log -- and reach for check_blueprint_errors / find_erroring_blueprints when a compile is not what you want.
-//   @param blueprint_name - Blueprint name or full asset path (e.g. BP_MyActor or /Game/MyGame/Core/BP_MyActor).
-//   @returns { name: string, num_errors: int, num_warnings: int, succeeded: bool (num_errors == 0), messages: [{ severity: 'error'|'warning'|'info', message: string }] }
-TSharedPtr<FJsonObject> HandleGetCompileErrors(const TSharedPtr<FJsonObject>& Params)
-{
-    FString BlueprintRef;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("blueprint_name"), BlueprintRef, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-    // The plugin's usual lookup (short name or known path) first, then a direct load of
-    // whatever path was given.
-    UBlueprint* Target = mcp_common::ResolveBlueprint(BlueprintRef);
-    if (Target == nullptr)
-    {
-        Target = LoadObject<UBlueprint>(nullptr, *BlueprintRef);
-    }
-    if (Target == nullptr)
-    {
-        return mcp_common::BlueprintNotFoundReply(BlueprintRef);
-    }
-
-    // A real compile, kept quiet; the counts and messages below are read off its results log.
-    FCompilerResultsLog Results;
-    Results.SetSilentMode(true);
-    FKismetEditorUtilities::CompileBlueprint(Target, EBlueprintCompileOptions::None, &Results);
-
-    TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-    Result->SetStringField(TEXT("name"), BlueprintRef);
-    Result->SetNumberField(TEXT("num_errors"), Results.NumErrors);
-    Result->SetNumberField(TEXT("num_warnings"), Results.NumWarnings);
-    Result->SetBoolField(TEXT("succeeded"), Results.NumErrors == 0);
-    Result->SetArrayField(TEXT("messages"), AssetCommandHelpers::CompilerMessagesToJson(Results));
     return Result;
 }
 
@@ -1527,7 +1364,7 @@ TSharedPtr<FJsonObject> HandleReloadAssetPackage(const TSharedPtr<FJsonObject>& 
 // ---------------------------------------------------------------------------
 // import_font_file
 //
-// Why it exists: import_asset is images-only by design, and no other tool imports
+// Why it exists: import_texture_file imports images only, and no other tool imports
 // fonts. Without it a game's typeface has to be imported outside the agent, by
 // someone opening the editor by hand.
 //
@@ -1537,7 +1374,7 @@ TSharedPtr<FJsonObject> HandleReloadAssetPackage(const TSharedPtr<FJsonObject>& 
 // headless call that hangs the editor waiting for a click that never comes. That is why
 // it is ALWAYS set explicitly here before importing.
 // ---------------------------------------------------------------------------
-// MCP:import_font_file - Import a .ttf/.otf/.ttc/.otc font from disk as a UFontFace, and optionally the companion UFont that a FSlateFontInfo needs to actually render text. This is the only way to get a typeface into the project headlessly: import_asset is images-only on purpose, and nothing else in the toolset touches fonts. Drives UFontFileImportFactory inline (never IAssetTools::ImportAssets, which asserts when re-entered from the engine tick, same reason import_asset avoids it) and ALWAYS sets BatchCreateFontAsset explicitly -- left at its default the factory pops a MODAL DIALOG asking whether to create the UFont, which would hang the editor on a click that is never coming. Once imported, point a widget at it with set_widget_property on the dotted path "Font.FontObject" (a UFont) plus "Font.TypefaceFontName", or "Font.Size" for the size.
+// MCP:import_font_file - Import a .ttf/.otf/.ttc/.otc font from disk as a UFontFace, and optionally the companion UFont that a FSlateFontInfo needs to actually render text. This is the only way to get a typeface into the project headlessly: import_texture_file imports images only, and nothing else in the toolset touches fonts. Drives UFontFileImportFactory inline (never IAssetTools::ImportAssets, which asserts when re-entered from the engine tick) and ALWAYS sets BatchCreateFontAsset explicitly -- left at its default the factory pops a MODAL DIALOG asking whether to create the UFont, which would hang the editor on a click that is never coming. Once imported, point a widget at it with set_widget_property on the dotted path "Font.FontObject" (a UFont) plus "Font.TypefaceFontName", or "Font.Size" for the size.
 //   @param source_file_path [string!] - Absolute path on disk to the .ttf/.otf/.ttc/.otc file. A missing file, or any other extension, is a clean error before anything is touched.
 //   @param destination_path [string!] - UE long path of the destination content folder, e.g. /Game/MyGame/UI/Fonts.
 //   @param name - Optional asset name; defaults to the source file's base name.
@@ -1560,7 +1397,7 @@ TSharedPtr<FJsonObject> HandleImportFontFile(const TSharedPtr<FJsonObject>& Para
     {
         return mcp_common::MakeErrorReply(FString::Printf(
             TEXT("import_font_file only accepts .ttf/.ttc/.otf/.otc; got '.%s'. For images use "
-                 "import_asset or import_texture_file."), *Extension));
+                 "import_texture_file."), *Extension));
     }
 
     FString AssetName;
@@ -1648,12 +1485,9 @@ const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("create_directory"), &HandleCreateDirectory },
     { TEXT("delete_directory"), &HandleDeleteDirectory },
-    { TEXT("disable_plugin"), &HandleDisablePlugin },
-    { TEXT("enable_plugin"), &HandleEnablePlugin },
+    { TEXT("set_plugin_enabled"), &HandleSetPluginEnabled },
     { TEXT("execute_console_command"), &HandleExecuteConsoleCommand },
     { TEXT("fixup_redirectors"), &HandleFixupRedirectors },
-    { TEXT("get_compile_errors"), &HandleGetCompileErrors },
-    { TEXT("import_asset"), &HandleImportAsset },
     { TEXT("import_font_file"), &HandleImportFontFile },
     { TEXT("list_dirty_packages"), &HandleListDirtyPackages },
     { TEXT("reload_asset_package"), &HandleReloadAssetPackage },

@@ -2,7 +2,7 @@
 
 # Navigation
 
-23 tools. Back to the [index](README.md).
+22 tools. Back to the [index](README.md).
 
 ## `add_eqs_generator`
 
@@ -61,13 +61,13 @@ Create an empty Environment Query System asset (UEnvQuery) named name in package
 
 *Read-only.*
 
-One-call navmesh diagnosis: reports every ANavMeshBoundsVolume (brush validity + world extent — detects the EMPTY brush = 0 bounds that yields 0 tiles), inclusion/total nav bounds, bWholeWorldNavigable, invoker-only generation + registered invokers, the RecastNavMesh MaxTiles / built (active) tile count / RuntimeGeneration, and is_spatially_loaded per volume, plus an actionable `diagnosis` list. Read-only.
+One-call navmesh diagnosis: reports every ANavMeshBoundsVolume (brush validity + world extent — detects the EMPTY brush = 0 bounds that yields 0 tiles), inclusion/total nav bounds, bWholeWorldNavigable, invoker-only generation + registered invokers, the RecastNavMesh MaxTiles / built (active) tile count / RuntimeGeneration, and is_spatially_loaded per volume, the nav system state (supported agents by name, nav data count, dirty flag; a world without a navigation system reports zeros, not an error), plus an actionable `diagnosis` list. Read-only.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `world` | string | no | Optional world selector: absent/'editor' (default) \| 'server' (**the one you want in PIE**: the navmesh is SERVER-AUTHORITATIVE, so only the authoritative world has a nav system and a RecastNavMesh) \| 'pie' (ambiguous: PlayWorld, else the first PIE context -- may well land on the CLIENT) \| 'client' \| 'pie:N' \| 'game' (alias of 'pie'). |
 
-**Returns:** `` { world, has_authority, nav_system_present, whole_world_navigable, generate_only_around_invokers, supported_agent_count, nav_data_count, is_navigation_dirty, nav_bounds_volume_count, nav_bounds_volumes:[{actor_name, actor_label, is_spatially_loaded, brush_present, brush_empty, bounds_valid, bounds_extent:{x,y,z}, brush_poly_count, note}], registered_nav_bounds_count, total_nav_bounds:{valid, min:{x,y,z}, max:{x,y,z}, extent:{x,y,z}}, invoker_component_count, invoker_location_count, invoker_seed_bounds_count, recast_navmesh_present, recast:{name, runtime_generation, supports_runtime_generation, max_tiles, active_tile_count, tile_size_uu, is_spatially_loaded}, diagnosis:[string], success, world_name, world_package, world_type, net_mode, pie_instance }. On a CLIENT world (has_authority=false) the heuristics are suppressed and `diagnosis` says so first: a client with no nav system / no RecastNavMesh is EXPECTED, and rebuild_navigation is NEVER recommended from there. ``
+**Returns:** `` { world, has_authority, nav_system_present, whole_world_navigable, generate_only_around_invokers, supported_agent_count, supported_agents:[string], nav_data_count, is_navigation_dirty, nav_bounds_volume_count, nav_bounds_volumes:[{actor_name, actor_label, is_spatially_loaded, brush_present, brush_empty, bounds_valid, bounds_extent:{x,y,z}, brush_poly_count, note}], registered_nav_bounds_count, total_nav_bounds:{valid, min:{x,y,z}, max:{x,y,z}, extent:{x,y,z}}, invoker_component_count, invoker_location_count, invoker_seed_bounds_count, recast_navmesh_present, recast:{name, runtime_generation, supports_runtime_generation, max_tiles, active_tile_count, tile_size_uu, is_spatially_loaded}, diagnosis:[string], success, world_name, world_package, world_type, net_mode, pie_instance }. On a CLIENT world (has_authority=false) the heuristics are suppressed and `diagnosis` says so first: a client with no nav system / no RecastNavMesh is EXPECTED, and rebuild_navigation is NEVER recommended from there. ``
 
 ## `diff_collision_channels`
 
@@ -102,16 +102,6 @@ Reports the composition of a UEnvQuery asset: each option's generator class and 
 | `query_path` | string | yes | /Game/... path to the UEnvQuery asset (required) |
 
 **Returns:** `{ query_path, option_count, options:[{index, generator_class?, generator_path?, test_count, tests:[{index, class, path}]}] }`
-
-## `get_navigation_info`
-
-*Read-only.*
-
-Read the navigation system state of the editor world (never PIE): nav_system_present, nav_data_count, supported_agent_count with the agent names, and is_navigation_dirty. Read-only; a world without a navigation system reports zeros instead of an error.
-
-No parameters.
-
-**Returns:** `{ nav_system_present, nav_data_count, supported_agent_count, is_navigation_dirty, supported_agents, success }`
 
 ## `get_recast_navmesh_settings`
 

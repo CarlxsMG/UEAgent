@@ -74,7 +74,7 @@ FIELD_RE = re.compile(
 # `Params->(Try)?GetField(TEXT("x"))` — the RAW/untyped getter, returning a
 # `TSharedPtr<FJsonValue>` the handler forwards as-is (typically straight into
 # `mcp_common::SetObjectProperty`'s generic JSON->UProperty importer, e.g.
-# `set_component_property`/`set_blueprint_component_property`'s `property_value`).
+# `set_component_property`/`set_blueprint_component_properties`'s `property_value`).
 # These params genuinely accept ANY JSON type (string/number/bool/array/object) —
 # they must NOT fall through to the "no hint -> string" default (see JSON_TYPE
 # lookups below), or the generated tool schema wrongly rejects
@@ -1084,7 +1084,7 @@ def _collect_params(text, body, visited, depth, ordered, required, chains=None, 
     # declare is "any" (-> JsonValue), not whichever read appears first.
     #
     # Keeping the first read's type would make the signature reject valid calls:
-    # set_property_value tries TryGetArrayField -> TryGetObjectField -> scalars, so its schema
+    # a property-value param tried with TryGetArrayField -> TryGetObjectField -> scalars has a schema that
     # would say `array` while its description promises "string, number, boolean, JSON object,
     # JSON array or UE text", and a non-array value would fail schema validation before
     # reaching the editor.

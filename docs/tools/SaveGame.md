@@ -2,25 +2,13 @@
 
 # SaveGame
 
-14 tools. Back to the [index](README.md).
-
-## `create_save_game`
-
-*Additive.*
-
-Create a transient, in-memory SaveGame object of save_game_class (default UMCPSaveGame), which checks that the class resolves and can be instantiated; nothing is written to disk and no other tool takes the object as input. save_game_class is matched by name among loaded classes and must be a concrete USaveGame subclass: an unknown, non-SaveGame or abstract class is an error. Every call makes a new object, named by save_game_instance and save_game_path; save_game_class echoes the name given, empty for the default. To write a slot use save_game, which builds its own default-valued object; to serialize to memory, save_game_to_memory; to read a slot back, load_game.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `save_game_class` | string | no | Optional name of a loaded, concrete USaveGame subclass, e.g. "MySaveGame" (found with FindFirstObject, never loaded from disk); defaults to the plugin's concrete UMCPSaveGame (the abstract USaveGame base is rejected) |
-
-**Returns:** `{ save_game_class: string, save_game_instance: string, save_game_path: string, success: bool }`
+9 tools. Back to the [index](README.md).
 
 ## `delete_save_game`
 
 *Destructive.*
 
-Delete the save file of a slot with DeleteGameInSlot; the data is gone for good. success is false, with an error, when the engine refuses, usually because the slot does not exist (check with does_save_game_exist). Returns slot_name, user_index and message.
+Delete the save file of a slot with DeleteGameInSlot; the data is gone for good. success is false, with an error, when the engine refuses, usually because the slot does not exist (check with get_save_game_slot_info). Returns slot_name, user_index and message.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -28,32 +16,6 @@ Delete the save file of a slot with DeleteGameInSlot; the data is gone for good.
 | `user_index` | number | no | Platform user index for the save system; default 0 (the generic desktop save system ignores it) |
 
 **Returns:** `{ slot_name: string, user_index: int, success: bool, message: string }`
-
-## `does_save_game_exist`
-
-*Read-only.*
-
-Check whether a save slot has data with UGameplayStatics::DoesSaveGameExist; returns exists. Read-only. Use get_save_game_slot_info for the file path, size and modification time, or list_save_games to see every slot.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `slot_name` | string | yes | Save slot name to check |
-| `user_index` | number | no | Platform user index for the save system; default 0 (the generic desktop save system ignores it) |
-
-**Returns:** `{ slot_name: string, user_index: int, exists: bool }`
-
-## `get_save_game_info`
-
-*Read-only.*
-
-Check one save slot with UGameplayStatics::DoesSaveGameExist and, when it exists, report save_path (the generic desktop Saved/SaveGames/&lt;slot>.sav) plus file_size when that file is on disk. Read-only; a missing slot is not an error, just exists false with no path or size. get_save_game_slot_info returns the same plus the modification time, does_save_game_exist only the flag, list_save_games every slot.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `slot_name` | string | yes | Save slot name to query |
-| `user_index` | number | no | Platform user index for the save system; default 0 (the generic desktop save system ignores it) |
-
-**Returns:** `{ slot_name: string, user_index: int, exists: bool, save_path?: string, file_size?: int }`
 
 ## `get_save_game_slot_info`
 
@@ -84,7 +46,7 @@ List all save games for a given user index. The list is what the platform's save
 
 *Read-only.*
 
-Load the SaveGame stored in a slot with LoadGameFromSlot and report the transient object: save_game_instance, save_game_class and save_game_path. success is false when the slot is empty or unreadable, or holds a class other than save_game_class; does_save_game_exist tells missing from corrupt. It only reads: the slot file is not changed and the object is transient. Write a slot with save_game; the same read without the class check is load_game_async.
+Load the SaveGame stored in a slot with LoadGameFromSlot and report the transient object: save_game_instance, save_game_class and save_game_path. success is false when the slot is empty or unreadable, or holds a class other than save_game_class; get_save_game_slot_info (exists) tells missing from corrupt. It only reads: the slot file is not changed and the object is transient. Write a slot with save_game.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -93,19 +55,6 @@ Load the SaveGame stored in a slot with LoadGameFromSlot and report the transien
 | `save_game_class` | string | no | Optional SaveGame subclass the slot is expected to hold. A slot file records its own class and is rebuilt as that; when the loaded object is not this class (or a child of it) the load is reported as failed. An unknown class name is an error. |
 
 **Returns:** `{ slot_name: string, user_index: int, success: bool, save_game_instance: string, save_game_class: string, save_game_path: string, expected_class?: string, error: string }`
-
-## `load_game_async`
-
-*Read-only.*
-
-Load the SaveGame stored in a slot and report the object it rebuilds (save_game_instance, save_game_class, save_game_path). Despite the name it runs synchronously through LoadGameFromSlot (mode=sync_fallback), since waiting on the game thread for the async delegate would deadlock; the outcome matches load_game without its save_game_class check. It only reads: the slot file is not changed and the object is transient. An empty slot or a file that fails to deserialize gives success=false with an error; tell them apart with does_save_game_exist. Write a slot with save_game_async or save_game; file path, size and date: get_save_game_slot_info; every slot: list_save_games.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `slot_name` | string | yes | Save slot name, non-empty; on desktop the file is Saved/SaveGames/&lt;slot>.sav. |
-| `user_index` | number | no | Platform user index for the save system; default 0 (the generic desktop save system ignores it) |
-
-**Returns:** `{ slot_name: string, user_index: int, success: bool, mode: string, note: string, save_game_instance?: string, save_game_class?: string, save_game_path?: string, error?: string }`
 
 ## `load_game_from_memory`
 
@@ -135,7 +84,7 @@ Restore the transform + properties a previous serialize_actor_state wrote, addre
 
 *Destructive.*
 
-Write a NEW default-valued SaveGame object of save_game_class (default UMCPSaveGame) to a slot with SaveGameToSlot, overwriting what the slot held; it does not save an object made by create_save_game. On desktop the file is Saved/SaveGames/&lt;slot>.sav. Returns success and message.
+Write a NEW default-valued SaveGame object of save_game_class (default UMCPSaveGame) to a slot with SaveGameToSlot, overwriting what the slot held. On desktop the file is Saved/SaveGames/&lt;slot>.sav. Returns success and message.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -144,20 +93,6 @@ Write a NEW default-valued SaveGame object of save_game_class (default UMCPSaveG
 | `save_game_class` | string | no | Name of a loaded, concrete USaveGame subclass, e.g. "MySaveGame" (found with FindFirstObject, never loaded from disk); default UMCPSaveGame |
 
 **Returns:** `{ slot_name: string, user_index: int, success: bool, message: string }`
-
-## `save_game_async`
-
-*Destructive.*
-
-Save a SaveGame instance to slot, sync fallback over AsyncSaveGameToSlot
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `slot_name` | string | yes | Save slot name |
-| `user_index` | number | no | Optional user index, default 0 |
-| `save_game_class` | string | no | Optional SaveGame subclass; defaults to the plugin's concrete UMCPSaveGame (the abstract USaveGame base is rejected) |
-
-**Returns:** `{ slot_name: string, user_index: int, success: bool, mode: string, note: string, message: string }`
 
 ## `save_game_to_memory`
 

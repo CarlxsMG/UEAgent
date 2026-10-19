@@ -41,29 +41,6 @@ namespace AssetCommandHelpers
     void AppendAmbiguity(const TSharedPtr<FJsonObject>& Reply, const TArray<TSharedPtr<FJsonValue>>& Candidates);
 
     /**
-     * The reply of Command refusing to delete Asset, which is not an ExpectedClassName: success false, its error naming
-     * the class found, and { asset_path, asset_class, deleted: false, note } as its data. Nothing is deleted.
-     */
-    TSharedPtr<FJsonObject> WrongTypeRefusal(const TCHAR* Command, const FString& AssetPath, const UObject& Asset,
-        const FString& ExpectedClassName);
-
-    /**
-     * The reply of Command once it has asked the engine to delete the asset at AssetPath: Data as it is, with success
-     * bDeleted. A delete the engine refused is an error that names the usual causes.
-     */
-    TSharedPtr<FJsonObject> DeleteOutcomeReply(const TCHAR* Command, const TSharedPtr<FJsonObject>& Data, bool bDeleted,
-        const FString& AssetPath);
-
-    /**
-     * The whole reply of a typed remove command: deletes the asset at AssetPath only when it loads as an ExpectedClass.
-     * A path that does not load is a no-op, success with { asset_path, asset_class: "", deleted: false,
-     * already_existed: false, note }; an asset of another class is WrongTypeRefusal; otherwise the data is
-     * { asset_path, asset_class, package_name, deleted, already_existed: true } and success is whether the engine
-     * deleted it (DeleteOutcomeReply).
-     */
-    TSharedPtr<FJsonObject> DeleteTypedAsset(const TCHAR* Command, const FString& AssetPath, const UClass* ExpectedClass);
-
-    /**
      * The object a dotted "Actor[.Component[.Subobject]]" path names in World: the first segment matches a live actor
      * by object name or editor label, each further segment a component of that actor by name or any other subobject
      * by name. Null when World is null or a segment does not resolve.

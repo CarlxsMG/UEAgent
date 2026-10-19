@@ -5,7 +5,6 @@
 #include "EngineSettings.h"
 #include "GameMapsSettings.h"
 #include "GeneralProjectSettings.h"
-#include "PhysicsEngine/PhysicsSettings.h"
 #include "UObject/UnrealType.h"
 #include "UObject/PropertyAccessUtil.h"
 #include "UObject/PropertyPortFlags.h"   // PPF_SerializedAsImportText (the port flags SaveConfig itself uses)
@@ -609,71 +608,6 @@ TSharedPtr<FJsonObject> HandleSetProjectSettingsValue(
 }
 
 // ---------------------------------------------------------------------------
-// set_physics_gravity {gravity_z}
-//   Specialized wrapper for UPhysicsSettings::DefaultGravityZ.
-// ---------------------------------------------------------------------------
-// MCP:set_physics_gravity - Set UPhysicsSettings DefaultGravityZ, persist it to the VERSIONED Config/DefaultEngine.ini (TryUpdateDefaultConfigFile) and re-read that .ini FROM DISK to prove it landed.
-//   @param gravity_z - World Z component of gravity
-//   @param verify_disk - Optional bool, default true. Re-read Config/DefaultEngine.ini with FConfigFile::Read (never GConfig) and report disk_value / disk_matches_memory.
-//   @returns { gravity_z: number, ini_path: string, is_default_config_class: bool, versioned_ini: bool, write_reported: bool, persist_method: string, ini_section: string, ini_key: string, disk_present: bool, disk_value: string, disk_matches_memory: bool, verification: object, verification_checks: [object] }
-TSharedPtr<FJsonObject> HandleSetPhysicsGravity(
-	const TSharedPtr<FJsonObject>& Params)
-{
-	double GravityZ = 0.0;
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("gravity_z"), GravityZ)) { return Missing; }
-	UPhysicsSettings* Settings = GetMutableDefault<UPhysicsSettings>();
-	if (!Settings)
-	{
-		return mcp_common::MakeErrorReply(TEXT("No UPhysicsSettings CDO"));
-	}
-	Settings->DefaultGravityZ = static_cast<float>(GravityZ);
-
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetNumberField(TEXT("gravity_z"), Settings->DefaultGravityZ);
-
-	// SaveConfig() writes Saved/Config/<Platform>/Engine.ini (gitignored) even though
-	// UPhysicsSettings is UCLASS(config=Engine, defaultconfig), as with set_default_game_map.
-	FPSCfgWriteTarget Target;
-	const bool bPersisted = PSCfgPersistSettingsObject(Settings, Target);
-	PSCfgAddWriteTargetFields(Data, Target);
-
-	bool bVerifyDisk = true;
-	Params->TryGetBoolField(TEXT("verify_disk"), bVerifyDisk);
-
-	if (!bPersisted)
-	{
-		mcp_common::AddVerificationEvidence(Data, mcp_common::EMcpVerification::Failed,
-			TEXT("UObject::TryUpdateDefaultConfigFile"), Target.FailReason);
-		return mcp_common::MakeOutcomeReply(Data, false, Target.FailReason);
-	}
-	if (!bVerifyDisk)
-	{
-		mcp_common::AddVerificationEvidence(Data, mcp_common::EMcpVerification::NotAttempted,
-			TEXT("FConfigFile::Read"), TEXT("verify_disk=false: the .ini was written but not re-read"));
-		return mcp_common::MakeOutcomeReply(Data, true);
-	}
-
-	// NOTE: DefaultGravityZ is declared on UPhysicsSettingsCore, so it is an INHERITED property
-	// of UPhysicsSettings -- SaveConfig omits it entirely when it equals the core default.
-	// PSCfgVerifyPropertyOnDisk handles that case explicitly instead of calling it a lost write.
-	FProperty* GravityProp = UPhysicsSettings::StaticClass()->FindPropertyByName(TEXT("DefaultGravityZ"));
-	TSharedPtr<FJsonObject> DiskBlock;
-	FString Detail;
-	const mcp_common::EMcpVerification Verdict =
-		PSCfgVerifyPropertyOnDisk(Settings, GravityProp, Target.IniPath, DiskBlock, Detail);
-	if (DiskBlock.IsValid())
-	{
-		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : DiskBlock->Values)
-		{
-			Data->SetField(Pair.Key, Pair.Value);
-		}
-	}
-	const bool bOk = (Verdict != mcp_common::EMcpVerification::Failed);
-	return mcp_common::MakeVerifiedReply(Data, bOk, Verdict, TEXT("FConfigFile::Read"), Detail,
-		bOk ? FString() : Detail);
-}
-
-// ---------------------------------------------------------------------------
 // set_default_game_map {editor_startup_map?, game_default_map?, verify_disk?}
 //   Writes to UGameMapsSettings::EditorStartupMap / GameDefaultMap. At least
 //   one must be supplied.
@@ -1187,7 +1121,6 @@ const McpCommandFamilies::FRegistrar Registration =
 	{ TEXT("list_collision_channels"), &HandleListCollisionChannels },
 	{ TEXT("list_project_setting_sections"), &HandleListProjectSettingSections },
 	{ TEXT("set_default_game_map"), &HandleSetDefaultGameMap },
-	{ TEXT("set_physics_gravity"), &HandleSetPhysicsGravity },
 	{ TEXT("set_project_settings_value"), &HandleSetProjectSettingsValue },
 };
 } // namespace UEAgentProjectSettingsCommands

@@ -7,12 +7,11 @@
 #include "Editor.h"                              // kept: UnrealEd types pulled in transitively by this TU (world resolution itself now lives in mcp_common::ResolveWorldFromParams)
 #include "Engine/EngineTypes.h"                  // EWorldType
 #include "Components/SkeletalMeshComponent.h"
-#include "Animation/AnimBlueprint.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/Skeleton.h"
+#include "Engine/SkeletalMesh.h"                 // USkeletalMesh::GetSkeletonMemberName (get_skeleton_info mesh_paths)
 #include "Animation/AnimationAsset.h"
 #include "Animation/AnimMontage.h"
-#include "Animation/AnimComposite.h"          // UAnimComposite (typed remove cast check)
 #include "UObject/UObjectGlobals.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Engine/Blueprint.h"
@@ -25,9 +24,6 @@
 #include "Engine/Selection.h"
 #include "HAL/PlatformFilemanager.h"
 #include "EditorAssetLibrary.h"
-#include "Animation/BlendSpace.h"                 // UBlendSpace (cast verify for remove_blend_space)
-#include "Animation/BlendSpace1D.h"               // UBlendSpace1D (cast verify for remove_blendspace_1d)
-#include "Animation/PoseAsset.h"                 // UPoseAsset (cast verify for remove_pose_asset)
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "AssetToolsModule.h"
@@ -174,50 +170,6 @@ namespace UEAgentAnimationImpl
         Out->SetStringField(TEXT("last_modified"), Disk.GetTimeStamp(*OnDisk).ToString());
     }
 
-    // get_animation_blueprint_info lookup through the shared resolver: an object path, a package
-    // path (its primary asset -- asked as an object path, the registry answered with the UPackage,
-    // which then failed to load as an AnimBlueprint) or a short name under /Game, the first match
-    // when a short name is ambiguous. Invalid when nothing resolves.
-    FAssetData FindAnimBlueprintAsset(const FString& NameOrPath)
-    {
-        TArray<FAssetData> Resolved;
-        FString Unused;
-        if (mcp_common::ResolveAssetFlexible(NameOrPath, UAnimBlueprint::StaticClass(), TEXT("/Game"), Resolved, Unused) && Resolved.Num() > 0)
-        {
-            return Resolved[0];
-        }
-        return FAssetData();
-    }
-
-    // load_full_data facts of an AnimBlueprint; a null pointer means the asset did not load as one.
-    void AddAnimBlueprintDetails(const TSharedPtr<FJsonObject>& Out, UAnimBlueprint* AnimBlueprint)
-    {
-        Out->SetBoolField(TEXT("loaded_successfully"), AnimBlueprint != nullptr);
-        if (AnimBlueprint == nullptr)
-        {
-            Out->SetStringField(TEXT("load_error"), TEXT("Failed to cast to UAnimBlueprint"));
-            return;
-        }
-        Out->SetBoolField(TEXT("is_valid"), IsValid(AnimBlueprint));
-
-        USkeleton* Target = AnimBlueprint->TargetSkeleton;
-        if (Target == nullptr)
-        {
-            Out->SetBoolField(TEXT("has_target_skeleton"), false);
-        }
-        else
-        {
-            Out->SetStringField(TEXT("target_skeleton"), Target->GetPathName());
-            Out->SetNumberField(TEXT("skeleton_bone_count"), Target->GetReferenceSkeleton().GetNum());
-        }
-
-        if (UClass* Generated = AnimBlueprint->GeneratedClass)
-        {
-            Out->SetStringField(TEXT("generated_class"), Generated->GetPathName());
-            Out->SetBoolField(TEXT("is_abstract"), Generated->HasAnyClassFlags(CLASS_Abstract));
-        }
-    }
-
     // load_full_data facts of a Skeleton; a null pointer means the asset did not load as one.
     void AddSkeletonDetails(const TSharedPtr<FJsonObject>& Out, USkeleton* Skeleton)
     {
@@ -250,44 +202,51 @@ namespace UEAgentAnimationImpl
         Out->SetBoolField(TEXT("bones_truncated"), TotalBones > MaxListedBones);
         Out->SetNumberField(TEXT("socket_count"), Skeleton->Sockets.Num());
         Out->SetNumberField(TEXT("slot_group_count"), Skeleton->GetSlotGroups().Num());
+
+        // Virtual bones, in two fields: the flat names (the shape remove_virtual_bone also returns) and the
+        // per-bone detail with its source and target bones.
+        TArray<TSharedPtr<FJsonValue>> VirtualBoneNames;
+        TArray<TSharedPtr<FJsonValue>> VirtualBones;
+        for (const FVirtualBone& VirtualBone : Skeleton->GetVirtualBones())
+        {
+            VirtualBoneNames.Add(MakeShared<FJsonValueString>(VirtualBone.VirtualBoneName.ToString()));
+            TSharedPtr<FJsonObject> VirtualEntry = MakeShared<FJsonObject>();
+            VirtualEntry->SetStringField(TEXT("name"), VirtualBone.VirtualBoneName.ToString());
+            VirtualEntry->SetStringField(TEXT("source_bone"), VirtualBone.SourceBoneName.ToString());
+            VirtualEntry->SetStringField(TEXT("target_bone"), VirtualBone.TargetBoneName.ToString());
+            VirtualBones.Add(MakeShared<FJsonValueObject>(VirtualEntry));
+        }
+        Out->SetNumberField(TEXT("virtual_bone_count"), VirtualBones.Num());
+        Out->SetArrayField(TEXT("virtual_bone_names"), VirtualBoneNames);
+        Out->SetArrayField(TEXT("virtual_bones"), VirtualBones);
+    }
+
+    // The skeletal meshes bound to a skeleton, from the Asset Registry tag USkeletalMesh::Skeleton (the lookup
+    // USkeleton::FindCompatibleMesh makes): no asset is loaded.
+    void AddSkeletonMeshes(const TSharedPtr<FJsonObject>& Out, const FAssetData& SkeletonAsset)
+    {
+        FARFilter Filter;
+        Filter.bRecursivePaths = true;
+        Filter.bRecursiveClasses = true;
+        Filter.ClassPaths.Add(USkeletalMesh::StaticClass()->GetClassPathName());
+        Filter.TagsAndValues.Add(USkeletalMesh::GetSkeletonMemberName(), SkeletonAsset.GetExportTextName());
+
+        TArray<FAssetData> Meshes;
+        mcp_common::AssetRegistry().GetAssets(Filter, Meshes);
+
+        TArray<TSharedPtr<FJsonValue>> MeshPaths;
+        MeshPaths.Reserve(Meshes.Num());
+        for (const FAssetData& Mesh : Meshes)
+        {
+            MeshPaths.Add(MakeShared<FJsonValueString>(Mesh.GetObjectPathString()));
+        }
+        Out->SetNumberField(TEXT("mesh_count"), Meshes.Num());
+        Out->SetBoolField(TEXT("shared"), Meshes.Num() > 1);
+        Out->SetArrayField(TEXT("mesh_paths"), MeshPaths);
     }
 }
 
-// MCP:get_animation_blueprint_info - Find an Animation Blueprint in the Asset Registry and report its object path, class, package, is_loaded and the size and timestamp of its .uasset on disk. With load_full_data it also loads the asset and adds the target skeleton, its bone count, the generated class and is_abstract. Read-only. blueprint_name takes an object path, a package path or a short name searched under /Game (the first match when several share it); no match is an error. For parent class, graphs and state machines use get_anim_blueprint_info.
-//   @param blueprint_name - Name or full path of the Animation Blueprint asset
-//   @param load_full_data - When true, loads the asset and reports target skeleton, generated class, and bone count (optional, default false)
-//   @returns { blueprint_name: string, blueprint_path: string, blueprint_class: string, package_name: string, is_loaded: bool, file_size_bytes: number, file_size_kb: number, file_size_mb: number, last_modified: string, loaded_successfully: bool?, is_valid: bool?, target_skeleton: string?, skeleton_bone_count: number?, has_target_skeleton: bool?, generated_class: string?, is_abstract: bool?, load_error: string? }
-
-TSharedPtr<FJsonObject> HandleGetAnimationBlueprintInfo(const TSharedPtr<FJsonObject>& Params)
-{
-    FString Requested;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("blueprint_name"), Requested, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    bool bWithDetails = false;
-    Params->TryGetBoolField(TEXT("load_full_data"), bWithDetails);
-    if (Requested.IsEmpty())
-    {
-        return AssetCommandHelpers::EmptyParamError(TEXT("blueprint_name"));
-    }
-
-    const FAssetData Found = UEAgentAnimationImpl::FindAnimBlueprintAsset(Requested);
-    if (!Found.IsValid())
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Animation Blueprint not found: %s"), *Requested));
-    }
-
-    // is_loaded is sampled by AddAssetIdentity, before load_full_data gets a chance to load the asset.
-    TSharedPtr<FJsonObject> Report = MakeShared<FJsonObject>();
-    UEAgentAnimationImpl::AddAssetIdentity(Report, Requested, Found,
-        TEXT("blueprint_name"), TEXT("blueprint_path"), TEXT("blueprint_class"));
-    UEAgentAnimationImpl::AddPackageFileStats(Report, Found.PackageName);
-    if (bWithDetails)
-    {
-        UEAgentAnimationImpl::AddAnimBlueprintDetails(Report, Cast<UAnimBlueprint>(Found.GetAsset()));
-    }
-    return Report;
-}
-
-// MCP:configure_animation_events - Switch the tick of a skeletal mesh component in the editor world (or the one the world param picks): despite the name, it only toggles component ticking and tick-when-paused. Returns the previous and current tick flags; nothing is marked dirty or saved.
+// MCP:set_skeletal_mesh_component_tick - Switch the tick of a skeletal mesh component in the editor world (or the one the world param picks): despite the name, it only toggles component ticking and tick-when-paused. Returns the previous and current tick flags; nothing is marked dirty or saved.
 //   @param component_name - Object name of the USkeletalMeshComponent, e.g. "CharacterMesh0", case-insensitive; the first actor in the world that has one with that name wins
 //   @param event_settings - Tick mode, any case: 'enable' (tick on, not while paused), 'disable' (tick off) or 'custom' (tick on, paused setting kept)
 //   @param world - Optional world selector: absent/'editor' (default) | 'pie' (ambiguous: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie').
@@ -348,7 +307,7 @@ TSharedPtr<FJsonObject> HandleConfigureAnimationEvents(const TSharedPtr<FJsonObj
     return Report;
 }
 
-// MCP:set_animation_speed - Set the play rate of a skeletal mesh component, found by object name in the editor world (or the world the world param selects), and switch its component tick on. Only a component in Use Animation Asset (single node) mode takes it: in Animation Blueprint mode nothing changes and actual_speed reads 0, so check speed_set_successfully. Transient: nothing is saved or undoable. A speed outside 0-10 or no such component is an error. For montages use play_animation with play_rate, or set_anim_montage_rate_scale on the asset.
+// MCP:set_animation_speed - Set the play rate of a skeletal mesh component, found by object name in the editor world (or the world the world param selects), and switch its component tick on. Only a component in Use Animation Asset (single node) mode takes it: in Animation Blueprint mode nothing changes and actual_speed reads 0, so check speed_set_successfully. Transient: nothing is saved or undoable. A speed outside 0-10 or no such component is an error. For montages use play_animation with play_rate, or set_montage_properties (rate_scale) on the asset.
 //   @param component_name - Object name of the USkeletalMeshComponent, e.g. "CharacterMesh0", case-insensitive; the first actor in the world that has one with that name wins
 //   @param speed - Playback speed multiplier; must be between 0.0 and 10.0
 //   @param world - Optional world selector: absent/'editor' (default) | 'pie' (ambiguous: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie').
@@ -404,15 +363,19 @@ TSharedPtr<FJsonObject> HandleSetAnimationSpeed(const TSharedPtr<FJsonObject>& P
     return Report;
 }
 
-// MCP:get_skeleton_info - Find a Skeleton asset in the Asset Registry and report its object path, class path, package, whether it is loaded, and the size and timestamp of its .uasset (left out when no file is on disk); nothing is changed. skeleton_name takes an object path, a package path or a short name searched under /Game; no match is an error, and so is a short name several skeletons share, with the candidates listed. Only with load_full_data true is the asset loaded, adding bone_count, the first 100 bones (name, index, parent_index) with bones_truncated, socket_count and slot_group_count. For the first 10 bone names plus virtual bones use get_skeleton_asset_info; the meshes using it: is_skeleton_shared; one bone's reference pose: get_bone_transform; a skeletal mesh: get_skeletal_mesh_info.
+// MCP:get_skeleton_info - Find a Skeleton asset in the Asset Registry and report its object path, class path, package, whether it is loaded, the size and timestamp of its .uasset (left out when no file is on disk), and the skeletal meshes bound to it (mesh_count, mesh_paths, shared when more than one), all without loading it; nothing is changed. skeleton_name takes an object path, a package path or a short name searched under /Game; no match is an error, and so is a short name several skeletons share, with the candidates listed. Only with load_full_data true is the asset loaded, adding bone_count, the first 100 bones (name, index, parent_index) with bones_truncated, socket_count, slot_group_count and every virtual bone with its source and target. One bone's reference pose: get_bone_transform; a skeletal mesh: get_skeletal_mesh_info.
 //   @param skeleton_name - Object path, package path, or bare short name of the Skeleton asset (resolved via mcp_common::ResolveAssetFlexible; an ambiguous short name errors out listing every candidate instead of picking one silently)
-//   @param load_full_data - When true, loads the asset and reports bone list (capped at 100), sockets, and slot groups (optional, default false)
-//   @returns { skeleton_name: string, skeleton_path: string, skeleton_class: string, package_name: string, is_loaded: bool, file_size_bytes: number?, file_size_kb: number?, file_size_mb: number?, last_modified: string?, loaded_successfully: bool?, is_valid: bool?, bone_count: number?, bones: [{ name, index, parent_index }]?, bones_truncated: bool?, socket_count: number?, slot_group_count: number?, load_error: string? }
+//   @param skeleton_path - Alias of skeleton_name.
+//   @param load_full_data - When true, loads the asset and reports bone list (capped at 100), sockets, slot groups and virtual bones (optional, default false)
+//   @returns { skeleton_name: string, skeleton_path: string, skeleton_class: string, package_name: string, is_loaded: bool, file_size_bytes: number?, file_size_kb: number?, file_size_mb: number?, last_modified: string?, mesh_count: int, shared: bool, mesh_paths: [string], loaded_successfully: bool?, is_valid: bool?, bone_count: number?, bones: [{ name, index, parent_index }]?, bones_truncated: bool?, socket_count: number?, slot_group_count: number?, virtual_bone_count: number?, virtual_bone_names: [string]?, virtual_bones: [{ name, source_bone, target_bone }]?, load_error: string? }
 
 TSharedPtr<FJsonObject> HandleGetSkeletonInfo(const TSharedPtr<FJsonObject>& Params)
 {
     FString Requested;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("skeleton_name"), Requested, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+    if (!Params->TryGetStringField(TEXT("skeleton_name"), Requested) && !Params->TryGetStringField(TEXT("skeleton_path"), Requested))
+    {
+        return mcp_common::MissingParameterReply(TEXT("skeleton_name"));
+    }
     bool bWithDetails = false;
     Params->TryGetBoolField(TEXT("load_full_data"), bWithDetails);
     if (Requested.IsEmpty())
@@ -448,6 +411,7 @@ TSharedPtr<FJsonObject> HandleGetSkeletonInfo(const TSharedPtr<FJsonObject>& Par
     UEAgentAnimationImpl::AddAssetIdentity(Report, Requested, Found,
         TEXT("skeleton_name"), TEXT("skeleton_path"), TEXT("skeleton_class"));
     UEAgentAnimationImpl::AddPackageFileStats(Report, Found.PackageName);
+    UEAgentAnimationImpl::AddSkeletonMeshes(Report, Found);
     if (bWithDetails)
     {
         UEAgentAnimationImpl::AddSkeletonDetails(Report, Cast<USkeleton>(Found.GetAsset()));
@@ -570,81 +534,6 @@ TSharedPtr<FJsonObject> HandleStopAnimation(const TSharedPtr<FJsonObject>& Param
     }
     UEAgentAnimationImpl::AddWorldFields(Report, Lookup);
     return Report;
-}
-
-// Typed remove commands: each deletes an asset only after verifying it is of the expected class, which is
-// what sets them apart from the generic delete_asset. A path that does not load answers deleted:false with
-// a `note` and success, so they are idempotent; an asset of another class is refused, and a delete the
-// engine does not carry out fails the call (AssetCommandHelpers::DeleteTypedAsset). The class is a parameter
-// rather than a template argument so the catalog generator follows each command into this body.
-
-static TSharedPtr<FJsonObject> HandleRemoveTypedAnimAsset(const TSharedPtr<FJsonObject>& Params, const TCHAR* CmdName,
-    const UClass* ExpectedClass)
-{
-    FString AssetPath;
-    if (!Params->TryGetStringField(TEXT("asset_path"), AssetPath) || AssetPath.IsEmpty())
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("[%s] Missing 'asset_path' parameter"), CmdName));
-    }
-
-    return AssetCommandHelpers::DeleteTypedAsset(CmdName, AssetPath, ExpectedClass);
-}
-
-// MCP:remove_anim_blueprint - Permanently delete one Animation Blueprint (UAnimBlueprint) asset after checking that the path loads as one: a force delete with no confirmation and no undo that nulls references to it. Idempotent: a path that no longer loads gives deleted=false with a note, not an error. An asset of another class is refused with success false and deleted=false. A delete the engine does not carry out -- PIE running, an asset the Asset Registry does not list, a file that cannot be deleted -- is also success false with deleted=false. Check get_asset_referencers first. Create one with create_anim_blueprint; delete_asset removes an asset of any type.
-//   @param asset_path - Long path of the UAnimBlueprint (e.g. /Game/Anim/ABP_Foo).
-//   @returns { asset_path, asset_class, package_name, deleted, already_existed, note? }
-TSharedPtr<FJsonObject> HandleRemoveAnimBlueprint(const TSharedPtr<FJsonObject>& Params)
-{
-    return HandleRemoveTypedAnimAsset(Params, TEXT("remove_anim_blueprint"), UAnimBlueprint::StaticClass());
-}
-
-// MCP:remove_anim_sequence - Permanently delete one UAnimSequence asset after checking that the path loads as one: a force delete with no confirmation and no undo that nulls references to it. Idempotent: a path that no longer loads gives deleted=false with a note, not an error. An asset of another class -- a montage or composite included -- is refused with success false and deleted=false. A delete the engine does not carry out -- PIE running, an asset the Asset Registry does not list, a file that cannot be deleted -- is also success false with deleted=false. Check get_asset_referencers first. Create one with create_anim_sequence; montages use remove_anim_montage and composites remove_anim_composite; delete_asset removes an asset of any type.
-//   @param asset_path - Long path of the UAnimSequence.
-//   @returns { asset_path, asset_class, package_name, deleted, already_existed, note? }
-TSharedPtr<FJsonObject> HandleRemoveAnimSequence(const TSharedPtr<FJsonObject>& Params)
-{
-    return HandleRemoveTypedAnimAsset(Params, TEXT("remove_anim_sequence"), UAnimSequence::StaticClass());
-}
-
-// MCP:remove_anim_montage - Permanently delete one UAnimMontage asset after checking that the path loads as one: a force delete with no confirmation and no undo that nulls references to it. Idempotent: a path that no longer loads gives deleted=false with a note, not an error. An asset of another class -- a sequence or composite included -- is refused with success false and deleted=false. A delete the engine does not carry out -- PIE running, an asset the Asset Registry does not list, a file that cannot be deleted -- is also success false with deleted=false. Check get_asset_referencers first. Create one with create_anim_montage; sequences use remove_anim_sequence and composites remove_anim_composite; delete_asset removes an asset of any type.
-//   @param asset_path - Long path of the UAnimMontage.
-//   @returns { asset_path, asset_class, package_name, deleted, already_existed, note? }
-TSharedPtr<FJsonObject> HandleRemoveAnimMontage(const TSharedPtr<FJsonObject>& Params)
-{
-    return HandleRemoveTypedAnimAsset(Params, TEXT("remove_anim_montage"), UAnimMontage::StaticClass());
-}
-
-// MCP:remove_anim_composite - Permanently delete one UAnimComposite asset after checking that the path loads as one: a force delete with no confirmation and no undo that nulls references to it. Idempotent: a path that no longer loads gives deleted=false with a note, not an error. An asset of another class -- a montage or sequence included -- is refused with success false and deleted=false. A delete the engine does not carry out -- PIE running, an asset the Asset Registry does not list, a file that cannot be deleted -- is also success false with deleted=false. Check get_asset_referencers first. Create one with create_anim_composite; montages use remove_anim_montage and sequences remove_anim_sequence; delete_asset removes an asset of any type.
-//   @param asset_path - Long path of the UAnimComposite.
-//   @returns { asset_path, asset_class, package_name, deleted, already_existed, note? }
-TSharedPtr<FJsonObject> HandleRemoveAnimComposite(const TSharedPtr<FJsonObject>& Params)
-{
-    return HandleRemoveTypedAnimAsset(Params, TEXT("remove_anim_composite"), UAnimComposite::StaticClass());
-}
-
-// MCP:remove_blend_space - Permanently delete one UBlendSpace asset after checking that the path loads as one: a force delete with no confirmation and no undo that nulls references to it. Idempotent: a path that no longer loads gives deleted=false with a note, not an error. Any blend space class passes the check, 1D blend spaces and aim offsets included; an asset of another class is refused with success false and deleted=false. A delete the engine does not carry out -- PIE running, an asset the Asset Registry does not list, a file that cannot be deleted -- is also success false with deleted=false. Check get_asset_referencers first. Create one with create_blend_space or scaffold_blend_space_2d; to accept only a 1D blend space use remove_blendspace_1d; delete_asset removes an asset of any type.
-//   @param asset_path - Long path of the UBlendSpace.
-//   @returns { asset_path, asset_class, package_name, deleted, already_existed, note? }
-TSharedPtr<FJsonObject> HandleRemoveBlendSpace(const TSharedPtr<FJsonObject>& Params)
-{
-    return HandleRemoveTypedAnimAsset(Params, TEXT("remove_blend_space"), UBlendSpace::StaticClass());
-}
-
-// MCP:remove_blendspace_1d - Permanently delete one UBlendSpace1D asset after checking that the path loads as one: a force delete with no confirmation and no undo that nulls references to it. Idempotent: a path that no longer loads gives deleted=false with a note, not an error. A 1D aim offset passes the check too; a 2D blend space or any other class is refused with success false and deleted=false. A delete the engine does not carry out -- PIE running, an asset the Asset Registry does not list, a file that cannot be deleted -- is also success false with deleted=false. Check get_asset_referencers first. Create one with create_blend_space; 2D blend spaces use remove_blend_space; delete_asset removes an asset of any type.
-//   @param asset_path - Long path of the UBlendSpace1D.
-//   @returns { asset_path, asset_class, package_name, deleted, already_existed, note? }
-TSharedPtr<FJsonObject> HandleRemoveBlendSpace1D(const TSharedPtr<FJsonObject>& Params)
-{
-    return HandleRemoveTypedAnimAsset(Params, TEXT("remove_blendspace_1d"), UBlendSpace1D::StaticClass());
-}
-
-// MCP:remove_pose_asset - Permanently delete one UPoseAsset after checking that the path loads as one: a force delete with no confirmation and no undo that nulls references to it. Idempotent: a path that no longer loads gives deleted=false with a note, not an error; an asset of another class is refused with success false and deleted=false, and during PIE the delete fails with success false and deleted=false. Check get_asset_referencers first. To drop one pose or curve inside the asset use remove_pose_from_pose_asset or remove_pose_curve; delete_asset removes an asset of any type.
-//   @param asset_path - Long path of the UPoseAsset.
-//   @returns { asset_path, asset_class, package_name, deleted, already_existed, note? }
-TSharedPtr<FJsonObject> HandleRemovePoseAsset(const TSharedPtr<FJsonObject>& Params)
-{
-    return HandleRemoveTypedAnimAsset(Params, TEXT("remove_pose_asset"), UPoseAsset::StaticClass());
 }
 
 // get_active_montages helpers -----------------------------------------------
@@ -806,18 +695,10 @@ TSharedPtr<FJsonObject> HandleGetActiveMontages(const TSharedPtr<FJsonObject>& P
 
 const McpCommandFamilies::FRegistrar Registration =
 {
-    { TEXT("configure_animation_events"), &HandleConfigureAnimationEvents },
+    { TEXT("set_skeletal_mesh_component_tick"), &HandleConfigureAnimationEvents },
     { TEXT("get_active_montages"), &HandleGetActiveMontages },
-    { TEXT("get_animation_blueprint_info"), &HandleGetAnimationBlueprintInfo },
     { TEXT("get_skeleton_info"), &HandleGetSkeletonInfo },
     { TEXT("play_animation"), &HandlePlayAnimation },
-    { TEXT("remove_anim_blueprint"), &HandleRemoveAnimBlueprint },
-    { TEXT("remove_anim_composite"), &HandleRemoveAnimComposite },
-    { TEXT("remove_anim_montage"), &HandleRemoveAnimMontage },
-    { TEXT("remove_anim_sequence"), &HandleRemoveAnimSequence },
-    { TEXT("remove_blend_space"), &HandleRemoveBlendSpace },
-    { TEXT("remove_blendspace_1d"), &HandleRemoveBlendSpace1D },
-    { TEXT("remove_pose_asset"), &HandleRemovePoseAsset },
     { TEXT("set_animation_speed"), &HandleSetAnimationSpeed },
     { TEXT("stop_animation"), &HandleStopAnimation },
 };

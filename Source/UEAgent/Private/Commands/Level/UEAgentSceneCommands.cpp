@@ -9,14 +9,6 @@
 #include "Components/MeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Materials/MaterialInterface.h"
-#include "Engine/Light.h"
-#include "Engine/DirectionalLight.h"
-#include "Engine/PointLight.h"
-#include "Engine/SpotLight.h"
-#include "Engine/RectLight.h"
-#include "Engine/SkyLight.h"
-#include "Components/LightComponent.h"
-#include "Components/SkyLightComponent.h"
 #include "EditorBuildUtils.h"
 #include "LightingBuildOptions.h"
 #include "Misc/ConfigCacheIni.h"
@@ -26,7 +18,7 @@
 #define LOCTEXT_NAMESPACE "UEAgentScene"
 
 /** Scene, actor and lighting commands: actor label, folder, attachment and material, viewport focus,
- *  spawning lights and building lighting. */
+ *  and building lighting. */
 namespace UEAgentSceneCommands
 {
 
@@ -346,72 +338,6 @@ TSharedPtr<FJsonObject> HandleFocusViewport(const TSharedPtr<FJsonObject>& Param
     return Result;
 }
 
-// MCP:add_light - Spawn a Directional, Point, Spot, Rect or Sky light actor in the editor world (not PIE) at location and rotation, optionally setting intensity and color, outside any undo transaction; nothing is saved. Returns light_type and the internal actor_name of the new actor.
-//   @param light_type - Directional, Point, Spot, Rect, or Sky (case-insensitive); anything else is an error.
-//   @param location - [x, y, z] world location in cm; default [0, 0, 0]. Any other value (an object, another length) is an error and no light is spawned.
-//   @param rotation - World rotation in degrees as [pitch, yaw, roll], default [0, 0, 0]; directional, spot and rect lights shine along its forward axis.
-//   @param intensity - Value for the Intensity property in the units of the light (Directional: lux; Sky: a multiplier); engine default when omitted.
-//   @param color - [r, g, b] linear color, usually 0..1; default white. Any other value (an object, a hex string, another length) is an error and no light is spawned.
-//   @returns { light_type: string, actor_name: string }
-TSharedPtr<FJsonObject> HandleAddLight(const TSharedPtr<FJsonObject>& Params)
-{
-    FString LightType;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("light_type"), LightType, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-    UWorld* World = nullptr;
-    if (TSharedPtr<FJsonObject> NoWorld = mcp_common::RequireEditorWorld(World, TEXT("Failed to get editor world"))) { return NoWorld; }
-
-    const FVector Location = mcp_common::ReadJsonVector(Params, TEXT("location"));
-    const FRotator Rotation = mcp_common::ReadJsonRotator(Params, TEXT("rotation"));
-
-    double Intensity = 0.0;
-    const bool bHasIntensity = Params->TryGetNumberField(TEXT("intensity"), Intensity);
-    FLinearColor Color = FLinearColor::White;
-    bool bHasColor = false;
-    if (Params->HasField(TEXT("color")))
-    {
-        const FVector C = mcp_common::ReadJsonVector(Params, TEXT("color"));
-        Color = FLinearColor(C.X, C.Y, C.Z);
-        bHasColor = true;
-    }
-
-    const FString TypeLower = LightType.ToLower();
-    AActor* NewActor = nullptr;
-    if (TypeLower == TEXT("directional"))   { NewActor = World->SpawnActor<ADirectionalLight>(Location, Rotation); }
-    else if (TypeLower == TEXT("point"))    { NewActor = World->SpawnActor<APointLight>(Location, Rotation); }
-    else if (TypeLower == TEXT("spot"))     { NewActor = World->SpawnActor<ASpotLight>(Location, Rotation); }
-    else if (TypeLower == TEXT("rect"))     { NewActor = World->SpawnActor<ARectLight>(Location, Rotation); }
-    else if (TypeLower == TEXT("sky"))      { NewActor = World->SpawnActor<ASkyLight>(Location, Rotation); }
-    else
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Unknown light_type '%s' (Directional/Point/Spot/Rect/Sky)"), *LightType));
-
-    if (!NewActor)
-        return mcp_common::MakeErrorReply(TEXT("Failed to spawn light actor"));
-
-    if (ASkyLight* Sky = Cast<ASkyLight>(NewActor))
-    {
-        if (USkyLightComponent* C = Sky->GetLightComponent())
-        {
-            if (bHasIntensity) { C->SetIntensity((float)Intensity); }
-            if (bHasColor)     { C->SetLightColor(Color); }
-            C->MarkRenderStateDirty();
-        }
-    }
-    else if (ALight* Light = Cast<ALight>(NewActor))
-    {
-        if (ULightComponent* C = Light->GetLightComponent())
-        {
-            if (bHasIntensity) { C->SetIntensity((float)Intensity); }
-            if (bHasColor)     { C->SetLightColor(Color); }
-        }
-    }
-
-    TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-    Result->SetStringField(TEXT("light_type"), LightType);
-    Result->SetStringField(TEXT("actor_name"), NewActor->GetName());
-    return Result;
-}
-
 // MCP:build_lighting - Start an asynchronous static lighting build of all levels in the editor world (not only the current one) and return started without waiting for the result. Side effect: writes the quality and OnlyBuildCurrentLevel=false into LightingBuildOptions of the editor per-project settings.
 //   @param quality - Preview, Medium, High or Production (case-insensitive); any other value silently builds at Preview. Default Preview.
 //   @returns { quality: string, started: bool, note: string }
@@ -443,7 +369,6 @@ TSharedPtr<FJsonObject> HandleBuildLighting(const TSharedPtr<FJsonObject>& Param
 
 const McpCommandFamilies::FRegistrar Registration =
 {
-    { TEXT("add_light"), &HandleAddLight },
     { TEXT("attach_actor"), &HandleAttachActor },
     { TEXT("build_lighting"), &HandleBuildLighting },
     { TEXT("detach_actor"), &HandleDetachActor },

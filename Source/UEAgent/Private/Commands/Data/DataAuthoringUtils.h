@@ -130,15 +130,4 @@ namespace DataAuthoringUtils
         }
         return nullptr;
     }
-
-    /** { world, is_world_partition, <NotRunFlag>: false, success: true }: a World Partition build reported on, not run. */
-    inline TSharedPtr<FJsonObject> WorldPartitionGateReply(const UWorld& World, const TCHAR* NotRunFlag)
-    {
-        TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
-        Reply->SetStringField(TEXT("world"), World.GetName());
-        Reply->SetBoolField(TEXT("is_world_partition"), World.IsPartitionedWorld());
-        Reply->SetBoolField(NotRunFlag, false);
-        Reply->SetBoolField(TEXT("success"), true);
-        return Reply;
-    }
 }

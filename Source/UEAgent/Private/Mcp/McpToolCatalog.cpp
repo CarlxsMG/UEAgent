@@ -177,7 +177,7 @@ namespace McpToolCatalogPrivate
 
 		// Alternatives listed WITHOUT quotes ("Filter to all, functions, or events"): there the
 		// quoted values are a SUBSET of the valid ones, and pinning the enum would reject a good
-		// one (e.g. get_blueprint_functions_list.filter_type, whose quotes left out 'all').
+		// one (e.g. a filter_type whose quotes named 'functions' and 'events' but left out 'all').
 		FString Replaced;
 		{
 			FRegexMatcher Matcher(Quoted, Desc);
@@ -849,7 +849,7 @@ FString FMcpToolCatalog::CheckNameLengths(const FString& CommandType, const TSha
 	}
 	// A name inside an object of an argument (a rename row, a node spec): the key says whether it is one. A batch's
 	// items are checked when each is dispatched, against its own tool.
-	if (Length < NameLengthLimit && CommandType != TEXT("batch"))
+	if (Length < NameLengthLimit && CommandType != TEXT("execute_batch"))
 	{
 		for (const auto& Field : Params->Values)
 		{
@@ -871,7 +871,7 @@ FString FMcpToolCatalog::CheckNameLengths(const FString& CommandType, const TSha
 			TEXT("nothing was changed. WHAT WORKS: a name or path of at most %d characters."),
 			*CommandType, *Where, Length, NAME_SIZE - 1, NameAffixMargin, NameLengthLimit, NameLengthLimit - 1);
 	}
-	if (CommandType == TEXT("batch"))
+	if (CommandType == TEXT("execute_batch"))
 	{
 		return FString();
 	}

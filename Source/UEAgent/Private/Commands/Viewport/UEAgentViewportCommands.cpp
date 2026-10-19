@@ -55,7 +55,7 @@ namespace
     }
 }
 
-// MCP:capture_viewport - Screenshot the active editor viewport to a PNG (forcing a fresh draw first), optionally resized and optionally returned inline as base64. Use it to SHOW a result -- proof that something looks right, an image to hand to a human. Do NOT use it to diagnose: an image costs far more context than a command and is read far less reliably than one, so for "is the actor there / did the value change / did it move" prefer get_actor_bounds, get_component_properties, raycast_scene or a property read, which answer exactly and cheaply. Captures the EDITOR viewport, not a PIE window; high_res_screenshot is the higher-resolution sibling.
+// MCP:capture_viewport - Screenshot the active editor viewport to a PNG (forcing a fresh draw first), optionally resized and optionally returned inline as base64. Use it to SHOW a result -- proof that something looks right, an image to hand to a human. Do NOT use it to diagnose: an image costs far more context than a command and is read far less reliably than one, so for "is the actor there / did the value change / did it move" prefer get_actor_bounds, get_component_properties, raycast_scene or a property read, which answer exactly and cheaply. Captures the EDITOR viewport, not a PIE window; capture_high_res_screenshot is the higher-resolution sibling.
 //   @param width - Optional target width to downscale/upscale to (omit to keep native viewport size).
 //   @param height - Optional target height (only used when width is also supplied).
 //   @param filename - Optional output filename (default MCP_Capture_<timestamp>.png); ".png" extension is added if missing.
@@ -170,7 +170,7 @@ TSharedPtr<FJsonObject> HandleCaptureViewport(const TSharedPtr<FJsonObject>& Par
 // capture, not Sequencer).
 // ---------------------------------------------------------------------------
 
-// MCP:high_res_screenshot - Capture a high-resolution (supersampled) screenshot and write it to a PNG SYNCHRONOUSLY. Prefers the Play-In-Editor game view when PIE is active (captured_pie=true); otherwise the active editor viewport. Drives FViewport::TakeHighResScreenShot() + FViewport::Draw(), which renders at resolution_multiplier x the viewport size and blocks (via ProcessScreenShots) until the file is on disk. The "HighResShot" exec path defers the write to the next render frame, which never runs headless, so it writes nothing. Requires a real RHI (errors honestly under -nullrhi) and a live viewport. Note: the supersampled path re-renders the scene, so the UMG/Slate HUD is NOT included; use capture_pie_screenshot for a HUD-inclusive PIE shot.
+// MCP:capture_high_res_screenshot - Capture a high-resolution (supersampled) screenshot and write it to a PNG SYNCHRONOUSLY. Prefers the Play-In-Editor game view when PIE is active (captured_pie=true); otherwise the active editor viewport. Drives FViewport::TakeHighResScreenShot() + FViewport::Draw(), which renders at resolution_multiplier x the viewport size and blocks (via ProcessScreenShots) until the file is on disk. The "HighResShot" exec path defers the write to the next render frame, which never runs headless, so it writes nothing. Requires a real RHI (errors honestly under -nullrhi) and a live viewport. Note: the supersampled path re-renders the scene, so the UMG/Slate HUD is NOT included; use capture_pie_screenshot for a HUD-inclusive PIE shot.
 //   @param resolution_multiplier - Resolution multiplier (clamped 1..16, default 2).
 //   @param filename - Optional output path; a bare name lands under <ProjectSaved>/Screenshots/, an absolute path is respected verbatim. ".png" is appended if missing. Defaults to a timestamped name.
 //   @returns { written: bool, file_path: string, resolution_multiplier: int, width: int, height: int, captured_pie: bool }
@@ -186,7 +186,7 @@ TSharedPtr<FJsonObject> HandleHighResScreenshot(const TSharedPtr<FJsonObject>& P
     if (!FApp::CanEverRender())
     {
         return mcp_common::MakeErrorReply(
-            TEXT("high_res_screenshot requires a real RHI; this editor is running without rendering (-nullrhi)"));
+            TEXT("capture_high_res_screenshot requires a real RHI; this editor is running without rendering (-nullrhi)"));
     }
 
     // Prefer the PIE game viewport when Play-In-Editor is active, so we capture the
@@ -243,7 +243,7 @@ TSharedPtr<FJsonObject> HandleHighResScreenshot(const TSharedPtr<FJsonObject>& P
     if (Size.X <= 0 || Size.Y <= 0)
     {
         return mcp_common::MakeErrorReply(
-            TEXT("high_res_screenshot: editor viewport produced no drawable frame (size 0)"));
+            TEXT("capture_high_res_screenshot: editor viewport produced no drawable frame (size 0)"));
     }
     const int32 OutW = Size.X * Multiplier;
     const int32 OutH = Size.Y * Multiplier;
@@ -280,7 +280,7 @@ TSharedPtr<FJsonObject> HandleHighResScreenshot(const TSharedPtr<FJsonObject>& P
     if (!bWritten)
     {
         return mcp_common::MakeErrorReply(FString::Printf(
-            TEXT("high_res_screenshot: capture produced no file at %s (requested=%s)"),
+            TEXT("capture_high_res_screenshot: capture produced no file at %s (requested=%s)"),
             *FilePath, bRequested ? TEXT("true") : TEXT("false")));
     }
 
@@ -297,6 +297,6 @@ TSharedPtr<FJsonObject> HandleHighResScreenshot(const TSharedPtr<FJsonObject>& P
 const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("capture_viewport"), &HandleCaptureViewport },
-    { TEXT("high_res_screenshot"), &HandleHighResScreenshot },
+    { TEXT("capture_high_res_screenshot"), &HandleHighResScreenshot },
 };
 } // namespace UEAgentViewportCommands

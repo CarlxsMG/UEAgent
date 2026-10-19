@@ -19,7 +19,7 @@
  *   BEFORE/_CHECK     a snapshot taken before the command and its check, which WINS over any other finding
  *   IN_RESPONSE       the evidence is already in the response: zero cost
  *   FOLLOW_UP_CUSTOM  one or two tailored re-reads
- *   FOLLOW_UP         the generic re-read (set_property_value -> get_property_value)
+ *   FOLLOW_UP         the generic re-read (set_properties -> get_properties)
  * Each family runs only if the one before found nothing. Then, for EVERY command, the notice for a
  * response whose heavy field was offloaded to disk (AnnotateOffload).
  *
@@ -45,7 +45,11 @@ namespace McpReadback
 		FString Reader;
 		/** destination (reader param) <- source (command param) */
 		TArray<TPair<FString, FString>> ParamMap;
+		/** The field of the reader's reply that holds the stored value. */
 		FString ValueKey;
+		/** Optional: ValueKey is a map keyed by the value of this command param (get_properties answers
+		 *  values.<property_name>), and the stored value is that entry. */
+		FString ValueKeyParam;
 		FString RequestKey;
 	};
 

@@ -9,6 +9,7 @@
 #include "Factories/BlueprintFactory.h"
 #include "EdGraphSchema_K2.h"
 #include "K2Node_Event.h"
+#include "K2Node_FunctionEntry.h"             // get_blueprint_functions: GetFunctionFlags (is_pure)
 #include "K2Node_VariableGet.h"
 #include "K2Node_VariableSet.h"
 #include "Components/StaticMeshComponent.h"
@@ -23,6 +24,7 @@
 #include "Engine/Engine.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
+#include "ScopedTransaction.h"                // FScopedTransaction around add_blueprint_function(override=true)
 // compile_blueprint(return_messages=true): capture node-anchored compiler diagnostics.
 #include "Kismet2/CompilerResultsLog.h"      // FCompilerResultsLog (UNREALED_API; UnrealEd already linked)
 #include "EdGraphToken.h"                     // FEdGraphToken -> GetGraphObject()/GetPin()
@@ -38,6 +40,9 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/GameMode.h"                    // create_blueprint: is_multiplayer of a GameMode Blueprint
+#include "GameFramework/GameModeBase.h"
+#include "Commands/Subsystem/SubsystemLifetime.h"      // create_blueprint: lifetime of a subsystem Blueprint
 #include "Kismet/GameplayStatics.h"
 // Blueprint Editor Library (UBlueprintEditorLibrary)
 #include "BlueprintEditorLibrary.h"
@@ -54,7 +59,7 @@
 // it through here.
 #include "Editor/LevelEditor/Public/LevelEditorSubsystem.h"
 // element-level typed import for set_blueprint_component_array_element /
-// apply_component_property_overrides. mcp_common::SetObjectProperty is object+property-NAME
+// set_blueprint_component_properties. mcp_common::SetObjectProperty is object+property-NAME
 // level; writing a struct member INSIDE a TArray element needs the same routing one level down.
 #include "JsonObjectConverter.h"   // FJsonObjectConverter::JsonValueToUProperty (same call shape as UEAgentAnimGraphCommands.cpp)
 #include "GameplayTagContainer.h"  // FGameplayTag / FGameplayTagContainer -- mirrors McpCommonUtils.cpp routing
@@ -207,12 +212,13 @@ TSharedPtr<FJsonObject> ReadOwnComponentTemplate(const TSharedPtr<FJsonObject>& 
 
 // Asset creation, component templates, compile and spawn
 
-// MCP:create_blueprint - Create a new Blueprint asset, optionally as a child of ANY parent class -- native or another Blueprint (pass its "..._C" class or asset path) -- and save it to disk immediately unless PIE is running. Also makes Blueprint Function Libraries and Macro Libraries, which have no Actor parent and which the normal path would reject. It does NOT create interfaces (create_blueprint_interface) nor the framework-class shortcuts (create_game_mode_class_bp, create_player_controller_class_bp, ...). A plain Blueprint already at the path is returned unchanged with already_exists=true and saved=false, nothing saved, parent_class and blueprint_type not applied; another asset class there (a Widget or Anim Blueprint included) is an error and nothing is created. It never confirms the parent of a new Blueprint: read it back with get_blueprint_parent.
+// MCP:create_blueprint - Create a new Blueprint asset, optionally as a child of ANY parent class -- native or another Blueprint (pass its "..._C" class or asset path) -- and save it to disk immediately unless PIE is running or save=false. This is also the way to make the framework classes (a GameMode, GameState, PlayerController, PlayerState, GameInstance or HUD Blueprint: pass that class as parent_class) and Blueprint subsystems (parent_class a USubsystem class such as "GameInstanceSubsystem"; lifetime says which family), and it makes Blueprint Function Libraries and Macro Libraries, which have no Actor parent and which the normal path would reject. It does NOT create interfaces (create_blueprint_interface). A plain Blueprint already at the path is returned unchanged with already_exists=true and saved=false, nothing saved and blueprint_type not applied -- when parent_class is given, only if its parent is parent_class or derives from it, otherwise it is an error and nothing is changed; another asset class there (a Widget or Anim Blueprint included) is an error and nothing is created. It never confirms the parent of a new Blueprint: read it back with get_blueprint_parent.
 //   @param name - Blueprint name. Either a bare name (created under 'path' or /Game/Blueprints/) OR a full content path ("/Game/MyGame/Systems/World/BP_Foo"); an object-path form ("/Game/.../BP_Foo.BP_Foo") is also accepted.
-//   @param parent_class - Optional parent class. Accepts a native name ("Actor", "Pawn", "Character", "StaticMeshActor", "BlueprintFunctionLibrary"), a "/Script/Module.Class" path, a Blueprint generated-class path ("/Game/.../BP_X.BP_X_C"), or a Blueprint asset path ("/Game/.../BP_X"). Defaults to AActor. Passing "BlueprintFunctionLibrary" makes a Function Library.
+//   @param parent_class - Optional parent class. Accepts a native name ("Actor", "Pawn", "Character", "GameModeBase", "PlayerController", "GameInstanceSubsystem", "BlueprintFunctionLibrary"), a "/Script/Module.Class" path, a Blueprint generated-class path ("/Game/.../BP_X.BP_X_C"), or a Blueprint asset path ("/Game/.../BP_X"). Defaults to AActor. Passing "BlueprintFunctionLibrary" makes a Function Library. When given, a Blueprint already at the path must have it (or a subclass of it) as parent.
 //   @param blueprint_type - Optional Blueprint type override: "normal" (default), "function_library" (a UBlueprintFunctionLibrary of static functions; parent_class is ignored/forced), or "macro" (a Macro Library; keeps parent_class or defaults to Actor). Function-library is also auto-detected from parent_class="BlueprintFunctionLibrary".
 //   @param path - Optional target content folder ("/Game/MyGame/Systems"). Used only when 'name' is a bare name; ignored when 'name' is already a full path.
-//   @returns { name: string, path: string, package_path: string, parent_class: string, generated_class: string, blueprint_type: string, already_exists: bool, saved: bool (false for a Blueprint already there: nothing saved), save_error?: string, note?: string } -- parent_class is, for a new Blueprint, what was REQUESTED and resolved, not proof the asset carries it (confirm a child's real parent with get_blueprint_parent), and for one already there its own parent. saved:false is honest: it carries save_error when PIE was running or the Blueprint already there has unsaved changes, and a note when an existing Blueprint is returned unchanged -- an unsaved Blueprint exists only in the editor and a later compile on it also returns success.
+//   @param save - Optional bool (default true). false registers the new Blueprint and marks its package dirty without saving it -- persist it later with save_asset.
+//   @returns { name: string, path: string, package_path: string, parent_class: string, generated_class: string, blueprint_type: string, already_exists: bool, saved: bool (false for a Blueprint already there: nothing saved), save_error?: string, note?: string, is_multiplayer?: bool, lifetime?: string } -- parent_class is, for a new Blueprint, what was REQUESTED and resolved, not proof the asset carries it (confirm a child's real parent with get_blueprint_parent), and for one already there its own parent. is_multiplayer appears for a GameMode (true when the parent derives from AGameMode); lifetime for a subsystem (Editor, Engine, GameInstance, World, LocalPlayer or Unknown). saved:false is honest: it carries save_error when PIE was running or the Blueprint already there has unsaved changes, and a note when save=false or an existing Blueprint is returned unchanged -- an unsaved Blueprint exists only in the editor and a later compile on it also returns success.
 
 TSharedPtr<FJsonObject> HandleCreateBlueprint(const TSharedPtr<FJsonObject>& Params)
 {
@@ -224,6 +230,34 @@ TSharedPtr<FJsonObject> HandleCreateBlueprint(const TSharedPtr<FJsonObject>& Par
 
     FString FolderOverride;
     Params->TryGetStringField(TEXT("path"), FolderOverride);
+
+    bool bSave = true;
+    Params->TryGetBoolField(TEXT("save"), bSave);
+
+    // A named parent is resolved up front: a Blueprint already at the path is only returned when it has that parent.
+    UClass* RequestedParentClass = nullptr;
+    if (!ParentClassStr.IsEmpty())
+    {
+        RequestedParentClass = FUEAgentGraphUtils::ResolveClass(ParentClassStr);
+        if (!RequestedParentClass)
+        {
+            return mcp_common::MakeErrorReply(
+                FString::Printf(TEXT("Parent class not found: %s"), *ParentClassStr));
+        }
+    }
+    // Why the Blueprint already at the path is not the one asked for, or empty when it is.
+    const auto ParentMismatch = [RequestedParentClass](const UBlueprint* Existing) -> FString
+    {
+        if (!RequestedParentClass || (Existing->ParentClass && Existing->ParentClass->IsChildOf(RequestedParentClass)))
+        {
+            return FString();
+        }
+        return FString::Printf(
+            TEXT("A Blueprint already exists at %s with parent %s, which does not derive from parent_class %s; ")
+            TEXT("nothing was created or changed. Pick another name, or delete that asset first."),
+            *Existing->GetPathName(), Existing->ParentClass ? *Existing->ParentClass->GetName() : TEXT("none"),
+            *RequestedParentClass->GetName());
+    };
 
     // Resolve the package path -- no blind concatenation: appending a full-path name ("/Game/MyGame/.../BP_Foo")
     // to the default folder makes a malformed package ("/Game/Blueprints//Game/MyGame/...") and a slashed object
@@ -268,6 +302,16 @@ TSharedPtr<FJsonObject> HandleCreateBlueprint(const TSharedPtr<FJsonObject>& Par
             BP->BlueprintType == BPTYPE_Interface       ? TEXT("interface") : TEXT("normal"));
         ResultObj->SetBoolField(TEXT("already_exists"), bAlreadyExists);
         ResultObj->SetBoolField(TEXT("saved"), bSaved);
+        // The framework families say what kind they are: a GameMode whether it runs match state, a subsystem its lifetime.
+        if (ParentClass && ParentClass->IsChildOf(AGameModeBase::StaticClass()))
+        {
+            ResultObj->SetBoolField(TEXT("is_multiplayer"), ParentClass->IsChildOf(AGameMode::StaticClass()));
+        }
+        if (ParentClass && ParentClass->IsChildOf(USubsystem::StaticClass()))
+        {
+            ResultObj->SetStringField(TEXT("lifetime"), UEAgentSubsystemLifetime::DetectLifetimeCategory(
+                BP->GeneratedClass ? BP->GeneratedClass.Get() : ParentClass));
+        }
         if (!SaveError.IsEmpty())
         {
             ResultObj->SetStringField(TEXT("save_error"), SaveError);
@@ -305,6 +349,11 @@ TSharedPtr<FJsonObject> HandleCreateBlueprint(const TSharedPtr<FJsonObject>& Par
                 : FString::Printf(TEXT("An asset already exists at '%s' but does not load as a Blueprint; nothing was created or saved."),
                     *ObjectPath));
         }
+        const FString Mismatch = ParentMismatch(Existing);
+        if (!Mismatch.IsEmpty())
+        {
+            return mcp_common::MakeErrorReply(Mismatch);
+        }
         return BlueprintReply(Existing, Existing->ParentClass, /*bAlreadyExists=*/true, /*bSaved=*/false, UnsavedNote(Existing));
     }
 
@@ -325,17 +374,7 @@ TSharedPtr<FJsonObject> HandleCreateBlueprint(const TSharedPtr<FJsonObject>& Par
     Params->TryGetStringField(TEXT("blueprint_type"), BlueprintTypeStr);
     BlueprintTypeStr = BlueprintTypeStr.ToLower().Replace(TEXT(" "), TEXT("")).Replace(TEXT("_"), TEXT(""));
 
-    UClass* SelectedParentClass = AActor::StaticClass();
-    if (!ParentClassStr.IsEmpty())
-    {
-        UClass* FoundClass = FUEAgentGraphUtils::ResolveClass(ParentClassStr);
-        if (!FoundClass)
-        {
-            return mcp_common::MakeErrorReply(
-                FString::Printf(TEXT("Parent class not found: %s"), *ParentClassStr));
-        }
-        SelectedParentClass = FoundClass;
-    }
+    UClass* SelectedParentClass = RequestedParentClass ? RequestedParentClass : AActor::StaticClass();
 
     const bool bWantFunctionLibrary =
         BlueprintTypeStr == TEXT("functionlibrary") || BlueprintTypeStr == TEXT("bftl") ||
@@ -363,8 +402,10 @@ TSharedPtr<FJsonObject> HandleCreateBlueprint(const TSharedPtr<FJsonObject>& Par
     }
     else
     {
-        // Normal blueprint: the parent must be a valid Blueprint base (clean error otherwise).
-        if (!FKismetEditorUtilities::CanCreateBlueprintOfClass(SelectedParentClass))
+        // Normal blueprint: the parent must be a valid Blueprint base (clean error otherwise). The subsystem bases
+        // are not BlueprintBase classes, yet a Blueprint subsystem is made exactly like this, so they skip the check.
+        if (!SelectedParentClass->IsChildOf(USubsystem::StaticClass())
+            && !FKismetEditorUtilities::CanCreateBlueprintOfClass(SelectedParentClass))
         {
             return mcp_common::MakeErrorReply(
                 FString::Printf(TEXT("Class cannot be a Blueprint parent: %s"), *SelectedParentClass->GetPathName()));
@@ -385,6 +426,14 @@ TSharedPtr<FJsonObject> HandleCreateBlueprint(const TSharedPtr<FJsonObject>& Par
 
     UBlueprint* NewBlueprint = FindObject<UBlueprint>(Package, *AssetName);
     const bool bAlreadyExists = (NewBlueprint != nullptr);
+    if (bAlreadyExists)
+    {
+        const FString Mismatch = ParentMismatch(NewBlueprint);
+        if (!Mismatch.IsEmpty())
+        {
+            return mcp_common::MakeErrorReply(Mismatch);
+        }
+    }
 
     // Registering the asset (AssetCreated + MarkPackageDirty below) does not write it: without a
     // SavePackage the Blueprint exists only in memory, and every later call on it (set_properties,
@@ -414,7 +463,11 @@ TSharedPtr<FJsonObject> HandleCreateBlueprint(const TSharedPtr<FJsonObject>& Par
         FAssetRegistryModule::AssetCreated(NewBlueprint);
         NewBlueprint->MarkPackageDirty();
 
-        if (bPieActive)
+        if (!bSave)
+        {
+            // Asked not to save: registered and dirty, persisted by a later save_asset.
+        }
+        else if (bPieActive)
         {
             SaveError = TEXT("Skipped saving to disk: a Play-in-Editor session is active. The Blueprint ")
                 TEXT("exists only in memory -- call save_asset on it once PIE has stopped (create_blueprint ")
@@ -432,8 +485,13 @@ TSharedPtr<FJsonObject> HandleCreateBlueprint(const TSharedPtr<FJsonObject>& Par
         SaveError = UnsavedNote(NewBlueprint);
     }
 
-    return BlueprintReply(NewBlueprint, bAlreadyExists ? NewBlueprint->ParentClass.Get() : SelectedParentClass,
+    TSharedPtr<FJsonObject> Reply = BlueprintReply(NewBlueprint, bAlreadyExists ? NewBlueprint->ParentClass.Get() : SelectedParentClass,
         bAlreadyExists, bSaved, SaveError);
+    if (!bSave && !bAlreadyExists)
+    {
+        Reply->SetStringField(TEXT("note"), TEXT("save=false: the Blueprint is registered and its package marked dirty, but not saved; persist it with save_asset"));
+    }
+    return Reply;
 }
 
 // ---------------------------------------------------------------------------
@@ -539,7 +597,7 @@ UClass* ResolveComponentClass(FString& InOutType)
 }
 }
 
-// MCP:add_component_to_blueprint - Add a component to a Blueprint's SCS (engine class or a Blueprint AC_* class) with an optional relative transform and parent, then compile. TRAP 1: on a CHILD Blueprint whose scene root is INHERITED, a SCENE component can end up written into the PARENT's SCS (source:"inherited", owner_class = the parent) -- which silently edits a vendor/library asset; non-scene ActorComponents land correctly on the child. TRAP 2: a scene component of a BLUEPRINT class, or one given a location, can report success without persisting and then materialize LATER as a duplicate. Both have the same oracle: get_blueprint_scs_tree right after, checking owner_class and source of the new node -- never the return value.
+// MCP:add_component_to_blueprint - Add a component to a Blueprint's SCS (engine class or a Blueprint AC_* class) with an optional relative transform and parent, then compile. TRAP 1: on a CHILD Blueprint whose scene root is INHERITED, a SCENE component can end up written into the PARENT's SCS (source:"inherited", owner_class = the parent) -- which silently edits a vendor/library asset; non-scene ActorComponents land correctly on the child. TRAP 2: a scene component of a BLUEPRINT class, or one given a location, can report success without persisting and then materialize LATER as a duplicate. Both have the same oracle: get_blueprint_components right after, checking owner_class and source of the new node -- never the return value.
 //   @param blueprint_name - Name of the blueprint
 //   @param component_type - Component class: a native short name ('StaticMesh', 'Box', 'Sphere'), a /Script path ('/Script/Engine.StaticMeshComponent'), OR a Blueprint component class given as its object path ('/Game/.../AC_Foo.AC_Foo_C'), a bare package path ('/Game/.../AC_Foo'), or a bare '<Name>_C' ('AC_Foo_C').
 //   @param component_name - Name for the new component instance
@@ -549,7 +607,7 @@ UClass* ResolveComponentClass(FString& InOutType)
 //   @param transform - Optional {"location":[x,y,z], "rotation":[p,y,r], "scale":[x,y,z]} alias for scene components; any flat location/rotation/scale arg above wins over the matching axis in here if both are given.
 //   @param parent_component_name - Optional parent for scene components; omit / "root" attaches under the Blueprint's EXISTING scene root (SCS or native) instead of force-adding a second orphan root node. May also name a NATIVE inherited scene component (e.g. ACharacter's "CharacterMesh0"), mirroring attach_blueprint_component. Ignored for non-scene ActorComponents (no transform, no hierarchy to join).
 //   @param socket_name - Optional socket/bone name on the parent (AttachToName)
-//   @returns { component_name: string, component_type: string } -- an ECHO of the request with no owner, no source and no verification. It says nothing about WHERE the node landed: read get_blueprint_scs_tree afterwards.
+//   @returns { component_name: string, component_type: string } -- an ECHO of the request with no owner, no source and no verification. It says nothing about WHERE the node landed: read get_blueprint_components afterwards.
 
 TSharedPtr<FJsonObject> HandleAddComponentToBlueprint(const TSharedPtr<FJsonObject>& Params)
 {
@@ -751,7 +809,7 @@ TSharedPtr<FJsonObject> HandleAddComponentToBlueprint(const TSharedPtr<FJsonObje
     return Echo;
 }
 
-// MCP:set_physics_properties - Set simulate-physics, mass override, linear and angular damping on ONE primitive component TEMPLATE of a Blueprint (an OWN SCS node only -- inherited components are not found here, and it is the template, not a placed actor). Only the fields present are touched. It does NOT compile and does NOT save. For any other property of a component template use set_blueprint_component_property, which is ICH-aware and reaches inherited components.
+// MCP:set_physics_properties - Set simulate-physics, mass override, linear and angular damping on ONE primitive component TEMPLATE of a Blueprint (an OWN SCS node only -- inherited components are not found here, and it is the template, not a placed actor). Only the fields present are touched. It does NOT compile and does NOT save. For any other property of a component template use set_blueprint_component_properties, which is ICH-aware and reaches inherited components.
 //   @param blueprint_name - Name of the blueprint
 //   @param component_name - Name of an OWN SCS component; must resolve to a UPrimitiveComponent or the call errors
 //   @param simulate_physics - Optional bool to toggle physics simulation
@@ -852,8 +910,8 @@ TArray<TSharedPtr<FJsonValue>> CompilerMessages(const FCompilerResultsLog& Resul
 }
 }
 
-// MCP:compile_blueprint - Compile a Blueprint to regenerate its class, returning the REAL outcome (succeeded == zero errors) plus the error/warning counts, and with return_messages=true the per-message log with each message anchored to its node_id/graph. Required after authoring functions, variables or RPCs and before anything calls them. TRAP: num_errors:0 is not a promise the graph works -- an unresolved WILDCARD pin on an array/ForEach node can compile clean and still block PIE, and warnings (a "was pruned" node whose consumers silently read defaults) do not lower it. Read the warnings too, and get_compile_errors as a second opinion.
-//   @param blueprint_name - Name of the blueprint. A short name matching two assets compiles ONE of them silently -- pass the full path when in doubt.
+// MCP:compile_blueprint - Compile a Blueprint to regenerate its class, returning the REAL outcome (succeeded == zero errors) plus the error/warning counts, and with return_messages=true the per-message log with each message anchored to its node_id/graph. Required after authoring functions, variables or RPCs and before anything calls them. TRAP: num_errors:0 is not a promise the graph works -- an unresolved WILDCARD pin on an array/ForEach node can compile clean and still block PIE, and warnings (a "was pruned" node whose consumers silently read defaults) do not lower it, so read the warnings too. Compiling dirties the package and can cascade into other packages; check_blueprint_errors / find_erroring_blueprints answer without a compile.
+//   @param blueprint_name - Name of the blueprint, or its full asset path (e.g. /Game/MyGame/Core/BP_MyActor). A short name matching two assets compiles ONE of them silently -- pass the full path when in doubt.
 //   @param return_messages - Optional (default false). When true, ALSO returns the per-message compiler results log so callers can see node-anchored errors/warnings. When false/absent the response omits the `messages` array but still reports the REAL compile status.
 //   @returns { name: string, compiled: bool, succeeded: bool, num_errors: int, num_warnings: int } -- `compiled`/`succeeded` reflect the ACTUAL compile outcome (true iff zero errors; warnings still compile). Both the default and return_messages paths return these fields. When return_messages=true additionally { messages: [{severity: 'error'|'warning'|'note', text: string, node_id: string, node_title: string, graph_name: string}] } (node_id/node_title/graph_name are empty strings when the message is not anchored to a graph node)
 
@@ -1374,7 +1432,7 @@ TSharedPtr<FJsonObject> HandleGetBlueprintMaterialInfo(const TSharedPtr<FJsonObj
 
 // Structure: overview, components, function graphs and variables
 
-// MCP:get_blueprint_info - One cheap overview of a Blueprint: parent class, compile status, and the counts + names of its OWN components, variables, function graphs and ubergraph pages. Everything here is what THIS asset declares -- nothing inherited, and interface-override graphs are not listed. So use it to orient, and the specialists to decide: get_blueprint_scs_tree for the real component set including ancestors, get_blueprint_functions for interface/macro/delegate graphs, get_blueprint_variables for variable flags, get_graph_nodes to read a graph.
+// MCP:get_blueprint_info - One cheap overview of a Blueprint: parent class, compile status, and the counts + names of its OWN components, variables, function graphs and ubergraph pages. Everything here is what THIS asset declares -- nothing inherited, and interface-override graphs are not listed. So use it to orient, and the specialists to decide: get_blueprint_components for the real component set including ancestors, get_blueprint_functions for interface/macro/delegate graphs, get_blueprint_variables for variable flags, get_graph_nodes to read a graph.
 //   @param blueprint_name - Name of the blueprint
 //   @returns { blueprint_name: string, parent_class: string, components: [{ name, type }], component_count: int, variables: [{ name, type }], variable_count: int, functions: [{ name }], function_count: int, graphs: [{ name, type }], graph_count: int, has_event_graph: bool, event_graph_name?: string, status: string } -- parent_class is a short NAME (ambiguous between an engine class and a same-named project one), variable "type" is only the pin CATEGORY (no struct/class), and status is UpToDate/Error/Unknown.
 
@@ -1477,81 +1535,9 @@ TSharedPtr<FJsonObject> HandleGetBlueprintInfo(const TSharedPtr<FJsonObject>& Pa
     return Overview;
 }
 
-// MCP:get_blueprint_components - List the components this Blueprint DECLARES in its own SCS, with type, relative transform and the real hierarchy linkage (in-tree parent from the ChildNodes tree, parent_is_native for a native/inherited parent, attach_socket, children). SCOPE: own SCS only -- components inherited from a parent Blueprint or declared natively are NOT here, so a small count is not proof the actor is small. For the full picture including ancestors use get_blueprint_scs_tree (which reports what it deduplicates), and cross-check the CDO when a component must be proven to exist.
-//   @param blueprint_name - Name of the blueprint
-//   @returns { blueprint_name: string, components: [{ name, type, is_scene_component, parent, parent_is_native, attach_socket, children:[name], location?, rotation?, scale? }], component_count: int } -- "parent" is the in-tree SCS parent, falling back to the inherited/native parent name when the node is parented outside this SCS; location/rotation/scale only appear for scene components.
-
-TSharedPtr<FJsonObject> HandleGetBlueprintComponents(const TSharedPtr<FJsonObject>& Params)
-{
-    FString BlueprintName;
-    TSharedPtr<FJsonObject> Error;
-    UBlueprint* Blueprint = UEAgentBlueprintCommandsImpl::ResolveBlueprintParam(
-        Params, &mcp_common::MissingParameterReply, BlueprintName, Error);
-    if (!Blueprint)
-    {
-        return Error;
-    }
-
-    // One row per node of this Blueprint's OWN construction script that carries a template.
-    auto DescribeNode = [](USimpleConstructionScript* Scs, USCS_Node* ScsNode) -> TSharedPtr<FJsonObject>
-    {
-        TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
-        Row->SetStringField(TEXT("name"), ScsNode->GetVariableName().ToString());
-        Row->SetStringField(TEXT("type"), ScsNode->ComponentTemplate->GetClass()->GetName());
-
-        // The in-tree parent lives in the ChildNodes tree, so ask FindParentNode first;
-        // ParentComponentOrVariableName only names a parent OUTSIDE this SCS (native or inherited).
-        const USCS_Node* TreeParent = Scs->FindParentNode(ScsNode);
-        Row->SetStringField(TEXT("parent"), TreeParent
-            ? TreeParent->GetVariableName().ToString()
-            : ScsNode->ParentComponentOrVariableName.ToString());
-        Row->SetBoolField(TEXT("parent_is_native"), ScsNode->bIsParentComponentNative);
-        Row->SetStringField(TEXT("attach_socket"), ScsNode->AttachToName.ToString());
-
-        TArray<TSharedPtr<FJsonValue>> ChildNames;
-        for (const USCS_Node* Child : ScsNode->GetChildNodes())
-        {
-            if (Child)
-            {
-                ChildNames.Add(MakeShared<FJsonValueString>(Child->GetVariableName().ToString()));
-            }
-        }
-        Row->SetArrayField(TEXT("children"), ChildNames);
-
-        // Relative transform, for scene components only.
-        const USceneComponent* SceneTemplate = Cast<USceneComponent>(ScsNode->ComponentTemplate);
-        Row->SetBoolField(TEXT("is_scene_component"), SceneTemplate != nullptr);
-        if (SceneTemplate)
-        {
-            Row->SetObjectField(TEXT("location"), mcp_common::VectorToJsonObject(SceneTemplate->GetRelativeLocation()));
-            Row->SetObjectField(TEXT("rotation"), mcp_common::RotatorToJsonObject(SceneTemplate->GetRelativeRotation()));
-            Row->SetObjectField(TEXT("scale"), mcp_common::VectorToJsonObject(SceneTemplate->GetRelativeScale3D()));
-        }
-        return Row;
-    };
-
-    TArray<TSharedPtr<FJsonValue>> ComponentRows;
-    if (USimpleConstructionScript* OwnScs = Blueprint->SimpleConstructionScript)
-    {
-        for (USCS_Node* ScsNode : OwnScs->GetAllNodes())
-        {
-            if (ScsNode && ScsNode->ComponentTemplate)
-            {
-                ComponentRows.Add(MakeShared<FJsonValueObject>(DescribeNode(OwnScs, ScsNode)));
-            }
-        }
-    }
-
-    TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
-    Reply->SetStringField(TEXT("blueprint_name"), BlueprintName);
-    Reply->SetArrayField(TEXT("components"), ComponentRows);
-    Reply->SetNumberField(TEXT("component_count"), ComponentRows.Num());
-    return Reply;
-}
-
 // ---------------------------------------------------------------------------
 // SCS structural-edit census + shared batch removal.
-// Used by BOTH remove_component_from_blueprint and remove_blueprint_component_node.
+// Used by remove_component_from_blueprint.
 // ---------------------------------------------------------------------------
 namespace
 {
@@ -1658,7 +1644,7 @@ namespace
         return Names;
     }
 
-    // The request of remove_component_from_blueprint / remove_blueprint_component_node: blueprint_name, the
+    // The request of remove_component_from_blueprint: blueprint_name, the
     // requested component names and promote_children (default true). The Blueprint, or null with OutError holding
     // the reply when a name is missing, the Blueprint does not resolve or has no construction script.
     UBlueprint* ReadScsRemovalRequest_BPCmd(const TSharedPtr<FJsonObject>& Params, FString& OutBlueprintName,
@@ -1696,7 +1682,7 @@ namespace
         return Blueprint;
     }
 
-    // Shared body of remove_component_from_blueprint / remove_blueprint_component_node.
+    // Body of remove_component_from_blueprint.
     // Removes N nodes with ONE compile for the whole batch -- chaining single-node calls is
     // exactly the pattern that causes collateral deletions. Fills `Data` with the
     // double census. Returns true only when every requested node is gone from AllNodes AND no
@@ -1849,12 +1835,12 @@ namespace
     }
 }
 
-// MCP:remove_component_from_blueprint - Remove one or more component nodes from a Blueprint's SCS, with a DOUBLE CENSUS (flat AllNodes vs a walk of RootNodes) so collateral losses are reported instead of hidden: also_removed names descendants that went with their parent and unexpected_losses names nodes left in AllNodes but unreachable from any root. Batch-capable and that is the point -- chaining SINGLE-node calls on the same Blueprint is exactly the pattern that deletes components nobody asked for, so pass component_names and take ONE compile for the lot. A re-added component comes back with its CLASS defaults: per-instance overrides are gone and do not come back on save. "Nothing matched" is an ERROR here; remove_blueprint_component_node is the idempotent twin that reports already_removed instead.
+// MCP:remove_component_from_blueprint - Remove one or more component nodes from a Blueprint's SCS, with a DOUBLE CENSUS (flat AllNodes vs a walk of RootNodes) so collateral losses are reported instead of hidden: also_removed names descendants that went with their parent and unexpected_losses names nodes left in AllNodes but unreachable from any root. Batch-capable and that is the point -- chaining SINGLE-node calls on the same Blueprint is exactly the pattern that deletes components nobody asked for, so pass component_names and take ONE compile for the lot. A re-added component comes back with its CLASS defaults: per-instance overrides are gone and do not come back on save. IDEMPOTENT, so it is safe in scripts that re-run: a requested component that is not there is listed in not_found, and when none of them is there the call still succeeds with already_removed:true and nothing removed.
 //   @param blueprint_name - Name/path of the blueprint
 //   @param component_name - Name of the component to remove (single form; matches the variable name or the _GEN_VARIABLE internal name)
 //   @param component_names - Optional array of component names removed as ONE batch with a SINGLE compile. Chaining single-node calls is the pattern that causes collateral deletions. Merged with component_name when both are given.
 //   @param promote_children - Optional bool, default true: keep descendants by re-parenting them (RemoveNodeAndPromoteChildren). Pass false for plain RemoveNode, which orphans the whole subtree.
-//   @returns { success, error?, data: { blueprint_name, removed_component, requested[], removed_components[], also_removed[], unexpected_losses[], not_found[], still_present[], node_count_before, node_count_after, reachable_before, reachable_after, orphans_before[], orphans_after[], root_nodes_before[], root_nodes_after[], root_nodes_changed, promote_children, compiled, compile_count, success, verification } }
+//   @returns { success, error?, data: { blueprint_name, removed_component, component_name, removed, already_removed, requested[], removed_components[], also_removed[], unexpected_losses[], not_found[], still_present[], node_count_before, node_count_after, reachable_before, reachable_after, orphans_before[], orphans_after[], root_nodes_before[], root_nodes_after[], root_nodes_changed, promote_children, compiled, compile_count, success, verification } } -- removed: at least one node went; already_removed: none of the requested names was there (a no-op, not an error).
 
 TSharedPtr<FJsonObject> HandleRemoveComponentFromBlueprint(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1871,25 +1857,22 @@ TSharedPtr<FJsonObject> HandleRemoveComponentFromBlueprint(const TSharedPtr<FJso
     // Remove (double census inside the shared helper)
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("blueprint_name"), BlueprintName);
-    // Legacy field kept so existing callers keep reading the single-node answer.
+    // The first requested name, under both of the names callers read it by.
     Data->SetStringField(TEXT("removed_component"), RequestedNames[0]);
+    Data->SetStringField(TEXT("component_name"), RequestedNames[0]);
 
     FString RemoveError;
     const bool bOk = PerformScsRemoval_BPCmd(Blueprint, RequestedNames, bPromoteChildren, Data, RemoveError);
     Data->SetBoolField(TEXT("success"), bOk);
 
-    // Nothing matched at all: that is a caller error, not a silent no-op.
+    // `removed` / `already_removed` describe the batch as a whole. A name this call did NOT find was
+    // already gone: that stays idempotent, not an error.
+    const TArray<TSharedPtr<FJsonValue>>* RemovedArr = nullptr;
     const TArray<TSharedPtr<FJsonValue>>* NotFoundArr = nullptr;
-    if (bOk && Data->TryGetArrayField(TEXT("not_found"), NotFoundArr) && NotFoundArr
-        && NotFoundArr->Num() == RequestedNames.Num())
-    {
-        Data->SetBoolField(TEXT("success"), false);
-        return mcp_common::MakeVerifiedReply(
-            Data, /*bSuccess=*/false, mcp_common::EMcpVerification::Verified,
-            TEXT("scs_double_census"),
-            TEXT("no requested component resolved to an SCS node; nothing was removed"),
-            FString::Printf(TEXT("Component not found: %s"), *RequestedNames[0]));
-    }
+    const int32 RemovedNum  = (Data->TryGetArrayField(TEXT("removed_components"), RemovedArr) && RemovedArr) ? RemovedArr->Num() : 0;
+    const int32 NotFoundNum = (Data->TryGetArrayField(TEXT("not_found"), NotFoundArr) && NotFoundArr) ? NotFoundArr->Num() : 0;
+    Data->SetBoolField(TEXT("removed"), RemovedNum > 0);
+    Data->SetBoolField(TEXT("already_removed"), NotFoundNum == RequestedNames.Num());
 
     return mcp_common::MakeVerifiedReply(
         Data, bOk,
@@ -1941,13 +1924,136 @@ TSharedPtr<FJsonObject> FunctionGraphReply(const FString& BlueprintName, const F
     Reply->SetStringField(TEXT("function_name"), FunctionName);
     return Reply;
 }
+
+// The reply of an override: which shape it took, whether it was there already, and the graph to wire.
+TSharedPtr<FJsonObject> OverrideReply(const FString& BlueprintName, const FString& FunctionName, const UEdGraph& Graph,
+    const TCHAR* Kind, bool bAlreadyExisted)
+{
+    TSharedPtr<FJsonObject> Reply = FunctionGraphReply(BlueprintName, FunctionName, Graph);
+    Reply->SetStringField(TEXT("kind"), Kind);
+    Reply->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
+    Reply->SetBoolField(TEXT("created"), !bAlreadyExisted);
+    Reply->SetBoolField(TEXT("was_already_overridden"), bAlreadyExisted);
+    return Reply;
 }
 
-// MCP:add_blueprint_function - Create a NEW function graph on a Blueprint, or with override=true a real OVERRIDE of an inherited/interface member (delegated to implement_interface_function, so an event-shape member becomes an event override node and a value-returning one an override graph). It REFUSES rather than guessing: a name that collides with an overridable inherited function errors with a hint instead of silently creating a "<name>_0" shadow, and an EVENT-shape member already shadowed by a local function graph errors telling you to remove that graph first. The new graph does not exist in the generated class until compile_blueprint, so compile BEFORE add_function_parameter or any node that calls it -- otherwise a build_blueprint_graph step fails with "Function not found" and rolls the whole batch back.
-//   @param blueprint_name - Name of the blueprint
-//   @param function_name - Name for the new function; with override=true, the EXACT name of the inherited (interface or parent-class) function to override.
+// add_blueprint_function(override=true): creates or resolves what IMPLEMENTS the inherited member FunctionName
+// (an interface member or a parent virtual). A member WITH a return value gets a real FUNCTION graph -- in
+// ImplementedInterfaces[].Graphs for an interface, where a plain new function is refused and an event node would
+// be a useless return-less stub -- and an event-shape member (no return value) gets a genuine event OVERRIDE node
+// in the event graph, placed at node_position when the params give one. Idempotent in both branches.
+TSharedPtr<FJsonObject> ImplementInheritedMember(UBlueprint* Blueprint, const FString& BlueprintName, const FString& FunctionName,
+    const TSharedPtr<FJsonObject>& Params)
+{
+    FScopedTransaction Transaction(NSLOCTEXT("UEAgentBlueprintCommands", "ImplInheritedMember", "MCP: Override Inherited Function"));
+    Blueprint->Modify();
+
+    // 1) Conform: for every implemented interface, (re)create the FUNCTION graph of any interface method that has a
+    //    return value / outputs (cannot be an event) in ImplementedInterfaces[].Graphs, with the correct Entry+Result
+    //    terminators. Idempotent -- a no-op if the graph already exists.
+    FBlueprintEditorUtils::ConformImplementedInterfaces(Blueprint);
+
+    // 2) Resolvable as a function graph now? FindGraphByNameDeep searches interface graphs, so it catches the
+    //    just-conformed graph as well as any pre-existing function override.
+    if (UEdGraph* Existing = FUEAgentGraphUtils::FindGraphByNameDeep(Blueprint, FunctionName))
+    {
+        FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+        return OverrideReply(BlueprintName, FunctionName, *Existing, TEXT("function"), true);
+    }
+
+    // 3) Not a function graph yet -> resolve the override target (interface method OR parent virtual).
+    //    GetOverrideFunctionClass checks interface functions first, then walks the parent hierarchy.
+    UFunction* OverrideFunc = nullptr;
+    UClass* OverrideFuncClass = FBlueprintEditorUtils::GetOverrideFunctionClass(Blueprint, FName(*FunctionName), &OverrideFunc);
+    if (!OverrideFunc || !OverrideFuncClass)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("No implementable interface/overridable function named '%s' on '%s' (is the interface implemented?)"),
+            *FunctionName, *BlueprintName));
+    }
+
+    // 4) If it CAN be an event (no return value), it belongs in the event graph as an event OVERRIDE
+    //    (bOverrideFunction=true), not in a function graph. Mirrors UBlueprintEditorLibrary::AddEventOverride;
+    //    idempotent via FindOverrideForFunction.
+    if (UEdGraphSchema_K2::FunctionCanBePlacedAsEvent(OverrideFunc))
+    {
+        UEdGraph* EventGraph = FBlueprintEditorUtils::FindEventGraph(Blueprint);
+        if (!EventGraph)
+        {
+            return mcp_common::MakeErrorReply(TEXT("Blueprint has no event graph to place the interface event override"));
+        }
+
+        // The event is referenced on the class that DECLARES it (what FBlueprintEventNodeSpawner does). Once the
+        // Blueprint overrides it, its skeleton class carries a stub of the event, GetOverrideFunctionClass answers the
+        // Blueprint's own class, and FindOverrideForFunction(that class) misses the existing node -- a second call
+        // would add a duplicate event. So the declaring class is the root of the super-function chain, and an
+        // override event of that name found anywhere in the Blueprint is THE override (there is one per name).
+        const UFunction* RootDeclaration = OverrideFunc;
+        while (const UFunction* SuperFunction = RootDeclaration->GetSuperFunction())
+        {
+            RootDeclaration = SuperFunction;
+        }
+        UClass* EventOwnerClass = RootDeclaration->GetOwnerClass() ? RootDeclaration->GetOwnerClass()->GetAuthoritativeClass() : OverrideFuncClass;
+        const FName EventName(*FunctionName);
+        UK2Node_Event* EventNode = FBlueprintEditorUtils::FindOverrideForFunction(Blueprint, EventOwnerClass, EventName);
+        if (!EventNode)
+        {
+            TArray<UK2Node_Event*> ExistingEvents;
+            FBlueprintEditorUtils::GetAllNodesOfClass<UK2Node_Event>(Blueprint, ExistingEvents);
+            for (UK2Node_Event* Candidate : ExistingEvents)
+            {
+                if (Candidate && Candidate->bOverrideFunction && Candidate->EventReference.GetMemberName() == EventName)
+                {
+                    EventNode = Candidate;
+                    break;
+                }
+            }
+        }
+        const bool bAlready = (EventNode != nullptr);
+        if (!EventNode)
+        {
+            EventGraph->Modify();
+            FGraphNodeCreator<UK2Node_Event> Creator(*EventGraph);
+            EventNode = Creator.CreateNode();
+            EventNode->EventReference.SetExternalMember(EventName, EventOwnerClass);
+            EventNode->bOverrideFunction = true;
+            // Only a node made here is placed; an existing override stays where it is.
+            if (Params->HasField(TEXT("node_position")))
+            {
+                const FVector2D Position = mcp_common::ReadJsonVector2D(Params, TEXT("node_position"));
+                EventNode->NodePosX = (int32)Position.X;
+                EventNode->NodePosY = (int32)Position.Y;
+            }
+            Creator.Finalize();
+            FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+            EventGraph->NotifyGraphChanged();
+        }
+
+        TSharedPtr<FJsonObject> Reply = OverrideReply(BlueprintName, FunctionName, *EventGraph, TEXT("event"), bAlready);
+        Reply->SetStringField(TEXT("node_id"), EventNode->NodeGuid.ToString());
+        return Reply;
+    }
+
+    // 5) Create the function-override graph exactly like SMyBlueprint::ImplementFunction: a new graph whose
+    //    Entry/Result terminators are built from the override function's signature (return pin included).
+    UEdGraph* NewGraph = FBlueprintEditorUtils::CreateNewGraph(
+        Blueprint, FName(*FunctionName), UEdGraph::StaticClass(), UEdGraphSchema_K2::StaticClass());
+    if (!NewGraph)
+    {
+        return mcp_common::MakeErrorReply(TEXT("Failed to create the override function graph"));
+    }
+    FBlueprintEditorUtils::AddFunctionGraph(Blueprint, NewGraph, /*bIsUserCreated=*/false, OverrideFuncClass);
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+    return OverrideReply(BlueprintName, FunctionName, *NewGraph, TEXT("function"), false);
+}
+}
+
+// MCP:add_blueprint_function - Create a NEW function graph on a Blueprint, or with override=true a real OVERRIDE of an inherited/interface member: an event-shape member (no return value) becomes a genuine event OVERRIDE node in the event graph (node_id returned, placed at node_position), a value-returning one a real override FUNCTION graph (in ImplementedInterfaces[].Graphs for an interface member) -- the only correct route for interface events, since a hand-placed event node can compile yet never fire. The override is idempotent (was_already_overridden) and leaves the Blueprint needing a compile, unsaved. It REFUSES rather than guessing: a name that collides with an overridable inherited function errors with a hint instead of silently creating a "<name>_0" shadow, and an EVENT-shape member already shadowed by a local function graph errors telling you to remove that graph first. The new graph does not exist in the generated class until compile_blueprint, so compile BEFORE add_function_parameter or any node that calls it -- otherwise a build_blueprint_graph step fails with "Function not found" and rolls the whole batch back.
+//   @param blueprint_name - Name of the blueprint (for override=true it must already implement the interface / inherit the virtual; implement_interface first).
+//   @param function_name - Name for the new function; with override=true, the EXACT name of the inherited (interface or parent-class) function to override (e.g. "CanInteract", "GetInteractText").
 //   @param override - Optional. When true, create an OVERRIDE of an inherited function ('My Blueprint > Override'): resolves the interface/parent-virtual signature and creates the override graph (function-shape) or event override node (event-shape) with the inherited signature + exact name -- NOT a new deduped function. When omitted and the name collides with an inherited overridable function, the call errors with a hint (instead of silently making a '<name>_0' shadow); pass override=false to force a brand-new function anyway.
-//   @returns { blueprint_name: string, function_name: string, graph_name: string, success: bool [, kind, already_existed, node_id, already_exists, is_interface_function, note] } -- with override=true the payload is implement_interface_function's (kind='function'|'event', graph_name or node_id). success:true can come back WITHOUT the graph actually appearing, so confirm with get_blueprint_functions before wiring it.
+//   @param node_position [array] - Optional [x, y] canvas position for an event-override node that override=true CREATES (an existing one is not moved; a function graph has no single node to place).
+//   @returns { blueprint_name: string, function_name: string, graph_name: string, success: bool [, kind, already_existed, created, was_already_overridden, node_id, already_exists, is_interface_function, note] } -- with override=true: kind='function' (graph_name is an editable function-override graph, ready to wire with get_graph_nodes / connect_pins) or kind='event' (an event OVERRIDE node was created or reused in the event graph graph_name names, and node_id is that node); created is !already_existed, and was_already_overridden is already_existed. success:true can come back WITHOUT the graph actually appearing, so confirm with get_blueprint_functions before wiring it.
 
 TSharedPtr<FJsonObject> HandleAddBlueprintFunction(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1980,7 +2086,7 @@ TSharedPtr<FJsonObject> HandleAddBlueprintFunction(const TSharedPtr<FJsonObject>
         }
         // A member without a return value is overridden by an event node, never by a function graph, so a function
         // graph of the same name only shadows it -- what re-parenting onto a class that newly declares the event
-        // leaves behind. implement_interface_function would take that graph for the override and answer
+        // leaves behind. ImplementInheritedMember would take that graph for the override and answer
         // already_existed, so the graph has to go first.
         if (UEdGraphSchema_K2::FunctionCanBePlacedAsEvent(Inherited) && UEAgentBlueprintCommandsImpl::HasOwnFunctionGraph(Blueprint, Name))
         {
@@ -1988,15 +2094,9 @@ TSharedPtr<FJsonObject> HandleAddBlueprintFunction(const TSharedPtr<FJsonObject>
                 TEXT("'%s' is an EVENT-shape inherited member (declared on %s), but a local FUNCTION graph named '%s' already exists and SHADOWS it -- it does NOT override the base contract (classic re-parent leftover). Remove the local function first (remove_blueprint_function '%s') and retry so the real event override is created."),
                 *FunctionName, *DeclaringClass->GetName(), *FunctionName, *FunctionName));
         }
-        // The override takes the inherited signature and the exact name, which implement_interface_function already
-        // works out (an override graph or an event node, by the member's shape). It answers success with bare data,
-        // so this command's success flag is added.
-        TSharedPtr<FJsonObject> Overridden = McpCommandFamilies::Run(TEXT("implement_interface_function"), Params);
-        if (Overridden.IsValid() && !Overridden->HasField(TEXT("success")))
-        {
-            Overridden->SetBoolField(TEXT("success"), true);
-        }
-        return Overridden;
+        // The override takes the inherited signature and the exact name: an override graph or an event node, by the
+        // member's shape.
+        return UEAgentBlueprintCommandsImpl::ImplementInheritedMember(Blueprint, BlueprintName, FunctionName, Params);
     }
 
     if (UEdGraph* Existing = UBlueprintEditorLibrary::FindGraph(Blueprint, Name))
@@ -2010,7 +2110,7 @@ TSharedPtr<FJsonObject> HandleAddBlueprintFunction(const TSharedPtr<FJsonObject>
         TSharedPtr<FJsonObject> Reply = UEAgentBlueprintCommandsImpl::FunctionGraphReply(BlueprintName, FunctionName, *Existing);
         Reply->SetBoolField(TEXT("already_exists"), true);
         Reply->SetBoolField(TEXT("is_interface_function"), true);
-        Reply->SetStringField(TEXT("note"), TEXT("Interface-override function graph (has a return value): it already exists and is editable. Wire it with get_graph_nodes/connect_pins/set_pin_default_value, or use implement_interface_function."));
+        Reply->SetStringField(TEXT("note"), TEXT("Interface-override function graph (has a return value): it already exists and is editable. Wire it with get_graph_nodes/connect_pins/set_pin_default_value, or call add_blueprint_function with override=true."));
         return Reply;
     }
 
@@ -2033,7 +2133,7 @@ TSharedPtr<FJsonObject> HandleAddBlueprintFunction(const TSharedPtr<FJsonObject>
     return UEAgentBlueprintCommandsImpl::FunctionGraphReply(BlueprintName, FunctionName, *Created);
 }
 
-// MCP:remove_blueprint_function - Delete a function graph OWNED BY the Blueprint (Blueprint->FunctionGraphs) by name. WARNING: It resolves more graphs than it can delete: name lookup goes through FindGraph (all graphs, interface overrides and macros included) but the delete only touches FunctionGraphs and only when bAllowDeletion is true, so an INTERFACE OVERRIDE resolves and cannot be removed. That case is a hard error naming the reason -- to change an interface override, author the signature on the INTERFACE and re-create it (add_function_parameter on the BPI_ -> compile_blueprint -> implement_interface_function). Not idempotent: a name that does not resolve is an error. TRAP when deleting to re-create: the class is NOT regenerated here, so an immediate add_blueprint_function with the same name fails with "is an inherited overridable function (declared on <this very class>)" because the stale UFunction is still in the generated class -- put a compile_blueprint BETWEEN the two calls. Callers of the removed function are left broken until the next compile.
+// MCP:remove_blueprint_function - Delete a function graph OWNED BY the Blueprint (Blueprint->FunctionGraphs) by name. WARNING: It resolves more graphs than it can delete: name lookup goes through FindGraph (all graphs, interface overrides and macros included) but the delete only touches FunctionGraphs and only when bAllowDeletion is true, so an INTERFACE OVERRIDE resolves and cannot be removed. That case is a hard error naming the reason -- to change an interface override, author the signature on the INTERFACE and re-create it (add_function_parameter on the BPI_ -> compile_blueprint -> add_blueprint_function with override=true). Not idempotent: a name that does not resolve is an error. TRAP when deleting to re-create: the class is NOT regenerated here, so an immediate add_blueprint_function with the same name fails with "is an inherited overridable function (declared on <this very class>)" because the stale UFunction is still in the generated class -- put a compile_blueprint BETWEEN the two calls. Callers of the removed function are left broken until the next compile.
 //   @param blueprint_name - Name of the blueprint
 //   @param function_name - Name of the function graph to remove; must exist, be owned by this Blueprint and be deletable, or the call errors
 //   @returns { blueprint_name: string, removed_function: string, success: bool } -- success:true means the graph is gone from Blueprint->FunctionGraphs (re-read after the delete), not merely that the call ran.
@@ -2088,7 +2188,7 @@ TSharedPtr<FJsonObject> HandleRemoveBlueprintFunction(const TSharedPtr<FJsonObje
                  "ubergraph / delegate signature), so remove_blueprint_function cannot delete it and "
                  "nothing was changed. For an interface override, author the signature on the INTERFACE "
                  "and re-create the override: add_function_parameter on the BPI_ -> compile_blueprint -> "
-                 "implement_interface_function."),
+                 "add_blueprint_function with override=true."),
             *FunctionName));
     }
 
@@ -2102,11 +2202,149 @@ TSharedPtr<FJsonObject> HandleRemoveBlueprintFunction(const TSharedPtr<FJsonObje
     return Reply;
 }
 
-// MCP:get_blueprint_functions - List the callable graphs of a Blueprint. Enumerates the FULL graph set (UBlueprint::GetAllGraphs), not just Blueprint->FunctionGraphs: an INTERFACE override graph lives in ImplementedInterfaces[].Graphs, which FunctionGraphs alone misses (a function that exists would read as "missing"). Each entry carries graph_type so the caller can tell a plain function from an interface override, a macro or a delegate signature.
-//   @param blueprint_name - Name of the blueprint. Pass the FULL path: a short name that matches two assets (a backup copy shares the original's name) resolves to one of them SILENTLY, and the listing then describes the wrong asset.
-//   @param include_ubergraphs - Optional bool (default false): also list the EventGraph/ubergraph pages (graph_type='ubergraph'). Off by default so 'functions' stays function-shaped.
+namespace UEAgentBlueprintCommandsImpl
+{
+// One declared variable, for get_blueprint_variables: identity, tooltip and the property flags of its description
+// (not of a compiled property). instance_editable and expose_on_spawn are the older names of is_editable and
+// is_expose_on_spawn.
+TSharedPtr<FJsonObject> DeclaredVariableRow(const FBPVariableDescription& Variable)
+{
+    TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
+    Row->SetStringField(TEXT("name"), Variable.VarName.ToString());
+    Row->SetStringField(TEXT("type"), Variable.VarType.PinCategory.ToString());
+    Row->SetStringField(TEXT("category"), Variable.Category.ToString());
+    // FriendlyName is a plain FString on the description, not an FText.
+    Row->SetStringField(TEXT("tooltip"), Variable.FriendlyName);
+
+    struct FFlagField
+    {
+        const TCHAR* Key;
+        uint64 Mask;
+    };
+    const FFlagField FlagFields[] = {
+        { TEXT("is_public"),              CPF_BlueprintVisible },
+        { TEXT("is_editable"),            CPF_Edit },
+        { TEXT("is_blueprint_read_only"), CPF_BlueprintReadOnly },
+        { TEXT("is_replicated"),          CPF_Net },
+        { TEXT("is_expose_on_spawn"),     CPF_ExposeOnSpawn },
+        { TEXT("instance_editable"),      CPF_Edit },
+        { TEXT("expose_on_spawn"),        CPF_ExposeOnSpawn },
+    };
+    for (const FFlagField& Field : FlagFields)
+    {
+        Row->SetBoolField(Field.Key, (Variable.PropertyFlags & Field.Mask) != 0);
+    }
+    return Row;
+}
+
+// The optional max_results of the Blueprint listings, 1..10000 (default 1000): the error reply, or null once OutCap
+// holds it.
+TSharedPtr<FJsonObject> ReadListingCap(const TSharedPtr<FJsonObject>& Params, int32& OutCap)
+{
+    OutCap = 1000;
+    double Requested = 0.0;
+    if (Params->TryGetNumberField(TEXT("max_results"), Requested))
+    {
+        OutCap = (int32)Requested;
+        if (Requested != (double)OutCap || OutCap < 1 || OutCap > 10000)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("Parameter 'max_results' must be a whole number from 1 to 10000; got %g"), Requested));
+        }
+    }
+    return nullptr;
+}
+
+// The other Blueprint assets under /Game (Widget and Anim Blueprints included) that share a bare Name, when there is
+// more than one: their object paths, else an empty list. A path-shaped Name is never ambiguous.
+TArray<TSharedPtr<FJsonValue>> AmbiguousBlueprintMatches(const FString& Name)
+{
+    TArray<TSharedPtr<FJsonValue>> Matches;
+    if (Name.IsEmpty() || Name.Contains(TEXT("/")))
+    {
+        return Matches;
+    }
+    FARFilter AnyBlueprintKind;
+    AnyBlueprintKind.PackagePaths.Add(TEXT("/Game"));
+    AnyBlueprintKind.bRecursivePaths = true;
+    AnyBlueprintKind.ClassPaths.Add(UBlueprint::StaticClass()->GetClassPathName());
+    AnyBlueprintKind.bRecursiveClasses = true;
+    TArray<FAssetData> Pool;
+    mcp_common::AssetRegistry().GetAssets(AnyBlueprintKind, Pool);
+    for (const FAssetData& Candidate : Pool)
+    {
+        if (Candidate.AssetName.ToString() == Name)
+        {
+            Matches.Add(MakeShared<FJsonValueString>(Candidate.GetObjectPathString()));
+        }
+    }
+    if (Matches.Num() < 2)
+    {
+        Matches.Reset();
+    }
+    return Matches;
+}
+
+// { blueprint_path, blueprint_valid, ambiguous_matches? }: which asset a Blueprint listing actually read.
+void AddListedBlueprintIdentity(const TSharedPtr<FJsonObject>& Reply, const FString& RequestedName, const UBlueprint* Blueprint)
+{
+    Reply->SetStringField(TEXT("blueprint_path"), Blueprint ? Blueprint->GetPathName() : FString());
+    Reply->SetBoolField(TEXT("blueprint_valid"), IsValid(Blueprint));
+    const TArray<TSharedPtr<FJsonValue>> Ambiguous = AmbiguousBlueprintMatches(RequestedName);
+    if (Ambiguous.Num() > 0)
+    {
+        Reply->SetArrayField(TEXT("ambiguous_matches"), Ambiguous);
+    }
+}
+
+// True when Graph overrides something: a function of the same name already on the parent chain, or one of an
+// interface the Blueprint implements. OutDeclaringClass names where it was found.
+bool FindOverriddenDeclaration(const UBlueprint* Blueprint, const UEdGraph* Graph, FString& OutDeclaringClass)
+{
+    const FName GraphName = Graph->GetFName();
+    if (UClass* Parent = Blueprint->ParentClass)
+    {
+        if (const UFunction* Inherited = Parent->FindFunctionByName(GraphName))
+        {
+            const UClass* Owner = Inherited->GetOwnerClass();
+            OutDeclaringClass = Owner ? Owner->GetPathName() : FString();
+            return true;
+        }
+    }
+    for (const FBPInterfaceDescription& Implemented : Blueprint->ImplementedInterfaces)
+    {
+        const UClass* InterfaceClass = Implemented.Interface.Get();
+        if (InterfaceClass && InterfaceClass->FindFunctionByName(GraphName))
+        {
+            OutDeclaringClass = InterfaceClass->GetPathName();
+            return true;
+        }
+    }
+    return false;
+}
+
+// Purity is read off the graph's own entry node (FUNC_BlueprintPure), never inferred.
+bool IsPureGraph(UEdGraph* Graph)
+{
+    TArray<UK2Node_FunctionEntry*> EntryNodes;
+    Graph->GetNodesOfClass<UK2Node_FunctionEntry>(EntryNodes);
+    if (EntryNodes.Num() == 0 || EntryNodes[0] == nullptr)
+    {
+        return false;
+    }
+    return (static_cast<uint32>(EntryNodes[0]->GetFunctionFlags()) & static_cast<uint32>(FUNC_BlueprintPure)) != 0;
+}
+}
+
+// MCP:get_blueprint_functions - List the graphs of a Blueprint -- functions, interface implementation graphs, macros, delegate signatures and, on request, event graph pages -- each with its node count, a REAL is_override (resolved against the parent class chain AND every implemented interface, naming the declaring class) and is_pure (read off the graph's FunctionEntry FUNC_BlueprintPure flag, not guessed). Enumerates the FULL graph set (UBlueprint::GetAllGraphs), not just Blueprint->FunctionGraphs: an INTERFACE override graph lives in ImplementedInterfaces[].Graphs, which FunctionGraphs alone misses (a function that exists would read as "missing"). Each entry carries graph_type so the caller can tell a plain function from an interface override, a macro or a delegate signature. The map to read before get_graph_nodes, which needs an exact graph name. WARNING: graph_type 'event_graph' entries are the TRANSIENT compiled event graphs and are absent on a Blueprint not compiled this session -- the authored EventGraph is the 'ubergraph' page. get_class_functions has the compiled class surface (inherited and native functions included).
+//   @param blueprint_name - Name of the blueprint, or its full path. A bare name that matches more than one Blueprint asset (a backup copy shares the original's name) resolves to one of them and lists the others in `ambiguous_matches` -- pass the full path then.
+//   @param filter_type - Optional 'all' (default), 'functions' or 'events' (case-insensitive, singular accepted). 'functions' keeps function, interface, macro and delegate_signature graphs; 'events' keeps the event side (ubergraph pages and compiled event graphs) and lists it without include_ubergraphs.
+//   @param include_ubergraphs - Optional bool (default false): also list the event side -- the authored EventGraph/ubergraph pages (graph_type='ubergraph') and the transient compiled event graphs (graph_type='event_graph'). Off by default so 'functions' stays function-shaped.
+//   @param include_macros - Optional bool (default true): list MacroGraphs (graph_type='macro').
+//   @param include_interface_graphs - Optional bool (default true): list ImplementedInterfaces[].Graphs (graph_type='interface').
 //   @param include_subgraphs - Optional bool (default false): also list nested/collapsed sub-graphs reached by GetAllGraphs but owned by no top-level list (graph_type='subgraph')
-//   @returns { blueprint_name: string, functions: [{ name, node_count, graph_type, is_interface, interface_name?, is_user_constructed }], function_count: int, own_function_graph_count: int, interface_graph_count: int, macro_graph_count: int, delegate_graph_count: int, ubergraph_count: int, subgraph_count: int, graphs_total: int } -- graph_type is function|interface|macro|delegate_signature|ubergraph|subgraph; is_user_constructed is just node_count>2, i.e. "someone wrote something beyond the auto Entry/Result terminators", because implementing an interface pre-creates empty graphs. subgraph_count>0 with include_subgraphs off is the warning that collapsed graphs exist and are not listed.
+//   @param max_results - Optional maximum number of entries to return, 1..10000 (default 1000); results_truncated says whether any were left out.
+//   @returns { blueprint_name: string, blueprint_path: string, blueprint_valid: bool, ambiguous_matches?: [string], filter_type: string, functions: [{ name, node_count, graph_type, is_interface, interface_name?, interface_class?, is_user_constructed, is_pure?, is_override?, override_declaring_class? }], function_count: int, override_count: int, own_function_graph_count: int, interface_graph_count: int, macro_graph_count: int, delegate_graph_count: int, ubergraph_count: int, event_graph_count: int, subgraph_count: int, graphs_total: int, max_results: int, results_truncated: bool } -- graph_type is function|interface|macro|delegate_signature|ubergraph|event_graph|subgraph; is_pure/is_override are on function, interface and macro entries (a macro is neither), override_declaring_class names the class or interface (path) that declares what is overridden; is_user_constructed is just node_count>2, i.e. "someone wrote something beyond the auto Entry/Result terminators", because implementing an interface pre-creates empty graphs. The *_count totals count every graph of that kind, listed or not: subgraph_count>0 with include_subgraphs off is the warning that collapsed graphs exist and are not listed.
 
 TSharedPtr<FJsonObject> HandleGetBlueprintFunctions(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2118,24 +2356,52 @@ TSharedPtr<FJsonObject> HandleGetBlueprintFunctions(const TSharedPtr<FJsonObject
     {
         return Error;
     }
-    // Both extra listings are off by default so "functions" stays function-shaped.
+    int32 Cap = 0;
+    if (TSharedPtr<FJsonObject> Invalid = UEAgentBlueprintCommandsImpl::ReadListingCap(Params, Cap))
+    {
+        return Invalid;
+    }
+    // The description reads "all, functions, or events", which invites the singular, so the VALUE is normalized
+    // before validation (trimmed, lower-cased, singular accepted).
+    FString Scope = TEXT("all");
+    Params->TryGetStringField(TEXT("filter_type"), Scope);
+    Scope = Scope.TrimStartAndEnd().ToLower();
+    if (Scope == TEXT("function"))
+    {
+        Scope = TEXT("functions");
+    }
+    else if (Scope == TEXT("event"))
+    {
+        Scope = TEXT("events");
+    }
+    if (Scope != TEXT("all") && Scope != TEXT("functions") && Scope != TEXT("events"))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Parameter 'filter_type' must be 'all', 'functions', or 'events'; got '%s'"), *Scope));
+    }
+    // The extra listings are off by default so "functions" stays function-shaped.
     bool bIncludeUbergraphs = false;
     Params->TryGetBoolField(TEXT("include_ubergraphs"), bIncludeUbergraphs);
     bool bIncludeSubgraphs = false;
     Params->TryGetBoolField(TEXT("include_subgraphs"), bIncludeSubgraphs);
+    bool bIncludeMacros = true;
+    Params->TryGetBoolField(TEXT("include_macros"), bIncludeMacros);
+    bool bIncludeInterfaceGraphs = true;
+    Params->TryGetBoolField(TEXT("include_interface_graphs"), bIncludeInterfaceGraphs);
+    const bool bFunctionSide = Scope != TEXT("events");
+    const bool bEventSide = Scope == TEXT("events") || (Scope == TEXT("all") && bIncludeUbergraphs);
 
     // The graphs come from GetAllGraphs, the enumeration FindGraphByNameDeep looks names up in, so whatever is
     // findable by name is listable. A graph's kind is the Blueprint list that holds it; one in none of them is a
     // collapsed graph nested in another.
-    TMap<const UEdGraph*, FString> InterfaceOf;
+    TMap<const UEdGraph*, const UClass*> InterfaceOf;
     for (const FBPInterfaceDescription& Interface : Blueprint->ImplementedInterfaces)
     {
-        const UClass* InterfaceClass = Interface.Interface.Get();
         for (const UEdGraph* Graph : Interface.Graphs)
         {
             if (Graph != nullptr)
             {
-                InterfaceOf.Add(Graph, InterfaceClass ? InterfaceClass->GetName() : FString(TEXT("<unresolved interface>")));
+                InterfaceOf.Add(Graph, Interface.Interface.Get());
             }
         }
     }
@@ -2148,32 +2414,62 @@ TSharedPtr<FJsonObject> HandleGetBlueprintFunctions(const TSharedPtr<FJsonObject
         if (Blueprint->UbergraphPages.Contains(Graph))           { return TEXT("ubergraph"); }
         return TEXT("subgraph");
     };
+    const auto IsListed = [&](const FString& Kind) -> bool
+    {
+        if (Kind == TEXT("ubergraph") || Kind == TEXT("event_graph")) { return bEventSide; }
+        if (Kind == TEXT("subgraph"))                                 { return bIncludeSubgraphs; }
+        if (!bFunctionSide)                                           { return false; }
+        if (Kind == TEXT("macro"))                                    { return bIncludeMacros; }
+        if (Kind == TEXT("interface"))                                { return bIncludeInterfaceGraphs; }
+        return true;
+    };
 
+    // The authored graphs, then the transient compiled event graphs, which GetAllGraphs does not reach.
     TArray<UEdGraph*> AllGraphs;
     Blueprint->GetAllGraphs(AllGraphs);
+    TArray<TPair<UEdGraph*, FString>> Classified;
+    for (UEdGraph* Graph : AllGraphs)
+    {
+        if (Graph != nullptr)
+        {
+            Classified.Emplace(Graph, KindOf(Graph));
+        }
+    }
+    for (UEdGraph* Graph : Blueprint->EventGraphs)
+    {
+        if (Graph != nullptr)
+        {
+            Classified.Emplace(Graph, TEXT("event_graph"));
+        }
+    }
 
     TMap<FString, int32> CountOfKind;
     TArray<TSharedPtr<FJsonValue>> Listed;
-    for (UEdGraph* Graph : AllGraphs)
+    int32 OverrideCount = 0;
+    bool bTruncated = false;
+    for (const TPair<UEdGraph*, FString>& Item : Classified)
     {
-        if (Graph == nullptr)
+        UEdGraph* Graph = Item.Key;
+        const FString& Kind = Item.Value;
+        ++CountOfKind.FindOrAdd(Kind);
+        if (!IsListed(Kind))
         {
             continue;
         }
-        const FString Kind = KindOf(Graph);
-        ++CountOfKind.FindOrAdd(Kind);
-        if ((Kind == TEXT("ubergraph") && !bIncludeUbergraphs) || (Kind == TEXT("subgraph") && !bIncludeSubgraphs))
+        if (Listed.Num() >= Cap)
         {
+            bTruncated = true;
             continue;
         }
 
         TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
         Entry->SetStringField(TEXT("graph_type"), Kind);
-        const FString* Interface = InterfaceOf.Find(Graph);
+        const UClass* const* Interface = InterfaceOf.Find(Graph);
         Entry->SetBoolField(TEXT("is_interface"), Interface != nullptr);
         if (Interface != nullptr)
         {
-            Entry->SetStringField(TEXT("interface_name"), *Interface);
+            Entry->SetStringField(TEXT("interface_name"), *Interface ? (*Interface)->GetName() : FString(TEXT("<unresolved interface>")));
+            Entry->SetStringField(TEXT("interface_class"), *Interface ? (*Interface)->GetPathName() : FString());
         }
         Entry->SetStringField(TEXT("name"), Graph->GetName());
         Entry->SetNumberField(TEXT("node_count"), Graph->Nodes.Num());
@@ -2181,45 +2477,60 @@ TSharedPtr<FJsonObject> HandleGetBlueprintFunctions(const TSharedPtr<FJsonObject
         // "the graph exists" is not "someone wrote logic": more than 2 nodes is something beyond the automatic entry
         // and result.
         Entry->SetBoolField(TEXT("is_user_constructed"), Graph->Nodes.Num() > 2);
+        // Purity and overriding are a function's properties: an interface graph always overrides its interface, a
+        // macro has no UFunction and is neither.
+        if (Kind == TEXT("function"))
+        {
+            FString DeclaredIn;
+            const bool bOverrides = UEAgentBlueprintCommandsImpl::FindOverriddenDeclaration(Blueprint, Graph, DeclaredIn);
+            Entry->SetBoolField(TEXT("is_pure"), UEAgentBlueprintCommandsImpl::IsPureGraph(Graph));
+            Entry->SetBoolField(TEXT("is_override"), bOverrides);
+            if (bOverrides)
+            {
+                Entry->SetStringField(TEXT("override_declaring_class"), DeclaredIn);
+                ++OverrideCount;
+            }
+        }
+        else if (Kind == TEXT("interface"))
+        {
+            Entry->SetBoolField(TEXT("is_pure"), UEAgentBlueprintCommandsImpl::IsPureGraph(Graph));
+            Entry->SetBoolField(TEXT("is_override"), true);
+            Entry->SetStringField(TEXT("override_declaring_class"), *Interface ? (*Interface)->GetPathName() : FString());
+            ++OverrideCount;
+        }
+        else if (Kind == TEXT("macro"))
+        {
+            Entry->SetBoolField(TEXT("is_pure"), false);
+            Entry->SetBoolField(TEXT("is_override"), false);
+        }
         Listed.Add(MakeShared<FJsonValueObject>(Entry));
     }
 
     TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
     Reply->SetStringField(TEXT("blueprint_name"), BlueprintName);
+    UEAgentBlueprintCommandsImpl::AddListedBlueprintIdentity(Reply, BlueprintName, Blueprint);
+    Reply->SetStringField(TEXT("filter_type"), Scope);
     Reply->SetArrayField(TEXT("functions"), Listed);
     Reply->SetNumberField(TEXT("function_count"), Listed.Num());
+    Reply->SetNumberField(TEXT("override_count"), OverrideCount);
     // Own function graphs alone, kept for the callers that compare.
     Reply->SetNumberField(TEXT("own_function_graph_count"), CountOfKind.FindRef(TEXT("function")));
     Reply->SetNumberField(TEXT("interface_graph_count"), CountOfKind.FindRef(TEXT("interface")));
     Reply->SetNumberField(TEXT("macro_graph_count"), CountOfKind.FindRef(TEXT("macro")));
     Reply->SetNumberField(TEXT("delegate_graph_count"), CountOfKind.FindRef(TEXT("delegate_signature")));
     Reply->SetNumberField(TEXT("ubergraph_count"), CountOfKind.FindRef(TEXT("ubergraph")));
+    Reply->SetNumberField(TEXT("event_graph_count"), CountOfKind.FindRef(TEXT("event_graph")));
     Reply->SetNumberField(TEXT("subgraph_count"), CountOfKind.FindRef(TEXT("subgraph")));
     Reply->SetNumberField(TEXT("graphs_total"), AllGraphs.Num());
+    Reply->SetNumberField(TEXT("max_results"), Cap);
+    Reply->SetBoolField(TEXT("results_truncated"), bTruncated);
     return Reply;
 }
 
-namespace UEAgentBlueprintCommandsImpl
-{
-// One declared variable, for get_blueprint_variables. The flags are the description's, not a compiled property's;
-// a description has no cinematics flag, so expose_to_cinematics is always false.
-TSharedPtr<FJsonObject> DeclaredVariableRow(const FBPVariableDescription& Variable)
-{
-    const auto HasFlag = [&Variable](const uint64 Flag) { return (Variable.PropertyFlags & Flag) != 0; };
-    TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
-    Row->SetBoolField(TEXT("instance_editable"), HasFlag(CPF_Edit));
-    Row->SetBoolField(TEXT("expose_on_spawn"), HasFlag(CPF_ExposeOnSpawn));
-    Row->SetBoolField(TEXT("expose_to_cinematics"), false);
-    Row->SetStringField(TEXT("name"), Variable.VarName.ToString());
-    Row->SetStringField(TEXT("type"), Variable.VarType.PinCategory.ToString());
-    Row->SetStringField(TEXT("category"), Variable.Category.ToString());
-    return Row;
-}
-}
-
-// MCP:get_blueprint_variables - List the variables this Blueprint DECLARES (its NewVariables): name, pin category, editor category and three flags. Inherited variables, function locals and components are NOT here. THE THREE FLAGS ARE UNRELIABLE, read off the stored variable description rather than the compiled property: instance_editable checks CPF_Edit and ignores CPF_DisableEditOnInstance, so it says true for variables the editor refuses to edit per instance; expose_on_spawn checks a property flag while set_bp_variable_metadata writes the ExposeOnSpawn METADATA, so it says false for variables that DO show up as SpawnActor pins; and expose_to_cinematics is hardcoded false. Oracles: write the placed instance for editability, the spawn node's pins for exposure, get_blueprint_variable_detailed_info for type/replication.
-//   @param blueprint_name - Name of the blueprint
-//   @returns { blueprint_name: string, variables: [{ name, type, category, instance_editable, expose_on_spawn, expose_to_cinematics }], variable_count: int } -- "type" is only the pin CATEGORY (e.g. "struct", "object"), not the struct or class; the three booleans are the unreliable ones described above.
+// MCP:get_blueprint_variables - List the variables this Blueprint DECLARES (its NewVariables) with name, pin category, editor category, tooltip and the flags that matter for co-op and UI work: is_public (BlueprintVisible), is_editable, is_blueprint_read_only, is_replicated (CPF_Net) and is_expose_on_spawn. Inherited variables, native C++ UPROPERTYs, function locals and components are NOT here -- get_class_properties on the generated class (..._C) has the full property surface. THE FLAGS ARE READ OFF THE STORED VARIABLE DESCRIPTION, not the compiled property, and two of them mislead: is_editable checks CPF_Edit and ignores CPF_DisableEditOnInstance, so it says true for variables the editor refuses to edit per instance; is_expose_on_spawn checks a property flag while set_blueprint_variable_metadata writes the ExposeOnSpawn METADATA, so it says false for variables that DO show up as SpawnActor pins. Oracles: write the placed instance for editability, the spawn node's pins for exposure, get_blueprint_variable_detailed_info for type/replication and one variable's default value.
+//   @param blueprint_name - Name of the blueprint, or its full path. A bare name that matches more than one Blueprint asset resolves to one of them and lists the others in `ambiguous_matches`.
+//   @param max_results - Optional maximum number of variables to return, 1..10000 (default 1000); results_truncated says whether any were left out.
+//   @returns { blueprint_name: string, blueprint_path: string, blueprint_valid: bool, ambiguous_matches?: [string], variables: [{ name, type, category, tooltip, is_public, is_editable, is_blueprint_read_only, is_replicated, is_expose_on_spawn, instance_editable, expose_on_spawn }], variable_count: int, variables_count: int, max_results: int, results_truncated: bool } -- "type" is only the pin CATEGORY (e.g. "struct", "object"), not the struct or class; instance_editable and expose_on_spawn repeat is_editable and is_expose_on_spawn; variable_count and variables_count are the same number.
 
 TSharedPtr<FJsonObject> HandleGetBlueprintVariables(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2231,23 +2542,35 @@ TSharedPtr<FJsonObject> HandleGetBlueprintVariables(const TSharedPtr<FJsonObject
     {
         return Error;
     }
+    int32 Cap = 0;
+    if (TSharedPtr<FJsonObject> Invalid = UEAgentBlueprintCommandsImpl::ReadListingCap(Params, Cap))
+    {
+        return Invalid;
+    }
 
     // The variables as the Blueprint declares them, so one added since the last compile is listed too.
     TArray<TSharedPtr<FJsonValue>> Declared;
-    Declared.Reserve(Blueprint->NewVariables.Num());
     for (const FBPVariableDescription& Variable : Blueprint->NewVariables)
     {
+        if (Declared.Num() >= Cap)
+        {
+            break;
+        }
         Declared.Add(MakeShared<FJsonValueObject>(UEAgentBlueprintCommandsImpl::DeclaredVariableRow(Variable)));
     }
 
     TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
-    Reply->SetNumberField(TEXT("variable_count"), Declared.Num());
-    Reply->SetArrayField(TEXT("variables"), Declared);
     Reply->SetStringField(TEXT("blueprint_name"), BlueprintName);
+    UEAgentBlueprintCommandsImpl::AddListedBlueprintIdentity(Reply, BlueprintName, Blueprint);
+    Reply->SetArrayField(TEXT("variables"), Declared);
+    Reply->SetNumberField(TEXT("variable_count"), Declared.Num());
+    Reply->SetNumberField(TEXT("variables_count"), Declared.Num());
+    Reply->SetNumberField(TEXT("max_results"), Cap);
+    Reply->SetBoolField(TEXT("results_truncated"), Blueprint->NewVariables.Num() > Declared.Num());
     return Reply;
 }
 
-// MCP:remove_unused_variables - Delete EVERY variable the engine considers unused from a Blueprint in one shot (GatherUnusedVariables + RemoveUnusedVariables) and report which ones went. Destructive and non-selective -- "unused" means no graph node reads or writes it, so a variable only touched from C++, a DataTable, a save game or a runtime name lookup counts as unused and is deleted. Preview it by comparing get_blueprint_variables before/after, or delete a specific one with delete_bp_variable.
+// MCP:remove_unused_variables - Delete EVERY variable the engine considers unused from a Blueprint in one shot (GatherUnusedVariables + RemoveUnusedVariables) and report which ones went. Destructive and non-selective -- "unused" means no graph node reads or writes it, so a variable only touched from C++, a DataTable, a save game or a runtime name lookup counts as unused and is deleted. Preview it by comparing get_blueprint_variables before/after, or delete a specific one with delete_blueprint_variable.
 //   @param blueprint_name - Name of the blueprint
 //   @returns { blueprint_name: string, removed_count: int, removed_variables?: [string] } -- removed_variables is the list gathered BEFORE the removal and removed_count what the engine reported removing; when they disagree, trust neither and re-read get_blueprint_variables.
 
@@ -2335,7 +2658,7 @@ namespace
      * this BP's SCS nor the scene root. The CDO's component set already includes every inherited native
      * subobject, so a single sweep suffices; the parent-class CDO is tried first (it declares the
      * component), the generated-class CDO as a fallback. Matches GetFName() then GetName(). This mirrors
-     * how set_blueprint_component_property resolves its "inherited-native" template. Returns nullptr if
+     * how set_blueprint_component_properties resolves its "inherited-native" template. Returns nullptr if
      * no native scene component of that name exists. Only the resolved component's FName is used by the
      * caller (USCS_Node::SetParent copies the name + flags bIsParentComponentNative), so either CDO works.
      */
@@ -2556,53 +2879,6 @@ TSharedPtr<FJsonObject> HandleAttachBlueprintComponent(const TSharedPtr<FJsonObj
     ChildNode->bIsParentComponentNative = false;
     ChildNode->AttachToName = SocketFName;
     return CommitLinkage();
-}
-
-// MCP:remove_blueprint_component_node - Remove one or MORE SCS component nodes in a single batch (ONE compile for the whole lot), optionally promoting their children, and report the double census (flat AllNodes vs a walk of RootNodes) so descendants that go missing or become unreachable are NAMED instead of silently dropped. Same engine work as remove_component_from_blueprint; the difference is the contract for a component that is not there: this one is IDEMPOTENT (already_removed:true, no error), while remove_component_from_blueprint treats "nothing matched" as a caller error. Prefer this one in scripts that may re-run.
-//   @param blueprint_name - Name of the blueprint
-//   @param component_name - Name of the SCS component node to remove (single form)
-//   @param component_names - Optional array of SCS component node names removed in ONE batch with a SINGLE compile. Chaining single-node calls is what causes collateral deletions; prefer this for lots. Merged with component_name when both are given.
-//   @param promote_children - Optional bool (default true); true keeps descendants (RemoveNodeAndPromoteChildren), false orphans/deletes them (RemoveNode)
-//   @returns { success, error?, data: { blueprint_name, component_name, promote_children, removed, already_removed, requested[], removed_components[], also_removed[], unexpected_losses[], not_found[], still_present[], node_count_before, node_count_after, reachable_before, reachable_after, orphans_before[], orphans_after[], root_nodes_before[], root_nodes_after[], root_nodes_changed, compiled, compile_count, verification } }
-
-TSharedPtr<FJsonObject> HandleRemoveBlueprintComponentNode(const TSharedPtr<FJsonObject>& Params)
-{
-    FString BlueprintName;
-    TArray<FString> RequestedNames;
-    bool bPromoteChildren = true;
-    TSharedPtr<FJsonObject> RequestError;
-    UBlueprint* Blueprint = ReadScsRemovalRequest_BPCmd(Params, BlueprintName, RequestedNames, bPromoteChildren, RequestError);
-    if (!Blueprint)
-    {
-        return RequestError;
-    }
-
-    UE_LOG(LogTemp, Verbose, TEXT("remove_blueprint_component_node: removing %d node(s) from '%s' (promote_children=%d)"),
-           RequestedNames.Num(), *BlueprintName, bPromoteChildren ? 1 : 0);
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("blueprint_name"), BlueprintName);
-    Data->SetStringField(TEXT("component_name"), RequestedNames[0]);
-
-    FString RemoveError;
-    const bool bOk = PerformScsRemoval_BPCmd(Blueprint, RequestedNames, bPromoteChildren, Data, RemoveError);
-
-    // Legacy contract: `removed` / `already_removed` describe the batch as a whole. Everything
-    // this call did NOT find was already gone -- that stays idempotent, not an error.
-    const TArray<TSharedPtr<FJsonValue>>* RemovedArr = nullptr;
-    const TArray<TSharedPtr<FJsonValue>>* NotFoundArr = nullptr;
-    const int32 RemovedNum  = (Data->TryGetArrayField(TEXT("removed_components"), RemovedArr) && RemovedArr) ? RemovedArr->Num() : 0;
-    const int32 NotFoundNum = (Data->TryGetArrayField(TEXT("not_found"), NotFoundArr) && NotFoundArr) ? NotFoundArr->Num() : 0;
-    Data->SetBoolField(TEXT("removed"), RemovedNum > 0);
-    Data->SetBoolField(TEXT("already_removed"), NotFoundNum == RequestedNames.Num());
-    Data->SetBoolField(TEXT("success"), bOk);
-
-    return mcp_common::MakeVerifiedReply(
-        Data, bOk,
-        bOk ? mcp_common::EMcpVerification::Verified : mcp_common::EMcpVerification::Failed,
-        TEXT("scs_double_census"),
-        TEXT("AllNodes set + RootNodes->ChildNodes walk compared before and after the batch"),
-        RemoveError);
 }
 
 // =====================================================================================
@@ -2876,8 +3152,8 @@ TSharedPtr<FJsonObject> HandleGetAIPerceptionSenses(const TSharedPtr<FJsonObject
 //     ALWAYS populated (COND_None by default), replicated or not. It only MEANS anything when
 //     `is_replicated` is true; on a non-replicated variable it is dead data the editor never consults.
 //     Read is_replicated FIRST: it comes from CPF_Net, and it is what tells the two apart.
-//   NOTE on `save_game`: the WRITE side is set_bp_variable_metadata(save_game=...). It does not compile,
-//     so the honest loop is set_bp_variable_metadata -> compile_blueprint -> save_asset -> re-read here
+//   NOTE on `save_game`: the WRITE side is set_blueprint_variable_metadata(save_game=...). It does not compile,
+//     so the honest loop is set_blueprint_variable_metadata -> compile_blueprint -> save_asset -> re-read here
 //     and check save_game_generated, not save_game.
 TSharedPtr<FJsonObject> HandleGetBlueprintVariableDetailedInfo(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2968,15 +3244,15 @@ TSharedPtr<FJsonObject> HandleGetBlueprintVariableDetailedInfo(const TSharedPtr<
     Data->SetObjectField(TEXT("var_type_detail"), TypeDetail);
     Data->SetBoolField(TEXT("is_instance_editable"), (VarDesc->PropertyFlags & CPF_Edit) != 0);
     Data->SetBoolField(TEXT("is_expose_on_spawn"), (VarDesc->PropertyFlags & CPF_ExposeOnSpawn) != 0);
-    // "BlueprintReadOnly" is CPF_BlueprintReadOnly (ObjectMacros.h), as in get_blueprint_variables_list
+    // "BlueprintReadOnly" is CPF_BlueprintReadOnly (ObjectMacros.h), as in get_blueprint_variables
     // (UEAgentAnalysisCommands.cpp) -- not CPF_BlueprintVisible, which the editor sets on
     // essentially EVERY Blueprint variable and so would answer `true` for all of them.
     Data->SetBoolField(TEXT("is_blueprint_read_only"), (VarDesc->PropertyFlags & CPF_BlueprintReadOnly) != 0);
     // "Expose to Cinematics" in the variable details panel toggles CPF_Interp
     // (ObjectMacros.h; Editor/Kismet BlueprintDetailsCustomization.cpp reads exactly this flag).
     Data->SetBoolField(TEXT("is_expose_to_cinematics"), (VarDesc->PropertyFlags & CPF_Interp) != 0);
-    // "SaveGame" -- the Details panel checkbox, written by set_bp_variable_metadata(save_game=...)
-    //   (set_property_value refuses it for not being CPF_Edit, and Python for
+    // "SaveGame" -- the Details panel checkbox, written by set_blueprint_variable_metadata(save_game=...)
+    //   (set_properties refuses it for not being CPF_Edit, and Python for
     //   CPF_NativeAccessSpecifierProtected).
     //   WARNING: IT LIVES IN TWO PLACES AND THEY CAN DISAGREE, so both are reported instead of picking one:
     //     - `save_game`           = CPF_SaveGame as AUTHORED, on FBPVariableDescription::PropertyFlags.
@@ -3480,7 +3756,7 @@ namespace
 
     // READ-ONLY twin of ResolveWritableComponentTemplate -- resolves the template a fresh
     // instance would actually read, and NEVER mints an ICH override. Shared with
-    // HandleGetBlueprintComponentProperty so apply_component_property_overrides can re-read the
+    // HandleGetBlueprintComponentProperty so set_blueprint_component_properties can re-read the
     // very same cascade AFTER its compile (the post-write oracle) instead of hand-rolling a
     // second, drifting copy. Order: own SCS -> nearest existing ICH override -> the ancestor's
     // declaring SCS template -> native CDO subobject. Returns nullptr when nothing matches.
@@ -3712,10 +3988,10 @@ namespace
     }
 }
 
-// MCP:get_blueprint_component_object_path - Resolve a Blueprint component's TEMPLATE archetype and return its object path, so get_property_value/set_property_value/call_function can target that component directly.
+// MCP:get_blueprint_component_object_path - Resolve a Blueprint component's TEMPLATE archetype and return its object path, so get_properties/set_properties/call_function can target that component directly.
 //   @param blueprint_name - Name/path of the Blueprint that owns the component.
 //   @param component_name - Component variable name. Resolves an OWN SCS component (the _GEN_VARIABLE archetype on USCS_Node::ComponentTemplate) or an INHERITED/native component (the like-named subobject on the generated-class CDO).
-//   @returns { object_path: string, class: string, source: 'scs'|'inherited' } -- object_path is GetPathName() (feed it to get/set_property_value); class is the component class' full path.
+//   @returns { object_path: string, class: string, source: 'scs'|'inherited' } -- object_path is GetPathName() (feed it to get_properties / set_properties); class is the component class' full path.
 
 TSharedPtr<FJsonObject> HandleGetBlueprintComponentObjectPath(const TSharedPtr<FJsonObject>& Params)
 {
@@ -3733,7 +4009,7 @@ TSharedPtr<FJsonObject> HandleGetBlueprintComponentObjectPath(const TSharedPtr<F
     FString Source;
 
     // 1. Own SCS component: the _GEN_VARIABLE archetype. FindSCSNode matches BOTH the variable
-    //    name AND the _GEN_VARIABLE internal name (same resolution set_blueprint_component_property uses).
+    //    name AND the _GEN_VARIABLE internal name (same resolution set_blueprint_component_properties uses).
     if (BP->SimpleConstructionScript)
     {
         if (USCS_Node* Node = BP->SimpleConstructionScript->FindSCSNode(FName(*ComponentName)))
@@ -3748,7 +4024,7 @@ TSharedPtr<FJsonObject> HandleGetBlueprintComponentObjectPath(const TSharedPtr<F
 
     // 2. Inherited component (declared in a parent Blueprint's SCS, or a native
     //    CreateDefaultSubobject): its archetype is the like-named subobject instantiated on the
-    //    generated-class CDO. That CDO subobject is exactly what get/set_property_value resolves
+    //    generated-class CDO. That CDO subobject is exactly what get_properties / set_properties resolve
     //    for inherited components, so returning its path lets callers target it uniformly.
     if (!Template && BP->GeneratedClass)
     {
@@ -3780,7 +4056,7 @@ TSharedPtr<FJsonObject> HandleGetBlueprintComponentObjectPath(const TSharedPtr<F
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_blueprint_component_property - Read the EFFECTIVE default of a property on a Blueprint component TEMPLATE, resolving components INHERITED from a parent/grandparent Blueprint. Read-only twin of set_blueprint_component_property: it NEVER mints an ICH override. Resolution order: own SCS template -> existing child InheritableComponentHandler override -> ancestor's declaring SCS template -> native CDO subobject. Omit property_name to dump ALL properties of the resolved template.
+// MCP:get_blueprint_component_property - Read the EFFECTIVE default of a property on a Blueprint component TEMPLATE, resolving components INHERITED from a parent/grandparent Blueprint. Read-only twin of set_blueprint_component_properties: it NEVER mints an ICH override. Resolution order: own SCS template -> existing child InheritableComponentHandler override -> ancestor's declaring SCS template -> native CDO subobject. Omit property_name to dump ALL properties of the resolved template.
 //   @param blueprint_name - Blueprint asset path or short name
 //   @param component_name - Component variable name (own or inherited)
 //   @param property_name - Property to read; omit to return ALL properties of the resolved template
@@ -3813,7 +4089,7 @@ TSharedPtr<FJsonObject> HandleGetBlueprintComponentProperty(const TSharedPtr<FJs
         return mcp_common::BlueprintNotFoundReply(BlueprintName);
     }
 
-    // The read-only cascade, shared with apply_component_property_overrides
+    // The read-only cascade, shared with set_blueprint_component_properties
     // so the "what would a fresh instance read" question has ONE implementation.
     FString Source;
     FString ResolvedFromClass;
@@ -3963,95 +4239,7 @@ TSharedPtr<FJsonObject> HandleGetBlueprintComponentProperty(const TSharedPtr<FJs
     return Result;
 }
 
-// MCP:set_blueprint_component_property - Set the DEFAULT of a property on a Blueprint component TEMPLATE, including components INHERITED from an ancestor Blueprint (routed through this class' InheritableComponentHandler) or native inherited subobjects; only FRESH instances read the new value. THREE TRAPS, all with the same shape (a green return over a different reality): (1) it can drop an entire OTHER component from the Blueprint IN MEMORY while disk and git stay clean -- count get_blueprint_components before and after, and reload_asset_package(on_dirty="discard") is the cure; (2) on an OBJECT-REFERENCE property it can write None and report override_persisted:true, wiping the inherited default -- check with get_blueprint_component_overrides; (3) actors ALREADY PLACED in a level keep their serialized value, so only runtime-spawned ones change. Read the effective value with get_blueprint_component_property (the read-only twin, which never mints an override), and use apply_component_property_overrides for several writes at once.
-//   @param blueprint_name - Blueprint asset path or short name
-//   @param component_name - Component variable name (own or inherited)
-//   @param property_name - Property to set on the component template
-//   @param property_value - New value (any JSON type; same importer as set_component_property). An array value REWRITES THE WHOLE ARRAY, including the empty/None gaps -- set_blueprint_component_array_element edits one element and proves the siblings did not move.
-//   @returns { blueprint_name, component_name, property_name, component_class, source, override_persisted } -- source tells you which template was hit (scs / inherited-ich / inherited-scs / inherited-native) and override_persisted only guards the ICH case; NEITHER field re-reads the value, so they are not proof the write landed.
-
-TSharedPtr<FJsonObject> HandleSetBlueprintComponentProperty(const TSharedPtr<FJsonObject>& Params)
-{
-    FString BlueprintName, ComponentName, PropertyName;
-    if (TSharedPtr<FJsonObject> Missing = UEAgentBlueprintCommandsImpl::ReadBlueprintComponentNames(
-            Params, &mcp_common::MissingParameterReply, BlueprintName, ComponentName))
-    {
-        return Missing;
-    }
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("property_name"), PropertyName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    // Pull property_value as a RAW JsonValue (numbers/bools/arrays/objects flow
-    // straight into JsonValueToUProperty) -- NOT a pre-stringified string. The guard
-    // on the field itself makes the catalog publish it as required (of any JSON type).
-    if (!Params->HasField(TEXT("property_value")))
-    {
-        return mcp_common::MissingParameterReply(TEXT("property_value"));
-    }
-    TSharedPtr<FJsonValue> ValJson = Params->TryGetField(TEXT("property_value"));
-
-    UBlueprint* BP = mcp_common::ResolveBlueprint(BlueprintName);
-    if (!BP)
-    {
-        return mcp_common::BlueprintNotFoundReply(BlueprintName);
-    }
-
-    // Resolve a WRITABLE template -- own SCS, an ICH override for an INHERITED component,
-    // or (best-effort) a native inherited subobject. bAllowCreate mints the ICH override if absent.
-    FString Source;
-    TSharedPtr<FJsonObject> ErrObj;
-    UActorComponent* Tmpl = ResolveWritableComponentTemplate(BP, ComponentName, /*bAllowCreate=*/true, Source, ErrObj);
-    if (!Tmpl) { return ErrObj; }
-
-    // Canonical JSON->property route: enum-by-name, FGameplayTagContainer arrays,
-    // soft-object paths, nested structs, arrays/sets/maps -- all for free.
-    Tmpl->Modify();
-    FString SetErr;
-    if (!mcp_common::SetObjectProperty(Tmpl, PropertyName, ValJson, SetErr))
-    {
-        return mcp_common::MakeErrorReply(SetErr);
-    }
-
-    // Capture BEFORE compile: reinstancing can trash/duplicate the template object, so read the
-    // class name off Tmpl now (dereferencing Tmpl after CompileBlueprint would be unsafe).
-    const FString CompClassName = Tmpl->GetClass()->GetName();
-
-    // ICH override records are STRUCTURAL and only take effect after a compile. Mark
-    // structurally modified, compile so the override reinstances onto the generated class, then
-    // persist. (Mirrors add_ai_perception_sense: MarkModified -> CompileBlueprint -> SaveAssetPackage.)
-    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(BP);
-    FKismetEditorUtilities::CompileBlueprint(BP);
-
-    // Self-check for the inherited-ich path: confirm the override actually survived the compile
-    // (guards against the UBlueprint-vs-BPGC ICH acquisition trap described above).
-    bool bOverridePersisted = true;
-    if (Source == TEXT("inherited-ich"))
-    {
-        bOverridePersisted = false;
-        if (USCS_Node* Decl = FindDeclaringSCSNode(BP, FName(*ComponentName)))
-        {
-            if (UInheritableComponentHandler* ICH = BP->GetInheritableComponentHandler(/*bCreateIfNecessary=*/false))
-            {
-                bOverridePersisted = (ICH->GetOverridenComponentTemplate(FComponentKey(Decl)) != nullptr);
-            }
-        }
-    }
-
-    FString SaveErr;
-    if (!mcp_common::SaveAssetPackage(BP->GetOutermost(), BP, SaveErr))
-    {
-        return mcp_common::MakeErrorReply(SaveErr);
-    }
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("blueprint_name"), BP->GetName());
-    Data->SetStringField(TEXT("component_name"), ComponentName);
-    Data->SetStringField(TEXT("property_name"), PropertyName);
-    Data->SetStringField(TEXT("component_class"), CompClassName);
-    Data->SetStringField(TEXT("source"), Source);
-    Data->SetBoolField(TEXT("override_persisted"), bOverridePersisted);
-    return mcp_common::MakeOkReply(Data);
-}
-
-// MCP:set_blueprint_component_collision - Set collision on a Blueprint component TEMPLATE (own SCS or inherited via ICH), not on a spawned actor, applying in this order: `profile` through SetCollisionProfileName (which expands the profile into the FBodyInstance response array -- a raw reflection write would set the string and leave BodyInstance inconsistent, and that is the whole reason this is a separate tool), then `collision_enabled`, then per-channel `responses`. Use it instead of set_blueprint_component_property for anything collision-shaped. Unknown channel, response or collision_enabled names are hard errors, never a silent default. Note the ORDER: a later profile would reset the per-channel responses, so responses always win here.
+// MCP:set_blueprint_component_collision - Set collision on a Blueprint component TEMPLATE (own SCS or inherited via ICH), not on a spawned actor, applying in this order: `profile` through SetCollisionProfileName (which expands the profile into the FBodyInstance response array -- a raw reflection write would set the string and leave BodyInstance inconsistent, and that is the whole reason this is a separate tool), then `collision_enabled`, then per-channel `responses`. Use it instead of set_blueprint_component_properties for anything collision-shaped. Unknown channel, response or collision_enabled names are hard errors, never a silent default. Note the ORDER: a later profile would reset the per-channel responses, so responses always win here.
 //   @param blueprint_name - Blueprint asset path or name (required)
 //   @param component_name - Component to modify (required); must resolve to a UPrimitiveComponent or the call errors with "no collision to set"
 //   @param profile - Collision profile name, e.g. "BlockAll" (optional). Applied FIRST, so it does not undo the per-channel responses below.
@@ -4074,7 +4262,7 @@ TSharedPtr<FJsonObject> HandleSetBlueprintComponentCollision(const TSharedPtr<FJ
         return mcp_common::BlueprintNotFoundReply(BlueprintName);
     }
 
-    // The same writable template set_blueprint_component_property writes: own SCS, an ICH override
+    // The same writable template set_blueprint_component_properties writes: own SCS, an ICH override
     // for an INHERITED component (minted if absent), or a native inherited subobject.
     FString Source;
     TSharedPtr<FJsonObject> Err;
@@ -4127,7 +4315,7 @@ TSharedPtr<FJsonObject> HandleSetBlueprintComponentCollision(const TSharedPtr<FJ
 // =====================================================================================
 // Batch component-override re-authoring + element-level TArray authoring.
 // Both live below ResolveWritableComponentTemplate / ResolveReadOnlyComponentTemplate_BPCmd
-// on purpose: they reuse the SAME two cascades set_blueprint_component_property already
+// on purpose: they reuse the SAME two cascades set_blueprint_component_properties already
 // uses, so "where does this value come from" has one answer across the whole file.
 // =====================================================================================
 
@@ -4139,23 +4327,41 @@ TSharedPtr<FJsonObject> HandleSetBlueprintComponentCollision(const TSharedPtr<FJ
 // the transient package -- so any hack evaporates on the next load. Neither tool below
 // attempts it; both only ever write VALUES onto an existing template.
 
-// MCP:apply_component_property_overrides - Re-apply N component-property overrides on ONE Blueprint with a SINGLE compile and a SINGLE save, then verify each value against the POST-COMPILE template (what a fresh instance actually reads). ICH-aware exactly like set_blueprint_component_property: an override on a component inherited from an ancestor Blueprint is routed through this class' InheritableComponentHandler. Built for post-reparent re-authoring, where one call per override means N compiles and N chances for an ICH record not to survive.
+// MCP:set_blueprint_component_properties - Set the DEFAULT of one or N properties on Blueprint component TEMPLATES -- own SCS components, components INHERITED from an ancestor Blueprint (routed through this class' InheritableComponentHandler) and native inherited subobjects -- with a SINGLE compile and a SINGLE save, then verify each value against the POST-COMPILE template (what a fresh instance actually reads). One write takes component_name + property_name + property_value; several go in overrides[]. Built for post-reparent re-authoring too, where one call per override means N compiles and N chances for an ICH record not to survive. THREE TRAPS with the same shape (a green return over a different reality): (1) it can drop an entire OTHER component from the Blueprint IN MEMORY while disk and git stay clean -- count get_blueprint_components before and after, and reload_asset_package(on_dirty="discard") is the cure; (2) on an OBJECT-REFERENCE property a write can land None and still report override_persisted:true, wiping the inherited default -- check with get_blueprint_component_overrides; (3) actors ALREADY PLACED in a level keep their serialized value, so only fresh instances change. Collision belongs to set_blueprint_component_collision; read the effective value with get_blueprint_component_property, which never mints an override.
 //   @param blueprint_name - Blueprint asset path or short name
-//   @param overrides - Array of { component_name, property_name, property_value } objects, applied in the given order
+//   @param overrides - Optional array of { component_name, property_name, property_value } objects, applied in the given order. Required unless the single-write form (component_name + property_name + property_value) is given; both together apply overrides[] first, then the single write.
+//   @param component_name - Optional single-write form: component variable name (own or inherited). Needs property_name and property_value too.
+//   @param property_name - Optional single-write form: property to set on that component template.
+//   @param property_value - Optional single-write form: the new value (any JSON type; same importer as set_component_property). An array value REWRITES THE WHOLE ARRAY, including the empty/None gaps -- set_blueprint_component_array_element edits one element and proves the siblings did not move.
 //   @param compile - Optional bool (default true). false skips the compile: nothing is verifiable, every entry reports matches_requested=false with verification_status='not_verifiable'
 //   @param save - Optional bool (default true). Saves the Blueprint package ONCE, after the compile
-//   @returns { success, error?, data: { blueprint_name, requested_count, applied_count, verified_count, mismatched_count, failed_count, compiled, saved, save_error?, equality_predicate, results: [{ index, component_name, property_name, source, applied, apply_error?, verification_status, matches_requested, post_value, post_source, note? }], verification } }
+//   @returns { success, error?, data: { blueprint_name, requested_count, applied_count, verified_count, mismatched_count, failed_count, compiled, saved, save_error?, equality_predicate, results: [{ index, component_name, property_name, source, component_class, override_persisted, applied, apply_error?, verification_status, matches_requested, post_value, post_source, note? }], verification } } -- source tells which template was hit (scs / inherited-ich / inherited-scs / inherited-native); component_class is that template's class, read before the compile; override_persisted is false only when an inherited-ich override did not survive the compile.
 
 TSharedPtr<FJsonObject> HandleApplyComponentPropertyOverrides(const TSharedPtr<FJsonObject>& Params)
 {
     FString BlueprintName;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("blueprint_name"), BlueprintName)) { return Missing; }
 
+    // overrides[] and the single-write form are both optional; at least one has to be there.
     const TArray<TSharedPtr<FJsonValue>>* OverridesArr = nullptr;
-    if (!Params->TryGetArrayField(TEXT("overrides"), OverridesArr) || !OverridesArr || OverridesArr->Num() == 0)
+    const bool bHasOverrides = Params->TryGetArrayField(TEXT("overrides"), OverridesArr) && OverridesArr && OverridesArr->Num() > 0;
+    FString SingleComponent;
+    FString SingleProperty;
+    const bool bHasSingleComponent = Params->TryGetStringField(TEXT("component_name"), SingleComponent) && !SingleComponent.IsEmpty();
+    const bool bHasSingleProperty = Params->TryGetStringField(TEXT("property_name"), SingleProperty) && !SingleProperty.IsEmpty();
+    // property_value is a RAW JsonValue (numbers/bools/arrays/objects flow straight into the importer).
+    const TSharedPtr<FJsonValue> SingleValue = Params->TryGetField(TEXT("property_value"));
+    const bool bHasSingle = bHasSingleComponent || bHasSingleProperty || SingleValue.IsValid();
+    if (bHasSingle && !(bHasSingleComponent && bHasSingleProperty && SingleValue.IsValid()))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("The single-write form needs component_name, property_name and property_value together; missing: %s"),
+            !bHasSingleComponent ? TEXT("component_name") : (!bHasSingleProperty ? TEXT("property_name") : TEXT("property_value"))));
+    }
+    if (!bHasOverrides && !bHasSingle)
     {
         return mcp_common::MakeErrorReply(
-            TEXT("Missing required parameter: overrides (non-empty array of {component_name, property_name, property_value})"));
+            TEXT("Missing required parameter: overrides (non-empty array of {component_name, property_name, property_value}), or component_name + property_name + property_value for a single write"));
     }
 
     bool bCompile = true;
@@ -4176,14 +4382,16 @@ TSharedPtr<FJsonObject> HandleApplyComponentPropertyOverrides(const TSharedPtr<F
         FString                Property;
         TSharedPtr<FJsonValue> Value;
         FString                Source;
+        FString                ComponentClass;
         bool                   bApplied = false;
         FString                ApplyError;
     };
 
     TArray<FPendingOverride> Pending;
-    Pending.Reserve(OverridesArr->Num());
+    const int32 ListedCount = bHasOverrides ? OverridesArr->Num() : 0;
+    Pending.Reserve(ListedCount + 1);
 
-    for (int32 i = 0; i < OverridesArr->Num(); ++i)
+    for (int32 i = 0; i < ListedCount; ++i)
     {
         const TSharedPtr<FJsonValue>& Entry = (*OverridesArr)[i];
         const TSharedPtr<FJsonObject>* EntryObjPtr = nullptr;
@@ -4214,6 +4422,14 @@ TSharedPtr<FJsonObject> HandleApplyComponentPropertyOverrides(const TSharedPtr<F
         }
         Pending.Add(MoveTemp(P));
     }
+    if (bHasSingle)
+    {
+        FPendingOverride P;
+        P.Component = SingleComponent;
+        P.Property = SingleProperty;
+        P.Value = SingleValue;
+        Pending.Add(MoveTemp(P));
+    }
 
     int32 AppliedCount = 0;
     for (FPendingOverride& P : Pending)
@@ -4228,6 +4444,8 @@ TSharedPtr<FJsonObject> HandleApplyComponentPropertyOverrides(const TSharedPtr<F
             P.ApplyError = FString::Printf(TEXT("Component '%s' could not be resolved to a writable template"), *P.Component);
             continue;
         }
+        // Read BEFORE the compile: reinstancing can trash/duplicate the template object.
+        P.ComponentClass = Tmpl->GetClass()->GetName();
         Tmpl->Modify();
         FString SetErr;
         if (!mcp_common::SetObjectProperty(Tmpl, P.Property, P.Value, SetErr))
@@ -4271,6 +4489,21 @@ TSharedPtr<FJsonObject> HandleApplyComponentPropertyOverrides(const TSharedPtr<F
         R->SetStringField(TEXT("component_name"), P.Component);
         R->SetStringField(TEXT("property_name"), P.Property);
         R->SetStringField(TEXT("source"), P.Source);
+        R->SetStringField(TEXT("component_class"), P.ComponentClass);
+        // An ICH override record only takes effect through the compile: confirm it survived it.
+        bool bOverridePersisted = true;
+        if (P.bApplied && P.Source == TEXT("inherited-ich"))
+        {
+            bOverridePersisted = false;
+            if (USCS_Node* Decl = FindDeclaringSCSNode(BP, FName(*P.Component)))
+            {
+                if (UInheritableComponentHandler* ICH = BP->GetInheritableComponentHandler(/*bCreateIfNecessary=*/false))
+                {
+                    bOverridePersisted = (ICH->GetOverridenComponentTemplate(FComponentKey(Decl)) != nullptr);
+                }
+            }
+        }
+        R->SetBoolField(TEXT("override_persisted"), bOverridePersisted);
         R->SetBoolField(TEXT("applied"), P.bApplied);
         if (!P.ApplyError.IsEmpty())
         {
@@ -4740,7 +4973,7 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("add_ai_perception_sense"), &HandleAddAIPerceptionSense },
     { TEXT("add_blueprint_function"), &HandleAddBlueprintFunction },
     { TEXT("add_component_to_blueprint"), &HandleAddComponentToBlueprint },
-    { TEXT("apply_component_property_overrides"), &HandleApplyComponentPropertyOverrides },
+    { TEXT("set_blueprint_component_properties"), &HandleApplyComponentPropertyOverrides },
     { TEXT("apply_material_to_blueprint"), &HandleApplyMaterialToBlueprint },
     { TEXT("attach_blueprint_component"), &HandleAttachBlueprintComponent },
     { TEXT("compile_blueprint"), &HandleCompileBlueprint },
@@ -4750,20 +4983,17 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("get_available_materials"), &HandleGetAvailableMaterials },
     { TEXT("get_blueprint_component_object_path"), &HandleGetBlueprintComponentObjectPath },
     { TEXT("get_blueprint_component_property"), &HandleGetBlueprintComponentProperty },
-    { TEXT("get_blueprint_components"), &HandleGetBlueprintComponents },
     { TEXT("get_blueprint_functions"), &HandleGetBlueprintFunctions },
     { TEXT("get_blueprint_info"), &HandleGetBlueprintInfo },
     { TEXT("get_blueprint_material_info"), &HandleGetBlueprintMaterialInfo },
     { TEXT("get_blueprint_variable_detailed_info"), &HandleGetBlueprintVariableDetailedInfo },
     { TEXT("get_blueprint_variables"), &HandleGetBlueprintVariables },
     { TEXT("list_overridable_functions"), &HandleListOverridableFunctions },
-    { TEXT("remove_blueprint_component_node"), &HandleRemoveBlueprintComponentNode },
     { TEXT("remove_blueprint_function"), &HandleRemoveBlueprintFunction },
     { TEXT("remove_component_from_blueprint"), &HandleRemoveComponentFromBlueprint },
     { TEXT("remove_unused_variables"), &HandleRemoveUnusedVariables },
     { TEXT("set_blueprint_component_array_element"), &HandleSetBlueprintComponentArrayElement },
     { TEXT("set_blueprint_component_collision"), &HandleSetBlueprintComponentCollision },
-    { TEXT("set_blueprint_component_property"), &HandleSetBlueprintComponentProperty },
     { TEXT("set_mesh_material_color"), &HandleSetMeshMaterialColor },
     { TEXT("set_physics_properties"), &HandleSetPhysicsProperties },
     { TEXT("set_static_mesh_properties"), &HandleSetStaticMeshProperties },

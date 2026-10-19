@@ -437,7 +437,7 @@ TSharedPtr<FJsonObject> HandleSetComponentProperty(const TSharedPtr<FJsonObject>
     const FString OldValue = UEAgentConfigImpl::ExportPropertyText(*Property, Component);
 
     // The write goes through the single canonical JSON->property route (the same one
-    // set_blueprint_component_property uses): object/soft/class references from "/Game/..."
+    // set_blueprint_component_properties uses): object/soft/class references from "/Game/..."
     // paths, enums by name, registry-validated gameplay tags, nested structs, arrays, sets and
     // maps. Modify() first, so the component's package (OFPA external actor packages included)
     // is dirtied and save_level persists the change.

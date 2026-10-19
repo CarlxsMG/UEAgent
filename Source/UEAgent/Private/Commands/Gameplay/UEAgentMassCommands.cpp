@@ -10,7 +10,7 @@
 #include "MassEntityTraitBase.h"
 #include "MassSpawner.h"
 #include "MassSpawnerTypes.h"
-#include "MassEntitySubsystem.h"   // UMassEntitySubsystem + FMassEntityManager::DebugGetEntityCount
+#include "MassEntitySubsystem.h"   // UMassEntitySubsystem + FMassEntityManager::DebugGetEntityCount (via Mass_LiveEntityCount)
 #include "MassEntityManager.h"
 #include "MassEntityQuery.h"       // FMassEntityQuery
 #include "MassEntityCollection.h"  // FMassArchetypeEntityCollection
@@ -40,6 +40,22 @@ namespace
 	UClass* ResolveClassByName(const FString& Name)
 	{
 		return FUEAgentGraphUtils::ResolveClass(Name);
+	}
+
+	/**
+	 * The live entities of an entity manager. FMassEntityManager::DebugGetEntityCount is the storage size minus the
+	 * reserved and free slots, so on a manager that never created an entity (empty storage, one reserved slot) it
+	 * answers -1; that is 0 entities, and a -1 baseline would also add one to every spawn/despawn delta.
+	 */
+	int32 Mass_LiveEntityCount(const FMassEntityManager& Mgr)
+	{
+		return FMath::Max(0, Mgr.DebugGetEntityCount());
+	}
+
+	/** Mass_LiveEntityCount of the subsystem's manager; 0 without a subsystem. */
+	int32 Mass_LiveEntityCount(const UMassEntitySubsystem* MassSub)
+	{
+		return MassSub ? Mass_LiveEntityCount(MassSub->GetEntityManager()) : 0;
 	}
 
 	/** Resolve a dotted property path on an object; returns the leaf FProperty + its value ptr. */
@@ -250,7 +266,7 @@ TSharedPtr<FJsonObject> HandleCreateMassEntityConfig(
 // ---------------------------------------------------------------------------
 // add_mass_trait
 // ---------------------------------------------------------------------------
-// MCP:add_mass_trait - Adds a trait (a concrete UMassEntityTraitBase subclass) to a UMassEntityConfigAsset and saves the config. Idempotent: if the config already holds a trait of exactly that class, itself or through its parent config chain, nothing is added or saved and the reply has added=false, already_existed=true and that trait's trait_path. trait_class takes a reflected name with or without its U prefix, or a /Script path; an unknown or non-trait class is an error, but an abstract one is not refused: the engine creates it behind an ensure and warns it is nulled out on save. Edit it with set_mass_trait_property; remove_mass_trait is the inverse; add_mass_trait_to_entity tags a live entity instead.
+// MCP:add_mass_trait - Adds a trait (a concrete UMassEntityTraitBase subclass) to a UMassEntityConfigAsset and saves the config. Idempotent: if the config already holds a trait of exactly that class, itself or through its parent config chain, nothing is added or saved and the reply has added=false, already_existed=true and that trait's trait_path. trait_class takes a reflected name with or without its U prefix, or a /Script path; an unknown or non-trait class is an error, but an abstract one is not refused: the engine creates it behind an ensure and warns it is nulled out on save. Edit it with set_mass_trait_property; remove_mass_trait is the inverse; add_mass_tag_to_entity tags a live entity instead.
 //   @param config_path - Asset path to the UMassEntityConfig
 //   @param trait_class - Trait class name to add (e.g. UMassMovementTrait)
 //   @returns { config_path, trait_class, trait_path, trait_count, added, already_existed, saved }
@@ -533,9 +549,9 @@ TSharedPtr<FJsonObject> HandleSpawnMassEntities(
 	// Count via the global Mass entity manager before/after. DoSpawning() runs here on
 	// the bridge's FTSTicker (top-level tick, outside Mass) — outside Mass processing, which is the safe path.
 	UMassEntitySubsystem* MassSub = World->GetSubsystem<UMassEntitySubsystem>();
-	const int32 CountBefore = MassSub ? MassSub->GetEntityManager().DebugGetEntityCount() : 0;
+	const int32 CountBefore = Mass_LiveEntityCount(MassSub);
 	Spawner->DoSpawning();
-	const int32 CountAfter = MassSub ? MassSub->GetEntityManager().DebugGetEntityCount() : 0;
+	const int32 CountAfter = Mass_LiveEntityCount(MassSub);
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("actor_label"), ActorLabel);
@@ -579,9 +595,9 @@ TSharedPtr<FJsonObject> HandleDespawnMassEntities(
 	// the bridge's FTSTicker (top-level tick, outside Mass) — outside Mass processing, the safe path. Mirror
 	// of spawn: it early-returns when this spawner spawned nothing (honest no-op).
 	UMassEntitySubsystem* MassSub = World->GetSubsystem<UMassEntitySubsystem>();
-	const int32 CountBefore = MassSub ? MassSub->GetEntityManager().DebugGetEntityCount() : 0;
+	const int32 CountBefore = Mass_LiveEntityCount(MassSub);
 	Spawner->DoDespawning();
-	const int32 CountAfter = MassSub ? MassSub->GetEntityManager().DebugGetEntityCount() : 0;
+	const int32 CountAfter = Mass_LiveEntityCount(MassSub);
 
 	const int32 Despawned = CountBefore - CountAfter;
 	const bool bWasEmpty = (Despawned == 0);
@@ -602,7 +618,7 @@ TSharedPtr<FJsonObject> HandleDespawnMassEntities(
 // ---------------------------------------------------------------------------
 // get_mass_spawner_info
 // ---------------------------------------------------------------------------
-// MCP:get_mass_spawner_info - Read an AMassSpawner actor of the editor world, found by actor label (first match), read-only. Returns actor_name, count and entity_types [{entity_config, proportion}] with entity_type_count; the entities it spawned are counted by count_mass_entities instead.
+// MCP:get_mass_spawner_info - Read an AMassSpawner actor of the editor world, found by actor label (first match), read-only. Returns actor_name, count (the spawn count set_mass_spawner_count writes) and entity_types [{entity_config, proportion}] (what set_mass_spawner_entity_types writes) with entity_type_count; the entities it spawned are counted by list_mass_archetypes instead.
 //   @param actor_label - Editor label of the AMassSpawner actor
 //   @returns { actor_label, actor_name, count, entity_type_count, entity_types: [{ entity_config, proportion }] }
 TSharedPtr<FJsonObject> HandleGetMassSpawnerInfo(
@@ -862,11 +878,10 @@ namespace
 	UScriptStruct* ResolveMassScriptStructByName(const FString& Name)
 	{
 		if (Name.IsEmpty()) { return nullptr; }
-		if (UClass* AsClass = FUEAgentGraphUtils::ResolveClass(Name))
+		if (FUEAgentGraphUtils::ResolveClass(Name) != nullptr)
 		{
-			if (UScriptStruct* AsStruct = Cast<UScriptStruct>(AsClass)) { return AsStruct; }
-			// If it's a UClass (e.g. UMassEntityTraitBase subclass), return its UScriptStruct
-			// for fragment requirement — usually traits are non-fragment; callers will reject.
+			// A name that resolves to a UClass (e.g. a UMassEntityTraitBase subclass) is never a fragment or tag
+			// struct (a UClass is not a UScriptStruct); callers reject the null.
 			return nullptr;
 		}
 		// Direct lookup by name (handles "FMassFoo" without prefix).
@@ -947,15 +962,51 @@ namespace
 // ---------------------------------------------------------------------------
 // destroy_mass_entity
 // ---------------------------------------------------------------------------
-// MCP:destroy_mass_entity - Destroy a single Mass entity by its handle (Index:SerialNumber).
-//   @param entity_handle - "{Index}:{SerialNumber}" string returned by spawn/query.
-//   @returns { entity_handle, destroyed: bool, already_destroyed: bool }
+// MCP:destroy_mass_entity - Destroy a single Mass entity by its handle (Index:SerialNumber), or with all=true every Mass entity in the editor world (not a PIE world), archetype by archetype; no undo either way. Give exactly one of entity_handle and all. To despawn what one spawner made use despawn_mass_entities.
+//   @param entity_handle - "{Index}:{SerialNumber}" string returned by spawn/query. Provide this OR all.
+//   @param all - Optional bool, default false: true destroys every entity of the editor world's entity manager instead of one. Provide this OR entity_handle.
+//   @returns { entity_handle?: string, destroyed?: bool, already_destroyed?: bool, all?: bool, destroyed_count?: int, before_count?: int, after_count?: int }
 TSharedPtr<FJsonObject> HandleDestroyMassEntity(const TSharedPtr<FJsonObject>& Params)
 {
 	FString HandleStr;
-	if (!Params->TryGetStringField(TEXT("entity_handle"), HandleStr) || HandleStr.IsEmpty())
+	const bool bHasHandle = Params->TryGetStringField(TEXT("entity_handle"), HandleStr) && !HandleStr.IsEmpty();
+	bool bAll = false;
+	Params->TryGetBoolField(TEXT("all"), bAll);
+	if (bAll && bHasHandle)
 	{
-		return mcp_common::MakeErrorReply(TEXT("entity_handle is required (format: Index:SerialNumber)"));
+		return mcp_common::MakeErrorReply(TEXT("Provide entity_handle OR all=true, not both"));
+	}
+
+	if (bAll)
+	{
+		UMassEntitySubsystem* MassSub = GetMassEntitySubsystem();
+		if (!MassSub) { return mcp_common::MakeErrorReply(TEXT("UMassEntitySubsystem unavailable (editor world not ready)")); }
+		FMassEntityManager& Mgr = MassSub->GetMutableEntityManager();
+
+		const int32 Before = Mass_LiveEntityCount(Mgr);
+		// No public GetArchetypes() -- walk via FMassEntityQuery (empty
+		// requirements = match all) and batch-destroy each per-archetype collection.
+		FMassEntityQuery Query(Mgr.AsShared());
+		TArray<FMassArchetypeEntityCollection> Collections = Query.CreateMatchingEntitiesCollection();
+		int32 Destroyed = 0;
+		for (const FMassArchetypeEntityCollection& C : Collections)
+		{
+			Destroyed += Mgr.DebugGetArchetypeEntitiesCount(C.GetArchetype());
+			Mgr.BatchDestroyEntityChunks(C);
+		}
+		const int32 After = Mass_LiveEntityCount(Mgr);
+
+		TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+		Data->SetBoolField(TEXT("all"), true);
+		Data->SetNumberField(TEXT("destroyed_count"), Destroyed);
+		Data->SetNumberField(TEXT("before_count"), Before);
+		Data->SetNumberField(TEXT("after_count"), After);
+		return mcp_common::MakeOkReply(Data);
+	}
+
+	if (!bHasHandle)
+	{
+		return mcp_common::MakeErrorReply(TEXT("Provide entity_handle (format: Index:SerialNumber) or all=true"));
 	}
 	FMassEntityHandle Handle;
 	if (!ParseMassEntityHandle(HandleStr, Handle))
@@ -983,37 +1034,6 @@ TSharedPtr<FJsonObject> HandleDestroyMassEntity(const TSharedPtr<FJsonObject>& P
 	Data->SetStringField(TEXT("entity_handle"), HandleStr);
 	Data->SetBoolField(TEXT("destroyed"), true);
 	Data->SetBoolField(TEXT("already_destroyed"), false);
-	return mcp_common::MakeOkReply(Data);
-}
-
-// ---------------------------------------------------------------------------
-// destroy_all_mass_entities
-// ---------------------------------------------------------------------------
-// MCP:destroy_all_mass_entities - Destroy every Mass entity in the editor world (not a PIE world), archetype by archetype, with no undo. Returns destroyed_count, before_count and after_count. For one entity use destroy_mass_entity; to despawn what one spawner made use despawn_mass_entities.
-//   @returns { destroyed_count: int, before_count: int, after_count: int }
-TSharedPtr<FJsonObject> HandleDestroyAllMassEntities(const TSharedPtr<FJsonObject>& Params)
-{
-	UMassEntitySubsystem* MassSub = GetMassEntitySubsystem();
-	if (!MassSub) { return mcp_common::MakeErrorReply(TEXT("UMassEntitySubsystem unavailable (editor world not ready)")); }
-	FMassEntityManager& Mgr = MassSub->GetMutableEntityManager();
-
-	const int32 Before = Mgr.DebugGetEntityCount();
-	// No public GetArchetypes() — walk via FMassEntityQuery (empty
-	// requirements = match all) and batch-destroy each per-archetype collection.
-	FMassEntityQuery Query(Mgr.AsShared());
-	TArray<FMassArchetypeEntityCollection> Collections = Query.CreateMatchingEntitiesCollection();
-	int32 Destroyed = 0;
-	for (const FMassArchetypeEntityCollection& C : Collections)
-	{
-		Destroyed += Mgr.DebugGetArchetypeEntitiesCount(C.GetArchetype());
-		Mgr.BatchDestroyEntityChunks(C);
-	}
-	const int32 After = Mgr.DebugGetEntityCount();
-
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetNumberField(TEXT("destroyed_count"), Destroyed);
-	Data->SetNumberField(TEXT("before_count"), Before);
-	Data->SetNumberField(TEXT("after_count"), After);
 	return mcp_common::MakeOkReply(Data);
 }
 
@@ -1121,50 +1141,11 @@ TSharedPtr<FJsonObject> HandleQueryMassEntities(const TSharedPtr<FJsonObject>& P
 }
 
 // ---------------------------------------------------------------------------
-// count_mass_entities
+// add_mass_tag_to_entity  — HOP REPLAY
 // ---------------------------------------------------------------------------
-// MCP:count_mass_entities - Count the live Mass entities of the editor world (not a PIE world), read-only. Returns total, archetype_count and per_archetype [{archetype_id, count}]; list_mass_archetypes adds fragment counts, query_mass_entities counts by fragment or tag.
-//   @returns { total: int, archetype_count: int, per_archetype: [{ archetype_id, count }] }
-TSharedPtr<FJsonObject> HandleCountMassEntities(const TSharedPtr<FJsonObject>& Params)
-{
-	UMassEntitySubsystem* MassSub = GetMassEntitySubsystem();
-	if (!MassSub) { return mcp_common::MakeErrorReply(TEXT("UMassEntitySubsystem unavailable")); }
-	FMassEntityManager& Mgr = MassSub->GetMutableEntityManager();
-
-	// Walk via FMassEntityQuery (empty requirements = match all). Need to
-	// pass the manager via the constructor (no public setter); the query caches
-	// archetypes internally on first use.
-	FMassEntityQuery Query(Mgr.AsShared());
-	TArray<FMassArchetypeEntityCollection> Collections = Query.CreateMatchingEntitiesCollection();
-
-	TArray<TSharedPtr<FJsonValue>> PerArchJson;
-	int32 TotalFromArch = 0;
-	for (const FMassArchetypeEntityCollection& C : Collections)
-	{
-		// Per-collection count comes from the manager's debug API (there is no
-		// public GetNumEntities on FMassArchetypeEntityCollection).
-		const FMassArchetypeHandle A = C.GetArchetype();
-		const int32 Count = Mgr.DebugGetArchetypeEntitiesCount(A);
-		TotalFromArch += Count;
-		TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
-		Entry->SetStringField(TEXT("archetype_id"), FString::Printf(TEXT("arch_%u"), GetTypeHash(A)));
-		Entry->SetNumberField(TEXT("count"), Count);
-		PerArchJson.Add(MakeShared<FJsonValueObject>(Entry));
-	}
-
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetNumberField(TEXT("total"), MassSub->GetEntityManager().DebugGetEntityCount());
-	Data->SetNumberField(TEXT("archetype_count"), Collections.Num());
-	Data->SetArrayField (TEXT("per_archetype"), PerArchJson);
-	return mcp_common::MakeOkReply(Data);
-}
-
-// ---------------------------------------------------------------------------
-// add_mass_trait_to_entity  — HOP REPLAY
-// ---------------------------------------------------------------------------
-// MCP:add_mass_trait_to_entity - Add an FMassTag (a tag, not a trait or fragment, despite the name) to a Mass entity of the editor world (not PIE) by archetype migration. Caveat: EVERY entity sharing that archetype gets the tag, not only this one. Returns old_archetype_id, new_archetype_id and changed; inverse: remove_mass_trait_from_entity.
+// MCP:add_mass_tag_to_entity - Add an FMassTag (a tag, not a trait or fragment, despite the name) to a Mass entity of the editor world (not PIE) by archetype migration. Caveat: EVERY entity sharing that archetype gets the tag, not only this one. Returns old_archetype_id, new_archetype_id and changed; inverse: remove_mass_tag_from_entity.
 //   @param entity_handle - Entity handle as "Index:SerialNumber", two integers such as "12:3" (no braces); a no-longer-valid entity is an error
-//   @param tag - Reflected name of an FMassTag struct without the F prefix, as list_mass_trait_types returns it (e.g. "MassOffLODTag"); /Script paths do not resolve
+//   @param tag - Reflected name of an FMassTag struct without the F prefix, as list_mass_tag_types returns it (e.g. "MassOffLODTag"); /Script paths do not resolve
 //   @returns { entity_handle, old_archetype_id, new_archetype_id, tag, changed }
 TSharedPtr<FJsonObject> HandleAddMassTraitToEntity(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1177,11 +1158,11 @@ TSharedPtr<FJsonObject> HandleAddMassTraitToEntity(const TSharedPtr<FJsonObject>
 }
 
 // ---------------------------------------------------------------------------
-// remove_mass_trait_from_entity
+// remove_mass_tag_from_entity
 // ---------------------------------------------------------------------------
-// MCP:remove_mass_trait_from_entity - Remove an FMassTag from a Mass entity of the editor world (not PIE) by archetype migration; inverse of add_mass_trait_to_entity. Caveat: the tag is removed from EVERY entity sharing that archetype, not only this one. Returns old_archetype_id, new_archetype_id and changed (false when nothing moved).
+// MCP:remove_mass_tag_from_entity - Remove an FMassTag from a Mass entity of the editor world (not PIE) by archetype migration; inverse of add_mass_tag_to_entity. Caveat: the tag is removed from EVERY entity sharing that archetype, not only this one. Returns old_archetype_id, new_archetype_id and changed (false when nothing moved).
 //   @param entity_handle - Entity handle as "Index:SerialNumber", two integers such as "12:3" (no braces); a no-longer-valid entity is an error
-//   @param tag - Reflected name of the FMassTag struct to remove, without the F prefix, as list_mass_trait_types returns it (e.g. "MassOffLODTag"); /Script paths do not resolve
+//   @param tag - Reflected name of the FMassTag struct to remove, without the F prefix, as list_mass_tag_types returns it (e.g. "MassOffLODTag"); /Script paths do not resolve
 //   @returns { entity_handle, old_archetype_id, new_archetype_id, tag, changed }
 TSharedPtr<FJsonObject> HandleRemoveMassTraitFromEntity(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1194,9 +1175,9 @@ TSharedPtr<FJsonObject> HandleRemoveMassTraitFromEntity(const TSharedPtr<FJsonOb
 }
 
 // ---------------------------------------------------------------------------
-// list_mass_trait_types
+// list_mass_tag_types
 // ---------------------------------------------------------------------------
-// MCP:list_mass_trait_types - Enumerate every UScriptStruct class derived from FMassTag (the zero-size tag markers — what BatchChangeTagsForEntities accepts). Filters out abstract and editor-only.
+// MCP:list_mass_tag_types - Enumerate every UScriptStruct class derived from FMassTag (the zero-size tag markers — what BatchChangeTagsForEntities accepts). Filters out abstract and editor-only.
 //   @param include_abstract - If true (default false), include abstract tags too.
 //   @returns { count, traits: [{ name, path }] }
 TSharedPtr<FJsonObject> HandleListMassTraitTypes(const TSharedPtr<FJsonObject>& Params)
@@ -1223,27 +1204,6 @@ TSharedPtr<FJsonObject> HandleListMassTraitTypes(const TSharedPtr<FJsonObject>& 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetNumberField(TEXT("count"), Count);
 	Data->SetArrayField (TEXT("traits"), Out);
-	return mcp_common::MakeOkReply(Data);
-}
-
-// ---------------------------------------------------------------------------
-// list_mass_signals
-// ---------------------------------------------------------------------------
-// MCP:list_mass_signals - ALWAYS RETURNS AN EMPTY LIST -- do not use it to discover signal names. Honest engine gap: UMassSignalSubsystem::NamedSignals is protected with no public enumeration API, so the tool can only answer count:0 plus a note. Call fire_mass_signal directly with a name you already know; the engine silently no-ops on an unknown one.
-//   @returns { count: 0, signals: [], note: "..." }
-TSharedPtr<FJsonObject> HandleListMassSignals(const TSharedPtr<FJsonObject>& Params)
-{
-	if (!GEditor) { return mcp_common::MakeErrorReply(TEXT("No editor world available")); }
-	UWorld* W = mcp_common::GetEditorWorld();
-	UMassSignalSubsystem* SigSub = W ? W->GetSubsystem<UMassSignalSubsystem>() : nullptr;
-	if (!SigSub) { return mcp_common::MakeErrorReply(TEXT("UMassSignalSubsystem unavailable (MassSignals module not loaded)")); }
-
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetNumberField(TEXT("count"), 0);
-	Data->SetArrayField (TEXT("signals"), TArray<TSharedPtr<FJsonValue>>());
-	Data->SetStringField(TEXT("note"),
-		TEXT("UE 5.8 UMassSignalSubsystem::NamedSignals is protected and has no public enumeration API. "
-		     "Use fire_mass_signal with a known signal name; engine silently no-ops on unknown names."));
 	return mcp_common::MakeOkReply(Data);
 }
 
@@ -1314,9 +1274,8 @@ TSharedPtr<FJsonObject> HandleFireMassSignal(const TSharedPtr<FJsonObject>& Para
 }
 
 // ===========================================================================
-// Read-side counterparts of the config/spawner setters.
-// get_mass_config_parent, get_mass_spawner_count,
-// get_mass_spawner_entity_types.
+// Read-side counterpart of the config setter: get_mass_config_parent (the
+// spawner setters are read back by get_mass_spawner_info).
 // ===========================================================================
 
 // MCP:get_mass_config_parent - Read the parent config path of a UMassEntityConfigAsset (inverse of set_mass_config_parent).
@@ -1341,46 +1300,8 @@ TSharedPtr<FJsonObject> HandleGetMassConfigParent(const TSharedPtr<FJsonObject>&
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_mass_spawner_count - Read the current spawn count of an AMassSpawner (inverse of set_mass_spawner_count).
-//   @param actor_label - Actor label of the AMassSpawner
-//   @returns { actor_label, actor_name, count }
-TSharedPtr<FJsonObject> HandleGetMassSpawnerCount(const TSharedPtr<FJsonObject>& Params)
-{
-	FString ActorLabel;
-	TSharedPtr<FJsonObject> Error;
-	AMassSpawner* Spawner = Mass_FindSpawnerParam(Params, ActorLabel, Error);
-	if (!Spawner)
-	{
-		return Error;
-	}
-	TSharedPtr<FJsonObject> Data = Mass_NewSpawnerData(Spawner);
-	Data->SetNumberField(TEXT("count"), Spawner->GetCount());
-	return mcp_common::MakeOkReply(Data);
-}
-
-// MCP:get_mass_spawner_entity_types - Read the EntityTypes array of an AMassSpawner (inverse of set_mass_spawner_entity_types).
-//   @param actor_label - Actor label of the AMassSpawner
-//   @returns { actor_label, actor_name, entity_type_count, entity_types:[{entity_config, proportion}] }
-TSharedPtr<FJsonObject> HandleGetMassSpawnerEntityTypes(const TSharedPtr<FJsonObject>& Params)
-{
-	FString ActorLabel;
-	TSharedPtr<FJsonObject> Error;
-	AMassSpawner* Spawner = Mass_FindSpawnerParam(Params, ActorLabel, Error);
-	if (!Spawner)
-	{
-		return Error;
-	}
-	const TArray<TSharedPtr<FJsonValue>> TypesJson = Mass_SpawnerEntityTypesJson(Spawner);
-	TSharedPtr<FJsonObject> Data = Mass_NewSpawnerData(Spawner);
-	Data->SetNumberField(TEXT("entity_type_count"), TypesJson.Num());
-	Data->SetArrayField(TEXT("entity_types"), TypesJson);
-	return mcp_common::MakeOkReply(Data);
-}
-
-// MCP:list_mass_archetypes - List every Mass archetype of the editor world (not a PIE world) with its live-entity and fragment counts, read-only. Returns archetype_count, total_entities and archetypes [{archetype_id, entity_count, fragment_count}]; get_mass_entity_info names the fragments of one entity.
-//   @returns { archetype_count: int, total_entities: int, archetypes: [{ archetype_id: string, entity_count: int, fragment_count: int }] }
-//   Read-only. Sibling of count_mass_entities; standalone cmd that returns the full breakdown
-//   without a per_archetype top-level summary.
+// MCP:list_mass_archetypes - Census the Mass entities of the editor world (not a PIE world), read-only: every archetype with its live-entity and fragment counts. Returns archetype_count, total_entities (the sum over the archetypes), total (the entity manager's own count) and archetypes [{archetype_id, entity_count, fragment_count}]; get_mass_entity_info names the fragments of one entity, query_mass_entities counts by fragment or tag.
+//   @returns { archetype_count: int, total_entities: int, total: int, archetypes: [{ archetype_id: string, entity_count: int, fragment_count: int }] }
 TSharedPtr<FJsonObject> HandleListMassArchetypes(const TSharedPtr<FJsonObject>& Params)
 {
 	UMassEntitySubsystem* MassSub = GetMassEntitySubsystem();
@@ -1411,6 +1332,7 @@ Mgr.ForEachArchetype(0, ArchetypeCount, [&](const FMassEntityManager& IterMgr, c
 	TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
 	Resp->SetNumberField(TEXT("archetype_count"), ArchetypeCount);
 	Resp->SetNumberField(TEXT("total_entities"), TotalEntities);
+	Resp->SetNumberField(TEXT("total"), Mass_LiveEntityCount(Mgr));
 	Resp->SetArrayField(TEXT("archetypes"), Archetypes);
 	return mcp_common::MakeOkReply(Resp);
 }
@@ -1418,27 +1340,22 @@ Mgr.ForEachArchetype(0, ArchetypeCount, [&](const FMassEntityManager& IterMgr, c
 const McpCommandFamilies::FRegistrar Registration =
 {
 	{ TEXT("add_mass_trait"), &HandleAddMassTrait },
-	{ TEXT("add_mass_trait_to_entity"), &HandleAddMassTraitToEntity },
-	{ TEXT("count_mass_entities"), &HandleCountMassEntities },
+	{ TEXT("add_mass_tag_to_entity"), &HandleAddMassTraitToEntity },
 	{ TEXT("create_mass_entity_config"), &HandleCreateMassEntityConfig },
 	{ TEXT("create_mass_spawner_actor"), &HandleCreateMassSpawnerActor },
 	{ TEXT("despawn_mass_entities"), &HandleDespawnMassEntities },
-	{ TEXT("destroy_all_mass_entities"), &HandleDestroyAllMassEntities },
 	{ TEXT("destroy_mass_entity"), &HandleDestroyMassEntity },
 	{ TEXT("fire_mass_signal"), &HandleFireMassSignal },
 	{ TEXT("get_mass_config_parent"), &HandleGetMassConfigParent },
 	{ TEXT("get_mass_entity_info"), &HandleGetMassEntityInfo },
-	{ TEXT("get_mass_spawner_count"), &HandleGetMassSpawnerCount },
-	{ TEXT("get_mass_spawner_entity_types"), &HandleGetMassSpawnerEntityTypes },
 	{ TEXT("get_mass_spawner_info"), &HandleGetMassSpawnerInfo },
 	{ TEXT("get_mass_trait_property"), &HandleGetMassTraitProperty },
 	{ TEXT("list_mass_archetypes"), &HandleListMassArchetypes },
-	{ TEXT("list_mass_signals"), &HandleListMassSignals },
-	{ TEXT("list_mass_trait_types"), &HandleListMassTraitTypes },
+	{ TEXT("list_mass_tag_types"), &HandleListMassTraitTypes },
 	{ TEXT("list_mass_traits"), &HandleListMassTraits },
 	{ TEXT("query_mass_entities"), &HandleQueryMassEntities },
 	{ TEXT("remove_mass_trait"), &HandleRemoveMassTrait },
-	{ TEXT("remove_mass_trait_from_entity"), &HandleRemoveMassTraitFromEntity },
+	{ TEXT("remove_mass_tag_from_entity"), &HandleRemoveMassTraitFromEntity },
 	{ TEXT("set_mass_config_parent"), &HandleSetMassConfigParent },
 	{ TEXT("set_mass_spawner_count"), &HandleSetMassSpawnerCount },
 	{ TEXT("set_mass_spawner_entity_types"), &HandleSetMassSpawnerEntityTypes },

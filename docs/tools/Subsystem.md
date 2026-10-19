@@ -8,16 +8,18 @@
 
 *Read-only.*
 
-Reads the exposed properties (EditAnywhere or Blueprint-visible, inherited included, Transient skipped) of a live subsystem instance, each with name, C++ type, property class, edit and blueprint_visible flags, and its value exported as text (empty when it cannot be exported). lifetime picks the host: world reads the world the world selector picks, the editor world by default; gameinstance and localplayer read the game instance of that world, the running Play-in-Editor world by default, since the editor world never has one (without PIE they fail saying so). The reply names the world it read (world_package, world_type). A missing host or instance is an error. Read-only. For a quick existence check use get_subsystem_instance; to enumerate use list_subsystem_instances or list_local_player_subsystems.
+Find the live instance of a subsystem class by its lifetime and read its exposed properties (EditAnywhere or Blueprint-visible, inherited included, Transient skipped), each with name, C++ type, property class, edit and blueprint_visible flags, and its value exported as text (empty when it cannot be exported); include_properties=false skips the property walk for a cheap "is it there, and what is it called" lookup. lifetime picks the host: world reads the world the world selector picks, the editor world by default; gameinstance and localplayer read the game instance of that world, the running Play-in-Editor world by default, since the editor world never has one (without PIE they fail saying so). The reply names the world it read (world_package, world_type). A missing host or instance is an error. Read-only. To enumerate use list_subsystem_instances or list_local_player_subsystems.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `subsystem_class` | string | yes | Class name of the subsystem to inspect (short reflected name or /Script path). |
-| `lifetime` | string | yes | Which host resolves the instance: one of engine \| gameinstance \| world \| editor \| localplayer. |
+| `subsystem_class` | string | yes | Class of the subsystem to inspect: short reflected name (with or without the U prefix), /Script path, or a Blueprint subsystem's class path. Must derive from USubsystem. |
+| `lifetime` | string | yes | Which host resolves the instance: one of engine \| gameinstance \| world \| editor \| localplayer (case-insensitive). |
+| `class_name` | string | no | Alias of subsystem_class. |
 | `player_index` | number | no | Local player index, used only when lifetime is "localplayer" (default 0). |
+| `include_properties` | boolean | no | Optional bool (default true). false returns the instance's identity only, with no properties walk. |
 | `world` | string | no | Optional world selector for the world, gameinstance and localplayer lifetimes, ignored by the others: editor, pie (ambiguous: PlayWorld, else the first PIE context), game (alias of pie), server (the PIE world with authority), client or pie:N. Absent means editor for world and pie for gameinstance and localplayer. An unrecognised value fails naming the worlds that exist |
 
-**Returns:** `{ subsystem_class: string, lifetime: string, subsystem_name: string, subsystem_path: string, property_count: int, properties: [{ name, cpp_type, class, edit, blueprint_visible, value }], world?: string, world_name?: string, world_package?: string, world_type?: string, net_mode?: string, pie_instance?: int } -- the world fields only for the world, gameinstance and localplayer lifetimes`
+**Returns:** `{ subsystem_class: string, lifetime: string, subsystem_name: string, subsystem_path: string, instance_name: string, instance_path: string, property_count?: int, properties?: [{ name, cpp_type, class, edit, blueprint_visible, value }], world?: string, world_name?: string, world_package?: string, world_type?: string, net_mode?: string, pie_instance?: int } -- instance_name/instance_path repeat subsystem_name/subsystem_path; property_count and properties only with include_properties; the world fields only for the world, gameinstance and localplayer lifetimes`
 
 ## `list_local_player_subsystems`
 

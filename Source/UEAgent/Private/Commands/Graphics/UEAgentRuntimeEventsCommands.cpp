@@ -373,8 +373,7 @@ TSharedPtr<FJsonObject> HandleUnsubscribeDelegate(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeOkReply(Out);
 }
 
-// Shared by get_component_events and add_component_event: the fixed catalogue of component
-// events both commands talk about, plus the actor/component lookup they share.
+// get_component_events' fixed catalogue of component events, plus its actor/component lookup.
 namespace UEAgentRuntimeEventsImpl
 {
     /** Which components get_component_events lists an event for. */
@@ -382,99 +381,50 @@ namespace UEAgentRuntimeEventsImpl
     {
         AnyComponent,
         SceneComponentsOnly,
-        StaticMeshComponentsOnly,
-        NotListed // only accepted (and described) by add_component_event
+        StaticMeshComponentsOnly
     };
 
-    /** One event name add_component_event accepts. Category doubles as the listed "type". */
+    /** One catalogued component event. Category doubles as the listed "type". */
     struct FKnownComponentEvent
     {
         const TCHAR* Name;
         const TCHAR* Category;
         const TCHAR* Description;
         const TCHAR* Signature;
-        const TCHAR* DelegateProperty; // multicast delegate looked up on the class, or nullptr
         EEventListing Listing;
     };
 
-    // Order matters twice: it is the order get_component_events lists the entries in, and the
-    // order of the "Valid events" list in add_component_event's rejection message.
+    // The order get_component_events lists the entries in.
     const FKnownComponentEvent KnownComponentEvents[] =
     {
         { TEXT("BeginPlay"), TEXT("Lifecycle"), TEXT("Called when the component begins play"),
           TEXT("UFUNCTION(BlueprintImplementableEvent) void BeginPlay()"),
-          nullptr, EEventListing::AnyComponent },
+          EEventListing::AnyComponent },
         { TEXT("EndPlay"), TEXT("Lifecycle"), TEXT("Called when the component ends play"),
           TEXT("UFUNCTION(BlueprintImplementableEvent) void EndPlay(EEndPlayReason::Type EndPlayReason)"),
-          nullptr, EEventListing::AnyComponent },
+          EEventListing::AnyComponent },
         { TEXT("Tick"), TEXT("Update"), TEXT("Called every frame"),
           TEXT("UFUNCTION(BlueprintImplementableEvent) void Tick(float DeltaTime)"),
-          nullptr, EEventListing::AnyComponent },
+          EEventListing::AnyComponent },
         { TEXT("Activate"), TEXT("Activation"), TEXT("Called when the component is activated"),
           TEXT("UFUNCTION(BlueprintImplementableEvent) void Activate()"),
-          TEXT("OnComponentActivated"), EEventListing::AnyComponent },
+          EEventListing::AnyComponent },
         { TEXT("Deactivate"), TEXT("Activation"), TEXT("Called when the component is deactivated"),
           TEXT("UFUNCTION(BlueprintImplementableEvent) void Deactivate()"),
-          TEXT("OnComponentDeactivated"), EEventListing::AnyComponent },
+          EEventListing::AnyComponent },
         { TEXT("Register"), TEXT("Registration"), TEXT("Called when the component is registered"),
           TEXT("UFUNCTION(BlueprintImplementableEvent) void Register()"),
-          nullptr, EEventListing::AnyComponent },
+          EEventListing::AnyComponent },
         { TEXT("Unregister"), TEXT("Registration"), TEXT("Called when the component is unregistered"),
           TEXT("UFUNCTION(BlueprintImplementableEvent) void Unregister()"),
-          nullptr, EEventListing::AnyComponent },
+          EEventListing::AnyComponent },
         { TEXT("TransformUpdated"), TEXT("Transform"), TEXT("Called when the component's transform is updated"),
           TEXT("UFUNCTION(BlueprintImplementableEvent) void TransformUpdated()"),
-          nullptr, EEventListing::SceneComponentsOnly },
+          EEventListing::SceneComponentsOnly },
         { TEXT("OnClicked"), TEXT("Input"), TEXT("Called when the component is clicked"),
           TEXT("UFUNCTION(BlueprintImplementableEvent) void OnClicked(UPrimitiveComponent* ClickedComp, FKey ButtonPressed)"),
-          TEXT("OnClicked"), EEventListing::StaticMeshComponentsOnly },
-        { TEXT("OnBeginCursorOver"), TEXT("Input"), TEXT("Called when the cursor begins hovering over the component"),
-          TEXT("UFUNCTION(BlueprintImplementableEvent) void OnBeginCursorOver(UPrimitiveComponent* TouchedComponent)"),
-          TEXT("OnBeginCursorOver"), EEventListing::NotListed },
-        { TEXT("OnEndCursorOver"), TEXT("Input"), TEXT("Called when the cursor stops hovering over the component"),
-          TEXT("UFUNCTION(BlueprintImplementableEvent) void OnEndCursorOver(UPrimitiveComponent* TouchedComponent)"),
-          TEXT("OnEndCursorOver"), EEventListing::NotListed },
-        { TEXT("OnInputTouchBegin"), TEXT("Input"), TEXT("Called when touch input begins on the component"),
-          TEXT("UFUNCTION(BlueprintImplementableEvent) void OnInputTouchBegin(ETouchIndex::Type FingerIndex, UPrimitiveComponent* TouchedComponent)"),
-          TEXT("OnInputTouchBegin"), EEventListing::NotListed },
-        { TEXT("OnInputTouchEnd"), TEXT("Input"), TEXT("Called when touch input ends on the component"),
-          TEXT("UFUNCTION(BlueprintImplementableEvent) void OnInputTouchEnd(ETouchIndex::Type FingerIndex, UPrimitiveComponent* TouchedComponent)"),
-          TEXT("OnInputTouchEnd"), EEventListing::NotListed },
-        { TEXT("OnInputTouchEnter"), TEXT("Input"), TEXT("Called when touch input enters the component"),
-          TEXT("UFUNCTION(BlueprintImplementableEvent) void OnInputTouchEnter(ETouchIndex::Type FingerIndex, UPrimitiveComponent* TouchedComponent)"),
-          TEXT("OnInputTouchEnter"), EEventListing::NotListed },
-        { TEXT("OnInputTouchLeave"), TEXT("Input"), TEXT("Called when touch input leaves the component"),
-          TEXT("UFUNCTION(BlueprintImplementableEvent) void OnInputTouchLeave(ETouchIndex::Type FingerIndex, UPrimitiveComponent* TouchedComponent)"),
-          TEXT("OnInputTouchLeave"), EEventListing::NotListed },
+          EEventListing::StaticMeshComponentsOnly },
     };
-
-    /** Catalogue entry for a requested name. FString equality, so the match ignores case. */
-    const FKnownComponentEvent* FindKnownEvent(const FString& RequestedName)
-    {
-        for (const FKnownComponentEvent& Known : KnownComponentEvents)
-        {
-            if (RequestedName.Equals(Known.Name, ESearchCase::IgnoreCase))
-            {
-                return &Known;
-            }
-        }
-        return nullptr;
-    }
-
-    /** "BeginPlay, EndPlay, ..." in catalogue order. */
-    FString KnownEventNameList()
-    {
-        FString Joined;
-        for (const FKnownComponentEvent& Known : KnownComponentEvents)
-        {
-            if (!Joined.IsEmpty())
-            {
-                Joined += TEXT(", ");
-            }
-            Joined += Known.Name;
-        }
-        return Joined;
-    }
 
     /** Whether get_component_events shows this entry for a component of the given kind. */
     bool IsListedFor(const FKnownComponentEvent& Known, bool bSceneComponent, bool bStaticMeshComponent)
@@ -530,7 +480,7 @@ namespace UEAgentRuntimeEventsImpl
         }
     }
 
-    /** The component/class facts both commands append to their payload. */
+    /** The component/class facts get_component_events appends to its payload. */
     void WriteComponentFacts(UActorComponent* Component, const TSharedPtr<FJsonObject>& Out)
     {
         UClass* ComponentClass = Component->GetClass();
@@ -595,103 +545,8 @@ TSharedPtr<FJsonObject> HandleGetComponentEvents(const TSharedPtr<FJsonObject>& 
     return Payload;
 }
 
-// MCP:add_component_event - Checks an event of a level actor's component; it never creates a binding (success is always false). A binding made on a live level-actor component would not persist: a handler belongs in a Blueprint's event graph. When the actor comes from a Blueprint and the event is a bindable delegate, the reply carries suggested_call: the add_component_bound_event call that authors it, with its parameters filled in.
-//   @param actor_name - Name of the actor containing the component
-//   @param component_name - Name of the component
-//   @param event_name - Name of the event to add (must be one of: BeginPlay, EndPlay, Tick, Activate, Deactivate, Register, Unregister, TransformUpdated, OnClicked, OnBeginCursorOver, OnEndCursorOver, OnInputTouchBegin, OnInputTouchEnd, OnInputTouchEnter, OnInputTouchLeave)
-//   @returns { actor_name: string, component_name: string, event_name: string, event_category: string, event_description: string, event_function_signature: string, success: bool, binding_created: bool, is_bindable_delegate: bool, delegate_property_name: string, bound_handler_count: int, message: string, error: string, component_class: string, component_category: string, component_tooltip: string, component_display_name: string, component_is_active: bool, component_is_registered: bool, component_owner: string, component_creation_method: string, suggested_call?: { tool: string, params: { blueprint_name, component_name, delegate_name } } }
-
-TSharedPtr<FJsonObject> HandleAddComponentEvent(const TSharedPtr<FJsonObject>& Params)
-{
-    namespace Impl = UEAgentRuntimeEventsImpl;
-
-    FString OwnerName, TargetComponent, RequestedEvent;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("actor_name"), OwnerName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("component_name"), TargetComponent, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("event_name"), RequestedEvent, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-    // The component is resolved before the event name is checked, so a bad target is
-    // reported ahead of a bad event.
-    UActorComponent* Component = nullptr;
-    if (TSharedPtr<FJsonObject> Error = Impl::FindNamedComponent(OwnerName, TargetComponent, Component)) { return Error; }
-
-    const Impl::FKnownComponentEvent* Known = Impl::FindKnownEvent(RequestedEvent);
-    if (!Known)
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Invalid event name: %s. Valid events: %s"),
-            *RequestedEvent, *Impl::KnownEventNameList()));
-    }
-
-    // Nothing is ever bound here. The command only reports whether the event corresponds to a
-    // BlueprintAssignable multicast delegate that this component's class really declares, and
-    // how many handlers that delegate holds right now. Override-style events (BeginPlay, Tick,
-    // Register...) have no delegate and are reported as not bindable.
-    const FString DelegatePropertyName = Known->DelegateProperty ? Known->DelegateProperty : TEXT("");
-    bool bBindable = false;
-    int32 BoundHandlers = 0;
-    if (!DelegatePropertyName.IsEmpty())
-    {
-        FProperty* Declared = Component->GetClass()->FindPropertyByName(FName(*DelegatePropertyName));
-        if (FMulticastDelegateProperty* DelegateProp = CastField<FMulticastDelegateProperty>(Declared))
-        {
-            bBindable = true;
-            const FMulticastScriptDelegate* Invocations =
-                DelegateProp->GetMulticastDelegate(DelegateProp->ContainerPtrToValuePtr<void>(Component));
-            if (Invocations)
-            {
-                BoundHandlers = Invocations->GetAllObjects().Num();
-            }
-        }
-    }
-
-    const FString Explanation = bBindable
-        ? FString::Printf(
-            TEXT("Event '%s' maps to bindable multicast delegate '%s' on %s (currently %d bound handler(s)). No new binding was created: ")
-            TEXT("authoring a persistent event handler requires a Blueprint event graph, not a transient level-actor component."),
-            *RequestedEvent, *DelegatePropertyName, *Component->GetClass()->GetName(), BoundHandlers)
-        : FString::Printf(
-            TEXT("Event '%s' is an overridable function (category '%s'), not a bindable delegate, so it cannot be added to a live ")
-            TEXT("level-actor component. Override it in a Blueprint/C++ class instead."),
-            *RequestedEvent, Known->Category);
-
-    TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
-    Payload->SetStringField(TEXT("actor_name"), OwnerName);
-    Payload->SetStringField(TEXT("component_name"), TargetComponent);
-    Payload->SetStringField(TEXT("event_name"), RequestedEvent);
-    Payload->SetStringField(TEXT("event_category"), Known->Category);
-    Payload->SetStringField(TEXT("event_description"), Known->Description);
-    Payload->SetStringField(TEXT("event_function_signature"), Known->Signature);
-    // Always false: this command never creates a binding (see Explanation).
-    Payload->SetBoolField(TEXT("success"), false);
-    Payload->SetBoolField(TEXT("binding_created"), false);
-    Payload->SetBoolField(TEXT("is_bindable_delegate"), bBindable);
-    Payload->SetStringField(TEXT("delegate_property_name"), DelegatePropertyName);
-    Payload->SetNumberField(TEXT("bound_handler_count"), BoundHandlers);
-    Payload->SetStringField(TEXT("message"), Explanation);
-    Payload->SetStringField(TEXT("error"), Explanation);
-    Impl::WriteComponentFacts(Component, Payload);
-
-    // The authoring path, ready to call, when there is one: a delegate of a component whose owner
-    // is a Blueprint actor.
-    const AActor* Owner = Component->GetOwner();
-    const UBlueprint* OwnerBlueprint = Owner != nullptr ? Cast<UBlueprint>(Owner->GetClass()->ClassGeneratedBy) : nullptr;
-    if (bBindable && OwnerBlueprint != nullptr)
-    {
-        TSharedPtr<FJsonObject> CallParams = MakeShared<FJsonObject>();
-        CallParams->SetStringField(TEXT("blueprint_name"), OwnerBlueprint->GetPathName());
-        CallParams->SetStringField(TEXT("component_name"), Component->GetFName().ToString());
-        CallParams->SetStringField(TEXT("delegate_name"), DelegatePropertyName);
-        TSharedPtr<FJsonObject> Suggested = MakeShared<FJsonObject>();
-        Suggested->SetStringField(TEXT("tool"), TEXT("add_component_bound_event"));
-        Suggested->SetObjectField(TEXT("params"), CallParams);
-        Payload->SetObjectField(TEXT("suggested_call"), Suggested);
-    }
-    return Payload;
-}
-
 const McpCommandFamilies::FRegistrar Registration =
 {
-    { TEXT("add_component_event"), &HandleAddComponentEvent },
     { TEXT("get_component_events"), &HandleGetComponentEvents },
     { TEXT("poll_delegate_events"), &HandlePollDelegateEvents },
     { TEXT("subscribe_to_delegate"), &HandleSubscribeToDelegate },

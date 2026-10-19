@@ -191,7 +191,7 @@ namespace UEAgentNavigationCommandsImpl
 // ----------------------------------------------------------------------------
 // spawn_nav_modifier_volume
 // ANavModifierVolume is an AVolume (Runtime/NavigationSystem/Public/NavModifierVolume.h),
-// so like create_volume we must build a box brush for it (mcp_common::BuildCubeBrushForVolume).
+// so like spawn_box_volume we must build a box brush for it (mcp_common::BuildCubeBrushForVolume).
 // Optional area_class resolves a UNavArea subclass; we apply it via SetAreaClass (public,
 // NAVIGATIONSYSTEM_API).
 // ----------------------------------------------------------------------------
@@ -337,51 +337,6 @@ TSharedPtr<FJsonObject> HandleRebuildNavigation(const TSharedPtr<FJsonObject>& P
     ResultObj->SetNumberField(TEXT("nav_data_count"), NavSys->NavDataSet.Num());
     ResultObj->SetBoolField(TEXT("success"), true);
     ResultObj->SetStringField(TEXT("message"), TEXT("Navigation build triggered on the editor world."));
-
-    return mcp_common::MakeOkReply(ResultObj);
-}
-
-// ----------------------------------------------------------------------------
-// get_navigation_info
-// Reports whether a nav system exists, the registered nav data actor count, and the
-// supported agent count from the nav system (NavDataSet / GetSupportedAgents, both
-// public members on UNavigationSystemV1).
-// ----------------------------------------------------------------------------
-// MCP:get_navigation_info - Read the navigation system state of the editor world (never PIE): nav_system_present, nav_data_count, supported_agent_count with the agent names, and is_navigation_dirty. Read-only; a world without a navigation system reports zeros instead of an error.
-//   @returns { nav_system_present, nav_data_count, supported_agent_count, is_navigation_dirty, supported_agents, success }
-TSharedPtr<FJsonObject> HandleGetNavigationInfo(const TSharedPtr<FJsonObject>& Params)
-{
-    UWorld* World = nullptr;
-    if (TSharedPtr<FJsonObject> NoWorld = mcp_common::RequireEditorWorld(World, TEXT("World not available"))) { return NoWorld; }
-
-    UNavigationSystemV1* NavSys = UNavigationSystemV1::GetCurrent(World);
-
-    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-    ResultObj->SetBoolField(TEXT("nav_system_present"), NavSys != nullptr);
-
-    if (NavSys)
-    {
-        ResultObj->SetNumberField(TEXT("nav_data_count"), NavSys->NavDataSet.Num());
-        ResultObj->SetNumberField(TEXT("supported_agent_count"), NavSys->GetSupportedAgents().Num());
-        ResultObj->SetBoolField(TEXT("is_navigation_dirty"), NavSys->IsNavigationDirty());
-
-        // List supported agent names for richer reporting.
-        TArray<TSharedPtr<FJsonValue>> Agents;
-        for (const FNavDataConfig& Agent : NavSys->GetSupportedAgents())
-        {
-            Agents.Add(MakeShared<FJsonValueString>(Agent.Name.ToString()));
-        }
-        ResultObj->SetArrayField(TEXT("supported_agents"), Agents);
-    }
-    else
-    {
-        ResultObj->SetNumberField(TEXT("nav_data_count"), 0);
-        ResultObj->SetNumberField(TEXT("supported_agent_count"), 0);
-        ResultObj->SetBoolField(TEXT("is_navigation_dirty"), false);
-        ResultObj->SetArrayField(TEXT("supported_agents"), TArray<TSharedPtr<FJsonValue>>());
-    }
-
-    ResultObj->SetBoolField(TEXT("success"), true);
 
     return mcp_common::MakeOkReply(ResultObj);
 }
@@ -1749,9 +1704,9 @@ namespace
 // built (active) tile count / RuntimeGeneration. A `diagnosis` array collects the
 // actionable reasons. Purely read-only; never spawns nav data.
 // ----------------------------------------------------------------------------
-// MCP:diagnose_navmesh - One-call navmesh diagnosis: reports every ANavMeshBoundsVolume (brush validity + world extent — detects the EMPTY brush = 0 bounds that yields 0 tiles), inclusion/total nav bounds, bWholeWorldNavigable, invoker-only generation + registered invokers, the RecastNavMesh MaxTiles / built (active) tile count / RuntimeGeneration, and is_spatially_loaded per volume, plus an actionable `diagnosis` list. Read-only.
+// MCP:diagnose_navmesh - One-call navmesh diagnosis: reports every ANavMeshBoundsVolume (brush validity + world extent — detects the EMPTY brush = 0 bounds that yields 0 tiles), inclusion/total nav bounds, bWholeWorldNavigable, invoker-only generation + registered invokers, the RecastNavMesh MaxTiles / built (active) tile count / RuntimeGeneration, and is_spatially_loaded per volume, the nav system state (supported agents by name, nav data count, dirty flag; a world without a navigation system reports zeros, not an error), plus an actionable `diagnosis` list. Read-only.
 //   @param world - Optional world selector: absent/'editor' (default) | 'server' (**the one you want in PIE**: the navmesh is SERVER-AUTHORITATIVE, so only the authoritative world has a nav system and a RecastNavMesh) | 'pie' (ambiguous: PlayWorld, else the first PIE context -- may well land on the CLIENT) | 'client' | 'pie:N' | 'game' (alias of 'pie').
-//   @returns { world, has_authority, nav_system_present, whole_world_navigable, generate_only_around_invokers, supported_agent_count, nav_data_count, is_navigation_dirty, nav_bounds_volume_count, nav_bounds_volumes:[{actor_name, actor_label, is_spatially_loaded, brush_present, brush_empty, bounds_valid, bounds_extent:{x,y,z}, brush_poly_count, note}], registered_nav_bounds_count, total_nav_bounds:{valid, min:{x,y,z}, max:{x,y,z}, extent:{x,y,z}}, invoker_component_count, invoker_location_count, invoker_seed_bounds_count, recast_navmesh_present, recast:{name, runtime_generation, supports_runtime_generation, max_tiles, active_tile_count, tile_size_uu, is_spatially_loaded}, diagnosis:[string], success, world_name, world_package, world_type, net_mode, pie_instance }. On a CLIENT world (has_authority=false) the heuristics are suppressed and `diagnosis` says so first: a client with no nav system / no RecastNavMesh is EXPECTED, and rebuild_navigation is NEVER recommended from there.
+//   @returns { world, has_authority, nav_system_present, whole_world_navigable, generate_only_around_invokers, supported_agent_count, supported_agents:[string], nav_data_count, is_navigation_dirty, nav_bounds_volume_count, nav_bounds_volumes:[{actor_name, actor_label, is_spatially_loaded, brush_present, brush_empty, bounds_valid, bounds_extent:{x,y,z}, brush_poly_count, note}], registered_nav_bounds_count, total_nav_bounds:{valid, min:{x,y,z}, max:{x,y,z}, extent:{x,y,z}}, invoker_component_count, invoker_location_count, invoker_seed_bounds_count, recast_navmesh_present, recast:{name, runtime_generation, supports_runtime_generation, max_tiles, active_tile_count, tile_size_uu, is_spatially_loaded}, diagnosis:[string], success, world_name, world_package, world_type, net_mode, pie_instance }. On a CLIENT world (has_authority=false) the heuristics are suppressed and `diagnosis` says so first: a client with no nav system / no RecastNavMesh is EXPECTED, and rebuild_navigation is NEVER recommended from there.
 TSharedPtr<FJsonObject> HandleDiagnoseNavmesh(const TSharedPtr<FJsonObject>& Params)
 {
     FString WorldKind;
@@ -1802,6 +1757,12 @@ TSharedPtr<FJsonObject> HandleDiagnoseNavmesh(const TSharedPtr<FJsonObject>& Par
         Result->SetBoolField(TEXT("whole_world_navigable"), bWholeWorld);
         Result->SetBoolField(TEXT("generate_only_around_invokers"), bInvokerOnly);
         Result->SetNumberField(TEXT("supported_agent_count"), NavSys->GetSupportedAgents().Num());
+        TArray<TSharedPtr<FJsonValue>> Agents;
+        for (const FNavDataConfig& Agent : NavSys->GetSupportedAgents())
+        {
+            Agents.Add(MakeShared<FJsonValueString>(Agent.Name.ToString()));
+        }
+        Result->SetArrayField(TEXT("supported_agents"), Agents);
         Result->SetNumberField(TEXT("nav_data_count"), NavSys->NavDataSet.Num());
         Result->SetBoolField(TEXT("is_navigation_dirty"), NavSys->IsNavigationDirty());
     }
@@ -1810,6 +1771,7 @@ TSharedPtr<FJsonObject> HandleDiagnoseNavmesh(const TSharedPtr<FJsonObject>& Par
         Result->SetBoolField(TEXT("whole_world_navigable"), false);
         Result->SetBoolField(TEXT("generate_only_around_invokers"), false);
         Result->SetNumberField(TEXT("supported_agent_count"), 0);
+        Result->SetArrayField(TEXT("supported_agents"), TArray<TSharedPtr<FJsonValue>>());
         Result->SetNumberField(TEXT("nav_data_count"), 0);
         Result->SetBoolField(TEXT("is_navigation_dirty"), false);
         if (!bIsClientWorld)
@@ -2166,7 +2128,6 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("diff_collision_channels"), &HandleDiffCollisionChannels },
     { TEXT("dump_collision_channels"), &HandleDumpCollisionChannels },
     { TEXT("get_eqs_query_info"), &HandleGetEQSQueryInfo },
-    { TEXT("get_navigation_info"), &HandleGetNavigationInfo },
     { TEXT("get_recast_navmesh_settings"), &HandleGetRecastNavMeshSettings },
     { TEXT("list_eqs_context_types"), &HandleListEQSContextTypes },
     { TEXT("list_eqs_generator_types"), &HandleListEQSGeneratorTypes },

@@ -362,25 +362,36 @@ TSharedPtr<FJsonObject> HandleGetDecalInfo(
 
 // ---------------------------------------------------------------------------
 // set_decal_fade {actor_label, fade_start_delay?, fade_duration?, fade_in_start_delay?,
-//   fade_in_duration?, destroy_owner_after_fade?}
+//   fade_in_duration?, destroy_owner_after_fade?, fade_screen_size?}
 //   Partial / idempotent: only provided fields change. Direct field writes (not
 //   SetFadeOut/SetFadeIn) so authored values round-trip exactly — SetFadeOut applies a
 //   global CVarDecalFadeDurationScale and calls SetLifeSpan (a runtime side effect); the
 //   details panel writes these EditAnywhere fields directly, which is what we do here.
 // ---------------------------------------------------------------------------
-// MCP:set_decal_fade - Set a UDecalComponent's fade-out/fade-in timing fields on a named DecalActor.  Writes the EditAnywhere fields directly (mirrors the details panel) so values round-trip exactly, avoiding SetFadeOut's global fade-scale CVar and SetLifeSpan side effect.  Only provided fields change (partial, idempotent).
+// MCP:set_decal_fade - Set a UDecalComponent's fade fields on a named DecalActor: fade-out timing, fade-in timing, the destroy-owner-after-fade bit and the fade screen size (the screen-size fraction below which the decal fades out).  Writes the EditAnywhere fields directly (mirrors the details panel) so values round-trip exactly, avoiding SetFadeOut's global fade-scale CVar and SetLifeSpan side effect, so no lifespan timer starts in the editor.  Only provided fields change (partial, idempotent); a change is one undo step that dirties the level, nothing is saved. An unknown label, or a fade_screen_size that is not a number of at least 0, is an error before anything is written. Read the values back with get_decal_info.
 //   @param actor_label - Label of the ADecalActor in the editor world.
 //   @param fade_start_delay - Optional seconds before fade-out begins (FadeStartDelay; 0 + fade_duration 0 = persistent).
 //   @param fade_duration - Optional fade-out duration in seconds (FadeDuration).
 //   @param fade_in_start_delay - Optional seconds before fade-in begins (FadeInStartDelay).
 //   @param fade_in_duration - Optional fade-in duration in seconds (FadeInDuration).
 //   @param destroy_owner_after_fade - Optional: destroy the owning actor after fully fading out (bDestroyOwnerAfterFade).
-//   @returns { actor_label: string, fade_start_delay: float, fade_duration: float, fade_in_start_delay: float, fade_in_duration: float, destroy_owner_after_fade: bool, applied_count: int }
+//   @param fade_screen_size - Optional FadeScreenSize, a number >= 0 (typically 0..1; smaller fades the decal only when it gets very small on screen).
+//   @returns { actor_label: string, fade_start_delay: float, fade_duration: float, fade_in_start_delay: float, fade_in_duration: float, destroy_owner_after_fade: bool, fade_screen_size: float, applied_count: int }
 TSharedPtr<FJsonObject> HandleSetDecalFade(
 	const TSharedPtr<FJsonObject>& Params)
 {
 	FString ActorLabel;
 	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("actor_label"), ActorLabel)) { return Missing; }
+
+	// fade_screen_size is checked before the actor is touched: a wrong one writes nothing.
+	double FadeScreenSize = 0.0;
+	const bool bFadeScreenSizeIsNumber = Params->TryGetNumberField(TEXT("fade_screen_size"), FadeScreenSize);
+	const bool bHasFadeScreenSize = Params->HasField(TEXT("fade_screen_size"));
+	if (bHasFadeScreenSize && (!bFadeScreenSizeIsNumber || !FMath::IsFinite(FadeScreenSize) || FadeScreenSize < 0.0))
+	{
+		return mcp_common::MakeErrorReply(TEXT("fade_screen_size must be a number >= 0 (typically 0..1); nothing was changed"));
+	}
+
 	ADecalActor* Decal = nullptr;
 	if (TSharedPtr<FJsonObject> Error = Decal_FindExisting(ActorLabel, Decal)) { return Error; }
 	UDecalComponent* Comp = Decal->GetDecal();
@@ -422,6 +433,7 @@ TSharedPtr<FJsonObject> HandleSetDecalFade(
 		}
 		++Applied;
 	}
+	if (bHasFadeScreenSize) { WriteField(Comp->FadeScreenSize, FadeScreenSize); ++Applied; }
 
 	if (bRecorded)
 	{
@@ -435,117 +447,8 @@ TSharedPtr<FJsonObject> HandleSetDecalFade(
 	Data->SetNumberField(TEXT("fade_in_start_delay"), Comp->FadeInStartDelay);
 	Data->SetNumberField(TEXT("fade_in_duration"), Comp->FadeInDuration);
 	Data->SetBoolField(TEXT("destroy_owner_after_fade"), Comp->bDestroyOwnerAfterFade != 0);
+	Data->SetNumberField(TEXT("fade_screen_size"), Comp->FadeScreenSize);
 	Data->SetNumberField(TEXT("applied_count"), Applied);
-	return mcp_common::MakeOkReply(Data);
-}
-
-// ---------------------------------------------------------------------------
-// set_decal_fade_screen_size {actor_label, fade_screen_size}
-// ---------------------------------------------------------------------------
-// MCP:set_decal_fade_screen_size - Set the FadeScreenSize on a UDecalComponent (the screen-size fraction below which the decal fades out).  The writer for the value get_decal_info already reads.
-//   @param actor_label - Label of the ADecalActor in the editor world.
-//   @param fade_screen_size - New FadeScreenSize (0..1; smaller fades the decal only when it gets very small on screen).
-//   @returns { actor_label: string, fade_screen_size: float }
-TSharedPtr<FJsonObject> HandleSetDecalFadeScreenSize(
-	const TSharedPtr<FJsonObject>& Params)
-{
-	FString ActorLabel;
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("actor_label"), ActorLabel)) { return Missing; }
-	double Value = 0.0;
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("fade_screen_size"), Value)) { return Missing; }
-	ADecalActor* Decal = nullptr;
-	if (TSharedPtr<FJsonObject> Error = Decal_FindExisting(ActorLabel, Decal)) { return Error; }
-	// The component is recorded before the write, so a change is one undo step and dirties the actor's package; the
-	// size it already has is not written again, so that call dirties nothing.
-	UDecalComponent* Comp = Decal->GetDecal();
-	if (Comp->FadeScreenSize != static_cast<float>(Value))
-	{
-		Comp->Modify();
-		Comp->SetFadeScreenSize(static_cast<float>(Value));
-	}
-
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetStringField(TEXT("actor_label"), ActorLabel);
-	Data->SetNumberField(TEXT("fade_screen_size"), Decal->GetDecal()->FadeScreenSize);
-	return mcp_common::MakeOkReply(Data);
-}
-
-// ---------------------------------------------------------------------------
-// Fade-in + destroy-owner flags
-// ---------------------------------------------------------------------------
-
-// MCP:set_decal_fade_in - Set the FadeInStartDelay and FadeInDuration on a UDecalComponent via UDecalComponent::SetFadeIn (the existing SetFadeOut cmd only sets the *out* fields; this cmd sets the *in* pair).
-//   @param actor_label - Label of the ADecalActor in the editor world.
-//   @param start_delay - Time in seconds before the decal begins fading in (default 0).
-//   @param duration - Time in seconds for the fade-in to complete (default 0 = no fade-in).
-//   @returns { actor_label: string, fade_in_start_delay: float, fade_in_duration: float }
-TSharedPtr<FJsonObject> HandleSetDecalFadeIn(
-	const TSharedPtr<FJsonObject>& Params)
-{
-	FString ActorLabel;
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("actor_label"), ActorLabel)) { return Missing; }
-
-	double StartDelay = 0.0;
-	Params->TryGetNumberField(TEXT("start_delay"), StartDelay);
-	double Duration = 0.0;
-	Params->TryGetNumberField(TEXT("duration"), Duration);
-
-	ADecalActor* Decal = nullptr;
-	if (TSharedPtr<FJsonObject> Error = Decal_FindExisting(ActorLabel, Decal)) { return Error; }
-
-	UDecalComponent* Comp = Decal->GetDecal();
-	// The component is recorded before the write, so a change is one undo step and dirties the actor's package; the
-	// pair it already has is not written again, so that call dirties nothing.
-	if (Comp->FadeInStartDelay != static_cast<float>(StartDelay) || Comp->FadeInDuration != static_cast<float>(Duration))
-	{
-		Comp->Modify();
-		Comp->SetFadeIn(static_cast<float>(StartDelay), static_cast<float>(Duration));
-	}
-
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetStringField(TEXT("actor_label"), ActorLabel);
-	Data->SetNumberField(TEXT("fade_in_start_delay"), Comp->FadeInStartDelay);
-	Data->SetNumberField(TEXT("fade_in_duration"), Comp->FadeInDuration);
-	return mcp_common::MakeOkReply(Data);
-}
-
-// MCP:set_decal_destroy_owner_after_fade - Set the bDestroyOwnerAfterFade bit of the UDecalComponent of an ADecalActor in the editor world, found by actor label: whether the actor is destroyed once its fade-out ends at runtime. The bit is written directly, as the details panel does, so FadeStartDelay and FadeDuration come back unchanged and no lifespan timer starts in the editor. A change is one undo step that dirties the level; nothing is saved. An unknown label is an error. set_decal_fade sets this bit together with the fade timing; read it back with get_decal_info.
-//   @param actor_label - Label of the ADecalActor in the editor world.
-//   @param destroy_owner_after_fade - New value for the bDestroyOwnerAfterFade bit (true = auto-destroy the actor once fully faded).
-//   @returns { actor_label: string, destroy_owner_after_fade: bool, fade_start_delay: float, fade_duration: float }
-TSharedPtr<FJsonObject> HandleSetDecalDestroyOwnerAfterFade(
-	const TSharedPtr<FJsonObject>& Params)
-{
-	FString ActorLabel;
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("actor_label"), ActorLabel)) { return Missing; }
-
-	bool bDestroy = true;
-	if (Params->HasField(TEXT("destroy_owner_after_fade")))
-	{
-		// TryGetBoolField returns false if missing; check HasField first.
-		Params->TryGetBoolField(TEXT("destroy_owner_after_fade"), bDestroy);
-	}
-
-	ADecalActor* Decal = nullptr;
-	if (TSharedPtr<FJsonObject> Error = Decal_FindExisting(ActorLabel, Decal)) { return Error; }
-
-	UDecalComponent* Comp = Decal->GetDecal();
-	// Written directly, as set_decal_fade and the details panel do. SetFadeOut would rescale FadeStartDelay and
-	// FadeDuration by r.Decal.FadeDurationScale and start the component's lifespan timer, which in an editor world
-	// with a realtime viewport destroys the decal component (and, with this bit set, its actor) when it runs out.
-	// The component is recorded before the write, so a change is one undo step and dirties the actor's package.
-	if ((Comp->bDestroyOwnerAfterFade != 0) != bDestroy)
-	{
-		Comp->Modify();
-		Comp->bDestroyOwnerAfterFade = bDestroy ? 1 : 0;
-		Comp->MarkRenderStateDirty();
-	}
-
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetStringField(TEXT("actor_label"), ActorLabel);
-	Data->SetBoolField(TEXT("destroy_owner_after_fade"), Comp->bDestroyOwnerAfterFade != 0);
-	Data->SetNumberField(TEXT("fade_start_delay"), Comp->FadeStartDelay);
-	Data->SetNumberField(TEXT("fade_duration"), Comp->FadeDuration);
 	return mcp_common::MakeOkReply(Data);
 }
 
@@ -553,10 +456,7 @@ const McpCommandFamilies::FRegistrar Registration =
 {
 	{ TEXT("get_decal_info"), &HandleGetDecalInfo },
 	{ TEXT("set_decal_color"), &HandleSetDecalColor },
-	{ TEXT("set_decal_destroy_owner_after_fade"), &HandleSetDecalDestroyOwnerAfterFade },
 	{ TEXT("set_decal_fade"), &HandleSetDecalFade },
-	{ TEXT("set_decal_fade_in"), &HandleSetDecalFadeIn },
-	{ TEXT("set_decal_fade_screen_size"), &HandleSetDecalFadeScreenSize },
 	{ TEXT("set_decal_material"), &HandleSetDecalMaterial },
 	{ TEXT("set_decal_size"), &HandleSetDecalSize },
 	{ TEXT("set_decal_sort_order"), &HandleSetDecalSortOrder },

@@ -496,10 +496,10 @@ TSharedPtr<FJsonObject> HandleClearProceduralMesh(
 // ---------------------------------------------------------------------------
 // get_procedural_mesh_info {actor_label, component_index?}
 // ---------------------------------------------------------------------------
-// MCP:get_procedural_mesh_info - Read summary info (section count, collision flags, per-section vertex/triangle counts) for a procedural mesh component on a named actor.
+// MCP:get_procedural_mesh_info - Read summary info for a procedural mesh component on a named actor, without changing it: section count, collision flags, and per section its index, vertex/triangle counts, visibility flag and collision flag.
 //   @param actor_label - Editor label of the actor carrying the PMC
 //   @param component_index - Optional 0-based PMC index on the actor; defaults to 0
-//   @returns { actor_label: string, num_sections: int, use_complex_as_simple_collision: bool, use_async_cooking: bool, sections: [{ index, vertex_count, triangle_count }] }
+//   @returns { actor_label: string, num_sections: int, use_complex_as_simple_collision: bool, use_async_cooking: bool, sections: [{ index: int, vertex_count: int, triangle_count: int, visible: bool, collision_enabled: bool }] }
 
 TSharedPtr<FJsonObject> HandleGetProceduralMeshInfo(
 	const TSharedPtr<FJsonObject>& Params)
@@ -524,6 +524,7 @@ TSharedPtr<FJsonObject> HandleGetProceduralMeshInfo(
 	{
 		const FProcMeshSection* Section = PMC->GetProcMeshSection(i);
 		TSharedPtr<FJsonObject> SectionObj = MakeShared<FJsonObject>();
+		SectionObj->SetNumberField(TEXT("index"), i);
 		SectionObj->SetNumberField(TEXT("vertex_count"), Section ? Section->ProcVertexBuffer.Num() : 0);
 		SectionObj->SetNumberField(TEXT("triangle_count"), Section ? Section->ProcIndexBuffer.Num() / 3 : 0);
 		SectionObj->SetBoolField(TEXT("visible"), PMC->IsMeshSectionVisible(i));
@@ -577,39 +578,6 @@ TSharedPtr<FJsonObject> HandleSetProceduralMeshSectionVisible(
 	TSharedPtr<FJsonObject> Data = ProceduralMesh_NewSectionData(ActorLabel, SectionIndex);
 	Data->SetBoolField(TEXT("visible"), PMC->IsMeshSectionVisible(SectionIndex));
 	Data->SetNumberField(TEXT("total_sections"), PMC->GetNumSections());
-	return mcp_common::MakeOkReply(Data);
-}
-
-// MCP:get_procedural_mesh_section_visible - Read the visibility flag of a single section on a procedural mesh component.
-//   @param actor_label - Editor label of the actor carrying the PMC
-//   @param component_index - Optional 0-based PMC index on the actor; defaults to 0
-//   @param section_index - Target section index; defaults to 0
-//   @returns { actor_label: string, section_index: int, visible: bool }
-
-TSharedPtr<FJsonObject> HandleGetProceduralMeshSectionVisible(
-	const TSharedPtr<FJsonObject>& Params)
-{
-	FString ActorLabel;
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("actor_label"), ActorLabel)) { return Missing; }
-	int32 ComponentIndex = 0;
-	Params->TryGetNumberField(TEXT("component_index"), ComponentIndex);
-	int32 SectionIndex = 0;
-	if (TSharedPtr<FJsonObject> BadIndex = ProceduralMesh_ReadSectionIndex(Params, SectionIndex)) { return BadIndex; }
-
-	TSharedPtr<FJsonObject> Err;
-	UProceduralMeshComponent* PMC = ProceduralMesh_FindComponent(ActorLabel, ComponentIndex, Err);
-	if (!PMC) { return Err; }
-	// IsMeshSectionVisible returns false for out-of-range indices, which is
-	// indistinguishable from a genuinely hidden section — validate explicitly.
-	if (SectionIndex < 0 || SectionIndex >= PMC->GetNumSections())
-	{
-		return mcp_common::MakeErrorReply(
-			FString::Printf(TEXT("Section index %d out of range (num_sections=%d) on actor '%s'"),
-				SectionIndex, PMC->GetNumSections(), *ActorLabel));
-	}
-
-	TSharedPtr<FJsonObject> Data = ProceduralMesh_NewSectionData(ActorLabel, SectionIndex);
-	Data->SetBoolField(TEXT("visible"), PMC->IsMeshSectionVisible(SectionIndex));
 	return mcp_common::MakeOkReply(Data);
 }
 
@@ -911,7 +879,6 @@ const McpCommandFamilies::FRegistrar Registration =
 	{ TEXT("create_procedural_mesh_component"), &HandleCreateProceduralMeshComponent },
 	{ TEXT("get_procedural_mesh_info"), &HandleGetProceduralMeshInfo },
 	{ TEXT("get_procedural_mesh_section_data"), &HandleGetProceduralMeshSectionData },
-	{ TEXT("get_procedural_mesh_section_visible"), &HandleGetProceduralMeshSectionVisible },
 	{ TEXT("remove_procedural_mesh_component"), &HandleRemoveProceduralMeshComponent },
 	{ TEXT("set_procedural_mesh_material"), &HandleSetProceduralMeshMaterial },
 	{ TEXT("set_procedural_mesh_section_visible"), &HandleSetProceduralMeshSectionVisible },

@@ -129,7 +129,7 @@
 //
 // GAME THREAD ONLY -> no locking. DispatchSingleCommand is game-thread by contract, and
 // every package dirty/save a command can cause happens on that same thread. RecordDepth
-// is a DEPTH (not a bool) because `batch` re-enters DispatchSingleCommand: a nested
+// is a DEPTH (not a bool) because `execute_batch` re-enters DispatchSingleCommand: a nested
 // tracked command must not disarm the outer one, and its findings merge upward.
 // =====================================================================================
 // =====================================================================================
@@ -141,7 +141,7 @@
 //
 // Why here and not tool by tool: most of those tools ALREADY have a cap parameter, and
 // passing it is not enough -- the cap cannot be chosen well without seeing the size first. This is
-// the single point every command goes through (and every `batch` sub-command, which re-enters).
+// the single point every command goes through (and every `execute_batch` sub-command, which re-enters).
 //
 // What is kept: ALL the scalars of the payload (the counters, which is what is asked about
 // most of the time) and, for each array/object moved out, its length. The detail is lost from
@@ -365,7 +365,7 @@ namespace McpCollateralDirty
     // Arm on construction, harvest on Finish(). Finish() is idempotent and the destructor
     // calls it, so a handler that THROWS (DispatchSingleCommand runs inside a try/catch)
     // can never leave RecordDepth armed. On Finish the parent's sets come back and this
-    // scope's findings are merged into them, so a `batch` reports the union of its
+    // scope's findings are merged into them, so a `execute_batch` reports the union of its
     // sub-commands as well as its own.
     struct FScopedRecorder
     {
@@ -984,9 +984,9 @@ namespace McpBridgeParams
 
 // Dispatches ONE command by name on the CALLING thread (no thread hop, no queueing) and
 // returns the fully-wrapped {"status":"success"|"error", ...} envelope. It is a function of its
-// own so the `batch` meta-command can call it in a loop within a single game-thread pass.
+// own so the `execute_batch` meta-command can call it in a loop within a single game-thread pass.
 //
-// Game thread only: it runs from a queued work item, or in a loop for `batch`.
+// Game thread only: it runs from a queued work item, or in a loop for `execute_batch`.
 // Each tool call is ONE undo step, named after the tool ("UEAgent: spawn_actor"), so Ctrl+Z reverts a
 // call as a whole. The handlers' own FScopedTransactions nest into it. A call that changes nothing leaves
 // no entry: the engine drops a transaction without changes, and one that only touched PIE objects
@@ -1011,15 +1011,14 @@ namespace McpUndoStep
     static bool ManagesUndoBuffer(const FString& CommandType)
     {
         static const TSet<FString> Commands = {
-            TEXT("undo"), TEXT("redo"), TEXT("undo_multiple"), TEXT("redo_multiple"),
-            TEXT("can_undo"), TEXT("can_redo"), TEXT("get_undo_state"), TEXT("get_transaction_history"),
+            TEXT("undo"), TEXT("redo"), TEXT("get_undo_state"), TEXT("get_transaction_history"),
             TEXT("begin_transaction"), TEXT("end_transaction"), TEXT("cancel_transaction"),
             TEXT("reset_transaction_buffer"), TEXT("set_undo_barrier"), TEXT("remove_undo_barrier"),
-            TEXT("clear_undo_barriers"), TEXT("build_blueprint_graph") };
+            TEXT("build_blueprint_graph") };
         return Commands.Contains(CommandType);
     }
 
-    // A `batch` is one step for all its commands, unless it opens its own transaction
+    // A `execute_batch` is one step for all its commands, unless it opens its own transaction
     // (`transaction: true`) or holds a command that has to run outside one.
     static bool ShouldWrap(const FString& CommandType, const TSharedPtr<FJsonObject>& Params)
     {
@@ -1027,7 +1026,7 @@ namespace McpUndoStep
         {
             return false;
         }
-        if (CommandType != TEXT("batch"))
+        if (CommandType != TEXT("execute_batch"))
         {
             return true;
         }
@@ -1044,7 +1043,7 @@ namespace McpUndoStep
             FString SubCommand;
             if (!Item.IsValid() || !Item->TryGetObject(ItemObject) || !ItemObject
                 || !(*ItemObject)->TryGetStringField(TEXT("command_type"), SubCommand)
-                || ManagesUndoBuffer(SubCommand) || SubCommand == TEXT("batch"))
+                || ManagesUndoBuffer(SubCommand) || SubCommand == TEXT("execute_batch"))
             {
                 return false;
             }
@@ -1056,7 +1055,7 @@ namespace McpUndoStep
 TSharedPtr<FJsonObject> UUEAgentBridge::DispatchSingleCommand(const FString& CommandType, const TSharedPtr<FJsonObject>& Params)
 {
     // PIE-safety gate. It goes HERE and not in the queued work item -- where the PIE OWNERSHIP
-    // guard lives -- because `batch` calls DispatchSingleCommand DIRECTLY: any batch would skip a
+    // guard lives -- because `execute_batch` calls DispatchSingleCommand DIRECTLY: any batch would skip a
     // gate in the work item, and a batch is exactly how a bulk compile gets triggered.
     //
     // It returns BEFORE the TGuardValue and the `goto dispatch_end` jumps of the generated
@@ -1105,7 +1104,7 @@ TSharedPtr<FJsonObject> UUEAgentBridge::DispatchSingleCommand(const FString& Com
 
     // Rotation by axis NAME. The {roll,pitch,yaw} object form is rewritten here into the
     // wire array [pitch, yaw, roll], so it works for every entry point: tools/call, in-process
-    // callers and each `batch` sub-command. Most handlers that read `rotation` accept the object
+    // callers and each `execute_batch` sub-command. Most handlers that read `rotation` accept the object
     // (mcp_common::ReadJsonRotator); the ones that read it by hand with TryGetArrayField
     // would ignore it SILENTLY -- with this, all of them accept it the same way.
     FMcpToolCatalog::NormalizeRotationParams(CommandType, Params);
@@ -1113,16 +1112,16 @@ TSharedPtr<FJsonObject> UUEAgentBridge::DispatchSingleCommand(const FString& Com
     // PRECONDITIONS -- what would KILL the editor never reaches the handler (including
     // the positional Rotator guard; see Mcp/McpPreconditions.h). It goes here, with the aliases
     // already rewritten, so an alias cannot sneak the fatal parameter in, and inside
-    // DispatchSingleCommand so `batch` is not a back door. The read probes are this same
+    // DispatchSingleCommand so `execute_batch` is not a back door. The read probes are this same
     // dispatch, in the same game-thread pass: no race is possible between what the probe sees
     // and what the call would do.
     {
         const McpPreconditions::FProbe Probe = [this](const FString& ProbeCommand, const TSharedPtr<FJsonObject>& ProbeParams) -> TSharedPtr<FJsonObject>
         {
-            // get_asset_metadata does a LoadAsset: to classify a MAP it would load the whole world
-            // (minutes on a large map). The check only needs the class, and the Asset Registry
-            // knows it without loading anything. If the registry does not know it, the handler answers.
-            if (ProbeCommand == TEXT("get_asset_metadata"))
+            // The check only needs the asset's class, and the Asset Registry knows it without loading
+            // anything (loading a MAP loads the whole world: minutes on a large map). The probe asks
+            // with load_full_data=false; if the registry does not know the asset, the handler answers.
+            if (ProbeCommand == TEXT("get_asset_by_name"))
             {
                 if (TSharedPtr<FJsonObject> FromRegistry = McpPreconditions::AssetMetadataFromRegistry(ProbeParams))
                 {
@@ -1273,7 +1272,7 @@ TSharedPtr<FJsonObject> UUEAgentBridge::DispatchSingleCommand(const FString& Com
             // the editor with an EXCEPTION_ACCESS_VIOLATION when its params are sent at the
             // root level instead of inside params:{}.
             //
-            // This is the ONLY place all responses go through -- including those of `batch`
+            // This is the ONLY place all responses go through -- including those of `execute_batch`
             // sub-commands, which re-enter here through DispatchSingleCommand and therefore
             // each get THEIR OWN verdict on THEIR OWN params (the batch also stamps its own on
             // its own response; they are distinct objects, so there is no double stamping and

@@ -4,7 +4,7 @@
 
 1 tools. Back to the [index](README.md).
 
-## `batch`
+## `execute_batch`
 
 *Destructive.*
 

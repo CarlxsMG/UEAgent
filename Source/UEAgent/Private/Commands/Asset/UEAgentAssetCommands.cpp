@@ -11,15 +11,10 @@
 #include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Engine/Texture2D.h"
-#include "Engine/Texture2DArray.h"             // UTexture2DArray (cast verify for remove_texture_2d_array)
-#include "Engine/TextureRenderTarget2D.h"      // UTextureRenderTarget2D (typed remove)
-#include "Engine/TextureRenderTarget2DArray.h" // UTextureRenderTarget2DArray (typed remove)
-#include "Engine/TextureRenderTargetCube.h"    // UTextureRenderTargetCube (typed remove)
 #include "Engine/World.h"
 #include "Engine/Level.h"
 #include "Sound/SoundWave.h"
 #include "Misc/FileHelper.h"
-#include "Misc/Paths.h"                        // FPaths::RemoveDuplicateSlashes (get_asset_metadata)
 #include "HAL/PlatformFilemanager.h"
 #include "ThumbnailRendering/ThumbnailManager.h"
 #include "ThumbnailRendering/ThumbnailRenderer.h"
@@ -31,7 +26,7 @@
 
 /**
  * The Asset Registry readers: look assets up by exact name, class, folder, name pattern or registry tag,
- * report one asset's tags, thumbnail capability, on-disk size and date, and remove typed texture assets.
+ * and report one asset's tags, thumbnail capability, and on-disk size and date.
  */
 namespace UEAgentAssetCommands
 {
@@ -52,9 +47,22 @@ namespace UEAgentAssetCommandsImpl
     using AssetCommandHelpers::RangeError;
 
     /**
+     * The form FindAssetByExactName looks up: an object path ("/Game/Foo/BP_Foo.BP_Foo") becomes its package name
+     * ("/Game/Foo/BP_Foo"); a package name or a bare asset name is returned as given.
+     */
+    FString PackageFormOf(const FString& Requested)
+    {
+        if (Requested.StartsWith(TEXT("/")) && Requested.Contains(TEXT(".")))
+        {
+            return FPackageName::ObjectPathToPackageName(Requested);
+        }
+        return Requested;
+    }
+
+    /**
      * asset_name of the single-asset readers, looked up like get_asset_by_name (any class; a project can hold many
-     * assets sharing one name, so Out lists every candidate when the pick was ambiguous). Returns the error reply to
-     * send back, or nullptr once Out holds the asset.
+     * assets sharing one name, so Out lists every candidate when the pick was ambiguous). An object path is looked
+     * up by its package name. Returns the error reply to send back, or nullptr once Out holds the asset.
      */
     TSharedPtr<FJsonObject> ReadNamedAsset(const TSharedPtr<FJsonObject>& Params, FString& OutRequested, FNamedAsset& Out)
     {
@@ -63,7 +71,7 @@ namespace UEAgentAssetCommandsImpl
         {
             return EmptyParamError(TEXT("asset_name"));
         }
-        if (!AssetCommandHelpers::FindAssetByExactName(OutRequested, nullptr, Out))
+        if (!AssetCommandHelpers::FindAssetByExactName(PackageFormOf(OutRequested), nullptr, Out))
         {
             return AssetNotFoundError(OutRequested);
         }
@@ -202,22 +210,47 @@ namespace UEAgentAssetCommandsImpl
     }
 
     /**
-     * The .uasset behind an asset. Fills OutFile and returns nullptr when the file exists; otherwise returns
-     * the error reply of the file readers (the package does not map to a file name, or the file is absent).
+     * The package file behind a long package name: its .uasset, else its .umap (a level is stored as .umap).
+     * Fills OutFile and OutExtension (the .uasset candidate when neither exists) and sets bOutExists; returns the
+     * error reply when the package does not map to a file name under a mounted content root, else nullptr.
      */
-    TSharedPtr<FJsonObject> LocateUassetFile(const FAssetData& Asset, FString& OutFile)
+    TSharedPtr<FJsonObject> LocatePackageFile(const FString& LongName, FString& OutFile, FString& OutExtension, bool& bOutExists)
     {
-        const FString LongName = Asset.PackageName.ToString();
-        if (!FPackageName::TryConvertLongPackageNameToFilename(LongName, OutFile, TEXT(".uasset")))
+        const FString AssetExt = FPackageName::GetAssetPackageExtension();
+        if (!FPackageName::TryConvertLongPackageNameToFilename(LongName, OutFile, AssetExt))
         {
             return mcp_common::MakeErrorReply(
                 FString::Printf(TEXT("Could not convert package name to filename: %s"), *LongName));
         }
-        if (!FPlatformFileManager::Get().GetPlatformFile().FileExists(*OutFile))
+        OutExtension = AssetExt;
+        IPlatformFile& Files = FPlatformFileManager::Get().GetPlatformFile();
+        bOutExists = Files.FileExists(*OutFile);
+        if (!bOutExists)
         {
-            return mcp_common::MakeErrorReply(FString::Printf(TEXT("File not found: %s"), *OutFile));
+            FString MapFile;
+            const FString MapExt = FPackageName::GetMapPackageExtension();
+            if (FPackageName::TryConvertLongPackageNameToFilename(LongName, MapFile, MapExt) && Files.FileExists(*MapFile))
+            {
+                OutFile = MapFile;
+                OutExtension = MapExt;
+                bOutExists = true;
+            }
         }
         return nullptr;
+    }
+
+    /** { name, value } of every Asset Registry tag the asset publishes (read from FAssetData, no load). */
+    TArray<TSharedPtr<FJsonValue>> RegistryTagsJson(const FAssetData& Asset)
+    {
+        TArray<TSharedPtr<FJsonValue>> Tags;
+        for (const auto& Tag : Asset.TagsAndValues)
+        {
+            TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+            Entry->SetStringField(TEXT("name"), Tag.Key.ToString());
+            Entry->SetStringField(TEXT("value"), Tag.Value.AsString());
+            Tags.Add(MakeShared<FJsonValueObject>(Entry));
+        }
+        return Tags;
     }
 
     /** The row of a batch reader for an entry that is not a non-empty string: { <KeyField>: "", found: false, error }. */
@@ -268,10 +301,11 @@ namespace UEAgentAssetCommandsImpl
 
 // Lookups and listings, plus the per-asset readers.
 
-// MCP:get_asset_by_name - Retrieve ONE asset by exact name and return its identity (name, class, object path, package, is_loaded, file size) plus, with load_full_data, type-specific detail: a Blueprint's parent class / compile status / generated class, a StaticMesh's section-vertex-LOD counts, whether a material is an instance. WARNING: When the name is ambiguous it still resolves to the FIRST match and merely lists the rest in `ambiguous_matches` -- check that field, or use resolve_asset_by_name, which refuses to pick for you. The fallback name scan only covers /Game, so an /Engine or plugin-mount asset must be addressed by its full package name. Use get_assets_by_names for a batch, get_asset_metadata for registry tags, and search_assets_by_pattern when you only know part of the name.
-//   @param asset_name - EXACT asset name, or a full package name (which is tried first and is the only form that reaches outside /Game)
+// MCP:get_asset_by_name - Retrieve ONE asset by exact name and return its identity (name, class, object path, package, is_loaded, file size) plus, with load_full_data, type-specific detail: a Blueprint's parent class / compile status / generated class, a StaticMesh's section-vertex-LOD counts, whether a material is an instance; with include_tags, its Asset Registry tags (the indexed key/value pairs an asset publishes -- parent class, mesh stats, fork-lineage tags) read without a load. WARNING: When the name is ambiguous it still resolves to the FIRST match and merely lists the rest in `ambiguous_matches` -- check that field, or use resolve_asset_by_name, which refuses to pick for you. The fallback name scan only covers /Game, so an /Engine or plugin-mount asset must be addressed by its full package or object path. Use get_assets_by_names for a batch, get_assets_by_tag to search BY a tag value, and search_assets_by_pattern when you only know part of the name.
+//   @param asset_name - EXACT asset name, or a full package name ('/Game/Foo/BP_Foo') or object path ('/Game/Foo/BP_Foo.BP_Foo'); a path is tried first and is the only form that reaches outside /Game
 //   @param load_full_data - When true (DEFAULT), LOADS the asset to add type-specific details (Blueprint parent class, mesh sections, ...). Pass false to stay metadata-only and avoid a synchronous load.
-//   @returns { name: string, class: string, path: string, package: string, is_loaded: bool, file_size_bytes?: int, file_size_kb?: number, parent_class?: string, is_compiled?: bool, is_valid?: bool, generated_class?: string, num_sections?: int, num_vertices?: int, num_lods?: int, is_material_instance?: bool, ambiguous_matches?: [string] }
+//   @param include_tags - Optional bool, default false: add `tags`, every Asset Registry tag of the asset as { name, value }, read from the registry without loading it.
+//   @returns { name: string, class: string, path: string, package: string, is_loaded: bool, file_size_bytes?: int, file_size_kb?: number, parent_class?: string, is_compiled?: bool, is_valid?: bool, generated_class?: string, num_sections?: int, num_vertices?: int, num_lods?: int, is_material_instance?: bool, tags?: [{ name: string, value: string }], ambiguous_matches?: [string] }
 
 TSharedPtr<FJsonObject> HandleGetAssetByName(const TSharedPtr<FJsonObject>& Params)
 {
@@ -286,12 +320,18 @@ TSharedPtr<FJsonObject> HandleGetAssetByName(const TSharedPtr<FJsonObject>& Para
     // Loading the asset for type-specific detail is the default; false keeps the call metadata-only.
     bool bLoadFullData = true;
     Params->TryGetBoolField(TEXT("load_full_data"), bLoadFullData);
+    bool bIncludeTags = false;
+    Params->TryGetBoolField(TEXT("include_tags"), bIncludeTags);
     const FAssetData& Asset = Found.Asset;
 
     TSharedPtr<FJsonObject> Reply = Impl::DescribeAsset(Asset, /*bWithLoadedFlag*/ true);
     if (bLoadFullData)
     {
         Impl::AddTypeDetails(Asset, Reply);
+    }
+    if (bIncludeTags)
+    {
+        Reply->SetArrayField(TEXT("tags"), Impl::RegistryTagsJson(Asset));
     }
 
     // Size on disk, only when the package maps to a .uasset that exists (silently left out otherwise).
@@ -525,53 +565,6 @@ TSharedPtr<FJsonObject> HandleSearchAssetsByPattern(const TSharedPtr<FJsonObject
     return Reply;
 }
 
-// MCP:get_asset_metadata - Read an asset's Asset Registry TAGS (the indexed key/value pairs an asset publishes -- parent class, mesh stats, fork-lineage tags, ...) together with its name, class, object path and package. WARNING: its `asset_name` is NOT a name: the tool literally prefixes "/Game/" to whatever you pass, so it must be a path RELATIVE TO /Game ("MyGame/Systems/Foo/BP_Foo.BP_Foo"), never a bare asset name and never an absolute "/Game/..." path -- and it LOADS the asset to resolve it. Use get_assets_metadata_batch for many paths at once, get_asset_by_name for identity from a bare name, and get_assets_by_tag to search BY a tag value instead of reading the tags of one asset.
-//   @param asset_name - Path RELATIVE to /Game, with no leading slash (e.g. "MyGame/Systems/Foo/BP_Foo.BP_Foo"); the tool prepends "/Game/" itself, so a bare name or an absolute path both fail to resolve
-//   @returns { name: string, class: string, path: string, package: string, asset_class_path?: string, package_path?: string, tags?: [{ name, value }] }
-
-TSharedPtr<FJsonObject> HandleGetAssetMetadata(const TSharedPtr<FJsonObject>& Params)
-{
-    FString RelativePath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("asset_name"), RelativePath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-    // Despite its name, asset_name is a path RELATIVE to /Game: the root is prepended here, and the asset
-    // is loaded to resolve it. LoadAsset collapses doubled slashes, so the path is checked as it resolves: with the
-    // root, a name under the limit can join to a package name past it, which aborts the editor.
-    FString FullPath = TEXT("/Game/") + RelativePath;
-    FPaths::RemoveDuplicateSlashes(FullPath);
-    if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(FullPath)) { return Invalid; }
-    UObject* Loaded = UEditorAssetLibrary::LoadAsset(FullPath);
-    if (Loaded == nullptr)
-    {
-        return UEAgentAssetCommandsImpl::AssetNotFoundError(RelativePath);
-    }
-
-    TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
-    Reply->SetStringField(TEXT("name"), Loaded->GetName());
-    Reply->SetStringField(TEXT("class"), Loaded->GetClass()->GetName());
-    Reply->SetStringField(TEXT("path"), Loaded->GetPathName());
-    Reply->SetStringField(TEXT("package"), Loaded->GetOuter()->GetName());
-
-    // The registry entry carries the indexed tags; without one only the identity above is reported.
-    FAssetData Registered = mcp_common::FindAssetDataByPath(FullPath);
-    if (Registered.IsValid())
-    {
-        Reply->SetStringField(TEXT("asset_class_path"), Registered.AssetClassPath.ToString());
-        Reply->SetStringField(TEXT("package_path"), Registered.PackageName.ToString());
-
-        TArray<TSharedPtr<FJsonValue>> Tags;
-        for (const auto& Tag : Registered.TagsAndValues)
-        {
-            TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
-            Entry->SetStringField(TEXT("name"), Tag.Key.ToString());
-            Entry->SetStringField(TEXT("value"), Tag.Value.AsString());
-            Tags.Add(MakeShared<FJsonValueObject>(Entry));
-        }
-        Reply->SetArrayField(TEXT("tags"), Tags);
-    }
-    return Reply;
-}
-
 // MCP:get_asset_thumbnail - Report whether an asset is of a type that CAN carry a thumbnail, alongside its resolved object path, class and loaded state. WARNING: `has_thumbnail` is a CLASS test, not a lookup of stored thumbnail bytes: it is true for any StaticMesh, Material, Texture, Blueprint, SkeletalMesh or Level and false for everything else, whether or not a thumbnail was ever rendered -- and it returns no image data at all. To actually see something rendered, use generate_asset_thumbnail or capture_viewport. Resolution matches get_asset_by_name (full package name first, then a /Game-only exact-name scan, first hit wins with the rest in ambiguous_matches).
 //   @param asset_name - EXACT asset name, or a full package name (which is tried first and is the only form that reaches outside /Game)
 //   @returns { asset_name: string, asset_path: string, has_thumbnail: bool, asset_class: string, asset_loaded: bool, asset_class_name?: string, ambiguous_matches?: [string] }
@@ -625,65 +618,86 @@ TSharedPtr<FJsonObject> HandleGetAssetThumbnail(const TSharedPtr<FJsonObject>& P
     return Reply;
 }
 
-// MCP:get_asset_file_size - Read the ON-DISK size of an asset's .uasset in bytes, KB and MB, plus the absolute file path it resolved to -- the measurement for a disk-budget question ("what is costing the 491 MB in this import?"). WARNING: Size is NOT a proxy for content or integrity: a DataTable that GREW by 5 KB had lost 46 of its 48 references. To measure content use get_data_table_info, read_data_table_row_complex or get_asset_dependencies; for in-memory cost use get_asset_memory_usage. Resolution matches get_asset_by_name (full package name first, then a /Game-only exact-name scan, first hit wins with the rest in ambiguous_matches).
-//   @param asset_name - EXACT asset name, or a full package name (which is tried first and is the only form that reaches outside /Game)
-//   @returns { asset_name: string, asset_path: string, file_path: string, file_size_bytes: int, file_size_kb: number, file_size_mb: number, file_exists: bool, asset_class: string, ambiguous_matches?: [string] }
+// MCP:get_asset_file_info - Stat an asset's package file on disk without loading the asset: its size in bytes, KB and MB, its last-modified timestamp (formatted string + Unix epoch) with its age in days and hours, and the absolute file path it resolved to (.uasset, else .umap for a level, which `extension` names) -- the measurement for a disk-budget question ("what is costing the 491 MB in this import?") and the disk-side oracle for a save whose return value claimed success. A package or object path is stat'ed even when the Asset Registry has no entry for it; a bare name resolves like get_asset_by_name (a /Game-only exact-name scan, first hit wins with the rest in ambiguous_matches). A package with no file on disk, one never saved for instance, is a success with file_exists=false, file_size_bytes 0 and a message. WARNING: Size is NOT a proxy for content or integrity: a DataTable that GREW by 5 KB had lost 46 of its 48 references. To measure content use get_data_table_info, get_data_table_row with include_export_text or get_asset_dependencies; for in-memory cost use get_asset_memory_usage. It is a FILE timestamp: an asset edited in memory but not saved reports its old size and date, and Unreal does not tell creation from modification. Use list_assets_modified_since to sweep a whole folder by date, and list_dirty_packages for unsaved-in-memory changes.
+//   @param asset_name - EXACT asset name, or a full package name ('/Game/Maps/L_Main') or object path ('/Game/Foo/BP_Foo.BP_Foo'); a path is tried first, is the only form that reaches outside /Game, and is stat'ed even when the Asset Registry does not list it
+//   @returns { asset_name: string, asset_path: string, asset_class?: string, package_name: string, file_path: string, extension: string, file_exists: bool, file_size_bytes: int, file_size_kb?: number, file_size_mb?: number, last_modified?: string, last_modified_timestamp?: int, age_days?: number, age_hours?: number, message?: string, ambiguous_matches?: [string] }
 
 TSharedPtr<FJsonObject> HandleGetAssetFileSize(const TSharedPtr<FJsonObject>& Params)
 {
     namespace Impl = UEAgentAssetCommandsImpl;
 
     FString Requested;
-    Impl::FNamedAsset Found;
-    if (TSharedPtr<FJsonObject> Problem = Impl::ReadNamedAsset(Params, Requested, Found))
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("asset_name"), Requested, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+    if (Requested.IsEmpty())
     {
-        return Problem;
+        return Impl::EmptyParamError(TEXT("asset_name"));
     }
 
-    FString OnDisk;
-    if (TSharedPtr<FJsonObject> FileProblem = Impl::LocateUassetFile(Found.Asset, OnDisk))
+    // Checked before the name becomes an FName (whose checkf aborts the editor at NAME_SIZE characters): an
+    // over-long name or a malformed package path is an error, not a lookup.
+    if (Requested.Len() >= NAME_SIZE)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("asset_name is %d characters; a name must stay under %d"), Requested.Len(), NAME_SIZE));
+    }
+    const bool bIsPath = Requested.StartsWith(TEXT("/"));
+    const FString PathPackage = bIsPath ? FPackageName::ObjectPathToPackageName(Requested) : FString();
+    if (bIsPath)
+    {
+        if (!FPackageName::IsValidLongPackageName(PathPackage))
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(TEXT("Not a valid long package name: %s"), *PathPackage));
+        }
+    }
+
+    // The registry entry gives the class and the ambiguity report; a path it does not list is stat'ed as given.
+    Impl::FNamedAsset Found;
+    TSharedPtr<FJsonObject> Reply;
+    FString PackageName;
+    if (AssetCommandHelpers::FindAssetByExactName(Impl::PackageFormOf(Requested), nullptr, Found))
+    {
+        Reply = Impl::StartNamedAssetReply(Requested, Found.Asset);
+        PackageName = Found.Asset.PackageName.ToString();
+    }
+    else if (bIsPath)
+    {
+        Reply = MakeShared<FJsonObject>();
+        Reply->SetStringField(TEXT("asset_name"), Requested);
+        Reply->SetStringField(TEXT("asset_path"), Requested);
+        PackageName = PathPackage;
+    }
+    else
+    {
+        return Impl::AssetNotFoundError(Requested);
+    }
+
+    FString OnDisk, Extension;
+    bool bExists = false;
+    if (TSharedPtr<FJsonObject> FileProblem = Impl::LocatePackageFile(PackageName, OnDisk, Extension, bExists))
     {
         return FileProblem;
     }
-    const int64 Bytes = FPlatformFileManager::Get().GetPlatformFile().FileSize(*OnDisk);
-
-    TSharedPtr<FJsonObject> Reply = Impl::StartNamedAssetReply(Requested, Found.Asset);
+    Reply->SetStringField(TEXT("package_name"), PackageName);
     Reply->SetStringField(TEXT("file_path"), OnDisk);
-    Reply->SetBoolField(TEXT("file_exists"), true);
+    Reply->SetStringField(TEXT("extension"), Extension);
+    Reply->SetBoolField(TEXT("file_exists"), bExists);
+    if (!bExists)
+    {
+        // Never saved, or deleted behind the editor's back: an honest answer, not an error.
+        Reply->SetNumberField(TEXT("file_size_bytes"), 0);
+        Reply->SetStringField(TEXT("message"), FString::Printf(TEXT("Package file not found on disk: %s"), *OnDisk));
+        Impl::AppendAmbiguity(Reply, Found.AmbiguousMatches);
+        return Reply;
+    }
+
+    IPlatformFile& Files = FPlatformFileManager::Get().GetPlatformFile();
+    const int64 Bytes = Files.FileSize(*OnDisk);
     Reply->SetNumberField(TEXT("file_size_bytes"), Bytes);
     Reply->SetNumberField(TEXT("file_size_kb"), Bytes / 1024.0);
     Reply->SetNumberField(TEXT("file_size_mb"), Bytes / (1024.0 * 1024.0));
-    Impl::AppendAmbiguity(Reply, Found.AmbiguousMatches);
-    return Reply;
-}
 
-// MCP:get_asset_last_modified - Read the .uasset file's last-modified timestamp (formatted string + Unix epoch) and how old it is in days and hours -- "was this asset actually written to disk when I saved it?", the disk-side oracle for a save whose return value claimed success. WARNING: It is a FILE timestamp: an asset edited in memory but not saved reports its old date, and Unreal does not distinguish creation from modification (the tool reads the same stamp for both). Use list_assets_modified_since to sweep a whole folder by date, and list_dirty_packages for unsaved-in-memory changes. Resolution matches get_asset_by_name (full package name first, then a /Game-only exact-name scan, first hit wins with the rest in ambiguous_matches).
-//   @param asset_name - EXACT asset name, or a full package name (which is tried first and is the only form that reaches outside /Game)
-//   @returns { asset_name: string, asset_path: string, file_path: string, last_modified: string, last_modified_timestamp: int, file_exists: bool, asset_class: string, age_days: number, age_hours: number, ambiguous_matches?: [string] }
-
-TSharedPtr<FJsonObject> HandleGetAssetLastModified(const TSharedPtr<FJsonObject>& Params)
-{
-    namespace Impl = UEAgentAssetCommandsImpl;
-
-    FString Requested;
-    Impl::FNamedAsset Found;
-    if (TSharedPtr<FJsonObject> Problem = Impl::ReadNamedAsset(Params, Requested, Found))
-    {
-        return Problem;
-    }
-
-    FString OnDisk;
-    if (TSharedPtr<FJsonObject> FileProblem = Impl::LocateUassetFile(Found.Asset, OnDisk))
-    {
-        return FileProblem;
-    }
     // The file's single timestamp: the platform layer does not tell creation and modification apart.
-    const FDateTime Stamp = FPlatformFileManager::Get().GetPlatformFile().GetTimeStamp(*OnDisk);
+    const FDateTime Stamp = Files.GetTimeStamp(*OnDisk);
     const FTimespan Age = FDateTime::UtcNow() - Stamp;
-
-    TSharedPtr<FJsonObject> Reply = Impl::StartNamedAssetReply(Requested, Found.Asset);
-    Reply->SetStringField(TEXT("file_path"), OnDisk);
-    Reply->SetBoolField(TEXT("file_exists"), true);
     Reply->SetStringField(TEXT("last_modified"), Stamp.ToString());
     Reply->SetNumberField(TEXT("last_modified_timestamp"), Stamp.ToUnixTimestamp());
     Reply->SetNumberField(TEXT("age_days"), Age.GetTotalDays());
@@ -693,8 +707,8 @@ TSharedPtr<FJsonObject> HandleGetAssetLastModified(const TSharedPtr<FJsonObject>
 }
 
 // ===========================================================================
-// get_assets_by_tag / resolve_asset_by_name / get_assets_by_names /
-// get_assets_metadata_batch. class_filter (below) resolves a class name the way the rest
+// get_assets_by_tag / resolve_asset_by_name / get_assets_by_names.
+// class_filter (below) resolves a class name the way the rest
 // of the plugin does (e.g. UEAgentSequencerCommands' class resolver): a full
 // object/script path via LoadObject first, then the 5.7-safe UClass::TryFindTypeSlow,
 // then FindFirstObject as a last resort.
@@ -723,8 +737,8 @@ static UClass* ResolveClassFilterToUClass(const FString& ClassFilter)
     return FindFirstObject<UClass>(*ClassFilter, EFindFirstObjectOptions::None);
 }
 
-// MCP:get_assets_by_tag - Search assets BY an Asset Registry tag (FARFilter::TagsAndValues), server-side and metadata-only -- it never force-loads anything. This is the only tool here that queries by tag rather than by name, path or type: "every asset carrying the fork-origin tag (mcp.forkOrigin by default)", "every Blueprint whose ParentClass tag is X". It is also the general-class search that get_assets_by_type cannot do, since class_filter resolves ANY class (with subclasses) instead of five hardcoded ones. Search by class alone by pairing class_filter with a tag every asset of that class publishes; use get_asset_metadata to read the tags OF one asset rather than search by them.
-//   @param tag_name - Asset Registry tag name to filter on, e.g. "ParentClass" or "mcp.forkOrigin" (required). Read the available tag names off a sample asset with get_asset_metadata.
+// MCP:get_assets_by_tag - Search assets BY an Asset Registry tag (FARFilter::TagsAndValues), server-side and metadata-only -- it never force-loads anything. This is the only tool here that queries by tag rather than by name, path or type: "every asset carrying the fork-origin tag (mcp.forkOrigin by default)", "every Blueprint whose ParentClass tag is X". It is also the general-class search that get_assets_by_type cannot do, since class_filter resolves ANY class (with subclasses) instead of five hardcoded ones. Search by class alone by pairing class_filter with a tag every asset of that class publishes; use get_asset_by_name with include_tags to read the tags OF one asset rather than search by them.
+//   @param tag_name - Asset Registry tag name to filter on, e.g. "ParentClass" or "mcp.forkOrigin" (required). Read the available tag names off a sample asset with get_asset_by_name include_tags=true.
 //   @param tag_value - When given, only assets whose tag equals this value EXACTLY match; when omitted, matches any asset that HAS the tag with any value
 //   @param folder_path - Root package path to search under; defaults to "/Game", so /Engine, /Water and plugin mounts need their root passed explicitly
 //   @param recursive - When true (DEFAULT), recurse into subfolders
@@ -882,10 +896,12 @@ TSharedPtr<FJsonObject> HandleResolveAssetByName(const TSharedPtr<FJsonObject>& 
     return ResultObj;
 }
 
-// MCP:get_assets_by_names - Batch variant of get_asset_by_name: resolve N asset names in ONE round-trip instead of N calls, returning per entry a found flag plus that asset's identity (class, object path, package, is_loaded) or the error that stopped it. Delegates to get_asset_by_name literally, so it inherits both its /Game-only fallback scan and its ambiguous_matches transparency -- an ambiguous name still resolves to the first hit, so check that field per entry. Use get_assets_metadata_batch when you want registry TAGS rather than identity.
-//   @param asset_names - Array of exact asset names (or full package names) to resolve (required)
+// MCP:get_assets_by_names - Batch variant of get_asset_by_name: resolve N asset names in ONE round-trip instead of N calls, returning per entry a found flag plus that asset's identity (class, object path, package, is_loaded), its Asset Registry tags with include_tags, or the error that stopped it. Delegates to get_asset_by_name literally, so it inherits both its /Game-only fallback scan and its ambiguous_matches transparency -- an ambiguous name still resolves to the first hit, so check that field per entry. max_results caps how many entries are processed.
+//   @param asset_names - Array of exact asset names, full package names or object paths to resolve (required)
 //   @param load_full_data - When true, adds the type-specific details of get_asset_by_name per asset. Defaults to FALSE here -- the opposite of the single-asset tool -- so a batch call cannot accidentally force N synchronous loads.
-//   @returns { requested_count: int, resolved: [{ asset_name, found: bool, name?, class?, path?, package?, is_loaded?, ambiguous_matches?, ... (same fields as get_asset_by_name when found) }] }
+//   @param include_tags - Optional bool, default false: add each found asset's Asset Registry `tags` [{ name, value }], as get_asset_by_name include_tags does.
+//   @param max_results - Optional safety cap on how many array entries get processed (1..5000); omitted processes every entry. Entries past the cap are dropped and results_truncated goes true.
+//   @returns { requested_count: int, processed_count: int, results_truncated: bool, resolved: [{ asset_name, found: bool, name?, class?, path?, package?, is_loaded?, tags?, ambiguous_matches?, error?, ... (same fields as get_asset_by_name when found) }] }
 
 TSharedPtr<FJsonObject> HandleGetAssetsByNames(const TSharedPtr<FJsonObject>& Params)
 {
@@ -897,11 +913,37 @@ TSharedPtr<FJsonObject> HandleGetAssetsByNames(const TSharedPtr<FJsonObject>& Pa
 
     bool bLoadFullData = false; // batch default = cheap path, unlike get_asset_by_name's default-true
     Params->TryGetBoolField(TEXT("load_full_data"), bLoadFullData);
+    bool bIncludeTags = false;
+    Params->TryGetBoolField(TEXT("include_tags"), bIncludeTags);
+
+    // No cap unless one is asked for; an asked-for cap outside 1..5000 is refused rather than clamped.
+    int32 MaxResults = NamesArray->Num();
+    int32 RequestedCap = 0;
+    const bool bCapIsNumber = Params->TryGetNumberField(TEXT("max_results"), RequestedCap);
+    if (Params->HasField(TEXT("max_results")))
+    {
+        if (!bCapIsNumber)
+        {
+            return mcp_common::MakeErrorReply(TEXT("Parameter 'max_results' must be a number"));
+        }
+        if (TSharedPtr<FJsonObject> OutOfRange = UEAgentAssetCommandsImpl::RangeError(TEXT("max_results"), RequestedCap, 1, 5000))
+        {
+            return OutOfRange;
+        }
+        MaxResults = RequestedCap;
+    }
 
     // Resolve each name by delegating to get_asset_by_name
     TArray<TSharedPtr<FJsonValue>> ResolvedArray;
+    int32 ProcessedCount = 0;
     for (const TSharedPtr<FJsonValue>& NameValue : *NamesArray)
     {
+        if (ProcessedCount >= MaxResults)
+        {
+            break;
+        }
+        ++ProcessedCount;
+
         FString AssetName;
         if (!NameValue.IsValid() || !NameValue->TryGetString(AssetName) || AssetName.IsEmpty())
         {
@@ -912,6 +954,7 @@ TSharedPtr<FJsonObject> HandleGetAssetsByNames(const TSharedPtr<FJsonObject>& Pa
         TSharedPtr<FJsonObject> SubParams = MakeShared<FJsonObject>();
         SubParams->SetStringField(TEXT("asset_name"), AssetName);
         SubParams->SetBoolField(TEXT("load_full_data"), bLoadFullData);
+        SubParams->SetBoolField(TEXT("include_tags"), bIncludeTags);
 
         TSharedPtr<FJsonObject> SingleResult = HandleGetAssetByName(SubParams);
         ResolvedArray.Add(UEAgentAssetCommandsImpl::BatchRow(TEXT("asset_name"), AssetName, SingleResult));
@@ -919,150 +962,22 @@ TSharedPtr<FJsonObject> HandleGetAssetsByNames(const TSharedPtr<FJsonObject>& Pa
 
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
     ResultObj->SetNumberField(TEXT("requested_count"), NamesArray->Num());
+    ResultObj->SetNumberField(TEXT("processed_count"), ProcessedCount);
+    ResultObj->SetBoolField(TEXT("results_truncated"), NamesArray->Num() > ProcessedCount);
     ResultObj->SetArrayField(TEXT("resolved"), ResolvedArray);
 
     return ResultObj;
 }
 
-// MCP:get_assets_metadata_batch - Batch variant of get_asset_metadata: read the Asset Registry tags of N assets in ONE round-trip instead of N calls, returning per entry a found flag plus the same fields get_asset_metadata emits (or an error string). It runs get_asset_metadata for each entry, so it inherits its path semantics exactly -- including the trap that each entry is prefixed with "/Game/", so entries must be paths RELATIVE to /Game, never bare names and never absolute "/Game/..." paths. Use get_assets_by_names for identity/type info from bare NAMES instead of tags.
-//   @param asset_paths - Array of paths RELATIVE to /Game with no leading slash (e.g. "MyGame/Systems/Foo/BP_Foo.BP_Foo"); each is passed to get_asset_metadata, which prepends "/Game/" itself (required)
-//   @param max_results - Safety cap on how many array entries get processed (1..5000); defaults to 500. Entries past the cap are dropped and results_truncated goes true.
-//   @returns { requested_count: int, processed_count: int, results_truncated: bool, results: [{ asset_path, found: bool, name?, class?, path?, package?, asset_class_path?, package_path?, tags?, error? }] }
-
-TSharedPtr<FJsonObject> HandleGetAssetsMetadataBatch(const TSharedPtr<FJsonObject>& Params)
-{
-    const TArray<TSharedPtr<FJsonValue>>* PathsArray = nullptr;
-    if (!Params->TryGetArrayField(TEXT("asset_paths"), PathsArray) || !PathsArray)
-    {
-        return mcp_common::MissingParameterReply(TEXT("asset_paths"));
-    }
-
-    int32 MaxResults = 500;
-    Params->TryGetNumberField(TEXT("max_results"), MaxResults);
-    if (MaxResults < 1)
-    {
-        MaxResults = 1;
-    }
-    else if (MaxResults > 5000)
-    {
-        MaxResults = 5000;
-    }
-
-    // Resolve each path by delegating to get_asset_metadata
-    TArray<TSharedPtr<FJsonValue>> ResultsArray;
-    int32 ProcessedCount = 0;
-    for (const TSharedPtr<FJsonValue>& PathValue : *PathsArray)
-    {
-        if (ProcessedCount >= MaxResults)
-        {
-            break;
-        }
-
-        FString AssetPath;
-        if (!PathValue.IsValid() || !PathValue->TryGetString(AssetPath) || AssetPath.IsEmpty())
-        {
-            ResultsArray.Add(UEAgentAssetCommandsImpl::InvalidBatchRow(TEXT("asset_path"), TEXT("Invalid or empty entry in asset_paths")));
-            ProcessedCount++;
-            continue;
-        }
-
-        TSharedPtr<FJsonObject> SubParams = MakeShared<FJsonObject>();
-        SubParams->SetStringField(TEXT("asset_name"), AssetPath); // get_asset_metadata's own param name/semantics
-
-        TSharedPtr<FJsonObject> SingleResult = HandleGetAssetMetadata(SubParams);
-        ResultsArray.Add(UEAgentAssetCommandsImpl::BatchRow(TEXT("asset_path"), AssetPath, SingleResult));
-        ProcessedCount++;
-    }
-
-    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-    ResultObj->SetNumberField(TEXT("requested_count"), PathsArray->Num());
-    ResultObj->SetNumberField(TEXT("processed_count"), ProcessedCount);
-    ResultObj->SetBoolField(TEXT("results_truncated"), PathsArray->Num() > ProcessedCount);
-    ResultObj->SetArrayField(TEXT("results"), ResultsArray);
-
-    return ResultObj;
-}
-
-// ===========================================================================
-// Typed remove commands: each deletes an asset only after verifying it is of the
-// expected class, which is what sets them apart from the generic delete_asset. A
-// path that does not load answers deleted:false with a `note` and success, so they
-// are idempotent; an asset of another class is refused, and a delete the engine
-// does not carry out fails the call (AssetCommandHelpers::DeleteTypedAsset). The
-// class is a parameter rather than a template argument so the catalog generator
-// follows each command into this body.
-// ===========================================================================
-
-static TSharedPtr<FJsonObject> HandleRemoveTypedAssetCmd(const TSharedPtr<FJsonObject>& Params, const TCHAR* CmdName,
-    const UClass* ExpectedClass)
-{
-    FString AssetPath;
-    if (!Params->TryGetStringField(TEXT("asset_path"), AssetPath) || AssetPath.IsEmpty())
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("[%s] Missing 'asset_path' parameter"), CmdName));
-    }
-
-    return AssetCommandHelpers::DeleteTypedAsset(CmdName, AssetPath, ExpectedClass);
-}
-
-// MCP:remove_render_target_2d - Delete a render target asset, but only after loading it and verifying it really is a UTextureRenderTarget2D -- the typed counterpart of create_render_target_2d, and what makes it safer than the generic delete_asset, which deletes whatever sits at that path. A missing path returns deleted:false with a `note` and success, so it is idempotent and safe to re-run; an asset of another type is refused with success false and deleted:false, and a delete the engine refuses (Play-in-Editor running, a read-only file) is success false too. Sisters by type: remove_render_target_2d_array, remove_render_target_cube, remove_texture_2d_array, remove_static_texture_from_render_target.
-//   @param asset_path - Full object/package path of the render target (e.g. /Game/MyGame/RT/RT_Foo.RT_Foo); a bare name is not resolved here
-//   @returns { asset_path, asset_class, package_name, deleted, already_existed, note? }
-TSharedPtr<FJsonObject> HandleRemoveRenderTarget2D(const TSharedPtr<FJsonObject>& Params)
-{
-    return HandleRemoveTypedAssetCmd(Params, TEXT("remove_render_target_2d"), UTextureRenderTarget2D::StaticClass());
-}
-
-// MCP:remove_render_target_2d_array - Delete a 2D-ARRAY render target, but only after loading it and verifying it really is a UTextureRenderTarget2DArray -- the typed counterpart of create_render_target_2d_array, and safer than the generic delete_asset, which deletes whatever sits at that path. A missing path returns deleted:false with a `note` and success, so it is idempotent; a wrong type, or a delete the engine refuses, is success false with deleted:false. Use remove_render_target_2d for a plain 2D render target and remove_texture_2d_array for a static UTexture2DArray.
-//   @param asset_path - Full object/package path of the 2D-array render target; a bare name is not resolved here
-//   @returns { asset_path, asset_class, package_name, deleted, already_existed, note? }
-TSharedPtr<FJsonObject> HandleRemoveRenderTarget2DArray(const TSharedPtr<FJsonObject>& Params)
-{
-    return HandleRemoveTypedAssetCmd(Params, TEXT("remove_render_target_2d_array"), UTextureRenderTarget2DArray::StaticClass());
-}
-
-// MCP:remove_render_target_cube - Delete a CUBE render target, but only after loading it and verifying it really is a UTextureRenderTargetCube -- the typed counterpart of create_render_target_cube, and safer than the generic delete_asset, which deletes whatever sits at that path. A missing path returns deleted:false with a `note` and success, so it is idempotent; a wrong type, or a delete the engine refuses, is success false with deleted:false. Use remove_render_target_2d / remove_render_target_2d_array for the flat variants.
-//   @param asset_path - Full object/package path of the cube render target; a bare name is not resolved here
-//   @returns { asset_path, asset_class, package_name, deleted, already_existed, note? }
-TSharedPtr<FJsonObject> HandleRemoveRenderTargetCube(const TSharedPtr<FJsonObject>& Params)
-{
-    return HandleRemoveTypedAssetCmd(Params, TEXT("remove_render_target_cube"), UTextureRenderTargetCube::StaticClass());
-}
-
-// MCP:remove_texture_2d_array - Delete a static TEXTURE array, but only after loading it and verifying it really is a UTexture2DArray -- the typed counterpart of create_texture_2d_array, and safer than the generic delete_asset, which deletes whatever sits at that path. A missing path returns deleted:false with a `note` and success, so it is idempotent; a wrong type, or a delete the engine refuses, is success false with deleted:false. Do not confuse it with remove_render_target_2d_array, which deletes the RENDER TARGET array, not this static texture.
-//   @param asset_path - Full object/package path of the 2D-array texture; a bare name is not resolved here
-//   @returns { asset_path, asset_class, package_name, deleted, already_existed, note? }
-TSharedPtr<FJsonObject> HandleRemoveTexture2DArray(const TSharedPtr<FJsonObject>& Params)
-{
-    return HandleRemoveTypedAssetCmd(Params, TEXT("remove_texture_2d_array"), UTexture2DArray::StaticClass());
-}
-
-// MCP:remove_static_texture_from_render_target - Delete the static UTexture2D that create_static_texture_from_render_target baked out of a render target (it lives beside the render target as a sibling asset), verifying the target really is a UTexture2D first -- so it refuses to delete the RENDER TARGET itself, which is remove_render_target_2d's job. Safer than the generic delete_asset, which deletes whatever sits at that path; a missing path returns deleted:false with a `note` and success, so it is idempotent, while a wrong type, or a delete the engine refuses, is success false with deleted:false.
-//   @param asset_path - Full object/package path of the baked static texture; a bare name is not resolved here
-//   @returns { asset_path, asset_class, package_name, deleted, already_existed, note? }
-TSharedPtr<FJsonObject> HandleRemoveStaticTextureFromRenderTarget(const TSharedPtr<FJsonObject>& Params)
-{
-    return HandleRemoveTypedAssetCmd(Params, TEXT("remove_static_texture_from_render_target"), UTexture2D::StaticClass());
-}
-
 const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("get_asset_by_name"), &HandleGetAssetByName },
-    { TEXT("get_asset_file_size"), &HandleGetAssetFileSize },
-    { TEXT("get_asset_last_modified"), &HandleGetAssetLastModified },
-    { TEXT("get_asset_metadata"), &HandleGetAssetMetadata },
+    { TEXT("get_asset_file_info"), &HandleGetAssetFileSize },
     { TEXT("get_asset_thumbnail"), &HandleGetAssetThumbnail },
     { TEXT("get_assets_by_names"), &HandleGetAssetsByNames },
     { TEXT("get_assets_by_tag"), &HandleGetAssetsByTag },
     { TEXT("get_assets_by_type"), &HandleGetAssetsByType },
     { TEXT("get_assets_in_folder"), &HandleGetAssetsInFolder },
-    { TEXT("get_assets_metadata_batch"), &HandleGetAssetsMetadataBatch },
-    { TEXT("remove_render_target_2d"), &HandleRemoveRenderTarget2D },
-    { TEXT("remove_render_target_2d_array"), &HandleRemoveRenderTarget2DArray },
-    { TEXT("remove_render_target_cube"), &HandleRemoveRenderTargetCube },
-    { TEXT("remove_static_texture_from_render_target"), &HandleRemoveStaticTextureFromRenderTarget },
-    { TEXT("remove_texture_2d_array"), &HandleRemoveTexture2DArray },
     { TEXT("resolve_asset_by_name"), &HandleResolveAssetByName },
     { TEXT("search_assets_by_pattern"), &HandleSearchAssetsByPattern },
 };

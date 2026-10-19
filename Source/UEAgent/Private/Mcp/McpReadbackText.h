@@ -23,7 +23,7 @@ inline constexpr const TCHAR* RB_check_collision_profile_0 =
 
 inline constexpr const TCHAR* RB_check_compile_blueprint_0 =
 	TEXT("The Blueprint does not compile. A common cause is an unresolved wildcard pin on a CustomThunk array node ('The type of Target Array is ")
-	TEXT("undetermined'), which also blocks PIE. get_compile_errors(blueprint_name) lists the messages; after editing graphs over MCP, always check ")
+	TEXT("undetermined'), which also blocks PIE. compile_blueprint(blueprint_name, return_messages=true) lists the messages; after editing graphs over MCP, always check ")
 	TEXT("for compile errors.");
 
 inline constexpr const TCHAR* RB_check_component_property_0 =
@@ -40,13 +40,13 @@ inline constexpr const TCHAR* RB_check_component_parameters_0 =
 inline constexpr const TCHAR* RB_check_component_parameters_1 =
 	TEXT("Writing a property on a live actor (world=%r) triggers PostEditChangeProperty -> RerunConstructionScripts. Actors whose construction script ")
 	TEXT("spawns helper actors (manager or proxy actors) break: SpawnActor is not allowed there, so those components end up ")
-	TEXT("holding None while everything looks in place. In PIE, change state through a function instead (call_component_function runs a UFUNCTION ")
+	TEXT("holding None while everything looks in place. In PIE, change state through a function instead (call_function with component_class runs a UFUNCTION ")
 	TEXT("without re-running construction); if it already happened, restart PIE.");
 
 inline constexpr const TCHAR* RB_check_component_parameters_2 =
 	TEXT("DefinitionAsset is deprecated: it is written and re-reads fine, but the SmartObject keeps using the old definition, and neither this tool ")
-	TEXT("nor get_property_value warns. Write DefinitionRef instead (a StructProperty): {\"SmartObjectDefinition\": \"/Game/...\"}. ")
-	TEXT("list_object_properties reports deprecated:true/false per property.");
+	TEXT("nor get_properties warns. Write DefinitionRef instead (a StructProperty): {\"SmartObjectDefinition\": \"/Game/...\"}. ")
+	TEXT("inspect_object with include_property_metadata=true reports deprecated:true/false per property.");
 
 inline constexpr const TCHAR* RB_check_comment_node_0 =
 	TEXT("The comment text was lost and the box shows the literal 'Comment': the tool sets NodeComment before the node is finalized and the ")
@@ -88,11 +88,6 @@ inline constexpr const TCHAR* RB_check_delete_after_pie_census_0 =
 	TEXT("player. Do not decide what to delete from it. Count the map in the editor world anchored by package (find_object + ")
 	TEXT("GameplayStatics.get_all_actors_of_class), and filter bulk deletes by exact label, never by class.");
 
-inline constexpr const TCHAR* RB_check_tag_refcount_0 =
-	TEXT("reference_count is a hard-coded 0 (UE 5.8 has no public API for tag reference counts), so never delete a tag because of it; the only ")
-	TEXT("meaningful field here is `valid`. To find real references, use find_blueprint_node_references with include_pin_defaults plus a binary grep ")
-	TEXT("of Content/ and Config/ for the tag string.");
-
 inline constexpr const TCHAR* RB_check_interface_sweep_0 =
 	TEXT("%d class(es) found with scanned_class_count:%d does not prove uniqueness: that counter measures cost, not coverage, and the sweep only sees ")
 	TEXT("loaded classes, so a vendor class that is not in the open map is missed. Do a second pass that does not depend on loading ")
@@ -127,7 +122,7 @@ inline constexpr const TCHAR* RB_check_spawn_without_authority_0 =
 inline constexpr const TCHAR* RB_check_replication_audit_0 =
 	TEXT("replicated_class_count:0 alongside %d declared replication signal(s) (RPCs or variables) points to a blind column, not broken networking: ")
 	TEXT("class_replicates casts the CDO to AActor, which fails for every component Blueprint, so it always reports false for them. Trust the ")
-	TEXT("variables and RPCs in this report instead. For one component's flag, read bReplicates on the instance inside the actor (get_property_value ")
+	TEXT("variables and RPCs in this report instead. For one component's flag, read bReplicates on the instance inside the actor (get_properties ")
 	TEXT("with object_path='<ActorInstance>.<Component>'), not on the component class CDO, which defaults to false; an SCS component routes RPCs by ")
 	TEXT("its stable name even when bReplicates is false.");
 
@@ -163,7 +158,7 @@ inline constexpr const TCHAR* RB_check_complex_row_0 =
 inline constexpr const TCHAR* RB_check_smart_object_registry_0 =
 	TEXT("This is what the subsystem has registered, not what the property says: the registration is fixed when the actor is created and only ")
 	TEXT("refreshes on re-registration or level reload, so in the editor it can lag behind a DefinitionRef you just wrote. To know which definition ")
-	TEXT("will be used on load, read the component's DefinitionRef with get_property_value.");
+	TEXT("will be used on load, read the component's DefinitionRef with get_properties.");
 
 inline constexpr const TCHAR* RBK_PYTHON_SAVE_WARNING_0 =
 	TEXT("from Python, its return value is not the save oracle. On a read-only .uasset it returns False but the change stays in memory, so re-reading ")
@@ -226,8 +221,8 @@ inline constexpr const TCHAR* RBK_LYING_APIS_10 =
 
 inline constexpr const TCHAR* RBK_LYING_APIS_11 =
 	TEXT("returns True no matter what. A TMap<Enum,SoftClass> exported with the export wrapper does not re-import (it becomes an empty ()) and still ")
-	TEXT("returns True. Pass bare paths ({'Key': '/Game/....Class_C'}) and re-read with get_data_table_column or read_data_table_row_complex -- not ")
-	TEXT("get_data_table_row, which does not serialize TMaps. File size is no proof of integrity.");
+	TEXT("returns True. Pass bare paths ({'Key': '/Game/....Class_C'}) and re-read with get_data_table_column or get_data_table_row ")
+	TEXT("(include_export_text=true adds each cell's ExportText). File size is no proof of integrity.");
 
 inline constexpr const TCHAR* RBK_LYING_APIS_12 =
 	TEXT("returns None in three ways that do not mean 'no navmesh here': with an explicit nav_data it always returns None (use nav_data=None); ")
@@ -315,7 +310,7 @@ inline constexpr const TCHAR* RBK_LYING_APIS_30 =
 
 inline constexpr const TCHAR* RBK_LYING_APIS_31 =
 	TEXT("is not exposed, and the HitResult returned by line_trace_single cannot be read from Python (its fields are missing, protected or not ")
-	TEXT("found), so traces always look like misses. Use raycast_scene / overlap_scene over MCP, which return real hit data and accept world='server'.");
+	TEXT("found), so traces always look like misses. Use raycast_scene / query_scene_overlaps over MCP, which return real hit data and accept world='server'.");
 
 inline constexpr const TCHAR* RBK_LYING_APIS_32 =
 	TEXT("on an AIPerceptionComponent says nothing about whether perception works: perception is driven by the central AIPerceptionSystem. Use ")
@@ -345,13 +340,13 @@ inline constexpr const TCHAR* RBK_LYING_APIS_37 =
 
 inline constexpr const TCHAR* RBK_LYING_APIS_38 =
 	TEXT("does not list every reflected property of an Unreal object, so a dir() sweep misses properties that exist (often inside structs). Use ")
-	TEXT("get_property_value / list_object_properties over MCP, or try the CamelCase name directly with get_editor_property.");
+	TEXT("get_properties / inspect_object (include_property_metadata=true) over MCP, or try the CamelCase name directly with get_editor_property.");
 
 inline constexpr const TCHAR* RBK_LYING_APIS_40 =
 	TEXT("argument passing fails silently in several ways: arrays of structs of the wrong type arrive empty; a GameplayTag passed where a Blueprint ")
 	TEXT("struct is expected arrives as an empty struct; Blueprint user structs and enums have no Python type (an int index fails); and positional ")
-	TEXT("arguments of the same type are not checked for order. Check the real order with get_function_info, and prefer the MCP tools call_function / ")
-	TEXT("call_object_method / call_component_function, which marshal through the bridge and accept enums by value name. Passing a UObject argument ")
+	TEXT("arguments of the same type are not checked for order. Check the real order with get_function_info, and prefer the MCP tool call_function ")
+	TEXT("(on an object_path, a class_name or a component_class), which marshals through the bridge and accepts enums by value name. Passing a UObject argument ")
 	TEXT("has crashed the editor. Calls made this way do not mark packages dirty (a following save_level writes nothing), and RPCs called from Python ")
 	TEXT("do not cross the network: they run locally, so verify state in both worlds and drive networked flows with real input.");
 
@@ -363,15 +358,16 @@ inline constexpr const TCHAR* RBK_LYING_APIS_42 =
 
 inline constexpr const TCHAR* RBK_LYING_APIS_43 =
 	TEXT("on a Blueprint struct returns {} because its fields carry GUID suffixes, which does not mean nothing was written. Read with ")
-	TEXT("list_object_properties, get_editor_property using the GUID-suffixed name, or read_data_table_row_complex. Never compare structs with str() ")
+	TEXT("inspect_object (include_property_metadata=true), get_editor_property using the GUID-suffixed name, or get_data_table_row with ")
+	TEXT("include_export_text=true. Never compare structs with str() ")
 	TEXT("(it includes the pointer); compare fields.");
 
 inline constexpr const TCHAR* RBK_LYING_APIS_44 =
-	TEXT("returns 0.0 for any name that does not exist, with no error. Confirm the name with search_cvars / list_cvars_with_prefix, or use the ")
+	TEXT("returns 0.0 for any name that does not exist, with no error. Confirm the name with list_cvars (filter), or use the ")
 	TEXT("get_cvar tool, which fails honestly.");
 
 inline constexpr const TCHAR* RBK_LYING_APIS_45 =
-	TEXT("can leave expressions behind without an error, and the material still compiles. Count them with get_material_expressions afterwards.");
+	TEXT("can leave expressions behind without an error, and the material still compiles. Count them with get_material_graph_info (expression_count) afterwards.");
 
 inline constexpr const TCHAR* RBK_LYING_APIS_46 =
 	TEXT("returns False even when the change was applied. Re-read with get_material_instance_static_switch_parameter_value.");
@@ -451,7 +447,7 @@ inline constexpr const TCHAR* RBK_LYING_APIS_63 =
 
 inline constexpr const TCHAR* RBK_LYING_APIS_64 =
 	TEXT("reflects the movement mode computed on the CMC's next tick, so reading it right after a teleport is unreliable. Check GetPhysicsVolume ")
-	TEXT("(immediate) or overlap_scene instead, and read IsSwimming in a later call.");
+	TEXT("(immediate) or query_scene_overlaps instead, and read IsSwimming in a later call.");
 
 inline constexpr const TCHAR* RBK_LYING_APIS_65 =
 	TEXT("order is not possession order, so 'the first character' may be the wrong player; use PlayerController.get_controlled_pawn(). When comparing ")
@@ -551,9 +547,9 @@ inline constexpr const TCHAR* RBK_LYING_ARGUMENTS_22 =
 
 inline constexpr const TCHAR* RBK_LYING_ARGUMENTS_23 =
 	TEXT("is not exposed to Python ('Failed to find property'); inside a try/except sweep it yields 0 components for every Blueprint, and the CDO ")
-	TEXT("only lists native components. Use get_blueprint_scs_tree (native + SCS + inherited) or the live actor in PIE. From Python, ")
+	TEXT("only lists native components. Use get_blueprint_components (native + SCS + inherited) or the live actor in PIE. From Python, ")
 	TEXT("SubobjectDataSubsystem also returns inherited components, but their templates may live in a library package: write inherited defaults with ")
-	TEXT("set_blueprint_component_property (which creates the override in the child), and prefer get_associated_object over the deprecated get_object.");
+	TEXT("set_blueprint_component_properties (which creates the override in the child), and prefer get_associated_object over the deprecated get_object.");
 
 inline constexpr const TCHAR* RBK_LYING_APIS_DURING_PIE_0 =
 	TEXT("(EditorAssetLibrary) returns None while PIE is running, by design (the reason only goes to the engine log), and a None passed on turns into ")
@@ -573,7 +569,7 @@ inline constexpr const TCHAR* RB_run_output_text_0 =
 
 inline constexpr const TCHAR* RB_check_python_code_0 =
 	TEXT("listing components on the CDO only returns native components; SCS components are not there, so this cannot prove that a component is ")
-	TEXT("missing. Use get_blueprint_scs_tree, or spawn the actor off camera, read it, and destroy it in a `finally` block.");
+	TEXT("missing. Use get_blueprint_components, or spawn the actor off camera, read it, and destroy it in a `finally` block.");
 
 inline constexpr const TCHAR* RB_check_python_code_1 =
 	TEXT("this error is usually harmless with navigation invokers: MaxTiles limits simultaneously loaded tiles, not the addressable grid, and ")
@@ -593,7 +589,7 @@ inline constexpr const TCHAR* RB_check_python_code_3 =
 inline constexpr const TCHAR* RB_check_python_code_4 =
 	TEXT("Blueprint enums are not Python types and an int is not accepted for them, which looks like 'this function cannot be called' when it can. ")
 	TEXT("Pass a real enum value taken from data that already holds one (e.g. a key of a TMap typed by that enum), or use the MCP tool ")
-	TEXT("call_object_method, which accepts an enum by its value name.");
+	TEXT("call_function, which accepts an enum by its value name.");
 
 inline constexpr const TCHAR* RB_check_python_code_5 =
 	TEXT("Python cannot see the bindings of a multicast delegate (it shows a single unbound entry), so this does not prove the dispatcher is unbound. ")
@@ -617,12 +613,12 @@ inline constexpr const TCHAR* RB_check_python_code_8 =
 inline constexpr const TCHAR* RB_check_python_code_9 =
 	TEXT("a deprecated asset property can return an empty container without an error, so a loop over it silently does nothing (e.g. ")
 	TEXT("InputMappingContext.mappings is deprecated and empty in 5.8; the data lives in default_key_mappings.mappings). Count before writing, ")
-	TEXT("re-read from the asset afterwards, and use list_object_properties to see which properties are deprecated.");
+	TEXT("re-read from the asset afterwards, and use inspect_object with include_property_metadata=true to see which properties are deprecated.");
 
 inline constexpr const TCHAR* RB_check_python_code_10 =
 	TEXT("this usually does not mean the property is missing: Blueprint variable names may contain spaces and capitals (ask for the exact authored ")
 	TEXT("name), Blueprint struct fields carry GUID suffixes (read them through export_text()), and some properties only exist on another class. ")
-	TEXT("get_property_value / set_property_value and get_blueprint_component_property reach Blueprint properties through C++ reflection.");
+	TEXT("get_properties / set_properties and get_blueprint_component_property reach Blueprint properties through C++ reflection.");
 
 inline constexpr const TCHAR* RB_check_python_code_11 =
 	TEXT("This script calls %d Python API(s) with known silent failure modes: ");
@@ -700,13 +696,9 @@ inline constexpr const TCHAR* RB_check_redirectors_2 =
 	TEXT("mismatch is expected, not a failure.%s");
 
 inline constexpr const TCHAR* RB_check_bridge_arguments_0 =
-	TEXT("Struct argument(s) %s: struct arguments can arrive empty through the bridge, while the function's fallback output still ")
-	TEXT("looks plausible. Call the inner piece alone (call_library_function) to separate the instrument from the system; to really verify a function ")
-	TEXT("with struct parameters, let the game call it.");
-
-inline constexpr const TCHAR* RB_check_bridge_arguments_1 =
-	TEXT("Object path argument(s) %s: an ObjectProperty passed as a path arrives null (the importer ignores its own success flag), which produces ")
-	TEXT("false negatives such as an 'empty slot' that was never read. Verify the effect in the world, not the return value.");
+	TEXT("Struct argument(s) %s: a JSON key that matches no field of the struct is ignored, so a struct can arrive at its defaults while the ")
+	TEXT("function's fallback output still looks plausible. Use the fields' authored names; call the inner piece alone (call_function with ")
+	TEXT("class_name) to separate the instrument from the system; to really verify a function with struct parameters, let the game call it.");
 
 inline constexpr const TCHAR* RB_check_package_reload_0 =
 	TEXT("%d packages in one call: reloading is synchronous on the game thread and can take many seconds per package, so large batches stall the ")
@@ -722,7 +714,7 @@ inline constexpr const TCHAR* RB_check_package_reload_2 =
 	TEXT("from here; close the editor without saving to discard them.");
 
 inline constexpr const TCHAR* RB_check_row_in_memory_0 =
-	TEXT("add_data_table_row: `saved: false` inside the payload despite success:true -- the row exists only in memory and is lost when the editor ")
+	TEXT("set_data_table_row: `saved: false` inside the payload despite success:true -- the row exists only in memory and is lost when the editor ")
 	TEXT("closes. Usual cause: the DataTable file is read-only (e.g. a lockable file under git-lfs without the lock). Take the lock (git lfs lock ")
 	TEXT("<file>) and save again; verify with git status.");
 
@@ -745,7 +737,7 @@ inline constexpr const TCHAR* RB_check_imported_font_0 =
 
 inline constexpr const TCHAR* RB_check_component_diff_0 =
 	TEXT("This diff compares presence, class and origin (plus attachment and transform), not property values: a component can be 'unchanged' with ")
-	TEXT("different values. To compare values, use snapshot_object + diff_object_snapshots.");
+	TEXT("different values. To compare values, use capture_object_snapshot + diff_object_snapshots.");
 
 inline constexpr const TCHAR* RB_check_default_map_0 =
 	TEXT("This call writes more than your key: TryUpdateDefaultConfigFile serializes the whole UGameMapsSettings CDO into Config/DefaultEngine.ini, ")
@@ -763,7 +755,7 @@ inline constexpr const TCHAR* RB_check_graph_lint_1 =
 
 inline constexpr const TCHAR* RB_check_graph_lint_2 =
 	TEXT("%d unreachable_exec_node finding(s): useful for spotting half-wired logic, but verify each one -- the lint can attribute a parent class's ")
-	TEXT("node to the child. Resolve the node_id with get_node_pin_info first.");
+	TEXT("node to the child. Resolve the node_id with get_graph_nodes (node_id) first.");
 
 inline constexpr const TCHAR* RB_check_graph_lint_3 =
 	TEXT(" Most findings of this lint are noise: treat it as a search aid, not an audit.");
@@ -831,7 +823,7 @@ inline constexpr const TCHAR* RB_check_graph_read_6 =
 inline constexpr const TCHAR* RB_check_write_to_pie_actor_0 =
 	TEXT("You are writing a property on a live PIE actor: PostEditChange re-runs its construction script, where spawning actors is not allowed, so ")
 	TEXT("components that create helper actors there (e.g. a manager actor) end up with None while the value itself re-reads fine. Change ")
-	TEXT("state through the actor's own functions (call_object_method / call_component_function) instead; if it already happened, restart PIE ")
+	TEXT("state through the actor's own functions (call_function) instead; if it already happened, restart PIE ")
 	TEXT("(nothing on disk is affected).");
 
 inline constexpr const TCHAR* RB_check_blueprint_functions_0 =
@@ -872,7 +864,7 @@ inline constexpr const TCHAR* RB_check_batch_without_compile_3 =
 
 inline constexpr const TCHAR* RB_check_renamed_enum_entry_0 =
 	TEXT("The rename succeeded, but every Select node indexed by this enum still points to the old enum object and now returns its default value -- ")
-	TEXT("while compile, find_erroring_blueprints and get_node_pin_info all look clean. Reconnect the Index pin of each such Select with connect_pins ")
+	TEXT("while compile, find_erroring_blueprints and get_graph_nodes all look clean. Reconnect the Index pin of each such Select with connect_pins ")
 	TEXT("(this rebuilds the node against the new enum), and verify by calling the function. Renaming the entry does not update data mapped to it ")
 	TEXT("either; check the Break/Make nodes that used it.");
 
@@ -887,18 +879,6 @@ inline constexpr const TCHAR* RB_check_asset_delete_1 =
 	TEXT("The delete returned true but the object is still in memory (asset_verified_deleted is false): the file may be gone while the package stays ")
 	TEXT("rooted, does_asset_exist stays true even after garbage collection, and creating or renaming onto that name fails. Recreate under another ")
 	TEXT("name or restart the editor; verify with does_asset_exist and the file on disk.");
-
-inline constexpr const TCHAR* RB_check_world_partition_hash_0 =
-	TEXT("applied:false is honest but incomplete: for the old spatial hash there is no headless path, but on maps using WorldPartitionRuntimeHashSet ")
-	TEXT("the cell size and loading range live in RuntimePartitionLHGrid_* subobjects that set_property_value can write (e.g. ")
-	TEXT("<...>WorldSettings.WorldPartition_0.WorldPartitionRuntimeHashSet_0.RuntimePartitionLHGrid_N); verify with get_property_value. This tool's ")
-	TEXT("cell_size, loading_range and grid_name parameters are informative only, by design.");
-
-inline constexpr const TCHAR* RB_check_material_instance_params_0 =
-	TEXT("This list is not the instance's full parameter set, and nothing in the response says so%s: it omits static switches (which can disable ")
-	TEXT("whole features inherited from the parent) and only lists parameters already overridden, not every tunable one. Read switches with ")
-	TEXT("get_material_instance_static_switch_parameter_value and compare them with the parent's defaults; list the tunable parameters with ")
-	TEXT("MaterialEditingLibrary.get_scalar_parameter_names (and the texture, vector and static switch variants) on the parent.");
 
 inline constexpr const TCHAR* RB_check_dirty_packages_0 =
 	TEXT("pie_active:false is not a reliable PIE indicator (it has read false with PIE running), and saving with PIE active reports success without ")
@@ -942,7 +922,7 @@ inline constexpr const TCHAR* RB_check_component_property_read_0 =
 
 inline constexpr const TCHAR* RB_check_component_property_read_1 =
 	TEXT("Changing a component class's default does not reach Blueprints that already contain that component: their SCS template is an independent ")
-	TEXT("copy made when the component was added. get_property_value on the CDO shows the new value while existing Blueprints (and their actors) keep ")
+	TEXT("copy made when the component was added. get_properties on the CDO shows the new value while existing Blueprints (and their actors) keep ")
 	TEXT("the old one.");
 
 inline constexpr const TCHAR* RB_check_component_property_read_2 =
@@ -984,7 +964,7 @@ inline constexpr const TCHAR* RB_check_water_material_0 =
 	TEXT("UWaterBodyComponent (readers: get_water_static_mesh_material_instance(), get_water_lod_material_instance()).");
 
 inline constexpr const TCHAR* RB_check_polygroup_paint_0 =
-	TEXT("Polygroup %s does not exist, so nothing was painted: with PolygroupMode = PerFace (the default of append_mesh_primitive) polygroups are ")
+	TEXT("Polygroup %s selected no triangle, so nothing was painted: with PolygroupMode = PerFace (the default of append_mesh_primitive) polygroups are ")
 	TEXT("numbered from 1, not 0. Check first with select_mesh_triangles(region='polygroup'), which returns triangles_selected.");
 
 inline constexpr const TCHAR* RB_check_polygroup_paint_1 =
@@ -993,7 +973,7 @@ inline constexpr const TCHAR* RB_check_polygroup_paint_1 =
 	TEXT("direct Python or Blueprint calls do not.");
 
 inline constexpr const TCHAR* RB_check_polygroup_paint_2 =
-	TEXT("response:polygroup_id_valid+distinct_material_ids_after");
+	TEXT("response:triangles_selected+distinct_material_ids_after");
 
 inline constexpr const TCHAR* RB_check_bake_without_materials_0 =
 	TEXT("The MaterialIDs were baked but the asset kept its previous material slots (material_count: %s), because bReplaceMaterials defaults to ")
@@ -1002,8 +982,8 @@ inline constexpr const TCHAR* RB_check_bake_without_materials_0 =
 
 inline constexpr const TCHAR* RB_check_dynamic_mesh_material_0 =
 	TEXT("The description's 'the dynamic mesh only uses slot 0' refers to this component's material slot, not an engine limit: multi-material dynamic ")
-	TEXT("meshes use per-triangle MaterialIDs. Write them with set_mesh_material_id, set_polygroup_material_id, set_mesh_material_id_in_region or ")
-	TEXT("remap_material_ids; copy_dynamic_mesh_to_static_mesh then emits one section per MaterialID.");
+	TEXT("meshes use per-triangle MaterialIDs. Write them with set_mesh_material_id (scope 'all', 'triangles' or 'region', e.g. ")
+	TEXT("region='polygroup') or remap_material_ids; copy_dynamic_mesh_to_static_mesh then emits one section per MaterialID.");
 
 inline constexpr const TCHAR* RB_check_material_stats_0 =
 	TEXT("num_pixel_texture_samples (%s) is summed over every output the material compiles (e.g. adding a RuntimeVirtualTextureOutput can triple it), ")
@@ -1040,20 +1020,10 @@ inline constexpr const TCHAR* RB_check_new_function_0 =
 	TEXT("success:true with graph_name does not prove the graph exists (the tool's own description says so). Confirm with get_blueprint_functions ")
 	TEXT("before wiring%s. If it is missing, create it with unreal.BlueprintEditorLibrary.add_function_graph(bp, name) via execute_python.");
 
-inline constexpr const TCHAR* RB_check_interface_override_0 =
-	TEXT("For events, already_existed:false is not reliable (detection only works for functions with a return value), so an existing event can be ")
-	TEXT("reported as new. To override an event, use BlueprintEditorLibrary.add_event_override via execute_python, and confirm with ")
-	TEXT("get_blueprint_functions.");
-
 inline constexpr const TCHAR* RB_check_select_polarity_0 =
 	TEXT("The option pins are named %s, not False/True: the tool does not rename them when a bool drives the Index, so the option-to-value mapping ")
 	TEXT("cannot be read from the graph, and getting it wrong compiles fine and returns the other branch. Verify by calling the function with a ")
-	TEXT("discriminating input (call_library_function); usually Option 1 = true and Option 0 = false.");
-
-inline constexpr const TCHAR* RB_check_smart_object_tags_0 =
-	TEXT("activity_tags: [] does not prove the definition has no tag: this reader returns empty even for definitions that have one. Read the asset ")
-	TEXT("instead: unreal.load_object(None, <definition>).get_editor_property('ActivityTags') via execute_python (get_smart_object_slots_detail ")
-	TEXT("reports slot tags, not the definition's).");
+	TEXT("discriminating input (call_function); usually Option 1 = true and Option 0 = false.");
 
 inline constexpr const TCHAR* RB_check_name_search_0 =
 	TEXT("No results with match=%r does not mean the actor is absent: auto-named actors (spawned, or placed without renaming) have labels other than ")
@@ -1138,14 +1108,6 @@ inline constexpr const TCHAR* RB_warn_array_rotation_0 =
 	TEXT("as an object instead ({'pitch': ..., 'yaw': ..., 'roll': ...}). This tool does not re-read the rotation: check get_actor_rotation() after ")
 	TEXT("spawning.");
 
-inline constexpr const TCHAR* RB_check_static_analysis_0 =
-	TEXT("Despite its name, this does not trace execution: it is a static listing (is_static_analysis) that does not descend into composites, and ")
-	TEXT("total_execution_paths counts graphs. Use get_graph_nodes to read a graph.");
-
-inline constexpr const TCHAR* RB_check_static_analysis_1 =
-	TEXT(" It also recompiles the Blueprint by default to time the compile, which dirties the asset and can surface new errors; pass ")
-	TEXT("compile_for_timing=False for a read-only analysis. cpu_usage is a complexity score and memory_usage is the .uasset size on disk.");
-
 inline constexpr const TCHAR* RB_check_child_widget_with_root_0 =
 	TEXT("A root canvas was added to a child Widget Blueprint: at runtime the first non-null RootWidget in the class chain wins, so this empty root ")
 	TEXT("hides the parent's tree (blank widget, clean compile), and it cannot be removed afterwards (RootWidget is protected and not writable ")
@@ -1165,7 +1127,7 @@ inline constexpr const TCHAR* RB_check_composite_table_0 =
 
 inline constexpr const TCHAR* RB_check_visible_text_without_identity_0 =
 	TEXT("This writes player-facing text without localization identity, so it will not be gathered or translated, and audit_widget_text will not ")
-	TEXT("catch it (it only inspects Widget Blueprints). Write the value through set_property_value / set_data_asset_property / set_data_table_cell ")
+	TEXT("catch it (it only inspects Widget Blueprints). Write the value through set_properties / set_data_asset_property / set_data_table_cell ")
 	TEXT("as NSLOCTEXT(\"NS\",\"Key\",\"Source\") or LOCTABLE(\"/Game/ST\",\"key\"); bare text stays invariant. The same applies to create_enum and ")
 	TEXT("rename_enum_entry.");
 
@@ -1191,20 +1153,15 @@ inline constexpr const TCHAR* RB_check_pcg_regenerated_0 =
 	TEXT("is off).");
 
 inline constexpr const TCHAR* RB_warn_local_rpc_0 =
-	TEXT("success:true with an empty returns_json does not mean the event ran: an RPC called from Python does not cross the network (the editor's ")
-	TEXT("script guard makes the call local) and may not run at all. Repeat the call on the object where the effect should happen locally (e.g. the ")
+	TEXT("success:true with nothing returned (no return_value, no out_params) does not mean the event ran: an RPC invoked from the editor does ")
+	TEXT("not cross the network (the call runs locally) and may not run at all. Repeat the call on the object where the effect should happen locally (e.g. the ")
 	TEXT("server's instance); if that is silent too, the harness is the problem. Drive networked effects with real input injected into the right ")
 	TEXT("player.");
-
-inline constexpr const TCHAR* RB_check_call_with_tag_0 =
-	TEXT("If any argument is an FGameplayTag passed as a string, it arrives as None, and code that does not handle empty tags (e.g. a loop that never ")
-	TEXT("terminates) can end PIE with no crash dump and nothing in this response. Compare PIE's start time with the first error in the log. Pass ")
-	TEXT("tags read from existing data (a DataTable row, a live component) instead of strings.");
 
 inline constexpr const TCHAR* RB_check_function_parameter_0 =
 	TEXT("This tool adds parameters but cannot retype them or create arrays (an array parameter comes out scalar); rename_function_parameter does not ")
 	TEXT("retype either, and there is no remove_function_parameter. To change a parameter's type, author the signature in a Blueprint interface ")
-	TEXT("(add_function_parameter on the interface, compile_blueprint, implement_interface_function).");
+	TEXT("(add_function_parameter on the interface, compile_blueprint, add_blueprint_function with override=true).");
 
 inline constexpr const TCHAR* RB_check_nav_modifier_volume_0 =
 	TEXT("This tool works, but brush_built and area_class_applied are echoes: they are just as true with NavArea_Default. Verify the geometry with ")
@@ -1252,7 +1209,7 @@ inline constexpr const TCHAR* RB_check_text_gather_0 =
 
 inline constexpr const TCHAR* RB_check_component_may_not_persist_0 =
 	TEXT("Returning a component_name does not prove the component is in the SCS: with %s (this case) the addition can succeed without persisting and ")
-	TEXT("may appear later, so retrying creates duplicates. Check get_blueprint_scs_tree after every addition; ")
+	TEXT("may appear later, so retrying creates duplicates. Check get_blueprint_components after every addition; ")
 	TEXT("SubobjectDataSubsystem.add_new_subobject via execute_python is a reliable alternative. Remove duplicates with ")
 	TEXT("remove_component_from_blueprint.");
 
@@ -1266,11 +1223,6 @@ inline constexpr const TCHAR* RB_check_unverifiable_replication_0 =
 	TEXT("This report cannot fail: get_blueprint_variable_detailed_info reads is_replicated from the same flags this tool writes, while actual ")
 	TEXT("replication depends on the generated class's FProperty. Compile and run audit_replication on the folder (the full payload lands in ")
 	TEXT("Saved/MCPAudits/), and verify in a networked PIE session.");
-
-inline constexpr const TCHAR* RB_warn_net_relevancy_0 =
-	TEXT("If the client does not mirror a change, check the distance first: force_net_update and flush_net_dormancy do not help when the actor is not ")
-	TEXT("network-relevant. Beyond the actor's NetCullDistanceSquared the server sends no updates to that connection and the client keeps the initial ")
-	TEXT("value. In headless tests the client's pawn is often far away; move it within the cull distance (from the server world) and re-read.");
 
 inline constexpr const TCHAR* RB_warn_tampered_proxy_0 =
 	TEXT("Possessing a pawn and manipulating its physics or input can leave its client proxy inconsistent (wrong position, components not ")
@@ -1298,7 +1250,7 @@ inline constexpr const TCHAR* RB_warn_volume_collision_1 =
 inline constexpr const TCHAR* RB_warn_volume_collision_2 =
 	TEXT("(2) For water, the volume's top must match the water surface: the CMC measures immersion against the volume bounds, so a sloped surface ")
 	TEXT("makes pawns swim on dry land. (3) With the default Static mobility, moving the volume moves its transform but not its collision; set ")
-	TEXT("BrushComponent0.Mobility = Movable if it must move (volumes cannot be created at runtime). Verify with overlap_scene, never with the ")
+	TEXT("BrushComponent0.Mobility = Movable if it must move (volumes cannot be created at runtime). Verify with query_scene_overlaps, never with the ")
 	TEXT("transform.");
 
 inline constexpr const TCHAR* RB_warn_undeformed_collision_0 =
@@ -1330,7 +1282,7 @@ inline constexpr const TCHAR* RB_warn_channel_unknown_to_engine_0 =
 inline constexpr const TCHAR* RB_warn_widget_without_lifecycle_0 =
 	TEXT("Nesting another Widget Blueprint inherits its appearance but not its lifecycle: when your wrapper is removed, the nested widget's Destruct ")
 	TEXT("cleanup may not run (e.g. a post-process effect it enabled stays on), and nothing headless shows it. Before nesting, check its Destruct ")
-	TEXT("(get_blueprint_functions_list, get_function_pins) and call any public cleanup from your wrapper's Destruct.");
+	TEXT("(get_blueprint_functions, get_function_pins) and call any public cleanup from your wrapper's Destruct.");
 
 inline constexpr const TCHAR* RB_warn_client_key_input_0 =
 	TEXT("Injected input does not drive the client copy of a pawn: key injection with pie_client_index does not reach it, Enhanced Input injection ")
@@ -1344,12 +1296,12 @@ inline constexpr const TCHAR* RB_warn_injected_aim_0 =
 
 inline constexpr const TCHAR* RB_warn_unlocated_region_0 =
 	TEXT("If the triangle range you are painting was derived from append order, checking the first and last pieces does not validate the ones in ")
-	TEXT("between. Locate a piece before painting it: paint half the space with a decoy ID using set_mesh_material_id_in_region, then check ")
+	TEXT("between. Locate a piece before painting it: paint half the space with a decoy ID using set_mesh_material_id (scope='region'), then check ")
 	TEXT("get_mesh_material_ids -- if the target ID disappears, the piece is in that half.");
 
 inline constexpr const TCHAR* RB_warn_array_not_propagated_0 =
 	TEXT("A container variable's default reaches the CDO but not the SCS template or placed instances, even though roundtrip_verified is true and ")
-	TEXT("scalars in the same component do propagate. Neither set_blueprint_component_property nor the construction script fixes placed instances. ")
+	TEXT("scalars in the same component do propagate. Neither set_blueprint_component_properties nor the construction script fixes placed instances. ")
 	TEXT("Verify by reading the placed instance.");
 
 inline constexpr const TCHAR* RB_warn_throttled_frame_0 =
@@ -1374,7 +1326,7 @@ inline constexpr const TCHAR* RB_warn_pie_not_starting_clean_0 =
 
 inline constexpr const TCHAR* RB_warn_sweep_loads_blueprints_0 =
 	TEXT("This tool loads Blueprints from disk, which changes what the editor holds in memory: loading a vendor asset that does not compile can make ")
-	TEXT("the next PIE start open a modal dialog that blocks the game thread, so MCP calls hang. If editor_status times out while the editor process ")
+	TEXT("the next PIE start open a modal dialog that blocks the game thread, so MCP calls hang. If get_editor_status times out while the editor process ")
 	TEXT("still responds, suspect a modal. Do not edit or delete the vendor asset; the damage is in memory only, and restarting the editor clears it.");
 
 inline constexpr const TCHAR* RB_check_compile_material_0 =
@@ -1442,7 +1394,7 @@ inline constexpr const TCHAR* RB_check_component_in_library_1 =
 	TEXT("This call dirtied a library package: %s. When the child Blueprint has no scene root of its own, a scene component can be written into the ")
 	TEXT("parent's SCS, editing a vendor or library asset; saving your Blueprint does not write it, but a 'Save All' would. Discard it with ")
 	TEXT("reload_asset_package(<parent package>, on_dirty='discard'). Alternatives that stay in the child: add the component at runtime ")
-	TEXT("(AddComponentByClass in BeginPlay), or set the data through set_blueprint_component_property. Confirm with get_blueprint_scs_tree ")
+	TEXT("(AddComponentByClass in BeginPlay), or set the data through set_blueprint_component_properties. Confirm with get_blueprint_components ")
 	TEXT("(owner_class and source of the new node).");
 
 inline constexpr const TCHAR* RB_check_dropped_components_0 =
@@ -1496,9 +1448,9 @@ inline constexpr const TCHAR* RB_check_widget_tree_during_pie_0 =
 	TEXT("the anchored world.");
 
 inline constexpr const TCHAR* RB_check_subsystem_in_editor_world_0 =
-	TEXT("PIE is active and the '%s' lifetime is resolved on the editor world, so this 'not found' may mean 'not in this world': a Blueprint ")
-	TEXT("WorldSubsystem exists once per world, and the PIE one is out of this tool's reach. Use execute_python with ObjectIterator over the PIE ")
-	TEXT("world (anchored by package) to find it, and load_object + call_method to call it.");
+	TEXT("PIE is active and the '%s' lifetime was resolved on the editor world, so this 'not found' may mean 'not in this world': a Blueprint ")
+	TEXT("WorldSubsystem exists once per world. Repeat the call with world='pie' (or 'server' / 'client') to read the PIE instance, and call it ")
+	TEXT("with call_function on the instance_path that read returns.");
 
 inline constexpr const TCHAR* RB_check_input_without_controller_0 =
 	TEXT("PIE is active, so 'start PIE first' is misleading: with player_index=%s the tool searches the PlayerControllers of the resolved world, and ")
@@ -1508,7 +1460,7 @@ inline constexpr const TCHAR* RB_check_input_without_controller_0 =
 
 inline constexpr const TCHAR* RB_check_expression_delete_0 =
 	TEXT("The deletion did happen: '%s' is no longer in the material (%d live expressions). This tool can return False or None after doing the work, ")
-	TEXT("so do not repeat the call. The oracle is the material's expression list (get_material_expressions); the error above is kept because it may ")
+	TEXT("so do not repeat the call. The oracle is the material's expression list (get_material_graph_info); the error above is kept because it may ")
 	TEXT("concern something else.");
 
 inline constexpr const TCHAR* RB_check_function_not_found_0 =
@@ -1537,7 +1489,7 @@ inline constexpr const TCHAR* RB_check_unknown_material_output_1 =
 
 inline constexpr const TCHAR* RB_check_rpc_on_custom_event_0 =
 	TEXT("If you passed a custom event, the name is not misspelled: this tool only reaches function graphs, and custom events cannot be made RPCs or ")
-	TEXT("renamed headless (FunctionFlags is not writable via reflection). Put the RPC on a function (add_blueprint_function + set_bp_function_rpc, ")
+	TEXT("renamed headless (FunctionFlags is not writable via reflection). Put the RPC on a function (add_blueprint_function + set_blueprint_function_rpc, ")
 	TEXT("with rpc_type capitalized, e.g. 'Server') that calls the custom event. Verify with the returned function_flags and audit_replication; a ")
 	TEXT("component RPC also needs replicates=True on its CDO.");
 

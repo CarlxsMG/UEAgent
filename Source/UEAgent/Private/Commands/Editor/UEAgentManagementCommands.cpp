@@ -1,6 +1,7 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
 #include "Commands/Asset/AssetCommandHelpers.h"
+#include "Commands/Common/UEAgentGraphUtils.h"  // FUEAgentGraphUtils::ResolveClass (expected_class of delete_asset / duplicate_asset)
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Engine/World.h"
 #include "Engine/Level.h"
@@ -398,7 +399,7 @@ namespace UEAgentManagementCommandsImpl
         Result->SetStringField(TEXT("original_package_name"), Source.PackageName.ToString());
     }
 
-    // The part of a plugin's identity both plugin handlers report. FPluginDescriptor has no
+    // The part of a plugin's identity get_plugin_status reports. FPluginDescriptor has no
     // bEnabled and IPlugin no IsLoaded(), so "loaded" and "enabled" both report IsEnabled().
     void AddPluginIdentity(const TSharedPtr<FJsonObject>& Result, const IPlugin& Plugin)
     {
@@ -461,16 +462,128 @@ namespace UEAgentManagementCommandsImpl
         }
         return Rows;
     }
+
+    // Why duplicate_asset may not write a new asset at PackageName, or empty when it may: a package under an
+    // enforced read-only root, a name under no mounted content root (it has no file), or a package whose file is
+    // outside the project directory (engine or engine-plugin content, which a copy is meant to leave untouched).
+    FString PackageWriteBlocker(const FString& PackageName)
+    {
+        if (mcp_common::IsUnderReadOnlyRoot(PackageName) && mcp_common::IsReadOnlyRootSaveEnforcementEnabled())
+        {
+            return FString::Printf(TEXT("%s is under a read-only root"), *PackageName);
+        }
+        FString FileName;
+        if (!FPackageName::TryConvertLongPackageNameToFilename(PackageName, FileName, FPackageName::GetAssetPackageExtension()))
+        {
+            return FString::Printf(TEXT("%s is not under a mounted content root"), *PackageName);
+        }
+        if (!FPaths::IsUnderDirectory(FPaths::ConvertRelativePathToFull(FileName), FPaths::ConvertRelativePathToFull(FPaths::ProjectDir())))
+        {
+            return FString::Printf(TEXT("%s is engine content outside the project"), *PackageName);
+        }
+        return FString();
+    }
+
+    // The type guard of delete_asset and duplicate_asset: the classes named by expected_class (Field), one class name
+    // or a list of them. Field absent or null leaves OutClasses empty (no guard). Anything else that is not a non-empty
+    // name or a non-empty list of non-empty names, or a name that resolves to no class, is the error reply of Command
+    // returned (nothing is done).
+    TSharedPtr<FJsonObject> ResolveExpectedClasses(const TCHAR* Command, const TSharedPtr<FJsonValue>& Field,
+        TArray<UClass*>& OutClasses)
+    {
+        if (!Field.IsValid() || Field->IsNull())
+        {
+            return nullptr;
+        }
+        TArray<FString> Names;
+        if (Field->Type == EJson::String)
+        {
+            Names.Add(Field->AsString());
+        }
+        else if (Field->Type == EJson::Array)
+        {
+            for (const TSharedPtr<FJsonValue>& Entry : Field->AsArray())
+            {
+                if (!Entry.IsValid() || Entry->Type != EJson::String)
+                {
+                    return mcp_common::MakeErrorReply(FString::Printf(
+                        TEXT("%s: every entry of 'expected_class' must be a class name string; nothing was done"), Command));
+                }
+                Names.Add(Entry->AsString());
+            }
+            if (Names.Num() == 0)
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(
+                    TEXT("%s: 'expected_class' is an empty list; nothing was done"), Command));
+            }
+        }
+        else
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("%s: 'expected_class' must be a class name or a list of class names; nothing was done"), Command));
+        }
+        for (const FString& Raw : Names)
+        {
+            const FString Name = Raw.TrimStartAndEnd();
+            if (Name.IsEmpty())
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(
+                    TEXT("%s: 'expected_class' has an empty class name; nothing was done"), Command));
+            }
+            UClass* Class = FUEAgentGraphUtils::ResolveClass(Name);
+            if (!Class)
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(TEXT("%s: expected_class names no class, nothing was done. %s"),
+                    Command, *FUEAgentGraphUtils::DescribeClassNotFound(Name)));
+            }
+            OutClasses.AddUnique(Class);
+        }
+        return nullptr;
+    }
+
+    // Whether Asset passes the expected_class guard: it IsA one of Classes, or it is a Blueprint whose generated
+    // class IsChildOf one of them (the Blueprint asset is a UBlueprint; its instances have the generated class).
+    bool MatchesExpectedClass(const UObject& Asset, const TArray<UClass*>& Classes)
+    {
+        const UBlueprint* Blueprint = Cast<UBlueprint>(&Asset);
+        const UClass* Generated = Blueprint ? Blueprint->GeneratedClass.Get() : nullptr;
+        for (const UClass* Class : Classes)
+        {
+            if (Asset.IsA(Class) || (Generated && Generated->IsChildOf(Class)))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // "asset is not a A or B (got C)" for Asset failing the expected_class guard; a Blueprint names its generated class.
+    FString WrongClassNote(const UObject& Asset, const TArray<UClass*>& Classes)
+    {
+        TArray<FString> Wanted;
+        for (const UClass* Class : Classes)
+        {
+            Wanted.Add(Class->GetName());
+        }
+        const UBlueprint* Blueprint = Cast<UBlueprint>(&Asset);
+        const FString Got = (Blueprint && Blueprint->GeneratedClass)
+            ? FString::Printf(TEXT("%s generating %s"), *Asset.GetClass()->GetName(), *Blueprint->GeneratedClass->GetName())
+            : Asset.GetClass()->GetName();
+        return FString::Printf(TEXT("asset is not a %s (got %s) - wrong type"), *FString::Join(Wanted, TEXT(" or ")), *Got);
+    }
 }
 
 // Asset file operations
 
-// MCP:duplicate_asset - Duplicates an asset to a new name in the same directory, then PERSISTS the copy to disk immediately (unless Play-In-Editor is active -- see the "saved"/"save_error" note on the save step below; a duplicate is very often used AS a safety net before a risky edit, so leaving it memory-only defeats the point). By default (remap_internal_refs absent/false) this is otherwise a plain copy: like EditorAssetLibrary.duplicate_asset, any internal references the copy holds still point at the ORIGINAL (not remapped). Set remap_internal_refs=true to run the SAME 2nd-pass reference remap that duplicate_directory uses (FArchiveReplaceObjectRef mapping original->copy) so the copy's own self-references point at the copy, before that save. repoint_parents_within additionally re-applies a MaterialInstance parent via SetParentEditorOnly when the parent maps into the copied set (for a single asset this only fires if the copy's parent is the original itself).
-//   @param asset_path - Full asset path to duplicate (e.g. /Game/Assets/MyAsset)
+// MCP:duplicate_asset - Duplicates an asset to a new name, in the same directory or in destination_path, then PERSISTS the copy to disk immediately (unless Play-In-Editor is active -- see the "saved"/"save_error" note on the save step below; a duplicate is very often used AS a safety net before a risky edit, so leaving it memory-only defeats the point). A target name already taken, in memory or on disk, is refused with nothing touched, unless if_exists='return' hands back an existing asset of the source's class with created=false; a destination outside the project's writable content (engine content, a read-only root, no mounted root) is refused, and so is a source that is not of expected_class when one is given. By default (remap_internal_refs absent/false) this is otherwise a plain copy: like EditorAssetLibrary.duplicate_asset, any internal references the copy holds still point at the ORIGINAL (not remapped). Set remap_internal_refs=true to run the SAME 2nd-pass reference remap that duplicate_directory uses (FArchiveReplaceObjectRef mapping original->copy) so the copy's own self-references point at the copy, before that save. repoint_parents_within additionally re-applies a MaterialInstance parent via SetParentEditorOnly when the parent maps into the copied set (for a single asset this only fires if the copy's parent is the original itself).
+//   @param asset_path - Full asset path to duplicate (e.g. /Game/Assets/MyAsset); engine content such as /Engine/BasicShapes/Cube can be copied into the project with destination_path
 //   @param new_asset_name - Name for the duplicated asset
+//   @param destination_path - Optional folder for the copy, a long package path (/Game/MyMeshes, a project plugin mount) or a folder relative to /Game; default the source asset's own folder
+//   @param if_exists - Optional "error" (default: a taken target name is refused) or "return" (an asset of the source's class already at the target is returned untouched with created=false; one of another class is still refused)
+//   @param expected_class - Optional class the SOURCE asset must be, or a list of classes it may be any one of, short names ("SkeletalMesh") or /Script/ paths; a Blueprint also passes when its generated class derives from one. Any other source is refused and nothing is duplicated; a name that resolves to no class is an error.
 //   @param remap_internal_refs - Optional bool (default false). When true, remap the copy's internal refs (original->copy) before the save; adds { new_path, refs_remapped } to the result.
 //   @param repoint_parents_within - Optional bool (default false). When true (and remap_internal_refs true), also re-apply MaterialInstanceConstant parents that map into the copied set via SetParentEditorOnly.
-//   @returns { original_asset_path: string, new_asset_name: string, new_asset_path: string, duplication_success: bool, duplication_message: string, new_asset_class: string, new_package_name: string, asset_verified: bool, new_file_size_bytes: number?, new_file_size_mb: number?, original_asset_class: string, original_package_name: string, new_path: string?, refs_remapped: int?, saved: bool?, save_error: string? }
+//   @returns { original_asset_path: string, new_asset_name: string, new_asset_path: string, destination_path: string, created: bool, duplication_success: bool, duplication_message: string, new_asset_class: string, new_package_name: string, asset_verified: bool, new_file_size_bytes: number?, new_file_size_mb: number?, original_asset_class: string, original_package_name: string, new_path: string?, refs_remapped: int?, saved: bool?, save_error: string? }
 
 TSharedPtr<FJsonObject> HandleDuplicateAsset(const TSharedPtr<FJsonObject>& Params)
 {
@@ -478,6 +591,22 @@ TSharedPtr<FJsonObject> HandleDuplicateAsset(const TSharedPtr<FJsonObject>& Para
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("asset_path"), SourcePath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
     FString CopyName;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("new_asset_name"), CopyName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+    FString DestinationPath;
+    Params->TryGetStringField(TEXT("destination_path"), DestinationPath);
+    FString IfExists = TEXT("error");
+    Params->TryGetStringField(TEXT("if_exists"), IfExists);
+    const bool bReturnExisting = IfExists.Equals(TEXT("return"), ESearchCase::IgnoreCase);
+    if (!bReturnExisting && !IfExists.Equals(TEXT("error"), ESearchCase::IgnoreCase))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("duplicate_asset: if_exists must be \"error\" or \"return\", got \"%s\"; nothing was duplicated"), *IfExists));
+    }
+    TArray<UClass*> ExpectedClasses;
+    if (TSharedPtr<FJsonObject> Invalid = UEAgentManagementCommandsImpl::ResolveExpectedClasses(
+            TEXT("duplicate_asset"), Params->TryGetField(TEXT("expected_class")), ExpectedClasses))
+    {
+        return Invalid;
+    }
 
     // A bare package path ("/Game/Foo/DT_X") and a full object path ("/Game/Foo/DT_X.DT_X")
     // are both accepted.
@@ -493,10 +622,71 @@ TSharedPtr<FJsonObject> HandleDuplicateAsset(const TSharedPtr<FJsonObject>& Para
     {
         return UEAgentManagementCommandsImpl::AssetLoadFailedReply(SourcePath);
     }
+    if (ExpectedClasses.Num() > 0 && !UEAgentManagementCommandsImpl::MatchesExpectedClass(*Original, ExpectedClasses))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("duplicate_asset: the source %s; nothing was duplicated"),
+            *UEAgentManagementCommandsImpl::WrongClassNote(*Original, ExpectedClasses)));
+    }
 
-    // The copy is created next to the original, under the new name.
-    const FString Folder = FPaths::GetPath(Source.PackageName.ToString());
-    const FString CopyObjectPath = (Folder / CopyName) + TEXT(".") + CopyName;
+    // The copy is created in destination_path, or next to the original, under the new name. A destination is a long
+    // package path used as given, or a folder taken under /Game.
+    while (DestinationPath.EndsWith(TEXT("/")))
+    {
+        DestinationPath.LeftChopInline(1);
+    }
+    if (!DestinationPath.IsEmpty() && !DestinationPath.StartsWith(TEXT("/")))
+    {
+        DestinationPath = TEXT("/Game/") + DestinationPath;
+    }
+    const FString Folder = DestinationPath.IsEmpty() ? FPaths::GetPath(Source.PackageName.ToString()) : DestinationPath;
+    const FString CopyPackageName = Folder / CopyName;
+    const FString CopyObjectPath = CopyPackageName + TEXT(".") + CopyName;
+    if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(CopyPackageName)) { return Invalid; }
+    const FString DestinationBlocker = UEAgentManagementCommandsImpl::PackageWriteBlocker(CopyPackageName);
+    if (!DestinationBlocker.IsEmpty())
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("duplicate_asset: cannot write the copy, %s; nothing was ")
+            TEXT("duplicated. Pick a destination_path in the project's content, e.g. /Game/MyGame."), *DestinationBlocker));
+    }
+
+    // A target name already taken, in memory or on disk, whatever its class: duplicating over it would replace a live
+    // object in place, under the editors and references that still hold it. if_exists='return' hands back an asset of
+    // the source's class instead.
+    UObject* Existing = FindObject<UObject>(nullptr, *CopyObjectPath);
+    const bool bTaken = Existing != nullptr
+        || IAssetRegistry::GetChecked().GetAssetByObjectPath(FSoftObjectPath(CopyObjectPath), /*bIncludeOnlyOnDiskAssets*/ true).IsValid();
+    if (bTaken)
+    {
+        if (bReturnExisting && !Existing)
+        {
+            Existing = StaticLoadObject(UObject::StaticClass(), nullptr, *CopyObjectPath);
+        }
+        if (!bReturnExisting || !Existing || !Existing->IsA(Original->GetClass()))
+        {
+            const FString How = !bReturnExisting
+                ? FString(TEXT(" (if_exists='return' returns an asset of the source's class untouched)"))
+                : FString::Printf(TEXT(" as a %s, not a %s"),
+                    Existing ? *Existing->GetClass()->GetName() : TEXT("asset that does not load"), *Original->GetClass()->GetName());
+            return mcp_common::MakeErrorReply(FString::Printf(TEXT("duplicate_asset: '%s' already exists%s; nothing was changed. ")
+                TEXT("Choose another new_asset_name or destination_path, or delete or rename the existing asset first."),
+                *CopyObjectPath, *How));
+        }
+        TSharedPtr<FJsonObject> Kept = MakeShared<FJsonObject>();
+        Kept->SetStringField(TEXT("original_asset_path"), SourcePath);
+        Kept->SetStringField(TEXT("new_asset_name"), CopyName);
+        Kept->SetStringField(TEXT("new_asset_path"), CopyObjectPath);
+        Kept->SetStringField(TEXT("destination_path"), Folder);
+        Kept->SetBoolField(TEXT("created"), false);
+        Kept->SetBoolField(TEXT("duplication_success"), false);
+        Kept->SetStringField(TEXT("duplication_message"),
+            TEXT("An asset of the source's class already exists at the target; returned untouched (if_exists='return')"));
+        Kept->SetStringField(TEXT("new_asset_class"), Existing->GetClass()->GetPathName());
+        Kept->SetStringField(TEXT("new_package_name"), Existing->GetPackage()->GetName());
+        Kept->SetBoolField(TEXT("asset_verified"), true);
+        UEAgentManagementCommandsImpl::AddOriginalAssetInfo(Kept, Source);
+        return Kept;
+    }
+
     // The copy's package joins the folder to new_asset_name, and DuplicateAsset aborts the editor on one past the FName
     // limit, or on the path of an object it copies under the copy's object path: the original's deepest object is
     // measured (a map's actors are packaged after its package name too, which the floor covers).
@@ -510,6 +700,8 @@ TSharedPtr<FJsonObject> HandleDuplicateAsset(const TSharedPtr<FJsonObject>& Para
     Report->SetStringField(TEXT("original_asset_path"), SourcePath);
     Report->SetStringField(TEXT("new_asset_name"), CopyName);
     Report->SetStringField(TEXT("new_asset_path"), CopyObjectPath);
+    Report->SetStringField(TEXT("destination_path"), Folder);
+    Report->SetBoolField(TEXT("created"), Copy != nullptr);
     const FAssetData Landed = UEAgentManagementCommandsImpl::AddOperationOutcome(Report, TEXT("duplication"),
         Copy != nullptr, CopyObjectPath, TEXT("Asset duplication completed successfully"), TEXT("Failed to duplicate asset"));
     // Whether the registry resolves the copy at its new path (always false after a failure).
@@ -913,15 +1105,25 @@ TSharedPtr<FJsonObject> HandleMoveAsset(const TSharedPtr<FJsonObject>& Params)
     return Report;
 }
 
-// MCP:delete_asset - Force-delete one asset with no confirmation or undo: references to it are nulled, the object is purged and its .uasset/.umap file removed from disk. Check get_asset_referencers first. Succeeds only when the file is gone from disk and the object from memory: a file left behind (read-only, or held open by another process) fails the call with file_still_exists true, and the asset comes back when the editor restarts.
+// MCP:delete_asset - Force-delete one asset with no confirmation or undo: references to it are nulled, the object is purged and its .uasset/.umap file removed from disk. Check get_asset_referencers first. Succeeds only when the file is gone from disk and the object from memory: a file left behind (read-only, or held open by another process) fails the call with file_still_exists true, and the asset comes back when the editor restarts. With expected_class it is a typed delete: an asset of any other class is refused and nothing is deleted, and a path with no asset is a no-op success.
 //   @param asset_path - Asset to delete, as an object path ("/Game/Props/SM_Box.SM_Box") or a bare package path ("/Game/Props/SM_Box")
-//   @returns { asset_path: string, object_path: string, asset_class: string, package_name: string, original_file_size_bytes: number, original_file_size_mb: number, delete_success: bool, delete_message: string, asset_verified_deleted: bool, file_still_exists: bool, deletion_timestamp: string? }
+//   @param expected_class - Optional class the asset must be, or a list of classes it may be any one of, as short names ("AnimSequence") or /Script/ paths ("/Script/Engine.StaticMesh"). A Blueprint asset also passes when its generated class derives from one ("Subsystem" accepts a subsystem Blueprint). Another class is refused with success false, deleted false, expected_class_matched false, its asset_class (and generated_class_name for a Blueprint) and a note, and nothing is deleted. With it, a path that names no asset is a no-op: success, deleted false, already_existed false. A name that resolves to no class is an error.
+//   @returns { asset_path: string, object_path: string, asset_class: string (class path), asset_class_name: string (short class name of the asset), generated_class_name?: string, expected_class_matched?: bool, package_name: string, original_file_size_bytes: number, original_file_size_mb: number, delete_success: bool, delete_message: string, asset_verified_deleted: bool, file_still_exists: bool, deleted: bool, already_existed: bool, note?: string, deletion_timestamp: string? }
 
 TSharedPtr<FJsonObject> HandleDeleteAsset(const TSharedPtr<FJsonObject>& Params)
 {
     // The asset to delete: a full object path or a bare package path, non-empty.
     FString AssetPath;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("asset_path"), AssetPath)) { return Missing; }
+
+    // The optional type guard, resolved before anything is looked up: a bad value refuses the call untouched.
+    TArray<UClass*> ExpectedClasses;
+    if (TSharedPtr<FJsonObject> Invalid = UEAgentManagementCommandsImpl::ResolveExpectedClasses(
+            TEXT("delete_asset"), Params->TryGetField(TEXT("expected_class")), ExpectedClasses))
+    {
+        return Invalid;
+    }
+    const bool bTyped = ExpectedClasses.Num() > 0;
 
     // Resolve the asset by DIRECT LOAD, not via the AssetRegistry. Two reasons:
     //   1. GetAssetByObjectPath(FSoftObjectPath("/Game/X/Foo")) with a BARE
@@ -952,6 +1154,18 @@ TSharedPtr<FJsonObject> HandleDeleteAsset(const TSharedPtr<FJsonObject>& Params)
         const FString ProbePackageName = FPackageName::ObjectPathToPackageName(AssetPath);
         if (!FPackageName::DoesPackageExist(ProbePackageName))
         {
+            if (bTyped)
+            {
+                // A typed delete is idempotent: nothing there to delete is a no-op, not an error.
+                TSharedPtr<FJsonObject> Nothing = MakeShared<FJsonObject>();
+                Nothing->SetStringField(TEXT("asset_path"), AssetPath);
+                Nothing->SetStringField(TEXT("asset_class"), TEXT(""));
+                Nothing->SetStringField(TEXT("asset_class_name"), TEXT(""));
+                Nothing->SetBoolField(TEXT("deleted"), false);
+                Nothing->SetBoolField(TEXT("already_existed"), false);
+                Nothing->SetStringField(TEXT("note"), TEXT("no asset at asset_path; nothing to delete"));
+                return mcp_common::MakeOkReply(Nothing);
+            }
             return AssetCommandHelpers::AssetNotFoundError(AssetPath);
         }
         // On disk but not yet loaded -- safe to load now (the file exists, so this
@@ -959,8 +1173,46 @@ TSharedPtr<FJsonObject> HandleDeleteAsset(const TSharedPtr<FJsonObject>& Params)
         Asset = StaticLoadObject(UObject::StaticClass(), nullptr, *AssetPath);
         if (!Asset)
         {
+            if (bTyped)
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(TEXT("delete_asset: the package of '%s' is on disk but ")
+                    TEXT("does not load, so its class cannot be checked against expected_class; nothing deleted"), *AssetPath));
+            }
             return AssetCommandHelpers::AssetNotFoundError(AssetPath);
         }
+    }
+
+    // What the type guard judges: a bare package path of a loaded package finds the UPackage itself, so the
+    // asset inside it is the subject. A Blueprint also reports the class its instances have.
+    UObject* TypeSubject = Asset;
+    if (const UPackage* AsPackage = Cast<UPackage>(Asset))
+    {
+        if (UObject* Inner = AsPackage->FindAssetInPackage())
+        {
+            TypeSubject = Inner;
+        }
+    }
+    const UBlueprint* AsBlueprint = Cast<UBlueprint>(TypeSubject);
+    const FString GeneratedClassName = (AsBlueprint && AsBlueprint->GeneratedClass) ? AsBlueprint->GeneratedClass->GetName() : FString();
+    // Read before the delete, which can collect garbage and free the asset.
+    const FString AssetClassName = TypeSubject->GetClass()->GetName();
+    if (bTyped && !UEAgentManagementCommandsImpl::MatchesExpectedClass(*TypeSubject, ExpectedClasses))
+    {
+        const FString Note = UEAgentManagementCommandsImpl::WrongClassNote(*TypeSubject, ExpectedClasses) + TEXT(", refusing to delete");
+        TSharedPtr<FJsonObject> Refused = MakeShared<FJsonObject>();
+        Refused->SetStringField(TEXT("asset_path"), AssetPath);
+        Refused->SetStringField(TEXT("object_path"), TypeSubject->GetPathName());
+        Refused->SetStringField(TEXT("asset_class"), TypeSubject->GetClass()->GetPathName());
+        Refused->SetStringField(TEXT("asset_class_name"), AssetClassName);
+        if (!GeneratedClassName.IsEmpty())
+        {
+            Refused->SetStringField(TEXT("generated_class_name"), GeneratedClassName);
+        }
+        Refused->SetBoolField(TEXT("expected_class_matched"), false);
+        Refused->SetBoolField(TEXT("deleted"), false);
+        Refused->SetBoolField(TEXT("already_existed"), true);
+        Refused->SetStringField(TEXT("note"), Note);
+        return mcp_common::MakeOutcomeReply(Refused, false, FString::Printf(TEXT("delete_asset: %s at %s"), *Note, *AssetPath));
     }
 
     // Metadata straight from the loaded object (registry-independent).
@@ -995,10 +1247,20 @@ TSharedPtr<FJsonObject> HandleDeleteAsset(const TSharedPtr<FJsonObject>& Params)
     Report->SetStringField(TEXT("asset_path"), AssetPath);
     Report->SetStringField(TEXT("object_path"), ResolvedObjectPath);
     Report->SetStringField(TEXT("asset_class"), AssetClass);
+    Report->SetStringField(TEXT("asset_class_name"), AssetClassName);
+    if (!GeneratedClassName.IsEmpty())
+    {
+        Report->SetStringField(TEXT("generated_class_name"), GeneratedClassName);
+    }
+    if (bTyped)
+    {
+        Report->SetBoolField(TEXT("expected_class_matched"), true);
+    }
     Report->SetStringField(TEXT("package_name"), PackageName);
     Report->SetNumberField(TEXT("original_file_size_bytes"), BytesBefore);
     Report->SetNumberField(TEXT("original_file_size_mb"), BytesBefore / (1024.0 * 1024.0));
     Report->SetBoolField(TEXT("delete_success"), bDeleteSuccess);
+    Report->SetBoolField(TEXT("already_existed"), true);
 
     // Whether the file is still on disk, asked of the file system: FPackageName::DoesPackageExist
     // answers from the asset registry first, and right after a delete the registry can still list a
@@ -1010,6 +1272,7 @@ TSharedPtr<FJsonObject> HandleDeleteAsset(const TSharedPtr<FJsonObject>& Params)
         Report->SetStringField(TEXT("delete_message"), TEXT("Failed to delete asset (ForceDeleteObjects returned 0)"));
         Report->SetBoolField(TEXT("asset_verified_deleted"), false);
         Report->SetBoolField(TEXT("file_still_exists"), FileStillOnDisk());
+        Report->SetBoolField(TEXT("deleted"), false);
         return mcp_common::MakeOutcomeReply(Report, false, FString::Printf(
             TEXT("delete_asset: the engine deleted nothing (ForceDeleteObjects returned 0), so '%s' is still there."), *AssetPath));
     }
@@ -1036,11 +1299,12 @@ TSharedPtr<FJsonObject> HandleDeleteAsset(const TSharedPtr<FJsonObject>& Params)
         : TEXT("Asset only partly deleted"));
     Report->SetBoolField(TEXT("asset_verified_deleted"), !bObjectStillLoaded);
     Report->SetBoolField(TEXT("file_still_exists"), bFileStillExists);
+    Report->SetBoolField(TEXT("deleted"), Failure.IsEmpty());
     Report->SetStringField(TEXT("deletion_timestamp"), FDateTime::Now().ToString());
     return mcp_common::MakeOutcomeReply(Report, Failure.IsEmpty(), Failure);
 }
 
-// Plugin status and settings
+// Plugin status
 
 // MCP:get_plugin_status - Read one plugin by name, read-only: Enabled or Disabled, version, author, category, base dir, .uplugin file, dependencies and modules. An unknown name returns plugin_status "Not Found" with "N/A" fields, not an error. plugin_loaded only mirrors plugin_enabled, and plugin_created_date holds the CreatedByURL.
 //   @param plugin_name - Name of the plugin to query, as its .uplugin file is named (e.g. "UEAgent")
@@ -1086,86 +1350,6 @@ TSharedPtr<FJsonObject> HandleGetPluginStatus(const TSharedPtr<FJsonObject>& Par
     Status->SetStringField(TEXT("plugin_search_paths"), FPaths::ProjectPluginsDir());
     Status->SetStringField(TEXT("plugin_status_timestamp"), FDateTime::Now().ToString());
     return Status;
-}
-
-// MCP:configure_plugin_setting - Write one key=value under a plugin config section through GConfig into GEngineIni (the Saved/Config user layer, not the versioned Config/DefaultEngine.ini), then read it back from the GConfig cache. Succeeds only when the read-back value matches; an unknown plugin fails without writing anything. For versioned settings use set_project_settings_value.
-//   @param plugin_name - Name of the plugin to configure
-//   @param setting_name - Name of the plugin setting to configure
-//   @param setting_value - Value to set for the plugin setting
-//   @param section - INI section name without brackets (optional, default "/Script/<Plugin>.<Plugin>")
-//   @returns { plugin_name: string, setting_name: string, setting_value: string, plugin_path: string, plugin_status: string, plugin_version: string, plugin_loaded: bool, plugin_enabled: bool, readback_value: string, config_file_path: string?, section: string, configuration_success: bool, configuration_message: string, config_file_used: string, plugin_description: string, plugin_author: string, plugin_category: string, plugin_file: string, configuration_timestamp: string }
-
-TSharedPtr<FJsonObject> HandleConfigurePluginSetting(const TSharedPtr<FJsonObject>& Params)
-{
-    FString PluginId;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("plugin_name"), PluginId, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    FString Key;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("setting_name"), Key, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    FString Value;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("setting_value"), Value, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-    TSharedPtr<FJsonObject> Outcome = MakeShared<FJsonObject>();
-    Outcome->SetStringField(TEXT("plugin_name"), PluginId);
-    Outcome->SetStringField(TEXT("setting_name"), Key);
-    Outcome->SetStringField(TEXT("setting_value"), Value);
-
-    const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(PluginId);
-    if (!Plugin.IsValid())
-    {
-        Outcome->SetBoolField(TEXT("configuration_success"), false);
-        Outcome->SetStringField(TEXT("configuration_message"), TEXT("Plugin not found"));
-        Outcome->SetStringField(TEXT("plugin_path"), TEXT("N/A"));
-        Outcome->SetStringField(TEXT("plugin_status"), TEXT("Not Found"));
-        return mcp_common::MakeOutcomeReply(Outcome, false, FString::Printf(
-            TEXT("configure_plugin_setting: no plugin named '%s' is known to the plugin manager; nothing was written."), *PluginId));
-    }
-    UEAgentManagementCommandsImpl::AddPluginIdentity(Outcome, *Plugin);
-
-    // The INI section, without brackets (GConfig wants it bare; a bracketed "[...]" form is
-    // tolerated). Defaults to the plugin's script section /Script/<Plugin>.<Plugin>.
-    FString SectionName;
-    if (!Params->TryGetStringField(TEXT("section"), SectionName) || SectionName.IsEmpty())
-    {
-        SectionName = FString::Printf(TEXT("/Script/%s.%s"), *PluginId, *PluginId);
-    }
-    SectionName.RemoveFromStart(TEXT("["));
-    SectionName.RemoveFromEnd(TEXT("]"));
-
-    // Written through GConfig into the project's Engine config (GEngineIni) -- what the config
-    // hierarchy consults at runtime -- flushed, then READ BACK: success means the value is
-    // really there, not that the write call returned.
-    bool bApplied = false;
-    FString ConfigFileUsed = TEXT("None");
-    if (GConfig != nullptr)
-    {
-        const FString& IniFile = GEngineIni;
-        GConfig->SetString(*SectionName, *Key, *Value, IniFile);
-        GConfig->Flush(false, IniFile);
-
-        FString ReadBack;
-        const bool bFound = GConfig->GetString(*SectionName, *Key, ReadBack, IniFile);
-        bApplied = bFound && ReadBack == Value;
-        if (bApplied)
-        {
-            ConfigFileUsed = FPaths::GetCleanFilename(IniFile);
-        }
-        Outcome->SetStringField(TEXT("readback_value"), ReadBack);
-        Outcome->SetStringField(TEXT("config_file_path"), IniFile);
-    }
-    else
-    {
-        Outcome->SetStringField(TEXT("readback_value"), TEXT("N/A"));
-    }
-
-    Outcome->SetStringField(TEXT("section"), SectionName);
-    Outcome->SetBoolField(TEXT("configuration_success"), bApplied);
-    Outcome->SetStringField(TEXT("configuration_message"), bApplied
-        ? TEXT("Plugin setting configured successfully")
-        : TEXT("Failed to configure plugin setting"));
-    Outcome->SetStringField(TEXT("config_file_used"), ConfigFileUsed);
-    Outcome->SetStringField(TEXT("configuration_timestamp"), FDateTime::Now().ToString());
-    return mcp_common::MakeOutcomeReply(Outcome, bApplied,
-        bApplied ? FString() : mcp_common::MeasuredOutcomeError(TEXT("configure_plugin_setting"), TEXT("configuration_success")));
 }
 
 // ==========================================================================
@@ -1824,7 +2008,6 @@ const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("audit_class_purity"), &HandleAuditClassPurity },
     { TEXT("audit_fork_refs"), &HandleAuditForkRefs },
-    { TEXT("configure_plugin_setting"), &HandleConfigurePluginSetting },
     { TEXT("delete_asset"), &HandleDeleteAsset },
     { TEXT("duplicate_asset"), &HandleDuplicateAsset },
     { TEXT("duplicate_directory"), &HandleDuplicateDirectory },

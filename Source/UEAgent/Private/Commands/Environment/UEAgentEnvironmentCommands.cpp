@@ -17,6 +17,7 @@
 #include "Components/SkyLightComponent.h"
 #include "Engine/PostProcessVolume.h"             // APostProcessVolume
 #include "Engine/Scene.h"                          // FPostProcessSettings, EAutoExposureMethod
+#include "Engine/Texture.h"                        // UTexture (ColorGradingLUT path in get_post_process_settings)
 #include "Engine/EngineTypes.h"                    // EDynamicGlobalIlluminationMethod
 
 #define LOCTEXT_NAMESPACE "UEAgentEnvironment"
@@ -499,9 +500,9 @@ TSharedPtr<FJsonObject> HandleSetPostProcessColorGrading(const TSharedPtr<FJsonO
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:get_post_process_settings - Read a PostProcessVolume's color grading and the scalar settings set_post_process_setting manages, each with its override flag.  The reader that was missing: every value comes with `overridden` (its bOverride_* flag) so you can see what is actually active.
+// MCP:get_post_process_settings - Read a PostProcessVolume without changing it: the actor-level enabled / unbounded / priority, its color grading and the scalar settings set_post_process_setting manages, each with its override flag, plus film grain, motion blur, the auto-exposure method and the color grading LUT.  Every graded or scalar value comes with `overridden` (its bOverride_* flag) so you can see what is actually active.
 //   @param actor_name - Label/name of the target PostProcessVolume actor.
-//   @returns { actor_name: string, color_grading: { saturation, contrast, gamma, gain, offset, saturation_shadows, saturation_midtones, saturation_highlights, contrast_shadows, contrast_midtones, contrast_highlights (each {value:[float], overridden}) }, white_balance: { white_temp, white_tint, shadows_max, highlights_min (each {value, overridden}) }, scalars: { bloom_intensity, vignette_intensity, ambient_occlusion_intensity, auto_exposure_bias, auto_exposure_min_brightness, auto_exposure_max_brightness (each {value, overridden}) }, exposure_method: int, dynamic_global_illumination_method: int }
+//   @returns { actor_name: string, enabled: bool, unbounded: bool, priority: number, color_grading: { saturation, contrast, gamma, gain, offset, saturation_shadows, saturation_midtones, saturation_highlights, contrast_shadows, contrast_midtones, contrast_highlights (each {value:[float], overridden}) }, white_balance: { white_temp, white_tint, shadows_max, highlights_min (each {value, overridden}) }, scalars: { bloom_intensity, vignette_intensity, ambient_occlusion_intensity, auto_exposure_bias, auto_exposure_min_brightness, auto_exposure_max_brightness (each {value, overridden}) }, film_grain_intensity: number, motion_blur_amount: number, color_grading_lut_path: string, exposure_method: int, auto_exposure_method: string, dynamic_global_illumination_method: int }
 TSharedPtr<FJsonObject> HandleGetPostProcessSettings(const TSharedPtr<FJsonObject>& Params)
 {
     FString ActorName;
@@ -543,10 +544,21 @@ TSharedPtr<FJsonObject> HandleGetPostProcessSettings(const TSharedPtr<FJsonObjec
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("actor_name"), PPV->GetActorLabel());
+    Result->SetBoolField(TEXT("enabled"), PPV->bEnabled);
+    Result->SetBoolField(TEXT("unbounded"), PPV->bUnbound);
+    Result->SetNumberField(TEXT("priority"), PPV->Priority);
     Result->SetObjectField(TEXT("color_grading"), CG);
     Result->SetObjectField(TEXT("white_balance"), WhiteBalance);
     Result->SetObjectField(TEXT("scalars"), Scalars);
+    Result->SetNumberField(TEXT("film_grain_intensity"), S.FilmGrainIntensity);
+    Result->SetNumberField(TEXT("motion_blur_amount"), S.MotionBlurAmount);
+    Result->SetStringField(TEXT("color_grading_lut_path"), S.ColorGradingLUT ? S.ColorGradingLUT->GetPathName() : FString());
     Result->SetNumberField(TEXT("exposure_method"), static_cast<int32>(S.AutoExposureMethod.GetValue()));
+    if (const UEnum* ExposureEnum = StaticEnum<EAutoExposureMethod>())
+    {
+        Result->SetStringField(TEXT("auto_exposure_method"),
+            ExposureEnum->GetNameStringByValue(static_cast<int64>(S.AutoExposureMethod.GetValue())));
+    }
     Result->SetNumberField(TEXT("dynamic_global_illumination_method"), static_cast<int32>(S.DynamicGlobalIlluminationMethod.GetValue()));
     return mcp_common::MakeOkReply(Result);
 }

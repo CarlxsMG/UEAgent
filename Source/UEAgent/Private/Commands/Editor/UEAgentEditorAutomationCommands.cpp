@@ -17,7 +17,7 @@
 #include "Editor.h"
 #include "UObject/ObjectRedirector.h"
 
-// bulk_delete_assets guards / verification.
+// delete_assets guards / verification.
 #include "ObjectTools.h"                                      // ObjectTools::ForceDeleteObjects (same call UEditorAssetSubsystem::DeleteAsset makes internally, EditorAssetSubsystem.cpp)
 #include "Editor/LevelEditor/Public/LevelEditorSubsystem.h"   // ULevelEditorSubsystem::IsInPlayInEditor -- same PIE-guard idiom fixup_redirectors uses (SystemCommands.cpp)
 #include "Engine/World.h"                                     // UWorld (open-editor-world gate via mcp_common::GetEditorWorld)
@@ -34,7 +34,7 @@
 /**
  * Editor automation / bulk asset operations, performed editor-side via IAssetTools,
  * UEditorAssetSubsystem and IAssetRegistry:
- *   - bulk_delete_assets       -> GUARDED batch delete. dry_run defaults to TRUE; a
+ *   - delete_assets       -> GUARDED batch delete. dry_run defaults to TRUE; a
  *                                 readonly_roots / protect_paths / open-editor-world /
  *                                 (opt-in) zero-referencer gate REFUSES per item, and the
  *                                 delete itself is ObjectTools::ForceDeleteObjects over the
@@ -150,7 +150,7 @@ namespace
 	}
 
 	// -----------------------------------------------------------------------
-	// Shared helpers for the guarded bulk_delete_assets / find_unused_assets
+	// Shared helpers for the guarded delete_assets / find_unused_assets
 	// paths.
 	// -----------------------------------------------------------------------
 
@@ -304,9 +304,9 @@ namespace
 }
 
 // ---------------------------------------------------------------------------
-// 2. bulk_delete_assets
+// 2. delete_assets
 // ---------------------------------------------------------------------------
-// MCP:bulk_delete_assets - GUARDED batch asset deletion. ***dry_run DEFAULTS TO TRUE*** (deliberate: it is the most destructive command in the plugin, `bulk_delete_assets(["/Game/VendorPack"], recursive=true)` would be a valid unconfirmed call, and agent allowlists may run mutating tools with no prompt). Four independent gates REFUSE per item instead of skipping silently: readonly_roots (default: the project's Read Only Content Roots), protect_paths (wildcards -- the only gate that saves a zero-referencer asset), the currently-open editor world, and the OPT-IN require_zero_referencers gate whose referencer count EXCLUDES referencers that are themselves in this batch (so a self-contained dead subgraph can still be deleted whole). Deletion is a single ObjectTools::ForceDeleteObjects over the whole eligible batch -- resolving each object here via StaticFindObject/StaticLoadObject rather than through UEditorAssetSubsystem::DeleteAsset, whose UE::EditorAssetUtils::LoadAssetFromPath/EnsureAssetsLoaded preamble is a known crash site ("Array index out of bounds", deterministic on corrupted leftovers). deleted_count counts ONLY items that passed BOTH post-delete probes -- the package file is gone (FPackageName::DoesPackageExist) AND the object no longer resolves at its original path (StaticFindObject) -- never the API's own return value. Both are required because for a never-saved, registry-visible asset the disk probe is vacuously true (it was never on disk), so residency is the only real evidence; each failure names which probe still sees the item.
+// MCP:delete_assets - GUARDED batch asset deletion. ***dry_run DEFAULTS TO TRUE*** (deliberate: it is the most destructive command in the plugin, `delete_assets(["/Game/VendorPack"], recursive=true)` would be a valid unconfirmed call, and agent allowlists may run mutating tools with no prompt). Four independent gates REFUSE per item instead of skipping silently: readonly_roots (default: the project's Read Only Content Roots), protect_paths (wildcards -- the only gate that saves a zero-referencer asset), the currently-open editor world, and the OPT-IN require_zero_referencers gate whose referencer count EXCLUDES referencers that are themselves in this batch (so a self-contained dead subgraph can still be deleted whole). Deletion is a single ObjectTools::ForceDeleteObjects over the whole eligible batch -- resolving each object here via StaticFindObject/StaticLoadObject rather than through UEditorAssetSubsystem::DeleteAsset, whose UE::EditorAssetUtils::LoadAssetFromPath/EnsureAssetsLoaded preamble is a known crash site ("Array index out of bounds", deterministic on corrupted leftovers). deleted_count counts ONLY items that passed BOTH post-delete probes -- the package file is gone (FPackageName::DoesPackageExist) AND the object no longer resolves at its original path (StaticFindObject) -- never the API's own return value. Both are required because for a never-saved, registry-visible asset the disk probe is vacuously true (it was never on disk), so residency is the only real evidence; each failure names which probe still sees the item.
 //   @param asset_paths - List of asset paths (or folder paths when recursive is true). Required, non-empty.
 //   @param recursive - If true, expand folder paths to all contained assets. Default false.
 //   @param dry_run - Default TRUE. Nothing is deleted; would_delete reports what WOULD go, with each item's gate verdict. Pass false to actually delete.
@@ -334,7 +334,7 @@ TSharedPtr<FJsonObject> HandleBulkDeleteAssets(
 	if (!Registry)
 	{
 		return mcp_common::MakeErrorReply(TEXT(
-			"AssetRegistry is not available: the referencer gate cannot be evaluated, so bulk_delete_assets refuses to delete anything."));
+			"AssetRegistry is not available: the referencer gate cannot be evaluated, so delete_assets refuses to delete anything."));
 	}
 
 	// PIE guard. UEditorAssetSubsystem::DeleteAsset already fails during PIE
@@ -347,7 +347,7 @@ TSharedPtr<FJsonObject> HandleBulkDeleteAssets(
 		if (LevelEditorSubsystem && LevelEditorSubsystem->IsInPlayInEditor())
 		{
 			return mcp_common::MakeErrorReply(TEXT(
-				"bulk_delete_assets refuses to run while Play-In-Editor is active: asset deletion is rejected "
+				"delete_assets refuses to run while Play-In-Editor is active: asset deletion is rejected "
 				"by the engine during PIE and would report a batch of silent failures. Stop PIE "
 				"(stop_play_in_editor) and call again."));
 		}
@@ -1554,7 +1554,7 @@ TSharedPtr<FJsonObject> HandleFindDuplicateAssets(
 
 const McpCommandFamilies::FRegistrar Registration =
 {
-	{ TEXT("bulk_delete_assets"), &HandleBulkDeleteAssets },
+	{ TEXT("delete_assets"), &HandleBulkDeleteAssets },
 	{ TEXT("consolidate_assets"), &HandleConsolidateAssets },
 	{ TEXT("export_assets"), &HandleExportAssets },
 	{ TEXT("find_duplicate_assets"), &HandleFindDuplicateAssets },

@@ -2,7 +2,7 @@
 
 # Export
 
-15 tools. Back to the [index](README.md).
+12 tools. Back to the [index](README.md).
 
 ## `cancel_render_job`
 
@@ -73,19 +73,6 @@ Produce a CANONICAL, STABLE text dump of ANY asset (Blueprint, DataTable, Materi
 
 **Returns:** `{ asset_path: string, object_path: string, asset_class: string, format: string, text: string, text_length: int, truncated: bool, content_hash: string, export_file_path: string, written: bool, message: string }`
 
-## `export_asset_data`
-
-*Destructive.*
-
-Load an asset and write its class, package and every editable or Blueprint-visible property, as details-panel text, to a new file Saved/Exports/Assets/Name_YYYYMMDD_HHMMSS.json or .txt in the project. Returns export_file_path, export_success and file sizes; an unsupported format writes nothing (export_success=false).
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `asset_path` | string | yes | Package or object path of the asset (e.g., '/Game/MyAsset'); the file is named after its last segment. |
-| `export_format` | string | yes | Export format: 'json' or 'txt'. |
-
-**Returns:** `{ asset_path: string, export_format: string, export_success: bool, export_message: string, export_file_path: string, export_file_name: string, export_file_size_bytes: int, export_file_size_mb: number, asset_class: string, package_name: string, original_file_size_bytes: int, original_file_size_mb: number, export_timestamp: string, export_status: string, export_directory: string }`
-
 ## `export_blueprint_data`
 
 *Additive.*
@@ -126,24 +113,15 @@ No parameters.
 
 *Additive.*
 
-Load an asset and write a property report to a new file Saved/Reports/Assets/&lt;Name>_Report_&lt;YYYYMMDD_HHMMSS>.json or .txt in the project: every reflected property of its class (editable or not) with its type and value text, counts of editable and Blueprint-visible properties, and the package file size. Those statistics go only into the file; the reply carries its path, size and status. The asset is not modified. A missing asset is an error; an unsupported format writes nothing (report_success=false). export_asset_data writes only editable or Blueprint-visible properties; export_asset_as_text returns a canonical dump inline.
+Load an asset and write a property report to a new file Saved/Reports/Assets/&lt;Name>_Report_&lt;YYYYMMDD_HHMMSS>.json or .txt in the project: every reflected property of its class (editable or not) with its type and value text, counts of editable and Blueprint-visible properties, and the package file size -- or, with visible_only, just the editable or Blueprint-visible properties as details-panel text. Those statistics go only into the file; the reply carries its path, size and status, and the package file size. The asset is not modified. A missing asset is an error; an unsupported format writes nothing (report_success=false). export_asset_as_text returns a canonical dump inline.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `asset_path` | string | yes | Full path to the asset to analyze (e.g., '/Game/MyAsset'). |
 | `report_format` | string | yes | Report format: 'json' or 'txt'. |
+| `visible_only` | boolean | no | Optional bool (default false): write only the editable or Blueprint-visible properties, each as its details-panel text (a JSON `properties` object of name -> text), with report_type "Visible Properties", instead of the full census. |
 
-**Returns:** `{ asset_path: string, report_format: string, report_success: bool, report_message: string, report_file_path: string, report_file_name: string, report_file_size_bytes: int, report_file_size_mb: number, asset_class: string, package_name: string, report_timestamp: string, report_status: string, report_type: string, report_directory: string }`
-
-## `get_engine_stats`
-
-*Read-only.*
-
-Report live engine profiling stats: average FPS/MS, process memory, the live UObject count and the engine version.
-
-No parameters.
-
-**Returns:** `{ average_fps, average_ms, max_fps, used_physical_bytes, peak_used_physical_bytes, available_physical_bytes, total_physical_bytes, used_physical_mb, peak_used_physical_mb, available_physical_mb, object_count, engine_version, is_editor }`
+**Returns:** `{ asset_path: string, report_format: string, report_success: bool, report_message: string, report_file_path: string, report_file_name: string, report_file_size_bytes: int, report_file_size_mb: number, asset_class: string, package_name: string, original_file_size_bytes: int, original_file_size_mb: number, report_timestamp: string, report_status: string, report_type: string, report_directory: string }`
 
 ## `get_render_queue`
 
@@ -177,16 +155,3 @@ Authors a one-off render job for a sequence and starts the (async) movie render.
 | `map_path` | string | no | Optional map object path (e.g. "/Game/Maps/MyMap.MyMap") |
 
 **Returns:** `{ sequence_name: string, job_name: string, job_created: bool, queue_job_count: number, render_started: bool, render_async: bool, note: string }`
-
-## `set_packaging_setting`
-
-*Destructive, idempotent.*
-
-Write a /Script/UnrealEd.ProjectPackagingSettings key into DefaultGame.ini (via GConfig) and read it back to verify
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `setting` | string | yes | the ini key, e.g. "bUsePakFile" (bool) or "BuildConfiguration" |
-| `value` | any | no | a bool, string or number to persist. |
-
-**Returns:** `{ setting, section, ini_file, value_type, applied, read_back, verified }`

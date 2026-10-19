@@ -14,6 +14,8 @@
 #include "Animation/PoseAsset.h"
 #include "Animation/BlendSpace.h"
 #include "Animation/BlendSpace1D.h"
+#include "Animation/AimOffsetBlendSpace.h"
+#include "Animation/AimOffsetBlendSpace1D.h"
 #include "AnimationBlueprintLibrary.h"
 #include "Animation/AnimNotifies/AnimNotify.h"
 #include "Animation/AnimNotifies/AnimNotifyState.h"
@@ -288,41 +290,159 @@ namespace
 // ---------------------------------------------------------------------------
 // create_blend_space
 // ---------------------------------------------------------------------------
-// MCP:create_blend_space - Create and save a UBlendSpace (or UBlendSpace1D) asset under /Game. Idempotent: a UBlendSpace already at that path is returned unchanged with already_existed=true and saved=false, and nothing is saved. A failed save makes success false, with saved=false and save_error.
+// MCP:create_blend_space - Create and save a blend space asset under /Game -- a 2D UBlendSpace (default), a UBlendSpace1D, or an aim offset (UAimOffsetBlendSpace or UAimOffsetBlendSpace1D) picked by blend_space_type -- and write every axis setting it is given (name, range and grid divisions of the X axis, and of the Y axis on a 2D type) before rebuilding its runtime data. Idempotent: a blend space already at that path is returned unchanged with already_existed=true and saved=false, and nothing is written or saved (blend_space_type then reports the class it already has). An unknown blend_space_type, one that contradicts is_1d, an axis minimum not below its maximum, a grid below 1 or a Y-axis param on a 1D type is refused before anything is created. A failed save makes success false, with saved=false and save_error.
 //   @param name - Asset name (e.g. 'BS_Example').
+//   @param asset_name - Alias of name.
 //   @param package_path - Target content package path where the asset is created (default /Game/Animation)
-//   @param is_1d - If true create a 1D BlendSpace, else 2D (default false)
-//   @param axis_name - X-axis display name (default 'Speed')
-//   @param axis_min - X-axis minimum value (default 0)
-//   @param axis_max - X-axis maximum value (default 100)
-//   @param skeleton_path - Asset path of the target Skeleton
-//   @returns { name, package_path, asset_path, blend_space_path, is_1d, skeleton_path, axis_name, axis_min, axis_max, axis_grid_num, sample_count, created, already_existed, saved, save_error, message }
+//   @param blend_space_type - Optional class to create: BlendSpace (2D, default) | BlendSpace1D | AimOffset (2D UAimOffsetBlendSpace) | AimOffset1D (UAimOffsetBlendSpace1D), any case. Omitted, is_1d picks BlendSpace1D or BlendSpace.
+//   @param is_1d - If true create a 1D BlendSpace, else 2D (default false); when blend_space_type is also given they must agree.
+//   @param axis_name - X-axis display name (default 'Speed'; 'Yaw' for an aim offset)
+//   @param axis_min - X-axis minimum value (default 0; -90 for an aim offset); must be below axis_max.
+//   @param min_value - Alias of axis_min.
+//   @param axis_max - X-axis maximum value (default 100; 90 for an aim offset)
+//   @param max_value - Alias of axis_max.
+//   @param axis_grid - Optional X-axis grid divisions, an integer >= 1 (default: the engine's 4).
+//   @param num_grid_points - Alias of axis_grid.
+//   @param y_axis_name - Optional Y-axis display name, 2D types only (default 'Pitch' for an aim offset; otherwise the engine's 'None' is kept).
+//   @param y_axis_min - Optional Y-axis minimum, 2D types only (default 0; -90 for an aim offset); must be below y_axis_max.
+//   @param y_axis_max - Optional Y-axis maximum, 2D types only (default 100; 90 for an aim offset).
+//   @param y_axis_grid - Optional Y-axis grid divisions, 2D types only, an integer >= 1 (default: the engine's 4).
+//   @param skeleton_path - Asset path of the target Skeleton (default /Engine/EngineMeshes/SkeletalCube_Skeleton)
+//   @returns { name, package_path, asset_path, blend_space_path, blend_space_type, is_1d, skeleton_path, axis_name, axis_min, axis_max, axis_grid_num, y_axis_name?, y_axis_min?, y_axis_max?, y_axis_grid_num?, sample_count, created, already_existed, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleCreateBlendSpace(const TSharedPtr<FJsonObject>& Params)
 {
     FString Name;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("name"), Name)) { return Missing; }
+    if (!Params->TryGetStringField(TEXT("name"), Name) && !Params->TryGetStringField(TEXT("asset_name"), Name))
+    {
+        return mcp_common::MissingParameterReply(TEXT("name"));
+    }
+    if (Name.IsEmpty())
+    {
+        return mcp_common::MissingParameterReply(TEXT("name"));
+    }
 
     const FString PackagePath = AnimAuthoring_ReadPackagePath(Params, TEXT("/Game/Animation"));
 
+    // The class: blend_space_type when given, else is_1d (the original switch). Both given must agree.
     bool bIs1D = false;
-    Params->TryGetBoolField(TEXT("is_1d"), bIs1D);
+    const bool bHasIs1D = Params->TryGetBoolField(TEXT("is_1d"), bIs1D);
+    bool bAimOffset = false;
+    FString TypeText;
+    if (Params->TryGetStringField(TEXT("blend_space_type"), TypeText) && !TypeText.TrimStartAndEnd().IsEmpty())
+    {
+        const FString Type = TypeText.TrimStartAndEnd();
+        bool bTypeIs1D = false;
+        if (Type.Equals(TEXT("BlendSpace"), ESearchCase::IgnoreCase) || Type.Equals(TEXT("BlendSpace2D"), ESearchCase::IgnoreCase))
+        {
+            bTypeIs1D = false;
+        }
+        else if (Type.Equals(TEXT("BlendSpace1D"), ESearchCase::IgnoreCase))
+        {
+            bTypeIs1D = true;
+        }
+        else if (Type.Equals(TEXT("AimOffset"), ESearchCase::IgnoreCase) || Type.Equals(TEXT("AimOffsetBlendSpace"), ESearchCase::IgnoreCase))
+        {
+            bAimOffset = true;
+        }
+        else if (Type.Equals(TEXT("AimOffset1D"), ESearchCase::IgnoreCase) || Type.Equals(TEXT("AimOffsetBlendSpace1D"), ESearchCase::IgnoreCase))
+        {
+            bAimOffset = true;
+            bTypeIs1D = true;
+        }
+        else
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("Unknown blend_space_type '%s': expected BlendSpace, BlendSpace1D, AimOffset or AimOffset1D. Nothing was created."), *Type));
+        }
+        if (bHasIs1D && bIs1D != bTypeIs1D)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("is_1d=%s contradicts blend_space_type '%s'; pass one of them. Nothing was created."),
+                bIs1D ? TEXT("true") : TEXT("false"), *Type));
+        }
+        bIs1D = bTypeIs1D;
+    }
 
-    FString AxisName = TEXT("Speed");
+    // X axis (BlendParameters[0]). An aim offset defaults to a Yaw axis of -90..90.
+    FString AxisName;
     Params->TryGetStringField(TEXT("axis_name"), AxisName);
     if (AxisName.IsEmpty())
     {
-        AxisName = TEXT("Speed");
+        AxisName = bAimOffset ? TEXT("Yaw") : TEXT("Speed");
+    }
+    double AxisMin = bAimOffset ? -90.0 : 0.0;
+    double AxisMax = bAimOffset ? 90.0 : 100.0;
+    if (!Params->TryGetNumberField(TEXT("axis_min"), AxisMin))
+    {
+        Params->TryGetNumberField(TEXT("min_value"), AxisMin);
+    }
+    if (!Params->TryGetNumberField(TEXT("axis_max"), AxisMax))
+    {
+        Params->TryGetNumberField(TEXT("max_value"), AxisMax);
+    }
+    double AxisGridD = 0.0;
+    if (!Params->TryGetNumberField(TEXT("axis_grid"), AxisGridD))
+    {
+        Params->TryGetNumberField(TEXT("num_grid_points"), AxisGridD);
+    }
+    const bool bHasAxisGrid = Params->HasField(TEXT("axis_grid")) || Params->HasField(TEXT("num_grid_points"));
+
+    // Y axis (BlendParameters[1]), 2D types only. An aim offset defaults to a Pitch axis of -90..90; a plain
+    // 2D blend space keeps the engine's unnamed 0..100 axis unless the call names one.
+    FString YAxisName;
+    Params->TryGetStringField(TEXT("y_axis_name"), YAxisName);
+    double YAxisMin = bAimOffset ? -90.0 : 0.0;
+    double YAxisMax = bAimOffset ? 90.0 : 100.0;
+    const bool bHasYMin = Params->TryGetNumberField(TEXT("y_axis_min"), YAxisMin);
+    const bool bHasYMax = Params->TryGetNumberField(TEXT("y_axis_max"), YAxisMax);
+    double YAxisGridD = 0.0;
+    const bool bHasYGrid = Params->TryGetNumberField(TEXT("y_axis_grid"), YAxisGridD);
+    if (bIs1D && (!YAxisName.IsEmpty() || bHasYMin || bHasYMax || bHasYGrid))
+    {
+        return mcp_common::MakeErrorReply(TEXT(
+            "y_axis_name, y_axis_min, y_axis_max and y_axis_grid apply to a 2D blend space only, and this call creates a 1D one. Nothing was created."));
+    }
+    if (YAxisName.IsEmpty() && bAimOffset)
+    {
+        YAxisName = TEXT("Pitch");
     }
 
-    double AxisMin = 0.0;
-    double AxisMax = 100.0;
-    Params->TryGetNumberField(TEXT("axis_min"), AxisMin);
-    Params->TryGetNumberField(TEXT("axis_max"), AxisMax);
+    // Every axis value is checked before anything is created: the engine divides by the range and the grid.
+    if (AxisMin >= AxisMax)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("axis_min (%g) must be below axis_max (%g). Nothing was created."), AxisMin, AxisMax));
+    }
+    if (!bIs1D && YAxisMin >= YAxisMax)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("y_axis_min (%g) must be below y_axis_max (%g). Nothing was created."), YAxisMin, YAxisMax));
+    }
+    const auto CheckGrid = [](bool bGiven, double Value, const TCHAR* Label) -> TSharedPtr<FJsonObject>
+    {
+        if (bGiven && (Value < 1.0 || Value > static_cast<double>(TNumericLimits<int32>::Max()) || FMath::Frac(Value) != 0.0))
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("%s must be an integer >= 1 (grid divisions), got %g. Nothing was created."), Label, Value));
+        }
+        return nullptr;
+    };
+    if (TSharedPtr<FJsonObject> Error = CheckGrid(bHasAxisGrid, AxisGridD, TEXT("axis_grid"))) { return Error; }
+    if (TSharedPtr<FJsonObject> Error = CheckGrid(bHasYGrid, YAxisGridD, TEXT("y_axis_grid"))) { return Error; }
 
     USkeleton* Skeleton = nullptr;
     if (TSharedPtr<FJsonObject> Error = AnimAuthoring_ReadSkeleton(Params, Skeleton)) { return Error; }
 
     const FString FullPath = FString::Printf(TEXT("%s/%s"), *PackagePath, *Name);
+
+    const auto TypeNameOf = [](const UBlendSpace* BlendSpace) -> const TCHAR*
+    {
+        // UAimOffsetBlendSpace1D derives from UBlendSpace1D, so the aim offsets are tested first.
+        if (BlendSpace->IsA<UAimOffsetBlendSpace1D>()) { return TEXT("AimOffset1D"); }
+        if (BlendSpace->IsA<UAimOffsetBlendSpace>())   { return TEXT("AimOffset"); }
+        if (BlendSpace->IsA<UBlendSpace1D>())          { return TEXT("BlendSpace1D"); }
+        return TEXT("BlendSpace");
+    };
 
     auto BuildPayload = [&](UBlendSpace* BlendSpace, bool bCreated) -> TSharedPtr<FJsonObject>
     {
@@ -331,16 +451,26 @@ TSharedPtr<FJsonObject> HandleCreateBlendSpace(const TSharedPtr<FJsonObject>& Pa
         Obj->SetStringField(TEXT("package_path"), PackagePath);
         Obj->SetStringField(TEXT("asset_path"), BlendSpace->GetPathName());
         Obj->SetStringField(TEXT("blend_space_path"), FullPath);
-        Obj->SetBoolField(TEXT("is_1d"), BlendSpace->IsA<UBlendSpace1D>());
+        Obj->SetStringField(TEXT("blend_space_type"), TypeNameOf(BlendSpace));
+        const bool bAsset1D = BlendSpace->IsA<UBlendSpace1D>();
+        Obj->SetBoolField(TEXT("is_1d"), bAsset1D);
         const USkeleton* BSSkeleton = BlendSpace->GetSkeleton();
         Obj->SetStringField(TEXT("skeleton_path"), BSSkeleton ? BSSkeleton->GetPathName() : FString());
 
-        // Read back the configured X axis via the public const accessor.
+        // Read back the configured axes via the public const accessor.
         const FBlendParameter& XAxis = BlendSpace->GetBlendParameter(0);
         Obj->SetStringField(TEXT("axis_name"), XAxis.DisplayName);
         Obj->SetNumberField(TEXT("axis_min"), XAxis.Min);
         Obj->SetNumberField(TEXT("axis_max"), XAxis.Max);
         Obj->SetNumberField(TEXT("axis_grid_num"), XAxis.GridNum);
+        if (!bAsset1D)
+        {
+            const FBlendParameter& YAxis = BlendSpace->GetBlendParameter(1);
+            Obj->SetStringField(TEXT("y_axis_name"), YAxis.DisplayName);
+            Obj->SetNumberField(TEXT("y_axis_min"), YAxis.Min);
+            Obj->SetNumberField(TEXT("y_axis_max"), YAxis.Max);
+            Obj->SetNumberField(TEXT("y_axis_grid_num"), YAxis.GridNum);
+        }
         Obj->SetNumberField(TEXT("sample_count"), BlendSpace->GetBlendSamples().Num());
         Obj->SetBoolField(TEXT("created"), bCreated);
         return Obj;
@@ -356,7 +486,9 @@ TSharedPtr<FJsonObject> HandleCreateBlendSpace(const TSharedPtr<FJsonObject>& Pa
         return mcp_common::MakeOkReply(Obj);
     }
 
-    UClass* BlendSpaceClass = bIs1D ? UBlendSpace1D::StaticClass() : UBlendSpace::StaticClass();
+    UClass* BlendSpaceClass = bAimOffset
+        ? (bIs1D ? UAimOffsetBlendSpace1D::StaticClass() : UAimOffsetBlendSpace::StaticClass())
+        : (bIs1D ? UBlendSpace1D::StaticClass() : UBlendSpace::StaticClass());
     // The constructor sets DimensionIndices ({0} for 1D, {0,1} for 2D) automatically.
     FString CreateError;
     UBlendSpace* BlendSpace = Cast<UBlendSpace>(mcp_common::NewAssetInPackage(BlendSpaceClass, FullPath, Name,
@@ -368,21 +500,43 @@ TSharedPtr<FJsonObject> HandleCreateBlendSpace(const TSharedPtr<FJsonObject>& Pa
 
     BlendSpace->SetSkeleton(Skeleton);
 
-    // Configure the X axis (BlendParameters[0]). BlendParameters is a protected
-    // fixed-size UPROPERTY array (ArrayDim==3); write it via the reflection system,
-    // which is the supported external-write path. Read-back uses GetBlendParameter().
+    // Configure the axes (BlendParameters[0] = X, [1] = Y). BlendParameters is a protected fixed-size
+    // UPROPERTY array (ArrayDim==3); write it via the reflection system, which is the supported external-write
+    // path. Read-back uses GetBlendParameter().
     if (FStructProperty* BlendParamsProp = FindFProperty<FStructProperty>(UBlendSpace::StaticClass(), TEXT("BlendParameters")))
     {
-        // Element 0 == X axis.
-        FBlendParameter* XAxis = BlendParamsProp->ContainerPtrToValuePtr<FBlendParameter>(BlendSpace, /*ArrayIndex=*/0);
-        if (XAxis)
+        if (FBlendParameter* XAxis = BlendParamsProp->ContainerPtrToValuePtr<FBlendParameter>(BlendSpace, /*ArrayIndex=*/0))
         {
             XAxis->DisplayName = AxisName;
             XAxis->Min = static_cast<float>(AxisMin);
             XAxis->Max = static_cast<float>(AxisMax);
-            if (XAxis->GridNum < 1)
+            if (bHasAxisGrid)
+            {
+                XAxis->GridNum = static_cast<int32>(AxisGridD);
+            }
+            else if (XAxis->GridNum < 1)
             {
                 XAxis->GridNum = 4;
+            }
+        }
+        if (!bIs1D)
+        {
+            if (FBlendParameter* YAxis = BlendParamsProp->ContainerPtrToValuePtr<FBlendParameter>(BlendSpace, /*ArrayIndex=*/1))
+            {
+                if (!YAxisName.IsEmpty())
+                {
+                    YAxis->DisplayName = YAxisName;
+                }
+                YAxis->Min = static_cast<float>(YAxisMin);
+                YAxis->Max = static_cast<float>(YAxisMax);
+                if (bHasYGrid)
+                {
+                    YAxis->GridNum = static_cast<int32>(YAxisGridD);
+                }
+                else if (YAxis->GridNum < 1)
+                {
+                    YAxis->GridNum = 4;
+                }
             }
         }
     }
@@ -770,75 +924,9 @@ TSharedPtr<FJsonObject> HandleAddMontageNotify(const TSharedPtr<FJsonObject>& Pa
 }
 
 // ---------------------------------------------------------------------------
-// set_montage_blend_times
-// ---------------------------------------------------------------------------
-// MCP:set_montage_blend_times - Set the blend-in / blend-out times (clamped to >= 0) on a UAnimMontage in an undo transaction and save it. Times the montage already has, or none given, are a success with applied=false and saved=false, and the montage is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
-//   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
-//   @param blend_in - Blend-in time in seconds (defaults to current value)
-//   @param blend_out - Blend-out time in seconds (defaults to current value)
-//   @returns { montage_path, blend_in, blend_out, applied, saved, save_error, message }
-TSharedPtr<FJsonObject> HandleSetMontageBlendTimes(const TSharedPtr<FJsonObject>& Params)
-{
-    FString MontagePath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("montage_path"), MontagePath)) { return Missing; }
-
-    UAnimMontage* Montage = nullptr;
-    if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadOrError(MontagePath, TEXT("AnimMontage"), Montage)) { return Error; }
-
-    // Default to the montage's current blend times if a value is omitted.
-    double BlendIn = Montage->BlendIn.GetBlendTime();
-    double BlendOut = Montage->BlendOut.GetBlendTime();
-    const bool bHasBlendIn = Params->TryGetNumberField(TEXT("blend_in"), BlendIn);
-    const bool bHasBlendOut = Params->TryGetNumberField(TEXT("blend_out"), BlendOut);
-
-    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-    Obj->SetStringField(TEXT("montage_path"), Montage->GetPathName());
-
-    // FAlphaBlend::SetBlendTime clamps to >= 0: a time the montage already has after that clamp, or no time
-    // at all, changes nothing and is answered before Modify() would dirty the montage.
-    const float NewIn = FMath::Max(static_cast<float>(BlendIn), 0.0f);
-    const float NewOut = FMath::Max(static_cast<float>(BlendOut), 0.0f);
-    const bool bInChanges = bHasBlendIn && NewIn != Montage->BlendIn.GetBlendTime();
-    const bool bOutChanges = bHasBlendOut && NewOut != Montage->BlendOut.GetBlendTime();
-    if (!bInChanges && !bOutChanges)
-    {
-        Obj->SetNumberField(TEXT("blend_in"), Montage->BlendIn.GetBlendTime());
-        Obj->SetNumberField(TEXT("blend_out"), Montage->BlendOut.GetBlendTime());
-        Obj->SetBoolField(TEXT("applied"), false);
-        return AnimAuthoring_NoChangeReply(Obj, TEXT("The montage already has those blend times; nothing changed, nothing saved"));
-    }
-
-    {
-        const FScopedTransaction Transaction(LOCTEXT("SetMontageBlendTimes", "Set Montage Blend Times"));
-        Montage->Modify();
-        if (bInChanges)
-        {
-            Montage->BlendIn.SetBlendTime(NewIn);
-        }
-        if (bOutChanges)
-        {
-            Montage->BlendOut.SetBlendTime(NewOut);
-        }
-    }
-
-    // Read back the values that actually landed on the FAlphaBlend members.
-    const float AppliedIn = Montage->BlendIn.GetBlendTime();
-    const float AppliedOut = Montage->BlendOut.GetBlendTime();
-
-    FString SaveError;
-    const bool bSaved = AnimAuthoring_SavePackageOf(Montage, SaveError);
-
-    Obj->SetNumberField(TEXT("blend_in"), AppliedIn);
-    Obj->SetNumberField(TEXT("blend_out"), AppliedOut);
-    Obj->SetBoolField(TEXT("applied"), true);
-    Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Montage blend times set"), bSaved, SaveError));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_montage_blend_times"), SaveError);
-}
-
-// ---------------------------------------------------------------------------
 // get_montage_info
 // ---------------------------------------------------------------------------
-// MCP:get_montage_info - Read a UAnimMontage without changing it: skeleton_path, section, slot and notify counts with their name lists, blend_in/blend_out times, blend modes, enable_auto_blend_out, blend_out_trigger_time, sync_group and sync_slot_index. Change them with set_montage_blend_times or set_montage_properties.
+// MCP:get_montage_info - Read a UAnimMontage without changing it: skeleton_path, section, slot and notify counts with their name lists, blend_in/blend_out times, blend modes, enable_auto_blend_out, blend_out_trigger_time, sync_group and sync_slot_index. Change them with set_montage_properties.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
 //   @returns { montage_path, skeleton_path, section_count, slot_count, notify_count, sections, slots, notifies, blend_in, blend_out, blend_mode_in, blend_mode_out, enable_auto_blend_out, blend_out_trigger_time, sync_group, sync_slot_index }
 TSharedPtr<FJsonObject> HandleGetMontageInfo(const TSharedPtr<FJsonObject>& Params)
@@ -863,7 +951,7 @@ TSharedPtr<FJsonObject> HandleGetMontageInfo(const TSharedPtr<FJsonObject>& Para
     Obj->SetNumberField(TEXT("blend_in"), Montage->BlendIn.GetBlendTime());
     Obj->SetNumberField(TEXT("blend_out"), Montage->BlendOut.GetBlendTime());
     // Round-trip the blend MODE + sync / auto-blend-out properties
-    // that set_montage_properties writes (set_montage_blend_times only owns the TIMES).
+    // that set_montage_properties writes (it also writes the blend TIMES above).
     Obj->SetStringField(TEXT("blend_mode_in"), AnimAuthoring_BlendModeName(Montage->BlendModeIn));
     Obj->SetStringField(TEXT("blend_mode_out"), AnimAuthoring_BlendModeName(Montage->BlendModeOut));
     Obj->SetBoolField(TEXT("enable_auto_blend_out"), Montage->bEnableAutoBlendOut);
@@ -874,7 +962,7 @@ TSharedPtr<FJsonObject> HandleGetMontageInfo(const TSharedPtr<FJsonObject>& Para
 }
 
 // ---------------------------------------------------------------------------
-// delete_montage_section
+// remove_montage_section
 // Remove a CompositeSection from UAnimMontage::CompositeSections by name.
 // Canonical path: UAnimMontage exposes GetSectionIndex(FName) -> int32 (AnimMontage.h)
 // and a public TArray<FCompositeSection> CompositeSections (AnimMontage.h). There is
@@ -882,7 +970,7 @@ TSharedPtr<FJsonObject> HandleGetMontageInfo(const TSharedPtr<FJsonObject>& Para
 // Idempotent: a missing section returns success with already_existed=false and the
 // current sections list (no fake removed=true). The caller can branch on the boolean.
 // ---------------------------------------------------------------------------
-// MCP:delete_montage_section - Delete the first composite section with that name (FName match, case ignored) from a UAnimMontage and save it; a missing name is a success with removed=false and nothing saved. Links from other sections (NextSectionName) are not updated. Returns removed_index, section_count and the remaining sections. A failed save makes success false, with saved=false and save_error.
+// MCP:remove_montage_section - Delete the first composite section with that name (FName match, case ignored) from a UAnimMontage and save it; a missing name is a success with removed=false and nothing saved. Links from other sections (NextSectionName) are not updated. Returns removed_index, section_count and the remaining sections. A failed save makes success false, with saved=false and save_error.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
 //   @param section_name - Name of the FCompositeSection to remove; compared as an FName, so case is ignored.
 //   @returns { montage_path, section_name, removed_index?, already_existed, removed, section_count, sections[], saved, save_error, message }
@@ -929,7 +1017,7 @@ TSharedPtr<FJsonObject> HandleDeleteMontageSection(const TSharedPtr<FJsonObject>
     Obj->SetNumberField(TEXT("section_count"), Montage->CompositeSections.Num());
     Obj->SetArrayField(TEXT("sections"), CollectSectionNames(Montage));
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Montage section removed"), bSaved, SaveError));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("delete_montage_section"), SaveError);
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("remove_montage_section"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -1002,10 +1090,10 @@ TSharedPtr<FJsonObject> HandleRemoveMontageNotify(const TSharedPtr<FJsonObject>&
 // UPROPERTY (AnimMontage.h); FSlotAnimationTrack has an FName SlotName
 // (AnimMontage.h). There is no RemoveSlot method — surgical TArray::RemoveAt
 // after a SlotName lookup is the canonical pattern (same idiom as
-// delete_montage_section's CompositeSections.RemoveAt). Resolution is by
+// remove_montage_section's CompositeSections.RemoveAt). Resolution is by
 // slot_name (primary; mirrors add_montage_slot) or by slot_index alternative.
 // Idempotent: a missing slot returns success with already_existed=false and the
-// current slots list (no fake removed=true), mirroring delete_montage_section.
+// current slots list (no fake removed=true), mirroring remove_montage_section.
 // ---------------------------------------------------------------------------
 // MCP:remove_montage_slot - Remove a slot animation track from a UAnimMontage by name or index. A failed save makes success false, with saved=false and save_error.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
@@ -1373,82 +1461,9 @@ TSharedPtr<FJsonObject> HandleAddPoseToPoseAsset(const TSharedPtr<FJsonObject>& 
 }
 
 // ---------------------------------------------------------------------------
-// set_anim_montage_rate_scale
-// ---------------------------------------------------------------------------
-// MCP:set_anim_montage_rate_scale - Set the global RateScale (and optionally BlendOutTriggerTime) on a UAnimMontage in an undo transaction and save it. Values the montage already has, or none given, are a success with applied=false and saved=false, and the montage is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
-//   @param montage_path - Path to the UAnimMontage (e.g. '/Game/MyGame/AM_Example').
-//   @param name - Alias of montage_path
-//   @param rate_scale - Global play rate scale (defaults to current value)
-//   @param blend_out_trigger_time - Blend-out trigger time in seconds (defaults to current value)
-//   @returns { montage_path, rate_scale, blend_out_trigger_time, applied, saved, save_error, message }
-TSharedPtr<FJsonObject> HandleSetAnimMontageRateScale(const TSharedPtr<FJsonObject>& Params)
-{
-    // Accept montage_path, or its alias 'name', for the asset path.
-    FString MontagePath;
-    if (!Params->TryGetStringField(TEXT("montage_path"), MontagePath) || MontagePath.IsEmpty())
-    {
-        Params->TryGetStringField(TEXT("name"), MontagePath);
-    }
-    if (MontagePath.IsEmpty())
-    {
-        return mcp_common::MissingParameterReply(TEXT("montage_path"));
-    }
-
-    UAnimMontage* Montage = nullptr;
-    if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadOrError(MontagePath, TEXT("AnimMontage"), Montage)) { return Error; }
-
-    // RateScale lives on UAnimSequenceBase (public float). Default to the current value.
-    double RateScale = Montage->RateScale;
-    const bool bHasRate = Params->TryGetNumberField(TEXT("rate_scale"), RateScale);
-
-    double BlendOutTrigger = Montage->BlendOutTriggerTime;
-    const bool bHasTrigger = Params->TryGetNumberField(TEXT("blend_out_trigger_time"), BlendOutTrigger);
-
-    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-    Obj->SetStringField(TEXT("montage_path"), Montage->GetPathName());
-
-    // Values the montage already has, or none given, change nothing: answered before Modify() would dirty it.
-    const bool bRateChanges = bHasRate && static_cast<float>(RateScale) != Montage->RateScale;
-    const bool bTriggerChanges = bHasTrigger && static_cast<float>(BlendOutTrigger) != Montage->BlendOutTriggerTime;
-    if (!bRateChanges && !bTriggerChanges)
-    {
-        Obj->SetNumberField(TEXT("rate_scale"), Montage->RateScale);
-        Obj->SetNumberField(TEXT("blend_out_trigger_time"), Montage->BlendOutTriggerTime);
-        Obj->SetBoolField(TEXT("applied"), false);
-        return AnimAuthoring_NoChangeReply(Obj, TEXT("The montage already has that rate scale and blend-out trigger time; nothing changed, nothing saved"));
-    }
-
-    {
-        const FScopedTransaction Transaction(LOCTEXT("SetAnimMontageRateScale", "Set Anim Montage Rate Scale"));
-        Montage->Modify();
-        if (bRateChanges)
-        {
-            Montage->RateScale = static_cast<float>(RateScale);
-        }
-        if (bTriggerChanges)
-        {
-            Montage->BlendOutTriggerTime = static_cast<float>(BlendOutTrigger);
-        }
-    }
-
-    // Read back the values that actually landed on the asset.
-    const float AppliedRate = Montage->RateScale;
-    const float AppliedTrigger = Montage->BlendOutTriggerTime;
-
-    FString SaveError;
-    const bool bSaved = AnimAuthoring_SavePackageOf(Montage, SaveError);
-
-    Obj->SetNumberField(TEXT("rate_scale"), AppliedRate);
-    Obj->SetNumberField(TEXT("blend_out_trigger_time"), AppliedTrigger);
-    Obj->SetBoolField(TEXT("applied"), true);
-    Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Montage rate scale set"), bSaved, SaveError));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_anim_montage_rate_scale"), SaveError);
-}
-
-// ---------------------------------------------------------------------------
 // get_anim_asset_info
 // ---------------------------------------------------------------------------
-// MCP:get_anim_asset_info - Load any animation asset and report its class, skeleton and asset_type (montage, composite, pose, sequence, blendspace or animation_asset) plus the counts of that type: sections/slots/notifies, segments, poses/tracks/curves, length, samples. Read-only; get_montage_info, get_anim_sequence_info and get_blendspace_samples give detail.
+// MCP:get_anim_asset_info - Load any animation asset and report its class, skeleton and asset_type (montage, composite, pose, sequence, blendspace or animation_asset) plus the counts of that type: sections/slots/notifies, segments, poses/tracks/curves, length, samples. Read-only; get_montage_info, get_anim_sequence_info and get_blend_space_samples give detail.
 //   @param asset_path - Path to the animation asset (UAnimMontage, UAnimComposite, UPoseAsset, UAnimSequence, or UBlendSpace)
 //   @returns { asset_path, class, skeleton, num_segments, num_poses, section_count, slot_count, notify_count, sequence_length, rate_scale, num_tracks, num_curves, sample_count, asset_type }
 TSharedPtr<FJsonObject> HandleGetAnimAssetInfo(const TSharedPtr<FJsonObject>& Params)
@@ -1654,9 +1669,9 @@ namespace
 }
 
 // ---------------------------------------------------------------------------
-// add_blendspace_sample
+// add_blend_space_sample
 // ---------------------------------------------------------------------------
-// MCP:add_blendspace_sample - Add a blend sample (animation + blend position) to a BlendSpace. A failed save makes success false, with saved=false and save_error.
+// MCP:add_blend_space_sample - Add a blend sample (animation + blend position) to a BlendSpace. A failed save makes success false, with saved=false and save_error.
 //   @param blendspace_path - Full asset path to the UBlendSpace (e.g.
 //   @param animation_path - Full asset path to the UAnimSequence to use as sample.
 //   @param blend_value - Blend position: single number (1D) or array of up to 3 numbers (default 0)
@@ -1698,7 +1713,7 @@ TSharedPtr<FJsonObject> HandleAddBlendspaceSample(const TSharedPtr<FJsonObject>&
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Sample added to blendspace"), bSaved, SaveError));
     // Success is BOTH things: the operation succeeded AND it persisted.
     return mcp_common::MakeOutcomeReply(Obj, (SampleIndex != INDEX_NONE) && bSaved,
-        ((SampleIndex != INDEX_NONE) && bSaved) ? FString() : mcp_common::SavedOutcomeError(TEXT("add_blendspace_sample")));
+        ((SampleIndex != INDEX_NONE) && bSaved) ? FString() : mcp_common::SavedOutcomeError(TEXT("add_blend_space_sample")));
 }
 
 namespace
@@ -1729,12 +1744,12 @@ namespace
 }
 
 // ---------------------------------------------------------------------------
-// remove_blendspace_sample
+// remove_blend_space_sample
 // ---------------------------------------------------------------------------
-// remove_blendspace_sample and edit_blendspace_sample validate the index with IsValidBlendSampleIndex, NEVER
+// remove_blend_space_sample and edit_blend_space_sample validate the index with IsValidBlendSampleIndex, NEVER
 // with GetBlendSample, which checkf-asserts on an invalid index.
 
-// MCP:remove_blendspace_sample - Remove a blend sample (by index) from a BlendSpace. WARNING: the remaining indices REORDER -- the engine removes with a swap, so the LAST sample lands in the deleted slot. Never remove a batch by descending index and assume the rest held still: the full post-op sample list is returned so the caller can re-sync before the next call. A failed save makes success false, with saved=false and save_error.
+// MCP:remove_blend_space_sample - Remove a blend sample (by index) from a BlendSpace. WARNING: the remaining indices REORDER -- the engine removes with a swap, so the LAST sample lands in the deleted slot. Never remove a batch by descending index and assume the rest held still: the full post-op sample list is returned so the caller can re-sync before the next call. A failed save makes success false, with saved=false and save_error.
 //   @param blendspace_path - Full asset path to the UBlendSpace.
 //   @param index - Index of the sample to remove.
 //   @returns { blendspace_path, removed, num_samples, samples, saved, save_error, message }
@@ -1760,7 +1775,7 @@ TSharedPtr<FJsonObject> HandleRemoveBlendspaceSample(const TSharedPtr<FJsonObjec
     BlendSpace->Modify();
 
     const bool bRemoved = BlendSpace->DeleteSample(Index);
-    UE_LOG(LogTemp, Verbose, TEXT("remove_blendspace_sample: DeleteSample(%d) on %s -> %s"),
+    UE_LOG(LogTemp, Verbose, TEXT("remove_blend_space_sample: DeleteSample(%d) on %s -> %s"),
            Index, *BlendSpacePath, bRemoved ? TEXT("true") : TEXT("false"));
 
     const int32 NumSamples = BlendSpace->GetNumberOfBlendSamples();
@@ -1778,13 +1793,13 @@ TSharedPtr<FJsonObject> HandleRemoveBlendspaceSample(const TSharedPtr<FJsonObjec
     Obj->SetStringField(TEXT("message"), bSaved
         ? TEXT("Sample removed (RemoveAtSwap reordered remaining indices); saved to disk")
         : FString::Printf(TEXT("Sample removed in-memory; save not persisted (%s)"), *SaveError));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("remove_blendspace_sample"), SaveError);
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("remove_blend_space_sample"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
-// edit_blendspace_sample
+// edit_blend_space_sample
 // ---------------------------------------------------------------------------
-// MCP:edit_blendspace_sample - Edit a blend sample (by index): blend value and/or animation. At least one of blend_value / animation_path is required; both are individually optional so you can retime a sample without touching its animation, or swap the animation without moving it. A sample that already has those values is a success with value_edited=false, animation_replaced=false and saved=false, and the blend space is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
+// MCP:edit_blend_space_sample - Edit a blend sample (by index): blend value and/or animation. At least one of blend_value / animation_path is required; both are individually optional so you can retime a sample without touching its animation, or swap the animation without moving it. A sample that already has those values is a success with value_edited=false, animation_replaced=false and saved=false, and the blend space is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
 //   @param blendspace_path - Full asset path to the UBlendSpace.
 //   @param index - Index of the sample to edit.
 //   @param blend_value - New blend position: single number (1D) or array of up to 3 numbers (optional).
@@ -1860,7 +1875,7 @@ TSharedPtr<FJsonObject> HandleEditBlendspaceSample(const TSharedPtr<FJsonObject>
         // EditSampleValue returns false (no mutation) on invalid index or an
         // out-of-bounds / too-close value — propagate as an honest failure, not a crash.
         bValueEdited = BlendSpace->EditSampleValue(Index, BlendValue);
-        UE_LOG(LogTemp, Verbose, TEXT("edit_blendspace_sample: EditSampleValue(%d, %s) -> %s"),
+        UE_LOG(LogTemp, Verbose, TEXT("edit_blend_space_sample: EditSampleValue(%d, %s) -> %s"),
                Index, *BlendValue.ToString(), bValueEdited ? TEXT("true") : TEXT("false"));
         if (!bValueEdited)
         {
@@ -1874,7 +1889,7 @@ TSharedPtr<FJsonObject> HandleEditBlendspaceSample(const TSharedPtr<FJsonObject>
     if (bHasAnimation)
     {
         bAnimationReplaced = BlendSpace->ReplaceSampleAnimation(Index, NewAnim);
-        UE_LOG(LogTemp, Verbose, TEXT("edit_blendspace_sample: ReplaceSampleAnimation(%d, %s) -> %s"),
+        UE_LOG(LogTemp, Verbose, TEXT("edit_blend_space_sample: ReplaceSampleAnimation(%d, %s) -> %s"),
                Index, *AnimationPath, bAnimationReplaced ? TEXT("true") : TEXT("false"));
         if (!bAnimationReplaced)
         {
@@ -1898,13 +1913,13 @@ TSharedPtr<FJsonObject> HandleEditBlendspaceSample(const TSharedPtr<FJsonObject>
     Obj->SetNumberField(TEXT("num_samples"), NumSamples);
     Obj->SetArrayField(TEXT("samples"), BuildBlendSampleArray(BlendSpace));
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Sample edited"), bSaved, SaveError));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("edit_blendspace_sample"), SaveError);
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("edit_blend_space_sample"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
-// get_blendspace_samples
+// get_blend_space_samples
 // ---------------------------------------------------------------------------
-// MCP:get_blendspace_samples - Read every sample of a UBlendSpace or UBlendSpace1D in index order (animation path, blend_x/blend_y/blend_z, rate_scale) plus num_samples and the per-axis input smoothing under interpolation. Read-only; change samples with add_blendspace_sample, edit_blendspace_sample or remove_blendspace_sample.
+// MCP:get_blend_space_samples - Read every sample of a UBlendSpace or UBlendSpace1D in index order (animation path, blend_x/blend_y/blend_z, rate_scale) plus num_samples and the per-axis input smoothing under interpolation. Read-only; change samples with add_blend_space_sample, edit_blend_space_sample or remove_blend_space_sample.
 //   @param blendspace_path - Full asset path to the UBlendSpace.
 //   @returns { animation, blend_x, blend_y, blend_z, rate_scale, blendspace_path, num_samples, samples }
 TSharedPtr<FJsonObject> HandleGetBlendspaceSamples(const TSharedPtr<FJsonObject>& Params)
@@ -2131,9 +2146,9 @@ TSharedPtr<FJsonObject> HandleAddAnimNotifyState(const TSharedPtr<FJsonObject>& 
 // ---------------------------------------------------------------------------
 // get_anim_notifies
 // ---------------------------------------------------------------------------
-// MCP:get_anim_notifies - List the notify events of a UAnimSequence without changing it: name, trigger time, duration, track_index and the notify_class or notify_state_class of each, plus num_notifies. Use get_notify_track_names for track names and get_montage_info for the notifies of a montage.
+// MCP:get_anim_notifies - List the notify events of a UAnimSequence without changing it: name, trigger time, duration, track_index and the notify_class or notify_state_class of each, plus num_notifies, and the names of its notify tracks in track order (track_names, track_count). Use get_montage_info for the notifies of a montage.
 //   @param animation_path - Full asset path to the UAnimSequence.
-//   @returns { name, time, duration, track_index, notify_class, notify_state_class, animation_path, num_notifies, notifies }
+//   @returns { animation_path, num_notifies, notifies: [{ name, time, duration, track_index, notify_class?, notify_state_class? }], track_names: [string], track_count }
 TSharedPtr<FJsonObject> HandleGetAnimNotifies(const TSharedPtr<FJsonObject>& Params)
 {
     FString AnimationPath;
@@ -2169,6 +2184,17 @@ TSharedPtr<FJsonObject> HandleGetAnimNotifies(const TSharedPtr<FJsonObject>& Par
     Obj->SetStringField(TEXT("animation_path"), AnimSeq->GetPathName());
     Obj->SetNumberField(TEXT("num_notifies"), NotifyEvents.Num());
     Obj->SetArrayField(TEXT("notifies"), NotifiesArray);
+
+    // The notify track names, in track order (GetAnimationNotifyTrackNames clears and refills the array).
+    TArray<FName> TrackNames;
+    UAnimationBlueprintLibrary::GetAnimationNotifyTrackNames(AnimSeq, TrackNames);
+    TArray<TSharedPtr<FJsonValue>> TrackNamesJson;
+    for (const FName& TrackName : TrackNames)
+    {
+        TrackNamesJson.Add(MakeShared<FJsonValueString>(TrackName.ToString()));
+    }
+    Obj->SetArrayField(TEXT("track_names"), TrackNamesJson);
+    Obj->SetNumberField(TEXT("track_count"), TrackNamesJson.Num());
     return mcp_common::MakeOkReply(Obj);
 }
 
@@ -2378,7 +2404,7 @@ namespace
 // ---------------------------------------------------------------------------
 // create_anim_sequence
 // ---------------------------------------------------------------------------
-// MCP:create_anim_sequence - Create a UAnimSequence at package_path/anim_name bound to the USkeleton at skeleton_path (default the engine SkeletalCube_Skeleton) and save it; its data model gets frame_rate rounded to whole fps and round(length_seconds * fps) frames, but no bone tracks or curves. Idempotent: a UAnimSequence already at that path is returned unchanged (already_existed=true, saved=false, length and rate not applied) and nothing is saved; another asset class there or an unknown skeleton is an error. A failed save makes success false, with saved=false and save_error, and the new asset stays in memory only. Fill it with add_anim_bone_track or add_anim_float_curve; inspect it with get_anim_sequence_info.
+// MCP:create_anim_sequence - Create a UAnimSequence at package_path/anim_name bound to the USkeleton at skeleton_path (default the engine SkeletalCube_Skeleton) and save it; its data model gets frame_rate rounded to whole fps and round(length_seconds * fps) frames, but no bone tracks or curves. Idempotent: a UAnimSequence already at that path is returned unchanged (already_existed=true, saved=false, length and rate not applied) and nothing is saved; another asset class there or an unknown skeleton is an error. A failed save makes success false, with saved=false and save_error, and the new asset stays in memory only. Fill it with set_anim_bone_track_keys (identity keys when keys is omitted) or add_anim_float_curve; inspect it with get_anim_sequence_info.
 //   @param anim_name - Asset name (no path).
 //   @param package_path - Target content package path where the asset is created (default /Game/MCP)
 //   @param length_seconds - Sequence length in seconds (default 1.0)
@@ -2466,120 +2492,17 @@ TSharedPtr<FJsonObject> HandleCreateAnimSequence(const TSharedPtr<FJsonObject>& 
 }
 
 // ---------------------------------------------------------------------------
-// add_anim_bone_track
+// set_anim_bone_track_keys — author per-key bone transforms (translation /
+// rotation / scale) on a UAnimSequence bone track, or num_keys identity keys
+// when no keys are given. IAnimationDataController::SetBoneTrackKeys, read back
+// from the data model.
 // ---------------------------------------------------------------------------
-// MCP:add_anim_bone_track - Add the animation track of one skeleton bone to a UAnimSequence through its data controller, filled with num_keys identity keys (zero translation, identity rotation, unit scale), as one undo step, then save the package. An existing track stays but its keys are replaced (idempotent); when that leaves the stored track data as it was (measured with the data model GUID; the engine stores a constant track as one value, whatever num_keys is) the reply is a success with changed=false and saved=false, the package keeps the dirty state it had and nothing is saved. A bone_name the sequence's skeleton does not have is an error and nothing is written; an omitted bone_name targets the root bone. A missing sequence or skeleton is an error and a failed save makes success false, with saved=false and save_error. Real poses: set_anim_bone_track_keys; inverse: remove_anim_bone_track.
+// MCP:set_anim_bone_track_keys - Replace the keys of one bone track of a UAnimSequence with the given per-key transforms (translation, rotation, scale), or, without keys, with num_keys identity keys (zero translation, identity rotation, unit scale), adding the track when it is missing, through its data controller as one undo step, then save the package; num_keys_readback and first_key are read back from the data model. A track that already holds exactly these keys (the stored track data comes out unchanged, measured with the data model GUID; the engine stores a constant track as one value, whatever num_keys is) is a success with changed=false and saved=false, the package keeps the dirty state it had and nothing is saved. A bone_name the sequence's skeleton does not have is an error and nothing is written; an omitted bone_name targets the root bone. keys and num_keys together, an empty keys array or a num_keys below 1 are refused. A failed save makes success false, with saved=false and save_error.
 //   @param anim_sequence_path - Asset path of the UAnimSequence.
 //   @param bone_name - Name of a bone of the skeleton of the sequence; omitted or empty means the root bone.
-//   @param num_keys - Number of identity keys to write, rounded, minimum 1 (default 2); not checked against the frame count of the sequence.
-//   @returns { anim_sequence_path, bone_name, num_bone_tracks, num_keys, changed, success, saved, save_error, message }
-TSharedPtr<FJsonObject> HandleAddAnimBoneTrack(const TSharedPtr<FJsonObject>& Params)
-{
-    FString AnimPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("anim_sequence_path"), AnimPath)) { return Missing; }
-
-    FString RequestedBone;
-    Params->TryGetStringField(TEXT("bone_name"), RequestedBone);
-
-    int32 NumKeys = 2;
-    {
-        double NumKeysD = 2.0;
-        if (Params->TryGetNumberField(TEXT("num_keys"), NumKeysD))
-        {
-            NumKeys = FMath::Max(1, FMath::RoundToInt(NumKeysD));
-        }
-    }
-
-    UAnimSequence* Seq = nullptr;
-    if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadOrError(AnimPath, TEXT("AnimSequence"), Seq)) { return Error; }
-
-    USkeleton* Skeleton = Seq->GetSkeleton();
-    if (!Skeleton)
-    {
-        return mcp_common::MakeErrorReply(TEXT("AnimSequence has no skeleton"));
-    }
-
-    // A named bone must exist on the skeleton: PickBoneName falls back to the root bone, and
-    // writing identity keys to the root track for a misspelled name would wipe the root motion.
-    if (!RequestedBone.IsEmpty()
-        && Skeleton->GetReferenceSkeleton().FindBoneIndex(FName(*RequestedBone)) == INDEX_NONE)
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(
-            TEXT("Bone '%s' is not in skeleton %s; nothing was written. List its bones with get_skeleton_info (load_full_data=true)."),
-            *RequestedBone, *Skeleton->GetPathName()));
-    }
-
-    const FName BoneFName = PickBoneName(Skeleton, RequestedBone);
-    if (BoneFName == NAME_None)
-    {
-        return mcp_common::MakeErrorReply(TEXT("Skeleton has no bones"));
-    }
-
-    int32 NumBoneTracks = 0;
-    bool bSaved = false;
-    FString SaveError;
-
-    // The public data model has no raw key count (GetBoneTrackTransforms samples every frame), so whether the
-    // write changes anything is measured on the stored data, before and after it.
-    const FAnimAuthoring_SequenceWriteProbe Probe(Seq);
-
-    IAnimationDataController& Controller = Seq->GetController();
-    Controller.OpenBracket(NSLOCTEXT("MCP", "AddBoneTrack", "Add Bone Track"));
-
-    // AddBoneCurve adds a bone track (no-op if it already exists).
-    Controller.AddBoneCurve(BoneFName);
-
-    // Three identity key arrays of equal, non-zero length.
-    TArray<FVector3f> PosKeys;
-    TArray<FQuat4f> RotKeys;
-    TArray<FVector3f> ScaleKeys;
-    PosKeys.Init(FVector3f::ZeroVector, NumKeys);
-    RotKeys.Init(FQuat4f::Identity, NumKeys);
-    ScaleKeys.Init(FVector3f(1.0f, 1.0f, 1.0f), NumKeys);
-    Controller.SetBoneTrackKeys(BoneFName, PosKeys, RotKeys, ScaleKeys, true);
-
-    Controller.CloseBracket();
-
-    if (const IAnimationDataModel* Model = Seq->GetDataModel())
-    {
-        NumBoneTracks = Model->GetNumBoneTracks();
-    }
-
-    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-    Obj->SetStringField(TEXT("anim_sequence_path"), Seq->GetPathName());
-    Obj->SetStringField(TEXT("bone_name"), BoneFName.ToString());
-    Obj->SetNumberField(TEXT("num_bone_tracks"), NumBoneTracks);
-    Obj->SetNumberField(TEXT("num_keys"), NumKeys);
-
-    // A track that already held these keys is left as it was: nothing to save.
-    if (Probe.RestoreIfUnchanged())
-    {
-        // The controller's bracket still recorded a change, which would undo nothing.
-        mcp_common::DiscardUndoStepOfThisCall();
-        Obj->SetBoolField(TEXT("changed"), false);
-        Obj->SetBoolField(TEXT("success"), true);
-        return AnimAuthoring_NoChangeReply(Obj, TEXT("The bone track already holds these identity keys; nothing changed, nothing saved"));
-    }
-
-    bSaved = AnimAuthoring_SavePackageOf(Seq, SaveError);
-
-    Obj->SetBoolField(TEXT("changed"), true);
-    Obj->SetBoolField(TEXT("success"), bSaved);
-    Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Bone track added"), bSaved, SaveError, TEXT("")));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("add_anim_bone_track"), SaveError);
-}
-
-// ---------------------------------------------------------------------------
-// set_anim_bone_track_keys — author REAL per-key bone transforms (translation /
-// rotation / scale) on a UAnimSequence bone track, vs add_anim_bone_track which
-// only writes identity. Same IAnimationDataController::SetBoneTrackKeys path,
-// fed from caller-provided per-key transforms; read back from the data model.
-// ---------------------------------------------------------------------------
-// MCP:set_anim_bone_track_keys - Replace the keys of one bone track of a UAnimSequence with the given per-key transforms (translation, rotation, scale: real pose data, not identity), adding the track when it is missing, through its data controller as one undo step, then save the package; num_keys_readback and first_key are read back from the data model. A track that already holds exactly these keys (the stored track data comes out unchanged, measured with the data model GUID) is a success with changed=false and saved=false, the package keeps the dirty state it had and nothing is saved. A bone_name the sequence's skeleton does not have is an error and nothing is written; an omitted bone_name targets the root bone. A failed save makes success false, with saved=false and save_error. Identity keys: add_anim_bone_track.
-//   @param anim_sequence_path - Asset path of the UAnimSequence.
-//   @param bone_name - Name of a bone of the skeleton of the sequence; omitted or empty means the root bone.
-//   @param keys - Array of per-key transforms: { translation:[x,y,z], rotation:[pitch,yaw,roll] (deg), scale:[x,y,z] }. translation default [0,0,0], rotation default [0,0,0], scale default [1,1,1].
-//   @returns { anim_sequence_path, bone_name, num_keys, num_keys_readback, num_bone_tracks, first_key:{translation,rotation_euler}, changed, success, saved, save_error, message }
+//   @param keys - Optional array of per-key transforms: { translation:[x,y,z], rotation:[pitch,yaw,roll] (deg), scale:[x,y,z] }. translation default [0,0,0], rotation default [0,0,0], scale default [1,1,1]. Omitted: num_keys identity keys are written.
+//   @param num_keys - Optional number of identity keys to write when keys is omitted, rounded, >= 1 (default 2); not checked against the frame count of the sequence.
+//   @returns { anim_sequence_path, bone_name, num_keys, num_keys_readback, num_bone_tracks, first_key:{translation,rotation_euler}, identity_keys, changed, success, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleSetAnimBoneTrackKeys(const TSharedPtr<FJsonObject>& Params)
 {
     FString AnimPath;
@@ -2587,11 +2510,25 @@ TSharedPtr<FJsonObject> HandleSetAnimBoneTrackKeys(const TSharedPtr<FJsonObject>
     FString RequestedBone;
     Params->TryGetStringField(TEXT("bone_name"), RequestedBone);
 
+    // keys (real transforms) or, without them, num_keys identity keys (default 2).
     const TArray<TSharedPtr<FJsonValue>>* KeysArr = nullptr;
-    if (!Params->TryGetArrayField(TEXT("keys"), KeysArr) || !KeysArr || KeysArr->Num() == 0)
+    const bool bHasKeys = Params->TryGetArrayField(TEXT("keys"), KeysArr) && KeysArr;
+    double NumKeysD = 2.0;
+    const bool bHasNumKeys = Params->TryGetNumberField(TEXT("num_keys"), NumKeysD);
+    if (bHasKeys && bHasNumKeys)
     {
-        return mcp_common::MakeErrorReply(TEXT("Missing required non-empty 'keys' array parameter"));
+        return mcp_common::MakeErrorReply(TEXT("Pass keys (per-key transforms) or num_keys (identity keys), not both; nothing was written."));
     }
+    if (bHasKeys && KeysArr->Num() == 0)
+    {
+        return mcp_common::MakeErrorReply(TEXT("'keys' is empty: pass at least one key, or omit it to write num_keys identity keys"));
+    }
+    if (!bHasKeys && (NumKeysD < 0.5 || NumKeysD > static_cast<double>(TNumericLimits<int32>::Max())))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("num_keys must be at least 1 (got %g); nothing was written."), NumKeysD));
+    }
+    const int32 IdentityKeyCount = bHasKeys ? 0 : FMath::Max(1, FMath::RoundToInt(NumKeysD));
 
     UAnimSequence* Seq = nullptr;
     if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadOrError(AnimPath, TEXT("AnimSequence"), Seq)) { return Error; }
@@ -2634,7 +2571,16 @@ TSharedPtr<FJsonObject> HandleSetAnimBoneTrackKeys(const TSharedPtr<FJsonObject>
     TArray<FVector3f> PosKeys;
     TArray<FQuat4f> RotKeys;
     TArray<FVector3f> ScaleKeys;
-    for (const TSharedPtr<FJsonValue>& KV : *KeysArr)
+    if (!bHasKeys)
+    {
+        // Three identity key arrays of equal, non-zero length.
+        PosKeys.Init(FVector3f::ZeroVector, IdentityKeyCount);
+        RotKeys.Init(FQuat4f::Identity, IdentityKeyCount);
+        ScaleKeys.Init(FVector3f(1.0f, 1.0f, 1.0f), IdentityKeyCount);
+    }
+    static const TArray<TSharedPtr<FJsonValue>> NoKeys;
+    const TArray<TSharedPtr<FJsonValue>>& KeySource = bHasKeys ? *KeysArr : NoKeys;
+    for (const TSharedPtr<FJsonValue>& KV : KeySource)
     {
         const TSharedPtr<FJsonObject>* KeyObjPtr = nullptr;
         if (!KV.IsValid() || !KV->TryGetObject(KeyObjPtr) || !KeyObjPtr) { continue; }
@@ -2661,7 +2607,8 @@ TSharedPtr<FJsonObject> HandleSetAnimBoneTrackKeys(const TSharedPtr<FJsonObject>
     bool bSaved = false;
     FString SaveError;
 
-    // Measured on the stored data before and after the write, as add_anim_bone_track does.
+    // The public data model has no raw key count (GetBoneTrackTransforms samples every frame), so whether the
+    // write changes anything is measured on the stored data, before and after it.
     const FAnimAuthoring_SequenceWriteProbe Probe(Seq);
 
     IAnimationDataController& Controller = Seq->GetController();
@@ -2690,6 +2637,7 @@ TSharedPtr<FJsonObject> HandleSetAnimBoneTrackKeys(const TSharedPtr<FJsonObject>
     Obj->SetNumberField(TEXT("num_keys"), NumKeys);
     Obj->SetNumberField(TEXT("num_keys_readback"), NumKeysReadback);
     Obj->SetNumberField(TEXT("num_bone_tracks"), NumBoneTracks);
+    Obj->SetBoolField(TEXT("identity_keys"), !bHasKeys);
     {
         TSharedPtr<FJsonObject> First = MakeShared<FJsonObject>();
         TArray<TSharedPtr<FJsonValue>> T = mcp_common::VectorToJsonArray(FirstPos);
@@ -3269,17 +3217,37 @@ TSharedPtr<FJsonObject> HandleScaleAnimCurve(const TSharedPtr<FJsonObject>& Para
 // ---------------------------------------------------------------------------
 // add_anim_float_curve
 // ---------------------------------------------------------------------------
-// MCP:add_anim_float_curve - Add a float curve (Editable flag) to a UAnimSequence through its data controller and set its keys from [time, value] pairs as linear keys with auto tangents, in one undo step, then save the package. An existing float curve of that name is kept and its keys are replaced (idempotent); one that already holds exactly those keys is a success with changed=false and saved=false, and nothing is written or saved. curve_found confirms the curve and num_keys counts the keys sent. A missing sequence is an error and a failed save makes success false, with saved=false and save_error. Rekey: set_anim_curve_keys; transform curves: add_anim_transform_curve; a skeleton-only name: add_anim_curve_name; read back: get_anim_curve_data.
+// MCP:add_anim_float_curve - Add a float curve (Editable flag) to a UAnimSequence, or rekey the one already there, through its data controller: its keys become the [time, value] pairs as linear keys with auto tangents, in one undo step, then the package is saved. An existing float curve of that name is kept and its keys are replaced (idempotent); one that already holds exactly those keys is a success with changed=false, applied=false and saved=false, and nothing is written or saved. curve_found confirms the curve and num_keys counts the keys sent. A missing sequence is an error, and so are keys the data controller rejects, with nothing saved; a failed save makes success false, with saved=false and save_error. curve_type=transform is refused before anything is loaded, since [time, value] keys only fit a float curve. Transform curves: add_anim_transform_curve; a skeleton-only name: add_anim_curve_name; read back: get_anim_curve_data.
 //   @param anim_sequence_path - Asset path of the UAnimSequence.
-//   @param curve_name - Float curve name to add.
-//   @param keys - JSON array of [time, value] pairs (default [[0,0],[1,1]])
-//   @returns { anim_sequence_path, curve_name, num_float_curves, num_keys, curve_found, changed, success, saved, save_error, message }
+//   @param curve_name - Float curve name to add or rekey.
+//   @param keys - JSON array of [time, value] pairs, time in seconds (default [[0,0],[1,1]]); entries that are not such a pair are skipped.
+//   @param curve_type - Optional curve type the keys are meant for: float (the default, the only one written). transform is refused with an error pointing at add_anim_transform_curve; any other value is an error.
+//   @returns { anim_sequence_path, curve_name, num_float_curves, num_keys, curve_found, changed, applied, success, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleAddAnimFloatCurve(const TSharedPtr<FJsonObject>& Params)
 {
     FString AnimPath, CurveName;
     if (TSharedPtr<FJsonObject> Error = AnimAuthoring_ReadCurveTarget(Params, AnimPath, CurveName))
     {
         return Error;
+    }
+
+    // curve_type is optional and only float is written. A transform curve holds nine channel curves
+    // (translation/rotation/scale by X/Y/Z) that the data controller keys only through an identifier
+    // naming the channel and axis; a [time, value] pair addresses none of them, so a caller that meant
+    // a transform curve is refused instead of getting a float curve of that name.
+    const FString CurveTypeRaw = AnimAuthoring_ReadCurveType(Params);
+    const FString CurveTypeLower = CurveTypeRaw.ToLower();
+    if (CurveTypeLower == TEXT("transform"))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("add_anim_float_curve takes [time, value] keys, which only a float curve has; '%s' asks for a transform curve. ")
+            TEXT("Key a transform curve with add_anim_transform_curve (its keys are {time, location, rotation, scale})."),
+            *CurveTypeRaw));
+    }
+    if (CurveTypeLower != TEXT("float"))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Unsupported curve_type '%s' (add_anim_float_curve writes float curves: use float, or omit it)"), *CurveTypeRaw));
     }
 
     // keys=[[time,value],...]; default [[0,0],[1,1]].
@@ -3316,6 +3284,7 @@ TSharedPtr<FJsonObject> HandleAddAnimFloatCurve(const TSharedPtr<FJsonObject>& P
             Obj->SetNumberField(TEXT("num_keys"), RichKeys.Num());
             Obj->SetBoolField(TEXT("curve_found"), true);
             Obj->SetBoolField(TEXT("changed"), false);
+            Obj->SetBoolField(TEXT("applied"), false);
             Obj->SetBoolField(TEXT("success"), true);
             return AnimAuthoring_NoChangeReply(Obj, TEXT("The float curve already exists with those keys; nothing changed, nothing saved"));
         }
@@ -3325,9 +3294,17 @@ TSharedPtr<FJsonObject> HandleAddAnimFloatCurve(const TSharedPtr<FJsonObject>& P
 
     // 0x00000004 == AACF_DefaultCurve.
     Controller.AddCurve(CurveId, 0x00000004);
-    Controller.SetCurveKeys(CurveId, RichKeys, true);
+    // SetCurveKeys returns false only when it wrote neither the curve's keys nor its control keys.
+    const bool bKeysSet = Controller.SetCurveKeys(CurveId, RichKeys, true);
 
     Controller.CloseBracket();
+
+    if (!bKeysSet)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("The data controller rejected the keys for float curve '%s' (see the editor log); nothing was saved"),
+            *CurveName));
+    }
 
     if (const IAnimationDataModel* Model = Seq->GetDataModel())
     {
@@ -3344,6 +3321,7 @@ TSharedPtr<FJsonObject> HandleAddAnimFloatCurve(const TSharedPtr<FJsonObject>& P
     Obj->SetNumberField(TEXT("num_keys"), RichKeys.Num());
     Obj->SetBoolField(TEXT("curve_found"), bCurveFound);
     Obj->SetBoolField(TEXT("changed"), true);
+    Obj->SetBoolField(TEXT("applied"), true);
     Obj->SetBoolField(TEXT("success"), true);
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Float curve added"), bSaved, SaveError, TEXT("")));
     return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("add_anim_float_curve"), SaveError);
@@ -3477,13 +3455,21 @@ TSharedPtr<FJsonObject> HandleSetAnimRootMotion(const TSharedPtr<FJsonObject>& P
 // ---------------------------------------------------------------------------
 // get_anim_sequence_info
 // ---------------------------------------------------------------------------
-// MCP:get_anim_sequence_info - Read a UAnimSequence without changing it: skeleton, play_length, frame_rate, num_frames, bone track and float curve counts from its data model, num_sync_markers, enable_root_motion, retarget_source and ref_pose_seq. Use get_anim_curve_names for the track and curve names.
+// MCP:get_anim_sequence_info - Read a UAnimSequence without changing it: skeleton, play_length, frame_rate, num_frames, the bone track, float curve and transform curve counts and NAMES from its data model, num_sync_markers, enable_root_motion, retarget_source and ref_pose_seq.
 //   @param anim_sequence_path - Asset path of the UAnimSequence.
-//   @returns { anim_sequence_path, skeleton, play_length, frame_rate, num_frames, num_bone_tracks, num_float_curves, num_sync_markers, enable_root_motion, success }
+//   @param sequence_path - Alias of anim_sequence_path.
+//   @returns { anim_sequence_path, skeleton, play_length, frame_rate, num_frames, num_bone_tracks, num_float_curves, transform_curve_count, bone_tracks: [string], float_curves: [string], transform_curves: [string], num_sync_markers, enable_root_motion, retarget_source, ref_pose_seq, success }
 TSharedPtr<FJsonObject> HandleGetAnimSequenceInfo(const TSharedPtr<FJsonObject>& Params)
 {
     FString AnimPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("anim_sequence_path"), AnimPath)) { return Missing; }
+    if (!Params->TryGetStringField(TEXT("anim_sequence_path"), AnimPath) && !Params->TryGetStringField(TEXT("sequence_path"), AnimPath))
+    {
+        return mcp_common::MissingParameterReply(TEXT("anim_sequence_path"));
+    }
+    if (AnimPath.IsEmpty())
+    {
+        return mcp_common::MissingParameterReply(TEXT("anim_sequence_path"));
+    }
 
     UAnimSequence* Seq = nullptr;
     if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadOrError(AnimPath, TEXT("AnimSequence"), Seq)) { return Error; }
@@ -3495,6 +3481,33 @@ TSharedPtr<FJsonObject> HandleGetAnimSequenceInfo(const TSharedPtr<FJsonObject>&
     Obj->SetStringField(TEXT("skeleton"), Skeleton ? Skeleton->GetPathName() : FString());
 
     FillSequenceModelCounts(Seq, Obj);
+
+    // The names of the bone tracks, float curves and transform curves of the data model.
+    TArray<TSharedPtr<FJsonValue>> BoneTracks;
+    TArray<TSharedPtr<FJsonValue>> FloatCurves;
+    TArray<TSharedPtr<FJsonValue>> TransformCurves;
+    if (const IAnimationDataModel* Model = Seq->GetDataModel())
+    {
+        TArray<FName> BoneTrackNames;
+        Model->GetBoneTrackNames(BoneTrackNames);
+        for (const FName& Bone : BoneTrackNames)
+        {
+            BoneTracks.Add(MakeShared<FJsonValueString>(Bone.ToString()));
+        }
+        for (const FFloatCurve& Curve : Model->GetFloatCurves())
+        {
+            FloatCurves.Add(MakeShared<FJsonValueString>(Curve.GetName().ToString()));
+        }
+        for (const FTransformCurve& Curve : Model->GetTransformCurves())
+        {
+            TransformCurves.Add(MakeShared<FJsonValueString>(Curve.GetName().ToString()));
+        }
+    }
+    Obj->SetNumberField(TEXT("transform_curve_count"), TransformCurves.Num());
+    Obj->SetArrayField(TEXT("bone_tracks"), BoneTracks);
+    Obj->SetArrayField(TEXT("float_curves"), FloatCurves);
+    Obj->SetArrayField(TEXT("transform_curves"), TransformCurves);
+
     int32 NumSyncMarkers = Seq->AuthoredSyncMarkers.Num();
     Obj->SetNumberField(TEXT("num_sync_markers"), NumSyncMarkers);
     Obj->SetBoolField(TEXT("enable_root_motion"), Seq->bEnableRootMotion);
@@ -3894,11 +3907,9 @@ TSharedPtr<FJsonObject> HandleCreatePoseAssetFromAnimSequence(const TSharedPtr<F
 //   remove_anim_sync_marker      -- direct UAnimSequence::AuthoredSyncMarkers.RemoveAll
 //   set_anim_frame_rate          -- IAnimationDataController::SetFrameRate
 //   set_anim_number_of_frames    -- IAnimationDataController::SetNumberOfFrames
-//   duplicate_anim_sequence      -- StaticDuplicateObject into /Game
-//   get_anim_curve_names         -- IAnimationDataModel::GetBoneTrackNames + GetFloatCurves + GetTransformCurves
 // ===========================================================================
 
-// MCP:remove_anim_bone_track - Remove the animation track of one bone from a UAnimSequence through its data controller (IAnimationDataController::RemoveBoneTrack, one undo step) and save the package. No track with that bone name is a success with removed=false and nothing saved; a failed save makes success false, with saved=false and save_error. List tracks with get_anim_curve_names.
+// MCP:remove_anim_bone_track - Remove the animation track of one bone from a UAnimSequence through its data controller (IAnimationDataController::RemoveBoneTrack, one undo step) and save the package. No track with that bone name is a success with removed=false and nothing saved; a failed save makes success false, with saved=false and save_error. List tracks with get_anim_sequence_info (bone_tracks).
 //   @param sequence_path - Asset path of the UAnimSequence.
 //   @param bone_name - Name of the bone track to remove; a name no track has removes nothing.
 //   @returns { sequence_path, bone_name, removed, saved, save_error }
@@ -4229,119 +4240,15 @@ TSharedPtr<FJsonObject> HandleSetAnimNumberOfFrames(const TSharedPtr<FJsonObject
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_anim_number_of_frames"), SaveError);
 }
 
-// MCP:duplicate_anim_sequence - Copy a UAnimSequence to a new asset package_path/new_name with the same skeleton (StaticDuplicateObject) and save it; a name already taken by any asset, in memory or on disk (the source included), is refused and nothing is touched. A failed save makes success false, with saved=false and save_error, and the copy stays in memory only. Returns duplicate_path and duplicate_class. For other asset types use duplicate_asset.
-//   @param source_path - Asset path of the source UAnimSequence.
-//   @param new_name - Name of the new duplicate.
-//   @param package_path - Target content package path where the asset is created (default /Game/MCP)
-//   @returns { source_path, duplicate_path, duplicate_class, saved, save_error }
-TSharedPtr<FJsonObject> HandleDuplicateAnimSequence(const TSharedPtr<FJsonObject>& Params)
-{
-    FString SourcePath, NewName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("source_path"), SourcePath)) { return Missing; }
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("new_name"), NewName)) { return Missing; }
-    FString PackagePath = mcp_common::DefaultAssetFolder();
-    Params->TryGetStringField(TEXT("package_path"), PackagePath);
-    PackagePath.RemoveFromEnd(TEXT("/"));
-
-    UAnimSequence* Source = nullptr;
-    if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadOrError(SourcePath, TEXT("Source AnimSequence"), Source)) { return Error; }
-    const FString FullPackageName = PackagePath / NewName;
-    if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(FullPackageName)) { return Invalid; }
-
-    // An existing asset of that name is refused, in memory or on disk, whatever its class (as duplicate_mpc
-    // refuses an existing target). For a UAnimSequence, StaticDuplicateObject would replace it in place:
-    // StaticAllocateObject destroys the live object and constructs the copy in its memory, under the asset
-    // editors, montages and undo history that still reference it.
-    const FString ObjectPath = FPackageName::ObjectPathToPackageName(FullPackageName) + TEXT(".") + NewName;
-    if (FindObject<UObject>(nullptr, *ObjectPath)
-        || IAssetRegistry::GetChecked().GetAssetByObjectPath(FSoftObjectPath(ObjectPath), /*bIncludeOnlyOnDiskAssets*/ true).IsValid())
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(
-            TEXT("'%s' already exists; nothing was changed. Choose another new_name, or delete or rename the existing asset first."),
-            *ObjectPath));
-    }
-
-    FString PackageError;
-    UPackage* Package = mcp_common::CreateAssetPackage(FullPackageName, NewName, Source->GetClass(), PackageError);
-    if (!Package)
-    {
-        return mcp_common::MakeErrorReply(PackageError);
-    }
-    Package->FullyLoad();
-
-    UObject* Dup = StaticDuplicateObject(Source, Package, FName(*NewName), RF_Public | RF_Standalone);
-    UAnimSequence* DupSeq = Cast<UAnimSequence>(Dup);
-    if (!DupSeq)
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Duplication produced wrong type (%s)"), Dup ? *Dup->GetClass()->GetName() : TEXT("null")));
-    }
-    DupSeq->SetSkeleton(Source->GetSkeleton());
-    FAssetRegistryModule::AssetCreated(DupSeq);
-    Package->MarkPackageDirty();
-    FString SaveError;
-    const bool bSaved = mcp_common::SaveAssetPackage(DupSeq->GetPackage(), DupSeq, SaveError);
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("source_path"), Source->GetPathName());
-    Data->SetStringField(TEXT("duplicate_path"), DupSeq->GetPathName());
-    Data->SetStringField(TEXT("duplicate_class"), DupSeq->GetClass()->GetName());
-    return mcp_common::MakeSavedReply(Data, bSaved, TEXT("duplicate_anim_sequence"), SaveError);
-}
-
-// MCP:get_anim_curve_names - List the bone tracks, float curves, and transform curves on a UAnimSequence
-//   @param sequence_path - Asset path of the UAnimSequence.
-//   @returns { sequence_path, bone_track_count, float_curve_count, transform_curve_count, bone_tracks, float_curves, transform_curves }
-TSharedPtr<FJsonObject> HandleGetAnimCurveNames(const TSharedPtr<FJsonObject>& Params)
-{
-    FString SequencePath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("sequence_path"), SequencePath)) { return Missing; }
-    UAnimSequence* Sequence = nullptr;
-    if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadOrError(SequencePath, TEXT("AnimSequence"), Sequence)) { return Error; }
-    const IAnimationDataModel* Model = Sequence->GetDataModel();
-
-    TArray<TSharedPtr<FJsonValue>> BoneTracks;
-    TArray<TSharedPtr<FJsonValue>> FloatCurves;
-    TArray<TSharedPtr<FJsonValue>> TransformCurves;
-    if (Model)
-    {
-        TArray<FName> BoneTrackNames;
-        Model->GetBoneTrackNames(BoneTrackNames);
-        for (const FName& Bone : BoneTrackNames)
-        {
-            BoneTracks.Add(MakeShared<FJsonValueString>(Bone.ToString()));
-        }
-        for (const FFloatCurve& C : Model->GetFloatCurves())
-        {
-            FloatCurves.Add(MakeShared<FJsonValueString>(C.GetName().ToString()));
-        }
-        for (const FTransformCurve& C : Model->GetTransformCurves())
-        {
-            TransformCurves.Add(MakeShared<FJsonValueString>(C.GetName().ToString()));
-        }
-    }
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("sequence_path"), Sequence->GetPathName());
-    Data->SetNumberField(TEXT("bone_track_count"), BoneTracks.Num());
-    Data->SetNumberField(TEXT("float_curve_count"), FloatCurves.Num());
-    Data->SetNumberField(TEXT("transform_curve_count"), TransformCurves.Num());
-    Data->SetArrayField(TEXT("bone_tracks"), BoneTracks);
-    Data->SetArrayField(TEXT("float_curves"), FloatCurves);
-    Data->SetArrayField(TEXT("transform_curves"), TransformCurves);
-    return mcp_common::MakeOkReply(Data);
-}
-
 // ========================================================================== //
 // Anim sequence curves advanced
 
 #define LOCTEXT_NAMESPACE "UEAgentAnimationAuthoringCommands"
-// Per-curve keyframe manipulation, curve flags, rename, full readback and
-// reimport on an AnimSequence; `add_anim_float_curve` /
+// Curve flags, rename, full readback and reimport on an AnimSequence;
+// `add_anim_float_curve` (which also rekeys an existing float curve) /
 // `add_anim_transform_curve` / `remove_anim_curve` cover add+remove at the
 // curve level.
-//   set_anim_curve_keys                  IAnimationDataController::SetCurveKeys
-//                                         (replace keys on an existing curve).
-//   set_anim_curve_interp_mode           IAnimationDataController::SetCurveFlags
+//   set_anim_curve_flags           IAnimationDataController::SetCurveFlags
 //                                         (AACF_DefaultCurve / Editable / Metadata /
 //                                         DriveTrack / Disabled).
 //   rename_anim_curve                    IAnimationDataController::RenameCurve.
@@ -4353,102 +4260,7 @@ TSharedPtr<FJsonObject> HandleGetAnimCurveNames(const TSharedPtr<FJsonObject>& P
 //   calls IAnimationDataController::SetFrameRate — see above.)
 // ========================================================================== //
 
-// MCP:set_anim_curve_keys - Replace every key of an existing float curve on a UAnimSequence with the given [time, value] pairs as linear keys with auto tangents, through its data controller in an undo transaction, then save the package; num_keys is read back. The curve must exist (add_anim_float_curve first) and keys needs at least one valid pair. A transform curve is refused, since its keys are transforms, not [time, value] pairs: rekey it with add_anim_transform_curve. Any other curve_type is an error, and so is a rekey the data controller rejects, with nothing saved. A curve that already holds exactly those keys is a success with applied=false, saved=false and a note, and nothing is written or saved. A failed save makes success false, with saved=false and save_error.
-//   @param anim_sequence_path - Full asset path to the UAnimSequence
-//   @param curve_name - Name of the float curve (e.g. "MyCurve")
-//   @param keys - JSON array of [time, value] pairs, time in seconds, at least one; entries that are not such a pair are skipped, and tangents or interpolation cannot be given.
-//   @param curve_type - Curve type to target: float (default) or transform; transform is refused with an error pointing at add_anim_transform_curve.
-//   @returns { anim_sequence_path, curve_name, curve_type, num_keys, applied, saved, save_error, note? }
-TSharedPtr<FJsonObject> HandleSetAnimCurveKeys(const TSharedPtr<FJsonObject>& Params)
-{
-    FString AnimPath, CurveName;
-    if (TSharedPtr<FJsonObject> Error = AnimAuthoring_ReadCurveTarget(Params, AnimPath, CurveName))
-    {
-        return Error;
-    }
-    const FString CurveTypeRaw = AnimAuthoring_ReadCurveType(Params);
-    const FString CTLower = CurveTypeRaw.ToLower();
-    if (CTLower == TEXT("transform"))
-    {
-        // A transform curve holds nine channel curves (translation/rotation/scale by X/Y/Z), and the
-        // data controller keys one only through an identifier that names its channel and axis; a
-        // [time, value] pair addresses none of them, so the call is refused instead of writing nothing.
-        return mcp_common::MakeErrorReply(FString::Printf(
-            TEXT("set_anim_curve_keys takes [time, value] keys, which only a float curve has; '%s' asks for a transform curve. ")
-            TEXT("Rekey a transform curve with add_anim_transform_curve (its keys are {time, location, rotation, scale})."),
-            *CurveTypeRaw));
-    }
-    if (CTLower != TEXT("float"))
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Unsupported curve_type '%s' (set_anim_curve_keys rekeys float curves: use float)"), *CurveTypeRaw));
-    }
-
-    // keys=[[time,value],...]; at least one pair.
-    const TArray<FRichCurveKey> RichKeys = AnimAuthoring_ReadTimeValueKeys(Params);
-    if (RichKeys.Num() == 0)
-    {
-        return mcp_common::MakeErrorReply(TEXT("Missing required parameter: keys (>=1 [time,value] pair)"));
-    }
-
-    UAnimSequence* Seq = nullptr;
-    if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadOrError(AnimPath, TEXT("AnimSequence"), Seq)) { return Error; }
-
-    const FName CurveFName(*CurveName);
-    const FAnimationCurveIdentifier CurveId(CurveFName, ERawCurveTrackTypes::RCT_Float);
-    IAnimationDataController& Controller = Seq->GetController();
-
-    const FFloatCurve* ExistingCurve = Controller.GetModel()->FindFloatCurve(CurveId);
-    if (!ExistingCurve)
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Float curve '%s' does not exist; call add_anim_float_curve first"), *CurveName));
-    }
-
-    // A curve that already holds exactly these keys changes nothing: answered before the transaction.
-    if (AnimAuthoring_FloatCurveHasKeys(ExistingCurve, RichKeys))
-    {
-        TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-        Result->SetStringField(TEXT("anim_sequence_path"), Seq->GetPathName());
-        Result->SetStringField(TEXT("curve_name"), CurveName);
-        Result->SetStringField(TEXT("curve_type"), CurveTypeRaw);
-        Result->SetNumberField(TEXT("num_keys"), ExistingCurve->FloatCurve.Keys.Num());
-        Result->SetBoolField(TEXT("applied"), false);
-        return AnimAuthoring_NoChangeReply(Result, TEXT("The curve already holds those keys; nothing changed and nothing was saved."), TEXT("note"));
-    }
-
-    const FScopedTransaction Transaction(LOCTEXT("SetAnimCurveKeys", "Set Anim Curve Keys"));
-    Controller.OpenBracket(NSLOCTEXT("MCP", "SetCurveKeys", "Set Curve Keys"));
-    const bool bApplied = Controller.SetCurveKeys(CurveId, RichKeys, true);
-    Controller.CloseBracket();
-
-    // SetCurveKeys returns false only when it wrote neither the curve's keys nor its control keys.
-    if (!bApplied)
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(
-            TEXT("The data controller rejected the keys for float curve '%s' (see the editor log); nothing was saved"),
-            *CurveName));
-    }
-
-    int32 NumKeys = 0;
-    if (const FFloatCurve* C = Controller.GetModel()->FindFloatCurve(CurveId))
-    {
-        NumKeys = C->FloatCurve.Keys.Num();
-    }
-
-    FString SaveError;
-    const bool bSaved = AnimAuthoring_SavePackageOf(Seq, SaveError);
-
-    TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-    Result->SetStringField(TEXT("anim_sequence_path"), Seq->GetPathName());
-    Result->SetStringField(TEXT("curve_name"), CurveName);
-    Result->SetStringField(TEXT("curve_type"), CurveTypeRaw);
-    Result->SetNumberField(TEXT("num_keys"), NumKeys);
-    Result->SetBoolField(TEXT("applied"), bApplied);
-    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("set_anim_curve_keys"), SaveError);
-}
-
-// MCP:set_anim_curve_interp_mode - Replace the curve flags (the EAnimAssetCurveFlags bitmask) of an existing float or transform curve on a UAnimSequence with one flag, in an undo transaction, then save the package. Despite the name it changes no key interpolation or tangents: linear and editable both set Editable; metadata, drive_track and disabled set those flags. interp_mode is required; an unknown mode, curve or sequence is an error, and any curve_type other than transform means float. old_flags and new_flags are the bitmasks before and after; flags the curve already has are a success with applied=false, saved=false and a note, and nothing is written or saved; a failed save makes success false, with saved=false and save_error. get_anim_curve_data reads the flags.
+// MCP:set_anim_curve_flags - Replace the curve flags (the EAnimAssetCurveFlags bitmask) of an existing float or transform curve on a UAnimSequence with one flag, in an undo transaction, then save the package. Despite the name it changes no key interpolation or tangents: linear and editable both set Editable; metadata, drive_track and disabled set those flags. interp_mode is required; an unknown mode, curve or sequence is an error, and any curve_type other than transform means float. old_flags and new_flags are the bitmasks before and after; flags the curve already has are a success with applied=false, saved=false and a note, and nothing is written or saved; a failed save makes success false, with saved=false and save_error. get_anim_curve_data reads the flags.
 //   @param anim_sequence_path - Full asset path to the UAnimSequence
 //   @param curve_name - Name of the curve
 //   @param interp_mode [string!] - One of "linear|editable|metadata|drive_track|disabled"
@@ -4546,12 +4358,12 @@ TSharedPtr<FJsonObject> HandleSetAnimCurveInterpMode(const TSharedPtr<FJsonObjec
     Result->SetNumberField(TEXT("old_flags"), OldFlags);
     Result->SetNumberField(TEXT("new_flags"), Flags);
     Result->SetBoolField(TEXT("applied"), bApplied);
-    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("set_anim_curve_interp_mode"), SaveError);
+    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("set_anim_curve_flags"), SaveError);
 }
 
 // MCP:rename_anim_curve - Rename a float or transform curve on a UAnimSequence through its data controller (one undo step) and save it; errors when the source curve does not exist or the rename is refused. The same name for both is a success with renamed=false, saved=false and a note, and nothing is written or saved. Any curve_type other than transform means float. Returns renamed and saved. A failed save makes success false, with saved=false and save_error.
 //   @param anim_sequence_path - Full asset path to the UAnimSequence
-//   @param old_curve_name - Name of the existing curve to rename, as listed by get_anim_curve_names.
+//   @param old_curve_name - Name of the existing curve to rename, as listed by get_anim_sequence_info (float_curves, transform_curves).
 //   @param new_curve_name - Name the curve gets after the rename.
 //   @param curve_type - Curve type to target: float (default) or transform
 //   @returns { anim_sequence_path, old_curve_name, new_curve_name, renamed, saved, save_error, note? }
@@ -4869,7 +4681,7 @@ TSharedPtr<FJsonObject> HandleLinkMontageSections(const TSharedPtr<FJsonObject>&
 }
 
 // ---------------------------------------------------------------------------
-// set_blendspace_properties
+// set_blend_space_properties
 // Configures the X (index 0) and, for 2D blendspaces, Y (index 1) axes of an
 // existing UBlendSpace — name / min / max / grid. create_blend_space only
 // configures the X axis; this is the only way to set the Y axis (or change X
@@ -4877,7 +4689,7 @@ TSharedPtr<FJsonObject> HandleLinkMontageSections(const TSharedPtr<FJsonObject>&
 // array, ArrayDim==3 — same path create_blend_space uses), reads back via
 // GetBlendParameter().
 // ---------------------------------------------------------------------------
-// MCP:set_blendspace_properties - Configure an existing blend space's X and (for 2D) Y axis: name, min, max, grid divisions.  create_blend_space only sets X; this sets the Y axis too (and can change X after creation). On a 1D blend space the y_axis_* params are reported as an honest note and ignored. Only the supplied fields change, in one undo transaction, then the blend space is saved; values the axes already have are a success with changed=false, applied_count 0, saved=false and a note, and nothing is modified or saved. A failed save makes success false, with saved=false and save_error.
+// MCP:set_blend_space_properties - Configure an existing blend space's X and (for 2D) Y axis: name, min, max, grid divisions.  create_blend_space only sets X; this sets the Y axis too (and can change X after creation). On a 1D blend space the y_axis_* params are reported as an honest note and ignored. Only the supplied fields change, in one undo transaction, then the blend space is saved; values the axes already have are a success with changed=false, applied_count 0, saved=false and a note, and nothing is modified or saved. A failed save makes success false, with saved=false and save_error.
 //   @param blend_space_path - Full asset path of the UBlendSpace / UBlendSpace1D.
 //   @param x_axis_name - Optional X axis display name.
 //   @param x_axis_min [number] - Optional X axis minimum value.
@@ -5012,7 +4824,7 @@ TSharedPtr<FJsonObject> HandleSetBlendSpaceProperties(const TSharedPtr<FJsonObje
     {
         return AnimAuthoring_NoChangeReply(Obj, TEXT("The blend space axes already have those values; nothing changed and nothing was saved."), TEXT("note"));
     }
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_blendspace_properties"), SaveError);
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_blend_space_properties"), SaveError);
 }
 
 // ===========================================================================
@@ -5169,29 +4981,6 @@ TSharedPtr<FJsonObject> HandleRemoveNotifyTrack(const TSharedPtr<FJsonObject>& P
     Obj->SetBoolField(TEXT("already_absent"), false);
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Notify track removed"), bSaved, SaveError));
     return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("remove_notify_track"), SaveError);
-}
-
-// ---------------------------------------------------------------------------
-// get_notify_track_names
-// ---------------------------------------------------------------------------
-// MCP:get_notify_track_names - List the notify track names of a UAnimSequence in track order (UAnimationBlueprintLibrary::GetAnimationNotifyTrackNames) without changing it; returns track_names and track_count. Use get_anim_notifies for the events and add_notify_track or remove_notify_track to edit tracks.
-//   @param animation_path - Full asset path to the UAnimSequence.
-//   @returns { animation_path, track_names, track_count }
-TSharedPtr<FJsonObject> HandleGetNotifyTrackNames(const TSharedPtr<FJsonObject>& Params)
-{
-    FString AnimationPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("animation_path"), AnimationPath)) { return Missing; }
-
-    UAnimSequence* AnimSeq = nullptr;
-    if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadOrError(AnimationPath, TEXT("AnimSequence"), AnimSeq)) { return Error; }
-
-    const TArray<TSharedPtr<FJsonValue>> TrackNamesJson = NotifyTrackNamesJson(AnimSeq);
-
-    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-    Obj->SetStringField(TEXT("animation_path"), AnimSeq->GetPathName());
-    Obj->SetArrayField(TEXT("track_names"), TrackNamesJson);
-    Obj->SetNumberField(TEXT("track_count"), TrackNamesJson.Num());
-    return mcp_common::MakeOkReply(Obj);
 }
 
 // ---------------------------------------------------------------------------
@@ -5548,8 +5337,12 @@ TSharedPtr<FJsonObject> HandleEditAnimNotify(const TSharedPtr<FJsonObject>& Para
     return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("edit_anim_notify"), SaveError);
 }
 
-// MCP:set_montage_properties - Set only the supplied blend modes, auto blend out, trigger time, sync group/slot and deprecated root motion fields of a UAnimMontage in one undo step and save it; bad enum names, or no field, are refused before any change, and supplied values the montage already has are a success with changed=false, applied_count 0 and saved=false, with nothing modified or saved. For blend times use set_montage_blend_times. A failed save makes success false, with saved=false and save_error.
+// MCP:set_montage_properties - Set only the supplied blend-in/blend-out times, global rate scale, blend modes, auto blend out, trigger time, sync group/slot and deprecated root motion fields of a UAnimMontage in one undo step and save it; bad enum names, or no field, are refused before any change, and supplied values the montage already has are a success with changed=false, applied_count 0 and saved=false, with nothing modified or saved. A failed save makes success false, with saved=false and save_error.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
+//   @param name - Alias of montage_path.
+//   @param blend_in - Blend-in time in seconds (BlendIn), clamped to >= 0. Optional.
+//   @param blend_out - Blend-out time in seconds (BlendOut), clamped to >= 0. Optional.
+//   @param rate_scale - Global play rate scale of the montage (RateScale). Optional.
 //   @param blend_mode_in - BlendModeIn: 'Standard' or 'Inertialization' (EMontageBlendMode). Optional.
 //   @param blend_mode_out - BlendModeOut: 'Standard' or 'Inertialization' (EMontageBlendMode). Optional.
 //   @param enable_auto_blend_out - When true the montage blends out by itself near its end (bEnableAutoBlendOut); omitted keeps the current value.
@@ -5559,11 +5352,19 @@ TSharedPtr<FJsonObject> HandleEditAnimNotify(const TSharedPtr<FJsonObject>& Para
 //   @param enable_root_motion_translation - bEnableRootMotionTranslation (bool, DEPRECATED since 4.5). Optional.
 //   @param enable_root_motion_rotation - bEnableRootMotionRotation (bool, DEPRECATED since 4.5). Optional.
 //   @param root_motion_root_lock - RootMotionRootLock: 'RefPose'|'AnimFirstFrame'|'Zero' (DEPRECATED since 4.5). Optional.
-//   @returns { montage_path, blend_mode_in, blend_mode_out, enable_auto_blend_out, blend_out_trigger_time, sync_group, sync_slot_index, root_motion: {...}, applied_count, notes, changed, saved, save_error, message }
+//   @returns { montage_path, blend_in, blend_out, rate_scale, blend_mode_in, blend_mode_out, enable_auto_blend_out, blend_out_trigger_time, sync_group, sync_slot_index, root_motion: {...}, applied_count, notes, changed, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleSetMontageProperties(const TSharedPtr<FJsonObject>& Params)
 {
+    // Accept montage_path, or its alias 'name', for the asset path.
     FString MontagePath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("montage_path"), MontagePath)) { return Missing; }
+    if (!Params->TryGetStringField(TEXT("montage_path"), MontagePath) && !Params->TryGetStringField(TEXT("name"), MontagePath))
+    {
+        return mcp_common::MissingParameterReply(TEXT("montage_path"));
+    }
+    if (MontagePath.IsEmpty())
+    {
+        return mcp_common::MissingParameterReply(TEXT("montage_path"));
+    }
 
     UAnimMontage* Montage = nullptr;
     if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadOrError(MontagePath, TEXT("AnimMontage"), Montage)) { return Error; }
@@ -5651,6 +5452,33 @@ TSharedPtr<FJsonObject> HandleSetMontageProperties(const TSharedPtr<FJsonObject>
         bAnyDiffers = false;
         Notes.Reset();
 
+        // Blend times: FAlphaBlend::SetBlendTime clamps to >= 0, so the clamped value is what is compared.
+        double BlendInTimeD = 0.0;
+        if (Params->TryGetNumberField(TEXT("blend_in"), BlendInTimeD))
+        {
+            const float NewIn = FMath::Max(static_cast<float>(BlendInTimeD), 0.0f);
+            ++AppliedCount;
+            bAnyDiffers |= Montage->BlendIn.GetBlendTime() != NewIn;
+            if (bWrite) { Montage->BlendIn.SetBlendTime(NewIn); }
+        }
+        double BlendOutTimeD = 0.0;
+        if (Params->TryGetNumberField(TEXT("blend_out"), BlendOutTimeD))
+        {
+            const float NewOut = FMath::Max(static_cast<float>(BlendOutTimeD), 0.0f);
+            ++AppliedCount;
+            bAnyDiffers |= Montage->BlendOut.GetBlendTime() != NewOut;
+            if (bWrite) { Montage->BlendOut.SetBlendTime(NewOut); }
+        }
+
+        // RateScale lives on UAnimSequenceBase (public float).
+        double RateScaleD = 1.0;
+        if (Params->TryGetNumberField(TEXT("rate_scale"), RateScaleD))
+        {
+            ++AppliedCount;
+            bAnyDiffers |= Montage->RateScale != static_cast<float>(RateScaleD);
+            if (bWrite) { Montage->RateScale = static_cast<float>(RateScaleD); }
+        }
+
         // BlendModeIn/Out are public 'enum class EMontageBlendMode : uint8' members -> assign
         // directly (type-checked; BlueprintReadOnly restricts BP write only, not C++).
         if (bHasBlendIn)
@@ -5733,7 +5561,7 @@ TSharedPtr<FJsonObject> HandleSetMontageProperties(const TSharedPtr<FJsonObject>
     if (AppliedCount == 0)
     {
         return mcp_common::MakeErrorReply(
-            TEXT("No properties provided. Supply at least one of: blend_mode_in, blend_mode_out, enable_auto_blend_out, "
+            TEXT("No properties provided. Supply at least one of: blend_in, blend_out, rate_scale, blend_mode_in, blend_mode_out, enable_auto_blend_out, "
                  "blend_out_trigger_time, sync_group, sync_slot_index, enable_root_motion_translation, "
                  "enable_root_motion_rotation, root_motion_root_lock"));
     }
@@ -5766,6 +5594,9 @@ TSharedPtr<FJsonObject> HandleSetMontageProperties(const TSharedPtr<FJsonObject>
 
     TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
     Obj->SetStringField(TEXT("montage_path"), Montage->GetPathName());
+    Obj->SetNumberField(TEXT("blend_in"), Montage->BlendIn.GetBlendTime());
+    Obj->SetNumberField(TEXT("blend_out"), Montage->BlendOut.GetBlendTime());
+    Obj->SetNumberField(TEXT("rate_scale"), Montage->RateScale);
     Obj->SetStringField(TEXT("blend_mode_in"), AnimAuthoring_BlendModeName(Montage->BlendModeIn));
     Obj->SetStringField(TEXT("blend_mode_out"), AnimAuthoring_BlendModeName(Montage->BlendModeOut));
     Obj->SetBoolField(TEXT("enable_auto_blend_out"), Montage->bEnableAutoBlendOut);
@@ -5795,23 +5626,23 @@ TSharedPtr<FJsonObject> HandleSetMontageProperties(const TSharedPtr<FJsonObject>
 // Blend space input-smoothing (interpolation) + anim retarget source
 // (Helpers ParseFilterInterpType / FilterInterpTypeToString / InterpAxisJson /
 //  ReadBlendSpaceInterpolation live in the blendspace-samples anonymous namespace above, since
-//  get_blendspace_samples also round-trips the interpolation through them.)
+//  get_blend_space_samples also round-trips the interpolation through them.)
 
 // ---------------------------------------------------------------------------
-// set_blendspace_interpolation
+// set_blend_space_interpolation
 // ---------------------------------------------------------------------------
-// set_blendspace_properties only writes the BlendParameters axis (name/min/max/
+// set_blend_space_properties only writes the BlendParameters axis (name/min/max/
 // grid); the INPUT-SMOOTHING (interpolation) of a blend space lives in a SIBLING
 // fixed-size array member, UBlendSpace::InterpolationParam[3] (BlendSpace.h,
 // EditAnywhere, FInterpolationParameter per axis). We reach it by reflection
-// EXACTLY like set_blendspace_properties reaches BlendParameters:
+// EXACTLY like set_blend_space_properties reaches BlendParameters:
 //   FindFProperty<FStructProperty>(UBlendSpace::StaticClass(), "InterpolationParam")
 //   -> ContainerPtrToValuePtr<FInterpolationParameter>(BS, AxisIndex).
 // 1D blend spaces only smooth axis 0; 2D smooth axes 0 and 1. ClampMin="0" metas
 // on InterpolationTime/DampingRatio/MaxSpeed fire only through the editor property
 // path, so we clamp to >=0 here.
 // ---------------------------------------------------------------------------
-// MCP:set_blendspace_interpolation - Set a blend space's INPUT-SMOOTHING (interpolation) per axis: smoothing time, damping ratio, max speed, smoothing type.  Distinct from set_blendspace_properties (which only sets the BlendParameters axis name/min/max/grid). Writes UBlendSpace::InterpolationParam[axis] via reflection. 1D smooths axis 0 only; 2D smooths X (axis 0) and Y (axis 1). Only the supplied fields change, in one undo transaction, then the blend space is saved; an unknown smoothing type is an error before anything changes, and values the axes already have are a success with changed=false, applied_count 0, saved=false and a note, with nothing modified or saved. A failed save makes success false, with saved=false and save_error.
+// MCP:set_blend_space_interpolation - Set a blend space's INPUT-SMOOTHING (interpolation) per axis: smoothing time, damping ratio, max speed, smoothing type.  Distinct from set_blend_space_properties (which only sets the BlendParameters axis name/min/max/grid). Writes UBlendSpace::InterpolationParam[axis] via reflection. 1D smooths axis 0 only; 2D smooths X (axis 0) and Y (axis 1). Only the supplied fields change, in one undo transaction, then the blend space is saved; an unknown smoothing type is an error before anything changes, and values the axes already have are a success with changed=false, applied_count 0, saved=false and a note, with nothing modified or saved. A failed save makes success false, with saved=false and save_error.
 //   @param blend_space_path - Full asset path of the UBlendSpace / UBlendSpace1D.
 //   @param x_interpolation_time [number] - Optional X-axis smoothing time in seconds (>= 0; 0 disables smoothing).
 //   @param x_damping_ratio [number] - Optional X-axis damping ratio (>= 0; only used when type is SpringDamper).
@@ -5949,7 +5780,7 @@ TSharedPtr<FJsonObject> HandleSetBlendSpaceInterpolation(const TSharedPtr<FJsonO
         return Axis ? InterpAxisJson(*Axis) : MakeShared<FJsonObject>();
     };
 
-    UE_LOG(LogTemp, Verbose, TEXT("[set_blendspace_interpolation] %s -> %d field(s) applied (is_1d=%d)"),
+    UE_LOG(LogTemp, Verbose, TEXT("[set_blend_space_interpolation] %s -> %d field(s) applied (is_1d=%d)"),
         *BlendSpace->GetPathName(), AppliedCount, bIs1D ? 1 : 0);
 
     TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
@@ -5967,7 +5798,7 @@ TSharedPtr<FJsonObject> HandleSetBlendSpaceInterpolation(const TSharedPtr<FJsonO
     {
         return AnimAuthoring_NoChangeReply(Obj, TEXT("The blend space smoothing already has those values; nothing changed and nothing was saved."), TEXT("note"));
     }
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_blendspace_interpolation"), SaveError);
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_blend_space_interpolation"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -6801,7 +6632,6 @@ TSharedPtr<FJsonObject> HandleSortMontageSegments(const TSharedPtr<FJsonObject>&
 
 const McpCommandFamilies::FRegistrar Registration =
 {
-    { TEXT("add_anim_bone_track"), &HandleAddAnimBoneTrack },
     { TEXT("add_anim_composite_segment"), &HandleAddAnimCompositeSegment },
     { TEXT("add_anim_curve_name"), &HandleAddAnimCurveName },
     { TEXT("add_anim_float_curve"), &HandleAddAnimFloatCurve },
@@ -6810,7 +6640,7 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("add_anim_notify_state"), &HandleAddAnimNotifyState },
     { TEXT("add_anim_sync_marker"), &HandleAddAnimSyncMarker },
     { TEXT("add_anim_transform_curve"), &HandleAddAnimTransformCurve },
-    { TEXT("add_blendspace_sample"), &HandleAddBlendspaceSample },
+    { TEXT("add_blend_space_sample"), &HandleAddBlendspaceSample },
     { TEXT("add_montage_notify"), &HandleAddMontageNotify },
     { TEXT("add_montage_section"), &HandleAddMontageSection },
     { TEXT("add_montage_segment"), &HandleAddMontageSegment },
@@ -6823,18 +6653,15 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("create_blend_space"), &HandleCreateBlendSpace },
     { TEXT("create_pose_asset"), &HandleCreatePoseAsset },
     { TEXT("create_pose_asset_from_anim_sequence"), &HandleCreatePoseAssetFromAnimSequence },
-    { TEXT("delete_montage_section"), &HandleDeleteMontageSection },
-    { TEXT("duplicate_anim_sequence"), &HandleDuplicateAnimSequence },
+    { TEXT("remove_montage_section"), &HandleDeleteMontageSection },
     { TEXT("edit_anim_notify"), &HandleEditAnimNotify },
-    { TEXT("edit_blendspace_sample"), &HandleEditBlendspaceSample },
+    { TEXT("edit_blend_space_sample"), &HandleEditBlendspaceSample },
     { TEXT("get_anim_asset_info"), &HandleGetAnimAssetInfo },
     { TEXT("get_anim_curve_data"), &HandleGetAnimCurveData },
-    { TEXT("get_anim_curve_names"), &HandleGetAnimCurveNames },
     { TEXT("get_anim_notifies"), &HandleGetAnimNotifies },
     { TEXT("get_anim_sequence_info"), &HandleGetAnimSequenceInfo },
-    { TEXT("get_blendspace_samples"), &HandleGetBlendspaceSamples },
+    { TEXT("get_blend_space_samples"), &HandleGetBlendspaceSamples },
     { TEXT("get_montage_info"), &HandleGetMontageInfo },
-    { TEXT("get_notify_track_names"), &HandleGetNotifyTrackNames },
     { TEXT("link_montage_sections"), &HandleLinkMontageSections },
     { TEXT("refresh_anim_montage_cache"), &HandleRefreshAnimMontageCache },
     { TEXT("reimport_anim_sequence"), &HandleReimportAnimSequence },
@@ -6843,7 +6670,7 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("remove_anim_curve"), &HandleRemoveAnimCurve },
     { TEXT("remove_anim_notify"), &HandleRemoveAnimNotify },
     { TEXT("remove_anim_sync_marker"), &HandleRemoveAnimSyncMarker },
-    { TEXT("remove_blendspace_sample"), &HandleRemoveBlendspaceSample },
+    { TEXT("remove_blend_space_sample"), &HandleRemoveBlendspaceSample },
     { TEXT("remove_montage_notify"), &HandleRemoveMontageNotify },
     { TEXT("remove_montage_slot"), &HandleRemoveMontageSlot },
     { TEXT("remove_notify_track"), &HandleRemoveNotifyTrack },
@@ -6857,18 +6684,15 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("set_anim_bone_track_keys"), &HandleSetAnimBoneTrackKeys },
     { TEXT("set_anim_curve_color"), &HandleSetAnimCurveColor },
     { TEXT("set_anim_curve_comment"), &HandleSetAnimCurveComment },
-    { TEXT("set_anim_curve_interp_mode"), &HandleSetAnimCurveInterpMode },
-    { TEXT("set_anim_curve_keys"), &HandleSetAnimCurveKeys },
+    { TEXT("set_anim_curve_flags"), &HandleSetAnimCurveInterpMode },
     { TEXT("set_anim_frame_rate"), &HandleSetAnimFrameRate },
     { TEXT("set_anim_montage_preview_mesh"), &HandleSetAnimMontagePreviewMesh },
-    { TEXT("set_anim_montage_rate_scale"), &HandleSetAnimMontageRateScale },
     { TEXT("set_anim_montage_skeleton"), &HandleSetAnimMontageSkeleton },
     { TEXT("set_anim_number_of_frames"), &HandleSetAnimNumberOfFrames },
     { TEXT("set_anim_retarget_source"), &HandleSetAnimRetargetSource },
     { TEXT("set_anim_root_motion"), &HandleSetAnimRootMotion },
-    { TEXT("set_blendspace_interpolation"), &HandleSetBlendSpaceInterpolation },
-    { TEXT("set_blendspace_properties"), &HandleSetBlendSpaceProperties },
-    { TEXT("set_montage_blend_times"), &HandleSetMontageBlendTimes },
+    { TEXT("set_blend_space_interpolation"), &HandleSetBlendSpaceInterpolation },
+    { TEXT("set_blend_space_properties"), &HandleSetBlendSpaceProperties },
     { TEXT("set_montage_properties"), &HandleSetMontageProperties },
     { TEXT("set_montage_section_start_time"), &HandleSetMontageSectionStartTime },
     { TEXT("set_montage_segment_anim_sequence"), &HandleSetMontageSegmentAnimSequence },

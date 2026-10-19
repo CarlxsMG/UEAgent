@@ -2,7 +2,7 @@
 
 <img src="assets/logo.svg" alt="UEAgent logo" width="96" align="right">
 
-**The MCP server for Unreal Engine 5, built into the editor.** More than 2,000 tools let Claude Code,
+**The MCP server for Unreal Engine 5, built into the editor.** More than 1,700 tools let Claude Code,
 Cursor or any MCP client build in Unreal, with every change checked before it runs and read back
 after.
 

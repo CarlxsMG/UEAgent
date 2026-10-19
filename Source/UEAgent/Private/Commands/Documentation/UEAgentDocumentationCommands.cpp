@@ -279,7 +279,7 @@ TSharedPtr<FJsonObject> HandleCreateAssetDocumentation(const TSharedPtr<FJsonObj
     Doc->SetStringField(TEXT("usage"), Usage);
 
     // Package-level edges, depth 1, at most 100 each way -- this documents an asset, it does not audit it
-    // (get_asset_dependencies / get_asset_dependents give the full lists).
+    // (get_asset_dependencies / get_asset_referencers give the full lists).
     const int32 MaxListed = 100;
     TArray<FName> Needs;
     Registry.GetDependencies(Asset.PackageName, Needs, UE::AssetRegistry::EDependencyCategory::Package);

@@ -20,7 +20,8 @@ C++ and in its vectors in the same commit; the self-test is the proof that nothi
   `note_result` calls, each with its probe replies in order and the session state before and
   after. The whole output is compared, and so are the probe calls and the final state.
 - `registry_vectors.json`: REAL read-only probes, kept generic so they hold in any project: the
-  Asset Registry lookup behind `get_asset_metadata` (`registry_probe`), and the asset-name guard the
+  Asset Registry lookup that answers the `get_asset_by_name` probe of the preconditions without
+  loading the asset (`registry_probe`), and the asset-name guard the
   create commands run before creating a package (`name_conflict`: an object of another class at
   that path, which would make NewObject abort the editor; an empty `expect_message` means free).
 

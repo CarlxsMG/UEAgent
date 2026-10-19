@@ -50,11 +50,11 @@ Controls (run with --controls; they gate --write)
 ------------------------------------------------
 POSITIVE: compile_blueprint, add_graph_node, connect_pins, reparent_blueprint,
 build_blueprint_graph, delete_node must be classified unsafe.
-NEGATIVE: get_graph_nodes, get_blueprint_info, get_node_pin_info, editor_status must NOT.
+NEGATIVE: get_graph_nodes, get_blueprint_info, get_blueprint_functions, get_editor_status must NOT.
 A scan that cannot reproduce those is refuted, and refuses to write.
 
-Note the three commands that READ like readers and genuinely compile:
-`get_compile_errors`, `audit_blueprint_health`, `find_erroring_blueprints`. They
+Note the two commands that READ like readers and genuinely compile:
+`audit_blueprint_health` and `find_erroring_blueprints`. They
 are true positives -- verify against the cited function before "fixing" them out.
 
 What it emits
@@ -132,7 +132,7 @@ POSITIVE_CONTROLS = [
     "reparent_blueprint", "build_blueprint_graph", "delete_node",
 ]
 NEGATIVE_CONTROLS = [
-    "get_graph_nodes", "get_blueprint_info", "get_node_pin_info", "editor_status",
+    "get_graph_nodes", "get_blueprint_info", "get_blueprint_functions", "get_editor_status",
 ]
 
 # A family's route table: `{ TEXT("cmd"), &HandleXxx },`

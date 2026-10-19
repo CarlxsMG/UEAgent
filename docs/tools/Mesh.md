@@ -2,7 +2,7 @@
 
 # Mesh
 
-12 tools. Back to the [index](README.md).
+11 tools. Back to the [index](README.md).
 
 ## `clear_procedural_mesh`
 
@@ -69,14 +69,14 @@ Spawn a bare AActor in the editor world and attach a fresh UProceduralMeshCompon
 
 *Read-only.*
 
-Read summary info (section count, collision flags, per-section vertex/triangle counts) for a procedural mesh component on a named actor.
+Read summary info for a procedural mesh component on a named actor, without changing it: section count, collision flags, and per section its index, vertex/triangle counts, visibility flag and collision flag.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_label` | string | yes | Editor label of the actor carrying the PMC |
 | `component_index` | number | no | Optional 0-based PMC index on the actor; defaults to 0 |
 
-**Returns:** `{ actor_label: string, num_sections: int, use_complex_as_simple_collision: bool, use_async_cooking: bool, sections: [{ index, vertex_count, triangle_count }] }`
+**Returns:** `{ actor_label: string, num_sections: int, use_complex_as_simple_collision: bool, use_async_cooking: bool, sections: [{ index: int, vertex_count: int, triangle_count: int, visible: bool, collision_enabled: bool }] }`
 
 ## `get_procedural_mesh_section_data`
 
@@ -91,20 +91,6 @@ Read back the raw geometry (vertices, triangles, normals, UV0, tangents, colors)
 | `component_index` | number | no | Optional 0-based PMC index on the actor; defaults to 0 |
 
 **Returns:** `{ actor_label, section_index, vertex_count, triangle_count, vertices, triangles, normals, uv0, tangents, colors, local_box, collision_enabled, visible }`
-
-## `get_procedural_mesh_section_visible`
-
-*Read-only.*
-
-Read the visibility flag of a single section on a procedural mesh component.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actor_label` | string | yes | Editor label of the actor carrying the PMC |
-| `component_index` | number | no | Optional 0-based PMC index on the actor; defaults to 0 |
-| `section_index` | number | no | Target section index; defaults to 0 |
-
-**Returns:** `{ actor_label: string, section_index: int, visible: bool }`
 
 ## `remove_procedural_mesh_component`
 

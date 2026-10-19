@@ -30,11 +30,9 @@
  *
  * Commands:
  *   - create_material_instance_dynamic: Create a MID from a parent material
- *   - set_mid_scalar_param: Set a scalar parameter value
- *   - set_mid_vector_param: Set a vector parameter value
- *   - get_mid_all_params: Get all parameters from the parent material
- *   - copy_mid_params_from_source: Copy parameters from another material
- *   - set_mid_texture_param: Set a texture parameter value
+ *   - set_material_instance_dynamic_parameter: Set a scalar, vector or texture parameter value
+ *   - copy_material_instance_dynamic_parameters: Copy parameters from another material
+ * (get_material_parameters, in the material instance family, reads a MID's values.)
  *   - create_dynamic_material_on_actor: Create a component-owned MID on an actor
  */
 namespace UEAgentMaterialDynamicCommands
@@ -139,7 +137,7 @@ namespace
 	/**
 	 * Holds every MID create_material_instance_dynamic makes. Nothing else references such a MID (it lives in the
 	 * transient package and belongs to no actor), so without this the next garbage collection could free it before
-	 * the set_mid_* calls that address it by path. No tool releases a MID, so they stay until the editor closes.
+	 * the set_material_instance_dynamic_parameter calls that address it by path. No tool releases a MID, so they stay until the editor closes.
 	 */
 	class FCreatedMidKeeper final : public FGCObject
 	{
@@ -226,7 +224,7 @@ namespace
 // ---------------------------------------------------------------------------
 // create_material_instance_dynamic
 // ---------------------------------------------------------------------------
-// MCP:create_material_instance_dynamic - Create a Material Instance Dynamic (MID) of a parent material in the transient package: a runtime-only object that is never saved, belongs to no actor and has no undo step. The plugin keeps a reference to every MID it makes this way, so garbage collection does not free it; no tool releases one, so each lives until the editor closes. Set its parameters with set_mid_scalar_param, set_mid_vector_param or set_mid_texture_param, which take its mid_object_path, or use create_dynamic_material_on_actor to have a mesh component own a MID it renders. A name another MID holds gets a numbered suffix, so keep mid_name and mid_object_path from the reply; each call creates another MID. A parent that cannot be loaded, or a name held by an object of another class, is an error. Read its values with get_mid_all_params; a saved, reusable instance asset: create_material_instance_constant.
+// MCP:create_material_instance_dynamic - Create a Material Instance Dynamic (MID) of a parent material in the transient package: a runtime-only object that is never saved, belongs to no actor and has no undo step. The plugin keeps a reference to every MID it makes this way, so garbage collection does not free it; no tool releases one, so each lives until the editor closes. Set its parameters with set_material_instance_dynamic_parameter, which takes its mid_object_path, or use create_dynamic_material_on_actor to have a mesh component own a MID it renders. A name another MID holds gets a numbered suffix, so keep mid_name and mid_object_path from the reply; each call creates another MID. A parent that cannot be loaded, or a name held by an object of another class, is an error. Read its values with get_material_parameters (material_instance_path = its mid_object_path); a saved, reusable instance asset: create_material_instance.
 //   @param parent_material_path - Content path to the parent material (e.g. /Game/MyGame/M_Example.M_Example); a material or a material instance
 //   @param name - Optional name for the MID (default auto-generated from MID_ and the parent's name)
 //   @returns { mid_object_path, mid_name, parent_material_path, parent_material_name, created }
@@ -283,199 +281,139 @@ TSharedPtr<FJsonObject> HandleCreateMaterialInstanceDynamic(
 }
 
 // ---------------------------------------------------------------------------
-// set_mid_scalar_param
+// set_material_instance_dynamic_parameter
 // ---------------------------------------------------------------------------
-// MCP:set_mid_scalar_param - Set a scalar parameter override on a transient Material Instance Dynamic (MID), found by object path or name as create_material_instance_dynamic or create_dynamic_material_on_actor return it; it takes effect at once and is never saved. param_name must be a global scalar parameter of the MID's material (as get_mid_all_params lists it); any other name is refused and nothing is written. set is the read-back of the new value. Vectors and textures: set_mid_vector_param, set_mid_texture_param.
+// MCP:set_material_instance_dynamic_parameter - Set a scalar, vector (color) or texture parameter override on a transient Material Instance Dynamic (MID), found by object path or name as create_material_instance_dynamic or create_dynamic_material_on_actor return it; it takes effect at once and is never saved. param_type picks the kind, or it is inferred from value: a number is a scalar, an {r,g,b,a} object a vector, a string a texture path. param_name must be a global parameter of that kind of the MID's material (as get_material_parameters lists it for the MID); any other name is refused and nothing is written. set is the read-back of the new value.
 //   @param mid_object_path - Object path of the MID (from create_material_instance_dynamic)
-//   @param param_name - Name of a scalar parameter of the MID's material
-//   @param value - New float value
-//   @returns { mid_object_path, param_name, old_value, new_value, set }
+//   @param mid_path - Alias of mid_object_path
+//   @param param_name - Name of a parameter of the MID's material, of the kind written
+//   @param parameter_name - Alias of param_name
+//   @param param_type - Optional "scalar", "vector" or "texture"; default inferred from value (number -> scalar, object -> vector, string -> texture). Any other value, or one that does not match the value's shape, is an error
+//   @param value - New value: a float for a scalar, a color object {r, g, b, a} for a vector (a missing component is 0, a missing a is 1), a texture content path for a texture. Required unless texture_path is given
+//   @param texture_path - Alias of value for a texture parameter (a texture content path)
+//   @returns { mid_object_path, param_name, param_type, old_value, new_value (numbers for a scalar, {r, g, b, a} for a vector), old_texture_path?, new_texture_path?, requested_texture_path? (texture), set }
 TSharedPtr<FJsonObject> HandleSetMidScalarParam(
 	const TSharedPtr<FJsonObject>& Params)
 {
 	FString MIDPath;
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("mid_object_path"), MIDPath)) { return Missing; }
+	if (!Params->TryGetStringField(TEXT("mid_object_path"), MIDPath) && !Params->TryGetStringField(TEXT("mid_path"), MIDPath))
+	{
+		return mcp_common::MissingParameterReply(TEXT("mid_object_path"));
+	}
 
 	FString ParamName;
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("param_name"), ParamName)) { return Missing; }
-
-	double ValueD = 0.0;
-	if (!Params->TryGetNumberField(TEXT("value"), ValueD))
+	if (!Params->TryGetStringField(TEXT("param_name"), ParamName) && !Params->TryGetStringField(TEXT("parameter_name"), ParamName))
 	{
-		return mcp_common::MakeErrorReply(TEXT("value (float) is required"));
+		return mcp_common::MissingParameterReply(TEXT("param_name"));
 	}
-	float Value = (float)ValueD;
+
+	FString ParamType;
+	Params->TryGetStringField(TEXT("param_type"), ParamType);
+	ParamType = ParamType.ToLower();
+
+	// value is polymorphic; a texture may also come as texture_path.
+	TSharedPtr<FJsonValue> RawValue = Params->TryGetField(TEXT("value"));
+	FString TexturePathAlias;
+	if ((!RawValue.IsValid() || RawValue->Type == EJson::Null) && Params->TryGetStringField(TEXT("texture_path"), TexturePathAlias))
+	{
+		RawValue = MakeShared<FJsonValueString>(TexturePathAlias);
+	}
+	if (!RawValue.IsValid() || RawValue->Type == EJson::None || RawValue->Type == EJson::Null)
+	{
+		return mcp_common::MissingParameterReply(TEXT("value"));
+	}
+
+	// The kind: param_type when given, else the value's JSON shape.
+	const TCHAR* InferredType = RawValue->Type == EJson::Number ? TEXT("scalar")
+		: RawValue->Type == EJson::Object ? TEXT("vector")
+		: RawValue->Type == EJson::String ? TEXT("texture")
+		: nullptr;
+	if (ParamType.IsEmpty())
+	{
+		if (InferredType == nullptr)
+		{
+			return mcp_common::MakeErrorReply(TEXT("value must be a number (scalar), an {r,g,b,a} object (vector) or a texture path string (texture)"));
+		}
+		ParamType = InferredType;
+	}
+	if (ParamType != TEXT("scalar") && ParamType != TEXT("vector") && ParamType != TEXT("texture"))
+	{
+		return mcp_common::MakeErrorReply(FString::Printf(TEXT("Unknown param_type: %s (expected scalar, vector or texture)"), *ParamType));
+	}
+	if (InferredType == nullptr || ParamType != InferredType)
+	{
+		return mcp_common::MakeErrorReply(FString::Printf(
+			TEXT("param_type %s needs value as %s"), *ParamType,
+			ParamType == TEXT("scalar") ? TEXT("a number") : ParamType == TEXT("vector") ? TEXT("an {r,g,b,a} object") : TEXT("a texture path string")));
+	}
 
 	UMaterialInstanceDynamic* MID = nullptr;
 	if (TSharedPtr<FJsonObject> NotFound = MaterialDynamic_ResolveMIDOrError(MIDPath, MID)) { return NotFound; }
-
-	if (TSharedPtr<FJsonObject> Unknown = MaterialDynamic_RefuseUnknownParam(MID, EMaterialParameterType::Scalar, ParamName, TEXT("scalar"))) { return Unknown; }
-
-	// Read old value
-	float OldValue = MID->K2_GetScalarParameterValue(FName(*ParamName));
-
-	// Set new value
-	MID->SetScalarParameterValue(FName(*ParamName), Value);
-
-	// Read back to confirm
-	float NewValue = MID->K2_GetScalarParameterValue(FName(*ParamName));
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("mid_object_path"), MID->GetPathName());
 	Data->SetStringField(TEXT("param_name"), ParamName);
-	Data->SetNumberField(TEXT("old_value"), OldValue);
-	Data->SetNumberField(TEXT("new_value"), NewValue);
-	const bool bSet = FMath::Abs(NewValue - Value) < KINDA_SMALL_NUMBER;
+	Data->SetStringField(TEXT("param_type"), ParamType);
+	const FName ParamFName(*ParamName);
+	bool bSet = false;
+
+	if (ParamType == TEXT("scalar"))
+	{
+		if (TSharedPtr<FJsonObject> Unknown = MaterialDynamic_RefuseUnknownParam(MID, EMaterialParameterType::Scalar, ParamName, TEXT("scalar"))) { return Unknown; }
+		const float Value = static_cast<float>(RawValue->AsNumber());
+		const float OldValue = MID->K2_GetScalarParameterValue(ParamFName);
+		MID->SetScalarParameterValue(ParamFName, Value);
+		const float NewValue = MID->K2_GetScalarParameterValue(ParamFName);
+		Data->SetNumberField(TEXT("old_value"), OldValue);
+		Data->SetNumberField(TEXT("new_value"), NewValue);
+		bSet = FMath::Abs(NewValue - Value) < KINDA_SMALL_NUMBER;
+	}
+	else if (ParamType == TEXT("vector"))
+	{
+		if (TSharedPtr<FJsonObject> Unknown = MaterialDynamic_RefuseUnknownParam(MID, EMaterialParameterType::Vector, ParamName, TEXT("vector"))) { return Unknown; }
+		const TSharedPtr<FJsonObject> ColorObj = RawValue->AsObject();
+		FLinearColor NewColor(0, 0, 0, 1);
+		ColorObj->TryGetNumberField(TEXT("r"), NewColor.R);
+		ColorObj->TryGetNumberField(TEXT("g"), NewColor.G);
+		ColorObj->TryGetNumberField(TEXT("b"), NewColor.B);
+		ColorObj->TryGetNumberField(TEXT("a"), NewColor.A);
+		const FLinearColor OldColor = MID->K2_GetVectorParameterValue(ParamFName);
+		MID->SetVectorParameterValue(ParamFName, NewColor);
+		const FLinearColor ReadBack = MID->K2_GetVectorParameterValue(ParamFName);
+		Data->SetObjectField(TEXT("old_value"), mcp_common::LinearColorToJsonObject(OldColor));
+		Data->SetObjectField(TEXT("new_value"), mcp_common::LinearColorToJsonObject(ReadBack));
+		bSet = FMath::Abs(ReadBack.R - NewColor.R) < KINDA_SMALL_NUMBER &&
+			FMath::Abs(ReadBack.G - NewColor.G) < KINDA_SMALL_NUMBER &&
+			FMath::Abs(ReadBack.B - NewColor.B) < KINDA_SMALL_NUMBER &&
+			FMath::Abs(ReadBack.A - NewColor.A) < KINDA_SMALL_NUMBER;
+	}
+	else
+	{
+		if (TSharedPtr<FJsonObject> Unknown = MaterialDynamic_RefuseUnknownParam(MID, EMaterialParameterType::Texture, ParamName, TEXT("texture"))) { return Unknown; }
+		const FString TexturePath = RawValue->AsString();
+		UTexture* NewTexture = mcp_common::LoadAssetOrSoftPath<UTexture>(TexturePath);
+		if (!NewTexture)
+		{
+			return mcp_common::MakeErrorReply(
+				FString::Printf(TEXT("Cannot load texture: %s"), *TexturePath));
+		}
+		UTexture* OldTexture = MID->K2_GetTextureParameterValue(ParamFName);
+		MID->SetTextureParameterValue(ParamFName, NewTexture);
+		UTexture* ReadBackTexture = MID->K2_GetTextureParameterValue(ParamFName);
+		Data->SetStringField(TEXT("old_texture_path"), OldTexture ? OldTexture->GetPathName() : TEXT(""));
+		Data->SetStringField(TEXT("new_texture_path"), ReadBackTexture ? ReadBackTexture->GetPathName() : TEXT(""));
+		Data->SetStringField(TEXT("requested_texture_path"), NewTexture->GetPathName());
+		bSet = (ReadBackTexture == NewTexture);
+	}
+
 	Data->SetBoolField(TEXT("set"), bSet);
-	return mcp_common::MakeOutcomeReply(Data, bSet, mcp_common::MeasuredOutcomeError(TEXT("set_mid_scalar_param"), TEXT("set")));
+	return mcp_common::MakeOutcomeReply(Data, bSet, mcp_common::MeasuredOutcomeError(TEXT("set_material_instance_dynamic_parameter"), TEXT("set")));
 }
 
 // ---------------------------------------------------------------------------
-// set_mid_vector_param
+// copy_material_instance_dynamic_parameters
 // ---------------------------------------------------------------------------
-// MCP:set_mid_vector_param - Set a vector (color) parameter override on a transient Material Instance Dynamic (MID), found by object path or name as create_material_instance_dynamic or create_dynamic_material_on_actor return it; it takes effect at once and is never saved. param_name must be a global vector parameter of the MID's material (as get_mid_all_params lists it); any other name is refused and nothing is written. set is the read-back of the new color. Scalars and textures: set_mid_scalar_param, set_mid_texture_param.
-//   @param mid_object_path - Object path of the MID (from create_material_instance_dynamic)
-//   @param param_name - Name of a vector parameter of the MID's material
-//   @param r [number] - Not read at the top level: the red component goes in value
-//   @param g [number] - Not read at the top level: the green component goes in value
-//   @param b [number] - Not read at the top level: the blue component goes in value
-//   @param value - Color object {r, g, b, a}; a missing component is 0, a missing a is 1
-//   @returns { mid_object_path, param_name, old_value: {r, g, b, a}, new_value: {r, g, b, a}, set }
-TSharedPtr<FJsonObject> HandleSetMidVectorParam(
-	const TSharedPtr<FJsonObject>& Params)
-{
-	FString MIDPath;
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("mid_object_path"), MIDPath)) { return Missing; }
-
-	FString ParamName;
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("param_name"), ParamName)) { return Missing; }
-
-	// Parse value {r, g, b, a}
-	const TSharedPtr<FJsonObject>* ValueObj = nullptr;
-	if (!Params->TryGetObjectField(TEXT("value"), ValueObj) || !ValueObj || !*ValueObj)
-	{
-		return mcp_common::MakeErrorReply(TEXT("value object {r,g,b,a} is required"));
-	}
-
-	FLinearColor NewColor(0, 0, 0, 1);
-	(*ValueObj)->TryGetNumberField(TEXT("r"), NewColor.R);
-	(*ValueObj)->TryGetNumberField(TEXT("g"), NewColor.G);
-	(*ValueObj)->TryGetNumberField(TEXT("b"), NewColor.B);
-	(*ValueObj)->TryGetNumberField(TEXT("a"), NewColor.A);
-
-	UMaterialInstanceDynamic* MID = nullptr;
-	if (TSharedPtr<FJsonObject> NotFound = MaterialDynamic_ResolveMIDOrError(MIDPath, MID)) { return NotFound; }
-
-	if (TSharedPtr<FJsonObject> Unknown = MaterialDynamic_RefuseUnknownParam(MID, EMaterialParameterType::Vector, ParamName, TEXT("vector"))) { return Unknown; }
-
-	// Read old value
-	FLinearColor OldColor = MID->K2_GetVectorParameterValue(FName(*ParamName));
-
-	// Set new value
-	MID->SetVectorParameterValue(FName(*ParamName), NewColor);
-
-	// Read back
-	FLinearColor ReadBack = MID->K2_GetVectorParameterValue(FName(*ParamName));
-
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetStringField(TEXT("mid_object_path"), MID->GetPathName());
-	Data->SetStringField(TEXT("param_name"), ParamName);
-
-	TSharedPtr<FJsonObject> OldObj = mcp_common::LinearColorToJsonObject(OldColor);
-	Data->SetObjectField(TEXT("old_value"), OldObj);
-
-	TSharedPtr<FJsonObject> NewObj = mcp_common::LinearColorToJsonObject(ReadBack);
-	Data->SetObjectField(TEXT("new_value"), NewObj);
-
-	const bool bSet = FMath::Abs(ReadBack.R - NewColor.R) < KINDA_SMALL_NUMBER &&
-				FMath::Abs(ReadBack.G - NewColor.G) < KINDA_SMALL_NUMBER &&
-				FMath::Abs(ReadBack.B - NewColor.B) < KINDA_SMALL_NUMBER &&
-				FMath::Abs(ReadBack.A - NewColor.A) < KINDA_SMALL_NUMBER;
-	Data->SetBoolField(TEXT("set"), bSet);
-	return mcp_common::MakeOutcomeReply(Data, bSet, mcp_common::MeasuredOutcomeError(TEXT("set_mid_vector_param"), TEXT("set")));
-}
-
-// ---------------------------------------------------------------------------
-// get_mid_all_params
-// ---------------------------------------------------------------------------
-// MCP:get_mid_all_params - Get all parameters and their current values from a Material Instance Dynamic
-//   @param mid_object_path - Object path of the MID
-//   @returns { name, value, r, g, b, a, texture_path, texture_name, mid_object_path, mid_name, parent_material, scalar_params, vector_params, texture_params, scalar_count, vector_count, texture_count }
-TSharedPtr<FJsonObject> HandleGetMidAllParams(
-	const TSharedPtr<FJsonObject>& Params)
-{
-	FString MIDPath;
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("mid_object_path"), MIDPath)) { return Missing; }
-
-	UMaterialInstanceDynamic* MID = nullptr;
-	if (TSharedPtr<FJsonObject> NotFound = MaterialDynamic_ResolveMIDOrError(MIDPath, MID)) { return NotFound; }
-
-	// Use GetAllParametersOfType on the MID (inherited from UMaterialInterface)
-	// to enumerate all parameters from the parent hierarchy
-	TMap<FMaterialParameterInfo, FMaterialParameterMetadata> ScalarParams;
-	MID->GetAllParametersOfType(EMaterialParameterType::Scalar, ScalarParams);
-
-	TMap<FMaterialParameterInfo, FMaterialParameterMetadata> VectorParams;
-	MID->GetAllParametersOfType(EMaterialParameterType::Vector, VectorParams);
-
-	TMap<FMaterialParameterInfo, FMaterialParameterMetadata> TextureParams;
-	MID->GetAllParametersOfType(EMaterialParameterType::Texture, TextureParams);
-
-	// Build scalar params array with current MID values
-	TArray<TSharedPtr<FJsonValue>> ScalarArr;
-	for (const auto& Pair : ScalarParams)
-	{
-		TSharedPtr<FJsonObject> ParamObj = MakeShared<FJsonObject>();
-		ParamObj->SetStringField(TEXT("name"), Pair.Key.Name.ToString());
-		// Read current value from MID
-		float Val = MID->K2_GetScalarParameterValue(Pair.Key.Name);
-		ParamObj->SetNumberField(TEXT("value"), Val);
-		ScalarArr.Add(MakeShared<FJsonValueObject>(ParamObj));
-	}
-
-	// Build vector params array
-	TArray<TSharedPtr<FJsonValue>> VectorArr;
-	for (const auto& Pair : VectorParams)
-	{
-		TSharedPtr<FJsonObject> ParamObj = MakeShared<FJsonObject>();
-		ParamObj->SetStringField(TEXT("name"), Pair.Key.Name.ToString());
-		FLinearColor Val = MID->K2_GetVectorParameterValue(Pair.Key.Name);
-		ParamObj->SetNumberField(TEXT("r"), Val.R);
-		ParamObj->SetNumberField(TEXT("g"), Val.G);
-		ParamObj->SetNumberField(TEXT("b"), Val.B);
-		ParamObj->SetNumberField(TEXT("a"), Val.A);
-		VectorArr.Add(MakeShared<FJsonValueObject>(ParamObj));
-	}
-
-	// Build texture params array
-	TArray<TSharedPtr<FJsonValue>> TextureArr;
-	for (const auto& Pair : TextureParams)
-	{
-		TSharedPtr<FJsonObject> ParamObj = MakeShared<FJsonObject>();
-		ParamObj->SetStringField(TEXT("name"), Pair.Key.Name.ToString());
-		UTexture* Tex = MID->K2_GetTextureParameterValue(Pair.Key.Name);
-		ParamObj->SetStringField(TEXT("texture_path"), Tex ? Tex->GetPathName() : TEXT(""));
-		ParamObj->SetStringField(TEXT("texture_name"), Tex ? Tex->GetName() : TEXT(""));
-		TextureArr.Add(MakeShared<FJsonValueObject>(ParamObj));
-	}
-
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetStringField(TEXT("mid_object_path"), MID->GetPathName());
-	Data->SetStringField(TEXT("mid_name"), MID->GetName());
-	Data->SetStringField(TEXT("parent_material"), MID->Parent ? MID->Parent->GetPathName() : TEXT(""));
-	Data->SetArrayField(TEXT("scalar_params"), ScalarArr);
-	Data->SetArrayField(TEXT("vector_params"), VectorArr);
-	Data->SetArrayField(TEXT("texture_params"), TextureArr);
-	Data->SetNumberField(TEXT("scalar_count"), ScalarArr.Num());
-	Data->SetNumberField(TEXT("vector_count"), VectorArr.Num());
-	Data->SetNumberField(TEXT("texture_count"), TextureArr.Num());
-	return mcp_common::MakeOkReply(Data);
-}
-
-// ---------------------------------------------------------------------------
-// copy_mid_params_from_source
-// ---------------------------------------------------------------------------
-// MCP:copy_mid_params_from_source - Copy parameter values from a source material or material instance into a transient Material Instance Dynamic (MID), found by object path or name as create_material_instance_dynamic returns it. The MID's current overrides are cleared first, then every non-static parameter the MID exposes takes the source's value where the source has that parameter; static switches are not copied. Takes effect at once, nothing saved, no undo. Refused, with the MID untouched, when the source is the MID itself or has none of its parameters. copied is measured: every copyable parameter read back on the MID with the source's value. For saved Material Instance Constant assets use copy_material_instance_params.
+// MCP:copy_material_instance_dynamic_parameters - Copy parameter values from a source material or material instance into a transient Material Instance Dynamic (MID), found by object path or name as create_material_instance_dynamic returns it. The MID's current overrides are cleared first, then every non-static parameter the MID exposes takes the source's value where the source has that parameter; static switches are not copied. Takes effect at once, nothing saved, no undo. Refused, with the MID untouched, when the source is the MID itself or has none of its parameters. copied is measured: every copyable parameter read back on the MID with the source's value. For saved Material Instance Constant assets use copy_material_instance_parameters.
 //   @param mid_object_path - Object path of the MID
 //   @param source_material_path - Content path to the source material to copy from
 //   @returns { mid_object_path, source_material_path, source_material_name, params_in_source, params_copied, params_not_in_source, mismatched_params, copied }
@@ -531,65 +469,13 @@ TSharedPtr<FJsonObject> HandleCopyMidParamsFromSource(
 	Data->SetNumberField(TEXT("params_not_in_source"), After.NotInSource);
 	Data->SetArrayField(TEXT("mismatched_params"), mcp_common::StringsToJson(After.Mismatched));
 	Data->SetBoolField(TEXT("copied"), bCopied);
-	return mcp_common::MakeOutcomeReply(Data, bCopied, mcp_common::MeasuredOutcomeError(TEXT("copy_mid_params_from_source"), TEXT("copied")));
-}
-
-// ---------------------------------------------------------------------------
-// set_mid_texture_param
-// ---------------------------------------------------------------------------
-// MCP:set_mid_texture_param - Set a texture parameter override on a transient Material Instance Dynamic (MID), found by object path or name as create_material_instance_dynamic or create_dynamic_material_on_actor return it; it takes effect at once and is never saved. parameter_name must be a global texture parameter of the MID's material (as get_mid_all_params lists it); any other name is refused and nothing is written. set is the read-back of the new texture. Scalars and vectors: set_mid_scalar_param, set_mid_vector_param.
-//   @param mid_path - Object path of the MID (transient or component-owned full path)
-//   @param parameter_name - Name of a texture parameter of the MID's material
-//   @param texture_path - Content path to the texture to assign
-//   @returns { mid_path, parameter_name, old_texture_path, new_texture_path, requested_texture_path, set }
-TSharedPtr<FJsonObject> HandleSetMidTextureParam(
-	const TSharedPtr<FJsonObject>& Params)
-{
-	FString MIDPath;
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("mid_path"), MIDPath)) { return Missing; }
-
-	FString ParamName;
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("parameter_name"), ParamName)) { return Missing; }
-
-	FString TexturePath;
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("texture_path"), TexturePath)) { return Missing; }
-
-	UMaterialInstanceDynamic* MID = nullptr;
-	if (TSharedPtr<FJsonObject> NotFound = MaterialDynamic_ResolveMIDOrError(MIDPath, MID)) { return NotFound; }
-
-	if (TSharedPtr<FJsonObject> Unknown = MaterialDynamic_RefuseUnknownParam(MID, EMaterialParameterType::Texture, ParamName, TEXT("texture"))) { return Unknown; }
-
-	UTexture* NewTexture = mcp_common::LoadAssetOrSoftPath<UTexture>(TexturePath);
-	if (!NewTexture)
-	{
-		return mcp_common::MakeErrorReply(
-			FString::Printf(TEXT("Cannot load texture: %s"), *TexturePath));
-	}
-
-	// Read old value
-	UTexture* OldTexture = MID->K2_GetTextureParameterValue(FName(*ParamName));
-
-	// Set new value
-	MID->SetTextureParameterValue(FName(*ParamName), NewTexture);
-
-	// Read back to confirm
-	UTexture* ReadBack = MID->K2_GetTextureParameterValue(FName(*ParamName));
-
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetStringField(TEXT("mid_path"), MID->GetPathName());
-	Data->SetStringField(TEXT("parameter_name"), ParamName);
-	Data->SetStringField(TEXT("old_texture_path"), OldTexture ? OldTexture->GetPathName() : TEXT(""));
-	Data->SetStringField(TEXT("new_texture_path"), ReadBack ? ReadBack->GetPathName() : TEXT(""));
-	Data->SetStringField(TEXT("requested_texture_path"), NewTexture->GetPathName());
-	const bool bSet = (ReadBack == NewTexture);
-	Data->SetBoolField(TEXT("set"), bSet);
-	return mcp_common::MakeOutcomeReply(Data, bSet, mcp_common::MeasuredOutcomeError(TEXT("set_mid_texture_param"), TEXT("set")));
+	return mcp_common::MakeOutcomeReply(Data, bCopied, mcp_common::MeasuredOutcomeError(TEXT("copy_material_instance_dynamic_parameters"), TEXT("copied")));
 }
 
 // ---------------------------------------------------------------------------
 // create_dynamic_material_on_actor
 // ---------------------------------------------------------------------------
-// MCP:create_dynamic_material_on_actor - Give one material slot of a mesh component on an editor-world actor its own Material Instance Dynamic (UPrimitiveComponent::CreateDynamicMaterialInstance), which replaces the slot's material with the MID, in one undo step that marks the level dirty; no asset is created or saved. The actor is matched by object name or label (first match), the component is its first StaticMeshComponent, else its first mesh component. Without parent_material_path the MID wraps the slot's current material, and a slot already holding a MID returns that same MID with created false, changing nothing; with it, the slot is first set to that material. Pass mid_object_path to set_mid_scalar_param, set_mid_vector_param, set_mid_texture_param or get_mid_all_params; verified confirms the slot holds the MID. A missing actor, mesh component or material, or an out-of-range element_index, is an error. Unowned MID: create_material_instance_dynamic; saved asset: create_material_instance_constant.
+// MCP:create_dynamic_material_on_actor - Give one material slot of a mesh component on an editor-world actor its own Material Instance Dynamic (UPrimitiveComponent::CreateDynamicMaterialInstance), which replaces the slot's material with the MID, in one undo step that marks the level dirty; no asset is created or saved. The actor is matched by object name or label (first match), the component is its first StaticMeshComponent, else its first mesh component. Without parent_material_path the MID wraps the slot's current material, and a slot already holding a MID returns that same MID with created false, changing nothing; with it, the slot is first set to that material. Pass mid_object_path to set_material_instance_dynamic_parameter, or to get_material_parameters as material_instance_path; verified confirms the slot holds the MID. A missing actor, mesh component or material, or an out-of-range element_index, is an error. Unowned MID: create_material_instance_dynamic; saved asset: create_material_instance.
 //   @param actor_name - Name or label of the actor in the editor world; the first actor whose object name or label matches is used
 //   @param element_index - Material slot index on the mesh component (default 0); must be below the component's slot count
 //   @param parent_material_path - Optional source material for the MID (default slot's current material); when given it is assigned to the slot before the MID is made from it
@@ -702,13 +588,10 @@ TSharedPtr<FJsonObject> HandleCreateDynamicMaterialOnActor(
 
 const McpCommandFamilies::FRegistrar Registration =
 {
-	{ TEXT("copy_mid_params_from_source"), &HandleCopyMidParamsFromSource },
+	{ TEXT("copy_material_instance_dynamic_parameters"), &HandleCopyMidParamsFromSource },
 	{ TEXT("create_dynamic_material_on_actor"), &HandleCreateDynamicMaterialOnActor },
 	{ TEXT("create_material_instance_dynamic"), &HandleCreateMaterialInstanceDynamic },
-	{ TEXT("get_mid_all_params"), &HandleGetMidAllParams },
-	{ TEXT("set_mid_scalar_param"), &HandleSetMidScalarParam },
-	{ TEXT("set_mid_texture_param"), &HandleSetMidTextureParam },
-	{ TEXT("set_mid_vector_param"), &HandleSetMidVectorParam },
+	{ TEXT("set_material_instance_dynamic_parameter"), &HandleSetMidScalarParam },
 };
 } // namespace UEAgentMaterialDynamicCommands
 

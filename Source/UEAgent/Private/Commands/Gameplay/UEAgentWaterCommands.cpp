@@ -286,13 +286,6 @@ namespace
 		}
 		Data->SetNumberField(TEXT("total_steepness"), TotalSteepness);
 	}
-
-	/** Short display name for an EWaveSpectrumType value. */
-	FString WaveSpectrumToString(EWaveSpectrumType Type)
-	{
-		const UEnum* E = StaticEnum<EWaveSpectrumType>();
-		return E ? E->GetNameStringByValue(static_cast<int64>(Type)) : FString(TEXT("Unknown"));
-	}
 }
 
 // ---------------------------------------------------------------------------
@@ -651,9 +644,9 @@ TSharedPtr<FJsonObject> HandleGetWaterZoneInfo(
 // Water body read-back + material + zone configuration
 // ---------------------------------------------------------------------------
 
-// MCP:get_water_body_info - Read back a water body's type, linked zone, surface material, and max wave height.
+// MCP:get_water_body_info - Read back a water body's type, linked zone, surface material and wave state: whether waves are supported and present, the max wave height, the active waves class with its wave count and, for Gerstner waves, the generator class. Read-only; an unknown label is an error. Per-wave detail is get_water_body_gerstner_wave_detail.
 //   @param water_body_label - Label of the AWaterBody actor
-//   @returns { actor_label: string, actor_name: string, body_type: string, water_zone_label: string, material: string, max_wave_height: number }
+//   @returns { actor_label: string, actor_name: string, body_type: string, water_zone_label: string, material: string, max_wave_height: number, wave_supported: bool, has_waves: bool, waves_class: string, num_waves: int, generator_class: string }
 TSharedPtr<FJsonObject> HandleGetWaterBodyInfo(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -675,6 +668,21 @@ TSharedPtr<FJsonObject> HandleGetWaterBodyInfo(
 	Data->SetStringField(TEXT("water_zone_label"), Zone ? Zone->GetActorLabel() : FString());
 	Data->SetStringField(TEXT("material"), Mat ? Mat->GetName() : FString(TEXT("None")));
 	Data->SetNumberField(TEXT("max_wave_height"), Comp ? Comp->GetMaxWaveHeight() : 0.0);
+
+	// Wave state: the waves object and, for Gerstner waves, its cached wave count and generator.
+	UWaterWavesBase* WavesBase = Comp ? Comp->GetWaterWaves() : nullptr;
+	int32 WaveCount = 0;
+	FString GeneratorClass;
+	if (const UGerstnerWaterWaves* Gerstner = Cast<UGerstnerWaterWaves>(WavesBase))
+	{
+		WaveCount = Gerstner->GetGerstnerWaves().Num();
+		GeneratorClass = Gerstner->GerstnerWaveGenerator ? Gerstner->GerstnerWaveGenerator->GetClass()->GetName() : FString();
+	}
+	Data->SetBoolField(TEXT("wave_supported"), Comp ? Comp->IsWaveSupported() : false);
+	Data->SetBoolField(TEXT("has_waves"), Comp ? Comp->HasWaves() : false);
+	Data->SetStringField(TEXT("waves_class"), WavesBase ? WavesBase->GetClass()->GetName() : FString(TEXT("None")));
+	Data->SetNumberField(TEXT("num_waves"), WaveCount);
+	Data->SetStringField(TEXT("generator_class"), GeneratorClass);
 	return mcp_common::MakeOkReply(Data);
 }
 
@@ -854,7 +862,7 @@ TSharedPtr<FJsonObject> HandleConfigureWaterZone(
 // River spline path + per-point width/depth
 // ---------------------------------------------------------------------------
 
-// MCP:set_river_spline_points - Set ANY water body's spline path from world points, then synchronize the water spline metadata and RE-READ the spline (point count + closed-loop) to prove it landed.
+// MCP:set_water_body_spline_points - Set ANY water body's spline path from world points, then synchronize the water spline metadata and RE-READ the spline (point count + closed-loop) to prove it landed.
 //   @param water_body_label - Label of the AWaterBody actor. DESPITE THE COMMAND NAME THIS IS NOT RIVER-ONLY: it works on any water body that has a UWaterSplineComponent -- lake, ocean, river, custom -- and it is the only way to give a LAKE its real shoreline, because the spline the actor factory creates is an arbitrary CLOSED triangle (3 points) that has nothing to do with the basin. `closed_loop` is a property of the spline and is NOT touched here: set 12 points on a factory-made lake and you get 12 points still closed.
 //   @param points - Array of [X, Y, Z] WORLD points (>= 2) defining the spline. Entries that are not a >= 3-element numeric array are skipped silently; `requested_point_count` reports how many survived parsing.
 //   @returns { water_body_label: string, point_count: int (RE-READ), spline_point_count_actual: int (RE-READ, same value, unambiguously named), closed_loop_actual: bool (RE-READ), requested_point_count: int, applied: bool (DERIVED: read-back count == requested count) }
@@ -863,7 +871,7 @@ TSharedPtr<FJsonObject> HandleConfigureWaterZone(
 // would read the same whether the spline had taken the points or not. The re-read is
 // cheap (GetNumberOfSplinePoints/IsClosedLoop) and turns "applied" into a measurement.
 // The whole `points` array is deliberately NOT echoed back under "requested": on a real
-// river that doubles the payload for no information. Use get_river_spline_points if you
+// river that doubles the payload for no information. Use get_water_body_spline_points if you
 // need the resulting points one by one.
 TSharedPtr<FJsonObject> HandleSetRiverSplinePoints(
 	const TSharedPtr<FJsonObject>& Params)
@@ -933,7 +941,7 @@ TSharedPtr<FJsonObject> HandleSetRiverSplinePoints(
 	return mcp_common::MakeOutcomeReply(Data, bApplied, Error);
 }
 
-// MCP:get_river_spline_points - Read the spline control points of any water body -- river, lake, ocean or custom, found by actor label in the editor world -- as world-space [x, y, z] positions in cm, in spline order. Only point locations come back: no tangents, widths, depths or closed-loop flag. Read-only. An unknown label, or a body without a water spline, is an error. Write them with set_river_spline_points; per-point river width and depth: set_river_width_depth_at_point; a generic actor's USplineComponent in local space, with its closed-loop flag: get_spline_points; body type, zone and material: get_water_body_info.
+// MCP:get_water_body_spline_points - Read the spline control points of any water body -- river, lake, ocean or custom, found by actor label in the editor world -- as world-space [x, y, z] positions in cm, in spline order. Only point locations come back: no tangents, widths, depths or closed-loop flag. Read-only. An unknown label, or a body without a water spline, is an error. Write them with set_water_body_spline_points; per-point river width and depth: set_river_width_depth_at_point; a generic actor's USplineComponent in local space, with its closed-loop flag: get_spline_points; body type, zone and material: get_water_body_info.
 //   @param water_body_label - Actor label of the AWaterBody in the editor world (case-insensitive; the object name does not match).
 //   @returns { water_body_label: string, point_count: int, points: [[number, number, number]] }
 TSharedPtr<FJsonObject> HandleGetRiverSplinePoints(
@@ -965,7 +973,7 @@ TSharedPtr<FJsonObject> HandleGetRiverSplinePoints(
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:set_river_width_depth_at_point - Set the width and/or depth of a river water body, found by actor label in the editor world, at the spline point at or before input_key (point i sits at key i; past the last point, the last one), then synchronize the spline so the river rebuilds; nothing is saved. A value below 0.0001 is stored as 0.0001, as the engine's sync does. width and depth are read back from that point, named by point_index. A value already held is not written: applied is false with a note and nothing changes; otherwise the call is one undo step that dirties the actor's package. Neither width nor depth, a non-river body, an unknown label, a spline without points or a key before the first point is an error and nothing changes. All points at once: set_river_widths_depths; point positions: get_river_spline_points.
+// MCP:set_river_width_depth_at_point - Set the width and/or depth of a river water body, found by actor label in the editor world, at the spline point at or before input_key (point i sits at key i; past the last point, the last one), then synchronize the spline so the river rebuilds; nothing is saved. A value below 0.0001 is stored as 0.0001, as the engine's sync does. width and depth are read back from that point, named by point_index. A value already held is not written: applied is false with a note and nothing changes; otherwise the call is one undo step that dirties the actor's package. Neither width nor depth, a non-river body, an unknown label, a spline without points or a key before the first point is an error and nothing changes. All points at once: set_river_widths_depths; point positions: get_water_body_spline_points.
 //   @param water_body_label - Label of the AWaterBodyRiver actor
 //   @param input_key - Spline input key at which to set width/depth; a key before the first spline point (below 0) is an error and nothing is changed
 //   @param width - Optional new river width at the point at or before the key (give width, depth or both)
@@ -1164,7 +1172,7 @@ TSharedPtr<FJsonObject> HandleSetRiverWidthsDepths(
 				River->SetRiverDepthAtSplineInputKey(InputKey, Wanted(DepthsArr, i));
 			}
 		}
-		// One metadata sync after the whole batch (same propagate idiom as set_river_spline_points).
+		// One metadata sync after the whole batch (same propagate idiom as set_water_body_spline_points).
 		Spline->K2_SynchronizeAndBroadcastDataChange();
 	}
 
@@ -1263,36 +1271,6 @@ TSharedPtr<FJsonObject> HandleSetWaterBodyGerstnerWaves(
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_water_body_wave_info - Read a water body's wave state: whether waves are supported, whether they are present, the max wave height, and the active waves class + wave count.
-//   @param water_body_label - Label of the AWaterBody actor
-//   @returns { water_body_label: string, wave_supported: bool, has_waves: bool, max_wave_height: number, waves_class: string, num_waves: int, generator_class: string }
-TSharedPtr<FJsonObject> HandleGetWaterBodyWaveInfo(
-	const TSharedPtr<FJsonObject>& Params)
-{
-	AWaterBody* Body = nullptr; TSharedPtr<FJsonObject> Err;
-	UWaterBodyComponent* Comp = Water_ResolveBodyComponent(Params, /*bRequireWaveSupport*/ false, Body, Err);
-	if (!Comp) { return Err; }
-
-	UWaterWavesBase* WavesBase = Comp->GetWaterWaves();
-	int32 WaveCount = 0;
-	FString GeneratorClass;
-	if (const UGerstnerWaterWaves* Gerstner = Cast<UGerstnerWaterWaves>(WavesBase))
-	{
-		WaveCount = Gerstner->GetGerstnerWaves().Num();
-		GeneratorClass = Gerstner->GerstnerWaveGenerator ? Gerstner->GerstnerWaveGenerator->GetClass()->GetName() : FString();
-	}
-
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetStringField(TEXT("water_body_label"), Body->GetActorLabel());
-	Data->SetBoolField(TEXT("wave_supported"), Comp->IsWaveSupported());
-	Data->SetBoolField(TEXT("has_waves"), Comp->HasWaves());
-	Data->SetNumberField(TEXT("max_wave_height"), Comp->GetMaxWaveHeight());
-	Data->SetStringField(TEXT("waves_class"), WavesBase ? WavesBase->GetClass()->GetName() : FString(TEXT("None")));
-	Data->SetNumberField(TEXT("num_waves"), WaveCount);
-	Data->SetStringField(TEXT("generator_class"), GeneratorClass);
-	return mcp_common::MakeOkReply(Data);
-}
-
 // MCP:create_water_body_exclusion_volume - Spawn an AWaterBodyExclusionVolume (a brush volume that excludes water bodies), build its cube brush, set the exclusion mode, and optionally bind specific water bodies by label.
 //   @param actor_label - Label to assign to the new exclusion volume actor
 //   @param location - Optional [X, Y, Z] world location (defaults to origin)
@@ -1374,82 +1352,10 @@ TSharedPtr<FJsonObject> HandleCreateWaterBodyExclusionVolume(
 }
 
 // ---------------------------------------------------------------------------
-// Gerstner spectrum generator + per-wave detail read-back
+// Per-wave detail read-back
 // ---------------------------------------------------------------------------
 
-// MCP:set_water_body_gerstner_waves_spectrum - Give a Lake or Ocean water body (found by actor label in the editor world) a new Gerstner waves object driven by the engine's spectrum generator, configured from spectrum_type and octaves, in place of the waves it had. In UE 5.8 that generator is an unimplemented engine stub, so the body is left with NO waves: num_waves and max_wave_height come back 0, and note says so. Use set_water_body_gerstner_waves for real waves. One undo step restores the waves it had; nothing is saved. A river, an unknown label or an unknown spectrum_type is an error. Read back with get_water_body_wave_info or get_water_body_gerstner_wave_detail.
-//   @param water_body_label - Actor label of a Lake or Ocean AWaterBody in the editor world (case-insensitive); a river is refused.
-//   @param spectrum_type - Wave spectrum: Phillips (default), PiersonMoskowitz, or JONSWAP; any other name is an error.
-//   @param octaves - Optional array of octave objects { num_waves (>= 1, default 16), amplitude_scale (default 1), main_direction (default 0), spread_angle (default 0), uniform_spread (default false) }; entries that are not objects are skipped, and one default octave is used when none is given.
-//   @returns { water_body_label: string, wave_supported: bool, has_waves: bool, num_waves: int, max_wave_height: number, total_steepness: number, spectrum_type: string, octave_count: int, applied: bool, note: string }
-//   NOTE: UGerstnerWaterWaveGeneratorSpectrum::GenerateGerstnerWaves is an unimplemented engine stub — the generator is applied/persisted but yields no waves (has_waves/num_waves/max_wave_height are 0).
-TSharedPtr<FJsonObject> HandleSetWaterBodyGerstnerWavesSpectrum(
-	const TSharedPtr<FJsonObject>& Params)
-{
-	AWaterBody* Body = nullptr; TSharedPtr<FJsonObject> Err;
-	UWaterBodyComponent* Comp = Water_ResolveBodyComponent(Params, /*bRequireWaveSupport*/ true, Body, Err);
-	if (!Comp) { return Err; }
-
-	FString SpectrumStr = TEXT("Phillips");
-	Params->TryGetStringField(TEXT("spectrum_type"), SpectrumStr);
-	const UEnum* SpecEnum = StaticEnum<EWaveSpectrumType>();
-	int64 SpecVal = SpecEnum ? SpecEnum->GetValueByNameString(SpectrumStr) : INDEX_NONE;
-	if (SpecVal == INDEX_NONE && SpecEnum)
-	{
-		SpecVal = SpecEnum->GetValueByNameString(SpecEnum->GetName() + TEXT("::") + SpectrumStr);
-	}
-	if (SpecVal == INDEX_NONE)
-	{
-		return mcp_common::MakeErrorReply(
-			FString::Printf(TEXT("Unknown spectrum_type: %s (expected Phillips|PiersonMoskowitz|JONSWAP)"), *SpectrumStr));
-	}
-
-	// Created only once the request is valid, so a refused call leaves no orphan objects inside the actor.
-	UGerstnerWaterWaves* Waves = NewObject<UGerstnerWaterWaves>(Body);
-	UGerstnerWaterWaveGeneratorSpectrum* Generator = NewObject<UGerstnerWaterWaveGeneratorSpectrum>(Waves);
-	Generator->SpectrumType = static_cast<EWaveSpectrumType>(SpecVal);
-
-	const TArray<TSharedPtr<FJsonValue>>* OctArr = nullptr;
-	if (Params->TryGetArrayField(TEXT("octaves"), OctArr) && OctArr)
-	{
-		for (const TSharedPtr<FJsonValue>& V : *OctArr)
-		{
-			const TSharedPtr<FJsonObject>* Obj = nullptr;
-			if (V.IsValid() && V->TryGetObject(Obj) && Obj)
-			{
-				FGerstnerWaveOctave Oct;
-				double D = 0.0;
-				if ((*Obj)->TryGetNumberField(TEXT("num_waves"), D) && D >= 1.0) { Oct.NumWaves = static_cast<int32>(D); }
-				if ((*Obj)->TryGetNumberField(TEXT("amplitude_scale"), D)) { Oct.AmplitudeScale = static_cast<float>(D); }
-				if ((*Obj)->TryGetNumberField(TEXT("main_direction"), D)) { Oct.MainDirection = static_cast<float>(D); }
-				if ((*Obj)->TryGetNumberField(TEXT("spread_angle"), D)) { Oct.SpreadAngle = static_cast<float>(D); }
-				bool b = false;
-				if ((*Obj)->TryGetBoolField(TEXT("uniform_spread"), b)) { Oct.bUniformSpread = b; }
-				Generator->Octaves.Add(Oct);
-			}
-		}
-	}
-	if (Generator->Octaves.Num() == 0)
-	{
-		// The spectrum generator produces no waves without octaves — seed a default one.
-		Generator->Octaves.Add(FGerstnerWaveOctave());
-	}
-
-	ApplyGerstnerWaves(Body, Waves, Generator);
-
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetStringField(TEXT("water_body_label"), Body->GetActorLabel());
-	FillWaveState(Data, Comp, Waves);
-	Data->SetStringField(TEXT("spectrum_type"), WaveSpectrumToString(Generator->SpectrumType));
-	Data->SetNumberField(TEXT("octave_count"), Generator->Octaves.Num());
-	Data->SetStringField(TEXT("note"),
-		TEXT("UGerstnerWaterWaveGeneratorSpectrum::GenerateGerstnerWaves is unimplemented in UE 5.8 (engine stub): ")
-		TEXT("the spectrum generator is applied + persisted on the body but produces no waves. ")
-		TEXT("Use set_water_body_gerstner_waves (simple generator) for actual waves."));
-	return mcp_common::MakeOkReply(Data);
-}
-
-// MCP:get_water_body_gerstner_wave_detail - Read the individual Gerstner waves a water body holds (found by actor label in the editor world), as last generated and cached on its waves object: per wave the wavelength and amplitude in cm, the steepness, and the horizontal direction vector. A body without Gerstner waves -- a river, a body with another waves class, or one whose generator produced none (as after set_water_body_gerstner_waves_spectrum) -- is a success with wave_count 0 and an empty list. Read-only; an unknown label is an error. For the summary (waves class, count, max height) use get_water_body_wave_info; author waves with set_water_body_gerstner_waves.
+// MCP:get_water_body_gerstner_wave_detail - Read the individual Gerstner waves a water body holds (found by actor label in the editor world), as last generated and cached on its waves object: per wave the wavelength and amplitude in cm, the steepness, and the horizontal direction vector. A body without Gerstner waves -- a river, a body with another waves class, or one whose generator produced none -- is a success with wave_count 0 and an empty list. Read-only; an unknown label is an error. For the summary (waves class, count, max height) use get_water_body_info; author waves with set_water_body_gerstner_waves.
 //   @param water_body_label - Actor label of the AWaterBody in the editor world (case-insensitive; the object name does not match).
 //   @returns { water_body_label: string, wave_count: int, waves: [{ wavelength: number, amplitude: number, steepness: number, direction: [number, number, number] }] }
 TSharedPtr<FJsonObject> HandleGetWaterBodyGerstnerWaveDetail(
@@ -1775,17 +1681,15 @@ const McpCommandFamilies::FRegistrar Registration =
 	{ TEXT("create_river_water_body"), &HandleCreateRiverWaterBody },
 	{ TEXT("create_water_body_exclusion_volume"), &HandleCreateWaterBodyExclusionVolume },
 	{ TEXT("create_water_zone"), &HandleCreateWaterZone },
-	{ TEXT("get_river_spline_points"), &HandleGetRiverSplinePoints },
+	{ TEXT("get_water_body_spline_points"), &HandleGetRiverSplinePoints },
 	{ TEXT("get_water_body_gerstner_wave_detail"), &HandleGetWaterBodyGerstnerWaveDetail },
 	{ TEXT("get_water_body_info"), &HandleGetWaterBodyInfo },
-	{ TEXT("get_water_body_wave_info"), &HandleGetWaterBodyWaveInfo },
 	{ TEXT("get_water_zone_info"), &HandleGetWaterZoneInfo },
 	{ TEXT("remove_water_body_from_zone"), &HandleRemoveWaterBodyFromZone },
-	{ TEXT("set_river_spline_points"), &HandleSetRiverSplinePoints },
+	{ TEXT("set_water_body_spline_points"), &HandleSetRiverSplinePoints },
 	{ TEXT("set_river_width_depth_at_point"), &HandleSetRiverWidthDepthAtPoint },
 	{ TEXT("set_river_widths_depths"), &HandleSetRiverWidthsDepths },
 	{ TEXT("set_water_body_gerstner_waves"), &HandleSetWaterBodyGerstnerWaves },
-	{ TEXT("set_water_body_gerstner_waves_spectrum"), &HandleSetWaterBodyGerstnerWavesSpectrum },
 	{ TEXT("set_water_body_material"), &HandleSetWaterBodyMaterial },
 	{ TEXT("set_water_body_properties"), &HandleSetWaterBodyProperties },
 };

@@ -2,39 +2,25 @@
 
 # BehaviorTree
 
-27 tools. Back to the [index](README.md).
+22 tools. Back to the [index](README.md).
 
-## `add_blackboard_key`
-
-*Additive, idempotent.*
-
-Append one key to the own Keys of a UBlackboardData asset loaded by path, re-index its key IDs and save it; no undo step. key_type is Bool, Int, Float, Vector, Rotator, String, Name, Object, Class or Enum (case-insensitive); instance_synced defaults to false. An Object, Class or Enum key gets no base class or enum here: use set_blackboard_key_subsettings. Idempotent: a key of that name and type already there is a success with already_exists=true and saved=false, nothing added or saved (its instance_synced untouched); the same name with another type is an error. A name a parent blackboard already has is an error naming that parent, nothing added: a key of that name would shadow the parent's. verified confirms the key resolves by name. A failed save gives success false, saved=false and save_error, with the key added in memory. Inverse: remove_blackboard_key; read: get_blackboard_keys_asset; create the asset: create_blackboard_data.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `blackboard_path` | string | yes | Path to the UBlackboardData asset. |
-| `key_name` | string | yes | New key name (must be unique on the asset). |
-| `key_type` | string | yes | One of Bool\|Int\|Float\|Vector\|Rotator\|String\|Name\|Object\|Class\|Enum. |
-| `instance_synced` | boolean | no | Whether the key is instance-synced (optional, default false) |
-
-**Returns:** `{ blackboard_path: string, key_name: string, key_type: string, key_count: number, verified: bool, saved: bool, already_exists: bool?, save_error: string?, note: string?, keys: [{ name, type, instance_synced }] }`
-
-## `add_bt_composite_child`
+## `add_behavior_tree_child`
 
 *Additive, idempotent.*
 
-Add a child composite (Selector/Sequence/SimpleParallel) under a BehaviorTree composite.  The child is appended to the parent's Children (array order = execution order). Authoring is data-only: ParentNode/ExecutionIndex are assigned by the BT runtime at load (run_behavior_tree). Idempotent by child_name within the parent. The returned child_name is how you address this composite as a parent for further children.
+Add a child under a BehaviorTree composite: a composite (Selector/Sequence/SimpleParallel) when composite is given, or a leaf task (Wait/MoveTo/PlaySound/RunBehavior/...) when task_class is given; exactly one of the two. The child is appended to the parent's Children (array order = execution order). Authoring is data-only: ParentNode/ExecutionIndex are assigned by the BT runtime at load (run_behavior_tree). Idempotent by child_name within the parent, whatever its kind. The returned child_name is how you address a composite as a parent for further children.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `behavior_tree_path` | string | yes | Path to the UBehaviorTree asset (its RootNode must already be set via set_behavior_tree_root). |
-| `composite` | string | yes | Concrete composite class: "Selector" \| "Sequence" \| "SimpleParallel" (or a BTComposite_* class name). |
+| `composite` | string | no | Concrete composite class: "Selector" \| "Sequence" \| "SimpleParallel" (or a BTComposite_* class name). Give this or task_class, not both. |
+| `task_class` | string | no | Concrete task class: "Wait" \| "MoveTo" \| "PlaySound" \| "RunBehavior" \| "FinishWithResult" (or a BTTask_* class name). Give this or composite, not both. |
 | `parent_name` | string | no | Optional parent composite name (a child_name from a prior add); "Root" or omitted targets the RootNode. |
-| `child_name` | string | no | Optional stable name for the new node (its identity for idempotency/addressing); defaults to the composite type. |
+| `child_name` | string | no | Optional stable name for the new node (its identity for idempotency/addressing); defaults to the class type without its BTComposite_/BTTask_ prefix. |
 
-**Returns:** `{ behavior_tree_path: string, parent_name: string, child_name: string, child_class: string, child_kind: string, already_exists: bool, child_count: int, saved: bool, save_error?: string }`
+**Returns:** `{ behavior_tree_path: string, parent_name: string, child_name: string, child_class: string, child_kind: "composite"|"task", already_exists: bool, child_count: int, saved: bool, save_error?: string }`
 
-## `add_bt_decorator`
+## `add_behavior_tree_decorator`
 
 *Additive, idempotent.*
 
@@ -43,14 +29,14 @@ Attach a decorator (execution condition) to a specific child-edge of a BehaviorT
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `behavior_tree_path` | string | yes | Path to the UBehaviorTree asset (its RootNode must already be set, with the target child added). |
-| `child_name` | string | yes | Name of the existing child (a child_name from a prior add_bt_task_child/add_bt_composite_child) whose edge the decorator gates. |
+| `child_name` | string | yes | Name of the existing child (a child_name from a prior add_behavior_tree_child) whose edge the decorator gates. |
 | `decorator_class` | string | yes | Concrete decorator class: "Cooldown" \| "Loop" \| "TimeLimit" \| "Blackboard" \| ... (or a BTDecorator_* class name). |
 | `parent_name` | string | no | Optional parent composite name owning the child-edge; "Root" or omitted targets the RootNode. |
 | `decorator_name` | string | no | Optional stable name for the new decorator (its identity for idempotency); defaults to the decorator type. |
 
 **Returns:** `{ behavior_tree_path: string, parent_name: string, child_name: string, decorator_name: string, decorator_class: string, already_exists: bool, decorator_count: int, saved: bool, save_error?: string }`
 
-## `add_bt_service`
+## `add_behavior_tree_service`
 
 *Additive, idempotent.*
 
@@ -65,26 +51,26 @@ Attach a service (background tick) to a BehaviorTree composite.  The service is 
 
 **Returns:** `{ behavior_tree_path: string, parent_name: string, service_name: string, service_class: string, already_exists: bool, service_count: int, saved: bool, save_error?: string }`
 
-## `add_bt_task_child`
+## `add_blackboard_key`
 
 *Additive, idempotent.*
 
-Add a leaf task node (Wait/MoveTo/PlaySound/RunBehavior/...) under a BehaviorTree composite.  The task is appended to the parent's Children (array order = execution order). Authoring is data-only: ParentNode/ExecutionIndex are assigned by the BT runtime at load. Idempotent by child_name within the parent.
+Append one key to the own Keys of a UBlackboardData asset loaded by path, re-index its key IDs and save it; no undo step. key_type is Bool, Int, Float, Vector, Rotator, String, Name, Object, Class or Enum (case-insensitive); instance_synced defaults to false. An Object, Class or Enum key gets no base class or enum here: use set_blackboard_key_subsettings. Idempotent: a key of that name and type already there is a success with already_exists=true and saved=false, nothing added or saved (its instance_synced untouched); the same name with another type is an error. A name a parent blackboard already has is an error naming that parent, nothing added: a key of that name would shadow the parent's. verified confirms the key resolves by name. A failed save gives success false, saved=false and save_error, with the key added in memory. Inverse: remove_blackboard_key; read: get_blackboard_data; create the asset: create_blackboard_data.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `behavior_tree_path` | string | yes | Path to the UBehaviorTree asset (its RootNode must already be set via set_behavior_tree_root). |
-| `task_class` | string | yes | Concrete task class: "Wait" \| "MoveTo" \| "PlaySound" \| "RunBehavior" \| "FinishWithResult" (or a BTTask_* class name). |
-| `parent_name` | string | no | Optional parent composite name; "Root" or omitted targets the RootNode. |
-| `child_name` | string | no | Optional stable name for the new node; defaults to the task type. |
+| `blackboard_path` | string | yes | Path to the UBlackboardData asset. |
+| `key_name` | string | yes | New key name (must be unique on the asset). |
+| `key_type` | string | yes | One of Bool\|Int\|Float\|Vector\|Rotator\|String\|Name\|Object\|Class\|Enum. |
+| `instance_synced` | boolean | no | Whether the key is instance-synced (optional, default false) |
 
-**Returns:** `{ behavior_tree_path: string, parent_name: string, child_name: string, child_class: string, child_kind: string, already_exists: bool, child_count: int, saved: bool, save_error?: string }`
+**Returns:** `{ blackboard_path: string, key_name: string, key_type: string, key_count: number, verified: bool, saved: bool, already_exists: bool?, save_error: string?, note: string?, keys: [{ name, type, instance_synced }] }`
 
 ## `create_behavior_tree`
 
 *Additive, idempotent.*
 
-Create a UBehaviorTree asset at package_path/name (default folder /Game/AI), optionally bound to the UBlackboardData at blackboard_path, register it and save it; no undo step, and the tree starts with no root node (add one with set_behavior_tree_root). An existing tree at that path is returned with already_exists=true: when blackboard_path names a different blackboard it is rebound and saved (blackboard_rebound=true), otherwise it is left unchanged with saved=false and a message, nothing saved, so a repeat call is idempotent. A blackboard_path that does not load, or a name taken by an asset of another class, is an error; a failed save of a new or rebound tree gives success false with saved=false and save_error. Make the blackboard with create_blackboard_data; read the tree with get_behavior_tree_info; add nodes with add_bt_composite_child and add_bt_task_child.
+Create a UBehaviorTree asset at package_path/name (default folder /Game/AI), optionally bound to the UBlackboardData at blackboard_path, register it and save it; no undo step, and the tree starts with no root node (add one with set_behavior_tree_root). An existing tree at that path is returned with already_exists=true: when blackboard_path names a different blackboard it is rebound and saved (blackboard_rebound=true), otherwise it is left unchanged with saved=false and a message, nothing saved, so a repeat call is idempotent. A blackboard_path that does not load, or a name taken by an asset of another class, is an error; a failed save of a new or rebound tree gives success false with saved=false and save_error. Make the blackboard with create_blackboard_data; read the tree with get_behavior_tree_info; add nodes with add_behavior_tree_child.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -98,7 +84,7 @@ Create a UBehaviorTree asset at package_path/name (default folder /Game/AI), opt
 
 *Additive, idempotent.*
 
-Create an empty UBlackboardData asset, with no keys and no parent, at package_path/name (default folder /Game/AI), register it and save it; no undo step. Idempotent: a blackboard already at that path is returned unchanged with already_exists=true, saved=false, a message and its key_count, nothing saved. An invalid package name, or a name taken by an asset of another class, is an error; a failed save of the new asset -- refused while PIE runs, under a read-only root, or a read-only file -- gives success false with saved=false and save_error. blackboard_path is the object path the other blackboard tools take. Add keys with add_blackboard_key and constrain them with set_blackboard_key_subsettings; read them with get_blackboard_keys_asset; bind it to a tree with create_behavior_tree.
+Create a UBlackboardData asset with no parent at package_path/name (default folder /Game/AI), register it and save it; no undo step. Its only key is the one the engine seeds every new blackboard with, the SelfActor Object key (while AISystem bAddBlackboardSelfKey is on, the default), counted in key_count. Idempotent: a blackboard already at that path is returned unchanged with already_exists=true, saved=false, a message and its key_count, nothing saved. An invalid package name, or a name taken by an asset of another class, is an error; a failed save of the new asset -- refused while PIE runs, under a read-only root, or a read-only file -- gives success false with saved=false and save_error. blackboard_path is the object path the other blackboard tools take. Add keys with add_blackboard_key and constrain them with set_blackboard_key_subsettings; read them with get_blackboard_data; bind it to a tree with create_behavior_tree.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -111,7 +97,7 @@ Create an empty UBlackboardData asset, with no keys and no parent, at package_pa
 
 *Read-only.*
 
-Read a UBehaviorTree asset found by content path: its name, its blackboard asset with every key it holds in key-ID order, parent blackboard keys first (name, type, instance_synced, the base class or enum subsettings, inherited, and defined_in naming the blackboard that declares the key), and the node tree from RootNode -- each node's name and class, a composite's services and children, and the decorators on each child edge, nested up to 64 levels. Nothing is written. A missing path, or one that does not load as a behavior tree, is an error; a tree with no root gives root_node null. The runtime state of a tree running on an AI actor is get_behavior_tree_status; blackboard asset details: get_blackboard_keys_asset; build the tree with set_behavior_tree_root, add_bt_composite_child, add_bt_task_child, add_bt_decorator and add_bt_service.
+Read a UBehaviorTree asset found by content path: its name, its blackboard asset with every key it holds in key-ID order, parent blackboard keys first (name, type, instance_synced, the base class or enum subsettings, inherited, and defined_in naming the blackboard that declares the key), and the node tree from RootNode -- each node's name and class, a composite's services and children, and the decorators on each child edge, nested up to 64 levels. Nothing is written. A missing path, or one that does not load as a behavior tree, is an error; a tree with no root gives root_node null. The runtime state of a tree running on an AI actor is get_behavior_tree_status; blackboard asset details: get_blackboard_data; build the tree with set_behavior_tree_root, add_behavior_tree_child, add_behavior_tree_decorator and add_behavior_tree_service.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -131,55 +117,18 @@ Reader: runtime BT status + active task name (if any) on an AI pawn.
 
 **Returns:** `{ actor_name, run_status, run_status_name, active_task_name, bt_asset_name }`
 
-## `get_blackboard_component`
-
-*Read-only.*
-
-Read the UBlackboardComponent of an editor-world actor (its AIController blackboard, else one on the actor): component_name, has_valid_asset, num_keys and the key list. The list holds every key num_keys counts, in key-ID order: the keys inherited from parent blackboards first, each with inherited and defined_in naming the blackboard asset that declares it. Read-only, nothing is written. Editor world only, never PIE, where pawns are not auto-possessed; an actor not found by object name or label, or one with no blackboard component, is an error. Current values: get_blackboard_data; one key: get_blackboard_value; asset keys: get_blackboard_keys_asset.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actor_name` | string | yes | Object name or label of the pawn, its AIController, or an actor with its own UBlackboardComponent, in the editor world (first match). |
-
-**Returns:** `{ actor_name: string, component_name: string, has_valid_asset: bool, num_keys: number, blackboard_asset: string?, keys: [{ name: string, type: string, instance_synced: bool, inherited: bool, defined_in: string }]? }`
-
 ## `get_blackboard_data`
 
 *Read-only.*
 
-Dump a blackboard from its asset or from a running component. With blackboard_path, which wins when both are given, it reads the UBlackboardData asset: name, parent and key definitions (name, type, instance_synced, base class or enum subsettings). With actor_name, it reads the running UBlackboardComponent of that actor in the editor world, never PIE (its AIController blackboard, else one on the actor), as entries with each key's name, type and current value as text. Either way every key is listed in key-ID order, those inherited from parent blackboards first, each with inherited and defined_in naming the asset that declares it. Nothing is written. No parameter, an asset that does not load, an actor not found by object name or label, or no running blackboard is an error. One key: get_blackboard_value; definitions only: get_blackboard_keys; component state: get_blackboard_component; write a value: set_blackboard_value.
+Dump a blackboard from its asset or from a running component. With blackboard_path, which wins when both are given, it reads the UBlackboardData asset: name, parent and key definitions (name, type, instance_synced, base class or enum subsettings). With actor_name, it reads the running UBlackboardComponent of that actor in the editor world, never PIE (its AIController blackboard, else one on the actor): the component's name, has_valid_asset and num_keys, the key definitions of its blackboard asset as keys, and entries with each key's name, type and current value as text; a component with no asset gives empty lists. Either way every key is listed in key-ID order, those inherited from parent blackboards first, each with inherited and defined_in naming the asset that declares it. Nothing is written. No parameter, an asset that does not load, an actor not found by object name or label, or no running blackboard is an error. One key: get_blackboard_value; write a value: set_blackboard_value; add a key: add_blackboard_key.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | no | Object name or label of the editor-world pawn or AIController whose running blackboard to dump; ignored when blackboard_path is given |
+| `actor_name` | string | no | Object name or label of the editor-world pawn, its AIController, or an actor with its own UBlackboardComponent, whose running blackboard to dump (first match); ignored when blackboard_path is given |
 | `blackboard_path` | string | no | Content path of a UBlackboardData asset to read instead, e.g. "/Game/AI/BB_Enemy"; takes precedence over actor_name |
 
-**Returns:** `{ actor_name: string?, blackboard_asset: string?, name: string?, parent: string?, keys: [{ name, type, instance_synced, inherited, defined_in }]?, entries: [{ name, type, value, inherited, defined_in }]?, key_count: number }`
-
-## `get_blackboard_keys`
-
-*Read-only.*
-
-List blackboard key definitions (name, type, instance_synced, base_class or enum subsettings): of the running blackboard of an editor-world actor when actor_name is given, else of the UBlackboardData asset at blackboard_path. Every key the blackboard holds is listed in key-ID order, the keys inherited from parent blackboards first, each with inherited and defined_in naming the asset that declares it; key_count counts them all. Read-only, nothing is written. Editor world only, never PIE. Neither param, an actor or asset not found, or an actor with no blackboard component is an error; a component with no asset gives an empty list. Current values: get_blackboard_data; asset name and parent: get_blackboard_keys_asset.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actor_name` | string | no | Object name or label of an editor-world actor whose live blackboard to read; takes precedence over blackboard_path. |
-| `blackboard_path` | string | no | Path to a UBlackboardData asset (alternative to actor_name) |
-
-**Returns:** `{ actor_name: string?, blackboard_asset: string?, keys: [{ name: string, type: string, instance_synced: bool, inherited: bool, defined_in: string }], key_count: number }`
-
-## `get_blackboard_keys_asset`
-
-*Read-only.*
-
-Read the key definitions of a UBlackboardData asset found by content path, with no live component needed: its name, its parent blackboard when it has one, and every key it holds in key-ID order, the keys inherited from the parent chain first. Each key has name, type, instance_synced, the base class or enum subsettings, inherited, and defined_in naming the asset that declares it; key_count counts them all. Read-only, nothing is written. A missing path, or one that does not load as a blackboard, is an error. A running blackboard: get_blackboard_keys or get_blackboard_data; add a key: add_blackboard_key; remove one: remove_blackboard_key.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `blackboard_path` | string | yes | Path to the UBlackboardData asset. |
-
-**Returns:** `{ blackboard_path: string, name: string, parent: string?, keys: [{ name: string, type: string, instance_synced: bool, inherited: bool, defined_in: string }], key_count: number }`
+**Returns:** `{ actor_name: string?, blackboard_asset: string?, name: string?, parent: string?, component_name: string? (actor mode), has_valid_asset: bool? (actor mode), num_keys: number? (actor mode), keys: [{ name, type, instance_synced, base_class?, enum_type?, enum_name?, inherited, defined_in }], entries: [{ name, type, value, inherited, defined_in }]? (actor mode), key_count: number }`
 
 ## `get_blackboard_value`
 
@@ -206,6 +155,53 @@ Pause the behavior tree of an editor-world actor (its AIController brain compone
 
 **Returns:** `{ actor_name, paused, was_running }`
 
+## `remove_behavior_tree_child`
+
+*Destructive, idempotent.*
+
+Remove a child, composite or task, from a BehaviorTree composite.  Inverse of add_behavior_tree_child: drops the matching entry from the parent's Children array and saves. With kind, only child-edges of that kind are considered (a node of the other kind with the same name is untouched, and an index pointing at the other kind is an error); omitted, an edge of either kind matches. child_kind reports the kind of the edge removed. Idempotent: a missing child returns removed:false / already_absent:true.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `behavior_tree_path` | string | yes | Path to the UBehaviorTree asset. |
+| `child_name` | string | no | Name of the child to remove (a child_name from a prior add_behavior_tree_child); provide this or 'index'. |
+| `index` | number | no | Alternative to child_name: 0-based position in the parent's Children array. |
+| `kind` | string | no | Optional edge kind to match: "composite" or "task"; omitted matches either. Any other value is an error. |
+| `parent_name` | string | no | Optional parent composite name owning the child; "Root" or omitted targets the RootNode. |
+
+**Returns:** `{ behavior_tree_path: string, parent_name: string, child_name: string, child_kind: "composite"|"task" (the edge removed; the requested kind, or absent, when nothing matched), removed: bool, already_absent: bool, child_count: int, saved: bool, save_error?: string }`
+
+## `remove_behavior_tree_decorator`
+
+*Destructive, idempotent.*
+
+Remove a decorator (execution condition) from a specific child-edge of a BehaviorTree composite.  Inverse of add_behavior_tree_decorator: drops the matching entry from that child's Decorators array (FBTCompositeChild::Decorators). Idempotent: a missing decorator returns removed:false / already_absent:true.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `behavior_tree_path` | string | yes | Path to the UBehaviorTree asset. |
+| `child_name` | string | yes | Name of the existing child (a child_name from a prior add) whose edge the decorator gates. |
+| `decorator_name` | string | no | Name of the decorator to remove (a decorator_name from a prior add_behavior_tree_decorator); provide this or 'index'. |
+| `index` | number | no | Alternative to decorator_name: 0-based position in the child-edge's Decorators array. |
+| `parent_name` | string | no | Optional parent composite name owning the child-edge; "Root" or omitted targets the RootNode. |
+
+**Returns:** `{ behavior_tree_path: string, parent_name: string, child_name: string, decorator_name: string, removed: bool, already_absent: bool, decorator_count: int, saved: bool, save_error?: string }`
+
+## `remove_behavior_tree_service`
+
+*Destructive, idempotent.*
+
+Remove a service (background tick) from a BehaviorTree composite.  Inverse of add_behavior_tree_service: drops the matching entry from the composite's Services array (UBTCompositeNode::Services). Idempotent: a missing service returns removed:false / already_absent:true.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `behavior_tree_path` | string | yes | Path to the UBehaviorTree asset. |
+| `service_name` | string | no | Name of the service to remove (a service_name from a prior add_behavior_tree_service); provide this or 'index'. |
+| `index` | number | no | Alternative to service_name: 0-based position in the composite's Services array. |
+| `parent_name` | string | no | Optional composite name the service is attached to; "Root" or omitted targets the RootNode. |
+
+**Returns:** `{ behavior_tree_path: string, parent_name: string, service_name: string, removed: bool, already_absent: bool, service_count: int, saved: bool, save_error?: string }`
+
 ## `remove_blackboard_key`
 
 *Destructive, idempotent.*
@@ -219,67 +215,6 @@ Remove a key from a UBlackboardData asset and save it.  Inverse of add_blackboar
 | `index` | number | no | Alternative to key_name: 0-based position in this asset's own Keys array (excludes inherited parent keys). |
 
 **Returns:** `{ blackboard_path: string, key_name: string, key_type: string?, removed: bool, already_absent: bool, key_count: number, saved: bool, save_error?: string, keys: [{ name, type, instance_synced }] }`
-
-## `remove_bt_composite_child`
-
-*Destructive, idempotent.*
-
-Remove a child composite (Selector/Sequence/...) from a BehaviorTree composite.  Inverse of add_bt_composite_child: drops the matching entry from the parent's Children array. Only composite child-edges are considered, so a task with the same name is untouched. Idempotent: a missing child returns removed:false / already_absent:true.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `behavior_tree_path` | string | yes | Path to the UBehaviorTree asset. |
-| `child_name` | string | no | Name of the composite child to remove (a child_name from a prior add_bt_composite_child); provide this or 'index'. |
-| `index` | number | no | Alternative to child_name: 0-based position in the parent's Children array (the edge at that index must be a composite). |
-| `parent_name` | string | no | Optional parent composite name owning the child; "Root" or omitted targets the RootNode. |
-
-**Returns:** `{ behavior_tree_path: string, parent_name: string, child_name: string, child_kind: string, removed: bool, already_absent: bool, child_count: int, saved: bool, save_error?: string }`
-
-## `remove_bt_decorator`
-
-*Destructive, idempotent.*
-
-Remove a decorator (execution condition) from a specific child-edge of a BehaviorTree composite.  Inverse of add_bt_decorator: drops the matching entry from that child's Decorators array (FBTCompositeChild::Decorators). Idempotent: a missing decorator returns removed:false / already_absent:true.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `behavior_tree_path` | string | yes | Path to the UBehaviorTree asset. |
-| `child_name` | string | yes | Name of the existing child (a child_name from a prior add) whose edge the decorator gates. |
-| `decorator_name` | string | no | Name of the decorator to remove (a decorator_name from a prior add_bt_decorator); provide this or 'index'. |
-| `index` | number | no | Alternative to decorator_name: 0-based position in the child-edge's Decorators array. |
-| `parent_name` | string | no | Optional parent composite name owning the child-edge; "Root" or omitted targets the RootNode. |
-
-**Returns:** `{ behavior_tree_path: string, parent_name: string, child_name: string, decorator_name: string, removed: bool, already_absent: bool, decorator_count: int, saved: bool, save_error?: string }`
-
-## `remove_bt_service`
-
-*Destructive, idempotent.*
-
-Remove a service (background tick) from a BehaviorTree composite.  Inverse of add_bt_service: drops the matching entry from the composite's Services array (UBTCompositeNode::Services). Idempotent: a missing service returns removed:false / already_absent:true.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `behavior_tree_path` | string | yes | Path to the UBehaviorTree asset. |
-| `service_name` | string | no | Name of the service to remove (a service_name from a prior add_bt_service); provide this or 'index'. |
-| `index` | number | no | Alternative to service_name: 0-based position in the composite's Services array. |
-| `parent_name` | string | no | Optional composite name the service is attached to; "Root" or omitted targets the RootNode. |
-
-**Returns:** `{ behavior_tree_path: string, parent_name: string, service_name: string, removed: bool, already_absent: bool, service_count: int, saved: bool, save_error?: string }`
-
-## `remove_bt_task_child`
-
-*Destructive, idempotent.*
-
-Remove a leaf task node (Wait/MoveTo/...) from a BehaviorTree composite.  Inverse of add_bt_task_child: drops the matching entry from the parent's Children array. Only task child-edges are considered, so a composite with the same name is untouched. Idempotent: a missing child returns removed:false / already_absent:true.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `behavior_tree_path` | string | yes | Path to the UBehaviorTree asset. |
-| `child_name` | string | no | Name of the task child to remove (a child_name from a prior add_bt_task_child); provide this or 'index'. |
-| `index` | number | no | Alternative to child_name: 0-based position in the parent's Children array (the edge at that index must be a task). |
-| `parent_name` | string | no | Optional parent composite name owning the child; "Root" or omitted targets the RootNode. |
-
-**Returns:** `{ behavior_tree_path: string, parent_name: string, child_name: string, child_kind: string, removed: bool, already_absent: bool, child_count: int, saved: bool, save_error?: string }`
 
 ## `restart_behavior_tree`
 

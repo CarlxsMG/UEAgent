@@ -2,48 +2,33 @@
 
 # Trigger
 
-14 tools. Back to the [index](README.md).
+11 tools. Back to the [index](README.md).
 
 ## `create_trigger`
 
 *Additive.*
 
-Creates a trigger actor (TriggerBox or TriggerSphere) at a specified location. These two shapes only -- for a brush-based ATriggerVolume use create_volume(volume_type="TriggerVolume") or spawn_box_volume instead.
+Creates a trigger actor (TriggerBox or TriggerSphere) at a specified location. These two shapes only -- for a brush-based ATriggerVolume use spawn_box_volume(volume_class="TriggerVolume") instead.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `trigger_name` | string | yes | Name label for the trigger actor |
-| `trigger_type` | string | no | Trigger class: "TriggerBox" (default) or "TriggerSphere". "TriggerVolume" is deliberately REJECTED here -- ATriggerVolume derives from AVolume/ABrush and needs a real UModel brush built for it, so spawning it through this path would hand you a success-shaped actor with no real collision; use create_volume(volume_type="TriggerVolume"), which builds that brush. |
+| `trigger_type` | string | no | Trigger class: "TriggerBox" (default) or "TriggerSphere". "TriggerVolume" is deliberately REJECTED here -- ATriggerVolume derives from AVolume/ABrush and needs a real UModel brush built for it, so spawning it through this path would hand you a success-shaped actor with no real collision; use spawn_box_volume(volume_class="TriggerVolume"), which builds that brush. |
 | `location` | array | no | World [x, y, z] location to spawn the trigger (default 0,0,0) |
 
 **Returns:** `{ trigger_name, trigger_type, actor_name, actor_path, success }`
-
-## `create_volume`
-
-*Additive.*
-
-Spawn a BlockingVolume, KillZVolume, PainCausingVolume, PostProcessVolume or TriggerVolume in the editor world with a real cube brush, labelled volume_name, as one undo step; the level is not saved. Returns actor_name, actor_path, actor_class and brush_built. For other AVolume classes or box extents use spawn_box_volume.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `volume_name` | string | yes | Editor label for the new actor; its object name is generated and returned as actor_name. |
-| `volume_type` | string | no | Volume class, case-insensitive: "BlockingVolume" (default), "KillZVolume", "PainCausingVolume", "PostProcessVolume" or "TriggerVolume"; any other value spawns a BlockingVolume. |
-| `location` | array | no | World location [x, y, z] in cm of the volume center (default [0, 0, 0]). |
-| `size` | number | no | Edge length in cm of the cube brush (the full side, not a half-extent); omitted or not positive gives 200. |
-
-**Returns:** `{ volume_name, volume_type, actor_name, actor_path, actor_class, brush_built, success }`
 
 ## `get_actors_in_trigger`
 
 *Read-only.*
 
-List the actors that a TriggerBox, TriggerSphere or TriggerVolume in the editor world (not PIE) currently reports as overlapping (AActor::GetOverlappingActors), without changing anything. Returns actor_count and actors [{actor_name, actor_class}]; get_trigger_overlap_count returns only the count.
+List and count the actors that a TriggerBox, TriggerSphere or TriggerVolume in the editor world (not PIE) currently reports as overlapping (AActor::GetOverlappingActors), without changing anything. Returns actor_count and actors [{actor_name, actor_class}], plus the trigger's own object name and class. The first actor whose object name or editor label matches is used; when it is not a trigger the call fails.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `trigger_name` | string | yes | Object name of the trigger actor, such as the actor_name returned by create_trigger; its editor label is not matched. |
+| `trigger_name` | string | yes | Object name or editor label of the trigger actor, such as the actor_name returned by create_trigger. |
 
-**Returns:** `{ trigger_name, actor_name, actor_class, actors, actor_count }`
+**Returns:** `{ trigger_name, actor_name (the trigger's object name), actor_class (the trigger's class), actors: [{actor_name, actor_class}], actor_count }`
 
 ## `get_trigger_events`
 
@@ -69,18 +54,6 @@ Retrieves information about a trigger actor, including its type and bounding box
 
 **Returns:** `{ actor_name, actor_class, is_trigger_box, is_trigger_sphere, bounds_origin, bounds_extent }`
 
-## `get_trigger_overlap_count`
-
-*Read-only.*
-
-Count the actors currently overlapping a TriggerBox, TriggerSphere or TriggerVolume in the editor world, without changing anything; the cheap form of get_actors_in_trigger. Returns actor_name and overlap_count. Fails if the first actor matching the name is not a trigger.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actor_name` | string | yes | Object name or editor label of the trigger actor; the first actor matching either is used. |
-
-**Returns:** `{ actor_name, overlap_count }`
-
 ## `get_volume_info`
 
 *Read-only.*
@@ -93,27 +66,15 @@ Read a volume actor in the editor world without changing it: its class, whether 
 
 **Returns:** `{ actor_name, actor_class, is_blocking_volume, is_killz_volume, is_pain_causing_volume, is_post_process_volume, bounds_origin, bounds_extent, has_brush }`
 
-## `remove_trigger_box`
-
-*Destructive.*
-
-Delete a TriggerBox actor from the editor world after checking its class; the level is not saved. A missing actor is not an error: the reply has deleted false and a note; an actor of another class is refused, and that refusal or a destroy the world refuses is success false with deleted false. Returns actor_name, actor_class, deleted and already_existed.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actor_name` | string | yes | Object name of the TriggerBox actor (its editor label is not matched); the command fails without it. |
-
-**Returns:** `{ actor_name, actor_class, deleted, already_existed, note? }`
-
-## `remove_trigger_sphere`
+## `remove_trigger`
 
 *Destructive, idempotent.*
 
-Delete one ATriggerSphere actor from the editor world, found by its object name (matched without case; the editor label is not), after checking its class, through UWorld::DestroyActor: no undo step is recorded and the level is not saved (save_level). A name that matches no actor is not an error: the reply has deleted=false and a note; already_existed=false means nothing was found, and a repeat call finds nothing more to do (idempotent). An actor of another class is refused with success false and deleted=false, nothing destroyed, and so is a destroy the world refuses. A missing actor_name or no editor world is an error. A TriggerBox: remove_trigger_box; a brush volume: remove_volume; any actor, undoably: delete_actor; create one: create_trigger; resize: set_trigger_sphere_radius.
+Delete one shape trigger (ATriggerBase: TriggerBox, TriggerSphere or TriggerCapsule) from the editor world, found by its object name (matched without case; the editor label is not), after checking its class, through UWorld::DestroyActor: no undo step is recorded and the level is not saved (save_level). A name that matches no actor is not an error: the reply has deleted=false and a note; already_existed=false means nothing was found, and a repeat call finds nothing more to do (idempotent). An actor of another class, a TriggerVolume included, is refused with success false and deleted=false, nothing destroyed, and so is a destroy the world refuses. A missing actor_name or no editor world is an error. A brush volume (TriggerVolume too): remove_volume; any actor, undoably: delete_actor; create one: create_trigger.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Object name of the TriggerSphere actor, e.g. TriggerSphere_0, matched without case (its editor label is not matched); the command fails without it. |
+| `actor_name` | string | yes | Object name of the trigger actor, e.g. TriggerBox_0 or TriggerSphere_0, matched without case (its editor label is not matched); the command fails without it. |
 
 **Returns:** `{ actor_name, actor_class, deleted, already_existed, note? }`
 
@@ -121,7 +82,7 @@ Delete one ATriggerSphere actor from the editor world, found by its object name 
 
 *Destructive.*
 
-Destroy a volume ACTOR in the world -- any AVolume subclass: BlockingVolume, PainCausingVolume, PostProcessVolume, TriggerVolume and the rest. Typed: it verifies the actor really is an AVolume before deleting, so pointing it at a non-volume actor is refused rather than obeyed (success false, deleted false, nothing destroyed). This is the counterpart of spawn_box_volume / create_volume; for a TriggerBox or TriggerSphere use remove_trigger_box / remove_trigger_sphere instead.
+Destroy a volume ACTOR in the world -- any AVolume subclass: BlockingVolume, PainCausingVolume, PostProcessVolume, TriggerVolume and the rest. Typed: it verifies the actor really is an AVolume before deleting, so pointing it at a non-volume actor is refused rather than obeyed (success false, deleted false, nothing destroyed). This is the counterpart of spawn_box_volume; for a TriggerBox, TriggerSphere or TriggerCapsule use remove_trigger instead.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -174,15 +135,15 @@ Resize a TriggerSphere in the editor world by setting the unscaled radius of its
 
 *Additive.*
 
-USE THIS, NOT the plain actor spawners, for ANY AVolume-derived actor: it spawns the actor AND builds a real cube brush for it from a half-extent, so the volume actually encloses space. The generic spawners leave an EMPTY UModel brush -- zero bounds, which means 0 nav tiles and no overlap, an actor that looks spawned and does nothing. It then normalizes the residual scale some actor factories stamp on placement and RE-READS the resulting world bounds, so `success` means "the volume you got matches the volume you asked for", not "the call returned".
+USE THIS, NOT the plain actor spawners, for ANY AVolume-derived actor: it spawns the actor AND builds a real cube brush for it from a half-extent, so the volume actually encloses space. The generic spawners leave an EMPTY UModel brush -- zero bounds, which means 0 nav tiles and no overlap, an actor that looks spawned and does nothing. It then normalizes the residual scale some actor factories stamp on placement and RE-READS the resulting world bounds, so `success` means "the volume you got matches the volume you asked for", not "the call returned". Called with no class and no extent it gives a 200 cm BlockingVolume cube. One undo step; the level is not saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `volume_class` | string | yes | Volume class: short reflected name ('NavMeshBoundsVolume', 'PhysicsVolume', 'TriggerVolume', 'BlockingVolume', 'PCGVolume', with or without a leading 'A') or a full object path ('/Script/Engine.TriggerVolume'). Must derive from AVolume (required). |
-| `extent` | array | yes | Required [x, y, z] in unreal units, each component > 0. !!! THIS IS THE SEMI-AXIS (HALF-size), NOT the full edge length !!! extent=[500,500,200] builds a 1000 x 1000 x 400 cube and, with the scale normalized, gives world bounds of +/-500 / +/-200 around `location`. Check `bounds_extent_actual` against what you asked for. |
+| `volume_class` | string | no | Optional volume class (default "BlockingVolume"): short reflected name ('BlockingVolume', 'KillZVolume', 'PainCausingVolume', 'PostProcessVolume', 'TriggerVolume', 'NavMeshBoundsVolume', 'PhysicsVolume', 'PCGVolume', case-insensitive, with or without a leading 'A') or a full object path ('/Script/Engine.TriggerVolume'). Must be a concrete AVolume subclass; anything else is an error. |
 | `location` | array | no | World [x, y, z] location to spawn the volume (default 0,0,0) |
+| `extent` | array | no | Optional [x, y, z] in unreal units, each component > 0; default [100, 100, 100] (a 200 cm cube). !!! THIS IS THE SEMI-AXIS (HALF-size), NOT the full edge length !!! extent=[500,500,200] builds a 1000 x 1000 x 400 cube and, with the scale normalized, gives world bounds of +/-500 / +/-200 around `location`. Check `bounds_extent_actual` against what you asked for. A value that is not an array is an error. |
 | `actor_label` | string | no | Optional editor label for the spawned actor |
-| `is_spatially_loaded` | boolean | no | World Partition spatial-loading flag (default true; only applied when the actor allows changing it). Reported RE-READ from the actor. |
+| `is_spatially_loaded` | boolean | no | Optional World Partition spatial-loading flag. Applied only when passed and the actor allows changing it (spatial_flag_applied); omitted, the actor keeps its class default. Reported RE-READ from the actor. |
 | `normalize_scale` | boolean | no | Default TRUE: resets the actor scale to (1,1,1) after building the brush, so the world bounds equal the requested `extent`. It matters because some actor factories stamp a default scale during placement -- APCGVolume is spawned at (25, 25, 10) -- and since brush polys are authored in LOCAL space that scale MULTIPLIES your extent. Set it false only if you deliberately want the factory's scale; `spawn_scale` always reports what it was. Be aware that with normalize_scale=false and a factory scale != 1 the real bounds are NOT the requested extent, so `extent_matches_request` and therefore `success` come back FALSE -- that is the honest answer, not a bug, and `actor_scale` says why they differ. |
 
 **Returns:** `{ actor_name, actor_path, actor_class, volume_class, world_bounds_extent: [x,y,z] (RE-READ, GetActorBounds -- kept for compatibility), bounds_extent_actual: [x,y,z] (RE-READ from the BRUSH component's world bounds; this is the volume itself, with no stray editor sprite in the box), bounds_origin_actual: [x,y,z], actor_scale: [x,y,z] (RE-READ, after normalization), spawn_scale: [x,y,z] (RE-READ, as the actor factory left it), scale_normalized: bool (true only when a correction was actually needed), extent_matches_request: bool, bounds_tolerance_uu: number, has_brush_geometry, brush_built, is_spatially_loaded (RE-READ), spatial_flag_applied, success, requested: { volume_class, location, extent, actor_label, is_spatially_loaded, normalize_scale } }`

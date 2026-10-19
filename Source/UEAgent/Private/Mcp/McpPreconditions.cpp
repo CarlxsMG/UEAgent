@@ -44,7 +44,7 @@ namespace McpPreconditionsPrivate
 	static const TCHAR* const MsgFoliage =
 		TEXT("The foliage tools CRASH THE EDITOR PROCESS (EXCEPTION_ACCESS_VIOLATION in FoliageEdit.dll); splitting the work or lowering the count does ")
 		TEXT("not help -- a single instance crashes it too. There is no workaround through these tools. WHAT WORKS: place the instances as an ")
-		TEXT("InstancedStaticMeshComponent on a placed actor, with add_instanced_static_mesh_component + add_ism_instance.");
+		TEXT("InstancedStaticMeshComponent on a placed actor, with add_instanced_static_mesh_component + add_instanced_static_mesh_instance.");
 
 	// MsgLoadLevelTemp  (args: filename)
 	static const TCHAR* const MsgLoadLevelTemp =
@@ -413,7 +413,7 @@ namespace McpPreconditionsPrivate
 			{
 				continue;
 			}
-			if (CommandType == TEXT("batch") && Key == TEXT("commands") && Field.Value.IsValid() && Field.Value->Type == EJson::Array)
+			if (CommandType == TEXT("execute_batch") && Key == TEXT("commands") && Field.Value.IsValid() && Field.Value->Type == EJson::Array)
 			{
 				const TArray<TSharedPtr<FJsonValue>>& Items = Field.Value->AsArray();
 				for (int32 Index = 0; Index < Items.Num(); ++Index)
@@ -528,7 +528,7 @@ namespace McpPreconditionsPrivate
 				&& (*Item)->TryGetStringField(TEXT("command_type"), SubCommand) && SubCommand.Len() >= NAME_SIZE)
 			{
 				return Refuse(FString::Printf(
-					TEXT("batch: commands[%d].command_type is %d characters long. An FName holds at most %d characters, and the engine ")
+					TEXT("execute_batch: commands[%d].command_type is %d characters long. An FName holds at most %d characters, and the engine ")
 					TEXT("aborts the editor when it builds one from a longer string (UnrealNames.cpp, NAME_SIZE); every command type ")
 					TEXT("becomes one before its item runs, and no tool has a name that long. Refused before any item ran: nothing was ")
 					TEXT("changed. WHAT WORKS: the name of a tool, as tools/list gives it."),
@@ -599,11 +599,17 @@ namespace McpPreconditionsPrivate
 		{
 			return {};
 		}
-		// NOTE: get_asset_metadata does not take a path: the handler prepends "/Game/" to whatever it gets.
-		const FString ProbeName = Asset.ToLower().StartsWith(TEXT("/game/")) ? Asset.Mid(6) : Asset;
+		// get_asset_by_name takes the path as given; load_full_data=false keeps it from LOADING the asset, which for
+		// a map means the whole world. Its `class` is the class PATH (/Script/Engine.World): the check reads the name.
 		TSharedPtr<FJsonObject> MetaParams = MakeShared<FJsonObject>();
-		MetaParams->SetStringField(TEXT("asset_name"), ProbeName);
-		const FString Class = TextOf(Ask(Probe, TEXT("get_asset_metadata"), MetaParams), TEXT("class")).ToLower();
+		MetaParams->SetStringField(TEXT("asset_name"), Asset);
+		MetaParams->SetBoolField(TEXT("load_full_data"), false);
+		FString Class = TextOf(Ask(Probe, TEXT("get_asset_by_name"), MetaParams), TEXT("class")).ToLower();
+		int32 ClassDot = INDEX_NONE;
+		if (Class.FindLastChar(TEXT('.'), ClassDot))
+		{
+			Class.RightChopInline(ClassDot + 1);
+		}
 
 		// The map first, the worst case: deleting the .umap's path deletes the MAP.
 		if (Class == TEXT("world"))
@@ -659,9 +665,11 @@ namespace McpPreconditionsPrivate
 			return {}; // not in the crashing family: allowed, at no read cost
 		}
 
+		// inspect_object without the properties: identity and class only.
 		TSharedPtr<FJsonObject> ClassParams = MakeShared<FJsonObject>();
 		ClassParams->SetStringField(TEXT("object_path"), Object);
-		const TSharedPtr<FJsonObject> Info = Ask(Probe, TEXT("get_object_class"), ClassParams);
+		ClassParams->SetBoolField(TEXT("include_properties"), false);
+		const TSharedPtr<FJsonObject> Info = Ask(Probe, TEXT("inspect_object"), ClassParams);
 		const FString ClassPath = TextOf(Info, TEXT("class_path"));
 		const FString ClassName = TextOf(Info, TEXT("class_name"));
 		// get_event_dispatchers wants the ASSET, not the generated class:
@@ -861,7 +869,7 @@ TOptional<McpPreconditions::FRefusal> McpPreconditions::Check(const FString& Com
 	if (TOptional<FRefusal> Refusal = RefuseIntegerOutOfRange(CommandType, Params)) { return Refusal; }
 	if (TOptional<FRefusal> Refusal = RefuseNameTooLong(CommandType, Params)) { return Refusal; }
 	if (TOptional<FRefusal> Refusal = RefuseMalformedVector(CommandType, Params)) { return Refusal; }
-	if (CommandType == TEXT("batch")) { return RefuseBatchCommandTypeTooLong(Params); }
+	if (CommandType == TEXT("execute_batch")) { return RefuseBatchCommandTypeTooLong(Params); }
 	if (CommandType == TEXT("create_material_expression")) { return RefuseSetMaterialAttributes(Params); }
 	if (CommandType == TEXT("scatter_foliage_in_box") || CommandType == TEXT("add_foliage_instances")) { return RefuseFoliage(Params); }
 	if (CommandType == TEXT("load_level")) { return RefuseLoadLevel(Params); }
@@ -973,8 +981,21 @@ TSharedPtr<FJsonObject> McpPreconditions::AssetMetadataFromRegistry(const TShare
 	{
 		return nullptr;
 	}
-	// Same path as the handler: prepend "/Game/" (which is why the probe strips that prefix).
-	FString PackageName = TEXT("/Game/") + AssetName;
+	// Only the identity, read without loading: a call that asks for the loaded detail or the tags goes to the handler.
+	bool bLoadFullData = true;
+	ProbeParams->TryGetBoolField(TEXT("load_full_data"), bLoadFullData);
+	bool bIncludeTags = false;
+	ProbeParams->TryGetBoolField(TEXT("include_tags"), bIncludeTags);
+	if (bLoadFullData || bIncludeTags)
+	{
+		return nullptr;
+	}
+	// A package name or an object path; a bare name is the handler's name scan.
+	if (!AssetName.StartsWith(TEXT("/")))
+	{
+		return nullptr;
+	}
+	FString PackageName = AssetName;
 	int32 Dot = INDEX_NONE;
 	if (PackageName.FindChar(TEXT('.'), Dot))
 	{
@@ -1002,13 +1023,13 @@ TSharedPtr<FJsonObject> McpPreconditions::AssetMetadataFromRegistry(const TShare
 		Primary = &Assets[0];
 	}
 
+	// The identity get_asset_by_name answers: `class` is the class PATH ("/Script/Engine.World").
 	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
 	Result->SetStringField(TEXT("name"), Primary->AssetName.ToString());
-	// Same as Asset->GetClass()->GetName(): "World", "Blueprint", "MetaHumanCharacter"...
-	Result->SetStringField(TEXT("class"), Primary->AssetClassPath.GetAssetName().ToString());
 	Result->SetStringField(TEXT("path"), Primary->GetObjectPathString());
+	Result->SetStringField(TEXT("class"), Primary->AssetClassPath.ToString());
 	Result->SetStringField(TEXT("package"), Primary->PackageName.ToString());
-	Result->SetStringField(TEXT("asset_class_path"), Primary->AssetClassPath.ToString());
+	Result->SetBoolField(TEXT("is_loaded"), Primary->IsAssetLoaded());
 	Result->SetStringField(TEXT("source"), TEXT("asset_registry"));
 	return Result;
 }
@@ -1104,7 +1125,7 @@ FString McpPreconditions::RunSelfTest(const FString& VectorsPath, FString& OutRe
 				continue;
 			}
 
-			// The REAL get_asset_metadata probe (Asset Registry, nothing loaded): it can be checked
+			// The REAL get_asset_by_name probe (Asset Registry, nothing loaded): it can be checked
 			// against a real map without risk, which delete_asset cannot.
 			if (Op == TEXT("registry_probe"))
 			{

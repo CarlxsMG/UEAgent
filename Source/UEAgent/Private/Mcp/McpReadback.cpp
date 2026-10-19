@@ -12,10 +12,15 @@ namespace McpReadbackCorePrivate
 	using namespace McpReadbackText;
 
 	// ------------------------------------------------------------- pre-command snapshots (BEFORE)
-	/** The SCS component names of a Blueprint, sorted; unset if they could not be read. */
+	/** The SCS component names of a Blueprint, sorted; unset if they could not be read. Its OWN construction
+	 *  script only: no native components, nothing inherited (the parent is read on its own). */
 	static TOptional<TArray<FString>> ScsComponentNames(const FSend& Send, const FString& Blueprint)
 	{
-		const FO Info = ProbeOrEmpty(Send, TEXT("get_blueprint_components"), Dict({ { TEXT("blueprint_name"), S(Blueprint) } }));
+		const FO Info = ProbeOrEmpty(Send, TEXT("get_blueprint_components"), Dict({
+			{ TEXT("blueprint_name"), S(Blueprint) },
+			{ TEXT("include_native"), B(false) },
+			{ TEXT("include_inherited"), B(false) },
+		}));
 		const FV Components = Get(Info, TEXT("components"));
 		if (!IsList(Components))
 		{
@@ -330,16 +335,19 @@ namespace McpReadback
 
 	void RegisterCore(FTables& Tables)
 	{
-		FFollowUp SetPropertyValue;
-		SetPropertyValue.Reader = TEXT("get_property_value");
-		SetPropertyValue.ParamMap = { { TEXT("object_path"), TEXT("object_path") }, { TEXT("property_name"), TEXT("property_name") } };
-		SetPropertyValue.ValueKey = TEXT("value");
-		SetPropertyValue.RequestKey = TEXT("value");
-		Tables.FollowUp.Add(TEXT("set_property_value"), SetPropertyValue);
+		// The single write (property_name + value) is re-read; properties{} alone requests no `value`, so it
+		// spends no re-read (the generic follow-up skips a call that requested nothing).
+		FFollowUp SetProperties;
+		SetProperties.Reader = TEXT("get_properties");
+		SetProperties.ParamMap = { { TEXT("object_path"), TEXT("object_path") }, { TEXT("property_name"), TEXT("property_name") } };
+		SetProperties.ValueKey = TEXT("values");
+		SetProperties.ValueKeyParam = TEXT("property_name");
+		SetProperties.RequestKey = TEXT("value");
+		Tables.FollowUp.Add(TEXT("set_properties"), SetProperties);
 
-		Tables.Before.Add(TEXT("set_blueprint_component_property"), &SnapshotScs);
+		Tables.Before.Add(TEXT("set_blueprint_component_properties"), &SnapshotScs);
 		Tables.Before.Add(TEXT("add_component_to_blueprint"), &SnapshotDirtyLibraryPackages);
-		Tables.BeforeCheck.Add(TEXT("set_blueprint_component_property"), &CheckDroppedComponents);
+		Tables.BeforeCheck.Add(TEXT("set_blueprint_component_properties"), &CheckDroppedComponents);
 		Tables.BeforeCheck.Add(TEXT("add_component_to_blueprint"), &CheckComponentInLibrary);
 	}
 
@@ -445,7 +453,11 @@ namespace McpReadback
 						{ TEXT("reason"), S(F(McpReadbackText::RB_verify_readback_1, { Follow->Reader, Why })) } }));
 					return Result;
 				}
-				const FV Stored = Get(Payload(Echo), Follow->ValueKey);
+				FV Stored = Get(Payload(Echo), Follow->ValueKey);
+				if (!Follow->ValueKeyParam.IsEmpty())
+				{
+					Stored = Get(Stored, TextOf(Get(Params, Follow->ValueKeyParam)));
+				}
 				const FString Verdict = McpReadbackUtil::CheckNonEmptyStored(Params, Stored, Follow->RequestKey);
 				if (!Verdict.IsEmpty())
 				{

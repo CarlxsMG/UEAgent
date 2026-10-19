@@ -167,10 +167,11 @@ namespace
 // ---------------------------------------------------------------------------
 // list_usd_stage_layers
 // ---------------------------------------------------------------------------
-// MCP:list_usd_stage_layers - List the layer stack of a USD stage opened with open_usd_stage or create_usd_stage, read-only: each layer identifier, real_path, is_muted and dirty, plus count and any captured USD errors. An unregistered stage_name is an error; get_usd_layer_info details one layer by index.
+// MCP:list_usd_stage_layers - List the layer stack of a USD stage opened with open_usd_stage or create_usd_stage, read-only: each layer's index in the stack, identifier, real_path, is_muted, dirty and sublayer paths, plus count and any captured USD errors; with layer_index only that layer. An unregistered stage_name, a layer_index outside the stack or an invalid layer at it is an error.
 //   @param stage_name [string!] - Name the stage was registered under via open_usd_stage or create_usd_stage.
-//   @param include_session_layers [bool] - When true (default) the returned stack also includes the stage's session/auto-generated layers; pass false to get only the persistent root + sublayers.
-//   @returns { stage_name: string, include_session_layers: bool, count: int, layers: [{ identifier: string, real_path: string, is_muted: bool, dirty: bool }], errors: [string]? }
+//   @param include_session_layers [bool] - When true (default) the returned stack also includes the stage's session/auto-generated layers; pass false to get only the persistent root + sublayers. layer_index counts in this stack.
+//   @param layer_index - Optional 0-based index into the layer stack (the root layer is 0); report only that layer
+//   @returns { stage_name: string, include_session_layers: bool, count: int, layers: [{ index: int, identifier: string, real_path: string, is_muted: bool, dirty: bool, sub_layer_paths: [string], sub_layer_count: int }], layer_index?: int, errors: [string]? }
 
 TSharedPtr<FJsonObject> HandleListUsdStageLayers(const TSharedPtr<FJsonObject>& Params)
 {
@@ -179,6 +180,13 @@ TSharedPtr<FJsonObject> HandleListUsdStageLayers(const TSharedPtr<FJsonObject>& 
 
 	bool bIncludeSession = true;
 	Params->TryGetBoolField(TEXT("include_session_layers"), bIncludeSession);
+	int32 OnlyIndex = INDEX_NONE;
+	const bool bIndexIsNumber = Params->TryGetNumberField(TEXT("layer_index"), OnlyIndex);
+	const bool bOneLayer = Params->HasField(TEXT("layer_index"));
+	if (bOneLayer && !bIndexIsNumber)
+	{
+		return mcp_common::MakeErrorReply(TEXT("layer_index must be an integer"));
+	}
 
 	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
 	Result->SetStringField(TEXT("stage_name"), StageName);
@@ -207,81 +215,41 @@ TSharedPtr<FJsonObject> HandleListUsdStageLayers(const TSharedPtr<FJsonObject>& 
 		}
 	}
 
-	TArray<TSharedPtr<FJsonValue>> LayerArr;
-	for (const UE::FSdfLayer& Layer : Stack)
+	if (bOneLayer)
 	{
-		if (!Layer) { continue; }
+		Result->SetNumberField(TEXT("layer_index"), OnlyIndex);
+		if (OnlyIndex < 0 || OnlyIndex >= Stack.Num())
+		{
+			return UEAgent::UsdCommon::FailReply(Result,
+				FString::Printf(TEXT("layer_index %d out of range [0, %d)"), OnlyIndex, Stack.Num()));
+		}
+		if (!Stack[OnlyIndex])
+		{
+			return UEAgent::UsdCommon::FailReply(Result, FString::Printf(TEXT("layer at index %d is invalid"), OnlyIndex));
+		}
+	}
+
+	// index is the position in GetLayerStack(include_session_layers), so an invalid layer leaves a gap.
+	TArray<TSharedPtr<FJsonValue>> LayerArr;
+	for (int32 Index = 0; Index < Stack.Num(); ++Index)
+	{
+		const UE::FSdfLayer& Layer = Stack[Index];
+		if (!Layer || (bOneLayer && Index != OnlyIndex)) { continue; }
 
 		TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+		Entry->SetNumberField(TEXT("index"), Index);
 		Entry->SetStringField(TEXT("identifier"), Layer.GetIdentifier());
 		Entry->SetStringField(TEXT("real_path"),  Layer.GetRealPath());
 		Entry->SetBoolField(TEXT("is_muted"),    Layer.IsMuted());
 		Entry->SetBoolField(TEXT("dirty"),       Layer.IsDirty());
+		const TArray<TSharedPtr<FJsonValue>> SubArr = mcp_common::StringsToJson(Layer.GetSubLayerPaths());
+		Entry->SetArrayField(TEXT("sub_layer_paths"), SubArr);
+		Entry->SetNumberField(TEXT("sub_layer_count"), SubArr.Num());
 		LayerArr.Add(MakeShared<FJsonValueObject>(Entry));
 	}
 
 	Result->SetArrayField(TEXT("layers"), LayerArr);
 	Result->SetNumberField(TEXT("count"), LayerArr.Num());
-	return mcp_common::MakeOkReply(Result);
-}
-
-// ---------------------------------------------------------------------------
-// get_usd_layer_info
-// ---------------------------------------------------------------------------
-// MCP:get_usd_layer_info - Read metadata for a single layer in the stage's stack (identifier, real path, dirty/muted flags, sublayer paths).
-//   @param stage_name [string!] - Name the stage was registered under.
-//   @param layer_index [integer] - 0-based index into the layer stack (root layer is 0; session layers follow). Defaults to 0. Out-of-range returns an error rather than a synthetic empty payload.
-//   @returns { stage_name: string, layer_index: int, identifier: string, real_path: string, dirty: bool, is_muted: bool, sub_layer_paths: [string], sub_layer_count: int, errors: [string]? }
-
-TSharedPtr<FJsonObject> HandleGetUsdLayerInfo(const TSharedPtr<FJsonObject>& Params)
-{
-	FString StageName;
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("stage_name"), StageName)) { return Missing; }
-
-	int32 LayerIndex = 0;
-	Params->TryGetNumberField(TEXT("layer_index"), LayerIndex);
-
-	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-	Result->SetStringField(TEXT("stage_name"), StageName);
-	Result->SetNumberField(TEXT("layer_index"), LayerIndex);
-
-	TArray<UE::FSdfLayer> Stack;
-	UEAgent::UsdCommon::CaptureUsdErrors(
-		[&Stack, &StageName]()
-		{
-			if (UE::FUsdStage Stage = UsdLayer_FindStage(StageName))
-			{
-				Stack = Stage.GetLayerStack(true);
-			}
-		},
-		Result);
-
-	if (Stack.Num() == 0 && !UsdLayer_FindStage(StageName))
-	{
-		return UEAgent::UsdCommon::FailReply(Result, FString::Printf(TEXT("Stage '%s' could not be resolved"), *StageName));
-	}
-
-	if (LayerIndex < 0 || LayerIndex >= Stack.Num())
-	{
-		return UEAgent::UsdCommon::FailReply(Result,
-			FString::Printf(TEXT("layer_index %d out of range [0, %d)"), LayerIndex, Stack.Num()));
-	}
-
-	const UE::FSdfLayer Layer = Stack[LayerIndex];
-	if (!Layer)
-	{
-		return UEAgent::UsdCommon::FailReply(Result, FString::Printf(TEXT("layer at index %d is invalid"), LayerIndex));
-	}
-
-	Result->SetStringField(TEXT("identifier"), Layer.GetIdentifier());
-	Result->SetStringField(TEXT("real_path"),  Layer.GetRealPath());
-	Result->SetBoolField(TEXT("dirty"),       Layer.IsDirty());
-	Result->SetBoolField(TEXT("is_muted"),    Layer.IsMuted());
-
-	const TArray<TSharedPtr<FJsonValue>> SubArr = mcp_common::StringsToJson(Layer.GetSubLayerPaths());
-	Result->SetArrayField(TEXT("sub_layer_paths"), SubArr);
-	Result->SetNumberField(TEXT("sub_layer_count"), SubArr.Num());
-
 	return mcp_common::MakeOkReply(Result);
 }
 
@@ -718,7 +686,6 @@ const McpCommandFamilies::FRegistrar Registration =
 	{ TEXT("add_usd_payload"), &HandleAddUsdPayload },
 	{ TEXT("add_usd_reference"), &HandleAddUsdReference },
 	{ TEXT("clear_usd_references"), &HandleClearUsdReferences },
-	{ TEXT("get_usd_layer_info"), &HandleGetUsdLayerInfo },
 	{ TEXT("insert_usd_sublayer"), &HandleInsertUsdSublayer },
 	{ TEXT("list_usd_stage_layers"), &HandleListUsdStageLayers },
 	{ TEXT("mute_usd_layer"), &HandleMuteUsdLayer },

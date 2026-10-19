@@ -182,7 +182,7 @@ public:
 	 * Rewrites in place the {roll,pitch,yaw} object form into the wire array [pitch, yaw, roll]
 	 * for CommandType's rotation parameters. Only touches objects whose keys are ALL axes and whose
 	 * values are numbers: any other shape is left intact for the handler to decide. Game thread
-	 * (called by DispatchSingleCommand, so it also covers `batch`). Returns how many parameters
+	 * (called by DispatchSingleCommand, so it also covers `execute_batch`). Returns how many parameters
 	 * it rewrote.
 	 */
 	static int32 NormalizeRotationParams(const FString& CommandType, const TSharedPtr<FJsonObject>& Params);

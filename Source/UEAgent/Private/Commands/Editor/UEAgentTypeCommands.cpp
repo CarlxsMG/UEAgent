@@ -336,7 +336,7 @@ TSharedPtr<FJsonObject> HandleAddStructMember(const TSharedPtr<FJsonObject>& Par
     return Result;
 }
 
-// MCP:create_blueprint_interface - Create a Blueprint Interface asset: a contract of function signatures that unrelated classes can implement, so callers talk to the contract instead of a concrete class. The right tool when several different kinds of actor must answer the same request (interactable, damageable, workable) and you do not want a shared base class -- one interface replaces N-by-M hard-wired cases. Created empty: add functions with add_blueprint_function, then implement_interface on each class and implement_interface_function per class.
+// MCP:create_blueprint_interface - Create a Blueprint Interface asset: a contract of function signatures that unrelated classes can implement, so callers talk to the contract instead of a concrete class. The right tool when several different kinds of actor must answer the same request (interactable, damageable, workable) and you do not want a shared base class -- one interface replaces N-by-M hard-wired cases. Created empty: add functions with add_blueprint_function, then implement_interface on each class and add_blueprint_function with override=true per function.
 //   @param name - Asset name (no path)
 //   @param path - Target content path for the new asset (default /Game/Blueprints)
 //   @returns { name, path, type }

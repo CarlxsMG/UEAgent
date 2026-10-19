@@ -4,8 +4,8 @@
 // Rendering
 #include "Kismet/KismetRenderingLibrary.h"                  // UKismetRenderingLibrary, FDrawToRenderTargetContext
 #include "Engine/TextureRenderTarget2D.h"                   // UTextureRenderTarget2D, ETextureRenderTargetFormat
-#include "Engine/TextureRenderTarget2DArray.h"              // UTextureRenderTarget2DArray (get_render_target_2d_array_info)
-#include "Engine/TextureRenderTargetCube.h"                 // UTextureRenderTargetCube (get_render_target_cube_info)
+#include "Engine/TextureRenderTarget2DArray.h"              // UTextureRenderTarget2DArray (get_render_target_info)
+#include "Engine/TextureRenderTargetCube.h"                 // UTextureRenderTargetCube (get_render_target_info)
 #include "Engine/Canvas.h"                                  // UCanvas (K2_DrawText/K2_DrawLine/K2_DrawTexture/K2_DrawMaterial/K2_DrawTile)
 #include "Engine/Texture.h"                                 // UTexture
 #include "Engine/Font.h"                                    // UFont
@@ -299,74 +299,54 @@ TSharedPtr<FJsonObject> HandleCreateRenderTarget2D(const TSharedPtr<FJsonObject>
 
 // ---------------------------------------------------------------------------
 // get_render_target_info
-// Reads SizeX/SizeY, the high-level render-target format, the resolved pixel
-// format and sRGB flag from the asset.
+// Resolves any UTextureRenderTarget and branches on its concrete class: a 2D
+// target reports SizeX/SizeY, the high-level render-target format, the resolved
+// pixel format and sRGB flag; a 2D array adds its slices, a cube its face size
+// and mips.
 // ---------------------------------------------------------------------------
-// MCP:get_render_target_info - Read the metadata of a UTextureRenderTarget2D asset without reading pixels or changing it: width, height, format (RTF_*), pixel_format and is_srgb. For 2D-array or cube render targets use get_render_target_2d_array_info or get_render_target_cube_info; export_render_target writes the image to disk.
+// MCP:get_render_target_info - Read the metadata of a render target asset without reading pixels or changing it, for every render-target class: render_target_class, pixel_format and is_srgb always; a UTextureRenderTarget2D adds width, height and format (RTF_*); a UTextureRenderTarget2DArray adds width, height, slices and is_hdr; a UTextureRenderTargetCube adds size (face edge), num_mips, is_hdr and auto_generate_mips; any other render-target class adds width and height. export_render_target writes the image to disk.
 //   @param render_target_path - Asset path of the render target, e.g. /Game/RenderTargets/RT_Example
-//   @returns { render_target_name: string, asset_path: string, width: int, height: int, format: string, pixel_format: string, is_srgb: bool }
+//   @returns { render_target_name: string, asset_path: string, render_target_class: string, pixel_format: string, is_srgb: bool, width?: int, height?: int, format?: string, slices?: int, size?: int, num_mips?: int, is_hdr?: bool, auto_generate_mips?: bool }
 TSharedPtr<FJsonObject> HandleGetRenderTargetInfo(const TSharedPtr<FJsonObject>& Params)
 {
-    UTextureRenderTarget2D* RT = nullptr;
-    if (TSharedPtr<FJsonObject> Error = RenderTarget_ReadTarget(Params, TEXT("Render target"), RT))
+    UTextureRenderTarget* Target = nullptr;
+    if (TSharedPtr<FJsonObject> Error = RenderTarget_ReadTarget(Params, TEXT("Render target"), Target))
     {
         return Error;
     }
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("render_target_name"), RT->GetName());
-    Data->SetStringField(TEXT("asset_path"), RT->GetPathName());
-    Data->SetNumberField(TEXT("width"), RT->SizeX);
-    Data->SetNumberField(TEXT("height"), RT->SizeY);
-    Data->SetStringField(TEXT("format"), RenderTargetFormatToString(RT->RenderTargetFormat.GetValue()));
-    Data->SetStringField(TEXT("pixel_format"), GetPixelFormatString(RT->GetFormat()));
-    Data->SetBoolField(TEXT("is_srgb"), RT->IsSRGB());
-    return mcp_common::MakeOkReply(Data);
-}
+    Data->SetStringField(TEXT("render_target_name"), Target->GetName());
+    Data->SetStringField(TEXT("asset_path"), Target->GetPathName());
+    Data->SetStringField(TEXT("render_target_class"), Target->GetClass()->GetName());
+    Data->SetStringField(TEXT("pixel_format"), GetPixelFormatString(Target->GetFormat()));
+    Data->SetBoolField(TEXT("is_srgb"), Target->IsSRGB());
 
-// MCP:get_render_target_2d_array_info - Read metadata for a UTextureRenderTarget2DArray asset (size, slice count, format). Metadata-only, no pixel readback.
-//   @param render_target_path - Asset path of the render target, e.g. /Game/RenderTargets/RTA_Example
-//   @returns { render_target_name: string, asset_path: string, width: int, height: int, slices: int, pixel_format: string, is_hdr: bool, is_srgb: bool }
-TSharedPtr<FJsonObject> HandleGetRenderTarget2DArrayInfo(const TSharedPtr<FJsonObject>& Params)
-{
-    UTextureRenderTarget2DArray* RT = nullptr;
-    if (TSharedPtr<FJsonObject> Error = RenderTarget_ReadTarget(Params, TEXT("Render target array"), RT))
+    if (const UTextureRenderTarget2D* RT = Cast<UTextureRenderTarget2D>(Target))
     {
-        return Error;
+        Data->SetNumberField(TEXT("width"), RT->SizeX);
+        Data->SetNumberField(TEXT("height"), RT->SizeY);
+        Data->SetStringField(TEXT("format"), RenderTargetFormatToString(RT->RenderTargetFormat.GetValue()));
     }
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("render_target_name"), RT->GetName());
-    Data->SetStringField(TEXT("asset_path"), RT->GetPathName());
-    Data->SetNumberField(TEXT("width"), RT->SizeX);
-    Data->SetNumberField(TEXT("height"), RT->SizeY);
-    Data->SetNumberField(TEXT("slices"), RT->Slices);
-    Data->SetStringField(TEXT("pixel_format"), GetPixelFormatString(RT->GetFormat()));
-    Data->SetBoolField(TEXT("is_hdr"), RT->bHDR != 0);
-    Data->SetBoolField(TEXT("is_srgb"), RT->IsSRGB());
-    return mcp_common::MakeOkReply(Data);
-}
-
-// MCP:get_render_target_cube_info - Read metadata for a UTextureRenderTargetCube asset (face size, mip count, format). Metadata-only, no pixel readback.
-//   @param render_target_path - Asset path of the render target, e.g. /Game/RenderTargets/RTC_Example
-//   @returns { render_target_name: string, asset_path: string, size: int, num_mips: int, pixel_format: string, is_hdr: bool, is_srgb: bool, auto_generate_mips: bool }
-TSharedPtr<FJsonObject> HandleGetRenderTargetCubeInfo(const TSharedPtr<FJsonObject>& Params)
-{
-    UTextureRenderTargetCube* RT = nullptr;
-    if (TSharedPtr<FJsonObject> Error = RenderTarget_ReadTarget(Params, TEXT("Render target cube"), RT))
+    else if (const UTextureRenderTarget2DArray* Array = Cast<UTextureRenderTarget2DArray>(Target))
     {
-        return Error;
+        Data->SetNumberField(TEXT("width"), Array->SizeX);
+        Data->SetNumberField(TEXT("height"), Array->SizeY);
+        Data->SetNumberField(TEXT("slices"), Array->Slices);
+        Data->SetBoolField(TEXT("is_hdr"), Array->bHDR != 0);
     }
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("render_target_name"), RT->GetName());
-    Data->SetStringField(TEXT("asset_path"), RT->GetPathName());
-    Data->SetNumberField(TEXT("size"), RT->SizeX);
-    Data->SetNumberField(TEXT("num_mips"), RT->GetNumMips());
-    Data->SetStringField(TEXT("pixel_format"), GetPixelFormatString(RT->GetFormat()));
-    Data->SetBoolField(TEXT("is_hdr"), RT->bHDR != 0);
-    Data->SetBoolField(TEXT("is_srgb"), RT->IsSRGB());
-    Data->SetBoolField(TEXT("auto_generate_mips"), RT->bAutoGenerateMips != 0);
+    else if (const UTextureRenderTargetCube* Cube = Cast<UTextureRenderTargetCube>(Target))
+    {
+        Data->SetNumberField(TEXT("size"), Cube->SizeX);
+        Data->SetNumberField(TEXT("num_mips"), Cube->GetNumMips());
+        Data->SetBoolField(TEXT("is_hdr"), Cube->bHDR != 0);
+        Data->SetBoolField(TEXT("auto_generate_mips"), Cube->bAutoGenerateMips != 0);
+    }
+    else
+    {
+        Data->SetNumberField(TEXT("width"), Target->GetSurfaceWidth());
+        Data->SetNumberField(TEXT("height"), Target->GetSurfaceHeight());
+    }
     return mcp_common::MakeOkReply(Data);
 }
 
@@ -374,10 +354,10 @@ TSharedPtr<FJsonObject> HandleGetRenderTargetCubeInfo(const TSharedPtr<FJsonObje
 // clear_render_target
 // UKismetRenderingLibrary::ClearRenderTarget2D(World, RT, FLinearColor).
 // ---------------------------------------------------------------------------
-// MCP:clear_render_target - Clear a render target to a solid color via ClearRenderTarget2D. Render-target contents live on the GPU only, so nothing is saved or undoable. cleared is false, and the call fails, when the engine skips the clear: a render target without a resource, which is every render target in a process that cannot render (-nullrhi, a commandlet).
+// MCP:clear_render_target - Fill a whole UTextureRenderTarget2D with one solid color via ClearRenderTarget2D, reporting the width and height it covered. Render-target contents live on the GPU only, so nothing is saved or undoable. cleared is false, and the call fails, when the engine skips the clear: a render target without a resource, which is every render target in a process that cannot render (-nullrhi, a commandlet).
 //   @param render_target_path - Asset path of the render target
 //   @param color - Optional [r, g, b, a] clear color, defaults to opaque black
-//   @returns { render_target_path: string, cleared: bool, clear_color: [number] }
+//   @returns { render_target_path: string, cleared: bool, clear_color: [number], width: int, height: int }
 TSharedPtr<FJsonObject> HandleClearRenderTarget(const TSharedPtr<FJsonObject>& Params)
 {
     UTextureRenderTarget2D* RT = nullptr;
@@ -398,6 +378,8 @@ TSharedPtr<FJsonObject> HandleClearRenderTarget(const TSharedPtr<FJsonObject>& P
     Data->SetStringField(TEXT("render_target_path"), RT->GetPathName());
     Data->SetBoolField(TEXT("cleared"), bCleared);
     Data->SetArrayField(TEXT("clear_color"), mcp_common::ColorToJsonArray(Color));
+    Data->SetNumberField(TEXT("width"), RT->SizeX);
+    Data->SetNumberField(TEXT("height"), RT->SizeY);
     return mcp_common::MakeOutcomeReply(Data, bCleared, bCleared ? FString()
         : FString(TEXT("clear_render_target: cleared is false, nothing was cleared: the render target has no resource ")
                   TEXT("(a process that cannot render, -nullrhi or a commandlet, never creates one)")));
@@ -405,13 +387,16 @@ TSharedPtr<FJsonObject> HandleClearRenderTarget(const TSharedPtr<FJsonObject>& P
 
 // ---------------------------------------------------------------------------
 // draw_material_to_render_target
-// UKismetRenderingLibrary::DrawMaterialToRenderTarget(World, RT, Material).
-// Renders a full-screen quad with the material into the render target.
+// UKismetRenderingLibrary::DrawMaterialToRenderTarget(World, RT, Material) renders
+// a full-screen quad; with position/size, Begin -> Canvas->K2_DrawMaterial(material,
+// position, size, ...) -> End draws a sub-region instead.
 // ---------------------------------------------------------------------------
-// MCP:draw_material_to_render_target - Render a material full-screen quad into a render target. drawn is false, and the call fails, when the engine skips the draw: a process that cannot render (-nullrhi, a commandlet) or a render target without a resource.
+// MCP:draw_material_to_render_target - Render a material into a UTextureRenderTarget2D: a full-screen quad by default, or, with position and/or size, a rectangle in render-target pixels from the top-left drawn in one canvas pass (full 0-1 UVs) that composites over the existing pixels by the material's blend mode. Nothing is cleared, saved or undoable, and render-target contents live on the GPU only, so keep them with create_static_texture_from_render_target or export_render_target. A missing render target or material is an error. drawn is false, and the call fails, when the engine skips the draw: for the full-screen pass a process that cannot render (-nullrhi, a commandlet) or a render target without a resource; for a rectangle a width or height that is not positive. For a texture use draw_texture_to_render_target.
 //   @param render_target_path - Asset path of the destination render target
 //   @param material_path - Asset path of the UMaterialInterface to draw
-//   @returns { render_target_path: string, material_path: string, drawn: bool }
+//   @param position - Optional [x, y] destination position of a rectangle draw, default [0,0]; giving it (or size) switches to the canvas rectangle draw
+//   @param size - Optional [w, h] destination size of a rectangle draw, defaults to the render target dimensions; giving it (or position) switches to the canvas rectangle draw
+//   @returns { render_target_path: string, material_path: string, drawn: bool, position?: [number], size?: [number] }
 TSharedPtr<FJsonObject> HandleDrawMaterialToRenderTarget(const TSharedPtr<FJsonObject>& Params)
 {
     UTextureRenderTarget2D* RT = nullptr;
@@ -420,6 +405,40 @@ TSharedPtr<FJsonObject> HandleDrawMaterialToRenderTarget(const TSharedPtr<FJsonO
     if (TSharedPtr<FJsonObject> Error = RenderTarget_ReadMaterialDraw(Params, RT, Material, World))
     {
         return Error;
+    }
+
+    // A rectangle (position and/or size given): one canvas pass with K2_DrawMaterial(RenderMaterial, ScreenPosition,
+    // ScreenSize, CoordinatePosition, CoordinateSize=UnitVector), which skips a rectangle whose width or height is
+    // not positive.
+    if (Params->HasField(TEXT("position")) || Params->HasField(TEXT("size")))
+    {
+        const FVector2D Position = ParseVector2D(Params, TEXT("position"), FVector2D(0.0f, 0.0f));
+        const FVector2D Size = ParseVector2D(Params, TEXT("size"), FVector2D((float)RT->SizeX, (float)RT->SizeY));
+
+        bool bRegionDrawn = false;
+        auto DrawOnCanvas = [&](UCanvas& Canvas, const FVector2D&)
+        {
+            bRegionDrawn = Size.X > 0.0 && Size.Y > 0.0 && Canvas.Canvas != nullptr;
+            Canvas.K2_DrawMaterial(
+                Material,
+                Position,
+                Size,
+                FVector2D(0.0f, 0.0f),            // CoordinatePosition (UV origin)
+                FVector2D(1.0f, 1.0f));           // CoordinateSize (full UV)
+        };
+        if (TSharedPtr<FJsonObject> Error = RenderTarget_DrawCanvas(World, RT, DrawOnCanvas))
+        {
+            return Error;
+        }
+
+        TSharedPtr<FJsonObject> RegionData = MakeShared<FJsonObject>();
+        RegionData->SetStringField(TEXT("render_target_path"), RT->GetPathName());
+        RegionData->SetStringField(TEXT("material_path"), Material->GetPathName());
+        RegionData->SetBoolField(TEXT("drawn"), bRegionDrawn);
+        RegionData->SetArrayField(TEXT("position"), mcp_common::Vector2DToJsonArray(Position));
+        RegionData->SetArrayField(TEXT("size"), mcp_common::Vector2DToJsonArray(Size));
+        return RenderTarget_DrawReply(RegionData, bRegionDrawn, TEXT("draw_material_to_render_target"),
+            TEXT("size has a width or height that is not positive"));
     }
 
     // With the world, render target and material resolved, these are the only conditions under which
@@ -538,65 +557,11 @@ TSharedPtr<FJsonObject> HandleExportRenderTarget(const TSharedPtr<FJsonObject>& 
 // Engine module only; headless-safe in the editor world.
 
 // ---------------------------------------------------------------------------
-// clear_and_fill_render_target
-// Begin -> Canvas->K2_DrawTile(white texture, full rect, tint=color) -> End.
-// Fills the whole render target with a solid color via the canvas (the point of
-// this group is exercising the UCanvas batch API, not ClearRenderTarget2D).
-// ---------------------------------------------------------------------------
-// MCP:clear_and_fill_render_target - Fill an entire render target with a solid color via the canvas. drawn is false, and the call fails, when the canvas draws nothing (no white texture or a zero size).
-//   @param render_target_path - Asset path of the destination render target, e.g. /Game/MyGame/RT_Example
-//   @param color - Optional [r, g, b, a] fill color, defaults to opaque white
-//   @returns { render_target_path: string, drawn: bool, canvas_width: number, canvas_height: number, fill_color: [number] }
-TSharedPtr<FJsonObject> HandleClearAndFillRenderTarget(const TSharedPtr<FJsonObject>& Params)
-{
-    UTextureRenderTarget2D* RT = nullptr;
-    UWorld* World = nullptr;
-    if (TSharedPtr<FJsonObject> Error = RenderTarget_ReadDrawTarget(Params, RT, World))
-    {
-        return Error;
-    }
-
-    const FLinearColor Color = ParseLinearColorWithDefault(Params, TEXT("color"), FLinearColor::White);
-
-    FVector2D CanvasSize(0.0f, 0.0f);
-    bool bDrawn = false;
-    auto DrawOnCanvas = [&](UCanvas& Canvas, const FVector2D& DrawSize)
-    {
-        CanvasSize = DrawSize;
-        // DrawTile of the engine white texture over the entire canvas, tinted to Color.
-        // DrawColor is applied to DrawTile, so set it to the requested fill color.
-        Canvas.SetLinearDrawColor(Color);
-        UTexture* WhiteTex = Canvas.DefaultTexture; // engine default white texture
-        // UCanvas::DrawTile draws nothing without a texture or with a zero-sized tile.
-        bDrawn = WhiteTex != nullptr && DrawSize.X > 0.0 && DrawSize.Y > 0.0 && Canvas.Canvas != nullptr;
-        Canvas.DrawTile(
-            WhiteTex,
-            0.0f, 0.0f,                           // X, Y
-            (float)DrawSize.X, (float)DrawSize.Y, // XL, YL (full rect)
-            0.0f, 0.0f, 1.0f, 1.0f,               // U, V, UL, VL
-            BLEND_Opaque);
-    };
-    if (TSharedPtr<FJsonObject> Error = RenderTarget_DrawCanvas(World, RT, DrawOnCanvas))
-    {
-        return Error;
-    }
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("render_target_path"), RT->GetPathName());
-    Data->SetBoolField(TEXT("drawn"), bDrawn);
-    Data->SetNumberField(TEXT("canvas_width"), CanvasSize.X);
-    Data->SetNumberField(TEXT("canvas_height"), CanvasSize.Y);
-    Data->SetArrayField(TEXT("fill_color"), mcp_common::ColorToJsonArray(Color));
-    return RenderTarget_DrawReply(Data, bDrawn, TEXT("clear_and_fill_render_target"),
-        TEXT("the canvas has no white texture or a zero size"));
-}
-
-// ---------------------------------------------------------------------------
 // draw_text_to_render_target
 // Begin -> Canvas->K2_DrawText(font, text, position, scale, color, ...) -> End.
 // Font defaults to GEngine->GetMediumFont() (falls back to GetTinyFont()).
 // ---------------------------------------------------------------------------
-// MCP:draw_text_to_render_target - Draw a string onto a UTextureRenderTarget2D asset in one canvas pass in the editor world, in the engine's medium font (no font choice), tinted by color and scaled by scale, with position the text's top-left in render-target pixels. The text blends over the existing pixels: nothing is cleared, saved or undoable, and render-target contents live on the GPU only, so keep them with create_static_texture_from_render_target or export_render_target. A missing render target is an error; drawn is false, and the call fails, when nothing was drawn (an empty text, or no engine font: font_resolved says whether one was found). Related: draw_texture_to_render_target, draw_line_to_render_target, clear_and_fill_render_target.
+// MCP:draw_text_to_render_target - Draw a string onto a UTextureRenderTarget2D asset in one canvas pass in the editor world, in the engine's medium font (no font choice), tinted by color and scaled by scale, with position the text's top-left in render-target pixels. The text blends over the existing pixels: nothing is cleared, saved or undoable, and render-target contents live on the GPU only, so keep them with create_static_texture_from_render_target or export_render_target. A missing render target is an error; drawn is false, and the call fails, when nothing was drawn (an empty text, or no engine font: font_resolved says whether one was found). Related: draw_texture_to_render_target, draw_line_to_render_target, clear_render_target.
 //   @param render_target_path - Asset path of the destination render target
 //   @param text - Text to draw
 //   @param position - Optional [x, y] text position, default [0,0]
@@ -724,7 +689,7 @@ TSharedPtr<FJsonObject> HandleDrawLineToRenderTarget(const TSharedPtr<FJsonObjec
 // draw_texture_to_render_target
 // Begin -> Canvas->K2_DrawTexture(texture, position, size, ...) -> End.
 // ---------------------------------------------------------------------------
-// MCP:draw_texture_to_render_target - Draw a texture as a rectangle onto a UTextureRenderTarget2D asset in one canvas pass in the editor world: position and size in render-target pixels from the top-left (size defaults to the whole target), full 0-1 UVs, tinted by color. It alpha-blends over the existing pixels: nothing is cleared, saved or undoable, and render-target contents live on the GPU only, so keep them with create_static_texture_from_render_target or export_render_target. A missing render target or texture is an error; drawn is false, and the call fails, when a width or height that is not positive draws nothing. For a material use draw_material_to_render_target_region.
+// MCP:draw_texture_to_render_target - Draw a texture as a rectangle onto a UTextureRenderTarget2D asset in one canvas pass in the editor world: position and size in render-target pixels from the top-left (size defaults to the whole target), full 0-1 UVs, tinted by color. It alpha-blends over the existing pixels: nothing is cleared, saved or undoable, and render-target contents live on the GPU only, so keep them with create_static_texture_from_render_target or export_render_target. A missing render target or texture is an error; drawn is false, and the call fails, when a width or height that is not positive draws nothing. For a material use draw_material_to_render_target with position and size.
 //   @param render_target_path - Asset path of the destination render target
 //   @param texture_path - Asset path of the UTexture to draw, e.g. /Engine/EngineResources/WhiteSquareTexture
 //   @param position - Optional [x, y] destination position, default [0,0]
@@ -789,71 +754,15 @@ TSharedPtr<FJsonObject> HandleDrawTextureToRenderTarget(const TSharedPtr<FJsonOb
     return RenderTarget_DrawReply(Data, bDrawn, TEXT("draw_texture_to_render_target"), TEXT("size has a width or height that is not positive"));
 }
 
-// ---------------------------------------------------------------------------
-// draw_material_to_render_target_region
-// Begin -> Canvas->K2_DrawMaterial(material, position, size, ...) -> End.
-// Draws the material into a sub-region of the render target (unlike
-// DrawMaterialToRenderTarget which is always full-screen).
-// ---------------------------------------------------------------------------
-// MCP:draw_material_to_render_target_region - Draw a material as a rectangle onto a UTextureRenderTarget2D asset in one canvas pass in the editor world: position and size in render-target pixels from the top-left (size defaults to the whole target), full 0-1 UVs. It composites over the existing pixels by the material's blend mode: nothing is cleared, saved or undoable, and render-target contents live on the GPU only, so keep them with create_static_texture_from_render_target or export_render_target. A missing render target or material is an error; drawn is false, and the call fails, when a width or height that is not positive draws nothing. For a full-target pass use draw_material_to_render_target; for a texture, draw_texture_to_render_target.
-//   @param render_target_path - Asset path of the destination render target
-//   @param material_path - Asset path of the UMaterialInterface to draw
-//   @param position - Optional [x, y] destination position, default [0,0]
-//   @param size - Optional [w, h] destination size, defaults to render target dimensions
-//   @returns { render_target_path: string, material_path: string, drawn: bool, position: [number], size: [number] }
-TSharedPtr<FJsonObject> HandleDrawMaterialToRenderTargetRegion(const TSharedPtr<FJsonObject>& Params)
-{
-    UTextureRenderTarget2D* RT = nullptr;
-    UMaterialInterface* Material = nullptr;
-    UWorld* World = nullptr;
-    if (TSharedPtr<FJsonObject> Error = RenderTarget_ReadMaterialDraw(Params, RT, Material, World))
-    {
-        return Error;
-    }
-
-    const FVector2D Position = ParseVector2D(Params, TEXT("position"), FVector2D(0.0f, 0.0f));
-    const FVector2D Size = ParseVector2D(Params, TEXT("size"), FVector2D((float)RT->SizeX, (float)RT->SizeY));
-
-    // K2_DrawMaterial(RenderMaterial, ScreenPosition, ScreenSize, CoordinatePosition,
-    //   CoordinateSize=UnitVector, Rotation, PivotPoint). It skips a rectangle whose width or height is not positive.
-    bool bDrawn = false;
-    auto DrawOnCanvas = [&](UCanvas& Canvas, const FVector2D&)
-    {
-        bDrawn = Size.X > 0.0 && Size.Y > 0.0 && Canvas.Canvas != nullptr;
-        Canvas.K2_DrawMaterial(
-            Material,
-            Position,
-            Size,
-            FVector2D(0.0f, 0.0f),            // CoordinatePosition (UV origin)
-            FVector2D(1.0f, 1.0f));           // CoordinateSize (full UV)
-    };
-    if (TSharedPtr<FJsonObject> Error = RenderTarget_DrawCanvas(World, RT, DrawOnCanvas))
-    {
-        return Error;
-    }
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("render_target_path"), RT->GetPathName());
-    Data->SetStringField(TEXT("material_path"), Material->GetPathName());
-    Data->SetBoolField(TEXT("drawn"), bDrawn);
-    Data->SetArrayField(TEXT("position"), mcp_common::Vector2DToJsonArray(Position));
-    Data->SetArrayField(TEXT("size"), mcp_common::Vector2DToJsonArray(Size));
-    return RenderTarget_DrawReply(Data, bDrawn, TEXT("draw_material_to_render_target_region"), TEXT("size has a width or height that is not positive"));
-}
-
 const McpCommandFamilies::FRegistrar Registration =
 {
-    { TEXT("clear_and_fill_render_target"), &HandleClearAndFillRenderTarget },
     { TEXT("clear_render_target"), &HandleClearRenderTarget },
     { TEXT("create_render_target_2d"), &HandleCreateRenderTarget2D },
     { TEXT("draw_line_to_render_target"), &HandleDrawLineToRenderTarget },
     { TEXT("draw_material_to_render_target"), &HandleDrawMaterialToRenderTarget },
-    { TEXT("draw_material_to_render_target_region"), &HandleDrawMaterialToRenderTargetRegion },
     { TEXT("draw_text_to_render_target"), &HandleDrawTextToRenderTarget },
     { TEXT("draw_texture_to_render_target"), &HandleDrawTextureToRenderTarget },
     { TEXT("export_render_target"), &HandleExportRenderTarget },
-    { TEXT("get_render_target_2d_array_info"), &HandleGetRenderTarget2DArrayInfo },
-    { TEXT("get_render_target_cube_info"), &HandleGetRenderTargetCubeInfo },
     { TEXT("get_render_target_info"), &HandleGetRenderTargetInfo },
 };
 } // namespace UEAgentRenderTargetCommands

@@ -12,7 +12,7 @@ script started: use a throwaway project for --launch. Checks:
   - protocol: initialize (with the agent instructions), ping, the full and the compact tool list;
   - the meta-tools: find_tools, describe_tool (the same schema as the full list), call_tool (the
     same answer as a direct call), the closest names for an unknown tool;
-  - edits: one undo step per call, a batch as one step, undo/redo and the undo-state tools,
+  - edits: one undo step per call, an execute_batch as one step, undo/redo and the undo-state tools,
     mcp.UndoStepPerCall, and a level load in the middle of a call.
 """
 
@@ -148,17 +148,17 @@ def check_edits(s: Session) -> None:
     s.check("a read leaves no step", newest_title(s) == (title, count), newest_title(s))
     s.call("spawn_actor", {"type": "NoSuchType", "name": "SmokeBad"})
     s.check("a failed call leaves no step", newest_title(s)[1] == count, newest_title(s))
-    s.call("batch", {"commands": [{"command_type": "spawn_actor", "params": {"type": "PointLight", "name": "SmokeB"}},
+    s.call("execute_batch", {"commands": [{"command_type": "spawn_actor", "params": {"type": "PointLight", "name": "SmokeB"}},
                                   {"command_type": "spawn_actor", "params": {"type": "PointLight", "name": "SmokeC"}}]})
-    s.check("a batch is one step", newest_title(s) == ("UEAgent: batch", count + 1), newest_title(s))
-    _, can = s.call("can_undo")
-    s.check("can_undo names what undo reverts", can.get("can_undo") is True and can.get("label") == "UEAgent: batch", can)
+    s.check("a batch is one step", newest_title(s) == ("UEAgent: execute_batch", count + 1), newest_title(s))
+    _, can = s.call("get_undo_state")
+    s.check("get_undo_state names what undo reverts", can.get("can_undo") is True and can.get("next_undo") == "UEAgent: execute_batch", can)
     _, undone = s.call("undo")
     _, state = s.call("get_undo_state")
     names = actor_names(s)
     s.check("undo reverts the whole batch", undone.get("applied") is True and not {"SmokeB", "SmokeC"} & names
             and "SmokeA" in names, (undone, sorted(n for n in names if n and n.startswith("Smoke"))))
-    s.check("get_undo_state counts the redo side", state.get("redo_count") == 1 and state.get("next_redo") == "UEAgent: batch", state)
+    s.check("get_undo_state counts the redo side", state.get("redo_count") == 1 and state.get("next_redo") == "UEAgent: execute_batch", state)
     _, redone = s.call("redo")
     s.check("redo restores it", redone.get("applied") is True and {"SmokeB", "SmokeC"} <= actor_names(s), redone)
 
@@ -171,8 +171,8 @@ def check_edits(s: Session) -> None:
     s.check("1 brings the step back", newest_title(s)[0] == "UEAgent: spawn_actor", newest_title(s))
 
     print("== a level load in the middle of a call")
-    is_error, loaded = s.call("new_level", {})
-    s.check("new_level runs inside its undo step", not is_error and loaded.get("success") is not False, loaded)
+    is_error, loaded = s.call("load_level", {"default_template": True})
+    s.check("a level load runs inside its undo step", not is_error and loaded.get("success") is not False, loaded)
     s.call("spawn_actor", {"type": "PointLight", "name": "SmokeF"})
     s.check("the buffer works after the reset", newest_title(s) == ("UEAgent: spawn_actor", 1), newest_title(s))
 

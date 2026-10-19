@@ -1,6 +1,7 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
-#include "Commands/Common/UEAgentGraphUtils.h" // FUEAgentGraphUtils::ResolveClass (name / /Script / BP-asset resolver, shared with call_library_function / call_component_function)
+#include "Commands/Common/UEAgentGraphUtils.h" // FUEAgentGraphUtils::ResolveClass (name / /Script / BP-asset resolver: call_function class_name / component_class)
+#include "Commands/Subsystem/SubsystemLifetime.h" // get_class_hierarchy: lifetime of a subsystem class
 #include "Commands/Asset/AssetCommandHelpers.h"
 #include "Engine/Blueprint.h"                        // UBlueprint::GeneratedClass — a Blueprint asset path passed as a TSubclassOf argument must become its generated class
 #include "Misc/Guid.h"                               // FGuid::Parse (call_function FGuid param marshaling)
@@ -15,6 +16,8 @@
 #include "UObject/StrProperty.h"
 #include "UObject/Field.h"
 #include "JsonObjectConverter.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
 #include "GameplayTagContainer.h" // FGameplayTag validation of single-tag params
 #include "UObject/StructOnScope.h"
 #include "Engine/World.h"
@@ -32,7 +35,7 @@
 #include "Misc/PackageName.h"
 #include "HAL/PlatformFilemanager.h"
 #include "CoreGlobals.h" // GAllowActorScriptExecutionInEditor (call_function)
-#include "ScopedTransaction.h" // `transact` opt-in on call_function / call_object_method / call_component_function (UnrealEd is already a module dep, UEAgent.Build.cs)
+#include "ScopedTransaction.h" // `transact` opt-in on call_function (UnrealEd is already a module dep, UEAgent.Build.cs)
 #include "UObject/Package.h"   // UPackage::IsDirty / ContainsMap — the OFPA half of list_instance_overrides and of the transact response
 
 /**
@@ -46,27 +49,17 @@ namespace UEAgentReflectionCommands
 // MCP-DOMAIN: Reflection
 
 // ---------------------------------------------------------------------------
-// PIE-aware helpers (shared by call_object_method /
-// get_property_value's world='pie' path). Forward-declared
-// here so every command below can use them; defined near the bottom of this
-// file.
+// PIE-aware helper (the world='pie' path of the world-aware readers and of
+// call_function). Forward-declared here so every command below can use it;
+// defined near the bottom of this file.
 //   - ReflectionPie_ResolveObjectInWorld: resolve a path/name/label to a live
 //     object, first by full/asset path then by dotted Actor[.Component[.Sub]]
 //     lookup within World.
-//   - ReflectionPie_InvokeUFunctionWithJsonParams: pack a JSON {name->value}
-//     dict into the function frame (same marshaling as call_function), invoke
-//     via ProcessEvent, and read return/out params back as typed JSON.
 static UObject* ReflectionPie_ResolveObjectInWorld(const FString& Path, UWorld* World);
-static bool ReflectionPie_InvokeUFunctionWithJsonParams(
-    UObject* Object,
-    UFunction* Function,
-    const TSharedPtr<FJsonObject>& ParamsObj,
-    TSharedPtr<FJsonObject>& OutReturns,
-    FString& OutError);
 
 // ---------------------------------------------------------------------------
 // OFPA / transaction helpers shared by list_instance_overrides and by the
-// `transact` opt-in of call_function / call_object_method / call_component_function.
+// `transact` opt-in of call_function.
 // Defined further down in this translation unit.
 //   - ReflectionOfpa_ResolveOwningPackage: the UPackage that actually PERSISTS an
 //     object. For a World Partition (OFPA) actor that is its own external package
@@ -519,7 +512,7 @@ namespace UEAgentReflectionCommandsImpl
     };
 
     /**
-     * set_property_value's `value`, whatever its JSON type, tried in this order: array, object,
+     * set_properties' single `value`, whatever its JSON type, tried in this order: array, object,
      * then string, number, bool. A number or a bool is normally picked up by the string read,
      * which converts it, so the later typed reads are only a fallback. Null when none applies.
      */
@@ -958,7 +951,7 @@ TSharedPtr<FJsonObject> BuildClassDescriptor(UClass* Class)
 }
 
 // Apply a single property write through the honest editable gate + editor change notification.
-// Shared by set_property_value and set_properties. The gate accepts a property that is editable in
+// Every write of set_properties goes through here. The gate accepts a property that is editable in
 // the editor (EditAnywhere/EditDefaultsOnly and not EditConst) OR writable from Blueprint
 // (BlueprintReadWrite); the Modify/PreEditChange/PostEditChangeProperty sequence is what makes the
 // change take effect and persist. All notify calls are WITH_EDITOR (our harness runs an editor target).
@@ -1004,49 +997,7 @@ bool ApplyCheckedPropertySet(UObject* Object, const FString& PropertyName, const
 
 // Types and instances: classes, their members and the inheritance chain.
 
-// MCP:get_object_class - Resolve an object instance and report just its type: class name, class path, is_native and immediate super class. The one-line "what IS this thing?" probe before spending a call on inspect_object or list_object_properties; get_class_hierarchy expands the same answer into the whole ancestor chain. Accepts `world`, so the same name can be typed in the editor world or in a LIVE PIE world (server vs client) — useful when a class is swapped at runtime — and the response stamps which world answered.
-//   @param object_path - Path or name of the object to inspect. In the editor world: full object path, asset path, CDO/archetype, or a dotted "Actor[.Component[.Subobject]]" whose first segment is the actor's INTERNAL name. In a live world: a fully-qualified PIE path or the same dotted form (first segment matches internal name OR editor label).
-//   @param world - Optional world selector: absent/'editor' (default: the editor/asset instance) | 'pie' (ambiguous: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie'). Anything other than absent/'editor' resolves the object in that live world; an UNRECOGNIZED value is an error naming the worlds that exist, never a silent fallback to another world.
-//   @returns { object_path: string, class_name: string, class_path: string, is_native: bool, super_class: string, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }
-
-TSharedPtr<FJsonObject> HandleGetObjectClass(const TSharedPtr<FJsonObject>& Params)
-{
-    namespace Impl = UEAgentReflectionCommandsImpl;
-
-    FString TargetPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("object_path"), TargetPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-    // absent/'editor' keeps the editor resolution; any other `world` resolves the object
-    // in that LIVE world (a class swapped at runtime shows up there), and an unknown selector
-    // is refused rather than answered from some other world.
-    Impl::FWorldScopedObject Target;
-    TSharedPtr<FJsonObject> Refusal;
-    if (!Impl::ResolveWorldScopedObject(Params, TargetPath, TEXT("get_object_class"),
-            [](const FString& Path) { return ResolveObjectByName(Path); }, Target, Refusal))
-    {
-        return Refusal;
-    }
-
-    const UClass* TargetClass = Target.Object->GetClass();
-    if (TargetClass == nullptr)
-    {
-        return mcp_common::MakeErrorReply(TEXT("Failed to get class from object"));
-    }
-    const UClass* ParentClass = TargetClass->GetSuperClass();
-
-    TSharedPtr<FJsonObject> Identity = MakeShared<FJsonObject>();
-    Identity->SetStringField(TEXT("object_path"), TargetPath);
-    Identity->SetStringField(TEXT("class_name"), TargetClass->GetName());
-    Identity->SetStringField(TEXT("class_path"), TargetClass->GetPathName());
-    Identity->SetBoolField(TEXT("is_native"), TargetClass->IsNative());
-    Identity->SetStringField(TEXT("super_class"), ParentClass ? ParentClass->GetName() : FString(TEXT("None")));
-    Identity->SetStringField(TEXT("world"), Target.WorldLabel);
-    // The world that answered -- a live world, or the object's own (null for an asset/CDO).
-    mcp_common::AddWorldEvidence(Identity, Target.World);
-    return mcp_common::MakeOkReply(Identity);
-}
-
-// MCP:get_class_properties - List every property VISIBLE on a class — the ones it DECLARES plus every inherited one, each tagged with owner_class and is_inherited so "does this class add anything of its own?" is a FIELD (declared_property_count) and not an eyeball diff against a remembered list of engine members. declared_only=true returns just this class's own. WARNING: a component or data class usually exposes its Blueprint API as PROPERTIES, not functions: get_class_functions coming back with nothing of its own does NOT mean the class has no API — ask here too (e.g. MetaHumanComponentBase: 0 own functions, 12 own properties). Full typed descriptor per property — kind, cpp_type, editable, edit_const, blueprint_visible, replicated, save_game, config, clamp min/max, enum entries, struct fields, tooltip, edit_condition — plus the class's own flags, config name and implemented interfaces. Schema only: NO instance values. Use list_object_properties for the same descriptors WITH the current values of a live object, get_properties when you already know the names, and get_blueprint_variables_list for just the variables a Blueprint itself authored.
+// MCP:get_class_properties - List every property VISIBLE on a class — the ones it DECLARES plus every inherited one, each tagged with owner_class and is_inherited so "does this class add anything of its own?" is a FIELD (declared_property_count) and not an eyeball diff against a remembered list of engine members. declared_only=true returns just this class's own. WARNING: a component or data class usually exposes its Blueprint API as PROPERTIES, not functions: get_class_functions coming back with nothing of its own does NOT mean the class has no API — ask here too (e.g. MetaHumanComponentBase: 0 own functions, 12 own properties). Full typed descriptor per property — kind, cpp_type, editable, edit_const, blueprint_visible, replicated, save_game, config, clamp min/max, enum entries, struct fields, tooltip, edit_condition — plus the class's own flags, config name and implemented interfaces. Schema only: NO instance values. Use inspect_object (include_property_metadata=true) for the same descriptors WITH the current values of a live object, get_properties when you already know the names, and get_blueprint_variables for just the variables a Blueprint itself authored.
 //   @param class_name - UClass identifier, resolved with ResolveClass: bare FName ("Character"), /Script/Module.Class, a Blueprint asset path, or a generated class ("BP_MyActor_C"). WARNING: the REGISTERED FName can differ from the C++ type name and from the name the Python bindings expose — UMetaHumanCharacterInstance is registered as "MetaHumanInstance" — so a failure here is NOT evidence the class is absent; the error names the near misses instead. The response echoes what it resolved to in resolved_class_name / resolved_class_path.
 //   @param declared_only - Optional bool (default false). true = ONLY the properties this class declares, skipping every inherited one. The cheap way to ask "what does this class add?", and what keeps a big class's response from being offloaded for size (get_class_properties("MetaHumanComponentBase") is 44 KB inherited-heavy, 12 properties declared).
 //   @returns { class_name: string, resolved_class_name: string, resolved_class_path: string, declared_only: bool, declared_property_count: int, inherited_property_count: int, is_abstract, is_deprecated, is_placeable, is_native, config_name, implemented_interfaces: [{interface, implemented_by_k2}], class_group?, is_blueprintable?, is_blueprint_type?, display_name?, tooltip?, properties: [<typed descriptor: name, owner_class, is_inherited, kind, cpp_type, editable, edit_const, blueprint_visible, save_game, replicated, config, deprecated, disable_edit_on_instance, enum_values?, fields?, object_class?, inner?, clamp_min/max?, tooltip?, edit_condition?, categories?, units?, display_name?, allow_private_access>], property_count: int }
@@ -1097,7 +1048,7 @@ TSharedPtr<FJsonObject> HandleGetClassProperties(const TSharedPtr<FJsonObject>& 
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_class_functions - List every UFUNCTION a class exposes — the ones it DECLARES plus every inherited one, each tagged with owner_class and is_inherited, and counted separately in declared_function_count / inherited_function_count so "does this class add a function of its own?" is answerable WITHOUT reading the array (declared_only=true returns just those) — with its signature and the flags that decide whether MCP can call it: is_blueprint_callable, is_public, is_static, is_blueprint_pure, is_blueprint_event, is_call_in_editor, category, tooltip and the parameter names/types. This is the lookup to run BEFORE call_function / call_object_method / call_component_function, which refuse anything that is not BlueprintCallable+Public or a BlueprintEvent. WARNING: ZERO own functions is NOT "no Blueprint API": components and data classes usually expose theirs as PROPERTIES (get_class_properties), and a plugin's runtime API often lives in a separate static "*BlueprintLibrary" class rather than on the type itself — both traps show up on MetaHumanComponentBase, whose creator API is in MetaHumanCharacterInstanceBlueprintLibrary. get_function_info drills into ONE function (and separates return values from inputs); get_blueprint_functions_list lists the graphs a Blueprint AUTHORED rather than the compiled class surface.
+// MCP:get_class_functions - List every UFUNCTION a class exposes — the ones it DECLARES plus every inherited one, each tagged with owner_class and is_inherited, and counted separately in declared_function_count / inherited_function_count so "does this class add a function of its own?" is answerable WITHOUT reading the array (declared_only=true returns just those) — with its signature and the flags that decide whether MCP can call it: is_blueprint_callable, is_public, is_static, is_blueprint_pure, is_blueprint_event, is_call_in_editor, category, tooltip and the parameter names/types. This is the lookup to run BEFORE call_function, which refuses anything that is not BlueprintCallable+Public or a BlueprintEvent. WARNING: ZERO own functions is NOT "no Blueprint API": components and data classes usually expose theirs as PROPERTIES (get_class_properties), and a plugin's runtime API often lives in a separate static "*BlueprintLibrary" class rather than on the type itself — both traps show up on MetaHumanComponentBase, whose creator API is in MetaHumanCharacterInstanceBlueprintLibrary. get_function_info drills into ONE function (and separates return values from inputs); get_blueprint_functions lists the graphs a Blueprint AUTHORED rather than the compiled class surface.
 //   @param class_name - UClass identifier, resolved with ResolveClass: bare FName ("Character"), /Script/Module.Class, a Blueprint asset path, or a generated class ("BP_MyActor_C"). WARNING: the REGISTERED FName can differ from the C++ type name and from the name the Python bindings expose — UMetaHumanCharacterInstance is registered as "MetaHumanInstance" — so a failure here is NOT evidence the class is absent; the error names the near misses instead. The response echoes what it resolved to in resolved_class_name / resolved_class_path.
 //   @param declared_only - Optional bool (default false). true = ONLY the UFUNCTIONs this class declares, skipping every inherited one.
 //   @returns { class_name: string, resolved_class_name: string, resolved_class_path: string, declared_only: bool, functions: [{name, owner_class, is_inherited, is_blueprint_callable, is_blueprint_event, is_public, is_static, is_blueprint_pure, is_call_in_editor, category?, tooltip?, parameters: [{name, type}]}], function_count: int, declared_function_count: int, inherited_function_count: int }
@@ -1160,10 +1111,12 @@ TSharedPtr<FJsonObject> HandleGetClassFunctions(const TSharedPtr<FJsonObject>& P
     return mcp_common::MakeOkReply(Listing);
 }
 
-// MCP:inspect_object - One-shot portrait of an object instance: identity (name, class, class path, is_valid), the class-level flags/metadata/implemented interfaces, EVERY reflected property as a { name: typed_value } map, and — when it is an actor — the list of its live components with their classes. The "I know nothing about this object yet" entry point; once you know what you want, get_property_value / get_properties are far cheaper, list_object_properties adds per-property editor metadata the map here omits, and get_actor_components lists components alone. Accepts `world`, so the portrait can be taken of the LIVE server instance or of the client one, and the response stamps which world answered.
+// MCP:inspect_object - One-shot portrait of an object instance: identity (name, class, class path, super class, is_valid), the class-level flags/metadata/implemented interfaces, EVERY reflected property as a { name: typed_value } map, and -- when it is an actor -- the list of its live components with their classes. The "I know nothing about this object yet" entry point: include_properties=false makes it the cheap "what IS this thing?" probe (identity and class only), and include_property_metadata=true lists every property with its full editor metadata (type, editable, edit_const, blueprint_visible, replicated, save_game, clamp, tooltip, enum entries...) next to its value, for when the property NAMES are not known yet. Once you know the names, get_properties is far cheaper; get_class_hierarchy expands the class into its whole ancestor chain, and get_actor_components lists components alone. Accepts `world`, so the portrait can be taken of the LIVE server instance or of the client one -- useful when a class is swapped at runtime -- and the response stamps which world answered.
 //   @param object_path - Path or name of the object to inspect. In the editor world: full object path, asset path, CDO/archetype, or a dotted "Actor[.Component[.Subobject]]" whose first segment is the actor's INTERNAL name. In a live world: a fully-qualified PIE path or the same dotted form (first segment matches internal name OR editor label).
 //   @param world - Optional world selector: absent/'editor' (default: the editor/asset instance) | 'pie' (ambiguous: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie'). Anything other than absent/'editor' portrays the LIVE instance in that world; an UNRECOGNIZED value is an error naming the worlds that exist, never a silent fallback to another world.
-//   @returns { object_path: string, object_name: string, class_name: string, class_path: string, is_valid: bool, is_abstract, is_deprecated, is_placeable, is_native, config_name, implemented_interfaces: [{interface, implemented_by_k2}], class_group?, is_blueprintable?, is_blueprint_type?, display_name?, tooltip?, properties: {prop_name: typed_value}, components: [{name, class}], world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }
+//   @param include_properties - Optional bool (default true). false skips the properties and the components list, leaving identity and class only.
+//   @param include_property_metadata - Optional bool (default false). true returns properties as an ARRAY of typed descriptors (see get_class_properties) each with its current `value`, instead of the { name: typed_value } map.
+//   @returns { object_path: string, object_name: string, class_name: string, class_path: string, super_class: string, is_valid: bool, is_abstract, is_deprecated, is_placeable, is_native, config_name, implemented_interfaces: [{interface, implemented_by_k2}], class_group?, is_blueprintable?, is_blueprint_type?, display_name?, tooltip?, properties?: {prop_name: typed_value} | [<typed descriptor + value>], property_count?: int, components?: [{name, class}], world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number } -- properties/property_count/components only with include_properties; properties is the array form with include_property_metadata; super_class is "None" for UObject.
 
 TSharedPtr<FJsonObject> HandleInspectObject(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1171,6 +1124,10 @@ TSharedPtr<FJsonObject> HandleInspectObject(const TSharedPtr<FJsonObject>& Param
 
     FString TargetPath;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("object_path"), TargetPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+    bool bIncludeProperties = true;
+    Params->TryGetBoolField(TEXT("include_properties"), bIncludeProperties);
+    bool bWithMetadata = false;
+    Params->TryGetBoolField(TEXT("include_property_metadata"), bWithMetadata);
 
     // With a live `world` the portrait is of the LIVE instance there, so a co-op reading can be
     // taken on the server AND on a client; absent/'editor' is the editor/asset instance.
@@ -1184,12 +1141,14 @@ TSharedPtr<FJsonObject> HandleInspectObject(const TSharedPtr<FJsonObject>& Param
 
     UObject* Subject = Target.Object;
     UClass* SubjectClass = Subject->GetClass();
+    const UClass* SuperClass = SubjectClass->GetSuperClass();
 
     TSharedPtr<FJsonObject> Portrait = MakeShared<FJsonObject>();
     Portrait->SetStringField(TEXT("object_path"), TargetPath);
     Portrait->SetStringField(TEXT("object_name"), Subject->GetName());
     Portrait->SetStringField(TEXT("class_name"), SubjectClass->GetName());
     Portrait->SetStringField(TEXT("class_path"), SubjectClass->GetPathName());
+    Portrait->SetStringField(TEXT("super_class"), SuperClass ? SuperClass->GetName() : FString(TEXT("None")));
     Portrait->SetBoolField(TEXT("is_valid"), IsValid(Subject));
     Portrait->SetStringField(TEXT("world"), Target.WorldLabel);
     // WHICH world this portrait came from. Two portraits that disagree are a replication
@@ -1200,7 +1159,34 @@ TSharedPtr<FJsonObject> HandleInspectObject(const TSharedPtr<FJsonObject>& Param
     TSharedPtr<FJsonObject> ClassDesc = BuildClassDescriptor(SubjectClass);
     for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : ClassDesc->Values) { Portrait->SetField(Pair.Key, Pair.Value); }
 
-    Portrait->SetObjectField(TEXT("properties"), Impl::PropertyValueMap(SubjectClass, Subject));
+    if (!bIncludeProperties)
+    {
+        return mcp_common::MakeOkReply(Portrait);
+    }
+    if (bWithMetadata)
+    {
+        // Every reflected property: the full typed descriptor plus its current typed value.
+        TArray<TSharedPtr<FJsonValue>> Described;
+        for (TFieldIterator<FProperty> PropIt(SubjectClass); PropIt; ++PropIt)
+        {
+            FProperty* Property = *PropIt;
+            if (Property == nullptr)
+            {
+                continue;
+            }
+            TSharedPtr<FJsonObject> Descriptor = BuildPropertyDescriptor(Property);
+            Descriptor->SetField(TEXT("value"), mcp_common::PropertyValueToJson(Property, Property->ContainerPtrToValuePtr<void>(Subject)));
+            Described.Add(MakeShared<FJsonValueObject>(Descriptor));
+        }
+        Portrait->SetArrayField(TEXT("properties"), Described);
+        Portrait->SetNumberField(TEXT("property_count"), Described.Num());
+    }
+    else
+    {
+        TSharedPtr<FJsonObject> Values = Impl::PropertyValueMap(SubjectClass, Subject);
+        Portrait->SetNumberField(TEXT("property_count"), Values->Values.Num());
+        Portrait->SetObjectField(TEXT("properties"), Values);
+    }
     if (AActor* SubjectActor = Cast<AActor>(Subject))
     {
         Portrait->SetArrayField(TEXT("components"), Impl::ComponentSummaries(SubjectActor));
@@ -1208,9 +1194,9 @@ TSharedPtr<FJsonObject> HandleInspectObject(const TSharedPtr<FJsonObject>& Param
     return mcp_common::MakeOkReply(Portrait);
 }
 
-// MCP:get_class_hierarchy - Walk the full inheritance chain of a class from itself up to UObject, one record per level with its path, is_native flag, class flags/metadata and implemented interfaces — the answer to "is X a Y?" and "where does the native code stop and the Blueprint chain start?". get_blueprint_parent returns only the IMMEDIATE parent of a Blueprint ASSET; this returns every ancestor of a compiled CLASS. get_blueprint_children goes the other direction (descendants).
-//   @param class_name - UClass identifier, resolved with ResolveClass: bare FName ("Character"), /Script/Module.Class, a Blueprint asset path, or a generated class ("BP_MyActor_C"). WARNING: the REGISTERED FName can differ from the C++ type name and from the name the Python bindings expose — UMetaHumanCharacterInstance is registered as "MetaHumanInstance" — so a failure here is NOT evidence the class is absent; the error names the near misses instead. The response echoes what it resolved to in resolved_class_name / resolved_class_path.
-//   @returns { class_name: string, hierarchy: [{name, path, is_native, is_abstract, is_deprecated, is_placeable, config_name, implemented_interfaces: [{interface, implemented_by_k2}], class_group?, is_blueprintable?, is_blueprint_type?, display_name?, tooltip?}] }
+// MCP:get_class_hierarchy - Walk the full inheritance chain of a class from itself up to UObject, one record per level with its path, is_native flag, class flags/metadata and implemented interfaces — the answer to "is X a Y?" and "where does the native code stop and the Blueprint chain start?". For a USubsystem class it also names the subsystem lifetime (Engine, Editor, GameInstance, World or LocalPlayer), at the top and per level. get_blueprint_parent returns only the IMMEDIATE parent of a Blueprint ASSET; this returns every ancestor of a compiled CLASS. list_derived_classes goes the other direction (descendants).
+//   @param class_name - UClass identifier, resolved with ResolveClass: bare FName ("Character"), /Script/Module.Class, a Blueprint asset path, or a generated class ("BP_MyActor_C"). WARNING: the REGISTERED FName can differ from the C++ type name and from the name the Python bindings expose — UMetaHumanCharacterInstance is registered as "MetaHumanInstance" — so a failure here is NOT evidence the class is absent; the error names the near misses instead.
+//   @returns { class_name: string, lifetime?: string, hierarchy: [{name, path, is_native, lifetime?, is_abstract, is_deprecated, is_placeable, config_name, implemented_interfaces: [{interface, implemented_by_k2}], class_group?, is_blueprintable?, is_blueprint_type?, display_name?, tooltip?}] } -- lifetime only on a USubsystem class and on its levels that are USubsystem classes ("Unknown" for the abstract USubsystem bases).
 
 TSharedPtr<FJsonObject> HandleGetClassHierarchy(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1231,6 +1217,10 @@ TSharedPtr<FJsonObject> HandleGetClassHierarchy(const TSharedPtr<FJsonObject>& P
         Entry->SetStringField(TEXT("name"), Level->GetName());
         Entry->SetStringField(TEXT("path"), Level->GetPathName());
         Entry->SetBoolField(TEXT("is_native"), Level->IsNative());
+        if (Level->IsChildOf(USubsystem::StaticClass()))
+        {
+            Entry->SetStringField(TEXT("lifetime"), UEAgentSubsystemLifetime::DetectLifetimeCategory(Level));
+        }
         TSharedPtr<FJsonObject> ClassDesc = BuildClassDescriptor(Level);
         for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : ClassDesc->Values) { Entry->SetField(Pair.Key, Pair.Value); }
         Chain.Add(MakeShared<FJsonValueObject>(Entry));
@@ -1238,153 +1228,15 @@ TSharedPtr<FJsonObject> HandleGetClassHierarchy(const TSharedPtr<FJsonObject>& P
 
     TSharedPtr<FJsonObject> Lineage = MakeShared<FJsonObject>();
     Lineage->SetStringField(TEXT("class_name"), RequestedClass);
+    if (Leaf->IsChildOf(USubsystem::StaticClass()))
+    {
+        Lineage->SetStringField(TEXT("lifetime"), UEAgentSubsystemLifetime::DetectLifetimeCategory(Leaf));
+    }
     Lineage->SetArrayField(TEXT("hierarchy"), Chain);
     return mcp_common::MakeOkReply(Lineage);
 }
 
 // Single-property reads and writes on one object.
-
-// MCP:get_property_value - Read ONE property off ONE object you can already name (full object path, on-disk asset, CDO/archetype, or a dotted "Actor[.Component[.Subobject]]"), typed rather than stringified. Cheapest of the property readers: use it for a single value, get_properties to batch several names off the same object, list_object_properties to dump every property with its editor metadata, and get_actor_properties_by_class when you do NOT have a path and want to find instances BY CLASS or LABEL instead. Accepts `world`, so the same property can be read on the server and on the client and the response stamps which world answered.
-//   @param object_path - Path or name of the object instance. In the editor world: full object path, asset path, CDO/archetype, or a dotted "Actor[.Component[.Subobject]]" where the first segment is the actor's INTERNAL name (editor labels are not matched here — get_actor_properties_by_class's actor_label is). In a live world: a fully-qualified PIE path or the same dotted form (first segment matches internal name OR label).
-//   @param property_name - Name of the property to read
-//   @param world - Optional world selector: absent/'editor' (default: the editor/asset instance) | 'pie' (ambiguous: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie'). Anything other than absent/'editor' resolves the object in that live world.
-//   @returns { object_path: string, property_name: string, property_type: string, value: any (typed: bool/number/string natively, struct/map as object, array/set as array, object-ref as path string), world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }
-
-TSharedPtr<FJsonObject> HandleGetPropertyValue(const TSharedPtr<FJsonObject>& Params)
-{
-    namespace Impl = UEAgentReflectionCommandsImpl;
-
-    FString TargetPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("object_path"), TargetPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    FString WantedProperty;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("property_name"), WantedProperty, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-    // absent/'editor' = the editor/asset instance; 'server' / 'client' / 'pie:N' address one
-    // live world each, so the same property can be read on both sides of a co-op session.
-    Impl::FWorldScopedObject Target;
-    TSharedPtr<FJsonObject> Refusal;
-    if (!Impl::ResolveWorldScopedObject(Params, TargetPath, TEXT("get_property_value"),
-            [](const FString& Path) { return ResolveObjectByName(Path); }, Target, Refusal))
-    {
-        return Refusal;
-    }
-
-    FProperty* Found = Target.Object->GetClass()->FindPropertyByName(*WantedProperty);
-    if (Found == nullptr)
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Property not found: %s"), *WantedProperty));
-    }
-
-    TSharedPtr<FJsonObject> Reading = MakeShared<FJsonObject>();
-    Reading->SetStringField(TEXT("object_path"), TargetPath);
-    Reading->SetStringField(TEXT("property_name"), WantedProperty);
-    Reading->SetStringField(TEXT("property_type"), Found->GetClass()->GetName());
-    Reading->SetField(TEXT("value"), mcp_common::PropertyValueToJson(Found, Found->ContainerPtrToValuePtr<void>(Target.Object)));
-    Reading->SetStringField(TEXT("world"), Target.WorldLabel);
-    mcp_common::AddWorldEvidence(Reading, Target.World);
-    return mcp_common::MakeOkReply(Reading);
-}
-
-// MCP:set_property_value - Write ONE property on ONE object instance (editor world only), through a CPF_Edit/!EditConst gate plus the full Modify/PreEditChange/PostEditChange editor notification so the change is undoable and dirties the package. Use set_properties to write several names at once, set_component_property for a component's own property (it validates gameplay tags, which this does not), and call_function/call_object_method when the value has to go through the object's own setter. WARNING: success:true only means the import raised no error: re-read the value with get_property_value / get_properties / list_instance_overrides before believing it — writing an FGameplayTag onto a PLACED ACTOR is measured to report success and leave the tag empty.
-//   @param object_path - Path or name of the object instance, resolved in the EDITOR world: full object path, asset path, CDO/archetype, or a dotted "Actor[.Component[.Subobject]]" whose first segment is the actor's internal name.
-//   @param property_name - Name of the property to set (must be CPF_Edit and not EditConst, or the call fails with a reason)
-//   @param value - New value: string, number, boolean, JSON object (struct), JSON array (array/set/tag container), or a UE-format text string like "(X=1,Y=2,Z=3)"
-//   @returns { success: bool, error: string, message: string }
-
-TSharedPtr<FJsonObject> HandleSetPropertyValue(const TSharedPtr<FJsonObject>& Params)
-{
-    namespace Impl = UEAgentReflectionCommandsImpl;
-
-    FString TargetPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("object_path"), TargetPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    FString TargetProperty;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("property_name"), TargetProperty, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    if (!Params->HasField(TEXT("value")))
-    {
-        return mcp_common::MissingParameterReply(TEXT("value"));
-    }
-
-    // `value` may be any JSON type (struct-arrays and tag containers arrive as arrays, structs
-    // as objects); ReadAnyTypedValue keeps it typed for the importer.
-    const TSharedPtr<FJsonValue> NewValue = Impl::ReadAnyTypedValue(Params);
-    if (!NewValue.IsValid())
-    {
-        return mcp_common::MakeErrorReply(TEXT("Invalid value parameter - must be array, object, string, number, or bool"));
-    }
-
-    UObject* Target = ResolveObjectByName(TargetPath);
-    if (Target == nullptr)
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Object not found: %s"), *TargetPath));
-    }
-
-    // The CPF_Edit / !EditConst gate and the Modify / PreEditChange / PostEditChange
-    // notification live in ApplyCheckedPropertySet, shared with set_properties.
-    FString WriteError;
-    const bool bWritten = ApplyCheckedPropertySet(Target, TargetProperty, NewValue, WriteError);
-
-    TSharedPtr<FJsonObject> Outcome = MakeShared<FJsonObject>();
-    Outcome->SetBoolField(TEXT("success"), bWritten);
-    if (bWritten)
-    {
-        Outcome->SetStringField(TEXT("message"), TEXT("Property set successfully"));
-    }
-    else
-    {
-        Outcome->SetStringField(TEXT("error"), WriteError);
-    }
-
-    // The measured verdict is the emitted one; a hardcoded success:true would hide it,
-    // and callers only look at that flag.
-    return mcp_common::MakeOutcomeReply(Outcome, bWritten,
-        bWritten ? FString() : mcp_common::MeasuredOutcomeError(TEXT("set_property_value"), TEXT("bSuccess")));
-}
-
-// MCP:list_object_properties - Dump EVERY reflected property of one object instance with its current value AND its full editor metadata (type, editable, edit_const, blueprint_visible, replicated, save_game, clamp, tooltip, enum entries...). The discovery tool of the property family: use it when you do not yet know the property NAMES, then switch to get_property_value (one name) or get_properties (several names) which are far cheaper. get_class_properties gives the same descriptors WITHOUT values for a class you cannot instantiate; get_actor_properties_by_class finds instances by class/label when you have no object path. Accepts `world`, so it can dump the live server instance or the client one.
-//   @param object_path - Path or name of the object instance. In the editor world: full object path, asset path, CDO/archetype, or a dotted "Actor[.Component[.Subobject]]" whose first segment is the actor's INTERNAL name (not its editor label). In a live world: a fully-qualified PIE path or the same dotted form (first segment matches internal name OR label).
-//   @param world - Optional world selector: absent/'editor' (default: the editor/asset instance) | 'pie' (ambiguous: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie'). Anything other than absent/'editor' resolves the object in that live world (LIVE per-instance state).
-//   @returns { object_path: string, class_name: string, properties: [<typed descriptor (see get_class_properties) + typed value>], property_count: int, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }
-
-TSharedPtr<FJsonObject> HandleListObjectProperties(const TSharedPtr<FJsonObject>& Params)
-{
-    namespace Impl = UEAgentReflectionCommandsImpl;
-
-    FString TargetPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("object_path"), TargetPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-    // A live `world` lists LIVE per-instance state (same resolution as get_property_value).
-    Impl::FWorldScopedObject Target;
-    TSharedPtr<FJsonObject> Refusal;
-    if (!Impl::ResolveWorldScopedObject(Params, TargetPath, TEXT("list_object_properties"),
-            [](const FString& Path) { return ResolveObjectByName(Path); }, Target, Refusal))
-    {
-        return Refusal;
-    }
-
-    // Every reflected property: the full typed descriptor plus its current typed value.
-    const UClass* SubjectClass = Target.Object->GetClass();
-    TArray<TSharedPtr<FJsonValue>> Described;
-    for (TFieldIterator<FProperty> PropIt(SubjectClass); PropIt; ++PropIt)
-    {
-        FProperty* Property = *PropIt;
-        if (Property == nullptr)
-        {
-            continue;
-        }
-        TSharedPtr<FJsonObject> Descriptor = BuildPropertyDescriptor(Property);
-        Descriptor->SetField(TEXT("value"), mcp_common::PropertyValueToJson(Property, Property->ContainerPtrToValuePtr<void>(Target.Object)));
-        Described.Add(MakeShared<FJsonValueObject>(Descriptor));
-    }
-
-    TSharedPtr<FJsonObject> Dump = MakeShared<FJsonObject>();
-    Dump->SetStringField(TEXT("object_path"), TargetPath);
-    Dump->SetStringField(TEXT("class_name"), SubjectClass->GetName());
-    Dump->SetStringField(TEXT("world"), Target.WorldLabel);
-    mcp_common::AddWorldEvidence(Dump, Target.World);
-    Dump->SetNumberField(TEXT("property_count"), Described.Num());
-    Dump->SetArrayField(TEXT("properties"), Described);
-    return mcp_common::MakeOkReply(Dump);
-}
 
 // ---------------------------------------------------------------------------
 // HARD OBJECT ARGUMENTS BY PATH.
@@ -1712,32 +1564,124 @@ static bool ReflectionPie_MarshalArguments(
 
 // UFUNCTION calls on an editor-world object, and one function's call contract.
 
-// MCP:call_function - Invoke a UFUNCTION on an object instance in the EDITOR world and get its return value and out-params back typed. Arguments go in a dict named `parameters` (each sibling uses a DIFFERENT key — call_object_method uses `args_json`, call_component_function uses `params` — and an unknown key is a hard error, so read the signature with get_function_info first). Marshals scalars, ENUM by entry name, Blueprint STRUCTs as JSON objects, ARRAY/set as JSON arrays, FGameplayTag (validated against the registry) and FGuid. Choose call_object_method to reach a CDO/archetype/live PIE subobject or to pass `world`, call_component_function to hit a component without hand-building its path, and call_library_function for a static/library call with no instance at all. Only BlueprintCallable+Public or BlueprintEvent functions are callable; pass transact=true to make the write undoable and actually dirty an OFPA package.
-//   @param object_path - Path or name of the object instance, resolved in the EDITOR world: full object path, asset path, CDO/archetype, or a dotted "Actor[.Component[.Subobject]]" whose first segment is the actor's internal name. This command has NO `world` parameter — use call_object_method for a live PIE target.
+// MCP:call_function - Invoke a UFUNCTION and get its return value and out-params back typed. The target is any UObject named by object_path -- a level actor, component archetype, class default object, asset, or a LIVE PIE subobject when `world` picks a live world (the response stamps which world ran it) -- or, with class_name instead, that class's Class Default Object (the way to reach UKismetSystemLibrary, UGameplayStatics or any Blueprint Function Library when there is no instance), or, with component_class, the FIRST component of that class on the actor object_path names (no hand-built component path; in co-op, world='server' is where authoritative component state lives). Arguments go in the `parameters` dict, keyed by parameter name (an unknown key is a hard error, so read the signature with get_function_info first). Marshals scalars, ENUM by entry name, Blueprint STRUCTs as JSON objects, ARRAY/set as JSON arrays, FGameplayTag (validated against the registry), FGuid, and OBJECT/class arguments by path (resolved in the target's own world first, then as an asset; a path that resolves to nothing is a hard error, never a silent null). Only BlueprintCallable+Public or BlueprintEvent functions are callable; pass transact=true to make the write undoable and actually dirty an OFPA package.
+//   @param object_path - Path or name of the target object: full object path, asset path, CDO/archetype, or a dotted "Actor[.Component[.Subobject]]" (first segment: the actor's internal name in the editor world, internal name OR editor label in a live world). With component_class it names the ACTOR whose component is called. Required unless class_name is given.
+//   @param actor - Alias of object_path.
+//   @param class_name - Optional, instead of object_path: a class NAME (bare/native e.g. "KismetSystemLibrary", /Script path, or a Blueprint asset path -- a Blueprint path yields its GeneratedClass); the function runs on that class's Class Default Object, with no `world`.
+//   @param component_class - Optional component CLASS (bare/native name, /Script path, or Blueprint asset path) to locate on the actor object_path names; the FIRST component of (or derived from) that class is the target. Must derive from UActorComponent.
 //   @param function_name - Name of the function to call, exactly as declared (a Blueprint graph named "Add Item" keeps its spaces)
-//   @param parameters [object] - Optional {param_name: value} dict. Scalars map directly; pass an ENUM by its entry name as a string (e.g. "Harvest"); pass a STRUCT param as a JSON object {Field: val, ...} and an ARRAY/set as a JSON array (nativized via FJsonObjectConverter — nested structs + enum-by-name inside structs supported; JSON keys match the field's authored name). A UE-format text string (e.g. "(X=1,Y=2,Z=3)") is also accepted for structs.
+//   @param function - Alias of function_name.
+//   @param parameters [object] - Optional {param_name: value} dict. Scalars map directly; pass an ENUM by its entry name as a string (e.g. "Harvest"); pass a STRUCT param as a JSON object {Field: val, ...} and an ARRAY/set as a JSON array (nativized via FJsonObjectConverter — nested structs + enum-by-name inside structs supported; JSON keys match the field's authored name); FGameplayTag as {"TagName":"A.B"}; FGuid as a hex/braced string. A UE-format text string (e.g. "(X=1,Y=2,Z=3)") is also accepted for structs.
+//   @param args_json [object] - Alias of parameters; like parameters it also takes the dict as JSON text.
+//   @param params [object] - Alias of parameters.
+//   @param world - Optional world selector (takes precedence over use_pie_world): absent/'editor' (default) | 'pie' (ambiguous: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie'). Anything other than absent/'editor' resolves object_path in that live world; an unrecognised value is an error naming the worlds that exist. Ignored with class_name.
+//   @param use_pie_world [bool] - Optional (default false). Resolve object_path in the running PIE world instead of the editor world. Equivalent to world='pie'; `world` wins when both are given.
 //   @param transact [bool] - Optional (default false). When true, wrap the invocation in an FScopedTransaction and Modify() the target (and, for a component, its owner) BEFORE calling, so whatever the function writes is undoable AND marks the owning package dirty. Without this, a CallInEditor-style function that fills state on a World Partition (OFPA) actor leaves the package clean and save_level reports success while writing nothing. REFUSED for pure/const functions and for PIE-world targets (both would only produce a false-positive dirty flag).
-//   @returns { object_path: string, function_name: string, success: bool, message: string, return_value: any (typed: bool/number/string natively, struct/map as object, array/set as array, object-ref as path string), out_params: object (same typed values), transaction?: { requested, modified: [path], saved_to_transaction_buffer, is_package_external, package_name, package_file, package_file_exists, package_dirty_before, package_dirty_after }, verification?: object (only when transact=true) }
+//   @returns { object_path: string, function_name: string, success: bool, message: string, return_value: any (typed: bool/number/string natively, struct/map as object, array/set as array, object-ref as path string), out_params: object (same typed values), world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number, class_name?: string, class_path?: string, actor?: string, component_class?: string, component_path?: string, transaction?: { requested, modified: [path], saved_to_transaction_buffer, is_package_external, package_name, package_file, package_file_exists, package_dirty_before, package_dirty_after }, verification?: object (only when transact=true) } -- object_path echoes the request (with class_name, the class default object's path); class_name/class_path with class_name; actor/component_class/component_path with component_class.
 
 TSharedPtr<FJsonObject> HandleCallFunction(const TSharedPtr<FJsonObject>& Params)
 {
     namespace Impl = UEAgentReflectionCommandsImpl;
 
-    FString TargetPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("object_path"), TargetPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
     FString RequestedFunction;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("function_name"), RequestedFunction, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-    // Editor world only: this command takes no `world` selector (call_object_method does).
-    UObject* Object = ResolveObjectByName(TargetPath);
-    if (!Object)
+    if (!Params->TryGetStringField(TEXT("function_name"), RequestedFunction) && !Params->TryGetStringField(TEXT("function"), RequestedFunction))
     {
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Object not found: %s"), *TargetPath));
+        return mcp_common::MissingParameterReply(TEXT("function_name"));
     }
+    // The target: object_path (alias actor), or class_name for a class default object.
+    FString TargetPath;
+    const bool bHasPath = (Params->TryGetStringField(TEXT("object_path"), TargetPath) || Params->TryGetStringField(TEXT("actor"), TargetPath))
+        && !TargetPath.IsEmpty();
+    FString RequestedClass;
+    const bool bHasClass = Params->TryGetStringField(TEXT("class_name"), RequestedClass) && !RequestedClass.IsEmpty();
+    FString ComponentClassName;
+    const bool bHasComponent = Params->TryGetStringField(TEXT("component_class"), ComponentClassName) && !ComponentClassName.IsEmpty();
+    // `world` wins over `use_pie_world`, a bool that can only say "some PIE world", never WHICH one:
+    // use_pie_world=true without `world` resolves like world='pie'.
+    bool bUsePieWorld = false;
+    Params->TryGetBoolField(TEXT("use_pie_world"), bUsePieWorld);
+    if (bHasPath == bHasClass)
+    {
+        return mcp_common::MakeErrorReply(bHasPath
+            ? TEXT("Pass object_path or class_name, not both")
+            : TEXT("Missing required parameter: object_path (or class_name for a class default object)"));
+    }
+    if (bHasClass && bHasComponent)
+    {
+        return mcp_common::MakeErrorReply(TEXT("component_class needs object_path naming the actor, not class_name"));
+    }
+
+    // The object the function runs on, and the world that answered (null for an asset, CDO or archetype).
+    UObject* Object = nullptr;
+    UWorld* AnsweringWorld = nullptr;
+    FString WorldLabel = TEXT("editor");
+    TSharedPtr<FJsonObject> Identity = MakeShared<FJsonObject>();
+    if (bHasClass)
+    {
+        // ResolveClass takes a bare name, a /Script path or a Blueprint asset path (returning its GeneratedClass);
+        // the call runs on that class's default object, which a hand-built "Default__<Class>_C" path addresses.
+        UClass* LibraryClass = FUEAgentGraphUtils::ResolveClass(RequestedClass);
+        if (!LibraryClass)
+        {
+            return mcp_common::MakeErrorReply(FUEAgentGraphUtils::DescribeClassNotFound(RequestedClass));
+        }
+        Object = LibraryClass->GetDefaultObject();
+        if (!Object)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(TEXT("Failed to get class default object for: %s"), *LibraryClass->GetName()));
+        }
+        Identity->SetStringField(TEXT("class_name"), RequestedClass);
+        Identity->SetStringField(TEXT("class_path"), LibraryClass->GetPathName());
+    }
+    else
+    {
+        Impl::FWorldScopedObject Resolved;
+        TSharedPtr<FJsonObject> Refusal;
+        if (!Impl::ResolveWorldScopedObject(Params, TargetPath, TEXT("call_function"),
+                [](const FString& Path) { return ResolveObjectByName(Path); }, Resolved, Refusal, bUsePieWorld))
+        {
+            return Refusal;
+        }
+        Object = Resolved.Object;
+        AnsweringWorld = Resolved.World;
+        WorldLabel = Resolved.WorldLabel;
+    }
+
+    if (bHasComponent)
+    {
+        AActor* Actor = Cast<AActor>(Object);
+        if (!Actor)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("'%s' is not an actor (class %s); component_class needs object_path to name the actor"), *TargetPath, *Object->GetClass()->GetName()));
+        }
+        UClass* ComponentClass = FUEAgentGraphUtils::ResolveClass(ComponentClassName);
+        if (!ComponentClass)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(TEXT("Component class not found: %s"), *ComponentClassName));
+        }
+        if (!ComponentClass->IsChildOf(UActorComponent::StaticClass()))
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("'%s' is not a UActorComponent subclass (component_class must name an actor component type)"), *ComponentClass->GetName()));
+        }
+        UActorComponent* Component = Actor->FindComponentByClass(ComponentClass);
+        if (!Component)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("Actor '%s' (class %s) has no component of class '%s'"), *Actor->GetName(), *Actor->GetClass()->GetName(), *ComponentClass->GetName()));
+        }
+        Identity->SetStringField(TEXT("actor"), Actor->GetPathName());
+        Identity->SetStringField(TEXT("component_class"), ComponentClass->GetName());
+        Identity->SetStringField(TEXT("component_path"), Component->GetPathName());
+        Object = Component;
+    }
+
     UFunction* Function = Object->FindFunction(*RequestedFunction);
     if (!Function)
     {
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Function not found: %s"), *RequestedFunction));
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Function not found: %s on %s (class %s)"),
+            *RequestedFunction, *Object->GetName(), *Object->GetClass()->GetName()));
     }
 
     // Honest gate: only functions exposed to scripting are invoked.
@@ -1762,12 +1706,41 @@ TSharedPtr<FJsonObject> HandleCallFunction(const TSharedPtr<FJsonObject>& Params
     FStructOnScope ArgumentFrame(Function);
     uint8* Frame = ArgumentFrame.GetStructMemory();
 
-    // Optional {param_name: value} arguments, marshaled into the frame.
-    const TSharedPtr<FJsonObject>* ParamsObj = nullptr;
-    if (Params->TryGetObjectField(FStringView(TEXT("parameters")), ParamsObj) && ParamsObj && (*ParamsObj))
+    // Optional {param_name: value} arguments, marshaled into the frame. args_json and params are older names, and
+    // the object may also come as its JSON text (the form args_json took): text that is not a JSON object is refused,
+    // never ignored, or the call would run with every argument left at its default.
+    TSharedPtr<FJsonObject> Arguments;
+    for (const TCHAR* Key : { TEXT("parameters"), TEXT("args_json"), TEXT("params") })
+    {
+        const TSharedPtr<FJsonValue> Value = Params->TryGetField(FStringView(Key));
+        if (!Value.IsValid() || Value->Type == EJson::Null)
+        {
+            continue;
+        }
+        if (Value->Type == EJson::Object)
+        {
+            Arguments = Value->AsObject();
+        }
+        else if (Value->Type == EJson::String)
+        {
+            const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Value->AsString());
+            if (!FJsonSerializer::Deserialize(Reader, Arguments) || !Arguments.IsValid())
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(
+                    TEXT("%s is a string that is not a JSON object; pass {param_name: value} (as an object or its JSON text)"), Key));
+            }
+        }
+        else
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("%s must be a {param_name: value} object (or its JSON text)"), Key));
+        }
+        break;
+    }
+    if (Arguments.IsValid())
     {
         FString MarshalError;
-        if (!ReflectionPie_MarshalArguments(Object, Function, *ParamsObj, RequestedFunction, Frame, MarshalError))
+        if (!ReflectionPie_MarshalArguments(Object, Function, Arguments, RequestedFunction, Frame, MarshalError))
         {
             return mcp_common::MakeErrorReply(MarshalError);
         }
@@ -1785,6 +1758,7 @@ TSharedPtr<FJsonObject> HandleCallFunction(const TSharedPtr<FJsonObject>& Params
     // (CoreGlobals.h, doc comment: "allow AActor object to execute script in the editor from
     // specific entry points") is the engine's own sanctioned escape hatch for exactly this --
     // same TGuardValue idiom FunctionalTestingManager.cpp uses to tick an editor-placed actor.
+    // Harmless in PIE, where AreActorsInitialized() is already true.
     TGuardValue<bool> AllowActorScriptExecutionGuard(GAllowActorScriptExecutionInEditor, true);
 
     // Transact — open the undo bracket and snapshot/dirty the target BEFORE the call.
@@ -1797,12 +1771,20 @@ TSharedPtr<FJsonObject> HandleCallFunction(const TSharedPtr<FJsonObject>& Params
     Object->ProcessEvent(Function, Frame);
 
     TSharedPtr<FJsonObject> Call = MakeShared<FJsonObject>();
-    Call->SetStringField(TEXT("object_path"), TargetPath);
+    // object_path echoes the request, as the caller wrote it; with class_name it is the class default object's path.
+    Call->SetStringField(TEXT("object_path"), bHasPath ? TargetPath : Object->GetPathName());
     Call->SetStringField(TEXT("function_name"), RequestedFunction);
     Call->SetBoolField(TEXT("success"), true);
     Call->SetStringField(TEXT("message"), TEXT("Function called successfully"));
+    for (const auto& Field : Identity->Values)
+    {
+        Call->SetField(Field.Key, Field.Value);
+    }
     // The return value and the out-params, typed, exactly as ProcessEvent left them.
     Impl::ReadBackCallFrame(Function, Frame, Call);
+    // WHICH world ran the function -- "pie" alone is ambiguous with two or more instances.
+    Call->SetStringField(TEXT("world"), WorldLabel);
+    mcp_common::AddWorldEvidence(Call, AnsweringWorld);
 
     if (!bTransact)
     {
@@ -1816,7 +1798,7 @@ TSharedPtr<FJsonObject> HandleCallFunction(const TSharedPtr<FJsonObject>& Params
         TEXT("UPackage::IsDirty() re-read after FScopedTransaction + Modify()"), VerificationDetail);
 }
 
-// MCP:get_function_info - Inspect ONE UFUNCTION on a class and get its exact call contract: input parameters and RETURN/out values split into separate lists (get_class_functions lumps them together), plus is_blueprint_callable / is_public / is_static / is_blueprint_pure / is_call_in_editor, category and tooltip. Run it to learn the PARAMETER NAMES to put in call_function's `parameters`, call_object_method's `args_json` or call_component_function's `params` — those dicts are keyed by name and an unknown key is a hard error.
+// MCP:get_function_info - Inspect ONE UFUNCTION on a class and get its exact call contract: input parameters and RETURN/out values split into separate lists (get_class_functions lumps them together), plus is_blueprint_callable / is_public / is_static / is_blueprint_pure / is_call_in_editor, category and tooltip. Run it to learn the PARAMETER NAMES to put in call_function's `parameters` — that dict is keyed by name and an unknown key is a hard error.
 //   @param class_name - Bare UClass name resolved with FindFirstObject (e.g. "KismetSystemLibrary", "BP_MyActor_C"); an asset path is NOT accepted here
 //   @param function_name - Name of the function to inspect, exactly as the class declares it (a Blueprint graph named "Add Item" keeps its spaces)
 //   @returns { class_name: string, function_name: string, is_blueprint_callable: bool, is_blueprint_event: bool, is_public: bool, is_static: bool, is_blueprint_pure: bool, is_call_in_editor: bool, category?, tooltip?, parameters: [{name, type}], returns: [{name, type}] }
@@ -1874,7 +1856,7 @@ TSharedPtr<FJsonObject> HandleGetFunctionInfo(const TSharedPtr<FJsonObject>& Par
 // Definitions of a UScriptStruct and of a UEnum, the contents of a loaded package, and the property diff of
 // two live objects.
 
-// MCP:get_struct_info - Read the definition of a UScriptStruct (native or Blueprint-authored): its path and every member property as a typed descriptor. Use it to learn the FIELD NAMES before passing a struct as a JSON object to call_function / set_property_value, or to read the row layout behind a DataTable. get_struct_members is the Blueprint-struct-authoring view of the same asset; get_enum_info is the enum equivalent.
+// MCP:get_struct_info - Read the definition of a UScriptStruct (native or Blueprint-authored): its path and every member property as a typed descriptor. Use it to learn the FIELD NAMES before passing a struct as a JSON object to call_function / set_properties, or to read the row layout behind a DataTable. get_struct_members is the Blueprint-struct-authoring view of the same asset; get_enum_info is the enum equivalent.
 //   @param struct_name - Bare struct name resolved with FindFirstObject (e.g. "Vector", "S_ItemStructure"); an asset path is NOT accepted here
 //   @returns { struct_name: string, struct_path: string, properties: [<typed property descriptor>] }
 
@@ -1906,7 +1888,7 @@ TSharedPtr<FJsonObject> HandleGetStructInfo(const TSharedPtr<FJsonObject>& Param
     return mcp_common::MakeOkReply(Layout);
 }
 
-// MCP:get_enum_info - Read an enum's definition — native or Blueprint (UUserDefinedEnum) — listing every entry (the _MAX sentinel excluded) with index, internal_name, display_name and numeric value. WARNING: the two names DIVERGE on a Blueprint enum: the editor shows the display_name ("Snowy") while the authored entry is the opaque internal_name ("NewEnumerator5"), and the INTERNAL name is what set_property_value / set_component_property / call_function's enum-by-name marshaling accept. Read it here before writing an enum, or the write imports nothing.
+// MCP:get_enum_info - Read an enum's definition — native or Blueprint (UUserDefinedEnum) — listing every entry (the _MAX sentinel excluded) with index, internal_name, display_name and numeric value. WARNING: the two names DIVERGE on a Blueprint enum: the editor shows the display_name ("Snowy") while the authored entry is the opaque internal_name ("NewEnumerator5"), and the INTERNAL name is what set_properties / set_component_property / call_function's enum-by-name marshaling accept. Read it here before writing an enum, or the write imports nothing.
 //   @param enum_name - Bare enum name resolved with FindFirstObject (e.g. "ECollisionEnabled", "E_MyEnum"); an asset path is NOT accepted here
 //   @returns { enum_name: string, enum_path: string, is_user_defined: bool, values: [{index, name, internal_name, display_name, value}] }
 
@@ -1968,7 +1950,7 @@ TSharedPtr<FJsonObject> HandleGetPackageInfo(const TSharedPtr<FJsonObject>& Para
     return mcp_common::MakeOkReply(Contents);
 }
 
-// MCP:compare_objects - Diff TWO LIVE objects property by property at the same instant, using the ENGINE's own equality (FProperty::Identical + PPF_DeepComparison) rather than exported text, so FText localization identity and object-outer differences are classified as `noise` instead of being reported as real differences. Use it for "instance vs its CDO", "fork vs original", "this actor vs that one". Accepts `world`, which resolves BOTH paths in the SAME world (e.g. two live actors inside the server world); to compare the same actor ACROSS worlds — server vs client — use snapshot_object + diff_object_snapshots, which is what a replication check needs. list_instance_overrides diffs a placed actor against its archetype and also tells you which package carries the override; diff_blueprints diffs the AUTHORED graphs instead of live values.
+// MCP:compare_objects - Diff TWO LIVE objects property by property at the same instant, using the ENGINE's own equality (FProperty::Identical + PPF_DeepComparison) rather than exported text, so FText localization identity and object-outer differences are classified as `noise` instead of being reported as real differences. Use it for "instance vs its CDO", "fork vs original", "this actor vs that one". Accepts `world`, which resolves BOTH paths in the SAME world (e.g. two live actors inside the server world); to compare the same actor ACROSS worlds — server vs client — use capture_object_snapshot + diff_object_snapshots, which is what a replication check needs. list_instance_overrides diffs a placed actor against its archetype and also tells you which package carries the override; diff_blueprints diffs the AUTHORED graphs instead of live values.
 //   @param object_path_1 - Path or name of the first object (full object path, asset path, CDO/archetype, or dotted "Actor[.Component[.Subobject]]" by internal name; in a live world the first segment also matches the editor LABEL)
 //   @param object_path_2 - Path or name of the second object, same resolution as object_path_1 and in the SAME world
 //   @param equality_predicate - Optional 'identical' (DEFAULT, FProperty::Identical + PPF_DeepComparison — what the engine itself calls equal) or 'export_text' (raw ExportTextItem_Direct(Defaults=nullptr, PPF_None) string compare, kept only for callers that depend on its over-reporting behavior).
@@ -2008,7 +1990,7 @@ TSharedPtr<FJsonObject> HandleCompareObjects(const TSharedPtr<FJsonObject>& Para
     Params->TryGetBoolField(TEXT("include_noise"), bIncludeNoise);
 
     // ONE world for both paths: a diff whose halves come from different worlds is a replication
-    // question, which snapshot_object + diff_object_snapshots answers.
+    // question, which capture_object_snapshot + diff_object_snapshots answers.
     Impl::FWorldChoice Where;
     TSharedPtr<FJsonObject> Refusal;
     if (!Impl::ChooseWorld(Params, TEXT("compare_objects"), Where, Refusal))
@@ -2471,9 +2453,9 @@ static void ReflectionOverrides_DiffAgainstArchetype(
     }
 }
 
-// MCP:list_instance_overrides - Audit a PLACED ACTOR (and every one of its components) against its ARCHETYPE and list the property values that were authored as per-instance overrides in the level, each with its archetype baseline, plus the physical package that carries them (the rotating-hash OFPA .uasset for a World Partition actor) and whether that package is dirty. The tool that answers "did my write actually land on this instance, or only look like it?" — it catches set_property_value reporting success on an FGameplayTag while storing an empty "()" override. Component baselines are the SCS TEMPLATE, not the Blueprint CDO (a CDO carries no SCS components at all). Resolves in the EDITOR world by design: an instance override is an on-disk concept, not a runtime one.
+// MCP:list_instance_overrides - Audit a PLACED ACTOR (and every one of its components) against its ARCHETYPE and list the property values that were authored as per-instance overrides in the level, each with its archetype baseline, plus the physical package that carries them (the rotating-hash OFPA .uasset for a World Partition actor) and whether that package is dirty. The tool that answers "did my write actually land on this instance, or only look like it?" — it catches set_properties reporting success on an FGameplayTag while storing an empty "()" override. Component baselines are the SCS TEMPLATE, not the Blueprint CDO (a CDO carries no SCS components at all). Resolves in the EDITOR world by design: an instance override is an on-disk concept, not a runtime one.
 //   @param actor - Actor to audit: internal object name, editor label, or full object path. Resolved in the EDITOR world — a per-instance override is an editor/on-disk concept, not a runtime one.
-//   @param include_components [bool] - Optional (default true). Also diff every UActorComponent of the actor against C->GetArchetype() — the SCS template, NOT the Blueprint CDO (a BP CDO does not carry the SCS components at all, which is why a snapshot_object workaround yields an unusable component half).
+//   @param include_components [bool] - Optional (default true). Also diff every UActorComponent of the actor against C->GetArchetype() — the SCS template, NOT the Blueprint CDO (a BP CDO does not carry the SCS components at all, which is why a capture_object_snapshot workaround yields an unusable component half).
 //   @param require_edit [bool] - Optional (default true). Only consider properties flagged CPF_Edit, i.e. what a human could actually have authored in the details panel. false widens to every reflected property.
 //   @param include_transient [bool] - Optional (default false). Include CPF_Transient / DuplicateTransient / NonPIEDuplicateTransient / Deprecated properties. They are never saved, so they are noise in an override audit.
 //   @param include_noise [bool] - Optional (default false). Also list, under `noise[]`, the properties the engine considers EQUAL but whose exported text differs (FText localization identity, object outer). They are ALWAYS counted in `noise_counts` regardless.
@@ -2628,11 +2610,12 @@ TSharedPtr<FJsonObject> HandleListInstanceOverrides(const TSharedPtr<FJsonObject
 
 // Batch property reads and writes on one object.
 
-// MCP:get_properties - Batch-read several named properties off ONE object instance in a single call, returning a { name: typed_value } map plus a not_found[] list of the names that do not exist on that class (unlike get_actor_properties_by_class, a misspelling is REPORTED, not silently dropped). Use it instead of N calls to get_property_value; use list_object_properties when you do not know the names yet. Accepts `world`, so the SAME batch can be read on the server and on the client — the cheapest way to prove a value replicated — and the response stamps which world answered.
-//   @param object_path - Path or name of the object instance. In the editor world: full object path, asset path, CDO/archetype, or a dotted "Actor[.Component[.Subobject]]" whose first segment is the actor's INTERNAL name. In a live world: a fully-qualified PIE path or the same dotted form (first segment matches internal name OR editor label).
-//   @param property_names [array] - Names of the properties to read; every name that the class does not declare comes back in not_found[]
+// MCP:get_properties - Read one or several named properties off ONE object you can already name (full object path, on-disk asset, CDO/archetype, or a dotted "Actor[.Component[.Subobject]]"), typed rather than stringified, returning a { name: typed_value } map, each property's FProperty class, and a not_found[] list of the names that do not exist on that class (unlike get_actor_properties_by_class, a misspelling is REPORTED, not silently dropped). property_name reads one; property_names batches several. Use inspect_object (include_property_metadata=true) when you do not know the names yet, and get_actor_properties_by_class when you have no path and want instances BY CLASS or LABEL. Accepts `world`, so the SAME read can be done on the server and on the client — the cheapest way to prove a value replicated — and the response stamps which world answered.
+//   @param object_path - Path or name of the object instance. In the editor world: full object path, asset path, CDO/archetype, or a dotted "Actor[.Component[.Subobject]]" whose first segment is the actor's INTERNAL name (editor labels are not matched here). In a live world: a fully-qualified PIE path or the same dotted form (first segment matches internal name OR editor label).
+//   @param property_names [array] - Optional names of the properties to read; every name that the class does not declare comes back in not_found[]. Required unless property_name is given.
+//   @param property_name - Optional single property to read, added to property_names.
 //   @param world - Optional world selector: absent/'editor' (default: the editor/asset instance) | 'pie' (ambiguous: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie'). Anything other than absent/'editor' reads the LIVE instance in that world; an UNRECOGNIZED value is an error naming the worlds that exist, never a silent fallback to another world.
-//   @returns { object_path: string, class_name: string, values: object (typed: bool/number/string natively, struct/map as object, array/set as array, object-ref as path string), not_found: [string], world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }
+//   @returns { object_path: string, class_name: string, values: object (typed: bool/number/string natively, struct/map as object, array/set as array, object-ref as path string), property_types: object ({name: FProperty class name}), not_found: [string], world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }
 
 TSharedPtr<FJsonObject> HandleGetProperties(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2641,10 +2624,29 @@ TSharedPtr<FJsonObject> HandleGetProperties(const TSharedPtr<FJsonObject>& Param
     FString ObjectPath;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("object_path"), ObjectPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
 
+    // property_names and the single property_name are both optional; together they are the names read.
+    TArray<FString> Names;
     const TArray<TSharedPtr<FJsonValue>>* NamesArray = nullptr;
-    if (!Params->TryGetArrayField(TEXT("property_names"), NamesArray) || !NamesArray)
+    const bool bHasNames = Params->TryGetArrayField(TEXT("property_names"), NamesArray) && NamesArray;
+    if (bHasNames)
     {
-        return mcp_common::MakeErrorReply(TEXT("Missing required parameter: property_names (array)"));
+        for (const TSharedPtr<FJsonValue>& NameVal : *NamesArray)
+        {
+            if (NameVal.IsValid())
+            {
+                Names.Add(NameVal->AsString());
+            }
+        }
+    }
+    FString SingleName;
+    const bool bHasSingle = Params->TryGetStringField(TEXT("property_name"), SingleName) && !SingleName.IsEmpty();
+    if (bHasSingle)
+    {
+        Names.AddUnique(SingleName);
+    }
+    if (!bHasNames && !bHasSingle)
+    {
+        return mcp_common::MakeErrorReply(TEXT("Missing required parameter: property_names (array) or property_name"));
     }
 
     // Optional world selector (absent/'editor' = the editor resolution). Anything
@@ -2661,11 +2663,11 @@ TSharedPtr<FJsonObject> HandleGetProperties(const TSharedPtr<FJsonObject>& Param
 
     UClass* Class = Object->GetClass();
     TSharedPtr<FJsonObject> ValuesObj = MakeShared<FJsonObject>();
+    TSharedPtr<FJsonObject> TypesObj = MakeShared<FJsonObject>();
     TArray<TSharedPtr<FJsonValue>> NotFound;
 
-    for (const TSharedPtr<FJsonValue>& NameVal : *NamesArray)
+    for (const FString& PropName : Names)
     {
-        const FString PropName = NameVal->AsString();
         FProperty* Property = Class->FindPropertyByName(*PropName);
         if (!Property)
         {
@@ -2674,12 +2676,14 @@ TSharedPtr<FJsonObject> HandleGetProperties(const TSharedPtr<FJsonObject>& Param
         }
         void* ValuePtr = Property->ContainerPtrToValuePtr<void>(Object);
         ValuesObj->SetField(PropName, mcp_common::PropertyValueToJson(Property, ValuePtr));
+        TypesObj->SetStringField(PropName, Property->GetClass()->GetName());
     }
 
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
     ResultObj->SetStringField(TEXT("object_path"), ObjectPath);
     ResultObj->SetStringField(TEXT("class_name"), Class->GetName());
     ResultObj->SetObjectField(TEXT("values"), ValuesObj);
+    ResultObj->SetObjectField(TEXT("property_types"), TypesObj);
     ResultObj->SetArrayField(TEXT("not_found"), NotFound);
     ResultObj->SetStringField(TEXT("world"), Target.WorldLabel);
     // WHICH world produced these values. Server and client can legitimately differ;
@@ -2688,20 +2692,39 @@ TSharedPtr<FJsonObject> HandleGetProperties(const TSharedPtr<FJsonObject>& Param
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:set_properties - Batch-write several properties on ONE object instance in a single call, reporting set[] and failed[{property,error}] per name instead of one opaque flag; each write goes through the same CPF_Edit/!EditConst gate and Modify/PreEditChange/PostEditChange notification as set_property_value. WARNING: EDITOR-WORLD ONLY (no `world` parameter) and success only means the import did not error — re-read the values (get_properties / list_instance_overrides) before believing it, especially for FGameplayTag on a placed actor, which reports success and leaves the tag empty.
+// MCP:set_properties - Write one or several properties on ONE object instance (editor world only) in a single call, reporting set[] and failed[{property,error}] per name instead of one opaque flag; every write goes through a CPF_Edit/!EditConst gate plus the full Modify/PreEditChange/PostEditChange editor notification, so it is undoable and dirties the package. property_name + value writes one; properties{} writes several. Use set_component_property for a component's own property (it validates gameplay tags, which this does not), and call_function when the value has to go through the object's own setter. WARNING: EDITOR-WORLD ONLY (no `world` parameter) and success only means the import did not error — re-read the values (get_properties / list_instance_overrides) before believing it, especially for FGameplayTag on a placed actor, which reports success and leaves the tag empty.
 //   @param object_path - Path or name of the object instance, resolved in the EDITOR world: full object path, asset path, CDO/archetype, or a dotted "Actor[.Component[.Subobject]]" whose first segment is the actor's internal name.
-//   @param properties [object] - Dict of {property_name: value}; values can be scalar, nested object, or array (UE-format text like "(X=1,Y=2,Z=3)" is also accepted for structs)
+//   @param properties [object] - Optional dict of {property_name: value}; values can be scalar, nested object, or array (UE-format text like "(X=1,Y=2,Z=3)" is also accepted for structs). Required unless property_name + value is given; both together write properties{} first.
+//   @param property_name - Optional single property to write (must be CPF_Edit and not EditConst, or it lands in failed[] with the reason). Needs value.
+//   @param value - Optional new value for property_name: string, number, boolean, JSON object (struct), JSON array (array/set/tag container), or a UE-format text string like "(X=1,Y=2,Z=3)"
 //   @returns { object_path: string, set: [string], failed: [{property, error}], success: bool }
 
 TSharedPtr<FJsonObject> HandleSetProperties(const TSharedPtr<FJsonObject>& Params)
 {
+    namespace Impl = UEAgentReflectionCommandsImpl;
+
     FString ObjectPath;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("object_path"), ObjectPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
 
+    // properties{} and the single property_name + value are both optional; at least one has to be there.
     const TSharedPtr<FJsonObject>* PropsObj = nullptr;
-    if (!Params->TryGetObjectField(FStringView(TEXT("properties")), PropsObj) || !PropsObj || !(*PropsObj))
+    const bool bHasProps = Params->TryGetObjectField(FStringView(TEXT("properties")), PropsObj) && PropsObj && (*PropsObj);
+    FString SingleName;
+    const bool bHasSingleName = Params->TryGetStringField(TEXT("property_name"), SingleName) && !SingleName.IsEmpty();
+    // `value` may be any JSON type (struct-arrays and tag containers arrive as arrays, structs as objects);
+    // ReadAnyTypedValue keeps it typed for the importer.
+    const TSharedPtr<FJsonValue> SingleValue = Params->HasField(TEXT("value")) ? Impl::ReadAnyTypedValue(Params) : nullptr;
+    if (bHasSingleName && !SingleValue.IsValid())
     {
-        return mcp_common::MakeErrorReply(TEXT("Missing required parameter: properties (object)"));
+        return mcp_common::MakeErrorReply(TEXT("property_name needs a value (array, object, string, number, or bool)"));
+    }
+    if (!bHasSingleName && SingleValue.IsValid())
+    {
+        return mcp_common::MakeErrorReply(TEXT("value needs a property_name to write it to"));
+    }
+    if (!bHasProps && !bHasSingleName)
+    {
+        return mcp_common::MakeErrorReply(TEXT("Missing required parameter: properties (object), or property_name + value"));
     }
 
     UObject* Object = ResolveObjectByName(ObjectPath);
@@ -2713,7 +2736,21 @@ TSharedPtr<FJsonObject> HandleSetProperties(const TSharedPtr<FJsonObject>& Param
     TArray<TSharedPtr<FJsonValue>> SetOk;
     TArray<TSharedPtr<FJsonValue>> Failed;
 
-    for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : (*PropsObj)->Values)
+    // The writes, in order: properties{} first, then the single one.
+    TArray<TPair<FString, TSharedPtr<FJsonValue>>> Writes;
+    if (bHasProps)
+    {
+        for (const auto& Pair : (*PropsObj)->Values)
+        {
+            Writes.Emplace(FString(*Pair.Key), Pair.Value);
+        }
+    }
+    if (bHasSingleName)
+    {
+        Writes.Emplace(SingleName, SingleValue);
+    }
+
+    for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Writes)
     {
         FString Error;
         if (ApplyCheckedPropertySet(Object, Pair.Key, Pair.Value, Error))
@@ -2773,321 +2810,11 @@ static UObject* ReflectionPie_ResolveObjectInWorld(const FString& Path, UWorld* 
     return AssetCommandHelpers::FindDottedPathInWorld(Path, World);
 }
 
-// Pack a JSON {param_name: value} dict into Function's parameter frame with the marshaling
-// call_function uses (ReflectionPie_MarshalArguments), invoke through ProcessEvent under the
-// editor script-execution guard, and read the return value + out-params back as typed JSON
-// into OutReturns ({ return_value?, out_params? }). Returns false + fills OutError when the
-// function is not script-callable or a parameter is unknown/mis-typed. Object/Function must be
-// non-null (checked by caller).
-static bool ReflectionPie_InvokeUFunctionWithJsonParams(
-    UObject* Object,
-    UFunction* Function,
-    const TSharedPtr<FJsonObject>& ParamsObj,
-    TSharedPtr<FJsonObject>& OutReturns,
-    FString& OutError)
-{
-    // The same callable gate as call_function.
-    const FString NotCallable = UEAgentReflectionCommandsImpl::NotScriptCallableReason(Function, Function->GetName());
-    if (!NotCallable.IsEmpty())
-    {
-        OutError = NotCallable;
-        return false;
-    }
-
-    FStructOnScope FunctionParams(Function);
-    uint8* Frame = FunctionParams.GetStructMemory();
-
-    if (ParamsObj.IsValid() && !ReflectionPie_MarshalArguments(Object, Function, ParamsObj, Function->GetName(), Frame, OutError))
-    {
-        return false;
-    }
-
-    // Same editor script-execution escape hatch call_function uses (see the long note in
-    // HandleCallFunction): without it, a non-CallInEditor AActor method silently no-ops in
-    // the plain editor world. Harmless in PIE (AreActorsInitialized() is already true there).
-    TGuardValue<bool> AllowActorScriptExecutionGuard(GAllowActorScriptExecutionInEditor, true);
-    Object->ProcessEvent(Function, Frame);
-
-    OutReturns = MakeShared<FJsonObject>();
-    UEAgentReflectionCommandsImpl::ReadBackCallFrame(Function, Frame, OutReturns);
-    return true;
-}
-
-// MCP:call_object_method - Invoke a UFUNCTION on ANY UObject — component archetype, class default object, asset, or a LIVE PIE subobject — not just level actors, and unlike call_function it takes a `world` selector so the same method can be driven on the server or on a client and the response stamps which world ran it. Arguments go in a dict named `args_json` (call_function uses `parameters`, call_component_function uses `params`); it marshals scalars, ENUM by entry name, STRUCT as a JSON object, ARRAY/set as a JSON array, FGameplayTag (validated) and FGuid, and reports return_value plus out_params typed. Use call_component_function instead when the target is a component you would otherwise have to path by hand, and call_library_function for a static library call. transact=true makes an editor-world write undoable and dirties the owning (OFPA) package; it is refused for pure functions and for PIE targets.
-//   @param object_path - Path or name of the object; resolved in the editor world by default, or in the PIE world when use_pie_world=true (full/PIE path, or dotted Actor[.Component[.Subobject]] by name/label).
-//   @param function_name - Name of the function to call.
-//   @param args_json [object] - Optional {param_name: value} dict. Same marshaling as call_function: scalars map directly; ENUM by entry name string; STRUCT param as a JSON object; ARRAY/set as a JSON array; FGameplayTag as {"TagName":"A.B"}.
-//   @param use_pie_world [bool] - Optional (default false). Resolve object_path in the running PIE world instead of the editor world. Equivalent to world='pie'; `world` wins when both are given.
-//   @param world - Optional world selector (takes precedence over use_pie_world): absent/'editor' (default) | 'pie' (ambiguous: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie').
-//   @param transact [bool] - Optional (default false). Wrap the invocation in an FScopedTransaction and Modify() the target (and, for a component, its owner) first, so the write is undoable AND dirties the owning package — without it a write into an OFPA actor is never saved even though save_level reports success. REFUSED for pure/const functions and for PIE-world targets.
-//   @returns { success: bool, object_path: string, function_name: string, world: string, returns_json: object ({ return_value?: any, out_params?: object }), transaction?: { requested, modified: [path], saved_to_transaction_buffer, is_package_external, package_name, package_file, package_file_exists, package_dirty_before, package_dirty_after }, verification?: object (only when transact=true), world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }
-
-TSharedPtr<FJsonObject> HandleCallObjectMethod(const TSharedPtr<FJsonObject>& Params)
-{
-    namespace Impl = UEAgentReflectionCommandsImpl;
-
-    FString TargetPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("object_path"), TargetPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    FString MethodName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("function_name"), MethodName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-    // `world` wins over `use_pie_world`, a bool that can only say "some PIE world", never
-    // WHICH one: use_pie_world=true without `world` resolves like world='pie'. The editor
-    // world also resolves assets, CDOs and archetypes.
-    bool bUsePieWorld = false;
-    Params->TryGetBoolField(TEXT("use_pie_world"), bUsePieWorld);
-    Impl::FWorldScopedObject Resolved;
-    TSharedPtr<FJsonObject> Refusal;
-    if (!Impl::ResolveWorldScopedObject(Params, TargetPath, TEXT("call_object_method"),
-            [](const FString& Path) { return ResolveObjectByName(Path); }, Resolved, Refusal, bUsePieWorld))
-    {
-        return Refusal;
-    }
-    UObject* Target = Resolved.Object;
-
-    UFunction* Method = Target->FindFunction(*MethodName);
-    if (!Method)
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Function not found: %s on %s"), *MethodName, *Target->GetName()));
-    }
-
-    // Optional {param_name: value} arguments.
-    TSharedPtr<FJsonObject> Arguments;
-    const TSharedPtr<FJsonObject>* ArgumentsField = nullptr;
-    if (Params->TryGetObjectField(FStringView(TEXT("args_json")), ArgumentsField) && ArgumentsField && (*ArgumentsField))
-    {
-        Arguments = *ArgumentsField;
-    }
-
-    // `transact` is opt-in; left false, it is the plain call.
-    bool bTransact = false;
-    Params->TryGetBoolField(TEXT("transact"), bTransact);
-
-    Impl::FCallTransaction Transaction;
-    if (bTransact)
-    {
-        FString RefuseReason;
-        if (ReflectionTransact_Refuse(Target, Method, RefuseReason))
-        {
-            return mcp_common::MakeErrorReply(RefuseReason);
-        }
-        Transaction.Open(Target, TEXT("call_object_method"), MethodName);
-    }
-
-    TSharedPtr<FJsonObject> Returns;
-    FString InvokeError;
-    if (!ReflectionPie_InvokeUFunctionWithJsonParams(Target, Method, Arguments, Returns, InvokeError))
-    {
-        // The arguments are marshaled INSIDE the invoke helper, so a rejection arrives after the
-        // transaction was opened and Modify() ran: canceling it leaves no half-applied edit behind.
-        Transaction.CancelAfterFailure(InvokeError);
-        return mcp_common::MakeErrorReply(InvokeError);
-    }
-
-    TSharedPtr<FJsonObject> Call = MakeShared<FJsonObject>();
-    Call->SetBoolField(TEXT("success"), true);
-    Call->SetStringField(TEXT("object_path"), Target->GetPathName());
-    Call->SetStringField(TEXT("function_name"), MethodName);
-    Call->SetStringField(TEXT("world"), Resolved.WorldLabel);
-    Call->SetObjectField(TEXT("returns_json"), Returns);
-    // WHICH world ran the method -- "pie" alone is ambiguous with two or more instances.
-    mcp_common::AddWorldEvidence(Call, Resolved.World);
-
-    if (!bTransact)
-    {
-        return mcp_common::MakeOkReply(Call);
-    }
-
-    FString VerificationDetail;
-    const mcp_common::EMcpVerification Verification = Transaction.Close(Target, Call, VerificationDetail);
-    return mcp_common::MakeVerifiedReply(
-        Call, /*bSuccess=*/true, Verification,
-        TEXT("UPackage::IsDirty() re-read after FScopedTransaction + Modify()"), VerificationDetail);
-}
-
-// MCP:call_library_function - Invoke a static / BlueprintCallable library function on a class's Class Default Object, addressing the class by NAME or by Blueprint asset path so you never have to hand-build a "Default__X_C" object path. This is the way to reach UKismetSystemLibrary, UGameplayStatics, UGameplayTagLibrary and any Blueprint Function Library when there is no instance to talk to. Arguments go in a dict named `parameters` (call_object_method uses `args_json`, call_component_function uses `params`), with the same marshaling: scalars, ENUM by entry name, STRUCT as a JSON object, ARRAY/set as a JSON array, FGameplayTag (validated) and FGuid. Note it always runs on the CDO and takes no `world` selector — use call_object_method(world=...) or call_component_function(world=...) for anything that must run inside a live PIE world.
-//   @param class_name - Class NAME (bare/native e.g. "KismetSystemLibrary", /Script path, or a Blueprint asset path — resolved via ResolveClass; a Blueprint path yields its GeneratedClass). The function is invoked on this class's Class Default Object.
-//   @param function_name - Name of the function to call (BlueprintCallable+Public or a BlueprintEvent). Static library functions and BlueprintPure getters work here.
-//   @param parameters [object] - Optional {param_name: value} dict. Same marshaling as call_function: scalars map directly; ENUM by entry name string; STRUCT param as a JSON object; ARRAY/set as a JSON array; FGameplayTag as {"TagName":"A.B"} (validated); FGuid as a hex/braced string.
-//   @returns { success: bool, class_name: string, class_path: string, function_name: string, returns_json: object ({ return_value?: any, out_params?: object }) }
-
-TSharedPtr<FJsonObject> HandleCallLibraryFunction(const TSharedPtr<FJsonObject>& Params)
-{
-    FString RequestedClass;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("class_name"), RequestedClass, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    FString RequestedFunction;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("function_name"), RequestedFunction, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-    // ResolveClass takes a bare name, a /Script path or a Blueprint asset path (returning its
-    // GeneratedClass). The call then runs on that class's default object -- the object a
-    // hand-built "Default__<Class>_C" object path addresses.
-    UClass* LibraryClass = FUEAgentGraphUtils::ResolveClass(RequestedClass);
-    if (!LibraryClass)
-    {
-        return mcp_common::MakeErrorReply(FUEAgentGraphUtils::DescribeClassNotFound(RequestedClass));
-    }
-    UObject* DefaultObject = LibraryClass->GetDefaultObject();
-    if (!DefaultObject)
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Failed to get class default object for: %s"), *LibraryClass->GetName()));
-    }
-    UFunction* Function = DefaultObject->FindFunction(*RequestedFunction);
-    if (!Function)
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Function not found: %s on class %s"), *RequestedFunction, *LibraryClass->GetName()));
-    }
-
-    // Optional {param_name: value} arguments, marshaled exactly like call_object_method's.
-    TSharedPtr<FJsonObject> Arguments;
-    const TSharedPtr<FJsonObject>* ArgumentsField = nullptr;
-    if (Params->TryGetObjectField(FStringView(TEXT("parameters")), ArgumentsField) && ArgumentsField && (*ArgumentsField))
-    {
-        Arguments = *ArgumentsField;
-    }
-
-    TSharedPtr<FJsonObject> Returns;
-    FString InvokeError;
-    if (!ReflectionPie_InvokeUFunctionWithJsonParams(DefaultObject, Function, Arguments, Returns, InvokeError))
-    {
-        return mcp_common::MakeErrorReply(InvokeError);
-    }
-
-    TSharedPtr<FJsonObject> Call = MakeShared<FJsonObject>();
-    Call->SetBoolField(TEXT("success"), true);
-    Call->SetStringField(TEXT("class_name"), RequestedClass);
-    Call->SetStringField(TEXT("class_path"), LibraryClass->GetPathName());
-    Call->SetStringField(TEXT("function_name"), RequestedFunction);
-    Call->SetObjectField(TEXT("returns_json"), Returns);
-    return mcp_common::MakeOkReply(Call);
-}
-
-// MCP:call_component_function - Drive a COMPONENT without ever building its object path: name the actor, name the component CLASS, and it resolves the actor (editor world or a live PIE world via `world`), runs FindComponentByClass, and invokes the UFUNCTION with JSON arguments — the one generalist reflection call that replaces bespoke per-feature helpers (attribute getters, inventory or equipment calls), since almost all gameplay state in a component-based framework lives on components rather than on the actor. Arguments go in a dict named `params` (call_function uses `parameters`, call_object_method uses `args_json`); marshals scalars, ENUM by entry name, STRUCT as a JSON object, ARRAY/set as a JSON array, FGameplayTag (validated) and FGuid, and returns return_value + out_params typed alongside the resolved component_path and the identity of the world that answered. WARNING: it uses the FIRST component of (or derived from) that class. An OBJECT/class argument IS passed by path — resolved in the target's own world first, then as an asset, and a path that resolves to nothing is a hard error, never a silent null. In co-op, world='server' is where authoritative component state lives.
-//   @param actor - Actor name / path / (in PIE, editor) label to resolve. In world='editor' also accepts a full object path / CDO / archetype; in world='pie' resolves within the running PIE world (Actor[.Component[.Subobject]] by name/label).
-//   @param component_class - Component CLASS name/path to locate on the actor (bare/native e.g. "AC_Storage", /Script path, or Blueprint asset path — resolved via ResolveClass). The FIRST component of (or derived from) this class is used.
-//   @param function - Name of the UFUNCTION to call on the component (BlueprintCallable+Public or a BlueprintEvent).
-//   @param params [object] - Optional {param_name: value} dict. Same marshaling as call_function: scalars; ENUM by entry name string; STRUCT as a JSON object; ARRAY/set as a JSON array; FGameplayTag as {"TagName":"A.B"} (validated); FGuid as a hex/braced string.
-//   @param world - Optional world selector: absent/'editor' (default) | 'pie' (ambiguous: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie'). Anything other than absent/'editor' resolves the actor in that live world (LIVE component instance).
-//   @param transact [bool] - Optional (default false). Wrap the invocation in an FScopedTransaction and Modify() BOTH the component and its owner actor first (a component's authored state persists in the OWNER's package — the OFPA .uasset for a World Partition actor), so the write is undoable and actually gets saved. REFUSED for pure/const functions and whenever world='pie'.
-//   @returns { success: bool, actor: string, component_class: string, component_path: string, function: string, world: string, returns_json: object ({ return_value?: any, out_params?: object }), transaction?: { requested, modified: [path], saved_to_transaction_buffer, is_package_external, package_name, package_file, package_file_exists, package_dirty_before, package_dirty_after }, verification?: object (only when transact=true), world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }
-
-TSharedPtr<FJsonObject> HandleCallComponentFunction(const TSharedPtr<FJsonObject>& Params)
-{
-    namespace Impl = UEAgentReflectionCommandsImpl;
-
-    FString ActorPath;
-    FString ComponentClassName;
-    FString FunctionName;
-
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("actor"), ActorPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("component_class"), ComponentClassName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("function"), FunctionName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-    // World selector (absent/'editor' = the editor resolver). Anything else resolves the actor in
-    // that LIVE world so the real component instance (with runtime state) is driven -- and
-    // 'server'/'client'/'pie:N' are addressable, not just "some PIE world".
-    Impl::FWorldChoice Where;
-    TSharedPtr<FJsonObject> Refusal;
-    if (!Impl::ChooseWorld(Params, TEXT("call_component_function"), Where, Refusal))
-    {
-        return Refusal;
-    }
-    AActor* Actor = Cast<AActor>(Impl::ResolveInChoice(Where, ActorPath,
-        [](const FString& Path) { return ResolveObjectByName(Path); }));
-    if (!Actor)
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Actor not found: %s (world='%s')"), *ActorPath, *Where.Label));
-    }
-    // The live world, or else the actor's OWN (null for a CDO/archetype) -- a reading, not an assumption.
-    UWorld* ResolvedWorld = Where.World ? Where.World : Actor->GetWorld();
-
-    // Resolve the component class and locate the (first) matching component instance on the actor.
-    UClass* ComponentClass = FUEAgentGraphUtils::ResolveClass(ComponentClassName);
-    if (!ComponentClass)
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Component class not found: %s"), *ComponentClassName));
-    }
-    if (!ComponentClass->IsChildOf(UActorComponent::StaticClass()))
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(
-            TEXT("'%s' is not a UActorComponent subclass (component_class must name an actor component type)"), *ComponentClass->GetName()));
-    }
-
-    UActorComponent* Component = Actor->FindComponentByClass(ComponentClass);
-    if (!Component)
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(
-            TEXT("Actor '%s' (class %s) has no component of class '%s'"), *Actor->GetName(), *Actor->GetClass()->GetName(), *ComponentClass->GetName()));
-    }
-
-    UFunction* Function = Component->FindFunction(*FunctionName);
-    if (!Function)
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(
-            TEXT("Function not found: %s on component '%s' (class %s)"), *FunctionName, *Component->GetName(), *Component->GetClass()->GetName()));
-    }
-
-    // Optional params {param_name: value}.
-    TSharedPtr<FJsonObject> ArgsObj;
-    const TSharedPtr<FJsonObject>* ArgsObjPtr = nullptr;
-    if (Params->TryGetObjectField(FStringView(TEXT("params")), ArgsObjPtr) && ArgsObjPtr && (*ArgsObjPtr))
-    {
-        ArgsObj = *ArgsObjPtr;
-    }
-
-    // `transact` (opt-in, default false).
-    bool bTransact = false;
-    Params->TryGetBoolField(TEXT("transact"), bTransact);
-
-    Impl::FCallTransaction Transaction;
-    if (bTransact)
-    {
-        FString RefuseReason;
-        if (ReflectionTransact_Refuse(Component, Function, RefuseReason))
-        {
-            return mcp_common::MakeErrorReply(RefuseReason);
-        }
-        // Modifies the component AND its owner — reported in transaction.modified[].
-        Transaction.Open(Component, TEXT("call_component_function"), FunctionName);
-    }
-
-    TSharedPtr<FJsonObject> Returns;
-    FString Error;
-    if (!ReflectionPie_InvokeUFunctionWithJsonParams(Component, Function, ArgsObj, Returns, Error))
-    {
-        // See call_object_method: marshaling failures happen after Modify(), so the recorded
-        // state is rolled back.
-        Transaction.CancelAfterFailure(Error);
-        return mcp_common::MakeErrorReply(Error);
-    }
-
-    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-    ResultObj->SetBoolField(TEXT("success"), true);
-    ResultObj->SetStringField(TEXT("actor"), Actor->GetPathName());
-    ResultObj->SetStringField(TEXT("component_class"), ComponentClass->GetName());
-    ResultObj->SetStringField(TEXT("component_path"), Component->GetPathName());
-    ResultObj->SetStringField(TEXT("function"), FunctionName);
-    ResultObj->SetStringField(TEXT("world"), Where.Label);
-    ResultObj->SetObjectField(TEXT("returns_json"), Returns);
-    // WHICH world the component instance lives in -- "pie" alone is ambiguous with 2+ instances.
-    mcp_common::AddWorldEvidence(ResultObj, ResolvedWorld);
-
-    if (bTransact)
-    {
-        FString VerificationDetail;
-        const mcp_common::EMcpVerification Verification = Transaction.Close(Component, ResultObj, VerificationDetail);
-        return mcp_common::MakeVerifiedReply(
-            ResultObj, /*bSuccess=*/true, Verification,
-            TEXT("UPackage::IsDirty() re-read after FScopedTransaction + Modify()"), VerificationDetail);
-    }
-
-    return mcp_common::MakeOkReply(ResultObj);
-}
-
 // MCP:get_actor_properties_by_class - Enumerate ACTORS by CLASS (or by editor label) and read their PROPERTIES in one call, in the editor world or in a live one. Reads the EDITOR world too (world='editor', with no PIE running), not just a live one. Use it instead of an execute_python loop over GetAllActorsOfClass + get_editor_property: it returns { path, props } per instance and stamps the world that answered, which such a loop does not. Filter with class_name (IsA) and/or actor_label, drill into one `component`, pick which `properties` to read, and use world='server' vs 'client' to separate an authoritative reading from a replicated one.
 //   @param class_name - Class filter: bare UClass name resolved with FindFirstObject (e.g. "BP_MyActor_C", "StaticMeshActor"), NOT an asset path. Matches every actor that IsA(class_name). REQUIRED unless actor_label is given.
 //   @param actor_label - Editor-label filter; matches actors whose GetActorLabel() equals this EXACTLY (no substring, no case-folding). REQUIRED unless class_name is given — the call errors when both are missing.
 //   @param component - Optional component name to drill into on each matched actor (reads that component's props instead of the actor's). WARNING: actors that have no component with this name are DROPPED from `instances` entirely, so a short list can mean "wrong component name", not "no such actor".
-//   @param properties [array] - Optional property names to read. Names the target does not have are skipped SILENTLY (no not_found list — cross-check the spelling with list_object_properties or get_class_properties). Omit it to read every BlueprintVisible property, which on a Character is a very large payload.
+//   @param properties [array] - Optional property names to read. Names the target does not have are skipped SILENTLY (no not_found list — cross-check the spelling with inspect_object or get_class_properties). Omit it to read every BlueprintVisible property, which on a Character is a very large payload.
 //   @param world - Optional world selector: absent/'pie' (default, ambiguous: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'editor' | 'game' (alias of 'pie'). THIS is the parameter that separates a server reading from a client one.
 //   @returns { instances: [{ path: string, props: object (typed values) }], instance_count: int, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }
 
@@ -3216,10 +2943,7 @@ TSharedPtr<FJsonObject> HandleGetActorPropertiesByClass(const TSharedPtr<FJsonOb
 
 const McpCommandFamilies::FRegistrar Registration =
 {
-    { TEXT("call_component_function"), &HandleCallComponentFunction },
     { TEXT("call_function"), &HandleCallFunction },
-    { TEXT("call_library_function"), &HandleCallLibraryFunction },
-    { TEXT("call_object_method"), &HandleCallObjectMethod },
     { TEXT("compare_objects"), &HandleCompareObjects },
     { TEXT("get_actor_properties_by_class"), &HandleGetActorPropertiesByClass },
     { TEXT("get_class_functions"), &HandleGetClassFunctions },
@@ -3227,15 +2951,11 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("get_class_properties"), &HandleGetClassProperties },
     { TEXT("get_enum_info"), &HandleGetEnumInfo },
     { TEXT("get_function_info"), &HandleGetFunctionInfo },
-    { TEXT("get_object_class"), &HandleGetObjectClass },
     { TEXT("get_package_info"), &HandleGetPackageInfo },
     { TEXT("get_properties"), &HandleGetProperties },
-    { TEXT("get_property_value"), &HandleGetPropertyValue },
     { TEXT("get_struct_info"), &HandleGetStructInfo },
     { TEXT("inspect_object"), &HandleInspectObject },
     { TEXT("list_instance_overrides"), &HandleListInstanceOverrides },
-    { TEXT("list_object_properties"), &HandleListObjectProperties },
     { TEXT("set_properties"), &HandleSetProperties },
-    { TEXT("set_property_value"), &HandleSetPropertyValue },
 };
 } // namespace UEAgentReflectionCommands

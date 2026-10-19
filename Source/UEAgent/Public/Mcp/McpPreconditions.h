@@ -9,7 +9,7 @@ class FJsonObject;
  * PRECONDITION guard: refuse cleanly instead of crashing (or freezing) the editor.
  *
  * Runs in DispatchSingleCommand, after aliases and rotations are translated and BEFORE the
- * handler, so it covers every tools/call, every in-process call and every sub-command of `batch`.
+ * handler, so it covers every tools/call, every in-process call and every sub-command of `execute_batch`.
  *
  * Three families:
  *   (a) by ARGUMENTS -- zero cost;
@@ -60,10 +60,11 @@ namespace McpPreconditions
 	UEAGENT_API TSharedPtr<FJsonObject> PayloadFromEnvelope(const TSharedPtr<FJsonObject>& Envelope);
 
 	/**
-	 * The `get_asset_metadata` response (name/class/path/package) taken from the Asset Registry,
-	 * WITHOUT loading the asset. The handler calls LoadAsset, and to classify a MAP that loads the
-	 * whole world (minutes and many GB on a large map); the check only needs the class.
-	 * Null if the registry does not know the asset: the probe then falls back to the real handler.
+	 * The identity part of the `get_asset_by_name` response (name/path/class/package/is_loaded, `class`
+	 * being the class path) taken from the Asset Registry, WITHOUT loading the asset: classifying a MAP
+	 * by loading it loads the whole world (minutes and many GB on a large map), and the check only needs
+	 * the class. Only for a package name or object path asked with load_full_data=false and no tags.
+	 * Null otherwise, or if the registry does not know the asset: the probe then falls back to the real handler.
 	 */
 	UEAGENT_API TSharedPtr<FJsonObject> AssetMetadataFromRegistry(const TSharedPtr<FJsonObject>& ProbeParams);
 

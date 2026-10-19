@@ -39,10 +39,9 @@
 #define LOCTEXT_NAMESPACE "UEAgentReparent"
 
 /**
- * Blueprint RE-PARENT tooling. It hardens the blunt `reparent_blueprint` command
- * with larger, stateful, mutating tools:
+ * Blueprint RE-PARENT tooling: larger, stateful, mutating tools around a parent change.
  *
- *   - reparent_blueprint_safe    : snapshot (variables + SCS nodes BY GUID) ->
+ *   - reparent_blueprint         : snapshot (variables + SCS nodes BY GUID) ->
  *                                  optional collision-var rename -> reparent with
  *                                  the editor's SCS scene-root reconciliation and
  *                                  the delta compile flags, capturing the compiler's
@@ -340,7 +339,7 @@ namespace
         }
     }
 
-    // The fields every reparent_blueprint_safe reply starts with: the Blueprint and both parents.
+    // The fields every reparent_blueprint reply starts with: the Blueprint and both parents.
     TSharedPtr<FJsonObject> StartReparentReply_Reparent(const FString& BlueprintName, const UBlueprint& Blueprint,
         const FString& OldParentName, const UClass& NewParent)
     {
@@ -508,7 +507,7 @@ namespace
     }
 }
 
-// MCP:reparent_blueprint_safe - Guarded, rollback-capable Blueprint reparent -- PREFER THIS OVER the raw reparent_blueprint, which has none of these guards. It adds: a pre-flight snapshot (parent chain, own-variable count, CDO component count); an OPTIONAL variable de-collision rename (rename_colliding_vars) for own variables whose name collides with a member the NEW parent already declares, which a plain reparent would otherwise clobber; the delta-serialization compile flags, without which a Blueprint with more than ~10 type-pinned variables CRASHES the editor during reinstancing; the same SCS-root reconciliation the Blueprint editor itself does, so a silently renamed component ("Mesh" -> "Mesh1") is reported instead of hidden; an invariant post-check (parent matches, no compile error, own-variable count did not shrink); and, on failure, an in-memory auto_rollback that restores the original parent, restores the component names and recompiles. It never saves to disk. This is a genuinely destructive multi-step transaction: run it with dry_run=true first on any real fork -- that reports the plan and the would-rename set without mutating anything.
+// MCP:reparent_blueprint - Change a Blueprint's parent class, guarded and rollback-capable; asking for the parent it already has is a no-op (reparented:false), not an error. On top of the reparent itself it takes: a pre-flight snapshot (parent chain, own-variable count, CDO component count); an OPTIONAL variable de-collision rename (rename_colliding_vars) for own variables whose name collides with a member the NEW parent already declares, which a plain reparent would otherwise clobber; the delta-serialization compile flags, without which a Blueprint with more than ~10 type-pinned variables CRASHES the editor during reinstancing; the same SCS-root reconciliation the Blueprint editor itself does, so a silently renamed component ("Mesh" -> "Mesh1") is reported instead of hidden; an invariant post-check (parent matches, no compile error, own-variable count did not shrink); and, on failure, an in-memory auto_rollback that restores the original parent, restores the component names and recompiles (auto_rollback=false leaves a failed reparent in place). It never saves to disk. This is a genuinely destructive multi-step transaction: run it with dry_run=true first on any real fork -- that reports the plan and the would-rename set without mutating anything.
 //   @param blueprint_name - Blueprint asset name or path to reparent.
 //   @param new_parent_class - New parent class name or path (native /Script, /Game/.../BP.BP_C, or a BP asset path -> its GeneratedClass).
 //   @param dry_run - Optional (default false): analyze + report the plan (snapshot, would-rename vars, component collisions) without mutating.
@@ -967,7 +966,7 @@ TSharedPtr<FJsonObject> HandleReparentBlueprintSafe(const TSharedPtr<FJsonObject
     // have made every clean reparent read as "not_verifiable".
     Result->SetBoolField(TEXT("saved_to_disk"), false);
     Result->SetStringField(TEXT("persistence_note"),
-        TEXT("reparent_blueprint_safe mutates IN MEMORY only and leaves the package dirty. ")
+        TEXT("reparent_blueprint mutates IN MEMORY only and leaves the package dirty. ")
         TEXT("Call save_asset afterwards and check ITS outcome; nothing in this response is evidence about disk."));
 
     // --- Honest verification evidence (the effect was RE-READ, not assumed) ---
@@ -1294,7 +1293,7 @@ TSharedPtr<FJsonObject> HandleReconcileFunctionSignature(const TSharedPtr<FJsonO
     return Result;
 }
 
-// MCP:fork_class_chain - One-call thin-fork + optional reparent + verify: collapses the create->reparent->verify pattern into a single call. It creates a NEW thin child Blueprint of base_class at fork_name (the seam you insert between a shared-library base and your own class), optionally tags it with the fork-origin metadata tag (project setting ForkOriginTag), saves it, and then -- only if reparent_target is given -- reparents that existing Blueprint onto the new fork through the guarded reparent_blueprint_safe path (snapshot + compile flags + post-check + rollback) and reports its verification. WARNING: no durable backup is taken -- the rollback is in-memory only, so call backup_asset yourself first if you want a rollback-to-disk safety net.
+// MCP:fork_class_chain - One-call thin-fork + optional reparent + verify: collapses the create->reparent->verify pattern into a single call. It creates a NEW thin child Blueprint of base_class at fork_name (the seam you insert between a shared-library base and your own class), optionally tags it with the fork-origin metadata tag (project setting ForkOriginTag), saves it, and then -- only if reparent_target is given -- reparents that existing Blueprint onto the new fork through the guarded reparent_blueprint path (snapshot + compile flags + post-check + rollback) and reports its verification. WARNING: no durable backup is taken -- the rollback is in-memory only, so call backup_asset yourself first if you want a rollback-to-disk safety net.
 //   @param fork_name - Name or full /Game path for the NEW thin child Blueprint to create.
 //   @param base_class - Parent class for the new fork (native /Script, /Game/.../BP.BP_C, or a BP asset path).
 //   @param path - Optional folder for fork_name when it is a bare name (default /Game/Blueprints).
@@ -1424,7 +1423,7 @@ TSharedPtr<FJsonObject> HandleForkClassChain(const TSharedPtr<FJsonObject>& Para
     {
         mcp_common::AddVerificationEvidence(Result,
             bReparentOk ? mcp_common::EMcpVerification::Verified : mcp_common::EMcpVerification::Failed,
-            TEXT("nested reparent_blueprint_safe post-check"),
+            TEXT("nested reparent_blueprint post-check"),
             TEXT("see the nested `reparent` object for its own verification evidence"));
     }
     Result->SetBoolField(TEXT("success"), bOverallSuccess);
@@ -1441,7 +1440,7 @@ const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("fork_class_chain"), &HandleForkClassChain },
     { TEXT("reconcile_function_signature"), &HandleReconcileFunctionSignature },
-    { TEXT("reparent_blueprint_safe"), &HandleReparentBlueprintSafe },
+    { TEXT("reparent_blueprint"), &HandleReparentBlueprintSafe },
 };
 } // namespace UEAgentReparentCommands
 

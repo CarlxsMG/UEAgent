@@ -2,9 +2,9 @@
 
 # Chooser
 
-14 tools. Back to the [index](README.md).
+13 tools. Back to the [index](README.md).
 
-## `add_chooser_column_to_table`
+## `add_chooser_column`
 
 *Additive.*
 
@@ -61,29 +61,16 @@ Destroy a UChooserTable asset at a /Game path (mirror of create_chooser_table). 
 
 *Read-only.*
 
-Actually RUN a UChooserTable and get the SINGLE chosen result -- the way to test a chooser you just authored without opening the editor. Headless-safe: it is a pure runtime API, so it needs no PIE and no render. Pass context_object_path (any UObject in the editor world) to seed the evaluation context. A table with no columns, or one where no context property matches, falls through to the table's FallbackResult (reported as fallback_used); a table that matches nothing and has no fallback returns null. Use evaluate_chooser_table_multi when you want EVERY matching result instead of the first.
+Actually RUN a UChooserTable and get the SINGLE chosen result, or with all_results EVERY matching result (for a chooser meant to select a set) -- the way to test a chooser you just authored without opening the editor. Headless-safe: it is a pure runtime API, so it needs no PIE and no render. Pass context_object_path (any UObject in the editor world) to seed the evaluation context. A table with no columns, or one where no context property matches, falls through to the table's FallbackResult (reported as fallback_used); a table that matches nothing and has no fallback returns null (an empty results list with all_results). With all_results, null entries the engine interleaves in its array are skipped, so result_count is the count of REAL results, and result_object_path is the first of them.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `table_path` | string | yes | Long package path of an existing UChooserTable. |
 | `context_object_path` | string | no | Optional UObject path used to seed the evaluation context. |
-| `object_class` | string | no | Optional UClass path for the expected result type (default = /Script/Engine.Object). |
+| `object_class` | string | no | Optional UClass path for the expected result type (default = /Script/CoreUObject.Object); results are filtered with IsA. |
+| `all_results` | boolean | no | Optional bool, default false: true evaluates with EvaluateChooserMulti and returns every matching result in results. |
 
-**Returns:** `{ table_path, evaluated, result_object_path, result_object_class, fallback_used, note? }`
-
-## `evaluate_chooser_table_multi`
-
-*Read-only.*
-
-Actually RUN a UChooserTable and get EVERY matching result, not just the first: the multi-result mirror of evaluate_chooser_table, which is what you want when the chooser is meant to select a set. Headless-safe pure runtime API -- no PIE, no render. object_class defaults to /Script/CoreUObject.Object and is never null, since results are post-filtered with IsA; null entries the engine interleaves in its array are skipped, so result_count is the count of REAL results.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `table_path` | string | yes | Long package path of an existing UChooserTable. |
-| `context_object_path` | string | no | Optional UObject path used to seed the evaluation context. |
-| `object_class` | string | no | Optional UClass path for the expected result type (default = /Script/CoreUObject.Object). |
-
-**Returns:** `{ table_path, evaluated, result_count, results: [{ result_object_path, result_object_class }], fallback_used, column_count }`
+**Returns:** `{ table_path, evaluated, result_object_path, result_object_class, fallback_used, column_count, result_count?: int, results?: [{ result_object_path, result_object_class }], note? }`
 
 ## `get_chooser_column_values`
 
@@ -139,7 +126,7 @@ List every UChooserTable asset under a package path via the AssetRegistry.
 
 *Destructive.*
 
-Remove a column from a UChooserTable by index (inverse of add_chooser_column_to_table). The column's per-row cells go with it -- a column owns its own RowValues, so nothing needs re-syncing across the other columns and the row COUNT is unchanged (use remove_chooser_row for that). The removal is one undo step; the table is then compiled and saved, and success is false, with save_error, when the save fails. A table with no columns is left as it is (note, saved false). Omit column_index (or pass -1) to remove the LAST column, matching remove_chooser_row's default.
+Remove a column from a UChooserTable by index (inverse of add_chooser_column). The column's per-row cells go with it -- a column owns its own RowValues, so nothing needs re-syncing across the other columns and the row COUNT is unchanged (use remove_chooser_row for that). The removal is one undo step; the table is then compiled and saved, and success is false, with save_error, when the save fails. A table with no columns is left as it is (note, saved false). Omit column_index (or pass -1) to remove the LAST column, matching remove_chooser_row's default.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

@@ -10,7 +10,6 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Misc/Base64.h"
-#include "Async/Future.h"
 
 /**
  * MCP domain for USaveGame objects and the slot files the engine's save system keeps:
@@ -137,27 +136,7 @@ namespace UEAgentSaveGameImpl
 
 // Slot lifecycle and inspection.
 
-// MCP:create_save_game - Create a transient, in-memory SaveGame object of save_game_class (default UMCPSaveGame), which checks that the class resolves and can be instantiated; nothing is written to disk and no other tool takes the object as input. save_game_class is matched by name among loaded classes and must be a concrete USaveGame subclass: an unknown, non-SaveGame or abstract class is an error. Every call makes a new object, named by save_game_instance and save_game_path; save_game_class echoes the name given, empty for the default. To write a slot use save_game, which builds its own default-valued object; to serialize to memory, save_game_to_memory; to read a slot back, load_game.
-//   @param save_game_class - Optional name of a loaded, concrete USaveGame subclass, e.g. "MySaveGame" (found with FindFirstObject, never loaded from disk); defaults to the plugin's concrete UMCPSaveGame (the abstract USaveGame base is rejected)
-//   @returns { save_game_class: string, save_game_instance: string, save_game_path: string, success: bool }
-TSharedPtr<FJsonObject> HandleCreateSaveGame(const TSharedPtr<FJsonObject>& Params)
-{
-    FString RequestedClass;
-    Params->TryGetStringField(TEXT("save_game_class"), RequestedClass);
-
-    USaveGame* Created = nullptr;
-    if (TSharedPtr<FJsonObject> Problem = UEAgentSaveGameImpl::NewTransientSaveGame(RequestedClass, Created)) { return Problem; }
-
-    // save_game_class echoes the name as it was requested (empty when the default class served).
-    TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
-    Payload->SetBoolField(TEXT("success"), true);
-    Payload->SetStringField(TEXT("save_game_class"), RequestedClass);
-    Payload->SetStringField(TEXT("save_game_instance"), Created->GetName());
-    Payload->SetStringField(TEXT("save_game_path"), Created->GetPathName());
-    return mcp_common::MakeOkReply(Payload);
-}
-
-// MCP:save_game - Write a NEW default-valued SaveGame object of save_game_class (default UMCPSaveGame) to a slot with SaveGameToSlot, overwriting what the slot held; it does not save an object made by create_save_game. On desktop the file is Saved/SaveGames/<slot>.sav. Returns success and message.
+// MCP:save_game - Write a NEW default-valued SaveGame object of save_game_class (default UMCPSaveGame) to a slot with SaveGameToSlot, overwriting what the slot held. On desktop the file is Saved/SaveGames/<slot>.sav. Returns success and message.
 //   @param slot_name - Save slot name where the game will be saved
 //   @param user_index - Platform user index for the save system; default 0 (the generic desktop save system ignores it)
 //   @param save_game_class - Name of a loaded, concrete USaveGame subclass, e.g. "MySaveGame" (found with FindFirstObject, never loaded from disk); default UMCPSaveGame
@@ -188,7 +167,7 @@ TSharedPtr<FJsonObject> HandleSaveGame(const TSharedPtr<FJsonObject>& Params)
     return mcp_common::MakeOutcomeReply(Payload, bWritten, Failure);
 }
 
-// MCP:load_game - Load the SaveGame stored in a slot with LoadGameFromSlot and report the transient object: save_game_instance, save_game_class and save_game_path. success is false when the slot is empty or unreadable, or holds a class other than save_game_class; does_save_game_exist tells missing from corrupt. It only reads: the slot file is not changed and the object is transient. Write a slot with save_game; the same read without the class check is load_game_async.
+// MCP:load_game - Load the SaveGame stored in a slot with LoadGameFromSlot and report the transient object: save_game_instance, save_game_class and save_game_path. success is false when the slot is empty or unreadable, or holds a class other than save_game_class; get_save_game_slot_info (exists) tells missing from corrupt. It only reads: the slot file is not changed and the object is transient. Write a slot with save_game.
 //   @param slot_name - Save slot name to load from
 //   @param user_index - Platform user index for the save system; default 0 (the generic desktop save system ignores it)
 //   @param save_game_class - Optional SaveGame subclass the slot is expected to hold. A slot file records its own class and is rebuilt as that; when the loaded object is not this class (or a child of it) the load is reported as failed. An unknown class name is an error.
@@ -242,14 +221,14 @@ TSharedPtr<FJsonObject> HandleLoadGame(const TSharedPtr<FJsonObject>& Params)
     {
         Failure = FString::Printf(
             TEXT("No SaveGame in slot '%s' for user %d: UGameplayStatics::LoadGameFromSlot ")
-            TEXT("returned null. Use does_save_game_exist to tell 'no file' from 'file that ")
+            TEXT("returned null. Use get_save_game_slot_info (exists) to tell 'no file' from 'file that ")
             TEXT("failed to deserialize'."),
             *Slot, User);
     }
     return mcp_common::MakeOutcomeReply(Payload, bRestored, Failure);
 }
 
-// MCP:delete_save_game - Delete the save file of a slot with DeleteGameInSlot; the data is gone for good. success is false, with an error, when the engine refuses, usually because the slot does not exist (check with does_save_game_exist). Returns slot_name, user_index and message.
+// MCP:delete_save_game - Delete the save file of a slot with DeleteGameInSlot; the data is gone for good. success is false, with an error, when the engine refuses, usually because the slot does not exist (check with get_save_game_slot_info). Returns slot_name, user_index and message.
 //   @param slot_name - Save slot name to delete
 //   @param user_index - Platform user index for the save system; default 0 (the generic desktop save system ignores it)
 //   @returns { slot_name: string, user_index: int, success: bool, message: string }
@@ -273,32 +252,10 @@ TSharedPtr<FJsonObject> HandleDeleteSaveGame(const TSharedPtr<FJsonObject>& Para
         Failure = FString::Printf(
             TEXT("UGameplayStatics::DeleteGameInSlot returned false for slot '%s' (user %d). ")
             TEXT("The usual cause is that the slot was not there to begin with: check with ")
-            TEXT("does_save_game_exist."),
+            TEXT("get_save_game_slot_info."),
             *Slot, User);
     }
     return mcp_common::MakeOutcomeReply(Payload, bErased, Failure);
-}
-
-// MCP:get_save_game_info - Check one save slot with UGameplayStatics::DoesSaveGameExist and, when it exists, report save_path (the generic desktop Saved/SaveGames/<slot>.sav) plus file_size when that file is on disk. Read-only; a missing slot is not an error, just exists false with no path or size. get_save_game_slot_info returns the same plus the modification time, does_save_game_exist only the flag, list_save_games every slot.
-//   @param slot_name - Save slot name to query
-//   @param user_index - Platform user index for the save system; default 0 (the generic desktop save system ignores it)
-//   @returns { slot_name: string, user_index: int, exists: bool, save_path?: string, file_size?: int }
-TSharedPtr<FJsonObject> HandleGetSaveGameInfo(const TSharedPtr<FJsonObject>& Params)
-{
-    FString Slot;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("slot_name"), Slot, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    int32 User = 0;
-    Params->TryGetNumberField(TEXT("user_index"), User);
-
-    const bool bPresent = UGameplayStatics::DoesSaveGameExist(Slot, User);
-
-    TSharedPtr<FJsonObject> Payload = UEAgentSaveGameImpl::StartSlotReply(Slot, User);
-    Payload->SetBoolField(TEXT("exists"), bPresent);
-    if (bPresent)
-    {
-        UEAgentSaveGameImpl::WriteSlotFileFacts(*Payload, Slot, /*bWithTimestamp=*/false);
-    }
-    return mcp_common::MakeOkReply(Payload);
 }
 
 // MCP:list_save_games - List all save games for a given user index. The list is what the platform's save system calls slots: on desktop, the .sav files at the root of the save folder. A save system can also keep a slot as a FOLDER of .sav files, which is not a slot here: those folders are reported apart, in slot_folders, so an empty list is only proof of no save when slot_folders is empty too.
@@ -360,115 +317,6 @@ TSharedPtr<FJsonObject> HandleListSaveGames(const TSharedPtr<FJsonObject>& Param
     return mcp_common::MakeOkReply(Listing);
 }
 
-// ===========================================================================
-// SaveGame async + memory + slot info.
-//
-// Honest note on async: UGameplayStatics::AsyncSaveGameToSlot / AsyncLoadGameFromSlot
-// fire-and-forget a delegate on the GAME THREAD. The bridge is itself a
-// game-thread consumer (FTSTicker drain from the UEAgentBridge), so
-// waiting on a delegate that must be pumped by the same thread would
-// deadlock. We therefore resolve the "async" commands by routing through
-// the synchronous overloads (SaveGameToSlot / LoadGameFromSlot) and report
-// `mode: "sync_fallback"` + an explanatory `note`. The async *API surface*
-// is exposed (same command names exist in UE) and the operations are
-// observable to the caller; the only difference is that the work is done
-// inline rather than queued.
-//
-// For true non-blocking behaviour the caller would need to drive the editor
-// from a non-game-thread side channel; that's outside the bridge's contract.
-// ===========================================================================
-
-// MCP:save_game_async - Save a SaveGame instance to slot, sync fallback over AsyncSaveGameToSlot
-//   @param slot_name - Save slot name
-//   @param user_index - Optional user index, default 0
-//   @param save_game_class - Optional SaveGame subclass; defaults to the plugin's concrete UMCPSaveGame (the abstract USaveGame base is rejected)
-//   @returns { slot_name: string, user_index: int, success: bool, mode: string, note: string, message: string }
-TSharedPtr<FJsonObject> HandleSaveGameAsync(const TSharedPtr<FJsonObject>& Params)
-{
-    FString Slot;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("slot_name"), Slot)) { return Missing; }
-    int32 User = 0;
-    Params->TryGetNumberField(TEXT("user_index"), User);
-    FString RequestedClass;
-    Params->TryGetStringField(TEXT("save_game_class"), RequestedClass);
-
-    USaveGame* Snapshot = nullptr;
-    if (TSharedPtr<FJsonObject> Problem = UEAgentSaveGameImpl::NewTransientSaveGame(RequestedClass, Snapshot)) { return Problem; }
-
-    // The bridge itself runs on the game thread, which is also where the async delegate would
-    // have to fire: waiting for it would deadlock. The synchronous overload does the work, and
-    // the payload says so in "mode" and "note".
-    const bool bWritten = UGameplayStatics::SaveGameToSlot(Snapshot, Slot, User);
-
-    TSharedPtr<FJsonObject> Payload = UEAgentSaveGameImpl::StartSlotReply(Slot, User);
-    Payload->SetBoolField(TEXT("success"), bWritten);
-    Payload->SetStringField(TEXT("mode"), TEXT("sync_fallback"));
-    Payload->SetStringField(TEXT("note"),
-        TEXT("bridge runs on game thread; awaiting UGameplayStatics::AsyncSaveGameToSlot's delegate would deadlock. Routed through SaveGameToSlot."));
-    Payload->SetStringField(TEXT("message"), bWritten ? TEXT("Game saved (sync fallback)") : TEXT("Failed to save game"));
-
-    const FString Failure = bWritten
-        ? FString()
-        : FString::Printf(TEXT("UGameplayStatics::SaveGameToSlot returned false for slot '%s' (sync fallback path)"), *Slot);
-    return mcp_common::MakeOutcomeReply(Payload, bWritten, Failure);
-}
-
-// MCP:load_game_async - Load the SaveGame stored in a slot and report the object it rebuilds (save_game_instance, save_game_class, save_game_path). Despite the name it runs synchronously through LoadGameFromSlot (mode=sync_fallback), since waiting on the game thread for the async delegate would deadlock; the outcome matches load_game without its save_game_class check. It only reads: the slot file is not changed and the object is transient. An empty slot or a file that fails to deserialize gives success=false with an error; tell them apart with does_save_game_exist. Write a slot with save_game_async or save_game; file path, size and date: get_save_game_slot_info; every slot: list_save_games.
-//   @param slot_name - Save slot name, non-empty; on desktop the file is Saved/SaveGames/<slot>.sav.
-//   @param user_index - Platform user index for the save system; default 0 (the generic desktop save system ignores it)
-//   @returns { slot_name: string, user_index: int, success: bool, mode: string, note: string, save_game_instance?: string, save_game_class?: string, save_game_path?: string, error?: string }
-//   @hints read-only
-TSharedPtr<FJsonObject> HandleLoadGameAsync(const TSharedPtr<FJsonObject>& Params)
-{
-    FString Slot;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("slot_name"), Slot)) { return Missing; }
-    int32 User = 0;
-    Params->TryGetNumberField(TEXT("user_index"), User);
-
-    // Synchronous for the same reason as save_game_async.
-    USaveGame* const Restored = UGameplayStatics::LoadGameFromSlot(Slot, User);
-    const bool bRestored = (Restored != nullptr);
-
-    TSharedPtr<FJsonObject> Payload = UEAgentSaveGameImpl::StartSlotReply(Slot, User);
-    Payload->SetBoolField(TEXT("success"), bRestored);
-    Payload->SetStringField(TEXT("mode"), TEXT("sync_fallback"));
-    Payload->SetStringField(TEXT("note"),
-        TEXT("bridge runs on game thread; awaiting AsyncLoadGameFromSlot's delegate would deadlock. Routed through LoadGameFromSlot."));
-    if (bRestored)
-    {
-        Payload->SetStringField(TEXT("save_game_instance"), Restored->GetName());
-        Payload->SetStringField(TEXT("save_game_class"), Restored->GetClass()->GetName());
-        Payload->SetStringField(TEXT("save_game_path"), Restored->GetPathName());
-    }
-
-    // The measured result is also the emitted verdict (see load_game).
-    FString Failure;
-    if (!bRestored)
-    {
-        Failure = FString::Printf(
-            TEXT("No SaveGame in slot '%s' for user %d (sync fallback path). ")
-            TEXT("Check does_save_game_exist."),
-            *Slot, User);
-    }
-    return mcp_common::MakeOutcomeReply(Payload, bRestored, Failure);
-}
-
-// MCP:does_save_game_exist - Check whether a save slot has data with UGameplayStatics::DoesSaveGameExist; returns exists. Read-only. Use get_save_game_slot_info for the file path, size and modification time, or list_save_games to see every slot.
-//   @param slot_name - Save slot name to check
-//   @param user_index - Platform user index for the save system; default 0 (the generic desktop save system ignores it)
-//   @returns { slot_name: string, user_index: int, exists: bool }
-TSharedPtr<FJsonObject> HandleDoesSaveGameExist(const TSharedPtr<FJsonObject>& Params)
-{
-    FString Slot;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("slot_name"), Slot)) { return Missing; }
-    int32 User = 0;
-    Params->TryGetNumberField(TEXT("user_index"), User);
-
-    TSharedPtr<FJsonObject> Payload = UEAgentSaveGameImpl::StartSlotReply(Slot, User);
-    Payload->SetBoolField(TEXT("exists"), UGameplayStatics::DoesSaveGameExist(Slot, User));
-    return mcp_common::MakeOkReply(Payload);
-}
-
 // MCP:get_save_game_slot_info - Read the metadata of a save slot: exists and, for an existing slot, save_path (the generic desktop Saved/SaveGames/<slot>.sav) plus file_size, modified_iso and modified_ticks when that file is on disk. A missing slot is exists=false with an error field, not a failure.
 //   @param slot_name - Save slot name to query
 //   @param user_index - Platform user index for the save system; default 0 (the generic desktop save system ignores it)
@@ -495,6 +343,8 @@ TSharedPtr<FJsonObject> HandleGetSaveGameSlotInfo(const TSharedPtr<FJsonObject>&
     }
     return mcp_common::MakeOkReply(Payload);
 }
+
+// In-memory (base64) round trip.
 
 // MCP:save_game_to_memory - Serialize a NEW default-valued SaveGame object of save_game_class (default UMCPSaveGame) with SaveGameToMemory and return it as memory_base64 with memory_size; nothing is written to disk. Pass the blob to load_game_from_memory to round-trip it.
 //   @param save_game_class - Name of a loaded, concrete USaveGame subclass, e.g. "MySaveGame" (found with FindFirstObject, never loaded from disk); default UMCPSaveGame
@@ -564,17 +414,12 @@ TSharedPtr<FJsonObject> HandleLoadGameFromMemory(const TSharedPtr<FJsonObject>& 
 
 const McpCommandFamilies::FRegistrar Registration =
 {
-    { TEXT("create_save_game"), &HandleCreateSaveGame },
     { TEXT("delete_save_game"), &HandleDeleteSaveGame },
-    { TEXT("does_save_game_exist"), &HandleDoesSaveGameExist },
-    { TEXT("get_save_game_info"), &HandleGetSaveGameInfo },
     { TEXT("get_save_game_slot_info"), &HandleGetSaveGameSlotInfo },
     { TEXT("list_save_games"), &HandleListSaveGames },
     { TEXT("load_game"), &HandleLoadGame },
-    { TEXT("load_game_async"), &HandleLoadGameAsync },
     { TEXT("load_game_from_memory"), &HandleLoadGameFromMemory },
     { TEXT("save_game"), &HandleSaveGame },
-    { TEXT("save_game_async"), &HandleSaveGameAsync },
     { TEXT("save_game_to_memory"), &HandleSaveGameToMemory },
 };
 } // namespace UEAgentSaveGameCommands

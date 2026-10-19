@@ -2,9 +2,21 @@
 
 # Performance
 
-19 tools. Back to the [index](README.md).
+17 tools. Back to the [index](README.md).
 
-## `assign_rvt_to_landscape`
+## `add_trace_bookmark`
+
+*Additive.*
+
+Emit a TRACE_BOOKMARK into the active .utrace at the current frame. The bookmark channel must be enabled in the trace (default start_trace channels include it). The text is dynamic via printf-style formatting, but the Format token itself is a TEXT() literal as required by the macro's static_assert.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `text` | string | yes | The bookmark text. Becomes the bookmark label in UnrealInsights. |
+
+**Returns:** `{ bookmarked: bool, text: string, frame: int, note: string }`
+
+## `assign_runtime_virtual_texture_to_landscape`
 
 *Destructive.*
 
@@ -19,23 +31,11 @@ Add a URuntimeVirtualTexture to the landscape's RuntimeVirtualTextures array (sl
 
 **Returns:** `{ applied, slot_index, rvt_asset_path, landscape, landscape_has_rvt, propagate_to_proxies, proxies_total, proxies_updated, proxies_with_rvt, proxies_missing: [string], proxies_missing_truncated: bool, proxy_enumeration, warning?, requested: {...} }`
 
-## `bookmark`
+## `create_runtime_virtual_texture`
 
 *Additive.*
 
-Emit a TRACE_BOOKMARK into the active .utrace at the current frame. The bookmark channel must be enabled in the trace (default start_trace channels include it). The text is dynamic via printf-style formatting, but the Format token itself is a TEXT() literal as required by the macro's static_assert.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `text` | string | yes | The bookmark text. Becomes the bookmark label in UnrealInsights. |
-
-**Returns:** `{ bookmarked: bool, text: string, frame: int, note: string }`
-
-## `create_rvt_asset`
-
-*Additive.*
-
-Create a URuntimeVirtualTexture asset at directory_path/asset_name with the given material type, tile count and tile size (both exponents, clamped silently), and save it; the save result is not checked. Returns asset_path, tile_count, tile_size and size in texels. Then use create_rvt_volume and assign_rvt_to_landscape.
+Create a URuntimeVirtualTexture asset at directory_path/asset_name with the given material type, tile count and tile size (both exponents, clamped silently), and save it; the save result is not checked. Returns asset_path, tile_count, tile_size and size in texels. Then use create_runtime_virtual_texture_volume and assign_runtime_virtual_texture_to_landscape.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -48,22 +48,44 @@ Create a URuntimeVirtualTexture asset at directory_path/asset_name with the give
 
 **Returns:** `{ asset_path, material_type, tile_count, tile_size, size }`
 
-## `create_rvt_volume`
+## `create_runtime_virtual_texture_volume`
 
 *Additive, idempotent.*
 
-Spawn an ARuntimeVirtualTextureVolume (the RVT producer that registers the runtime virtual texture into the scene and defines its world-space region) bound to an RVT asset. Without a volume, assign_rvt_to_landscape only wires the landscape as a writer -- nothing produces the RVT. Optionally fits the volume bounds to an actor (usually the landscape) in the same call. Headless-safe: spawns with a null VirtualTexture (no render-state) then binds a valid RVT. Idempotent: returns the existing volume if one already targets this RVT.
+Spawn an ARuntimeVirtualTextureVolume (the RVT producer that registers the runtime virtual texture into the scene and defines its world-space region) bound to an RVT asset. Without a volume, assign_runtime_virtual_texture_to_landscape only wires the landscape as a writer -- nothing produces the RVT. Optionally fits the volume bounds to an actor (usually the landscape) in the same call. Headless-safe: spawns with a null VirtualTexture (no render-state) then binds a valid RVT. Idempotent: returns the existing volume if one already targets this RVT.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `rvt_asset_path` | string | yes | Required. /Game path to the URuntimeVirtualTexture asset (create_rvt_asset). |
+| `rvt_asset_path` | string | yes | Required. /Game path to the URuntimeVirtualTexture asset (create_runtime_virtual_texture). |
 | `bounds_align_actor` | string | no | Optional. Name/label of an actor (usually the ALandscape) to fit the volume bounds to; runs the engine "Set Bounds" after binding. |
 | `volume_name` | string | no | Optional. Actor label for the spawned volume. |
 | `location` | array | no | Optional [x,y,z] spawn location (default [0,0,0]; overridden by the bounds-align when bounds_align_actor is given). |
 
 **Returns:** `{ volume_name, rvt_asset_path, bounds_aligned, bounds_align_actor?, already_existed }`
 
-## `frame_timing`
+## `end_timing_region`
+
+*Destructive.*
+
+Close an open named region and return its duration in ms. Removes the region from the active set; subsequent end_timing_region with the same name returns an error.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Region identifier. Must match an open region. |
+
+**Returns:** `{ ended: bool, name: string, duration_ms: float, duration_s: float }`
+
+## `get_fps_info`
+
+*Read-only.*
+
+Retrieves current and target FPS along with performance settings and world network mode, plus the engine-wide rolling frame averages, the live UObject count, byte-precise process memory and the scalability screen percentage. Read-only.
+
+No parameters.
+
+**Returns:** `{ current_fps: float, target_fps: float, fps_variance: float, average_fps: float (GAverageFPS), average_ms: float (GAverageMS), engine_version: string, is_editor: bool, is_dedicated_server: bool, performance_settings: {vsync_enabled (r.VSync), smooth_frame_rate, max_fps (0 = uncapped), min_fps (lower bound of frame-rate smoothing; 0 without it)}, screen_percentage: float (r.ScreenPercentage within the scalability range), object_count: int, memory: { used_physical_bytes, peak_used_physical_bytes, available_physical_bytes, total_physical_bytes, used_physical_mb, peak_used_physical_mb, available_physical_mb }, world_name: string, net_mode: string }`
+
+## `get_frame_timing`
 
 *Read-only.*
 
@@ -72,26 +94,6 @@ Read the current frame's Game/Render/GPU/RHI thread times plus a CPU-vs-GPU bott
 No parameters.
 
 **Returns:** `{ frame_ms: float, game_thread_ms: float, render_thread_ms: float, rhi_thread_ms: float, game_thread_wait_ms: float, render_thread_wait_ms: float, gpu_ms: float, cpu_busy_ms: float, verdict: "GPU-bound"|"CPU-bound (game thread)"|"CPU-bound (render thread)"|"VSync/present bound"|"balanced"|"no-data", hint: string, null_rhi: bool, note: string } -- cpu_busy_ms is game + render + rhi; null_rhi is true with -nullrhi or in a commandlet, where the timings read 0 (verdict "no-data" when they all do) and note warns of it; otherwise note is empty.`
-
-## `get_fps_info`
-
-*Read-only.*
-
-Retrieves current and target FPS along with performance settings and world network mode.
-
-No parameters.
-
-**Returns:** `{ current_fps: float, target_fps: float, fps_variance: float, engine_version: string, is_editor: bool, is_dedicated_server: bool, performance_settings: {vsync_enabled (r.VSync), smooth_frame_rate, max_fps (0 = uncapped), min_fps (lower bound of frame-rate smoothing; 0 without it)}, world_name: string, net_mode: string }`
-
-## `get_frame_count`
-
-*Read-only.*
-
-Read the engine frame counters without side effects: frame_count (GFrameCounter, game thread) and frame_count_render_thread (GFrameCounterRenderThread). Read it before and after another call to measure how many frames ticked; for frame times use frame_timing or get_fps_info.
-
-No parameters.
-
-**Returns:** `{ frame_count: uint64, frame_count_render_thread: uint64 }`
 
 ## `get_memory_usage`
 
@@ -103,11 +105,11 @@ No parameters.
 
 **Returns:** `{ process_memory: {used_physical_memory_mb, peak_used_physical_memory_mb, available_physical_memory_mb, total_physical_memory_mb, used_virtual_memory_mb, peak_used_virtual_memory_mb}, scene_memory: {actor_count, component_count, static_mesh_count, material_count (distinct), material_slot_count, texture_count (distinct textures the scene's materials use), resident_texture_count (every UTexture2D in memory)}, gpu_memory: {gpu_memory_available, gpu_memory_status, rhi_name, dedicated_video_memory_mb?, shared_system_memory_mb?, total_graphics_memory_mb?, streaming_texture_memory_mb, non_streaming_texture_memory_mb}, system_info: {platform, cpu_brand, cpu_cores, cpu_threads} }`
 
-## `get_rvt_info`
+## `get_runtime_virtual_texture_info`
 
 *Read-only.*
 
-Read a URuntimeVirtualTexture asset without changing it: material_type (full enum name, e.g. "ERuntimeVirtualTextureMaterialType::WorldHeight"), tile_count in tiles, tile_size and size in texels (not the exponents create_rvt_asset takes), and continuous_update.
+Read a URuntimeVirtualTexture asset without changing it: material_type (full enum name, e.g. "ERuntimeVirtualTextureMaterialType::WorldHeight"), tile_count in tiles, tile_size and size in texels (not the exponents create_runtime_virtual_texture takes), and continuous_update.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -125,11 +127,11 @@ No parameters.
 
 **Returns:** `{ system_status: "not_available"|"available"|"tracing_to_file"|"tracing_to_server"|"tracing_to_secure_network"|"tracing_to_custom_relay"|"unknown", compile_time_enabled: bool, connected: bool, destination: string, elapsed_s: float } -- compile_time_enabled is false only when system_status is not_available (tracing compiled out, as in Shipping); destination is empty and elapsed_s 0 when not connected, and elapsed_s is also 0 for a trace start_trace did not start.`
 
-## `list_active_regions`
+## `list_timing_regions`
 
 *Read-only.*
 
-Read-side of region_start: the named timing regions still OPEN in this bridge instance, each with how long it has been running. Use it to spot a region you forgot to close, or to read an elapsed time without ending the region. Entries disappear when region_end closes them, one name at a time; the state is per bridge instance and does not survive a restart.
+Read-side of start_timing_region: the named timing regions still OPEN in this bridge instance, each with how long it has been running. Use it to spot a region you forgot to close, or to read an elapsed time without ending the region. Entries disappear when end_timing_region closes them, one name at a time; the state is per bridge instance and does not survive a restart.
 
 No parameters.
 
@@ -145,47 +147,11 @@ No parameters.
 
 **Returns:** `{ directory: string, count: int, traces: [{ path, name, size_bytes, modified_iso }] } -- directory is the resolved profiling folder; only its own files are listed, not subfolders.`
 
-## `region_end`
-
-*Destructive.*
-
-Close an open named region and return its duration in ms. Removes the region from the active set; subsequent region_end with the same name returns an error.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `name` | string | yes | Region identifier. Must match an open region. |
-
-**Returns:** `{ ended: bool, name: string, duration_ms: float, duration_s: float }`
-
-## `region_start`
+## `set_runtime_virtual_texture_volume_bounds`
 
 *Destructive, idempotent.*
 
-Begin tracking an in-process named region. Region start time is stored in this bridge instance and matched by region_end for duration calculation. Idempotent — calling region_start twice with the same name returns already_started:true.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `name` | string | yes | Region identifier. Required. |
-
-**Returns:** `{ started: bool, already_started: bool, name: string, started_at_s: float }`
-
-## `remove_rvt_asset`
-
-*Destructive, idempotent.*
-
-Destroy a URuntimeVirtualTexture asset (mirror of create_rvt_asset). Typed-delete: it loads the asset and REFUSES to delete it if it is not a URuntimeVirtualTexture, so it cannot wipe the wrong asset the way the generic delete_asset can; that refusal, and a delete the engine does not carry out, make success false with deleted false. Idempotent on missing assets. It deletes the ASSET, not any binding: unassign_rvt_from_landscape is what detaches it from a landscape first.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `asset_path` | string | yes | Full /Game/... asset path of the RVT. |
-
-**Returns:** `{ asset_path, deleted, already_existed, asset_class?, note? }`
-
-## `set_rvt_volume_bounds`
-
-*Destructive, idempotent.*
-
-Fit an existing ARuntimeVirtualTextureVolume's bounds to an actor -- the engine "Set Bounds" button (RuntimeVirtualTexture::SetBounds). Sets the volume's BoundsAlignActor and recomputes its transform to cover that actor (a landscape uses its complete bounds) plus any primitives writing to the volume's RVT. The volume must already have its RVT bound (create_rvt_volume). Optional landscape texel-snap + bounds expansion.
+Fit an existing ARuntimeVirtualTextureVolume's bounds to an actor -- the engine "Set Bounds" button (RuntimeVirtualTexture::SetBounds). Sets the volume's BoundsAlignActor and recomputes its transform to cover that actor (a landscape uses its complete bounds) plus any primitives writing to the volume's RVT. The volume must already have its RVT bound (create_runtime_virtual_texture_volume). Optional landscape texel-snap + bounds expansion.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -195,6 +161,18 @@ Fit an existing ARuntimeVirtualTextureVolume's bounds to an actor -- the engine 
 | `expand_bounds` | number | no | Optional float >= 0. Amount to expand the computed bounds. |
 
 **Returns:** `{ volume_name, bounds_align_actor, snap_to_landscape, expand_bounds, applied }`
+
+## `start_timing_region`
+
+*Destructive, idempotent.*
+
+Begin tracking an in-process named region. Region start time is stored in this bridge instance and matched by end_timing_region for duration calculation. Idempotent — calling start_timing_region twice with the same name returns already_started:true.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Region identifier. Required. |
+
+**Returns:** `{ started: bool, already_started: bool, name: string, started_at_s: float }`
 
 ## `start_trace`
 
@@ -219,11 +197,11 @@ No parameters.
 
 **Returns:** `{ stopped: bool, was_tracing: bool, destination?: string, duration_s?: float, size_bytes?: int, note: string } -- with no trace running only stopped:false, was_tracing:false and note; when the engine's Stop() refuses because the trace is already stopping, stopped is false and size_bytes is absent; after a stop, note says to open the .utrace in Unreal Insights. duration_s is 0 for a trace start_trace did not start.`
 
-## `unassign_rvt_from_landscape`
+## `unassign_runtime_virtual_texture_from_landscape`
 
 *Destructive.*
 
-Inverse of assign_rvt_to_landscape: clears ONE slot of a landscape's RuntimeVirtualTextures array, breaking the binding without leaving a dangling entry behind. It unbinds only -- the RVT asset itself survives (remove_rvt_asset destroys that). Reports the asset path that was in the slot, so the operation is reversible.
+Inverse of assign_runtime_virtual_texture_to_landscape: clears ONE slot of a landscape's RuntimeVirtualTextures array, breaking the binding without leaving a dangling entry behind. It unbinds only -- the RVT asset itself survives (delete_asset with expected_class "RuntimeVirtualTexture" destroys that). Reports the asset path that was in the slot, so the operation is reversible.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

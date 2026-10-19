@@ -35,7 +35,7 @@ UEAgent's tools are this session's MCP tools, named `mcp__<server>__<tool>`
 - The tool reference, with search, is at <https://carlxsmg.github.io/UEAgent/tools/>.
 
 Read the whole description of every tool you pick: it names the traps (parameter forms, what it
-refuses during Play-in-Editor, what it does not verify). Prefer the most specific tool, use `batch`
+refuses during Play-in-Editor, what it does not verify). Prefer the most specific tool, use `execute_batch`
 for steps that do not depend on each other's answers, and keep `execute_python` for what no tool does.
 
 ## 3. Rehearse it in the editor

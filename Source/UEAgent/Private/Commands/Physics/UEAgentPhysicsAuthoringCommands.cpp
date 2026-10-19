@@ -518,7 +518,7 @@ TSharedPtr<FJsonObject> HandleSetPhysicalMaterialProperties(const TSharedPtr<FJs
 // --------------------------------------------------------------------------- //
 // spawn_physics_constraint
 // --------------------------------------------------------------------------- //
-// MCP:spawn_physics_constraint - Spawns an APhysicsConstraintActor in the editor world at location (zero rotation) in an undo transaction and optionally sets the two actors it constrains, found by object name or label (first match), then recomputes the joint frames. A name that matches no actor is skipped, not an error: check actor1_wired and actor2_wired. Each call adds a new actor; the level is not saved. Tune it with set_constraint_limits and set_physics_constraint_drives, read it with get_physics_constraint_info; for joints inside a Physics Asset use add_physics_asset_constraint.
+// MCP:spawn_physics_constraint - Spawns an APhysicsConstraintActor in the editor world at location (zero rotation) in an undo transaction and optionally sets the two actors it constrains, found by object name or label (first match), then recomputes the joint frames. A name that matches no actor is skipped, not an error: check actor1_wired and actor2_wired. Each call adds a new actor; the level is not saved. Tune it with set_physics_constraint_limits and set_physics_constraint_drives, read it with get_physics_constraint_info; for joints inside a Physics Asset use add_physics_asset_constraint.
 //   @param location - World [x, y, z] for the constraint actor (defaults to origin)
 //   @param actor1_name - Optional name/label of the first actor to constrain
 //   @param actor2_name - Optional name/label of the second actor to constrain
@@ -585,9 +585,9 @@ TSharedPtr<FJsonObject> HandleSpawnPhysicsConstraint(const TSharedPtr<FJsonObjec
 }
 
 // --------------------------------------------------------------------------- //
-// set_constraint_limits
+// set_physics_constraint_limits
 // --------------------------------------------------------------------------- //
-// MCP:set_constraint_limits - Set linear/angular limits on a physics-constraint actor's UPhysicsConstraintComponent and read back.  Providing a limit sets that axis to a Limited motion type with the given size (linear is shared across X/Y/Z; swing/twist are in degrees).
+// MCP:set_physics_constraint_limits - Set linear/angular limits on a physics-constraint actor's UPhysicsConstraintComponent and read back.  Providing a limit sets that axis to a Limited motion type with the given size (linear is shared across X/Y/Z; swing/twist are in degrees).
 //   @param constraint_actor_name - Label/name of the APhysicsConstraintActor.
 //   @param linear_limit - Optional shared linear limit applied to all 3 axes (cm)
 //   @param swing1_limit - Optional swing1 angular limit (degrees)
@@ -695,7 +695,7 @@ TSharedPtr<FJsonObject> HandleSetPhysicsConstraintDrives(const TSharedPtr<FJsonO
         ConstraintComp->Modify();
 
         // The component setters delegate into this same instance, so it is written directly (authoring the
-        // serialized template), the way set_constraint_limits writes the limits.
+        // serialized template), the way set_physics_constraint_limits writes the limits.
         FConstraintInstance& CI = ConstraintComp->ConstraintInstance;
         Applied = PhysicsConstraintUtils::ApplyDriveSettings(CI, Drives);
 
@@ -791,7 +791,7 @@ TSharedPtr<FJsonObject> HandleSetActorPhysicalMaterial(const TSharedPtr<FJsonObj
 // --------------------------------------------------------------------------- //
 // get_physics_constraint_info
 // --------------------------------------------------------------------------- //
-// MCP:get_physics_constraint_info - Read the full authored configuration of a world APhysicsConstraintActor's UPhysicsConstraintComponent: identity + wired bodies/bones, linear/angular limits (with motion types), linear/angular drives (motors) with targets, breakable thresholds, projection, and collision/dominance flags.  Read-only complement of spawn_physics_constraint / set_constraint_limits / set_physics_constraint_drives; returns the serialized template, not live simulation state (no motor torque/broken/force values, which are 0 outside PIE).
+// MCP:get_physics_constraint_info - Read the full authored configuration of a world APhysicsConstraintActor's UPhysicsConstraintComponent: identity + wired bodies/bones, linear/angular limits (with motion types), linear/angular drives (motors) with targets, breakable thresholds, projection, and collision/dominance flags.  Read-only complement of spawn_physics_constraint / set_physics_constraint_limits / set_physics_constraint_drives; returns the serialized template, not live simulation state (no motor torque/broken/force values, which are 0 outside PIE).
 //   @param constraint_actor_name - Label/name of the APhysicsConstraintActor.
 //   @returns { constraint_actor_name: string, constraint_component: string, constraint_actor1?: string, constraint_actor2?: string, constraint_bone1: string, constraint_bone2: string, linear_limit: number, linear_x_motion: string, linear_y_motion: string, linear_z_motion: string, swing1_limit: number, swing1_motion: string, swing2_limit: number, swing2_motion: string, twist_limit: number, twist_motion: string, angular_drive_mode: string, angular_orientation_drive: bool, angular_velocity_drive: bool, angular_drive_spring: number, angular_drive_damping: number, angular_drive_force_limit: number, angular_orientation_target: [number], linear_position_drive: bool, linear_velocity_drive: bool, linear_drive_spring: number, linear_drive_damping: number, linear_drive_force_limit: number, linear_position_target: [number], linear_breakable: bool, linear_break_threshold: number, angular_breakable: bool, angular_break_threshold: number, projection_enabled: bool, projection_linear_alpha: number, projection_angular_alpha: number, projection_linear_tolerance: number, projection_angular_tolerance: number, parent_dominates: bool, disable_collision: bool, found: bool }
 
@@ -819,15 +819,15 @@ TSharedPtr<FJsonObject> HandleGetPhysicsConstraintInfo(const TSharedPtr<FJsonObj
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:set_vehicle_wheel_setup - Configure ONE entry of a UChaosWheeledVehicleMovementComponent's WheelSetups array (wheel class, bone, offset) by index. USE THIS RATHER THAN the generic set_property_value / set_properties, which cannot reliably write the wheel class: it is a TSubclassOf nested in a struct nested in an array, and the generic path only FINDS an already-loaded class instead of loading it. This tool resolves the class explicitly and writes the whole struct element, growing the array to fit if wheel_index is past the end. READING them back needs no special tool -- the generic get_properties / get_property_value already resolves nested object refs correctly.
+// MCP:set_vehicle_wheel_setup - Configure ONE entry of a UChaosWheeledVehicleMovementComponent's WheelSetups array (wheel class, bone, offset) by index. USE THIS RATHER THAN the generic set_properties, which cannot reliably write the wheel class: it is a TSubclassOf nested in a struct nested in an array, and the generic path only FINDS an already-loaded class instead of loading it. This tool resolves the class explicitly and writes the whole struct element, growing the array to fit if wheel_index is past the end. READING them back needs no special tool -- the generic get_properties already resolves nested object refs correctly.
 //   @param actor_name [string!] - Editor-world actor with a UChaosWheeledVehicleMovementComponent
 //   @param wheel_index [number!] - Index into WheelSetups (>= 0). The array grows to fit if this is past the current end.
 //   @param wheel_class [string!] - Full class path of the UChaosVehicleWheel subclass, e.g. "/Script/ChaosVehicles.ChaosVehicleWheel"
 //   @param bone_name [string] - Skeletal bone this wheel is attached to. Optional.
 //   @param additional_offset [array] - [x, y, z] additional offset applied to the wheel. Optional.
 //   @returns { actor_name: string, wheel_index: int, wheel_class: string, bone_name: string, additional_offset: {x,y,z}, num_wheels: int }
-//   NOTE (impl): not a thin wrapper. The generic reflection layer (set_property_value /
-//   set_properties, mcp_common::SetObjectProperty) cannot write the wheel_class field reliably -- it's a
+//   NOTE (impl): not a thin wrapper. The generic reflection layer (set_properties,
+//   mcp_common::SetObjectProperty) cannot write the wheel_class field reliably -- it's a
 //   TSubclassOf<UChaosVehicleWheel> nested inside a struct nested inside an array (FArrayProperty ->
 //   FStructProperty -> FClassProperty), and the generic JsonValueToUProperty path for object/class refs is
 //   find-only-first (StaticFindObjectSafe) with StaticLoadObject only as a fallback -- unreliable
@@ -920,7 +920,7 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("create_physical_material"), &HandleCreatePhysicalMaterial },
     { TEXT("get_physics_constraint_info"), &HandleGetPhysicsConstraintInfo },
     { TEXT("set_actor_physical_material"), &HandleSetActorPhysicalMaterial },
-    { TEXT("set_constraint_limits"), &HandleSetConstraintLimits },
+    { TEXT("set_physics_constraint_limits"), &HandleSetConstraintLimits },
     { TEXT("set_physical_material_properties"), &HandleSetPhysicalMaterialProperties },
     { TEXT("set_physics_constraint_drives"), &HandleSetPhysicsConstraintDrives },
     { TEXT("set_vehicle_wheel_setup"), &HandleSetVehicleWheelSetup },

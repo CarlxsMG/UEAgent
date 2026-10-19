@@ -2,7 +2,7 @@
 
 # Engine
 
-90 tools. Back to the [index](README.md).
+74 tools. Back to the [index](README.md).
 
 ## `add_niagara_data_interface`
 
@@ -18,49 +18,19 @@ Add a new UNiagaraDataInterface user-parameter binding to a Niagara system, insi
 
 **Returns:** `{ system_path: string, parameter_name: string, data_interface_class: string, data_interface_class_path?: string, offset?: int, added?: bool, already_exists?: bool, saved: bool, save_error?: string }`
 
-## `add_niagara_decal_renderer`
-
-*Additive.*
-
-Add a Decal renderer (UNiagaraDecalRendererProperties) to one emitter of a Niagara System asset, found by handle name, with its material, source mode, visibility tag and screen-size fade seeded, in one undo step, then save the system. The renderer is created inside the emitter, as the Niagara editor creates one; verified is true when it is in the emitter's renderer list and resolves that emitter, and the reply reads the stored values back. Each call adds one more renderer. A material_path that does not load as a material, a number field that is not a JSON number, or an unknown source_mode, system or emitter is an error and nothing is created. A failed save makes success false, with saved=false and save_error, the renderer kept in memory. add_niagara_renderer has no Decal type; change this one later with set_niagara_renderer_properties or set_niagara_decal_renderer_material.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `system_path` | string | yes | Asset path of the Niagara System (e.g. "/Game/Niagara/NS_Example"). |
-| `emitter_name` | string | yes | Name of the emitter handle (the human-readable name in the system's emitter list). |
-| `material_path` | string | no | Optional asset path; sets the renderer's Material UPROPERTY. |
-| `source_mode` | string | no | Optional ENiagaraRendererSourceDataMode name (Particles/Emitter). Default Particles. |
-| `renderer_visibility` | number | no | Optional int32 visibility tag (default 0). |
-| `decal_screen_size_fade` | number | no | Optional float fade threshold (default 0.0). |
-
-**Returns:** `{ system_path, emitter_name, renderer_index, renderer_class, material_path, source_mode, renderer_visibility, decal_screen_size_fade, renderer_count, verified: bool, saved: bool, save_error? }`
-
 ## `add_niagara_emitter_from_template`
 
 *Additive.*
 
-Add a copy of a template emitter to a Niagara system (canonical path).  Loads the template/parent UNiagaraEmitter asset and adds a standalone copy of it to the system via FNiagaraEditorUtilities::AddEmitterToSystem — the same operation the Niagara editor's "Add Emitter" performs. This rebuilds the emitter's nodes and syncs the system overview graph, then requests a compile and saves the system.
+Add a copy of a template emitter to a Niagara system (canonical path).  Loads the template/parent UNiagaraEmitter asset and adds a standalone copy of it to the system via FNiagaraEditorUtilities::AddEmitterToSystem — the same operation the Niagara editor's "Add Emitter" performs. This rebuilds the emitter's nodes and syncs the system overview graph, optionally names the new handle, then requests a compile and saves the system.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `system_path` | string | yes | Asset path of the Niagara System (e.g. "/Game/Niagara/NS_Example") |
 | `emitter_asset_path` | string | yes | Asset path of the source UNiagaraEmitter template (e.g. "/Niagara/DefaultAssets/Templates/Emitters/Fountain.Fountain") |
+| `emitter_name` | string | no | Optional name for the new emitter handle; absent or empty keeps the name the engine generates from the source emitter. The engine sanitizes it and makes it unique among the system's emitters, so read emitter_handle_name for the stored name. |
 
 **Returns:** `{ system_path: string, source_emitter_asset: string, emitter_handle_id: string, emitter_handle_name: string, is_valid: bool, is_enabled: bool, emitters_before: int, total_emitters: int, success: bool, saved: bool, save_error?: string }`
-
-## `add_niagara_emitter_handle`
-
-*Additive.*
-
-Add an emitter to a Niagara system from an existing UNiagaraEmitter asset.  Loads the emitter asset, gets its exposed version GUID, and calls UNiagaraSystem::AddEmitterHandle. The system is saved after modification.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `system_path` | string | yes | Asset path of the target Niagara System (e.g. "/Game/Niagara/NS_Example"). |
-| `emitter_path` | string | no | Asset path of the source UNiagaraEmitter to add. |
-| `emitter_name` | string | no | Optional desired name for the new handle; defaults to the source emitter's name |
-
-**Returns:** `{ system_path: string, emitter_handle_name: string, emitter_handle_id: string, is_valid: bool, is_enabled: bool, total_emitters: int, saved: bool, save_error?: string }`
 
 ## `add_niagara_event_handler`
 
@@ -82,50 +52,11 @@ Add an event handler to a Niagara emitter (the writer for event_handler_count). 
 
 **Returns:** `{ system_path: string, emitter_name: string, usage_id: string, source_event_name: string, execution_mode: string, spawn_number: int, max_events_per_frame: int, already_exists: bool, event_handler_count: int, saved: bool, save_error?: string, note: string }`
 
-## `add_niagara_light_renderer`
-
-*Additive.*
-
-Add a Light renderer (UNiagaraLightRendererProperties) to one emitter of a Niagara System asset, found by handle name, with its light settings seeded in the same call, in one undo step, then save the system. The renderer is created inside the emitter, as the Niagara editor creates one; verified is true when it is in the emitter's renderer list and resolves that emitter, and the reply reads the stored settings back. radius_scale, default_exponent, specular_scale and diffuse_scale below 0 become 0, and one that is not a JSON number is an error. Each call adds one more renderer; an unknown system or emitter is an error and nothing changes. A failed save makes success false, with saved=false and save_error, the renderer kept in memory. A Light renderer with engine defaults: add_niagara_renderer with renderer_type='Light'; change it later with set_niagara_renderer_properties.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `system_path` | string | yes | Asset path of the Niagara System (e.g. "/Game/Niagara/NS_Example"). |
-| `emitter_name` | string | yes | Name of the emitter handle. |
-| `use_inverse_squared_falloff` | boolean | no | Optional bool (default true). True => UE physical light; false => use DefaultExponent below. |
-| `affects_translucency` | boolean | no | Optional bool (default true). Set false for cheaper lights that shouldn't bleed through translucent surfaces. |
-| `allow_mega_lights` | boolean | no | Optional bool (default false). True => MegaLights path (Lumen); see bMegaLightsCastShadows below. |
-| `mega_lights_cast_shadows` | boolean | no | Optional bool (default false). |
-| `alpha_scales_brightness` | boolean | no | Optional bool (default true). When true, particle color alpha modulates brightness. |
-| `radius_scale` | number | no | Optional float (default 1.0, ClampMin=0). |
-| `default_exponent` | number | no | Optional float (default 1.0, ClampMin=0); only used when use_inverse_squared_falloff=false. |
-| `specular_scale` | number | no | Optional float (default 1.0, ClampMin=0). |
-| `diffuse_scale` | number | no | Optional float (default 1.0, ClampMin=0). |
-| `color_add` | array | no | Optional [r, g, b] static color shift. |
-
-**Returns:** `{ system_path, emitter_name, renderer_index, renderer_class, radius_scale, default_exponent, specular_scale, diffuse_scale, color_add_x, color_add_y, color_add_z, renderer_count, verified: bool, saved: bool, save_error? }`
-
-## `add_niagara_module_to_graph`
-
-*Additive.*
-
-Insert a module script (a UNiagaraScript, by asset path) into the particle spawn or update stack of one emitter of a Niagara System asset (emitter by handle name) at a chosen position, in one undo step; then request a recompile of the system and save it. target_index is the 0-based position in that stack: -1, the default, appends, and an index past the end is clamped to it. The module starts with its script's default inputs. Not idempotent: every call adds another module node, named in module_node_name. A target_index that is not a JSON number, an emitter without an editable graph, or an unknown system, emitter or script is an error; a failed save makes success false with saved=false and save_error. Append only: add_niagara_module_to_stack; move: reorder_niagara_modules; inputs: set_niagara_module_input; list: list_niagara_modules; take out: remove_niagara_module_from_stack.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `system_path` | string | yes | Niagara System asset path, e.g. "/Game/FX/NS_Fire" (the object path form also works). |
-| `emitter_name` | string | yes | Emitter handle name as shown in the system, e.g. "Sparks" (case-insensitive). |
-| `module_script_path` | string | yes | Module UNiagaraScript asset path, e.g. "/Niagara/Modules/Update/Forces/GravityForce.GravityForce"; the call fails without it. |
-| `script_group` | string | no | Optional "spawn" or "update"; defaults to "update"; case-insensitive, any other value is an error. |
-| `target_index` | number | no | Optional 0-based position in the stack; -1 (INDEX_NONE, the default) and any index past the end append, and an index below -1 inserts first. |
-
-**Returns:** `{ system_path: string, emitter_name: string, module_script_path: string, script_group: string, target_index: int, module_node_name: string, added: bool, saved: bool, save_error?: string }`
-
 ## `add_niagara_module_to_stack`
 
 *Additive.*
 
-Insert an engine module script into a Niagara emitter's particle stack.  Loads the module UNiagaraScript and inserts it at the end of the emitter's ParticleSpawn or ParticleUpdate stack via FNiagaraStackGraphUtilities::AddScriptModuleToStack, then recompiles and saves.  NOTE: only the module's script-default inputs are applied — per-instance input overrides are out of scope (the response reports added_with_defaults=true). Stateless emitters (no editable graph) return a clean error.
+Insert an engine module script into a Niagara emitter's particle stack.  Loads the module UNiagaraScript and inserts it into the emitter's ParticleSpawn or ParticleUpdate stack via FNiagaraStackGraphUtilities::AddScriptModuleToStack, at the end or at a chosen target_index, then recompiles and saves. Not idempotent: every call adds another module node.  NOTE: only the module's script-default inputs are applied — per-instance input overrides are out of scope (the response reports added_with_defaults=true). Stateless emitters (no editable graph) return a clean error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -133,23 +64,25 @@ Insert an engine module script into a Niagara emitter's particle stack.  Loads t
 | `emitter_name` | string | yes | Display name of the emitter handle to modify. |
 | `module_script_path` | string | yes | Asset path of the module UNiagaraScript (e.g. "/Niagara/Modules/Update/Forces/GravityForce.GravityForce") |
 | `script_group` | string | no | Optional "spawn" (ParticleSpawnScript) or "update" (ParticleUpdateScript); defaults to "update" |
+| `target_index` | number | no | Optional 0-based position in the stack; -1 (INDEX_NONE, the default) and any index past the end append. A value that is not a JSON number is an error. |
 
-**Returns:** `{ system_path: string, emitter_name: string, module_script_path: string, script_group: string, module_node_name: string, added_with_defaults: bool, success: bool, saved: bool, save_error?: string }`
+**Returns:** `{ system_path: string, emitter_name: string, module_script_path: string, script_group: string, target_index: int, module_node_name: string, added_with_defaults: bool, success: bool, saved: bool, save_error?: string }`
 
 ## `add_niagara_renderer`
 
 *Additive.*
 
-Add a new renderer (Sprite / Ribbon / Mesh / Light) to a Niagara emitter.  Creates a UNiagaraRendererProperties instance of the requested concrete class (Sprite / Ribbon / Mesh / Light), optionally sets the Material UPROPERTY, and appends it to the emitter's RendererProperties array. Then requests a system compile and saves the asset; a failed save makes success false, with saved=false and save_error, the renderer kept in memory.
+Add a new renderer (Sprite / Ribbon / Mesh / Light / Decal) to a Niagara emitter, optionally with its properties seeded in the same call.  Creates a UNiagaraRendererProperties instance of the requested concrete class inside the emitter, as the Niagara editor does, optionally sets the Material UPROPERTY and the supplied properties (the keys set_niagara_renderer_properties takes, converted and clamped by reflection; enum keys fire PostEditChangeProperty), and appends it to the emitter's RendererProperties array, in one undo step. A Light is seeded with affects_translucency and alpha_scales_brightness true (the engine defaults are false), as the dedicated light-renderer tool seeded it; properties overrides either. Then requests a system compile and saves the asset. verified is true when the renderer is in the emitter's list and resolves that emitter; properties reads the stored values back. Each call adds one more renderer. An unknown renderer_type, a material_path that does not load as a material, an unknown key in properties, a numeric property given something other than a JSON number, or a value that does not convert is an error and nothing is created. A failed save makes success false, with saved=false and save_error, the renderer kept in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `system_path` | string | yes | Asset path of the Niagara System (e.g. "/Game/Niagara/NS_Example"). |
 | `emitter_name` | string | yes | Name of the emitter handle (the human-readable name in the system's emitter list). |
-| `renderer_type` | string | yes | One of "Sprite" / "Ribbon" / "Mesh" / "Light" (case-insensitive). |
-| `material_path` | string | no | Optional asset path; sets the renderer's Material property. If omitted, the renderer is added with a null material (still a valid empty renderer). |
+| `renderer_type` | string | yes | One of "Sprite" / "Ribbon" / "Mesh" / "Light" / "Decal" (case-insensitive). |
+| `material_path` | string | no | Optional asset path; sets the renderer's Material property (a class without one, such as Light, ignores it). If omitted, the renderer is added with a null material (still a valid empty renderer). |
+| `properties` | object | no | Optional object of renderer properties to seed, with the keys and value forms of set_niagara_renderer_properties, e.g. {"radius_scale": 2, "use_inverse_squared_falloff": false, "color_add": {"X": 1, "Y": 0, "Z": 0}} for a Light (scales clamped at 0; affects_translucency and alpha_scales_brightness default to true) or {"decal_source_mode": "Emitter", "renderer_visibility": 1, "decal_screen_size_fade": 0.1} for a Decal. Keys the renderer class lacks are listed in not_applicable. |
 
-**Returns:** `{ system_path: string, emitter_name: string, renderer_type: string, renderer_class: string, renderer_index: int, material_path: string, renderer_count: int, saved: bool, save_error?: string }`
+**Returns:** `{ system_path: string, emitter_name: string, renderer_type: string, renderer_class: string, renderer_index: int, material_path: string, applied: [string], not_applicable: [string], post_edit_fired: bool, properties: object, renderer_count: int, verified: bool, saved: bool, save_error?: string }`
 
 ## `add_niagara_simulation_stage`
 
@@ -183,7 +116,7 @@ Creates (or loads, idempotently) an empty UNiagaraSystem asset and saves it.  Us
 
 *Additive.*
 
-Duplicate an emitter handle of a Niagara System asset under a new name, keeping its enabled state, in one undo step, then save the system. The source is found by display name (case-insensitive); an unknown system or source is an error and nothing changes. The stored name can differ from the one asked for, so read new_emitter_name. Returns the actual name and id of the copy plus total_emitters; a failed save makes success false, with saved=false and save_error, the copy kept in memory. Find handle names with get_niagara_emitter_handles; add an emitter asset instead with add_niagara_emitter_handle; rename the copy with rename_niagara_emitter_handle.
+Duplicate an emitter handle of a Niagara System asset under a new name, keeping its enabled state, in one undo step, then save the system. The source is found by display name (case-insensitive); an unknown system or source is an error and nothing changes. The stored name can differ from the one asked for, so read new_emitter_name. Returns the actual name and id of the copy plus total_emitters; a failed save makes success false, with saved=false and save_error, the copy kept in memory. Find handle names with get_niagara_emitter_handles; add an emitter asset instead with add_niagara_emitter_from_template; rename the copy with rename_niagara_emitter_handle.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -209,45 +142,25 @@ Add another instance of a module to one emitter of a Niagara System asset: the m
 
 **Returns:** `{ system_path: string, emitter_name: string, script_group: string, source_module_name: string, new_module_name: string, inserted_index: int, duplicated: bool, saved: bool, save_error?: string }`
 
-## `editor_status`
+## `get_editor_status`
 
 *Read-only.*
 
-Prove the Unreal editor is alive and TICKING: a no-argument game-thread liveness/health probe, and the first call to make when the MCP bridge goes quiet. It runs on the GAME THREAD via the bridge's command drain, so a reply proves the game thread is pumping -- unlike a transport-only ping, which a wedged editor still answers. After a "Connection reset" use it to tell an editor CRASH (this errors, the reconnect refuses) from a mere tool TIMEOUT (this returns alive=true); call it twice and diff frame_counter to rule out a deadlock, since a frozen game thread replies once but never advances the frame. Also reports whether PIE is running (pie_active / is_simulating) and the open editor world, without starting or stopping anything. Read-only and cheap; safe to call any time.
+Prove the Unreal editor is alive and TICKING: a no-argument game-thread liveness/health probe, and the first call to make when the MCP bridge goes quiet. It runs on the GAME THREAD via the bridge's command drain, so a reply proves the game thread is pumping -- unlike a transport-only ping, which a wedged editor still answers. After a "Connection reset" use it to tell an editor CRASH (this errors, the reconnect refuses) from a mere tool TIMEOUT (this returns alive=true); call it twice and diff frame_counter to rule out a deadlock, since a frozen game thread replies once but never advances the frame (frame_count_render_thread is the render thread's own counter). Also reports whether PIE is running (pie_active / is_simulating) and the open editor world, without starting or stopping anything. Read-only and cheap; safe to call any time.
 
 No parameters.
 
-**Returns:** `{ alive: bool, gis_running: bool, exit_requested: bool, is_editor: bool, frame_counter: number, pie_active: bool, is_simulating: bool, editor_world: string, world_context_count: int }`
+**Returns:** `{ alive: bool, gis_running: bool, exit_requested: bool, is_editor: bool, frame_counter: number, frame_count_render_thread: number, pie_active: bool, is_simulating: bool, editor_world: string, world_context_count: int }`
 
 ## `get_engine_info`
 
 *Read-only.*
 
-Read the GEngine object (engine_name, engine_class) and enumerate every world context with its world_name, world_type (Editor/PIE/Game/...) and has_game_instance flag. Use it to see how many worlds exist at once -- in co-op PIE the host and each client are SEPARATE world contexts, so this is how you confirm two PIE worlds are up before reading state that must be checked on both sides. Sibling: get_game_instance_info adds the GameInstance class; editor_status is the cheaper "is the editor alive" probe.
+Read the GEngine object (engine_name, engine_class), the live UGameInstance (name, class, object path) and every world context with its world_name, world_type (Editor/PIE/Game/...) and has_game_instance flag. Use it to see how many worlds exist at once -- in co-op PIE the host and each client are SEPARATE world contexts, so this is how you confirm two PIE worlds are up before reading state that must be checked on both sides -- and which GameInstance class a running session picked. A UGameInstance only exists while PIE or a game world runs, so at rest game_instance_exists=false with empty strings is the normal answer, not an error. get_editor_status is the cheaper "is the editor alive" probe. Read-only.
 
 No parameters.
 
-**Returns:** `{ engine_name: string, engine_class: string, world_context_count: int, worlds: [object] }`
-
-## `get_engine_settings`
-
-*Read-only.*
-
-Read exactly two live engine knobs: max_fps (UEngine::GetMaxFPS) and screen_percentage (Scalability resolution scale). NOT a general settings dump -- for project/plugin settings use get_project_settings_value or get_engine_ini_value, for scalability buckets get_scalability_levels, and for frame timing get_fps_info / frame_timing.
-
-No parameters.
-
-**Returns:** `{ max_fps: number, screen_percentage: number }`
-
-## `get_game_instance_info`
-
-*Read-only.*
-
-Read the live UGameInstance (name, class, object path) plus every engine world context (world_name + world_type: Editor/PIE/Game/EditorPreview/Inactive). A UGameInstance only exists while PIE or a game world is running, so at rest exists=false with empty strings is the NORMAL answer, not an error -- use it to answer "is a game session up, and which GameInstance class did it pick?". Pick this over get_engine_info when you care about the GameInstance itself; get_engine_info answers the same world-context question without it.
-
-No parameters.
-
-**Returns:** `{ exists: bool, game_instance_name: string, game_instance_class: string, game_instance_path: string, world_context_count: int, worlds: [object] }`
+**Returns:** `{ engine_name: string, engine_class: string, game_instance_exists: bool, game_instance_name: string, game_instance_class: string, game_instance_path: string, world_context_count: int, worlds: [{ world_name, world_type, has_game_instance }] }`
 
 ## `get_niagara_component_matrix`
 
@@ -262,42 +175,30 @@ Reads a Matrix (FMatrix4f) override parameter back off a spawned Niagara compone
 
 **Returns:** `{ actor_name: string, variable_name: string, variable_type: string, found: bool, matrix: [number x 16] }`
 
-## `get_niagara_data_interface_info`
-
-*Read-only.*
-
-Get detail and a UPROPERTY dump for one UNiagaraDataInterface user-parameter binding on a Niagara system.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `system_path` | string | yes | Asset path of the Niagara System. |
-| `parameter_name` | string | yes | Short name of the user-parameter DI |
-
-**Returns:** `{ system_path: string, parameter_name: string, data_interface_class: string, data_interface_class_path: string, path_name: string, properties: [{ name, type }], property_count: int }`
-
 ## `get_niagara_data_interfaces`
 
 *Read-only.*
 
-List all UNiagaraDataInterface user-parameter bindings on a Niagara system. parameter_name is the user parameter's short name (no "User." prefix), the name the other data interface tools take; object_name and path_name name the data interface object itself; index is its slot in the system's data interface store.
+List all UNiagaraDataInterface user-parameter bindings on a Niagara system, or just the one named parameter_name, each with the name and property class of its UPROPERTYs (Transient and DuplicateTransient ones skipped). parameter_name is the user parameter's short name (no "User." prefix), the name the other data interface tools take; object_name and path_name name the data interface object itself; index is its slot in the system's data interface store. Read-only; a parameter_name that is not a data interface user parameter of the system is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `system_path` | string | yes | Asset path of the Niagara System. |
+| `parameter_name` | string | no | Optional short name (no "User." prefix, case-insensitive) of one data interface user parameter to return. |
 
-**Returns:** `{ system_path: string, count: int, data_interfaces: [{ index, parameter_name, object_name, data_interface_class, data_interface_class_path, path_name }] }`
+**Returns:** `{ system_path: string, count: int, data_interfaces: [{ index, parameter_name, object_name, data_interface_class, data_interface_class_path, path_name, properties: [{ name, type }], property_count: int }] }`
 
 ## `get_niagara_effect_type`
 
 *Read-only.*
 
-Read which Niagara Effect Type asset a Niagara System asset uses, plus three of that effect type's settings: update_frequency and cull_reaction (as enum value names) and allows_culling (bAllowCullingForLocalPlayers). A system with no effect type is a success with an empty effect_type_path, None for both enums and allows_culling false. Read-only; an unknown system path is an error. Assign one with set_niagara_effect_type; the effect type's distance and instance-count limits: get_niagara_scalability_settings; the system's own flags and fixed bounds: get_niagara_system_properties.
+Read which Niagara Effect Type asset a Niagara System asset uses, plus that effect type's settings: update_frequency and cull_reaction (as enum value names), allows_culling (bAllowCullingForLocalPlayers), and the scalability limits of its first system and emitter scalability entries: max_distance and max_instances (system), cull_by_distance (max_distance above 0) and scale_spawn_count (emitter SpawnCountScale). A system with no effect type, or an effect type without those entries, is a success with the defaults: an empty effect_type_path, None for both enums, allows_culling false, max_distance 0, max_instances 0, cull_by_distance false and scale_spawn_count 1. Read-only; an unknown system path is an error. Assign one with set_niagara_effect_type; the system's own flags and fixed bounds: get_niagara_system_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `system_path` | string | yes | Niagara System asset path, e.g. "/Game/FX/NS_Fire" (the object path form also works). |
 
-**Returns:** `{ system_path: string, effect_type_path: string, update_frequency: string, cull_reaction: string, allows_culling: bool }`
+**Returns:** `{ system_path: string, effect_type_path: string, update_frequency: string, cull_reaction: string, allows_culling: bool, max_distance: number, max_instances: int, cull_by_distance: bool, scale_spawn_count: number }`
 
 ## `get_niagara_emitter_data_interfaces`
 
@@ -312,31 +213,19 @@ List the data interface bindings on a Niagara emitter (read-only).  Reads the FV
 
 **Returns:** `{ system_path: string, emitter_name: string, data_interface_count: int, data_interfaces: [{ emitter_name, binding_mode }] }`
 
-## `get_niagara_emitter_handle_info`
-
-*Read-only.*
-
-Read one emitter handle of a Niagara System asset, chosen by display name or 0-based index: its id, id name, enabled and valid flags, version GUID and, when it has emitter data, its local-space and deprecated flags. Read-only; list every handle with get_niagara_emitter_handles.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `system_path` | string | yes | Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it. |
-| `emitter_name` | string | no | Display name of the handle (case-insensitive); when non-empty it wins over emitter_index. |
-| `emitter_index` | number | no | 0-based position in the emitter list of the system, used only when emitter_name is absent or empty. |
-
-**Returns:** `{ system_path: string, emitter_name: string, emitter_id: string, emitter_id_name: string, is_enabled: bool, is_valid: bool, emitter_version: string, is_local_space?: bool, is_deprecated?: bool }`
-
 ## `get_niagara_emitter_handles`
 
 *Read-only.*
 
-List every emitter handle of a Niagara System asset with its display name, id GUID, enabled and valid flags, plus emitter_count. Read-only; the names feed the other emitter tools, and get_niagara_emitter_handle_info gives one handle in detail.
+List every emitter handle of a Niagara System asset, or just one chosen by display name or 0-based index, with its display name, id GUID, id name, enabled and valid flags, version GUID and, when it has emitter data, its local-space and deprecated flags, plus emitter_count (all handles of the system). Read-only; the names feed the other emitter tools. A name or index that matches no handle, or an emitter_index that is not a JSON number, is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `system_path` | string | yes | Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it. |
+| `emitter_name` | string | no | Optional display name of one handle to return (case-insensitive); when non-empty it wins over emitter_index. |
+| `emitter_index` | number | no | Optional 0-based position in the emitter list of the system of one handle to return, used only when emitter_name is absent or empty. |
 
-**Returns:** `{ system_path: string, emitter_count: int, emitter_handles: [{ name, id, is_enabled, is_valid }] }`
+**Returns:** `{ system_path: string, emitter_count: int, emitter_handles: [{ index: int, name: string, id: string, id_name: string, is_enabled: bool, is_valid: bool, emitter_version: string, is_local_space?: bool, is_deprecated?: bool }] }`
 
 ## `get_niagara_emitter_renderers`
 
@@ -364,19 +253,6 @@ Flat readback of a Niagara emitter's runtime knobs and counts.
 
 **Returns:** `{ system_path: string, emitter_name: string, sim_target: string, bounds_mode: string, bounds_min: string, bounds_max: string, allocation_mode: string, pre_allocation_count: int, max_gpu_particles: int, local_space: bool, deterministic: bool, requires_persistent_ids: bool, update_module_count: int, spawn_module_count: int, emitter_spawn_module_count: int, emitter_update_module_count: int, renderer_count: int, event_handler_count: int, simulation_stage_count: int }`
 
-## `get_niagara_emitter_sim_target`
-
-*Read-only.*
-
-Get the simulation target configuration of a Niagara emitter.  Reads SimTarget, bLocalSpace and bDeterministic from the emitter's FVersionedNiagaraEmitterData.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `system_path` | string | yes | Asset path of the Niagara System (e.g. "/Game/Niagara/NS_Example"). |
-| `emitter_name` | string | yes | Display name of the emitter handle. |
-
-**Returns:** `{ system_path: string, emitter_name: string, sim_target: string, is_local_space: bool, is_deterministic: bool }`
-
 ## `get_niagara_event_handlers`
 
 *Read-only.*
@@ -389,21 +265,6 @@ List a Niagara emitter's event handlers and their properties.  Reads FVersionedN
 | `emitter_name` | string | yes | Display name of the emitter handle within the system. |
 
 **Returns:** `{ system_path: string, emitter_name: string, event_handler_count: int, event_handlers: [{usage_id, source_event_name, execution_mode, spawn_number, max_events_per_frame, min_spawn_number, random_spawn_number, source_emitter_id, has_script}] }`
-
-## `get_niagara_module_info`
-
-*Read-only.*
-
-Read detail for a single UNiagaraNodeFunctionCall module in a Niagara emitter's spawn or update graph.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `system_path` | string | yes | Asset path of the Niagara System. |
-| `emitter_name` | string | yes | Name of the emitter handle. |
-| `module_name` | string | yes | Display name of the module function-call node |
-| `script_group` | string | no | Optional "spawn" or "update"; defaults to "update" |
-
-**Returns:** `{ system_path: string, emitter_name: string, script_group: string, module_name: string, node_guid: string, stack_index: int, total_modules_in_stack: int, function_script?: string, function_script_class?: string, is_enabled?: bool, input_pin_count: int, output_pin_count: int, is_deprecated: bool }`
 
 ## `get_niagara_module_input`
 
@@ -420,19 +281,6 @@ Read a Niagara module input override from the rapid-iteration store.  Locates th
 
 **Returns:** `{ system_path: string, emitter_name: string, module_node_name: string, input_name: string, ri_param_name: string, value_type: string, found: bool, value?: number | [number, number, number] | [number, number, number, number], success: bool }`
 
-## `get_niagara_module_stack`
-
-*Read-only.*
-
-Read BOTH the spawn AND update module stacks of a Niagara emitter in one call (read-only). Runs the same export-safe enumeration as list_niagara_modules twice, returning the modules grouped as spawn:[...] and update:[...] (each entry also carries its own script_group tag). Honest-empty arrays per group, with a spawn_note/update_note if a graph could not be resolved.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `system_path` | string | yes | Asset path of the Niagara System. |
-| `emitter_name` | string | yes | Name of the emitter handle. |
-
-**Returns:** `{ system_path: string, emitter_name: string, spawn: [{...}], update: [{...}], spawn_module_count: int, update_module_count: int, total_modules_in_stack: int, spawn_note?: string, update_note?: string }`
-
 ## `get_niagara_renderer_info`
 
 *Read-only.*
@@ -448,23 +296,11 @@ Dump the full property set of a specific renderer instance owned by a system emi
 
 **Returns:** `{ system_path, emitter_name, renderer_index, renderer_class, renderer_class_path, properties: {...} }`
 
-## `get_niagara_scalability_settings`
-
-*Read-only.*
-
-Get the scalability configuration of a Niagara system.  Reads scalability settings from the system's UNiagaraEffectType: MaxDistance, MaxInstances (system-level), ScaleSpawnCount (emitter-level), and whether distance culling is active.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `system_path` | string | yes | Asset path of the Niagara System. |
-
-**Returns:** `{ system_path: string, effect_type_path: string, has_scalability_settings: bool, max_distance: number, max_instances: int, scale_spawn_count: number, distance_culling_enabled: bool }`
-
 ## `get_niagara_simulation_stages`
 
 *Read-only.*
 
-Read the simulation stages of a Niagara emitter (read-only). Same enumeration as list_niagara_simulation_stages, but accepts an OPTIONAL stage_index (preferred) or stage_name to return just the matching stage; with no identifier it returns the full array. Each entry reports index, stage_name, class, enabled, and (for UNiagaraSimulationStageGeneric) iteration_source. Honest-empty when the emitter has no stages or the filter matches nothing.
+Read the simulation stages of a Niagara emitter (read-only): every stage of FVersionedNiagaraEmitterData::GetSimulationStages(), or, with the OPTIONAL stage_index (preferred) or stage_name, just the matching stage. Each entry reports index, stage_name, class, enabled, and (for UNiagaraSimulationStageGeneric) iteration_source. Honest-empty when the emitter has no stages or the filter matches nothing.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -479,13 +315,13 @@ Read the simulation stages of a Niagara emitter (read-only). Same enumeration as
 
 *Read-only.*
 
-Reads metadata for a UNiagaraSystem: emitter count, warmup time and exposed user parameters.
+Reads metadata for a UNiagaraSystem: emitter count, exposed user parameters, and its warmup and determinism settings (warmup_time in seconds, warmup_tick_count, warmup_tick_delta, needs_warmup, deterministic). Read-only; change the warmup with set_niagara_system_warmup_time, set_niagara_system_warmup_tick_count and set_niagara_system_warmup_tick_delta, determinism with set_niagara_system_deterministic.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `system_path` | string | yes | Asset path of the Niagara System (e.g. /Game/Niagara/NS_Example or /Game/Niagara/NS_Example.NS_Example) |
 
-**Returns:** `{ system_name: string, system_path: string, emitter_count: int, num_user_parameters: int, warmup_time: number, user_parameters: [{ name, type }] }`
+**Returns:** `{ system_name: string, system_path: string, emitter_count: int, num_user_parameters: int, warmup_time: number, warmup_tick_count: int, warmup_tick_delta: number, needs_warmup: bool, deterministic: bool, user_parameters: [{ name, type }] }`
 
 ## `get_niagara_system_properties`
 
@@ -498,18 +334,6 @@ Read the render/system flags + fixed bounds of a UNiagaraSystem asset via reflec
 | `system_path` | string | yes | Asset path of the Niagara System. |
 
 **Returns:** `{ system_path, cast_shadow, override_cast_shadow, receives_decals, override_receives_decals, render_custom_depth, override_render_custom_depth, custom_depth_stencil_value, override_custom_depth_stencil_value, translucency_sort_priority, override_translucency_sort_priority, translucency_sort_distance_offset, override_translucency_sort_distance_offset, support_large_world_coordinates, require_current_frame_data, b_fixed_bounds, fixed_bounds:{min,max}, fixed_bounds_valid }`
-
-## `get_niagara_system_warmup_time`
-
-*Read-only.*
-
-Read the warmup and determinism settings of a Niagara System asset: warmup_time in seconds, warmup_tick_count, warmup_tick_delta, needs_warmup and deterministic. Read-only; change them with set_niagara_system_warmup_time, set_niagara_system_warmup_tick_count, set_niagara_system_warmup_tick_delta and set_niagara_system_deterministic.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `system_path` | string | yes | Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it. |
-
-**Returns:** `{ system_path: string, warmup_time: number, warmup_tick_count: int, warmup_tick_delta: number, needs_warmup: bool, deterministic: bool }`
 
 ## `get_niagara_user_parameter`
 
@@ -539,15 +363,16 @@ No parameters.
 
 *Read-only.*
 
-List the module function-call nodes on ONE stack of a Niagara emitter (read-only). Resolves the emitter's spawn OR update group graph (script_group, default "update") via the export-safe ResolveEmitterOutputNode + UNiagaraGraph::GetNodesOfClass path, then reports each UNiagaraNodeFunctionCall: index, module_name (GetFunctionName), node_guid, function_script(+class), is_enabled (IsNodeEnabled), is_deprecated, input/output pin counts. Honest-empty modules:[] when the stack has no modules or the graph is not resolvable (a note is returned).
+List the module function-call nodes on one stack, or both stacks, of a Niagara emitter (read-only), optionally just the module with a given name. Resolves the emitter's spawn or update group graph (script_group, default "update"; "all" reads both and also groups them as spawn[] and update[]) via the export-safe ResolveEmitterOutputNode + UNiagaraGraph::GetNodesOfClass path, then reports each UNiagaraNodeFunctionCall: index (its position in its stack), module_name (GetFunctionName), node_guid, function_script(+class), is_enabled (IsNodeEnabled), is_deprecated, input/output pin counts. Honest-empty modules:[] when the stack has no modules or the graph is not resolvable (a note is returned); a module_name that matches no module is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Name of the emitter handle. |
-| `script_group` | string | no | Optional "spawn" or "update"; defaults to "update". |
+| `script_group` | string | no | Optional "spawn", "update" or "all" (both stacks); defaults to "update". |
+| `module_name` | string | no | Optional module name (GetFunctionName, case-sensitive): return only that module; an error when no module of the stack(s) has it. |
 
-**Returns:** `{ system_path: string, emitter_name: string, script_group: string, module_count: int, total_modules_in_stack: int, modules: [{ index, script_group, module_name, node_guid, function_script?, function_script_class?, is_enabled, is_deprecated, input_pin_count, output_pin_count, total_modules_in_stack }], note?: string }`
+**Returns:** `{ system_path: string, emitter_name: string, script_group: string, module_count: int, total_modules_in_stack: int, modules: [{ index, script_group, module_name, node_guid, function_script?, function_script_class?, is_enabled, is_deprecated, input_pin_count, output_pin_count, total_modules_in_stack }], note?: string, spawn?: [{...}], update?: [{...}], spawn_module_count?: int, update_module_count?: int, spawn_note?: string, update_note?: string }`
 
 ## `list_niagara_renderer_classes`
 
@@ -558,19 +383,6 @@ Enumerate every concrete UNiagaraRendererProperties subclass registered in this 
 No parameters.
 
 **Returns:** `{ count: int, classes: [{class_name, class_path, display_name, abstract, class_flags}] }`
-
-## `list_niagara_simulation_stages`
-
-*Read-only.*
-
-List all simulation stages on a Niagara emitter (read-only). Resolves the system by path and the emitter by name, then enumerates FVersionedNiagaraEmitterData::GetSimulationStages(). Each entry reports index, stage_name (SimulationStageName), class, enabled, and (for UNiagaraSimulationStageGeneric stages) iteration_source. Honest-empty: returns simulation_stages:[] / simulation_stage_count:0 when the emitter has no stages.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `system_path` | string | yes | Asset path of the Niagara System. |
-| `emitter_name` | string | yes | Name of the emitter handle. |
-
-**Returns:** `{ system_path: string, emitter_name: string, simulation_stage_count: int, simulation_stages: [{ index, stage_name, class, enabled, iteration_source? }] }`
 
 ## `move_niagara_simulation_stage`
 
@@ -691,7 +503,7 @@ Rename an emitter handle of a Niagara System asset in one undo step, then save t
 
 *Destructive.*
 
-Move a module node, found by function name (case-sensitive, as list_niagara_modules gives it) anywhere in the graph of one emitter of a Niagara System asset, to target_index by reordering the graph node array in place (pins and inputs kept), in one undo step, then request a system compile and save. target_index, old_index and new_index count all module nodes of the emitter graph in node order, as get_niagara_module_info reports stack_index; target_index is required, a JSON number of 0 or more, and one past the last is clamped to it. A module already in place is still saved and reordered is always true, so compare old_index with new_index. An unknown system, emitter or module is an error; a failed save makes success false, with saved=false and save_error. Insert at a position: add_niagara_module_to_graph.
+Move a module node, found by function name (case-sensitive, as list_niagara_modules gives it) anywhere in the graph of one emitter of a Niagara System asset, to target_index by reordering the graph node array in place (pins and inputs kept), in one undo step, then request a system compile and save. target_index, old_index and new_index count all module nodes of the emitter graph in node order, as list_niagara_modules reports index; target_index is required, a JSON number of 0 or more, and one past the last is clamped to it. A module already in place is still saved and reordered is always true, so compare old_index with new_index. An unknown system, emitter or module is an error; a failed save makes success false, with saved=false and save_error. Insert at a position: add_niagara_module_to_stack with target_index.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -730,6 +542,20 @@ Set a LinearColor override (a user parameter value) on the Niagara component of 
 | `color` | array | no | Color as [R, G, B] or [R, G, B, A], numbers within the float range; A is 1.0 when omitted, and an omitted color is opaque black. Any other value is an error. |
 
 **Returns:** `{ actor_name: string, variable_name: string, variable_type: string, set: bool, verified: bool, value_read_back: [number, number, number, number] }`
+
+## `set_niagara_component_fixed_bounds`
+
+*Destructive, idempotent.*
+
+Sets fixed local-space bounds on a spawned Niagara component.  Resolves the UNiagaraComponent on the owner actor and calls UNiagaraComponent::SetSystemFixedBounds(FBox), then reads back via GetSystemFixedBounds.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `actor_name` | string | yes | Owner actor identifier (internal name or editor label). |
+| `min` | array | no | Local-space bounds minimum [X, Y, Z]. |
+| `max` | array | no | Local-space bounds maximum [X, Y, Z]. |
+
+**Returns:** `{ actor_name: string, applied: bool, bounds_valid: bool, min_read_back: [number, number, number], max_read_back: [number, number, number] }`
 
 ## `set_niagara_component_float`
 
@@ -868,7 +694,7 @@ Sets a Vector3 override parameter on a spawned Niagara component.  Resolves the 
 
 *Destructive, idempotent.*
 
-Replace the contents of a numeric array on an array user-parameter data interface of a Niagara System asset (FloatData by default, IntData on the int32 array DI) with values, in an undo transaction that records the DI, then request a recompile and save the system; success requires the save. Every value must be a finite JSON number; an int array stores it truncated toward zero. A value of another type, an unknown system or data interface, an array_property the DI lacks, or an array of structs (Vector, Color, Position) is an error and nothing changes. There is no no-op check: the same values are written and saved again. The reply reads the stored array back. The DI must exist (add_niagara_data_interface); curve DIs: set_niagara_data_interface_curve; inspect it with get_niagara_data_interface_info.
+Replace the contents of a numeric array on an array user-parameter data interface of a Niagara System asset (FloatData by default, IntData on the int32 array DI) with values, in an undo transaction that records the DI, then request a recompile and save the system; success requires the save. Every value must be a finite JSON number; an int array stores it truncated toward zero. A value of another type, an unknown system or data interface, an array_property the DI lacks, or an array of structs (Vector, Color, Position) is an error and nothing changes. There is no no-op check: the same values are written and saved again. The reply reads the stored array back. The DI must exist (add_niagara_data_interface); curve DIs: set_niagara_data_interface_curve; inspect it with get_niagara_data_interfaces.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -913,7 +739,7 @@ Replaces all keys of one FRichCurve property on a curve user-parameter data inte
 
 *Destructive, idempotent.*
 
-Writes one property of a user-parameter data interface on a Niagara system from text parsed by the property's ImportText, so any type it accepts works ("1.5", "(X=1,Y=2,Z=3)", "(R=1,G=0,B=0,A=1)", an enum name), inside an undo transaction, then requests a system recompile and saves the system; success requires the save. A missing DI or property, or text that does not parse, is an error and the DI is left untouched. value echoes the request; value_read_back is the stored value exported as text. List the DI's properties with get_niagara_data_interface_info; for asset references use set_niagara_data_interface_asset.
+Writes one property of a user-parameter data interface on a Niagara system from text parsed by the property's ImportText, so any type it accepts works ("1.5", "(X=1,Y=2,Z=3)", "(R=1,G=0,B=0,A=1)", an enum name), inside an undo transaction, then requests a system recompile and saves the system; success requires the save. A missing DI or property, or text that does not parse, is an error and the DI is left untouched. value echoes the request; value_read_back is the stored value exported as text. List the DI's properties with get_niagara_data_interfaces; for asset references use set_niagara_data_interface_asset.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -924,26 +750,11 @@ Writes one property of a user-parameter data interface on a Niagara system from 
 
 **Returns:** `{ system_path: string, parameter_name: string, property_name: string, value: string, value_read_back: string, set: bool, saved: bool, save_error?: string }`
 
-## `set_niagara_decal_renderer_material`
-
-*Destructive, idempotent.*
-
-Assign a material to the Decal renderer at renderer_index of one emitter in a Niagara System asset, in one undo step, then save the system. material_path is loaded as a UMaterialInterface; a missing or unknown material, system or emitter, a renderer_index that is not a JSON number or is out of range, or a renderer that is not a Decal renderer is an error and nothing changes. A renderer that already uses that material is a success with changed=false and saved=false, nothing written. A failed save makes success false, with saved=false and save_error, the change kept in memory. Returns the previous and new material paths. For sprite, ribbon or mesh renderers use set_niagara_renderer_material; add a Decal renderer with add_niagara_decal_renderer.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `system_path` | string | yes | Niagara System asset path, e.g. "/Game/Niagara/NS_Example"; the call fails without it. |
-| `emitter_name` | string | yes | Display name of the emitter handle that owns the renderer (case-insensitive); the call fails without it. |
-| `renderer_index` | number | yes | 0-based index in the renderer list of the emitter, in get_niagara_emitter_renderers order; that renderer must be a Decal renderer. The call fails without it. |
-| `material_path` | string | yes | Object path of the UMaterialInterface to assign, e.g. "/Game/Decals/M_Blood.M_Blood". |
-
-**Returns:** `{ system_path, emitter_name, renderer_index, previous_material_path, new_material_path, changed, saved, save_error?, note? }`
-
 ## `set_niagara_effect_type`
 
 *Destructive, idempotent.*
 
-Assign a Niagara Effect Type asset (the scalability and culling settings) to a Niagara System asset in one undo step, then save the system. effect_type_path is loaded as a UNiagaraEffectType; an unknown system or effect type is an error and nothing changes. A system that already uses that effect type is a success with changed=false and saved=false, and nothing is written. A failed save makes success false, with saved=false and save_error, the change kept in memory. Read it back with get_niagara_effect_type; the effect type's limits: get_niagara_scalability_settings.
+Assign a Niagara Effect Type asset (the scalability and culling settings) to a Niagara System asset in one undo step, then save the system. effect_type_path is loaded as a UNiagaraEffectType; an unknown system or effect type is an error and nothing changes. A system that already uses that effect type is a success with changed=false and saved=false, and nothing is written. A failed save makes success false, with saved=false and save_error, the change kept in memory. Read it back, with the effect type's limits, with get_niagara_effect_type.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -971,7 +782,7 @@ Set how one emitter of a Niagara System asset, found by handle name, sizes its p
 
 *Destructive, idempotent.*
 
-Set how one emitter of a Niagara System asset, found by handle name, computes its bounds (bounds_mode Dynamic, Fixed or Programmable, case-insensitive, default Fixed) and optionally its fixed box, in one undo step, then save the system. bounds_min and bounds_max are FVector strings like "X=-50 Y=-50 Z=0", not arrays; one alone keeps the other corner. With neither, Fixed resets the box to the engine default (-100 to 100 per axis) and the other modes keep it; min &lt;= max is not checked. An unknown mode, system or emitter, or a corner without X=, Y= and Z=, is an error and nothing changes. A mode and box already in place are a success with changed=false and saved=false, nothing written. A failed save makes success false, with saved=false and save_error. Read back with get_niagara_emitter_runtime_summary; for a placed Niagara component use set_niagara_system_fixed_bounds.
+Set how one emitter of a Niagara System asset, found by handle name, computes its bounds (bounds_mode Dynamic, Fixed or Programmable, case-insensitive, default Fixed) and optionally its fixed box, in one undo step, then save the system. bounds_min and bounds_max are FVector strings like "X=-50 Y=-50 Z=0", not arrays; one alone keeps the other corner. With neither, Fixed resets the box to the engine default (-100 to 100 per axis) and the other modes keep it; min &lt;= max is not checked. An unknown mode, system or emitter, or a corner without X=, Y= and Z=, is an error and nothing changes. A mode and box already in place are a success with changed=false and saved=false, nothing written. A failed save makes success false, with saved=false and save_error. Read back with get_niagara_emitter_runtime_summary; for a placed Niagara component use set_niagara_component_fixed_bounds.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -997,20 +808,6 @@ Enable or disable one emitter handle of a Niagara System asset, found by display
 
 **Returns:** `{ system_path: string, emitter_name: string, enabled: bool, state_changed: bool, verified: bool, is_enabled_read_back: bool, saved: bool, save_error?: string, note?: string }`
 
-## `set_niagara_emitter_local_space`
-
-*Destructive, idempotent.*
-
-Set whether one emitter of a Niagara System asset, found by handle name, simulates in local space (bLocalSpace on its emitter data), in one undo step, then save the system. local_space is required: true keeps the particles in the space of the emitter, false in world space. A value already in place is a success with changed=false and saved=false, nothing written. An unknown system or emitter is an error. A failed save makes success false, with saved=false and save_error, the change kept in memory. Returns local_space as read back. Read it back with get_niagara_emitter_runtime_summary; the simulation target: set_niagara_emitter_sim_target.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `system_path` | string | yes | Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it. |
-| `emitter_name` | string | yes | Display name of the emitter handle (case-insensitive). |
-| `local_space` | boolean | yes | true to simulate the particles of the emitter in its local space, false for world space; the call fails without it. |
-
-**Returns:** `{ system_path: string, emitter_name: string, local_space: bool, applied: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
-
 ## `set_niagara_emitter_max_gpu_particles`
 
 *Destructive, idempotent.*
@@ -1029,7 +826,7 @@ Set the MaxGPUParticlesSpawnPerFrame override of one emitter of a Niagara System
 
 *Destructive, idempotent.*
 
-Set whether one emitter of a Niagara System asset, found by handle name, gives its particles persistent IDs (bRequiresPersistentIDs: a Particles.ID stable across frames, at a small cost), in one undo step, then save the system. requires_persistent_ids is required. A value already in place is a success with changed=false and saved=false, nothing written. A missing param or an unknown system or emitter is an error. A failed save makes success false, with saved=false and save_error, the change kept in memory. Returns the flag as read back; read it later with get_niagara_emitter_runtime_summary; local space: set_niagara_emitter_local_space.
+Set whether one emitter of a Niagara System asset, found by handle name, gives its particles persistent IDs (bRequiresPersistentIDs: a Particles.ID stable across frames, at a small cost), in one undo step, then save the system. requires_persistent_ids is required. A value already in place is a success with changed=false and saved=false, nothing written. A missing param or an unknown system or emitter is an error. A failed save makes success false, with saved=false and save_error, the change kept in memory. Returns the flag as read back; read it later with get_niagara_emitter_runtime_summary; local space: set_niagara_emitter_sim_target with local_space.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1043,23 +840,23 @@ Set whether one emitter of a Niagara System asset, found by handle name, gives i
 
 *Destructive, idempotent.*
 
-Set the simulation target (CPUSim or GPUComputeSim, case-insensitive) of one emitter of a Niagara System asset, found by handle name, and optionally its local_space and deterministic flags, in one undo step, then save the system. Values already in place are a success with changed=false and saved=false, and nothing is written. An unknown sim_target, system or emitter is an error and nothing changes. A failed save makes success false, with saved=false and save_error, the change kept in memory. Read it back with get_niagara_emitter_sim_target; GPU spawn limit: set_niagara_emitter_max_gpu_particles; local space alone: set_niagara_emitter_local_space.
+Set the simulation target (CPUSim or GPUComputeSim, case-insensitive), the local-space flag (bLocalSpace: particles in the emitter's space, or world space) and the deterministic flag of one emitter of a Niagara System asset, found by handle name, in one undo step, then save the system. Each of the three is optional and only the supplied ones are written, but at least one is required. Values already in place are a success with changed=false and saved=false, and nothing is written. An unknown sim_target, system or emitter, or a call with none of the three, is an error and nothing changes. A failed save makes success false, with saved=false and save_error, the change kept in memory. Returns the three as read back. Read them back with get_niagara_emitter_runtime_summary; GPU spawn limit: set_niagara_emitter_max_gpu_particles.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Display name of the emitter handle. |
-| `sim_target` | string | yes | Target type — "CPUSim" or "GPUComputeSim". |
-| `local_space` | boolean | no | Optional bool override for bLocalSpace |
-| `deterministic` | boolean | no | Optional bool override for bDeterminism |
+| `sim_target` | string | no | Optional target type, "CPUSim" or "GPUComputeSim"; omitted keeps the current one. |
+| `local_space` | boolean | no | Optional bool for bLocalSpace: true simulates the particles in the emitter's local space, false in world space; omitted keeps the current value. |
+| `deterministic` | boolean | no | Optional bool for bDeterminism; omitted keeps the current value. |
 
-**Returns:** `{ system_path: string, emitter_name: string, sim_target: string, success: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
+**Returns:** `{ system_path: string, emitter_name: string, sim_target: string, local_space: bool, deterministic: bool, success: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_niagara_emitter_template_description`
 
 *Destructive, idempotent.*
 
-Set the TemplateAssetDescription text (shown when the emitter is picked as a template) of a standalone Niagara Emitter asset, not an emitter inside a system, in one undo step, then save the asset. description is stored as FText; an empty string clears it. A description the property system already finds identical is a success with changed=false and saved=false, nothing written. An unknown emitter asset or a missing param is an error. A failed save makes success false, with saved=false and save_error, the change kept in memory. Returns old_description and new_description as read back. Emitters inside a system: get_niagara_emitter_handles; add one from an emitter asset with add_niagara_emitter_handle.
+Set the TemplateAssetDescription text (shown when the emitter is picked as a template) of a standalone Niagara Emitter asset, not an emitter inside a system, in one undo step, then save the asset. description is stored as FText; an empty string clears it. A description the property system already finds identical is a success with changed=false and saved=false, nothing written. An unknown emitter asset or a missing param is an error. A failed save makes success false, with saved=false and save_error, the change kept in memory. Returns old_description and new_description as read back. Emitters inside a system: get_niagara_emitter_handles; add one from an emitter asset with add_niagara_emitter_from_template.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1121,7 +918,7 @@ Override a Niagara module input by writing the rapid-iteration store. Locates th
 
 *Destructive, idempotent.*
 
-Set the Material UPROPERTY on a Niagara renderer (Sprite/Ribbon/Mesh).  Loads the material, sets it on the renderer's public Material field, requests a system compile and saves; a failed save makes success false, with saved=false and save_error. A renderer that already uses that material is a success with changed=false and saved=false, and nothing is written. A renderer_index that is not a JSON number is an error. Reads back to verify the material path is now bound.
+Set the Material UPROPERTY on a Niagara renderer (Sprite, Ribbon, Mesh or Decal: any renderer class with a Material property).  Loads the material, sets it on the renderer's public Material field, requests a system compile and saves; a failed save makes success false, with saved=false and save_error. A renderer that already uses that material is a success with changed=false and saved=false, and nothing is written. A renderer_index that is not a JSON number, or a renderer class without a Material property (Light), is an error. Reads back to verify the material path is now bound, and returns the material it replaced.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1130,13 +927,13 @@ Set the Material UPROPERTY on a Niagara renderer (Sprite/Ribbon/Mesh).  Loads th
 | `renderer_index` | number | yes | 0-based index of the renderer (use get_niagara_emitter_renderers to find the index) |
 | `material_path` | string | yes | Asset path of the UMaterialInterface to assign. |
 
-**Returns:** `{ system_path: string, emitter_name: string, renderer_index: int, renderer_class: string, material_path: string, verified: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
+**Returns:** `{ system_path: string, emitter_name: string, renderer_index: int, renderer_class: string, previous_material_path: string, material_path: string, verified: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_niagara_renderer_properties`
 
 *Destructive, idempotent.*
 
-Set properties of one renderer (Sprite, Mesh, Ribbon, Light or Decal) of a Niagara emitter by reflection, in one undo step, then request a system compile and save. Only the supplied fields are written, with ClampMin/ClampMax applied; enum fields (alignment, facing_mode, sort_mode, motion_vector_setting, decal_source_mode) also fire PostEditChangeProperty so derived state updates. Every field is converted before the first write, so a value that does not convert (an unknown enum name, an array for a struct field) is an error and nothing changes. Values the renderer already holds are a success with changed=false and saved=false, nothing written. A renderer_index that is not a JSON number is an error. Keys the renderer class lacks are listed in not_applicable. A failed save makes success false, with saved=false and save_error. Materials: set_niagara_renderer_material or set_niagara_decal_renderer_material; read back with get_niagara_renderer_info.
+Set properties of one renderer (Sprite, Mesh, Ribbon, Light or Decal) of a Niagara emitter by reflection, in one undo step, then request a system compile and save. Only the supplied fields are written, with ClampMin/ClampMax applied; enum fields (alignment, facing_mode, sort_mode, motion_vector_setting, decal_source_mode) also fire PostEditChangeProperty so derived state updates. Every field is converted before the first write, so a value that does not convert (an unknown enum name, an array for a struct field) is an error and nothing changes. Values the renderer already holds are a success with changed=false and saved=false, nothing written. A renderer_index that is not a JSON number is an error. Keys the renderer class lacks are listed in not_applicable. A failed save makes success false, with saved=false and save_error. Materials: set_niagara_renderer_material; read back with get_niagara_renderer_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1204,7 +1001,7 @@ Set the enum, bool, name and FIntPoint properties of one generic simulation stag
 
 *Destructive, idempotent.*
 
-Set the system-wide determinism flag (bDeterminism, written by reflection) of a Niagara System asset, found by asset path, in one undo step, then save the asset. When true, every instance seeds its random numbers from the system's RandomSeed plus the component's RandomSeedOffset, so runs are repeatable; when false, each instance draws a new seed on reset. deterministic is required. A value the system already holds is a success with changed=false and saved=false, nothing written. A missing param or unknown system is an error; a failed save (for example while PIE runs) makes success false with saved=false and save_error, the change kept in memory. Read it back with get_niagara_system_warmup_time; one emitter's determinism: set_niagara_emitter_sim_target.
+Set the system-wide determinism flag (bDeterminism, written by reflection) of a Niagara System asset, found by asset path, in one undo step, then save the asset. When true, every instance seeds its random numbers from the system's RandomSeed plus the component's RandomSeedOffset, so runs are repeatable; when false, each instance draws a new seed on reset. deterministic is required. A value the system already holds is a success with changed=false and saved=false, nothing written. A missing param or unknown system is an error; a failed save (for example while PIE runs) makes success false with saved=false and save_error, the change kept in memory. Read it back with get_niagara_system_info; one emitter's determinism: set_niagara_emitter_sim_target.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1212,20 +1009,6 @@ Set the system-wide determinism flag (bDeterminism, written by reflection) of a 
 | `deterministic` | boolean | yes | Boolean to assign to bDeterminism |
 
 **Returns:** `{ system_path: string, old_deterministic: bool, new_deterministic: bool, applied: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
-
-## `set_niagara_system_fixed_bounds`
-
-*Destructive, idempotent.*
-
-Sets fixed local-space bounds on a spawned Niagara component.  Resolves the UNiagaraComponent on the owner actor and calls UNiagaraComponent::SetSystemFixedBounds(FBox), then reads back via GetSystemFixedBounds.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actor_name` | string | yes | Owner actor identifier (internal name or editor label). |
-| `min` | array | no | Local-space bounds minimum [X, Y, Z]. |
-| `max` | array | no | Local-space bounds maximum [X, Y, Z]. |
-
-**Returns:** `{ actor_name: string, applied: bool, bounds_valid: bool, min_read_back: [number, number, number], max_read_back: [number, number, number] }`
 
 ## `set_niagara_system_properties`
 
@@ -1259,7 +1042,7 @@ Set render and system flags of a Niagara System asset by reflection, without Pos
 
 *Destructive, idempotent.*
 
-Recompute the warmup tick count of a Niagara System asset, found by asset path, from its current warmup time and tick delta, in one undo step, then save the asset; it takes no count. The engine stores floor(warmup_time / warmup_tick_delta) and rounds warmup_time down to whole ticks; a delta near zero is reset to 0 with a count of 0, so no warmup runs. Settings that are already consistent are a success with changed=false and saved=false, nothing written. An unknown system is an error; a failed save makes success false with saved=false and save_error, the change kept in memory. For N ticks, set the delta with set_niagara_system_warmup_tick_delta, then N times it with set_niagara_system_warmup_time and check warmup_tick_count; read back with get_niagara_system_warmup_time.
+Recompute the warmup tick count of a Niagara System asset, found by asset path, from its current warmup time and tick delta, in one undo step, then save the asset; it takes no count. The engine stores floor(warmup_time / warmup_tick_delta) and rounds warmup_time down to whole ticks; a delta near zero is reset to 0 with a count of 0, so no warmup runs. Settings that are already consistent are a success with changed=false and saved=false, nothing written. An unknown system is an error; a failed save makes success false with saved=false and save_error, the change kept in memory. For N ticks, set the delta with set_niagara_system_warmup_tick_delta, then N times it with set_niagara_system_warmup_time and check warmup_tick_count; read back with get_niagara_system_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1271,7 +1054,7 @@ Recompute the warmup tick count of a Niagara System asset, found by asset path, 
 
 *Destructive, idempotent.*
 
-Set the warmup tick delta (seconds simulated per warmup tick) of a Niagara System asset in one undo step, then save it. The engine re-derives the tick count as floor(warmup_time / delta) and rounds warmup_time down to a whole number of ticks, so a delta that does not divide the warmup time shortens it and one larger than it zeroes the warmup; the reply does not show this, so read warmup_time and warmup_tick_count back with get_niagara_system_warmup_time. A delta that leaves the warmup settings as they are is a success with changed=false and saved=false, nothing written. A missing delta, one that is not a finite JSON number above 0, or an unknown system, is an error and nothing changes; a failed save makes success false with saved=false and save_error. Set the delta before calling set_niagara_system_warmup_time.
+Set the warmup tick delta (seconds simulated per warmup tick) of a Niagara System asset in one undo step, then save it. The engine re-derives the tick count as floor(warmup_time / delta) and rounds warmup_time down to a whole number of ticks, so a delta that does not divide the warmup time shortens it and one larger than it zeroes the warmup; the reply does not show this, so read warmup_time and warmup_tick_count back with get_niagara_system_info. A delta that leaves the warmup settings as they are is a success with changed=false and saved=false, nothing written. A missing delta, one that is not a finite JSON number above 0, or an unknown system, is an error and nothing changes; a failed save makes success false with saved=false and save_error. Set the delta before calling set_niagara_system_warmup_time.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1284,7 +1067,7 @@ Set the warmup tick delta (seconds simulated per warmup tick) of a Niagara Syste
 
 *Destructive, idempotent.*
 
-Set the warmup time in seconds (simulated ahead when the system activates; 0 turns warmup off) of a Niagara System asset in one undo step, then save the asset. The engine re-derives warmup_tick_count as floor(warmup_time / warmup_tick_delta) and rounds the time down to whole ticks, so a time that is not a multiple of the delta comes back shorter in new_warmup_time; with a delta of 0 no warmup runs. A time that is not a finite JSON number of 0 or more, a missing param or an unknown system is an error and nothing changes. A time that leaves the warmup settings as they are is a success with changed=false and saved=false, nothing written. A failed save makes success false with saved=false and save_error, the change kept in memory. Set the delta first with set_niagara_system_warmup_tick_delta; read back with get_niagara_system_warmup_time.
+Set the warmup time in seconds (simulated ahead when the system activates; 0 turns warmup off) of a Niagara System asset in one undo step, then save the asset. The engine re-derives warmup_tick_count as floor(warmup_time / warmup_tick_delta) and rounds the time down to whole ticks, so a time that is not a multiple of the delta comes back shorter in new_warmup_time; with a delta of 0 no warmup runs. A time that is not a finite JSON number of 0 or more, a missing param or an unknown system is an error and nothing changes. A time that leaves the warmup settings as they are is a success with changed=false and saved=false, nothing written. A failed save makes success false with saved=false and save_error, the change kept in memory. Set the delta first with set_niagara_system_warmup_tick_delta; read back with get_niagara_system_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

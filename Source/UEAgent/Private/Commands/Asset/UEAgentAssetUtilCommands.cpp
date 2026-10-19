@@ -2,8 +2,8 @@
 #include "Commands/Common/McpCommonUtils.h"
 #include "Commands/Asset/AssetCommandHelpers.h"
 
-#include "Misc/PackageName.h"                 // FPackageName::LongPackageNameToFilename / GetAssetPackageExtension / GetMapPackageExtension / ObjectPathToPackageName
-#include "HAL/FileManager.h"                  // IFileManager::Get().FileSize
+#include "Misc/PackageName.h"                 // FPackageName::TryConvertLongPackageNameToFilename / ObjectPathToPackageName
+#include "HAL/FileManager.h"                  // IFileManager::Get().FindFilesRecursive
 #include "Misc/App.h"                         // FApp::CanEverRender
 #include "RHI.h"                              // GIsRHIInitialized
 
@@ -20,11 +20,11 @@
 #include "Curves/CurveLinearColor.h"          // UCurveLinearColor::GetLinearColorValue
 #include "Curves/CurveBase.h"                 // UCurveBase
 
-// bulk_rename_assets via IAssetTools.
+// rename_assets via IAssetTools.
 #include "IAssetTools.h"
 #include "AssetToolsModule.h"
 
-// bulk_rename_assets guards (readonly roots / PIE / CDO-modal pre-detection /
+// rename_assets guards (readonly roots / PIE / CDO-modal pre-detection /
 // per-item disk verification / dirty-referencer classification).
 #include "Editor.h"                                          // GEditor
 #include "Editor/LevelEditor/Public/LevelEditorSubsystem.h"   // ULevelEditorSubsystem::IsInPlayInEditor (same include form as UEAgentSystemCommands.cpp)
@@ -99,69 +99,6 @@ namespace
         }
         return UE::AssetRegistry::FDependencyQuery();
     }
-}
-
-// -------------------------------------------------------------------------- //
-// get_asset_disk_size
-// -------------------------------------------------------------------------- //
-// MCP:get_asset_disk_size - Stat the package file of an asset on disk, by object or package path, without loading the asset or changing anything: the package name is mapped through the mounted content roots to its .uasset file, else its .umap, and file_path and extension say which was found. A package with no file on disk, one never saved for instance, is still a success with exists_on_disk=false, size_bytes 0 and a message, and without size_kb or size_mb. The asset registry is not consulted and unsaved in-memory edits do not count. A malformed package name is an error. To look an asset up by name instead use get_asset_file_size; estimated memory is get_asset_memory_usage; what it pulls in is get_asset_dependencies_recursive.
-//   @param asset_path - Object path or package path of the asset (e.g. '/Game/MyGame/M_Example').
-//   @returns { asset_path: string, package_name: string, file_path: string, extension: string, size_bytes: number, size_kb?: number, size_mb?: number, exists_on_disk: bool, message?: string }
-
-TSharedPtr<FJsonObject> HandleGetAssetDiskSize(const TSharedPtr<FJsonObject>& Params)
-{
-    FString AssetPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("asset_path"), AssetPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-    const FString PackageName = ToLongPackageName(AssetPath);
-    if (!FPackageName::IsValidLongPackageName(PackageName))
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Not a valid long package name: %s"), *PackageName));
-    }
-
-    // Try the standard asset extension first (.uasset), then the map extension (.umap),
-    // since a world package is stored as .umap. Resolve the on-disk filename and stat it.
-    const FString AssetExt = FPackageName::GetAssetPackageExtension(); // ".uasset"
-    const FString MapExt   = FPackageName::GetMapPackageExtension();   // ".umap"
-
-    FString ResolvedFile = FPackageName::LongPackageNameToFilename(PackageName, AssetExt);
-    int64 FileSize = IFileManager::Get().FileSize(*ResolvedFile);
-    FString UsedExtension = AssetExt;
-
-    if (FileSize < 0)
-    {
-        const FString MapFile = FPackageName::LongPackageNameToFilename(PackageName, MapExt);
-        const int64 MapSize = IFileManager::Get().FileSize(*MapFile);
-        if (MapSize >= 0)
-        {
-            ResolvedFile = MapFile;
-            FileSize = MapSize;
-            UsedExtension = MapExt;
-        }
-    }
-
-    TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-    Result->SetStringField(TEXT("asset_path"), AssetPath);
-    Result->SetStringField(TEXT("package_name"), PackageName);
-    Result->SetStringField(TEXT("file_path"), ResolvedFile);
-    Result->SetStringField(TEXT("extension"), UsedExtension);
-
-    if (FileSize < 0)
-    {
-        // The package is not present on disk (e.g. never saved). Report honestly.
-        Result->SetNumberField(TEXT("size_bytes"), 0);
-        Result->SetBoolField(TEXT("exists_on_disk"), false);
-        Result->SetStringField(TEXT("message"),
-            FString::Printf(TEXT("Package file not found on disk: %s"), *ResolvedFile));
-        return mcp_common::MakeOkReply(Result);
-    }
-
-    Result->SetNumberField(TEXT("size_bytes"), static_cast<double>(FileSize));
-    Result->SetNumberField(TEXT("size_kb"), static_cast<double>(FileSize) / 1024.0);
-    Result->SetNumberField(TEXT("size_mb"), static_cast<double>(FileSize) / (1024.0 * 1024.0));
-    Result->SetBoolField(TEXT("exists_on_disk"), true);
-    return mcp_common::MakeOkReply(Result);
 }
 
 // -------------------------------------------------------------------------- //
@@ -444,12 +381,12 @@ namespace
 }
 
 // ===========================================================================
-// RENAME GUARDS of bulk_rename_assets. Why each guard exists is right below
+// RENAME GUARDS of rename_assets. Why each guard exists is right below
 // (all three are measured behaviors of IAssetTools::RenameAssets, not
 // defensive guesses).
 // ===========================================================================
 
-// Why each guard exists. bulk_rename_assets, rename_asset and move_asset (UEAgentManagementCommands.cpp)
+// Why each guard exists. rename_assets, rename_asset and move_asset (UEAgentManagementCommands.cpp)
 // all end up in the same IAssetTools::RenameAssets / FAssetRenameManager path, so they share three
 // exposures:
 //   1. PIE. RenameAssets re-saves referencing packages; doing that while a PIE session is live is the same
@@ -487,7 +424,7 @@ bool IsPlayInEditorActive()
  *     to their generated class counterparts" case).
  * The soft half is an APPROXIMATION of the engine's serializer-based scan: it reaches nested structs and
  * containers, but NOT soft paths that only exist inside instanced subobjects of the CDO. Consumers must
- * report it as such (bulk_rename_assets emits `soft_scan_is_approximate`), never as a guarantee that no
+ * report it as such (rename_assets emits `soft_scan_is_approximate`), never as a guarantee that no
  * modal will appear.
  *
  * @return one JSON object per asset that has at least one CDO reference:
@@ -806,7 +743,7 @@ TArray<TSharedPtr<FJsonObject>> ClassifyDirtyPackages(const TArray<FString>& Pac
 }
 
 // ---------------------------------------------------------------------------
-// 1. bulk_rename_assets
+// 1. rename_assets
 // ---------------------------------------------------------------------------
 //   (a) per-row results come from disk verification, not from RenameAssets' single
 //       batch bool;
@@ -826,7 +763,7 @@ TArray<TSharedPtr<FJsonObject>> ClassifyDirtyPackages(const TArray<FString>& Pac
 // silent no-op into a refusal with its cause. A local TGuardValue is kept too, so
 // the handler is safe if ever called off-bridge.
 // ---------------------------------------------------------------------------
-// MCP:bulk_rename_assets - Rename/move multiple assets in one IAssetTools::RenameAssets batch, with per-item disk verification instead of the batch bool. Guards: refuses while PIE is active; refuses paths under readonly_roots (default: the project's Read Only Content Roots setting) on BOTH the source and the destination; pre-detects the native-CDO reference case that makes the engine's FMessageDialog auto-cancel the whole batch (would_block_on_modal) and does NOT call RenameAssets in that case. Also reports referencer packages left DIRTY -- PerformAssetRename discards its FailedPackages list unless UE source control is connected, so a referencer (typically OFPA) can be left unwritten while RenameAssets still returns true.
+// MCP:rename_assets - Rename/move multiple assets in one IAssetTools::RenameAssets batch, with per-item disk verification instead of the batch bool. Guards: refuses while PIE is active; refuses paths under readonly_roots (default: the project's Read Only Content Roots setting) on BOTH the source and the destination; pre-detects the native-CDO reference case that makes the engine's FMessageDialog auto-cancel the whole batch (would_block_on_modal) and does NOT call RenameAssets in that case. Also reports referencer packages left DIRTY -- PerformAssetRename discards its FailedPackages list unless UE source control is connected, so a referencer (typically OFPA) can be left unwritten while RenameAssets still returns true.
 //   @param assets - List of rename descriptors: { old_path (required), new_name (optional, default = current name), new_folder (optional, default = current folder) }.
 //   @param dry_run - Optional bool (default false). Plan + run every guard and the CDO scan, but never call RenameAssets.
 //   @param readonly_roots - Optional array of long paths that must not be renamed FROM or INTO (default: the project's Read Only Content Roots setting). Pass [] to disable the guard.
@@ -867,7 +804,7 @@ TSharedPtr<FJsonObject> HandleBulkRenameAssets(
     if (IsPlayInEditorActive())
     {
         return mcp_common::MakeErrorReply(TEXT(
-            "bulk_rename_assets refuses to run while Play-In-Editor is active: IAssetTools::RenameAssets "
+            "rename_assets refuses to run while Play-In-Editor is active: IAssetTools::RenameAssets "
             "re-saves every referencing package, which is unreliable during PIE. Stop PIE "
             "(stop_play_in_editor) and call again."));
     }
@@ -1367,7 +1304,7 @@ namespace
 // -------------------------------------------------------------------------- //
 // ingest_external_uassets
 // -------------------------------------------------------------------------- //
-// MCP:ingest_external_uassets - Copy .uasset/.uexp/.ubulk/.umap from an EXTERNAL Content tree into THIS project, preserving each file's path relative to its Content root, then register the new packages with IAssetRegistry::ScanPathsSynchronous(bForceRescan) and sweep object redirectors under the destination. Fills the gap that migrate_assets only EXPORTS and import_asset is FBX/PNG-only. HEAVY: touches project Content on disk + mutates the registry -- run with confirmation.
+// MCP:ingest_external_uassets - Copy .uasset/.uexp/.ubulk/.umap from an EXTERNAL Content tree into THIS project, preserving each file's path relative to its Content root, then register the new packages with IAssetRegistry::ScanPathsSynchronous(bForceRescan) and sweep object redirectors under the destination. Fills the gap that migrate_assets only EXPORTS and import_texture_file is image-only. HEAVY: touches project Content on disk + mutates the registry -- run with confirmation.
 //   @param source_dir - External source directory (its Content ancestor defines the preserved relative path; if none, source_dir itself is the root).
 //   @param dest_root - Destination content mount path (optional, default '/Game'); e.g. '/Game/MyGame/Imported'.
 //   @param paths - Optional list of relative sub-paths (relative to the Content root) to restrict the copy to; empty/absent = whole tree.
@@ -1569,9 +1506,9 @@ TSharedPtr<FJsonObject> HandleIngestExternalUAssets(const TSharedPtr<FJsonObject
 }
 
 // -------------------------------------------------------------------------- //
-// scan_uasset_refs
+// scan_uasset_references
 // -------------------------------------------------------------------------- //
-// MCP:scan_uasset_refs - Lightweight BINARY scan of a .uasset/.umap on disk (NO editor load): tokenizes the raw package bytes and reports the referenced-asset-path tokens (/Game//Engine//Script) plus, optionally, tokens matching a regex `pattern`. A quick way to compare copies of one asset: an incomplete (stub) copy shows far fewer reference tokens than the complete one. Accepts a disk path OR a /Game|/Engine mount path.
+// MCP:scan_uasset_references - Lightweight BINARY scan of a .uasset/.umap on disk (NO editor load): tokenizes the raw package bytes and reports the referenced-asset-path tokens (/Game//Engine//Script) plus, optionally, tokens matching a regex `pattern`. A quick way to compare copies of one asset: an incomplete (stub) copy shows far fewer reference tokens than the complete one. Accepts a disk path OR a /Game|/Engine mount path.
 //   @param package_file - Absolute .uasset/.umap path on disk, or a /Game|/Engine mount path.
 //   @param pattern - Optional regex (ECMAScript); tokens containing a match are counted in the 'matches' fields.
 //   @returns { package_file: string, resolved_path: string, exists: bool, file_size_bytes: number, modified: string, pattern: string, ref_path_unique: int, ref_path_occurrences: number, ref_paths: [{token, count}], match_unique: int, match_occurrences: number, matches: [{token, count}] }
@@ -1615,7 +1552,7 @@ TSharedPtr<FJsonObject> HandleScanUAssetRefs(const TSharedPtr<FJsonObject>& Para
 // -------------------------------------------------------------------------- //
 // compare_asset_versions
 // -------------------------------------------------------------------------- //
-// MCP:compare_asset_versions - Apply the binary ref-scan of scan_uasset_refs to the SAME asset (rel_path) across N external Content roots, reporting ref-count / size / mtime (and optional pattern-match count) per root so you can tell an incomplete (stub) copy from the complete one at a glance.
+// MCP:compare_asset_versions - Apply the binary ref-scan of scan_uasset_references to the SAME asset (rel_path) across N external Content roots, reporting ref-count / size / mtime (and optional pattern-match count) per root so you can tell an incomplete (stub) copy from the complete one at a glance.
 //   @param rel_path - Asset path relative to each root's Content dir, e.g. 'Characters/Mannequin/ABP_Manny.uasset' (a missing extension defaults to .uasset).
 //   @param roots - List of external Content-root directories to compare across.
 //   @param pattern - Optional regex (ECMAScript) forwarded to the scan; when set, roots rank by pattern-match count instead of ref-path count.
@@ -2046,16 +1983,15 @@ TSharedPtr<FJsonObject> HandleGetReferencePath(const TSharedPtr<FJsonObject>& Pa
 
 const McpCommandFamilies::FRegistrar Registration =
 {
-    { TEXT("bulk_rename_assets"), &HandleBulkRenameAssets },
+    { TEXT("rename_assets"), &HandleBulkRenameAssets },
     { TEXT("compare_asset_versions"), &HandleCompareAssetVersions },
     { TEXT("diff_content_trees"), &HandleDiffContentTrees },
     { TEXT("evaluate_curve_at_time"), &HandleEvaluateCurveAtTime },
     { TEXT("generate_asset_thumbnail"), &HandleGenerateAssetThumbnail },
     { TEXT("get_asset_dependencies_recursive"), &HandleGetAssetDependenciesRecursive },
-    { TEXT("get_asset_disk_size"), &HandleGetAssetDiskSize },
     { TEXT("get_reference_path"), &HandleGetReferencePath },
     { TEXT("ingest_external_uassets"), &HandleIngestExternalUAssets },
     { TEXT("list_assets_modified_since"), &HandleListAssetsModifiedSince },
-    { TEXT("scan_uasset_refs"), &HandleScanUAssetRefs },
+    { TEXT("scan_uasset_references"), &HandleScanUAssetRefs },
 };
 } // namespace UEAgentAssetUtilCommands

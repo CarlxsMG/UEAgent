@@ -37,7 +37,7 @@ namespace
      *
      * Why: IAssetTools::ImportAssetTasks pumps the game-thread task graph, which
      * trips a RecursionGuard assertion when called from inside the bridge's
-     * FTSTicker callback (the same risk profile import_asset hit at UE 5.7).
+     * FTSTicker callback (the risk the old generic importer hit at UE 5.7).
      * FactoryCreateBinary is inline on the calling thread, no task-graph
      * dependency.
      *
@@ -75,23 +75,56 @@ namespace
 
         Params->TryGetStringField(TEXT("asset_name"), OutAssetName);
 
+        // replace_existing=false refuses before anything is touched when the destination already holds an
+        // asset; the factory import itself always overwrites, so this is the only place the flag can act.
         bool bReplaceExisting = true;
         Params->TryGetBoolField(TEXT("replace_existing"), bReplaceExisting);
+        if (!bReplaceExisting)
+        {
+            const FString FinalName = OutAssetName.IsEmpty() ? FPaths::GetBaseFilename(OutFilePath) : OutAssetName;
+            const FString DestinationPackage = OutPackagePath / FinalName;
+            if (UEditorAssetLibrary::DoesAssetExist(DestinationPackage))
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(
+                    TEXT("An asset already exists at %s and replace_existing is false; pass replace_existing=true to overwrite it or choose another asset_name."),
+                    *DestinationPackage));
+            }
+        }
         return nullptr;
+    }
+
+    // Image extensions the legacy UTextureFactory path imports; anything else is refused before the factory runs.
+    bool Import_IsTextureExtension(const FString& Extension)
+    {
+        static const TSet<FString> TextureExtensions = {
+            TEXT("png"), TEXT("jpg"), TEXT("jpeg"), TEXT("bmp"), TEXT("tga"),
+            TEXT("dds"), TEXT("exr"), TEXT("hdr"), TEXT("tif"), TEXT("tiff"),
+            TEXT("psd"), TEXT("pcx")
+        };
+        return TextureExtensions.Contains(Extension.ToLower());
     }
 }
 
-// MCP:import_texture_file - Import an external image file (PNG/JPG/TGA/...) into a UTexture2D asset.  Uses the legacy UTextureFactory path (no Interchange). The new texture is saved to disk and verified by loading it back; the response reports the resulting asset_path, width and height.
-//   @param file_path - Absolute path to the source image on disk.
-//   @param package_path - Destination content folder, e.g. /Game/Imported.
+// MCP:import_texture_file - Import an external image file into a UTexture2D asset.  Uses the legacy UTextureFactory path inline (no Interchange, no IAssetTools::ImportAssets, which asserts when re-entered from the engine tick). Images only -- png/jpg/jpeg/bmp/tga/dds/exr/hdr/tif/tiff/psd/pcx: any other extension is refused before anything is touched (import_sound_file for .wav, import_landscape_heightmap for terrain, import_interchange_asset for FBX/glTF meshes). The new texture is saved to disk and verified by loading it back; the response reports the resulting asset_path, width and height.
+//   @param file_path - Absolute path to the source image on disk; its existence is checked before any work starts.
+//   @param package_path - Destination content folder, e.g. /Game/Imported. Must start with '/'.
 //   @param asset_name - Optional destination asset name (default = source file stem).
-//   @param replace_existing - bool, replace an asset at the destination path (default true).
+//   @param replace_existing - Optional bool, default true: overwrite an asset already at the destination. false refuses with an error when the destination already holds an asset.
 //   @returns { file_path: string, package_path: string, asset_path: string, asset_name: string, width: int, height: int, imported: bool }
 
 TSharedPtr<FJsonObject> HandleImportTextureFile(const TSharedPtr<FJsonObject>& Params)
 {
     FString FilePath, PackagePath, AssetName;
     if (TSharedPtr<FJsonObject> Error = Import_ReadSourceAndDestination(Params, FilePath, PackagePath, AssetName)) { return Error; }
+
+    const FString Extension = FPaths::GetExtension(FilePath);
+    if (!Import_IsTextureExtension(Extension))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("import_texture_file only imports images (png/jpg/jpeg/bmp/tga/dds/exr/hdr/tif/tiff/psd/pcx), got '.%s'. "
+                 "Use import_sound_file for .wav, import_landscape_heightmap for terrain, import_interchange_asset for FBX/glTF meshes."),
+            *Extension));
+    }
 
     // Legacy texture factory: forces the inline import path (no Interchange re-entry).
     // FactoryCreateBinaryImport owns the AddToRoot / RemoveFromRoot lifecycle.
@@ -123,7 +156,7 @@ TSharedPtr<FJsonObject> HandleImportTextureFile(const TSharedPtr<FJsonObject>& P
 //   @param file_path - Absolute path to the source .wav on disk.
 //   @param package_path - Destination content folder, e.g. /Game/Imported.
 //   @param asset_name - Optional destination asset name (default = source file stem).
-//   @param replace_existing - bool, replace an asset at the destination path (default true).
+//   @param replace_existing - Optional bool, default true: overwrite an asset already at the destination. false refuses with an error when the destination already holds an asset.
 //   @returns { file_path: string, package_path: string, asset_path: string, asset_name: string, duration: float, num_channels: int, imported: bool }
 
 TSharedPtr<FJsonObject> HandleImportSoundFile(const TSharedPtr<FJsonObject>& Params)
@@ -214,7 +247,7 @@ TSharedPtr<FJsonObject> HandleReimportAsset(const TSharedPtr<FJsonObject>& Param
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_asset_import_data - Read the source-file record (UAssetImportData) of an asset loaded by path: the file(s) it was imported from, as stored and resolved to absolute paths, with each file's import timestamp. Works for textures, sound waves and any class with an AssetImportData property (static and skeletal meshes, animation sequences). An asset that has none is a success with has_import_data=false, empty source_file and source_files, source_file_count 0 and no import_time. source_file is the first resolved file and import_time the first file's timestamp. Read-only: the asset is loaded if needed, not changed. An asset that does not load is an error. Interchange pipelines and node data: interchange_get_asset_import_data; reimport from the recorded file: reimport_asset or interchange_reimport_asset.
+// MCP:get_asset_import_data - Read the source-file record (UAssetImportData) of an asset loaded by path: the file(s) it was imported from, as stored and resolved to absolute paths, with each file's import timestamp. Works for textures, sound waves and any class with an AssetImportData property (static and skeletal meshes, animation sequences). An asset that has none is a success with has_import_data=false, empty source_file and source_files, source_file_count 0 and no import_time. source_file is the first resolved file and import_time the first file's timestamp. Read-only: the asset is loaded if needed, not changed. An asset that does not load is an error. Interchange pipelines and node data: get_interchange_asset_import_data; reimport from the recorded file: reimport_asset or reimport_interchange_asset.
 //   @param asset_path - Asset path in object form, e.g. "/Game/Imported/T_Rock.T_Rock", or package form "/Game/Imported/T_Rock".
 //   @returns { asset_path: string, asset_class: string, has_import_data: bool, source_file: string, source_files: [{relative_filename, resolved_filename, import_time}], source_file_count: int, import_time?: string }
 

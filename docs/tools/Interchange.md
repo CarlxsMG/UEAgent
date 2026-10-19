@@ -2,9 +2,9 @@
 
 # Interchange
 
-22 tools. Back to the [index](README.md).
+19 tools. Back to the [index](README.md).
 
-## `interchange_can_reset_actor`
+## `can_reset_interchange_actor`
 
 *Read-only.*
 
@@ -16,11 +16,11 @@ Report, read-only, whether Interchange can reset an actor of the editor world (U
 
 **Returns:** `{ actor_path: string, can_reset: bool }`
 
-## `interchange_can_reset_world`
+## `can_reset_interchange_world`
 
 *Read-only.*
 
-Report, read-only, whether Interchange can reset a world (UInterchangeEditorScriptLibrary::CanResetWorld): the map asset world_path names, loaded if needed, or the current editor world. Returns can_reset, is_editor_world and resolved_world_path. Run the reset with interchange_reset_level_asset.
+Report, read-only, whether Interchange can reset a world (UInterchangeEditorScriptLibrary::CanResetWorld): the map asset world_path names, loaded if needed, or the current editor world. Returns can_reset, is_editor_world and resolved_world_path. Run the reset with reset_interchange_level_asset.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -28,7 +28,7 @@ Report, read-only, whether Interchange can reset a world (UInterchangeEditorScri
 
 **Returns:** `{ world_path: string, can_reset: bool, is_editor_world: bool }`
 
-## `interchange_can_translate_source_data`
+## `can_translate_interchange_source_data`
 
 *Read-only.*
 
@@ -41,7 +41,7 @@ Whether a registered Interchange translator can read a source file (a path on di
 
 **Returns:** `{ file_path: string, scene_only: bool, can_translate: bool }`
 
-## `interchange_create_pipeline_asset`
+## `create_interchange_pipeline_asset`
 
 *Additive, idempotent.*
 
@@ -55,35 +55,24 @@ Create an Interchange pipeline asset of a concrete pipeline class (the generic t
 
 **Returns:** `{ pipeline_path: string, class: string, already_existed: bool, note: string }`
 
-## `interchange_get_asset_import_data`
+## `get_interchange_asset_import_data`
 
 *Read-only.*
 
-Read the Interchange import data (UInterchangeAssetImportData) of an asset loaded by package or object path: its source_filenames, display_labels, pipelines_count and whether it holds a node container. An asset imported through the legacy factory path, or never imported, has none: that answers present=false with zeros and empty lists, a normal state and not an error; only a path that does not load is an error. Read-only: it writes nothing and needs no PIE. The legacy UAssetImportData of a factory import (source file and timestamp): get_asset_import_data; the pipeline objects: interchange_get_pipelines; the nodes the import produced: interchange_get_node_container; reimport from this data: interchange_reimport_asset.
+Read the Interchange import data (UInterchangeAssetImportData) of an asset loaded by package or object path: its source_filenames, display_labels, the pipeline objects stored on it (class, name, object path of each) and whether it holds a node container; with include_node_container, also that container's root_uids and every factory node (uid, display_label and the class of the object that factory produces) -- what an Interchange import produced. An asset imported through the legacy factory path, or never imported, has none: that answers present=false with zeros and empty lists, a normal state and not an error; only a path that does not load is an error. Read-only: it writes nothing and needs no PIE. The legacy UAssetImportData of a factory import (source file and timestamp): get_asset_import_data; replace the pipeline stack: set_interchange_pipelines; reimport from this data: reimport_interchange_asset.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `asset_path` | string | yes | Asset path (e.g. "/Game/Foo/Foo") or fully-qualified object path ("/Game/Foo/Foo.Foo") |
+| `include_node_container` | boolean | no | Optional bool, default false: add root_uids, factory_node_count and factory_nodes from the import data's node container (empty when there is none) |
 
-**Returns:** `{ asset_path: string, present: bool, pipelines_count: number, has_node_container: bool, source_filenames: [string], display_labels: [string] }`
+**Returns:** `{ asset_path: string, present: bool, pipelines_count: number, pipelines: [{ class: string, name: string, path: string }], has_node_container: bool, source_filenames: [string], display_labels: [string], root_uids?: [string], factory_node_count?: number, factory_nodes?: [{ uid: string, class: string, display_label: string }] }`
 
-## `interchange_get_node_container`
-
-*Read-only.*
-
-Read the node container kept in the Interchange import data of an asset loaded by path: the root_uids and every factory node, each with its uid, display_label and the class of the object that factory produces. An asset with no Interchange import data (a legacy factory import, or one never imported), or with import data but no node container, answers present=false with empty lists rather than an error; only a path that does not load is an error. Read-only: it writes nothing and needs no PIE. Use it to see what an Interchange import produced; source files and pipeline count: interchange_get_asset_import_data; the pipeline stack: interchange_get_pipelines; reimport: interchange_reimport_asset.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `asset_path` | string | yes | Asset path (e.g. "/Game/Foo/Foo") or fully-qualified object path ("/Game/Foo/Foo.Foo") |
-
-**Returns:** `{ asset_path: string, present: bool, root_uids: [string], factory_node_count: number, factory_nodes: [{ uid: string, class: string, display_label: string }] }`
-
-## `interchange_get_pipeline_properties`
+## `get_interchange_pipeline_properties`
 
 *Read-only.*
 
-Read the editable (EditAnywhere) properties of an Interchange pipeline asset by reflection, inherited ones included: each entry gives name, C++ type and, unless class_only is true, the current value as JSON (left out when it cannot be converted). The values are the in-memory ones, so edits made with interchange_set_pipeline_properties and not yet saved already show. Read-only: it writes nothing and needs no PIE. A path that does not load as a UInterchangePipelineBase is an error. Discover the names with class_only=true, write them with interchange_set_pipeline_properties and persist with interchange_save_pipeline; the pipelines an imported asset used: interchange_get_pipelines; a new pipeline asset: interchange_create_pipeline_asset.
+Read the editable (EditAnywhere) properties of an Interchange pipeline asset by reflection, inherited ones included: each entry gives name, C++ type and, unless class_only is true, the current value as JSON (left out when it cannot be converted). The values are the in-memory ones, so edits made with set_interchange_pipeline_properties and not yet saved already show. Read-only: it writes nothing and needs no PIE. A path that does not load as a UInterchangePipelineBase is an error. Discover the names with class_only=true, write them with set_interchange_pipeline_properties and persist with save_interchange_pipeline; the pipelines an imported asset used: get_interchange_asset_import_data; a new pipeline asset: create_interchange_pipeline_asset.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -92,41 +81,29 @@ Read the editable (EditAnywhere) properties of an Interchange pipeline asset by 
 
 **Returns:** `{ pipeline_path: string, class: string, properties: [{ name: string, type: string, value?: any }], property_count: number }`
 
-## `interchange_get_pipelines`
+## `get_interchange_project_settings`
 
 *Read-only.*
 
-List the UInterchangePipelineBase instances stored on an asset's UInterchangeAssetImportData.  Loads the asset, retrieves its UInterchangeAssetImportData via UInterchangeManager::GetAssetImportData (InterchangeManager.h), then calls ID->GetPipelines() (InterchangeAssetImportData.h, INTERCHANGEENGINE_API). Returns the class, name, and full object path of each pipeline.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `asset_path` | string | yes | Asset path (e.g. "/Game/Foo/Foo") or fully-qualified object path |
-
-**Returns:** `{ asset_path: string, present: bool, pipeline_count: number, pipelines: [object] }`
-
-## `interchange_get_project_settings`
-
-*Read-only.*
-
-Read the project's Interchange settings, the live class defaults of UInterchangeProjectSettings as Project Settings shows them. For content import: the default pipeline stack, every pipeline stack with its pipeline paths, the per-asset-type default-stack overrides, the import dialog class and the import and reimport dialog flags. For scene import: the default stack, the two dialog flags and only a count of its per-translator dialog overrides. Plus the file picker, generic pipeline and converter default pipeline classes, the static mesh smoothing fallback flag and the Interchange groups. Read-only, with no parameters. Change the default stack with interchange_set_pipeline_stack_default; read one pipeline asset with interchange_get_pipeline_properties; the formats translators accept: interchange_get_supported_formats.
+Read the project's Interchange settings, the live class defaults of UInterchangeProjectSettings as Project Settings shows them. For content import: the default pipeline stack, every pipeline stack with its pipeline paths, the per-asset-type default-stack overrides, the import dialog class and the import and reimport dialog flags. For scene import: the default stack, the two dialog flags and only a count of its per-translator dialog overrides. Plus the file picker, generic pipeline and converter default pipeline classes, the static mesh smoothing fallback flag and the Interchange groups. Read-only, with no parameters. Change the default stack with set_interchange_pipeline_stack_default; read one pipeline asset with get_interchange_pipeline_properties; the formats translators accept: get_interchange_supported_formats.
 
 No parameters.
 
 **Returns:** `{ content_import_settings: { default_pipeline_stack: string, import_dialog_class: string, b_show_import_dialog: bool, b_show_reimport_dialog: bool, pipeline_stacks: [{ name: string, pipelines: [string] }], pipeline_stacks_count: int, default_pipeline_stack_override: [{ translator_type: string, stack_name: string }] }, scene_import_settings: { default_pipeline_stack: string, b_show_import_dialog: bool, b_show_reimport_dialog: bool, per_translator_dialog_override_count: int }, file_picker_class: string, generic_pipeline_class: string, converter_default_pipeline: string, b_static_mesh_use_smooth_edges_if_smoothing_information_is_missing: bool, interchange_groups: [{ display_name: string, unique_id: string, default_pipeline_stack: string, b_show_import_dialog: bool, b_show_reimport_dialog: bool }], interchange_groups_count: int }`
 
-## `interchange_get_supported_formats`
+## `get_interchange_supported_formats`
 
 *Read-only.*
 
-List file extensions supported by registered Interchange translators of a given type.  Calls UInterchangeManager::GetSupportedFormats(EInterchangeTranslatorType) (InterchangeManager.h, INTERCHANGEENGINE_API). The 5.8 enum has Invalid / Assets / Actors / Scenes (Scenes = Assets|Actors). Accepts aliases "Assets", "Actors", "Scenes", and "AssetsAndScene" (mapped to Scenes).
+Report Interchange framework availability and list the file extensions supported by registered Interchange translators of a given type.  Calls UInterchangeManager::GetSupportedFormats(EInterchangeTranslatorType) (InterchangeManager.h, INTERCHANGEENGINE_API) and IsInterchangeImportEnabled(). The 5.8 enum has Invalid / Assets / Actors / Scenes (Scenes = Assets|Actors). Accepts aliases "Assets", "Actors", "Scenes", and "AssetsAndScene" (mapped to Scenes). The registered translator set is private in 5.8, so availability is reported as enabled (= import enabled AND at least one supported asset format) with the per-type format counts.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `translator_type` | string | no | Translator type: "Assets" [default], "Actors", "Scenes", or the spec alias "AssetsAndScene" |
 
-**Returns:** `{ translator_type: string, format_count: number, formats: [string] }`
+**Returns:** `{ translator_type: string, format_count: number, formats: [string], enabled: bool, import_enabled: bool, asset_format_count: number, actor_format_count: number, scene_format_count: number }`
 
-## `interchange_import_asset`
+## `import_interchange_asset`
 
 *Destructive.*
 
@@ -140,17 +117,7 @@ Import a source file synchronously through the Interchange manager: unattended, 
 
 **Returns:** `{ file_path: string, destination_path: string, imported: bool, count: number, imported_objects: [string], note: string }`
 
-## `interchange_module_status`
-
-*Read-only.*
-
-Report Interchange framework availability.  Reads UInterchangeManager::IsInterchangeImportEnabled() (InterchangeManager.h, INTERCHANGEENGINE_API) and counts the supported file extensions reported by GetSupportedFormats(Assets) (InterchangeManager.h). Translator count itself is derived because UInterchangeManager's RegisteredTranslatorsClass set is private in 5.8 (InterchangeManager.h) — we surface ``enabled`` (= import enabled AND at least one supported format) which carries the same operational signal.
-
-No parameters.
-
-**Returns:** `{ enabled: bool, import_enabled: bool, asset_format_count: number, actor_format_count: number, scene_format_count: number, asset_formats: [string], translator_type_queried: string }`
-
-## `interchange_register_factory`
+## `register_interchange_factory`
 
 *Additive, idempotent.*
 
@@ -162,7 +129,7 @@ Load a factory class and register it with the Interchange manager. Idempotent: a
 
 **Returns:** `{ factory_class_path: string, class: string, registered: bool, note: string }`
 
-## `interchange_register_translator`
+## `register_interchange_translator`
 
 *Additive, idempotent.*
 
@@ -174,7 +141,7 @@ Load a translator class (e.g. /Script/InterchangeEngine.InterchangeTextureTransl
 
 **Returns:** `{ translator_class_path: string, class: string, registered: bool, note: string }`
 
-## `interchange_reimport_asset`
+## `reimport_interchange_asset`
 
 *Destructive.*
 
@@ -186,11 +153,11 @@ Reimport an existing asset from its stored UInterchangeAssetImportData (UInterch
 
 **Returns:** `{ asset_path: string, reimported: bool, count: number, note: string }`
 
-## `interchange_reset_actors`
+## `reset_interchange_actors`
 
 *Destructive, idempotent.*
 
-Run an Interchange reset (UInterchangeEditorScriptLibrary::ResetActors) on the editor-world actors listed by object path or persistent-level object name; the library skips actors that fail CanResetActor, and the reply does not say which were reset. Returns count, resolved and unresolved_paths. Check first with interchange_can_reset_actor.
+Run an Interchange reset (UInterchangeEditorScriptLibrary::ResetActors) on the editor-world actors listed by object path or persistent-level object name; the library skips actors that fail CanResetActor, and the reply does not say which were reset. Returns count, resolved and unresolved_paths. Check first with can_reset_interchange_actor.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -198,7 +165,7 @@ Run an Interchange reset (UInterchangeEditorScriptLibrary::ResetActors) on the e
 
 **Returns:** `{ count: number, resolved: number, unresolved_paths: [string], note: string }`
 
-## `interchange_reset_level_asset`
+## `reset_interchange_level_asset`
 
 *Destructive, idempotent.*
 
@@ -210,11 +177,11 @@ Run an Interchange reset on a level (UInterchangeEditorScriptLibrary::ResetLevel
 
 **Returns:** `{ world_path: string, resolved_world_path: string, reset: bool, can_reset: bool, cvar_enabled: bool, note: string }`
 
-## `interchange_reset_scene_import_asset`
+## `reset_interchange_scene_import_asset`
 
 *Destructive, idempotent.*
 
-Call the Interchange reset of a UInterchangeSceneImportAsset (UInterchangeEditorScriptLibrary::ResetSceneImportAsset); other asset classes are refused. The engine only resets while the Interchange.FeatureFlags.InterchangeReset CVar is 1: with it at 0 the call does nothing and fails (reset false). The reset itself returns nothing, so reset true means it ran, not what it changed. Use interchange_reset_level_asset for a level.
+Call the Interchange reset of a UInterchangeSceneImportAsset (UInterchangeEditorScriptLibrary::ResetSceneImportAsset); other asset classes are refused. The engine only resets while the Interchange.FeatureFlags.InterchangeReset CVar is 1: with it at 0 the call does nothing and fails (reset false). The reset itself returns nothing, so reset true means it ran, not what it changed. Use reset_interchange_level_asset for a level.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -222,11 +189,11 @@ Call the Interchange reset of a UInterchangeSceneImportAsset (UInterchangeEditor
 
 **Returns:** `{ asset_path: string, reset: bool, cvar_enabled: bool, note: string }`
 
-## `interchange_save_pipeline`
+## `save_interchange_pipeline`
 
 *Destructive, idempotent.*
 
-Write the package of an Interchange pipeline asset (a UInterchangePipelineBase loaded by object path) over its .uasset on disk, dirty or not, through the shared asset save; saved false makes success false and save_error carries the measured cause. It is the persist step after interchange_create_pipeline_asset and interchange_set_pipeline_properties, which change memory only; repeating it is idempotent. Like save_asset it refuses during PIE and under a read-only root. A path that does not load as a pipeline is an error.
+Write the package of an Interchange pipeline asset (a UInterchangePipelineBase loaded by object path) over its .uasset on disk, dirty or not, through the shared asset save; saved false makes success false and save_error carries the measured cause. It is the persist step after create_interchange_pipeline_asset and set_interchange_pipeline_properties, which change memory only; repeating it is idempotent. Like save_asset it refuses during PIE and under a read-only root. A path that does not load as a pipeline is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -234,7 +201,7 @@ Write the package of an Interchange pipeline asset (a UInterchangePipelineBase l
 
 **Returns:** `{ pipeline_path: string, file_path: string, saved: bool, save_error?: string }`
 
-## `interchange_set_pipeline_properties`
+## `set_interchange_pipeline_properties`
 
 *Destructive, idempotent.*
 
@@ -247,7 +214,7 @@ Set properties of an Interchange pipeline asset by reflection: properties is {na
 
 **Returns:** `{ pipeline_path: string, applied_count: number, skipped_count: number, skipped: [string], note: string }`
 
-## `interchange_set_pipeline_stack_default`
+## `set_interchange_pipeline_stack_default`
 
 *Destructive, idempotent.*
 
@@ -260,7 +227,7 @@ Set the default Interchange pipeline stack for content or scene import (DefaultP
 
 **Returns:** `{ content_or_scene: string, stack_name: string, applied: bool }`
 
-## `interchange_set_pipelines`
+## `set_interchange_pipelines`
 
 *Destructive, idempotent.*
 

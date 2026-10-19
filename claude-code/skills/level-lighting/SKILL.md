@@ -24,7 +24,7 @@ The look to aim for (noon if none is given): $ARGUMENTS
 5. **Sky light**: `spawn_sky_light` with `recapture: true`, so it picks up the new sky.
 6. **Fog**: `spawn_exponential_height_fog` with `fog_density` (0.02 for clear air, around 0.05 for
    overcast).
-7. **Show it**: `high_res_screenshot`, and tell the user the file it wrote.
+7. **Show it**: `capture_high_res_screenshot`, and tell the user the file it wrote.
 
 ## Verify
 

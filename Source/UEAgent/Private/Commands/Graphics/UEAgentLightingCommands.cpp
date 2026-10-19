@@ -2191,52 +2191,9 @@ namespace
     }
 }
 
-// configure_post_processing applies preset buckets globally; these two read and write the FPostProcessSettings
-// of one specific volume actor and return the values actually in effect.
-
-// MCP:get_post_process_volume_settings - Read the FPostProcessSettings struct of an APostProcessVolume. Returns the fields that only this pair can reach (actor-level enabled/unbounded/priority + the FPostProcessSettings members not covered by the key-value pair get_post_process_settings/set_post_process_setting). bloom_intensity/ambient_occlusion_intensity/vignette_intensity are read there, not here (one code path per FPostProcessSettings field).
-//   @param volume_name - Label of the APostProcessVolume in the editor world.
-//   @returns { volume_name, enabled, unbounded, priority, white_temp, auto_exposure_method, film_grain_intensity, motion_blur_amount, color_grading_lut_path }
-TSharedPtr<FJsonObject> HandleGetPostProcessVolumeSettings(
-    const TSharedPtr<FJsonObject>& Params)
-{
-    TSharedPtr<FJsonObject> Error;
-    APostProcessVolume* PPV = ResolvePPVolume(Params, Error);
-    if (!PPV)
-        return Error;
-
-    const FPostProcessSettings& S = PPV->Settings;
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("volume_name"), PPV->GetActorLabel());
-    Data->SetBoolField(TEXT("enabled"), PPV->bEnabled);
-    Data->SetBoolField(TEXT("unbounded"), PPV->bUnbound);
-    Data->SetNumberField(TEXT("priority"), PPV->Priority);
-    // FPostProcessSettings exposes WhiteTemp (Kelvin color temperature) and a
-    // Color Grading WhiteTint, but no SceneWhitePoint member — return the temperature
-    // as a single scalar (the canonical "white point" of the volume's grading).
-    Data->SetNumberField(TEXT("white_temp"), S.WhiteTemp);
-    Data->SetNumberField(TEXT("film_grain_intensity"), S.FilmGrainIntensity);
-    Data->SetNumberField(TEXT("motion_blur_amount"), S.MotionBlurAmount);
-
-    UEnum* ExposureEnum = StaticEnum<EAutoExposureMethod>();
-    if (ExposureEnum)
-    {
-        Data->SetStringField(TEXT("auto_exposure_method"),
-            ExposureEnum->GetNameStringByValue(static_cast<int64>(S.AutoExposureMethod)));
-    }
-
-    if (S.ColorGradingLUT)
-    {
-        Data->SetStringField(TEXT("color_grading_lut_path"), S.ColorGradingLUT->GetPathName());
-    }
-    else
-    {
-        Data->SetStringField(TEXT("color_grading_lut_path"), FString());
-    }
-
-    return mcp_common::MakeOkReply(Data);
-}
+// configure_post_processing applies preset buckets globally; set_post_process_volume_settings writes the
+// FPostProcessSettings of one specific volume actor and returns the values actually in effect
+// (get_post_process_settings reads them back).
 
 // MCP:set_post_process_volume_settings - Set enabled, priority, film_grain_intensity and motion_blur_amount of a PostProcessVolume in the editor world as one undo step; only the fields you pass change, and film grain and motion blur also get their bOverride flag so they take effect. The level is not saved. Returns applied_count and applied_fields; other settings use set_post_process_setting.
 //   @param volume_name - Editor label of the PostProcessVolume in the editor world; object names are not matched.
@@ -2307,7 +2264,6 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("get_directional_light_cascade_settings"), &HandleGetDirectionalLightCascadeSettings },
     { TEXT("get_light_properties"), &HandleGetLightProperties },
     { TEXT("get_lighting_quality"), &HandleGetLightingQuality },
-    { TEXT("get_post_process_volume_settings"), &HandleGetPostProcessVolumeSettings },
     { TEXT("get_rendering_settings"), &HandleGetRenderingSettings },
     { TEXT("get_shader_info"), &HandleGetShaderInfo },
     { TEXT("set_directional_light_cascade_settings"), &HandleSetDirectionalLightCascadeSettings },

@@ -2,7 +2,7 @@
 
 # Graphics
 
-10 tools. Back to the [index](README.md).
+7 tools. Back to the [index](README.md).
 
 ## `get_decal_info`
 
@@ -29,24 +29,11 @@ Set DecalColor on an editor-world ADecalActor found by label; it only shows if t
 
 **Returns:** `{ actor_label: string, r: float, g: float, b: float, a: float }`
 
-## `set_decal_destroy_owner_after_fade`
-
-*Destructive, idempotent.*
-
-Set the bDestroyOwnerAfterFade bit of the UDecalComponent of an ADecalActor in the editor world, found by actor label: whether the actor is destroyed once its fade-out ends at runtime. The bit is written directly, as the details panel does, so FadeStartDelay and FadeDuration come back unchanged and no lifespan timer starts in the editor. A change is one undo step that dirties the level; nothing is saved. An unknown label is an error. set_decal_fade sets this bit together with the fade timing; read it back with get_decal_info.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actor_label` | string | yes | Label of the ADecalActor in the editor world. |
-| `destroy_owner_after_fade` | boolean | no | New value for the bDestroyOwnerAfterFade bit (true = auto-destroy the actor once fully faded). |
-
-**Returns:** `{ actor_label: string, destroy_owner_after_fade: bool, fade_start_delay: float, fade_duration: float }`
-
 ## `set_decal_fade`
 
 *Destructive, idempotent.*
 
-Set a UDecalComponent's fade-out/fade-in timing fields on a named DecalActor.  Writes the EditAnywhere fields directly (mirrors the details panel) so values round-trip exactly, avoiding SetFadeOut's global fade-scale CVar and SetLifeSpan side effect.  Only provided fields change (partial, idempotent).
+Set a UDecalComponent's fade fields on a named DecalActor: fade-out timing, fade-in timing, the destroy-owner-after-fade bit and the fade screen size (the screen-size fraction below which the decal fades out).  Writes the EditAnywhere fields directly (mirrors the details panel) so values round-trip exactly, avoiding SetFadeOut's global fade-scale CVar and SetLifeSpan side effect, so no lifespan timer starts in the editor.  Only provided fields change (partial, idempotent); a change is one undo step that dirties the level, nothing is saved. An unknown label, or a fade_screen_size that is not a number of at least 0, is an error before anything is written. Read the values back with get_decal_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -56,35 +43,9 @@ Set a UDecalComponent's fade-out/fade-in timing fields on a named DecalActor.  W
 | `fade_in_start_delay` | number | no | Optional seconds before fade-in begins (FadeInStartDelay). |
 | `fade_in_duration` | number | no | Optional fade-in duration in seconds (FadeInDuration). |
 | `destroy_owner_after_fade` | boolean | no | Optional: destroy the owning actor after fully fading out (bDestroyOwnerAfterFade). |
+| `fade_screen_size` | number | no | Optional FadeScreenSize, a number >= 0 (typically 0..1; smaller fades the decal only when it gets very small on screen). |
 
-**Returns:** `{ actor_label: string, fade_start_delay: float, fade_duration: float, fade_in_start_delay: float, fade_in_duration: float, destroy_owner_after_fade: bool, applied_count: int }`
-
-## `set_decal_fade_in`
-
-*Destructive, idempotent.*
-
-Set the FadeInStartDelay and FadeInDuration on a UDecalComponent via UDecalComponent::SetFadeIn (the existing SetFadeOut cmd only sets the *out* fields; this cmd sets the *in* pair).
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actor_label` | string | yes | Label of the ADecalActor in the editor world. |
-| `start_delay` | number | no | Time in seconds before the decal begins fading in (default 0). |
-| `duration` | number | no | Time in seconds for the fade-in to complete (default 0 = no fade-in). |
-
-**Returns:** `{ actor_label: string, fade_in_start_delay: float, fade_in_duration: float }`
-
-## `set_decal_fade_screen_size`
-
-*Destructive, idempotent.*
-
-Set the FadeScreenSize on a UDecalComponent (the screen-size fraction below which the decal fades out).  The writer for the value get_decal_info already reads.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actor_label` | string | yes | Label of the ADecalActor in the editor world. |
-| `fade_screen_size` | number | yes | New FadeScreenSize (0..1; smaller fades the decal only when it gets very small on screen). |
-
-**Returns:** `{ actor_label: string, fade_screen_size: float }`
+**Returns:** `{ actor_label: string, fade_start_delay: float, fade_duration: float, fade_in_start_delay: float, fade_in_duration: float, destroy_owner_after_fade: bool, fade_screen_size: float, applied_count: int }`
 
 ## `set_decal_material`
 

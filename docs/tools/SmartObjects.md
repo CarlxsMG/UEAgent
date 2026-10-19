@@ -2,7 +2,7 @@
 
 # SmartObjects
 
-27 tools. Back to the [index](README.md).
+26 tools. Back to the [index](README.md).
 
 ## `add_smart_object_definition_default_behavior`
 
@@ -127,25 +127,13 @@ Read the USmartObjectDefinition assigned to an actor's USmartObjectComponent and
 
 *Read-only.*
 
-Read the object-level state of a USmartObjectDefinition asset without changing it: its activity tags with their merging policy, the user-tag filtering policy and whether the object-level user filter is empty, the slot count, the default behavior count, and bounds around every slot in the object local space (slot offsets plus the default slot size, not world space). It also runs the engine Validate() pass: is_valid, and validation_errors with the messages of every severity. A missing definition_path, or one that does not load, is an error. Per-slot fields: get_smart_object_slots_detail; slot and registered-actor counts: get_smart_object_info; entrances: get_smart_object_slot_entrance_annotations; edit the object level with set_smart_object_definition_activity_tags or set_smart_object_definition_user_tag_filter.
+Read the object-level state of a USmartObjectDefinition asset without changing it: its activity tags with their merging policy, the user-tag filtering policy and whether the object-level user filter is empty, the slot count, the default behavior count, and bounds around every slot in the object local space (slot offsets plus the default slot size, not world space). It also runs the engine Validate() pass: is_valid, and validation_errors with the messages of every severity. It also gives slot_activity_tags, the union of the activity tags of every slot (object-level activity_tags excluded), and registered_actor_count, how many smart object components registered with the editor-world SmartObjectSubsystem use this definition (0 without that subsystem). A missing definition_path, or one that does not load, is an error. Per-slot fields: get_smart_object_slots_detail; entrances: get_smart_object_slot_entrance_annotations; edit the object level with set_smart_object_definition_activity_tags or set_smart_object_definition_user_tag_filter.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `definition_path` | string | yes | Object path of the USmartObjectDefinition asset, e.g. /Game/AI/SO_Bench.SO_Bench |
 
-**Returns:** `{ definition_path: string, slot_count: int, activity_tags: [string], merging_policy: string, filtering_policy: string, user_filter_is_empty: bool, bounds: { min: [number, number, number], max: [number, number, number] }, is_valid: bool, validation_errors: [string], default_behavior_count: int }`
-
-## `get_smart_object_info`
-
-*Read-only.*
-
-Get slot count, activity tag set, and the number of registered actors for a USmartObjectDefinition.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `definition_path` | string | yes | Path to the USmartObjectDefinition asset |
-
-**Returns:** `{ definition_path: string, slot_count: int, activity_tags: [string], registered_actor_count: int }`
+**Returns:** `{ definition_path: string, slot_count: int, activity_tags: [string], slot_activity_tags: [string], registered_actor_count: int, merging_policy: string, filtering_policy: string, user_filter_is_empty: bool, bounds: { min: [number, number, number], max: [number, number, number] }, is_valid: bool, validation_errors: [string], default_behavior_count: int }`
 
 ## `get_smart_object_slot_entrance_annotations`
 
@@ -253,7 +241,7 @@ Remove one entrance annotation (an entry or exit point) from the slot at slot_in
 
 **Returns:** `{ definition_path: string, slot_index: int, entrance_index: int, entrance_count: int, data_count: int, removed: bool, already_absent: bool, saved: bool, save_error?: string }`
 
-## `set_component_definition`
+## `set_smart_object_component_definition`
 
 *Destructive, idempotent.*
 

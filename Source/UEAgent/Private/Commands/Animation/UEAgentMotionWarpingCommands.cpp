@@ -46,6 +46,19 @@ namespace
     }
 
     /**
+     * Reads "actor_path", or its alias "actor_name" (the internal object name the typed setters take; MW_ResolveActor
+     * finds an actor by object name or label either way). Null when one is there, else the error reply.
+     */
+    TSharedPtr<FJsonObject> MW_ReadActorPathOrName(const TSharedPtr<FJsonObject>& Params, FString& OutActorPath)
+    {
+        if (!Params->TryGetStringField(TEXT("actor_path"), OutActorPath) && !Params->TryGetStringField(TEXT("actor_name"), OutActorPath))
+        {
+            return mcp_common::MakeErrorReply(TEXT("Missing required 'actor_path' parameter (actor_name is accepted as an alias)"));
+        }
+        return nullptr;
+    }
+
+    /**
      * Resolve an actor by its `actor_path` (full editor path or short label).
      *
      * Tries the fast path first: FindObject<AActor>(nullptr, *Path) on the
@@ -95,7 +108,7 @@ namespace
     /**
      * Locate a USceneComponent on the actor by name (FName match against
      * GetFName() + editor label). Used when the caller passes a component_path
-     * to add_warp_target_to_component. Returns the first match.
+     * to add_motion_warping_target. Returns the first match.
      */
     USceneComponent* MW_FindSceneComponentByName(AActor* Actor, const FString& ComponentName)
     {
@@ -253,35 +266,29 @@ namespace
 //   @returns { actor_path: string, component_path: string, already_existed: bool }
 
 // ---------------------------------------------------------------------------
-// add_warp_target_to_component
+// add_motion_warping_target
 // ---------------------------------------------------------------------------
-// MCP:add_warp_target_to_component - Add (or update in-place) a FMotionWarpingTarget on an existing UMotionWarpingComponent. Exactly one of three payload shapes must be supplied: (1) component_path -> AddOrUpdateWarpTargetFromComponent(name, comp, NAME_None, false, TargetsForwardVector, ZeroVector, ZeroRotator); (2) location + rotation -> AddOrUpdateWarpTargetFromLocationAndRotation; (3) location only -> AddOrUpdateWarpTargetFromLocation. The engine API is idempotent by WarpTargetName (replace-in-place). Marking the owning actor dirty so the editor persists the change.
-//   @param actor_path [string!] - Full editor path or short name of the actor.
-//   @param target_name [string!] - FName identifier for the warp target.
+// MCP:add_motion_warping_target - Add (or update in-place) a FMotionWarpingTarget on an existing UMotionWarpingComponent, including moving or re-aiming an existing target. Exactly one of four payload shapes must be supplied: (1) component_path -> AddOrUpdateWarpTargetFromComponent(name, comp, NAME_None, false, TargetsForwardVector, ZeroVector, ZeroRotator); (2) location + rotation -> AddOrUpdateWarpTargetFromLocationAndRotation; (3) location only -> AddOrUpdateWarpTargetFromLocation (rotation [0,0,0]); (4) rotation only, on a target that already exists -> its Location is kept and only the rotation changes (a missing target is an error). Shapes 2-4 rebuild the target as a plain transform target, so a component-based one loses its Component, BoneName, follow flag and offsets. The engine API is idempotent by WarpTargetName (replace-in-place). Marks the owning level dirty; WarpTargets is Transient, so the targets are not saved with the level.
+//   @param actor_path [string!] - Full editor path or short name of the actor. actor_name (the internal object name) is accepted as an alias.
+//   @param target_name [string!] - FName identifier for the warp target. warp_target_name is accepted as an alias.
 //   @param location - Optional world [x, y, z] location for the target.
-//   @param rotation - Optional world [pitch, yaw, roll] rotation in degrees for the target.
+//   @param rotation - Optional world [pitch, yaw, roll] rotation in degrees for the target; alone, it re-aims an existing target and keeps its location.
 //   @param component_path [string] - Optional name of a USceneComponent on the actor to drive the target transform.
-//   @returns { actor_path: string, target_name: string, warp_target_count: int, source: string, already_existed: bool }
+//   @returns { actor_path: string, target_name: string, warp_target_count: int, previous_count: int, source: string (component | location_and_rotation | location | rotation), already_existed: bool, previous_location?: [x,y,z], previous_rotation?: [pitch,yaw,roll], location: [x,y,z], rotation: [pitch,yaw,roll], changed: bool }
 
 // ---------------------------------------------------------------------------
-// remove_warp_target
+// remove_motion_warping_target
 // ---------------------------------------------------------------------------
-// MCP:remove_warp_target - Remove a FMotionWarpingTarget from a UMotionWarpingComponent by FName. Wraps UMotionWarpingComponent::RemoveWarpTarget(name) which returns the count of entries removed (0 or 1; the array is keyed by FName). Idempotent: removing a non-existent target returns count:0 without raising an error.
-//   @param actor_path [string!] - Full editor path or short name of the actor.
-//   @param target_name [string!] - FName identifier of the warp target to remove.
-//   @returns { actor_path: string, target_name: string, removed_count: int, warp_target_count: int }
-
-// ---------------------------------------------------------------------------
-// list_warp_targets_on_component
-// ---------------------------------------------------------------------------
-// MCP:list_warp_targets_on_component - List every FMotionWarpingTarget on an actor's UMotionWarpingComponent. Read-only: wraps GetWarpTargets() (TConstArrayView<FMotionWarpingTarget>). Each entry reports the FName, the static location/rotation, the optional component reference (via path or null), the optional bone name, the b_follow_component flag, the location/rotation offsets, and the location_offset_direction enum integer.
-//   @param actor_path [string!] - Full editor path or short name of the actor.
-//   @returns { actor_path: string, warp_target_count: int, warp_targets: array }
+// MCP:remove_motion_warping_target - Remove a FMotionWarpingTarget from a UMotionWarpingComponent by FName, or with all=true every warp target at once. Wraps UMotionWarpingComponent::RemoveWarpTarget(name) (0 or 1 removed; the array is keyed by FName), looped over a snapshot of the names for all=true. Idempotent: removing a non-existent target, or clearing an empty component, returns removed_count 0 without raising an error. Pass target_name or all=true, not both.
+//   @param actor_path [string!] - Full editor path or short name of the actor. actor_name (the internal object name) is accepted as an alias.
+//   @param target_name - FName identifier of the warp target to remove. Required unless all is true.
+//   @param all - Optional bool (default false). When true, remove every warp target of the component; target_name must then be omitted.
+//   @returns { actor_path: string, target_name?: string, all: bool, removed_count: int, removed_names: [string], previous_count: int, warp_target_count: int, cleared: bool }
 
 // ---------------------------------------------------------------------------
 // inspect_motion_warping_component
 // ---------------------------------------------------------------------------
-// MCP:inspect_motion_warping_component - Read the full data-layer state of a UMotionWarpingComponent: the b_search_for_windows_in_anims_within_montages flag, the warp target array (via GetWarpTargets()), the modifier count (via GetModifiers()), the runtime adapter class (GetOwnerAdapter()->GetClass()), and the protected switch-off-conditions array count (via reflection — FindFProperty<FArrayProperty> + FScriptArrayHelper). Read-only, idempotent.
+// MCP:inspect_motion_warping_component - Read the full data-layer state of a UMotionWarpingComponent: the b_search_for_windows_in_anims_within_montages flag, every warp target (via GetWarpTargets(): its FName, static location/rotation, component path or null, bone name, b_follow_component, location/rotation offsets and location_offset_direction enum integer), the modifier count (via GetModifiers()), the runtime adapter class (GetOwnerAdapter()->GetClass()), and the protected switch-off-conditions array count (via reflection — FindFProperty<FArrayProperty> + FScriptArrayHelper). Read-only, idempotent.
 //   @param actor_path [string!] - Full editor path or short name of the actor.
 //   @returns { actor_path: string, b_search_for_windows_in_anims_within_montages: bool, warp_target_count: int, modifier_count: int, owner_adapter_class: string, switch_off_condition_count: int, warp_targets: array }
 
@@ -336,10 +343,14 @@ TSharedPtr<FJsonObject> HandleAddWarpTargetToComponent(
     const TSharedPtr<FJsonObject>& Params)
 {
     FString ActorPath;
-    if (TSharedPtr<FJsonObject> Missing = MW_ReadActorPath(Params, ActorPath)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Missing = MW_ReadActorPathOrName(Params, ActorPath)) { return Missing; }
 
+    // target_name, else its alias warp_target_name.
     FString TargetNameStr;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("target_name"), TargetNameStr)) { return Missing; }
+    if (!Params->TryGetStringField(TEXT("target_name"), TargetNameStr) && !Params->TryGetStringField(TEXT("warp_target_name"), TargetNameStr))
+    {
+        return mcp_common::MakeErrorReply(TEXT("Missing required parameter: target_name (warp_target_name is accepted as an alias)"));
+    }
     const FName TargetName(*TargetNameStr);
 
     AActor* Actor = nullptr;
@@ -350,6 +361,14 @@ TSharedPtr<FJsonObject> HandleAddWarpTargetToComponent(
     const bool bHasComponentPath = Params->TryGetStringField(TEXT("component_path"), ComponentPath) && !ComponentPath.IsEmpty();
     const bool bHasLocation = Params->HasField(TEXT("location"));
     const bool bHasRotation = Params->HasField(TEXT("rotation"));
+
+    // The target as it was, for previous_* and changed (a copy: the write below may reallocate the array).
+    const int32 PreviousCount = Comp->GetWarpTargets().Num();
+    TOptional<FMotionWarpingTarget> Before;
+    if (const FMotionWarpingTarget* Found = Comp->FindWarpTarget(TargetName))
+    {
+        Before = *Found;
+    }
 
     FString Source;
     bool bAlreadyExisted = false;
@@ -396,10 +415,24 @@ TSharedPtr<FJsonObject> HandleAddWarpTargetToComponent(
         Comp->AddOrUpdateWarpTargetFromLocation(TargetName, Location);
         Source = TEXT("location");
     }
+    else if (bHasRotation)
+    {
+        // (4) Rotation only: re-aim an existing target, keeping its Location.
+        if (!Before.IsSet())
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("Warp target '%s' not found on actor '%s': rotation alone re-aims an existing target; pass 'location' (with or without 'rotation') to create one."),
+                *TargetNameStr, *Actor->GetName()));
+        }
+        const FRotator Rotation = mcp_common::ReadJsonRotator(Params, TEXT("rotation"));
+        bAlreadyExisted = true;
+        Comp->AddOrUpdateWarpTargetFromLocationAndRotation(TargetName, Before->Location, Rotation);
+        Source = TEXT("rotation");
+    }
     else
     {
         return mcp_common::MakeErrorReply(
-            TEXT("Provide 'component_path' or 'location' (optionally with 'rotation')."));
+            TEXT("Provide 'component_path' or 'location' (optionally with 'rotation'), or 'rotation' alone for an existing target."));
     }
 
     if (ULevel* Level = Actor->GetLevel())
@@ -408,14 +441,35 @@ TSharedPtr<FJsonObject> HandleAddWarpTargetToComponent(
     }
 
     UE_LOG(LogTemp, Verbose,
-        TEXT("[MCP] add_warp_target_to_component: actor='%s' target='%s' source=%s already_existed=%s"),
+        TEXT("[MCP] add_motion_warping_target: actor='%s' target='%s' source=%s already_existed=%s"),
         *Actor->GetName(), *TargetNameStr, *Source, bAlreadyExisted ? TEXT("true") : TEXT("false"));
 
     TSharedPtr<FJsonObject> Data = MW_StartReply(Actor);
     Data->SetStringField(TEXT("target_name"), TargetNameStr);
     Data->SetNumberField(TEXT("warp_target_count"), Comp->GetWarpTargets().Num());
+    Data->SetNumberField(TEXT("previous_count"), PreviousCount);
     Data->SetStringField(TEXT("source"), Source);
     Data->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
+
+    // Read the target back: its stored location/rotation, and whether the call changed anything.
+    bool bChanged = !Before.IsSet();
+    if (Before.IsSet())
+    {
+        Data->SetArrayField(TEXT("previous_location"), mcp_common::VectorToJsonArray(Before->Location));
+        Data->SetArrayField(TEXT("previous_rotation"), mcp_common::RotatorToJsonArray(Before->Rotation));
+    }
+    if (const FMotionWarpingTarget* After = Comp->FindWarpTarget(TargetName))
+    {
+        Data->SetArrayField(TEXT("location"), mcp_common::VectorToJsonArray(After->Location));
+        Data->SetArrayField(TEXT("rotation"), mcp_common::RotatorToJsonArray(After->Rotation));
+        if (Before.IsSet())
+        {
+            bChanged = !Before->Location.Equals(After->Location) || !Before->Rotation.Equals(After->Rotation)
+                || Before->Component != After->Component || Before->BoneName != After->BoneName
+                || Before->bFollowComponent != After->bFollowComponent;
+        }
+    }
+    Data->SetBoolField(TEXT("changed"), bChanged);
     return mcp_common::MakeOkReply(Data);
 }
 
@@ -423,20 +477,53 @@ TSharedPtr<FJsonObject> HandleRemoveWarpTarget(
     const TSharedPtr<FJsonObject>& Params)
 {
     FString ActorPath;
-    if (TSharedPtr<FJsonObject> Missing = MW_ReadActorPath(Params, ActorPath)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Missing = MW_ReadActorPathOrName(Params, ActorPath)) { return Missing; }
 
+    // target_name names one target; all=true removes every one. Exactly one of the two.
+    bool bAll = false;
+    Params->TryGetBoolField(TEXT("all"), bAll);
     FString TargetNameStr;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("target_name"), TargetNameStr)) { return Missing; }
-    const FName TargetName(*TargetNameStr);
+    Params->TryGetStringField(TEXT("target_name"), TargetNameStr);
+    if (bAll && !TargetNameStr.IsEmpty())
+    {
+        return mcp_common::MakeErrorReply(TEXT("Pass target_name or all=true, not both."));
+    }
+    if (!bAll && TargetNameStr.IsEmpty())
+    {
+        return mcp_common::MakeErrorReply(
+            TEXT("Missing required parameter: target_name (or all=true to remove every warp target)"));
+    }
 
     AActor* Actor = nullptr;
     UMotionWarpingComponent* Comp = nullptr;
     if (TSharedPtr<FJsonObject> Error = MW_ResolveActorComponent(ActorPath, Actor, Comp)) { return Error; }
 
-    const int32 Removed = Comp->RemoveWarpTarget(TargetName);
-
-    if (Removed > 0)
+    // The engine removes one FName at a time: snapshot the names to remove first.
+    const int32 PreviousCount = Comp->GetWarpTargets().Num();
+    TArray<FName> ToRemove;
+    if (bAll)
     {
+        for (const FMotionWarpingTarget& Existing : Comp->GetWarpTargets())
+        {
+            ToRemove.Add(Existing.Name);
+        }
+    }
+    else if (Comp->FindWarpTarget(FName(*TargetNameStr)) != nullptr)
+    {
+        ToRemove.Add(FName(*TargetNameStr));
+    }
+
+    TArray<FString> RemovedNames;
+    if (ToRemove.Num() > 0)
+    {
+        Comp->Modify();
+        for (const FName& Name : ToRemove)
+        {
+            if (Comp->RemoveWarpTarget(Name) > 0)
+            {
+                RemovedNames.Add(Name.ToString());
+            }
+        }
         if (ULevel* Level = Actor->GetLevel())
         {
             Level->MarkPackageDirty();
@@ -444,36 +531,20 @@ TSharedPtr<FJsonObject> HandleRemoveWarpTarget(
     }
 
     UE_LOG(LogTemp, Verbose,
-        TEXT("[MCP] remove_warp_target: actor='%s' target='%s' removed=%d remaining=%d"),
-        *Actor->GetName(), *TargetNameStr, Removed, Comp->GetWarpTargets().Num());
+        TEXT("[MCP] remove_motion_warping_target: actor='%s' target='%s' all=%s removed=%d remaining=%d"),
+        *Actor->GetName(), *TargetNameStr, bAll ? TEXT("true") : TEXT("false"), RemovedNames.Num(), Comp->GetWarpTargets().Num());
 
     TSharedPtr<FJsonObject> Data = MW_StartReply(Actor);
-    Data->SetStringField(TEXT("target_name"), TargetNameStr);
-    Data->SetNumberField(TEXT("removed_count"), Removed);
+    if (!bAll)
+    {
+        Data->SetStringField(TEXT("target_name"), TargetNameStr);
+    }
+    Data->SetBoolField(TEXT("all"), bAll);
+    Data->SetNumberField(TEXT("removed_count"), RemovedNames.Num());
+    Data->SetArrayField(TEXT("removed_names"), mcp_common::StringsToJson(RemovedNames));
+    Data->SetNumberField(TEXT("previous_count"), PreviousCount);
     Data->SetNumberField(TEXT("warp_target_count"), Comp->GetWarpTargets().Num());
-    return mcp_common::MakeOkReply(Data);
-}
-
-TSharedPtr<FJsonObject> HandleListWarpTargetsOnComponent(
-    const TSharedPtr<FJsonObject>& Params)
-{
-    FString ActorPath;
-    if (TSharedPtr<FJsonObject> Missing = MW_ReadActorPath(Params, ActorPath)) { return Missing; }
-
-    AActor* Actor = nullptr;
-    UMotionWarpingComponent* Comp = nullptr;
-    if (TSharedPtr<FJsonObject> Error = MW_ResolveActorComponent(ActorPath, Actor, Comp)) { return Error; }
-
-    const TConstArrayView<FMotionWarpingTarget> Targets = Comp->GetWarpTargets();
-    const TArray<TSharedPtr<FJsonValue>> TargetsArr = MW_TargetsToJsonArray(Targets);
-
-    UE_LOG(LogTemp, Verbose,
-        TEXT("[MCP] list_warp_targets_on_component: actor='%s' count=%d"),
-        *Actor->GetName(), Targets.Num());
-
-    TSharedPtr<FJsonObject> Data = MW_StartReply(Actor);
-    Data->SetNumberField(TEXT("warp_target_count"), Targets.Num());
-    Data->SetArrayField(TEXT("warp_targets"), TargetsArr);
+    Data->SetBoolField(TEXT("cleared"), bAll && RemovedNames.Num() > 0);
     return mcp_common::MakeOkReply(Data);
 }
 
@@ -515,92 +586,6 @@ TSharedPtr<FJsonObject> HandleInspectMotionWarpingComponent(
     Data->SetNumberField(TEXT("switch_off_condition_count"), SwitchOffCount);
     Data->SetArrayField(TEXT("warp_targets"), TargetsArr);
     return mcp_common::MakeOkReply(Data);
-}
-
-// ---------------------------------------------------------------------------
-// Explicit location/rotation setter + bulk clear.
-// ---------------------------------------------------------------------------
-
-// MCP:set_motion_warping_target_location - Update an existing FMotionWarpingTarget's location (and optionally rotation) by FName -- an idempotent replace-in-place. Choose this over add_warp_target_to_component when the target already exists and you only want to nudge where it points; add_warp_target_to_component is the one that CREATES a target.
-//   @param actor_name - Engine name of the actor carrying the UMotionWarpingComponent
-//   @param warp_target_name - FName of the existing target
-//   @param location - [x, y, z] world location
-//   @param rotation - Optional [pitch, yaw, roll] rotation; defaults to ZeroRotator
-//   @returns { actor_name, warp_target_name, location_set, previous_count, new_count }
-//   NOTE (impl): wraps UMotionWarpingComponent::AddOrUpdateWarpTargetFromLocationAndRotation with the existing target name.
-
-TSharedPtr<FJsonObject> HandleSetMotionWarpingTargetLocation(const TSharedPtr<FJsonObject>& Params)
-{
-    FString ActorName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("actor_name"), ActorName)) { return Missing; }
-    FString WarpTargetName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("warp_target_name"), WarpTargetName)) { return Missing; }
-
-    AActor* Actor = nullptr;
-    UMotionWarpingComponent* Comp = nullptr;
-    if (TSharedPtr<FJsonObject> Error = MW_FindNamedActorComponent(ActorName, Actor, Comp)) { return Error; }
-
-    const FVector Location = mcp_common::ReadJsonVector(Params, TEXT("location"));
-    FRotator Rotation = FRotator::ZeroRotator;
-    if (Params->HasField(TEXT("rotation")))
-    {
-        Rotation = mcp_common::ReadJsonRotator(Params, TEXT("rotation"));
-    }
-
-    const int32 PrevCount = Comp->GetWarpTargets().Num();
-    Comp->Modify();
-    Comp->AddOrUpdateWarpTargetFromLocationAndRotation(FName(*WarpTargetName), Location, Rotation);
-    Actor->MarkPackageDirty();
-
-    TSharedPtr<FJsonObject> Resp = MW_StartTargetReply(Actor, WarpTargetName);
-    Resp->SetBoolField(TEXT("location_set"), true);
-    Resp->SetNumberField(TEXT("previous_count"), PrevCount);
-    Resp->SetNumberField(TEXT("new_count"), Comp->GetWarpTargets().Num());
-    return mcp_common::MakeOkReply(Resp);
-}
-
-// MCP:clear_motion_warping_targets - Remove EVERY FMotionWarpingTarget from a UMotionWarpingComponent in one call (there is no bulk engine API; use remove_warp_target for a single named target). Reports previous + new count and the names it removed. Idempotent: clearing an already-empty component returns cleared:false + count:0, not an error.
-//   @param actor_name - Engine name of the actor carrying the UMotionWarpingComponent
-//   @returns { actor_name, cleared, previous_count, new_count, removed_names: [string] }
-//   NOTE (impl): loops UMotionWarpingComponent::RemoveWarpTarget, which takes one FName at a time.
-
-TSharedPtr<FJsonObject> HandleClearMotionWarpingTargets(const TSharedPtr<FJsonObject>& Params)
-{
-    FString TargetActorName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("actor_name"), TargetActorName)) { return Missing; }
-    AActor* Owner = nullptr;
-    UMotionWarpingComponent* Warping = nullptr;
-    if (TSharedPtr<FJsonObject> Error = MW_FindNamedActorComponent(TargetActorName, Owner, Warping)) { return Error; }
-
-    // The engine has no bulk clear: snapshot the names first, then remove them one by one.
-    TArray<FName> RemovedNames;
-    for (const FMotionWarpingTarget& Existing : Warping->GetWarpTargets())
-    {
-        RemovedNames.Add(Existing.Name);
-    }
-    const int32 CountBefore = RemovedNames.Num();
-
-    Warping->Modify();
-    for (const FName& Removed : RemovedNames)
-    {
-        Warping->RemoveWarpTarget(Removed);
-    }
-    Owner->MarkPackageDirty();
-
-    TArray<TSharedPtr<FJsonValue>> RemovedJson;
-    RemovedJson.Reserve(CountBefore);
-    for (const FName& Removed : RemovedNames)
-    {
-        RemovedJson.Add(MakeShared<FJsonValueString>(Removed.ToString()));
-    }
-
-    TSharedPtr<FJsonObject> Outcome = MakeShared<FJsonObject>();
-    Outcome->SetStringField(TEXT("actor_name"), Owner->GetName());
-    Outcome->SetBoolField(TEXT("cleared"), CountBefore > 0);
-    Outcome->SetNumberField(TEXT("previous_count"), CountBefore);
-    Outcome->SetNumberField(TEXT("new_count"), Warping->GetWarpTargets().Num());
-    Outcome->SetArrayField(TEXT("removed_names"), RemovedJson);
-    return mcp_common::MakeOkReply(Outcome);
 }
 
 // ---------------------------------------------------------------------------
@@ -651,7 +636,7 @@ TSharedPtr<FJsonObject> HandleRemoveMotionWarpingComponent(
 // Typed setters on FMotionWarpingTarget fields and the
 // bSearchForWindowsInAnimsWithinMontages component-level toggle.
 //
-// Pattern: same actor/component resolution as HandleSetMotionWarpingTargetLocation.
+// Pattern: the actor is found by internal object name (MW_ResolveNamedComponent below).
 // For setters that need the existing component ref (BoneName / follow /
 // location-offset / rotation-offset), we look it up via FindWarpTarget first
 // and re-call AddOrUpdateWarpTargetFromComponent with the new parameter —
@@ -697,7 +682,7 @@ namespace
         if (!OutTarget->Component.IsValid())
         {
             return mcp_common::MakeErrorReply(
-                TEXT("FMotionWarpingTarget has no Component ref -- create the target via add_warp_target_to_component first"));
+                TEXT("FMotionWarpingTarget has no Component ref -- create the target via add_motion_warping_target first"));
         }
         return nullptr;
     }
@@ -706,41 +691,6 @@ namespace
 // Each typed setter changes ONE property in place (no removal + re-add), so the gameplay layer keeps the same
 // FMotionWarpingTarget instance with the same RPC/replication identity. The component-ref based setters read
 // the existing component from the BlueprintReadOnly TWeakObjectPtr stored on the target itself.
-
-// MCP:set_motion_warping_target_rotation - Set the rotation of an existing warp target of an editor-world actor (found by internal name), keeping its Location. The target is rebuilt as a plain transform target, so a component-based one loses its Component, BoneName, follow flag and offsets. WarpTargets is Transient: not saved.
-//   @param actor_name - Internal object name of the actor with the UMotionWarpingComponent, e.g. "BP_Hero_C_0"; the outliner label does not match.
-//   @param warp_target_name - FName of the existing warp target on the component
-//   @param rotation - New world rotation in degrees as [pitch, yaw, roll]; omitted means [0, 0, 0].
-//   @returns { actor_name, warp_target_name, previous_pitch, previous_yaw, previous_roll, new_pitch, new_yaw, new_roll, changed: bool }
-TSharedPtr<FJsonObject> HandleSetMotionWarpingTargetRotation(const TSharedPtr<FJsonObject>& Params)
-{
-    AActor* Actor = nullptr;
-    UMotionWarpingComponent* Comp = nullptr;
-    if (TSharedPtr<FJsonObject> Error = MW_ResolveNamedComponent(Params, Actor, Comp)) { return Error; }
-
-    FString WarpTargetName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("warp_target_name"), WarpTargetName)) { return Missing; }
-    const FRotator NewRotation = mcp_common::ReadJsonRotator(Params, TEXT("rotation"));
-
-    const FMotionWarpingTarget* Existing = nullptr;
-    if (TSharedPtr<FJsonObject> Error = MW_FindWarpTarget(Comp, Actor, WarpTargetName, Existing)) { return Error; }
-    const FRotator PreviousRotation = Existing->Rotation;
-
-    Actor->Modify();
-    Comp->Modify();
-    Comp->AddOrUpdateWarpTargetFromLocationAndRotation(FName(*WarpTargetName), Existing->Location, NewRotation);
-    Actor->MarkPackageDirty();
-
-    TSharedPtr<FJsonObject> Obj = MW_StartTargetReply(Actor, WarpTargetName);
-    Obj->SetNumberField(TEXT("previous_pitch"), PreviousRotation.Pitch);
-    Obj->SetNumberField(TEXT("previous_yaw"), PreviousRotation.Yaw);
-    Obj->SetNumberField(TEXT("previous_roll"), PreviousRotation.Roll);
-    Obj->SetNumberField(TEXT("new_pitch"), NewRotation.Pitch);
-    Obj->SetNumberField(TEXT("new_yaw"), NewRotation.Yaw);
-    Obj->SetNumberField(TEXT("new_roll"), NewRotation.Roll);
-    Obj->SetBoolField(TEXT("changed"), PreviousRotation != NewRotation);
-    return mcp_common::MakeOkReply(Obj);
-}
 
 // MCP:set_motion_warping_target_bone_name - Set the BoneName on an existing FMotionWarpingTarget (resolves the existing Component ref).
 //   @param actor_name - Engine name of the actor carrying the UMotionWarpingComponent
@@ -901,17 +851,13 @@ TSharedPtr<FJsonObject> HandleSetMotionWarpingComponentSearchInAnims(const TShar
 const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("add_motion_warping_component"), &HandleAddMotionWarpingComponent },
-    { TEXT("add_warp_target_to_component"), &HandleAddWarpTargetToComponent },
-    { TEXT("clear_motion_warping_targets"), &HandleClearMotionWarpingTargets },
+    { TEXT("add_motion_warping_target"), &HandleAddWarpTargetToComponent },
     { TEXT("inspect_motion_warping_component"), &HandleInspectMotionWarpingComponent },
-    { TEXT("list_warp_targets_on_component"), &HandleListWarpTargetsOnComponent },
     { TEXT("remove_motion_warping_component"), &HandleRemoveMotionWarpingComponent },
-    { TEXT("remove_warp_target"), &HandleRemoveWarpTarget },
+    { TEXT("remove_motion_warping_target"), &HandleRemoveWarpTarget },
     { TEXT("set_motion_warping_component_search_in_anims"), &HandleSetMotionWarpingComponentSearchInAnims },
     { TEXT("set_motion_warping_target_bone_name"), &HandleSetMotionWarpingTargetBoneName },
     { TEXT("set_motion_warping_target_follow_component"), &HandleSetMotionWarpingTargetFollowComponent },
-    { TEXT("set_motion_warping_target_location"), &HandleSetMotionWarpingTargetLocation },
     { TEXT("set_motion_warping_target_location_offset"), &HandleSetMotionWarpingTargetLocationOffset },
-    { TEXT("set_motion_warping_target_rotation"), &HandleSetMotionWarpingTargetRotation },
 };
 } // namespace UEAgentMotionWarpingCommands
