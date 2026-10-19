@@ -12,7 +12,7 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
   `copy_static_mesh_to_dynamic_mesh`, a name held by another class in `create_material_instance_dynamic`, a
   link that would make a loop in `connect_sound_cue_nodes`, an empty renderer slot in `remove_niagara_renderer`,
   and USD tokens and type names of 1024 characters or more.
-- Parameters that could not be left out now can: 22 parameters of 12 tools were published as required although
+- Parameters that could not be left out now can: 27 parameters of 17 tools were published as required although
   the handler needs them only in some cases. `add_graph_node` demanded all of `event_name`, `function_name`,
   `target_class`, `variable_name`, `struct_type`, `enum_path`, `dispatcher` and `macro_graph_name` for any node;
   the others are in `overlap_scene`, `diff_data_tables`, `delete_render_job`, `list_states`,
