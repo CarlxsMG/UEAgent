@@ -1,7 +1,7 @@
 {
 	"FileVersion": 3,
-	"Version": 11,
-	"VersionName": "1.2.8",
+	"Version": 12,
+	"VersionName": "1.2.9",
 	"FriendlyName": "UEAgent",
 	"Description": "MCP server for Unreal Engine 5, served by the editor itself: about 2,100 tools for AI agents (Claude Code, Cursor, any MCP client), each call checked before it runs and re-read after.",
 	"Category": "Editor",
@@ -17,6 +17,14 @@
 	"Modules": [
 		{
 			"Name": "UEAgent",
+			"Type": "Editor",
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "UEAgentUsdSdk",
 			"Type": "Editor",
 			"LoadingPhase": "Default",
 			"PlatformAllowList": [

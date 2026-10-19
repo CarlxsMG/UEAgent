@@ -21,6 +21,7 @@
 #include "UsdWrappers/UsdStage.h"
 #include "UsdWrappers/VtValue.h"
 #include "USDValueConversion.h"
+#include "UEAgentUsdSdk.h"  // the values the wrapper cannot convert (integer list ops, path expressions), through the USD SDK
 
 // UsdUtils::StartMonitoringErrors / GetErrorsAndStopMonitoring are deprecated, yet they are the only API
 // that returns the text of the captured USD errors.
@@ -581,9 +582,11 @@ namespace UEAgent::UsdCommon
 	 * number (half and float within their range); string, token and asset a string. A vector, color, point, normal,
 	 * texCoord or quaternion type takes an array of exactly its count of such numbers (a quaternion x, y, z, then the real
 	 * part w), a matrix an array of rows, and an array type ("float3[]") a JSON array of values of its element type;
-	 * those are built by the engine's UnrealToUsd::ConvertValue. False, with OutError, for opaque or group (USD gives
-	 * them no value to author), pathExpression (the wrapper has no way to build one from its text), an unknown type, or a
-	 * value of another shape or that does not fit. Holder names what holds the value in the messages ("an attribute").
+	 * those are built by the engine's UnrealToUsd::ConvertValue. pathExpression takes the text of a path expression and
+	 * pathExpression[] a JSON array of such texts, which USD parses (UEAgent::UsdSdk; an empty text is the empty
+	 * expression). False, with OutError, for opaque or group (USD gives them no value to author), a text that does not
+	 * parse as a path expression (with USD's parse error), an unknown type, or a value of another shape or that does not
+	 * fit. Holder names what holds the value in the messages ("an attribute").
 	 */
 	inline bool VtValueForDeclaredType(const FString& DeclaredType, const TSharedPtr<FJsonValue>& RawVal, UE::FVtValue& Out,
 		FString& OutError, const TCHAR* Holder = TEXT("an attribute"))
@@ -594,12 +597,6 @@ namespace UEAgent::UsdCommon
 		{
 			OutError = FString::Printf(TEXT("%s of type %s is not one this tool can author: opaque and group types hold no value by design, ")
 				TEXT("USD gives them none to author"), Holder, *DeclaredType);
-			return false;
-		}
-		if (Type == TEXT("pathexpression") || Type == TEXT("pathexpression[]"))
-		{
-			OutError = FString::Printf(TEXT("%s of type %s is not one this tool can author: the engine's USD wrapper has no way to build a ")
-				TEXT("path expression from its text (a path expression is read as its text)"), Holder, *DeclaredType);
 			return false;
 		}
 		if (!RawVal.IsValid() || RawVal->IsNull())
@@ -613,6 +610,38 @@ namespace UEAgent::UsdCommon
 			OutError = FString::Printf(TEXT("%s of type %s takes %s, not %s"), Holder, *DeclaredType, Wanted, JsonTypeName(RawVal->Type));
 			return false;
 		};
+
+		// The engine's wrapper has no way to build a path expression; USD parses the text, and its parse error refuses one
+		// that does not parse.
+		if (Type == TEXT("pathexpression"))
+		{
+			if (RawVal->Type != EJson::String) { return Mismatch(TEXT("a string, the text of a path expression")); }
+			FString ParseError;
+			if (!UEAgent::UsdSdk::MakePathExpression(RawVal->AsString(), Out, ParseError))
+			{
+				OutError = FString::Printf(TEXT("'%s' does not parse as a path expression: %s"), *RawVal->AsString(), *ParseError);
+				return false;
+			}
+			return true;
+		}
+		if (Type == TEXT("pathexpression[]"))
+		{
+			if (RawVal->Type != EJson::Array) { return Mismatch(TEXT("a JSON array of path expression texts")); }
+			const TArray<TSharedPtr<FJsonValue>>& Items = RawVal->AsArray();
+			TArray<FString> Texts;
+			Texts.Reserve(Items.Num());
+			for (int32 Index = 0; Index < Items.Num(); ++Index)
+			{
+				if (!Items[Index].IsValid() || Items[Index]->Type != EJson::String)
+				{
+					OutError = FString::Printf(TEXT("element %d of %s of type %s takes a string, not %s"), Index, Holder, *DeclaredType,
+						*JsonShapeName(Items[Index]));
+					return false;
+				}
+				Texts.Add(Items[Index]->AsString());
+			}
+			return UEAgent::UsdSdk::MakePathExpressionArray(Texts, Out, OutError);
+		}
 		// A whole JSON number in [Min, MaxExclusive): the range of the integer type it is stored as.
 		const auto ReadWhole = [&RawVal, &DeclaredType, &OutError, Holder](double Min, double MaxExclusive, double& OutNumber)
 		{
@@ -729,8 +758,8 @@ namespace UEAgent::UsdCommon
 		{
 			OutError = FString::Printf(
 				TEXT("%s of type %s is not one this tool can author: the declared type must be a scalar (bool, uchar, int, uint, ")
-				TEXT("int64, uint64, half, float, double, timecode, string, token, asset), a vector, point, normal, color or texCoord, ")
-				TEXT("a quaternion, a matrix, or an array of one of them"), Holder, *DeclaredType);
+				TEXT("int64, uint64, half, float, double, timecode, string, token, asset), a pathExpression, a vector, point, normal, color ")
+				TEXT("or texCoord, a quaternion, a matrix, or an array of one of them"), Holder, *DeclaredType);
 			return false;
 		}
 
@@ -773,13 +802,14 @@ namespace UEAgent::UsdCommon
 	// Dictionaries and list ops: the names of their types and the JSON forms they are written from.
 	// ---------------------------------------------------------------------------------------------------------------
 
-	/** The items a list op holds, which decides how their texts are checked and converted. */
-	enum class EUsdListOpItems : uint8 { Token, String, Path, Arc };
+	/** The items a list op holds, which decides how they are checked and converted. */
+	enum class EUsdListOpItems : uint8 { Token, String, Path, Arc, Int, UInt, Int64, UInt64 };
 
 	/**
-	 * One list op type the engine's value conversion handles: the Sdf name of its metadata type, the name USD gives the
-	 * held C++ type (the engine keys the conversion on it, FConvertedVtValue::ExtraTypeInfo) and its items. Any other
-	 * SdfListOp (of int, uint...) has no conversion in the engine, so it has no JSON form here.
+	 * One list op type: the Sdf name of its metadata type, the name USD gives the held C++ type (the engine keys its
+	 * conversion on it, FConvertedVtValue::ExtraTypeInfo) and its items. The list ops of tokens, strings, paths, references
+	 * and payloads go through the engine's value conversion; those of integers, which it has no conversion for, through
+	 * UEAgent::UsdSdk.
 	 */
 	struct FUsdListOpKind
 	{
@@ -790,14 +820,46 @@ namespace UEAgent::UsdCommon
 
 	inline TConstArrayView<FUsdListOpKind> UsdListOpKinds()
 	{
+		// The held type names are spelled as USD's MSVC build demangles them (the plugin is built for Win64 only).
 		static const FUsdListOpKind Kinds[] = {
 			{ TEXT("tokenlistop"), TEXT("SdfListOp<TfToken>"), EUsdListOpItems::Token },
 			{ TEXT("stringlistop"), TEXT("SdfListOp<string>"), EUsdListOpItems::String },  // the name a clipSets read reports
 			{ TEXT("pathlistop"), TEXT("SdfListOp<SdfPath>"), EUsdListOpItems::Path },
 			{ TEXT("referencelistop"), TEXT("SdfListOp<SdfReference>"), EUsdListOpItems::Arc },
 			{ TEXT("payloadlistop"), TEXT("SdfListOp<SdfPayload>"), EUsdListOpItems::Arc },
+			{ TEXT("intlistop"), TEXT("SdfListOp<int>"), EUsdListOpItems::Int },
+			{ TEXT("uintlistop"), TEXT("SdfListOp<unsigned int>"), EUsdListOpItems::UInt },
+			{ TEXT("int64listop"), TEXT("SdfListOp<__int64>"), EUsdListOpItems::Int64 },
+			{ TEXT("uint64listop"), TEXT("SdfListOp<unsigned __int64>"), EUsdListOpItems::UInt64 },
 		};
 		return TConstArrayView<FUsdListOpKind>(Kinds);
+	}
+
+	/** The UEAgent::UsdSdk item type of a list op of Items: None for a list op that does not hold integers. */
+	inline UEAgent::UsdSdk::EIntListOpItems UsdIntListOpItems(EUsdListOpItems Items)
+	{
+		using ESdkItems = UEAgent::UsdSdk::EIntListOpItems;
+		switch (Items)
+		{
+			case EUsdListOpItems::Int: return ESdkItems::Int;
+			case EUsdListOpItems::UInt: return ESdkItems::UInt;
+			case EUsdListOpItems::Int64: return ESdkItems::Int64;
+			case EUsdListOpItems::UInt64: return ESdkItems::UInt64;
+			default: return ESdkItems::None;
+		}
+	}
+
+	/** The kind of the integer list op whose items are SdkItems; null for None. */
+	inline const FUsdListOpKind* UsdIntListOpKind(UEAgent::UsdSdk::EIntListOpItems SdkItems)
+	{
+		for (const FUsdListOpKind& Kind : UsdListOpKinds())
+		{
+			if (SdkItems != UEAgent::UsdSdk::EIntListOpItems::None && UsdIntListOpItems(Kind.Items) == SdkItems)
+			{
+				return &Kind;
+			}
+		}
+		return nullptr;
 	}
 
 	/** The items of the list op held as TypeName: those of its kind, else (a name only a read gave) strings. */
@@ -821,6 +883,13 @@ namespace UEAgent::UsdCommon
 	constexpr int32 UsdListOpPrepended = 4;
 	constexpr int32 UsdListOpAppended = 5;
 	constexpr int32 UsdListOpListCount = 6;
+	static_assert(UsdListOpExplicit == static_cast<int32>(UEAgent::UsdSdk::EListOpList::Explicit)
+		&& UsdListOpAdded == static_cast<int32>(UEAgent::UsdSdk::EListOpList::Added)
+		&& UsdListOpDeleted == static_cast<int32>(UEAgent::UsdSdk::EListOpList::Deleted)
+		&& UsdListOpOrdered == static_cast<int32>(UEAgent::UsdSdk::EListOpList::Ordered)
+		&& UsdListOpPrepended == static_cast<int32>(UEAgent::UsdSdk::EListOpList::Prepended)
+		&& UsdListOpAppended == static_cast<int32>(UEAgent::UsdSdk::EListOpList::Appended)
+		&& UsdListOpListCount == UEAgent::UsdSdk::ListOpListCount, "the list indices are UEAgent::UsdSdk's");
 
 	/** The JSON name of the list List, one of the UsdListOp* indices. */
 	inline const TCHAR* UsdListOpListName(int32 List)
@@ -838,9 +907,10 @@ namespace UEAgent::UsdCommon
 	 * it is ("float3", "token[]"); an alias (boolean for bool, integer and int32 for int, number for double, name for
 	 * token); the name of a held C++ type as get_usd_attribute_value and get_usd_prim_metadata report it ("TfToken",
 	 * "pxr_half::half", "unsigned __int64", "SdfAssetPath", "GfVec3f", "GfQuatd", "GfMatrix4d", "VtArray<float>") as its
-	 * Sdf value type; "dictionary" for VtDictionary; a list op as the held type name of its kind ("tokenlistop" and
-	 * "SdfListOp<TfToken>" both give "SdfListOp<TfToken>"), and any other SdfListOp name as it is. Any other name comes
-	 * back lowercased, for the converter to refuse.
+	 * Sdf value type; "dictionary" for VtDictionary; a list op as the held type name of its kind ("tokenlistop",
+	 * "SdfListOp<TfToken>" and "SdfListOp<token>" give "SdfListOp<TfToken>", "int64listop" and "SdfListOp<int64>" give
+	 * "SdfListOp<__int64>"), and any other SdfListOp name as it is. Any other name comes back lowercased, for the
+	 * converter to refuse.
 	 */
 	inline FString CanonicalUsdTypeName(const FString& Name)
 	{
@@ -855,6 +925,18 @@ namespace UEAgent::UsdCommon
 		}
 		if (Lower.StartsWith(TEXT("sdflistop<"), ESearchCase::CaseSensitive))
 		{
+			// The item type in any spelling this function takes names the same kind: SdfListOp<int64> is an int64listop.
+			if (Lower.EndsWith(TEXT(">"), ESearchCase::CaseSensitive))
+			{
+				const FString ItemSdfName = CanonicalUsdTypeName(Trimmed.Mid(10, Trimmed.Len() - 11)) + TEXT("listop");
+				for (const FUsdListOpKind& Kind : UsdListOpKinds())
+				{
+					if (ItemSdfName.Equals(Kind.SdfName, ESearchCase::CaseSensitive))
+					{
+						return Kind.TypeName;
+					}
+				}
+			}
 			return Trimmed;
 		}
 		if (Lower.Equals(TEXT("dictionary"), ESearchCase::CaseSensitive) || Lower.Equals(TEXT("vtdictionary"), ESearchCase::CaseSensitive))
@@ -1126,13 +1208,65 @@ namespace UEAgent::UsdCommon
 	}
 
 	/**
+	 * Adds the whole number the JSON value RawVal gives, item Index of list List, to that list of OutListOp, in the range
+	 * of its item type: int [-2^31, 2^31), uint [0, 2^32), int64 [-2^63, 2^63), uint64 [0, 2^64). Seen holds the items
+	 * of that list so far. False, with OutError, for anything else or a number already in the list.
+	 */
+	inline bool AddUsdListOpInteger(const TSharedPtr<FJsonValue>& RawVal, int32 List, int32 Index, TSet<uint64>& Seen,
+		UEAgent::UsdSdk::FIntListOp& OutListOp, FString& OutError)
+	{
+		using ESdkItems = UEAgent::UsdSdk::EIntListOpItems;
+		const TCHAR* const ListName = UsdListOpListName(List);
+		if (!RawVal.IsValid() || RawVal->Type != EJson::Number)
+		{
+			OutError = FString::Printf(TEXT("item %d of list '%s' takes a whole number, not %s"), Index, ListName, *JsonShapeName(RawVal));
+			return false;
+		}
+		const double Number = RawVal->AsNumber();
+		const bool bSigned = OutListOp.Items == ESdkItems::Int || OutListOp.Items == ESdkItems::Int64;
+		const TCHAR* const ItemType = OutListOp.Items == ESdkItems::Int ? TEXT("int") : OutListOp.Items == ESdkItems::UInt ? TEXT("uint")
+			: OutListOp.Items == ESdkItems::Int64 ? TEXT("int64") : TEXT("uint64");
+		const double Min = OutListOp.Items == ESdkItems::Int ? -2147483648.0 : OutListOp.Items == ESdkItems::Int64 ? -9223372036854775808.0 : 0.0;
+		const double MaxExclusive = OutListOp.Items == ESdkItems::Int ? 2147483648.0 : OutListOp.Items == ESdkItems::UInt ? 4294967296.0
+			: OutListOp.Items == ESdkItems::Int64 ? 9223372036854775808.0 : 18446744073709551616.0;
+		if (Number != FMath::FloorToDouble(Number) || Number < Min || Number >= MaxExclusive)
+		{
+			OutError = FString::Printf(TEXT("item %d of list '%s' (%.17g) does not fit a list op of %s: it takes a whole number in the range of %s"),
+				Index, ListName, Number, ItemType, ItemType);
+			return false;
+		}
+		// Seen keys an item by its 64 bits, which tell any two values of one item type apart.
+		const int64 SignedItem = bSigned ? static_cast<int64>(Number) : 0;
+		const uint64 UnsignedItem = bSigned ? static_cast<uint64>(SignedItem) : static_cast<uint64>(Number);
+		bool bAlreadySeen = false;
+		Seen.Add(UnsignedItem, &bAlreadySeen);
+		if (bAlreadySeen)
+		{
+			OutError = FString::Printf(TEXT("item %d of list '%s' (%.17g) is already in that list: a list op holds an item once per list"),
+				Index, ListName, Number);
+			return false;
+		}
+		if (bSigned)
+		{
+			OutListOp.Signed[List].Add(SignedItem);
+		}
+		else
+		{
+			OutListOp.Unsigned[List].Add(UnsignedItem);
+		}
+		return true;
+	}
+
+	/**
 	 * The list op held as TypeName (an SdfListOp name, see UsdListOpKinds) that the JSON object RawVal gives: "explicit"
-	 * alone, or any of "prepended", "appended", "deleted", "ordered" and "added"; each an array of item texts as
-	 * get_usd_prim_metadata reads them (a token, string or path; a reference or payload in UsdArcText's syntax). The
-	 * engine's UnrealToUsd::ConvertValue builds it. False, with OutError, for another shape, a list of another name,
-	 * explicit beside another list, an item twice in one list (SdfListOp would drop it unsaid), an invalid item, a list op
-	 * without items (the engine's conversion builds none, an explicit empty one included), or a value USD does not hold
-	 * as TypeName.
+	 * alone, or any of "prepended", "appended", "deleted", "ordered" and "added"; each an array of items as
+	 * get_usd_prim_metadata reads them. A list op of integers takes whole numbers in the range of its item type and is
+	 * built by UEAgent::UsdSdk, an explicit empty one ({"explicit": []}) included; any other takes item texts (a token,
+	 * string or path; a reference or payload in UsdArcText's syntax) and is built by the engine's
+	 * UnrealToUsd::ConvertValue. False, with OutError, for another shape, a list of another name, explicit beside another
+	 * list, an item twice in one list (SdfListOp would drop it unsaid), an invalid item, a list op of texts without items
+	 * (the engine's conversion builds none, an explicit empty one included) or of integers with neither items nor an
+	 * explicit list, or a value USD does not hold as TypeName.
 	 */
 	inline bool UsdListOpFromJson(const FString& TypeName, const TSharedPtr<FJsonValue>& RawVal, UE::FVtValue& Out, FString& OutError)
 	{
@@ -1143,6 +1277,9 @@ namespace UEAgent::UsdCommon
 			return false;
 		}
 		const EUsdListOpItems Items = UsdListOpItemsOf(TypeName);
+		UEAgent::UsdSdk::FIntListOp IntListOp;
+		IntListOp.Items = UsdIntListOpItems(Items);
+		const bool bIntegers = IntListOp.Items != UEAgent::UsdSdk::EIntListOpItems::None;
 		UsdUtils::FConvertedVtValue Converted;
 		Converted.SourceType = Items == EUsdListOpItems::Token ? UsdUtils::EUsdBasicDataTypes::Token : UsdUtils::EUsdBasicDataTypes::String;
 		Converted.ExtraTypeInfo = TypeName;
@@ -1171,12 +1308,26 @@ namespace UEAgent::UsdCommon
 			}
 			if (!Member.Value.IsValid() || Member.Value->Type != EJson::Array)
 			{
-				OutError = FString::Printf(TEXT("list '%s' takes an array of strings, not %s"), *Member.Key, *JsonShapeName(Member.Value));
+				OutError = FString::Printf(TEXT("list '%s' takes an array of %s, not %s"), *Member.Key,
+					bIntegers ? TEXT("whole numbers") : TEXT("strings"), *JsonShapeName(Member.Value));
 				return false;
 			}
 			const TArray<TSharedPtr<FJsonValue>>& Values = Member.Value->AsArray();
 			bExplicitGiven |= List == UsdListOpExplicit;
 			bOtherItems |= List != UsdListOpExplicit && Values.Num() > 0;
+			if (bIntegers)
+			{
+				TSet<uint64> SeenNumbers;
+				for (int32 Index = 0; Index < Values.Num(); ++Index)
+				{
+					if (!AddUsdListOpInteger(Values[Index], List, Index, SeenNumbers, IntListOp, OutError))
+					{
+						return false;
+					}
+					++ItemCount;
+				}
+				continue;
+			}
 			TSet<FString> Seen;
 			for (int32 Index = 0; Index < Values.Num(); ++Index)
 			{
@@ -1209,6 +1360,22 @@ namespace UEAgent::UsdCommon
 		{
 			OutError = TEXT("explicit replaces the whole list, so it cannot stand beside prepended, appended, deleted, ordered or added items");
 			return false;
+		}
+		if (bIntegers)
+		{
+			if (ItemCount == 0 && !bExplicitGiven)
+			{
+				OutError = TEXT("a list op without items edits nothing: give items, or {\"explicit\": []} for an explicit empty list");
+				return false;
+			}
+			IntListOp.bExplicit = bExplicitGiven;
+			FString SdkError;
+			if (!UEAgent::UsdSdk::MakeIntListOp(IntListOp, Out, SdkError))
+			{
+				OutError = FString::Printf(TEXT("the items could not be built into a list op of type %s: %s"), *TypeName, *SdkError);
+				return false;
+			}
+			return true;
 		}
 		if (ItemCount == 0)
 		{
@@ -1405,9 +1572,9 @@ namespace UEAgent::UsdCommon
 	/** Writes the null "value" and the "note" saying TypeName has no JSON form into Out. */
 	inline EUsdJsonRead UsdNoJsonForm(FJsonObject& Out, const FString& TypeName, FUsdJsonBudget& Budget)
 	{
-		const FString Note = FString::Printf(TEXT("type '%s' has no JSON form here: scalars, vectors, quaternions, matrices and arrays ")
-			TEXT("of those, dictionaries, list ops of tokens, strings, paths, references or payloads, and single path expressions are converted"),
-			*TypeName);
+		const FString Note = FString::Printf(TEXT("type '%s' has no JSON form here: scalars, vectors, quaternions, matrices, path ")
+			TEXT("expressions and arrays of those, dictionaries, and list ops of tokens, strings, paths, references, payloads or integers ")
+			TEXT("are converted"), *TypeName);
 		Budget.Spend(UsdJsonStringCost(Note));
 		Out.SetField(TEXT("value"), MakeShared<FJsonValueNull>());
 		Out.SetStringField(TEXT("note"), Note);
@@ -1415,26 +1582,15 @@ namespace UEAgent::UsdCommon
 	}
 
 	/**
-	 * Writes the list op Value, which the engine converted into Converted (its six item lists), into Out: "value" is
-	 * {explicit} for an explicit list op, else {prepended, appended, deleted} plus ordered and added when they hold items,
-	 * each an array of item texts (a reference or payload as UsdArcText writes it); "length" counts their items and
-	 * "truncated" says whether all were sent. The items are cut, in that order, at MaxArrayValuesRead items,
-	 * MaxArrayStringCharsRead characters, or what is left of Budget.
+	 * Writes the item lists of a list op into Out: "value" is {explicit} when bExplicit, else {prepended, appended,
+	 * deleted} plus ordered and added when they hold items, each a JSON array of the items Item gives (ItemCount(List)
+	 * of them, Item(List, Index, OutCost) setting the characters each takes); "length" counts their items and "truncated"
+	 * says whether all were sent. The items are cut, in that order, at MaxArrayValuesRead items, MaxChars characters, or
+	 * what is left of Budget.
 	 */
-	inline void UsdListOpToJson(const UE::FVtValue& Value, const UsdUtils::FConvertedVtValue& Converted, FJsonObject& Out,
-		FUsdJsonBudget& Budget, int32 Depth)
+	inline void UsdListOpListsToJson(bool bExplicit, TFunctionRef<int32(int32)> ItemCount,
+		TFunctionRef<TSharedPtr<FJsonValue>(int32, int32, int32&)> Item, int32 MaxChars, FJsonObject& Out, FUsdJsonBudget& Budget, int32 Depth)
 	{
-		const auto ItemCount = [&Converted](int32 List) { return Converted.Entries.IsValidIndex(List) ? Converted.Entries[List].Num() : 0; };
-		int32 AllItems = 0;
-		for (int32 List = 0; List < UsdListOpListCount; ++List)
-		{
-			AllItems += ItemCount(List);
-		}
-		// The engine fills only the explicit list of an explicit list op, so one without items is told apart by USD's own
-		// text of the value, "SdfTokenListOp(Explicit Items: [])".
-		const bool bExplicit = ItemCount(UsdListOpExplicit) > 0
-			|| (AllItems == 0 && Value.Get<FString>().Contains(TEXT("(Explicit Items: ["), ESearchCase::CaseSensitive));
-
 		TArray<int32, TInlineAllocator<UsdListOpListCount>> Lists;
 		if (bExplicit)
 		{
@@ -1452,11 +1608,10 @@ namespace UEAgent::UsdCommon
 			}
 		}
 
-		const bool bArcs = UsdListOpItemsOf(Converted.ExtraTypeInfo) == EUsdListOpItems::Arc;
 		TSharedPtr<FJsonObject> ListsJson = MakeShared<FJsonObject>();
 		int32 Total = 0;
 		int32 Shown = 0;
-		int32 StringChars = 0;
+		int32 Chars = 0;
 		bool bCut = false;
 		for (const int32 List : Lists)
 		{
@@ -1465,23 +1620,102 @@ namespace UEAgent::UsdCommon
 			TArray<TSharedPtr<FJsonValue>> Items;
 			for (int32 Index = 0; !bCut && Index < ItemCount(List); ++Index)
 			{
-				const FString* Raw = Converted.Entries[List][Index].TryGet<FString>();
-				const FString Item = Raw == nullptr ? FString() : bArcs ? UsdArcText(*Raw) : *Raw;
-				const int32 Cost = UsdJsonStringCost(Item) + 2 * Depth;
-				if (Shown >= MaxArrayValuesRead || StringChars + Cost > MaxArrayStringCharsRead || !Budget.Take(Cost))
+				int32 Cost = 0;
+				TSharedPtr<FJsonValue> ItemJson = Item(List, Index, Cost);
+				if (Shown >= MaxArrayValuesRead || Chars + Cost > MaxChars || !Budget.Take(Cost))
 				{
 					bCut = true;
 					break;
 				}
-				StringChars += Cost;
+				Chars += Cost;
 				++Shown;
-				Items.Add(MakeShared<FJsonValueString>(Item));
+				Items.Add(MoveTemp(ItemJson));
 			}
 			ListsJson->SetArrayField(UsdListOpListName(List), Items);
 		}
 		Out.SetObjectField(TEXT("value"), ListsJson);
 		Out.SetNumberField(TEXT("length"), Total);
 		Out.SetBoolField(TEXT("truncated"), Shown < Total);
+	}
+
+	/**
+	 * Writes the list op Value, which the engine converted into Converted (its six item lists), into Out as
+	 * UsdListOpListsToJson does, each item as its text (a reference or payload as UsdArcText writes it), cut at
+	 * MaxArrayStringCharsRead characters.
+	 */
+	inline void UsdListOpToJson(const UE::FVtValue& Value, const UsdUtils::FConvertedVtValue& Converted, FJsonObject& Out,
+		FUsdJsonBudget& Budget, int32 Depth)
+	{
+		const auto ItemCount = [&Converted](int32 List) { return Converted.Entries.IsValidIndex(List) ? Converted.Entries[List].Num() : 0; };
+		int32 AllItems = 0;
+		for (int32 List = 0; List < UsdListOpListCount; ++List)
+		{
+			AllItems += ItemCount(List);
+		}
+		// The engine fills only the explicit list of an explicit list op, so one without items is told apart by USD's own
+		// text of the value, "SdfTokenListOp(Explicit Items: [])".
+		const bool bExplicit = ItemCount(UsdListOpExplicit) > 0
+			|| (AllItems == 0 && Value.Get<FString>().Contains(TEXT("(Explicit Items: ["), ESearchCase::CaseSensitive));
+
+		const bool bArcs = UsdListOpItemsOf(Converted.ExtraTypeInfo) == EUsdListOpItems::Arc;
+		const auto Item = [&Converted, bArcs, Depth](int32 List, int32 Index, int32& OutCost) -> TSharedPtr<FJsonValue>
+		{
+			const FString* Raw = Converted.Entries[List][Index].TryGet<FString>();
+			const FString Text = Raw == nullptr ? FString() : bArcs ? UsdArcText(*Raw) : *Raw;
+			OutCost = UsdJsonStringCost(Text) + 2 * Depth;
+			return MakeShared<FJsonValueString>(Text);
+		};
+		UsdListOpListsToJson(bExplicit, ItemCount, Item, MaxArrayStringCharsRead, Out, Budget, Depth);
+	}
+
+	/**
+	 * Writes the list op of integers ListOp, as UEAgent::UsdSdk read it, into Out as UsdListOpListsToJson does, each
+	 * item as a JSON number.
+	 */
+	inline void UsdIntListOpToJson(const UEAgent::UsdSdk::FIntListOp& ListOp, FJsonObject& Out, FUsdJsonBudget& Budget, int32 Depth)
+	{
+		const bool bSigned = ListOp.Items == UEAgent::UsdSdk::EIntListOpItems::Int || ListOp.Items == UEAgent::UsdSdk::EIntListOpItems::Int64;
+		const auto ItemCount = [&ListOp, bSigned](int32 List) { return bSigned ? ListOp.Signed[List].Num() : ListOp.Unsigned[List].Num(); };
+		const auto Item = [&ListOp, bSigned, Depth](int32 List, int32 Index, int32& OutCost) -> TSharedPtr<FJsonValue>
+		{
+			OutCost = UsdJsonNumberCost(Depth);
+			return MakeShared<FJsonValueNumber>(bSigned ? static_cast<double>(ListOp.Signed[List][Index])
+				: static_cast<double>(ListOp.Unsigned[List][Index]));
+		};
+		UsdListOpListsToJson(ListOp.bExplicit, ItemCount, Item, MAX_int32, Out, Budget, Depth);
+	}
+
+	/**
+	 * Writes the array of path expressions Value into Out: "value" is a JSON array of the text of each expression, cut
+	 * at MaxArrayValuesRead elements, MaxArrayStringCharsRead characters or what is left of Budget; "length" counts the
+	 * elements and "truncated" says whether all were sent. False, with Out untouched, when UEAgent::UsdSdk cannot read it.
+	 */
+	inline bool UsdPathExpressionArrayToJson(const UE::FVtValue& Value, FJsonObject& Out, FUsdJsonBudget& Budget, int32 Depth)
+	{
+		TArray<FString> Texts;
+		int32 Length = 0;
+		FString ReadError;
+		if (!UEAgent::UsdSdk::ReadPathExpressionArray(Value, MaxArrayValuesRead, Texts, Length, ReadError))
+		{
+			return false;
+		}
+		TArray<TSharedPtr<FJsonValue>> Items;
+		Items.Reserve(Texts.Num());
+		int32 Chars = 0;
+		for (const FString& Text : Texts)
+		{
+			const int32 Cost = UsdJsonStringCost(Text) + 2 * Depth;
+			if (Chars + Cost > MaxArrayStringCharsRead || !Budget.Take(Cost))
+			{
+				break;
+			}
+			Chars += Cost;
+			Items.Add(MakeShared<FJsonValueString>(Text));
+		}
+		Out.SetArrayField(TEXT("value"), Items);
+		Out.SetNumberField(TEXT("length"), Length);
+		Out.SetBoolField(TEXT("truncated"), Items.Num() < Length);
+		return true;
 	}
 
 	/**
@@ -1518,8 +1752,9 @@ namespace UEAgent::UsdCommon
 	 * Writes Value into Out as "type" (the type name USD gives the held value) and "value", Depth dictionaries down: a
 	 * scalar as a bool, number or string; a path expression as its text; a vector or quaternion as an array of numbers
 	 * (a quaternion x, y, z, then the real part w); a matrix as an array of rows; an Sdf enum such as SdfSpecifier as its
-	 * number; an array as a JSON array of those; a dictionary as an object of {type, value} entries (UsdDictionaryToJson);
-	 * a list op as its item lists (UsdListOpToJson). A container adds "length" and "truncated": an array is cut at
+	 * number; an array as a JSON array of those (an array of path expressions as their texts); a dictionary as an object
+	 * of {type, value} entries (UsdDictionaryToJson); a list op as its item lists (UsdListOpToJson), a list op of integers
+	 * with numbers for items (UsdIntListOpToJson). A container adds "length" and "truncated": an array is cut at
 	 * MaxArrayElementsRead elements, fewer for strings past MaxArrayStringCharsRead, and every container at what is left
 	 * of Budget. An empty value is "type": "empty" with a null "value"; any other type gets a null "value" and a "note"
 	 * (NoJsonForm). A value sent whole (a scalar, one vector or matrix) takes its characters from Budget: with
@@ -1528,9 +1763,10 @@ namespace UEAgent::UsdCommon
 	 * Each scalar type is read with its own C++ type: FVtValue::Get<T> of a T the value does not hold raises a USD
 	 * coding error and returns a default T, so a float read as a double comes back 0. The type name is the
 	 * demangled C++ type of the held value ("float", "pxr_half::half", "__int64", "TfToken"), not the Sdf
-	 * value type name; both spellings are accepted, as the engine's own USD metadata translation does. Every other
-	 * type but a dictionary and a path expression goes through the engine's UsdToUnreal::ConvertValue, which dispatches on
-	 * the held type itself.
+	 * value type name; both spellings are accepted, as the engine's own USD metadata translation does. A list op of
+	 * integers and an array of path expressions, which the engine has no conversion for, are read by UEAgent::UsdSdk;
+	 * every other type but a dictionary and a path expression goes through the engine's UsdToUnreal::ConvertValue, which
+	 * dispatches on the held type itself.
 	 */
 	inline EUsdJsonRead UsdValueToJson(const UE::FVtValue& Value, FJsonObject& Out, FUsdJsonBudget& Budget, int32 Depth, bool bWholeMustFit)
 	{
@@ -1611,6 +1847,28 @@ namespace UEAgent::UsdCommon
 		else if (TypeName == TEXT("VtDictionary"))
 		{
 			UsdDictionaryToJson(Value, Out, Budget, Depth);
+			return EUsdJsonRead::Converted;
+		}
+		else if (UEAgent::UsdSdk::GetIntListOpItems(Value) != UEAgent::UsdSdk::EIntListOpItems::None)
+		{
+			// The engine has no conversion for a list op of integers (inactiveIds...); the USD SDK reads its lists.
+			UEAgent::UsdSdk::FIntListOp ListOp;
+			FString ReadError;
+			if (!UEAgent::UsdSdk::ReadIntListOp(Value, ListOp, ReadError))
+			{
+				return UsdNoJsonForm(Out, TypeName, Budget);
+			}
+			UsdIntListOpToJson(ListOp, Out, Budget, Depth);
+			return EUsdJsonRead::Converted;
+		}
+		else if (UEAgent::UsdSdk::IsPathExpressionArray(Value))
+		{
+			// The text of the whole array cannot be split into its elements (an expression may hold commas); the USD SDK
+			// gives the text of each.
+			if (!UsdPathExpressionArrayToJson(Value, Out, Budget, Depth))
+			{
+				return UsdNoJsonForm(Out, TypeName, Budget);
+			}
 			return EUsdJsonRead::Converted;
 		}
 		else
@@ -1719,9 +1977,10 @@ namespace UEAgent::UsdCommon
 
 	/**
 	 * The type the held Value is authored back in, spelled as VtValueForMetadataType takes it: a scalar, vector,
-	 * quaternion, matrix or array as its Sdf value type ("token", "double3", "string[]"), a dictionary as "dictionary", a
-	 * list op the engine converts as its held type name ("SdfListOp<TfToken>"). Empty for an empty value or any other
-	 * type (an Sdf enum such as SdfSpecifier, a path expression).
+	 * quaternion, matrix or array as its Sdf value type ("token", "double3", "string[]"), a path expression as
+	 * "pathexpression" (an array "pathexpression[]"), a dictionary as "dictionary", a list op the engine or
+	 * UEAgent::UsdSdk converts as the held type name of its kind ("SdfListOp<TfToken>", "SdfListOp<__int64>"). Empty for
+	 * an empty value or any other type (an Sdf enum such as SdfSpecifier).
 	 */
 	inline FString UsdDeclaredTypeOf(const UE::FVtValue& Value)
 	{
@@ -1730,9 +1989,14 @@ namespace UEAgent::UsdCommon
 			return FString();
 		}
 		const FString Canonical = CanonicalUsdTypeName(Value.GetTypeName());
-		if (Canonical.Equals(TEXT("dictionary"), ESearchCase::CaseSensitive))
+		if (Canonical.Equals(TEXT("dictionary"), ESearchCase::CaseSensitive) || Canonical.Equals(TEXT("pathexpression"), ESearchCase::CaseSensitive)
+			|| Canonical.Equals(TEXT("pathexpression[]"), ESearchCase::CaseSensitive))
 		{
 			return Canonical;
+		}
+		if (const FUsdListOpKind* IntKind = UsdIntListOpKind(UEAgent::UsdSdk::GetIntListOpItems(Value)))
+		{
+			return IntKind->TypeName;
 		}
 		if (Canonical.StartsWith(TEXT("SdfListOp<"), ESearchCase::IgnoreCase))
 		{
@@ -1758,9 +2022,9 @@ namespace UEAgent::UsdCommon
 	 * (no prim definition gives these fields a fallback): the Sdf prim fields as SdfPrimSpec types them (kind, typeName
 	 * and symmetryFunction tokens; comment, documentation, displayName, prefix, suffix and symmetricPeer strings; active,
 	 * hidden and instanceable bools; the dictionaries; the list ops of tokens, strings, paths and arcs) and the prim
-	 * fields the shipped plugins register (apiSchemas, sdrMetadata, uiHints, payloadAssetDependencies). Fields the
-	 * converters cannot author (specifier and permission enums, primOrder and propertyOrder token vectors, int list ops)
-	 * are left out. Empty for any other field.
+	 * fields the shipped plugins register (apiSchemas, sdrMetadata, uiHints, payloadAssetDependencies, and UsdGeom's
+	 * inactiveIds, a list op of int64). Fields the converters cannot author (specifier and permission enums, primOrder
+	 * and propertyOrder token vectors) are left out. Empty for any other field.
 	 */
 	inline FString UsdWellKnownMetadataType(const FString& Key)
 	{
@@ -1776,7 +2040,7 @@ namespace UEAgent::UsdCommon
 			{ TEXT("apiSchemas"), TEXT("SdfListOp<TfToken>") }, { TEXT("clipSets"), TEXT("SdfListOp<string>") },
 			{ TEXT("variantSetNames"), TEXT("SdfListOp<string>") }, { TEXT("references"), TEXT("SdfListOp<SdfReference>") },
 			{ TEXT("payload"), TEXT("SdfListOp<SdfPayload>") }, { TEXT("inheritPaths"), TEXT("SdfListOp<SdfPath>") },
-			{ TEXT("specializes"), TEXT("SdfListOp<SdfPath>") } };
+			{ TEXT("specializes"), TEXT("SdfListOp<SdfPath>") }, { TEXT("inactiveIds"), TEXT("SdfListOp<__int64>") } };
 		for (const auto& Field : Fields)
 		{
 			if (Key.Equals(Field[0], ESearchCase::CaseSensitive))

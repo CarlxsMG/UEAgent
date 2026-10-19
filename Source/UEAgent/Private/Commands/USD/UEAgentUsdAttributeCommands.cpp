@@ -41,10 +41,10 @@
  *     sites need the `UE::` prefix.
  *   - USD type names are tokens ("float", "float3", "color3f[]", ...) — normalize to
  *     lowercase before dispatch. Scalars, vectors and their roles, quaternions,
- *     matrices and arrays of them convert both ways (UEAgentUsdRegistry.h); a
- *     pathExpression is read as its text but cannot be built from it through the
- *     wrapper; opaque and group hold no value. Any other type is read as its type
- *     name only.
+ *     matrices, path expressions and arrays of them convert both ways
+ *     (UEAgentUsdRegistry.h); a path expression as its text, which the USD SDK
+ *     parses (module UEAgentUsdSdk: the wrapper cannot build one); opaque and
+ *     group hold no value. Any other type is read as its type name only.
  *   - `Attr.Set(VtValue)` with the wrong type is a SILENT FAIL in pxr::: it does
  *     not convert a double into a float attribute. set_usd_attribute_value builds
  *     the value in the attribute's declared type with
@@ -132,8 +132,8 @@ namespace
 		return Time;
 	}
 
-	// {"type", "value"} of Value (UEAgent::UsdCommon::VtValueToJson); a type with no JSON form (an array of path
-	// expressions) gets a null "value" and a "note" naming it, so the type name stays visible.
+	// {"type", "value"} of Value (UEAgent::UsdCommon::VtValueToJson); a type with no JSON form gets a null "value" and a
+	// "note" naming it, so the type name stays visible.
 	TSharedPtr<FJsonObject> UsdAttribute_VtValueToJson(const UE::FVtValue& Value)
 	{
 		TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
@@ -374,7 +374,7 @@ TSharedPtr<FJsonObject> HandleGetUsdAttributeValue(const TSharedPtr<FJsonObject>
 // ---------------------------------------------------------------------------
 // set_usd_attribute_value
 // ---------------------------------------------------------------------------
-// MCP:set_usd_attribute_value - Author one attribute value on a prim of a registered USD stage, at the current edit target: a time sample at time, else the default; a missing attribute is created with type_name. The JSON value converts to the declared type: bool takes a boolean; integer types a whole number in range; half, float, double and timecode a number; string, token and asset a string; vectors, colors, points and texCoords an array of numbers; a quaternion [x, y, z, w]; a matrix an array of rows; an array type a JSON array of those. Another shape or range, opaque or group (valueless by design), pathExpression (the wrapper cannot build one) or a new attribute without type_name fails, writing nothing. If USD refuses it, success is false and a created attribute is removed. In memory: save_usd_stage writes it; get_usd_attribute_value reads it back.
+// MCP:set_usd_attribute_value - Author one attribute value on a prim of a registered USD stage, at the current edit target: a time sample at time, else the default; a missing attribute is created with type_name. The JSON value converts to the declared type: bool takes a boolean; integer types a whole number in range; half, float, double and timecode a number; string, token and asset a string; pathExpression the text of the expression; vectors, colors, points and texCoords an array of numbers; a quaternion [x, y, z, w]; a matrix an array of rows; an array type a JSON array of those. Another shape or range, a text that does not parse as a path expression (the error gives USD's parse message), opaque or group (valueless by design) or a new attribute without type_name fails, writing nothing. If USD refuses it, success is false and a created attribute is removed. In memory: save_usd_stage writes it; get_usd_attribute_value reads it back.
 //   @param stage_name [string!] - Name the stage was registered under by open_usd_stage (default the file basename) or create_usd_stage (default "Untitled").
 //   @param prim_path [string!] - Absolute SdfPath of an existing prim on that stage, e.g. "/World/Cube".
 //   @param attr_name [string!] - Attribute name to set, e.g. "size"

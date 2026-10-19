@@ -390,10 +390,78 @@ namespace McpPreconditionsPrivate
 	}
 
 	/** Any argument that is a content path with "//": every command, before anything else. */
-	static TOptional<FRefusal> RefuseDoubleSlashPath(const TSharedPtr<FJsonObject>& Params)
+	/**
+	 * The arguments that hold USD data, never a content path: a USD path expression (e.g. "/World//Mesh", any
+	 * descendant named Mesh) legitimately has "//" in it, and a USD value never becomes a package name.
+	 */
+	static bool IsUsdValueArgument(const FString& CommandType, const FString& Key)
+	{
+		return Key == TEXT("value")
+			&& (CommandType == TEXT("set_usd_attribute_value") || CommandType == TEXT("set_usd_prim_metadata"));
+	}
+
+	/** The first content path with "//" among the fields of Params, a command's arguments: OutWhere is the field's
+	 *  path under Prefix. A batch's items are walked with their own command, so their USD values are exempt too. */
+	static bool FindDoubleSlashArgument(const FString& CommandType, const TSharedPtr<FJsonObject>& Params,
+		const FString& Prefix, int32 Depth, FString& OutWhere, FString& OutValue)
+	{
+		for (const auto& Field : Params->Values)
+		{
+			const FString Key(Field.Key);
+			const FString Where = Prefix.IsEmpty() ? Key : Prefix + TEXT(".") + Key;
+			if (IsUsdValueArgument(CommandType, Key))
+			{
+				continue;
+			}
+			if (CommandType == TEXT("batch") && Key == TEXT("commands") && Field.Value.IsValid() && Field.Value->Type == EJson::Array)
+			{
+				const TArray<TSharedPtr<FJsonValue>>& Items = Field.Value->AsArray();
+				for (int32 Index = 0; Index < Items.Num(); ++Index)
+				{
+					const FString ItemWhere = FString::Printf(TEXT("%s[%d]"), *Where, Index);
+					const TSharedPtr<FJsonObject>* Item = nullptr;
+					if (!Items[Index].IsValid() || !Items[Index]->TryGetObject(Item) || !Item || !Item->IsValid())
+					{
+						if (FindDoubleSlashPath(Items[Index], ItemWhere, Depth + 1, OutWhere, OutValue))
+						{
+							return true;
+						}
+						continue;
+					}
+					FString ItemCommand;
+					(*Item)->TryGetStringField(TEXT("command"), ItemCommand);
+					for (const auto& ItemField : (*Item)->Values)
+					{
+						const FString ItemKey(ItemField.Key);
+						const TSharedPtr<FJsonObject>* ItemParams = nullptr;
+						if (ItemKey == TEXT("params") && ItemField.Value.IsValid() && ItemField.Value->TryGetObject(ItemParams)
+							&& ItemParams && ItemParams->IsValid())
+						{
+							if (FindDoubleSlashArgument(ItemCommand, *ItemParams, ItemWhere + TEXT(".params"), Depth + 2, OutWhere, OutValue))
+							{
+								return true;
+							}
+						}
+						else if (FindDoubleSlashPath(ItemField.Value, ItemWhere + TEXT(".") + ItemKey, Depth + 2, OutWhere, OutValue))
+						{
+							return true;
+						}
+					}
+				}
+				continue;
+			}
+			if (FindDoubleSlashPath(Field.Value, Where, Depth + 1, OutWhere, OutValue))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	static TOptional<FRefusal> RefuseDoubleSlashPath(const FString& CommandType, const TSharedPtr<FJsonObject>& Params)
 	{
 		FString Where, Value;
-		if (!Params.IsValid() || !FindDoubleSlashPath(MakeShared<FJsonValueObject>(Params), FString(), 0, Where, Value))
+		if (!Params.IsValid() || !FindDoubleSlashArgument(CommandType, Params, FString(), 0, Where, Value))
 		{
 			return {};
 		}
@@ -789,7 +857,7 @@ TOptional<McpPreconditions::FRefusal> McpPreconditions::Check(const FString& Com
 	using namespace McpPreconditionsPrivate;
 
 	// (a) by arguments
-	if (TOptional<FRefusal> Refusal = RefuseDoubleSlashPath(Params)) { return Refusal; }
+	if (TOptional<FRefusal> Refusal = RefuseDoubleSlashPath(CommandType, Params)) { return Refusal; }
 	if (TOptional<FRefusal> Refusal = RefuseIntegerOutOfRange(CommandType, Params)) { return Refusal; }
 	if (TOptional<FRefusal> Refusal = RefuseNameTooLong(CommandType, Params)) { return Refusal; }
 	if (TOptional<FRefusal> Refusal = RefuseMalformedVector(CommandType, Params)) { return Refusal; }

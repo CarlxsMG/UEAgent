@@ -2525,6 +2525,95 @@
    ]
   },
   {
+   "id": "double_slash_path-05",
+   "steps": [
+    {
+     "op": "check",
+     "command": "set_usd_attribute_value",
+     "params": {
+      "stage_name": "S",
+      "prim_path": "/Root",
+      "attr_name": "expr",
+      "value": "/World//Mesh"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     }
+    }
+   ]
+  },
+  {
+   "id": "double_slash_path-06",
+   "steps": [
+    {
+     "op": "check",
+     "command": "set_usd_prim_metadata",
+     "params": {
+      "stage_name": "S",
+      "prim_path": "/Root",
+      "key": "customData",
+      "value": {
+       "filter": "/World//Mesh"
+      }
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     }
+    }
+   ]
+  },
+  {
+   "id": "double_slash_path-07",
+   "steps": [
+    {
+     "op": "check",
+     "command": "batch",
+     "params": {
+      "commands": [
+       {
+        "command": "set_usd_attribute_value",
+        "params": {
+         "stage_name": "S",
+         "prim_path": "/Root",
+         "attr_name": "expr",
+         "value": "/World//Mesh"
+        }
+       }
+      ]
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     }
+    }
+   ]
+  },
+  {
+   "id": "double_slash_path-08",
+   "steps": [
+    {
+     "op": "check",
+     "command": "set_usd_attribute_value",
+     "params": {
+      "stage_name": "S",
+      "prim_path": "/Game/U//Root",
+      "attr_name": "expr",
+      "value": "//Mesh"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "prim_path is '/Game/U//Root', a content path with '//' in it: the engine aborts the editor on a package name like that (CreatePackage is Fatal on it). Write the path with single slashes."
+     }
+    }
+   ]
+  },
+  {
    "id": "integer_range-01",
    "steps": [
     {
