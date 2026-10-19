@@ -796,7 +796,7 @@ namespace
     }
 }
 
-// MCP:create_data_table - Create a DataTable asset bound to a row struct -- the standard container for game data (items, recipes, loot, quests, dialogue) that designers edit without touching Blueprints. The row struct must already exist (create_struct) and cannot be changed afterwards without losing data, so settle its columns first. Idempotent: re-running with the same row_struct returns the existing table with already_existed instead of erroring. Rows go in with add_data_table_row or import_data_table_csv; create_composite_data_table is the variant that merges several parent tables.
+// MCP:create_data_table - Create a DataTable asset bound to a row struct -- the standard container for game data (items, recipes, loot, quests, dialogue) that designers edit without touching Blueprints. The row struct must already exist (create_struct) and cannot be changed afterwards without losing data, so settle its columns first. Idempotent: re-running with the same row_struct returns the existing table unchanged with already_existed=true and saved=false, and nothing is saved; a different row_struct, a composite table or another asset class at the path is an error. Rows go in with add_data_table_row or import_data_table_csv; create_composite_data_table is the variant that merges several parent tables.
 //   @param table_name - Name of the new DataTable.
 //   @param row_struct - Name of the UScriptStruct that defines the row structure.
 //   @param package_path - Target content package path where the asset is created (check the body for the default)
@@ -822,7 +822,8 @@ TSharedPtr<FJsonObject> HandleCreateDataTable(const TSharedPtr<FJsonObject>& Par
     const FString TargetPath = Impl::JoinPackagePath(Folder, NewName);
 
     // Idempotent: a table already at this path with the SAME row struct is this very call re-run, so it
-    // succeeds with already_existed=true. A different row struct is a real conflict and still fails.
+    // succeeds with already_existed=true, unchanged and not saved. A different row struct is a real conflict and
+    // still fails, and so does a composite table: it also loads as a UDataTable, but its rows come from its parents.
     const bool bRegistered = UEditorAssetLibrary::DoesAssetExist(TargetPath);
     UDataTable* Existing = Cast<UDataTable>(StaticLoadObject(UDataTable::StaticClass(), nullptr, *TargetPath));
     if (bRegistered || Existing != nullptr)
@@ -831,6 +832,10 @@ TSharedPtr<FJsonObject> HandleCreateDataTable(const TSharedPtr<FJsonObject>& Par
         {
             return mcp_common::MakeErrorReply(
                 TEXT("DataTable already exists but could not be loaded to verify its row struct: ") + TargetPath);
+        }
+        if (Existing->GetClass() != UDataTable::StaticClass())
+        {
+            return DataAuthoringUtils::OtherClassAtPathReply(TargetPath, Existing, UDataTable::StaticClass());
         }
         if (Existing->RowStruct != RowStruct)
         {
@@ -846,9 +851,9 @@ TSharedPtr<FJsonObject> HandleCreateDataTable(const TSharedPtr<FJsonObject>& Par
         Unchanged->SetStringField(TEXT("row_struct"), StructName);
         Unchanged->SetStringField(TEXT("table_path"), Existing->GetPathName());
         Unchanged->SetBoolField(TEXT("already_existed"), true);
-        Unchanged->SetBoolField(TEXT("saved"), true);
+        Unchanged->SetBoolField(TEXT("saved"), false);
         Unchanged->SetBoolField(TEXT("success"), true);
-        Unchanged->SetStringField(TEXT("message"), TEXT("DataTable already exists with matching row struct"));
+        Unchanged->SetStringField(TEXT("message"), TEXT("DataTable already exists with matching row struct; returned unchanged, nothing saved"));
         return mcp_common::MakeOkReply(Unchanged);
     }
 
@@ -884,13 +889,13 @@ TSharedPtr<FJsonObject> HandleCreateDataTable(const TSharedPtr<FJsonObject>& Par
         bSaved ? FString() : mcp_common::MeasuredOutcomeError(TEXT("create_data_table"), TEXT("bSaved")));
 }
 
-// MCP:create_composite_data_table - Create (or re-converge) a UCompositeDataTable whose row map is the merge of its parent DataTables, so a fork can EXTEND an upstream table instead of replacing it. The parent list is SET, not appended (re-running with a different list rewrites it), the row struct of every parent is validated BEFORE assignment (a mismatch or a cyclic parent chain would make the engine open a modal dialog and hang the editor), and the merge is verified by re-reading the live row map.
+// MCP:create_composite_data_table - Create (or re-converge) a UCompositeDataTable whose row map is the merge of its parent DataTables, so a fork can EXTEND an upstream table instead of replacing it. The parent list is SET, not appended (re-running with a different list rewrites it), the row struct of every parent is validated BEFORE assignment (a mismatch or a cyclic parent chain would make the engine open a modal dialog and hang the editor), and the merge is verified by re-reading the live row map. Re-running with the row struct and parent list it already has changes nothing: saved=false and a note, and nothing is saved.
 //   @param table_name - Name of the composite DataTable asset to create or converge.
 //   @param package_path - Target content package path where the asset lives (check the body for the default).
 //   @param parent_tables - Array of full asset paths of the parent DataTables, LOW precedence first: a row present in several parents is won by the one with the HIGHEST index.
 //   @param row_struct - Optional UScriptStruct name for the composite rows. Defaults to the row struct of the first resolved parent (or, on an existing composite, to the one it already has -- which cannot be changed in place).
 //   @param include_row_sources - Optional bool (default false): also return the winning parent for EVERY merged row. Expensive on large tables.
-//   @returns { table_name, package_path, table_path, table_class, row_struct, created, already_existed, requested_parent_tables, missing_parents, parents_applied, saved, save_error, parent_tables, parent_count, contributing_parent_count, merged_row_count, sum_parent_row_counts, expected_merged_row_count, merged_row_count_matches_parents, parent_row_struct_mismatch, shadowed_rows, shadowed_row_count, row_sources_included, row_sources? }
+//   @returns { table_name, package_path, table_path, table_class, row_struct, created, already_existed, requested_parent_tables, missing_parents, parents_applied, saved, save_error, note, parent_tables, parent_count, contributing_parent_count, merged_row_count, sum_parent_row_counts, expected_merged_row_count, merged_row_count_matches_parents, parent_row_struct_mismatch, shadowed_rows, shadowed_row_count, row_sources_included, row_sources? }
 TSharedPtr<FJsonObject> HandleCreateCompositeDataTable(const TSharedPtr<FJsonObject>& Params)
 {
     FString TableName;
@@ -1071,6 +1076,10 @@ TSharedPtr<FJsonObject> HandleCreateCompositeDataTable(const TSharedPtr<FJsonObj
             TEXT("Cyclic parent chain through composite %s; nothing was created or modified"), *LoopTable->GetPathName()));
     }
 
+    // A composite that already holds exactly this row struct and parent list is the state asked for: it is
+    // neither modified, dirtied nor saved, and the reply below still verifies its merge.
+    const bool bUnchanged = bAlreadyExists && Composite->RowStruct == RowStruct && Composite->GetParentTables() == DesiredParents;
+
     // ---------------------------------------------------------------------- //
     // STEP 3 -- create the asset (only once the inputs are known-safe).
     // ---------------------------------------------------------------------- //
@@ -1087,44 +1096,49 @@ TSharedPtr<FJsonObject> HandleCreateCompositeDataTable(const TSharedPtr<FJsonObj
     }
     UPackage* Package = Composite->GetOutermost();
 
-    Composite->Modify();
-
-    // ---------------------------------------------------------------------- //
-    // STEP 4 -- row struct FIRST. UpdateCachedRowMap() compares every parent
-    // against Composite->RowStruct; leaving it null here would make every parent
-    // "mismatch" and open the modal.
-    // ---------------------------------------------------------------------- //
-    Composite->RowStruct = RowStruct;
-
-    // ---------------------------------------------------------------------- //
-    // STEP 5 -- converge the parent list: SET semantics, not append. The engine's
-    // AppendParentTables() appends raw (no dedupe), so an idempotent re-run would
-    // otherwise grow the array forever -- and it is the ONLY public entry point
-    // that drives OnParentTablesUpdated()->UpdateCachedRowMap(), i.e. the merge a
-    // hand-written execute_python assignment to ParentTables never performs.
-    // Removing everything first (rather than diffing) is what guarantees the
-    // resulting ORDER matches the requested precedence, and it is also the safe
-    // order: with an empty parent array neither the loop check nor the row-struct
-    // check inside UpdateCachedRowMap can fire.
-    // ---------------------------------------------------------------------- //
-    TArray<UDataTable*> CurrentParents = Composite->GetParentTables(); // copy: RemoveParentTables mutates the live array
-    const bool bParentListDiffers = (CurrentParents != DesiredParents);
-    if (bParentListDiffers)
-    {
-        if (CurrentParents.Num() > 0)
-        {
-            Composite->RemoveParentTables(CurrentParents);
-        }
-        if (DesiredParents.Num() > 0)
-        {
-            Composite->AppendParentTables(DesiredParents);
-        }
-    }
-
-    Composite->MarkPackageDirty();
-
+    bool bParentListDiffers = false;
+    bool bSaved = false;
     FString SaveError;
-    const bool bSaved = mcp_common::SaveAssetPackage(Package, Composite, SaveError);
+    if (!bUnchanged)
+    {
+        Composite->Modify();
+
+        // ------------------------------------------------------------------ //
+        // STEP 4 -- row struct FIRST. UpdateCachedRowMap() compares every parent
+        // against Composite->RowStruct; leaving it null here would make every parent
+        // "mismatch" and open the modal.
+        // ------------------------------------------------------------------ //
+        Composite->RowStruct = RowStruct;
+
+        // ------------------------------------------------------------------ //
+        // STEP 5 -- converge the parent list: SET semantics, not append. The engine's
+        // AppendParentTables() appends raw (no dedupe), so an idempotent re-run would
+        // otherwise grow the array forever -- and it is the ONLY public entry point
+        // that drives OnParentTablesUpdated()->UpdateCachedRowMap(), i.e. the merge a
+        // hand-written execute_python assignment to ParentTables never performs.
+        // Removing everything first (rather than diffing) is what guarantees the
+        // resulting ORDER matches the requested precedence, and it is also the safe
+        // order: with an empty parent array neither the loop check nor the row-struct
+        // check inside UpdateCachedRowMap can fire.
+        // ------------------------------------------------------------------ //
+        TArray<UDataTable*> CurrentParents = Composite->GetParentTables(); // copy: RemoveParentTables mutates the live array
+        bParentListDiffers = (CurrentParents != DesiredParents);
+        if (bParentListDiffers)
+        {
+            if (CurrentParents.Num() > 0)
+            {
+                Composite->RemoveParentTables(CurrentParents);
+            }
+            if (DesiredParents.Num() > 0)
+            {
+                Composite->AppendParentTables(DesiredParents);
+            }
+        }
+
+        Composite->MarkPackageDirty();
+
+        bSaved = mcp_common::SaveAssetPackage(Package, Composite, SaveError);
+    }
 
     // ---------------------------------------------------------------------- //
     // Verification: re-read the LIVE parent array and the LIVE merged row map.
@@ -1153,7 +1167,15 @@ TSharedPtr<FJsonObject> HandleCreateCompositeDataTable(const TSharedPtr<FJsonObj
     ResultObj->SetBoolField(TEXT("already_existed"), bAlreadyExists);
     ResultObj->SetBoolField(TEXT("parent_list_rewritten"), bParentListDiffers);
     ResultObj->SetBoolField(TEXT("parents_applied"), bParentsApplied);
-    mcp_common::AddSaveOutcome(ResultObj, bSaved, SaveError);
+    if (bUnchanged)
+    {
+        ResultObj->SetBoolField(TEXT("saved"), false);
+        ResultObj->SetStringField(TEXT("note"), TEXT("The composite already had this row struct and parent list; nothing changed, nothing saved"));
+    }
+    else
+    {
+        mcp_common::AddSaveOutcome(ResultObj, bSaved, SaveError);
+    }
 
     ResultObj->SetArrayField(TEXT("requested_parent_tables"), mcp_common::StringsToJson(RequestedParentPaths));
     ResultObj->SetArrayField(TEXT("missing_parents"), TArray<TSharedPtr<FJsonValue>>());
@@ -1170,7 +1192,7 @@ TSharedPtr<FJsonObject> HandleCreateCompositeDataTable(const TSharedPtr<FJsonObj
     {
         OutcomeError = TEXT("The merged row map does not hold the distinct row names the parents supply -- the cached row map did not converge");
     }
-    else if (!bSaved)
+    else if (!bSaved && !bUnchanged)
     {
         OutcomeError = FString::Printf(TEXT("Composite converged in memory but the package did not save: %s"), *SaveError);
     }
@@ -2504,7 +2526,7 @@ TSharedPtr<FJsonObject> HandleRenameDataTableRow(const TSharedPtr<FJsonObject>& 
 // Curve asset authoring
 // ----------------------------------------------------------------------------
 
-// MCP:create_curve_asset - Create a curve asset (CurveFloat, CurveVector or CurveLinearColor) -- a reusable value-over-time or value-over-input ramp for damage falloff, stat growth, fade timing or colour gradients, referenced by assets instead of hard-coded numbers. Channel count follows the type (1 / 3 / 4), and add_curve_key fills it. Different thing from a CurveTable (create_curve_table), which holds many named curves as rows.
+// MCP:create_curve_asset - Create a curve asset (CurveFloat, CurveVector or CurveLinearColor) -- a reusable value-over-time or value-over-input ramp for damage falloff, stat growth, fade timing or colour gradients, referenced by assets instead of hard-coded numbers. Channel count follows the type (1 / 3 / 4), and add_curve_key fills it. A curve of that type already at the path is returned unchanged with already_exists=true and saved=false, and nothing is saved; another asset class there is an error. Different thing from a CurveTable (create_curve_table), which holds many named curves as rows.
 //   @param name - Asset name to create
 //   @param package_path - Target content package path where the asset is created (check the body for the default)
 //   @param curve_type - Curve type to create (read the body for the allowed values)
@@ -2553,18 +2575,18 @@ TSharedPtr<FJsonObject> HandleCreateCurveAsset(const TSharedPtr<FJsonObject>& Pa
     const FString FullPath = FString::Printf(TEXT("%s/%s"), *PackagePath, *AssetName);
     if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(FullPath)) { return Invalid; }
 
-    // Idempotent: if it already exists, load and return it.
+    // Idempotent: a curve of exactly the requested class already there is returned unchanged and nothing is saved.
+    // Anything else there, a subclass with its own behavior included, is not the curve asked for.
     if (UEditorAssetLibrary::DoesAssetExist(FullPath))
     {
         UObject* Existing = StaticLoadObject(CurveClass, nullptr, *FullPath);
-        if (Existing)
+        if (Existing && Existing->GetClass() == CurveClass)
         {
             TSharedPtr<FJsonObject> ExistObj = UEAgentDataAssetCommandsImpl::CreatedCurveReply(AssetName, PackagePath, CurveType, Existing, NumChannels);
-            DataAuthoringUtils::AddAlreadyExistsFlags(ExistObj);
+            DataAuthoringUtils::AddAlreadyExistsFlags(ExistObj, TEXT("Curve asset"));
             return mcp_common::MakeOkReply(ExistObj);
         }
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Curve already exists at %s but could not be loaded as %s"), *FullPath, *CurveClass->GetName()));
+        return DataAuthoringUtils::OtherClassAtPathReply(FullPath, Existing, CurveClass);
     }
 
     // Create a real /Game package + curve object inside it, then save (mirrors the
@@ -3325,7 +3347,10 @@ TSharedPtr<FJsonObject> HandleDiffDataTables(const TSharedPtr<FJsonObject>& Para
         Params->TryGetStringField(TEXT("table_b"), PathB);
     }
 
-    if (PathA.IsEmpty() || PathB.IsEmpty())
+    // Tested through a bool: a and b are needed only in asset mode (JSON mode returned above), and
+    // an emptiness test of PathA/PathB that returns would make the catalog require them always.
+    const bool bHasBothPaths = !PathA.IsEmpty() && !PathB.IsEmpty();
+    if (!bHasBothPaths)
     {
         return mcp_common::MakeErrorReply(
             TEXT("Provide two DataTable asset paths (a/table_a, b/table_b) or two JSON dumps (before_json, after)"));

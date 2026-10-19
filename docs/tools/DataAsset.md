@@ -107,7 +107,7 @@ Compile a localization target's archives into runtime LocRes/LocMeta binaries, b
 
 *Additive.*
 
-Creates a UCompositeCurveTable at package_path/name that stacks the given UCurveTables as parents, and saves it. An existing composite there is reused and only gets parents if it has none; parents that fail to load are skipped and listed in missing_parents. Returns parent_count, row_count, created, saved.
+Creates a UCompositeCurveTable at package_path/name that stacks the given UCurveTables as parents, and saves it. An existing composite there is reused and only gets parents if it has none; when it gets none it is returned unchanged with already_exists=true and saved=false, and nothing is saved. Any other asset class at that path is an error. Parents that fail to load are skipped and listed in missing_parents. A failed save makes success false with saved=false and save_error. Returns parent_count, row_count, created, saved. A plain table is create_curve_table; read back with get_curve_table_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -115,13 +115,13 @@ Creates a UCompositeCurveTable at package_path/name that stacks the given UCurve
 | `package_path` | string | no | Content folder; defaults to /Game/CurveTables |
 | `parent_table_paths` | array | no | Optional list of UCurveTable asset paths to stack as parents |
 
-**Returns:** `{ name: string, package_path: string, asset_path: string, curve_table_path: string, curve_class: string, parent_count: int, row_count: int, curve_table_mode: string, created: bool, already_exists: bool, saved: bool, missing_parents?: [string] }`
+**Returns:** `{ name: string, package_path: string, asset_path: string, curve_table_path: string, curve_class: string, parent_count: int, row_count: int, curve_table_mode: string, created: bool, already_exists: bool, saved: bool, missing_parents?: [string], message?: string, save_error?: string }`
 
 ## `create_composite_data_table`
 
 *Additive.*
 
-Create (or re-converge) a UCompositeDataTable whose row map is the merge of its parent DataTables, so a fork can EXTEND an upstream table instead of replacing it. The parent list is SET, not appended (re-running with a different list rewrites it), the row struct of every parent is validated BEFORE assignment (a mismatch or a cyclic parent chain would make the engine open a modal dialog and hang the editor), and the merge is verified by re-reading the live row map.
+Create (or re-converge) a UCompositeDataTable whose row map is the merge of its parent DataTables, so a fork can EXTEND an upstream table instead of replacing it. The parent list is SET, not appended (re-running with a different list rewrites it), the row struct of every parent is validated BEFORE assignment (a mismatch or a cyclic parent chain would make the engine open a modal dialog and hang the editor), and the merge is verified by re-reading the live row map. Re-running with the row struct and parent list it already has changes nothing: saved=false and a note, and nothing is saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -131,13 +131,13 @@ Create (or re-converge) a UCompositeDataTable whose row map is the merge of its 
 | `row_struct` | string | no | Optional UScriptStruct name for the composite rows. Defaults to the row struct of the first resolved parent (or, on an existing composite, to the one it already has -- which cannot be changed in place). |
 | `include_row_sources` | boolean | no | Optional bool (default false): also return the winning parent for EVERY merged row. Expensive on large tables. |
 
-**Returns:** `{ table_name, package_path, table_path, table_class, row_struct, created, already_existed, requested_parent_tables, missing_parents, parents_applied, saved, save_error, parent_tables, parent_count, contributing_parent_count, merged_row_count, sum_parent_row_counts, expected_merged_row_count, merged_row_count_matches_parents, parent_row_struct_mismatch, shadowed_rows, shadowed_row_count, row_sources_included, row_sources? }`
+**Returns:** `{ table_name, package_path, table_path, table_class, row_struct, created, already_existed, requested_parent_tables, missing_parents, parents_applied, saved, save_error, note, parent_tables, parent_count, contributing_parent_count, merged_row_count, sum_parent_row_counts, expected_merged_row_count, merged_row_count_matches_parents, parent_row_struct_mismatch, shadowed_rows, shadowed_row_count, row_sources_included, row_sources? }`
 
 ## `create_curve_asset`
 
 *Additive.*
 
-Create a curve asset (CurveFloat, CurveVector or CurveLinearColor) -- a reusable value-over-time or value-over-input ramp for damage falloff, stat growth, fade timing or colour gradients, referenced by assets instead of hard-coded numbers. Channel count follows the type (1 / 3 / 4), and add_curve_key fills it. Different thing from a CurveTable (create_curve_table), which holds many named curves as rows.
+Create a curve asset (CurveFloat, CurveVector or CurveLinearColor) -- a reusable value-over-time or value-over-input ramp for damage falloff, stat growth, fade timing or colour gradients, referenced by assets instead of hard-coded numbers. Channel count follows the type (1 / 3 / 4), and add_curve_key fills it. A curve of that type already at the path is returned unchanged with already_exists=true and saved=false, and nothing is saved; another asset class there is an error. Different thing from a CurveTable (create_curve_table), which holds many named curves as rows.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -151,7 +151,7 @@ Create a curve asset (CurveFloat, CurveVector or CurveLinearColor) -- a reusable
 
 *Additive, idempotent.*
 
-Create an empty UCurveTable asset (a table of named curve rows) at package_path/name and save it. Idempotent: a curve table already at that path, a composite one included, is returned untouched with created=false and already_exists=true; any other asset there, or an invalid package name, is an error. A failed save makes success false with saved=false and the cause in message, the new table staying in memory. The table starts in Empty mode and turns RichCurves when add_curve_table_row adds its first row. Add keys with add_curve_table_key; read back with get_curve_table_info; stack tables with create_composite_curve_table; a standalone float, vector or color curve is create_curve_asset, and a table of struct rows is create_data_table.
+Create an empty UCurveTable asset (a table of named curve rows) at package_path/name and save it. Idempotent: a plain curve table already at that path is returned untouched with created=false, already_exists=true and saved=false, and nothing is saved; a composite curve table or any other asset there, or an invalid package name, is an error naming what is there. A failed save makes success false with saved=false and the cause in message, the new table staying in memory. The table starts in Empty mode and turns RichCurves when add_curve_table_row adds its first row. Add keys with add_curve_table_key; read back with get_curve_table_info; stack tables with create_composite_curve_table; a standalone float, vector or color curve is create_curve_asset, and a table of struct rows is create_data_table.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -178,7 +178,7 @@ Create a DataAsset instance of a given parent class -- the single-record alterna
 
 *Additive, idempotent.*
 
-Create and save a UDataRegistry asset.  The registry's ItemStruct is set to the named UScriptStruct (e.g. "MirrorTableRow"); DataTable sources attached later must use a matching RowStruct. Idempotent: re-loads and returns an existing asset.
+Create and save a UDataRegistry asset.  The registry's ItemStruct is set to the named UScriptStruct (e.g. "MirrorTableRow"); DataTable sources attached later must use a matching RowStruct. Idempotent: a registry already at the path is returned unchanged with already_exists=true and saved=false (registry_type and item_struct not applied), and nothing is saved; another asset class there is an error. A failed save makes success false with saved=false and save_error. Attach sources with add_data_registry_source, then register it with initialize_data_registry.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -187,13 +187,13 @@ Create and save a UDataRegistry asset.  The registry's ItemStruct is set to the 
 | `package_path` | string | no | Destination /Game folder (default /Game/DataRegistries). |
 | `registry_type` | string | no | RegistryType FName (defaults to registry_name). |
 
-**Returns:** `{ registry_path: string, registry_type: string, item_struct: string, success: bool, already_exists: bool, type_verified: bool, struct_verified: bool, saved: bool, save_error: string }`
+**Returns:** `{ registry_path: string, registry_type: string, item_struct: string, success: bool, already_exists: bool, type_verified: bool, struct_verified: bool, saved: bool, save_error: string, message?: string }`
 
 ## `create_data_table`
 
 *Additive, idempotent.*
 
-Create a DataTable asset bound to a row struct -- the standard container for game data (items, recipes, loot, quests, dialogue) that designers edit without touching Blueprints. The row struct must already exist (create_struct) and cannot be changed afterwards without losing data, so settle its columns first. Idempotent: re-running with the same row_struct returns the existing table with already_existed instead of erroring. Rows go in with add_data_table_row or import_data_table_csv; create_composite_data_table is the variant that merges several parent tables.
+Create a DataTable asset bound to a row struct -- the standard container for game data (items, recipes, loot, quests, dialogue) that designers edit without touching Blueprints. The row struct must already exist (create_struct) and cannot be changed afterwards without losing data, so settle its columns first. Idempotent: re-running with the same row_struct returns the existing table unchanged with already_existed=true and saved=false, and nothing is saved; a different row_struct, a composite table or another asset class at the path is an error. Rows go in with add_data_table_row or import_data_table_csv; create_composite_data_table is the variant that merges several parent tables.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -207,7 +207,7 @@ Create a DataTable asset bound to a row struct -- the standard container for gam
 
 *Additive.*
 
-Creates a UStringTable asset at package_path/name with the given namespace and no entries, then saves it. A string table already there is returned unchanged (namespace not applied, already_exists true). Returns asset_path, string_table_id, namespace, entry_count, created, saved. Add entries with set_string_table_entry.
+Creates a UStringTable asset at package_path/name with the given namespace and no entries, then saves it. A string table already there is returned unchanged (namespace not applied, already_exists true, saved false) and nothing is saved; an asset of another class there is an error naming that class. A failed save makes success false with saved=false and save_error, the new table staying in memory. Returns asset_path, string_table_id, namespace, entry_count, created, saved. Add entries with set_string_table_entry; list them with get_string_table_entries.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -215,7 +215,7 @@ Creates a UStringTable asset at package_path/name with the given namespace and n
 | `package_path` | string | no | Target content path, defaults to /Game/StringTables |
 | `namespace` | string | no | Optional namespace for all entries, defaults to asset name |
 
-**Returns:** `{ name: string, package_path: string, asset_path: string, string_table_path: string, string_table_id: string, namespace: string, entry_count: int, created: bool, already_exists: bool, saved: bool, message: string }`
+**Returns:** `{ name: string, package_path: string, asset_path: string, string_table_path: string, string_table_id: string, namespace: string, entry_count: int, created: bool, already_exists: bool, saved: bool, message: string, save_error?: string }`
 
 ## `delete_curve_table_row`
 
@@ -251,8 +251,8 @@ Diff two DataTables row by row and cell by cell without modifying either: two as
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `a` | string | yes | Full asset path of the first DataTable (alias: table_a); asset mode |
-| `b` | string | yes | Full asset path of the second DataTable (alias: table_b); asset mode |
+| `a` | string | no | Full asset path of the first DataTable (alias: table_a); asset mode |
+| `b` | string | no | Full asset path of the second DataTable (alias: table_b); asset mode |
 | `before_json` | any | no | The 'before'/A table dump as a JSON object/array or stringified JSON (alias: before); JSON mode |
 | `after` | any | no | The 'after'/B table dump as a JSON object/array or stringified JSON (alias: after_json); JSON mode |
 | `table_a` | string | no | Alias of a: asset path of the first DataTable, e.g. "/Game/Data/DT_Items"; a wins when both are given |
@@ -505,7 +505,7 @@ Bulk-load a DataTable from a CSV string -- the fast path for authoring or restor
 
 *Additive, idempotent.*
 
-Register and initialize a UDataRegistry asset with the UDataRegistrySubsystem for this editor session, so get_data_registry_item can read its precached items: the asset is loaded, its path goes on the subsystem's load list (LoadRegistryPath), the registry map is refreshed and registries not yet initialized are initialized. Nothing is saved or written to the asset, and a repeat call adds nothing (idempotent). registered and initialized describe the registry the subsystem holds for this asset's registry_type afterwards -- with two assets of one type that can be the other one -- and loaded only says the path is on the load list. A registry that does not load, or a missing subsystem (DataRegistry plugin off), is an error. Create one with create_data_registry and attach sources with add_data_registry_source; after edits use refresh_data_registry_map; state: get_data_registry_info, list_data_registry_types.
+Register and initialize a UDataRegistry asset with the UDataRegistrySubsystem for this editor session, so get_data_registry_item can read its precached items: the asset is loaded, its path goes on the subsystem's load list (LoadRegistryPath), the registry map is refreshed and registries not yet initialized are initialized. Nothing is saved or written to the asset, and a repeat call adds nothing (idempotent). loaded, registered and initialized are read back from this asset, and it is a failure, success false with the reason, unless it ends up registered and initialized: another asset holding its registry_type, or no source that initializes, prevents that. A registry that does not load, or a missing subsystem (DataRegistry plugin off), is an error. Create one with create_data_registry and attach sources with add_data_registry_source; after edits use refresh_data_registry_map; state: get_data_registry_info, list_data_registry_types.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -796,7 +796,7 @@ Upsert many DataTable rows with one native JSON import and one save, each deep-m
 
 *Destructive, idempotent.*
 
-Set the source string of key in a UStringTable asset loaded by path, adding the entry when the key is new (created=true) or overwriting its source string when it exists (updated=true, its metadata kept), in one undo step, then save the asset. Every call writes and saves, even with the same string; entry_set and verified both mean the read-back matched. The key must not be empty: an empty one is not refused here and trips an engine assertion that stops the editor. A missing table is an error. A failed save, as during PIE, still answers success, with saved=false and a message, and the entry set in memory only. Create the table with create_string_table; list entries with get_string_table_entries; take one out with remove_string_table_entry; per-entry metadata: set_string_table_metadata.
+Set the source string of key in a UStringTable asset loaded by path, adding the entry when the key is new (created=true) or overwriting its source string when it exists (updated=true, its metadata kept), in one undo step, then save the asset. Every call writes and saves, even with the same string; entry_set and verified both mean the read-back matched. The key must not be empty: an empty one, which the engine asserts on, is refused before anything changes. A missing table is an error. A failed save, as during PIE, still answers success, with saved=false and a message, and the entry set in memory only. Create the table with create_string_table; list entries with get_string_table_entries; take one out with remove_string_table_entry; per-entry metadata: set_string_table_metadata.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

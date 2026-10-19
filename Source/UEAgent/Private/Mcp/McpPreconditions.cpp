@@ -752,21 +752,36 @@ void McpPreconditions::NoteResult(const FString& CommandType, const TSharedPtr<F
 	using namespace McpPreconditionsPrivate;
 
 	// A create_world_partition_map that WORKED leaves its world resident for the whole session.
-	// Recorded AFTER the call and only on success: recording it before would refuse loading a map
-	// that was never created.
-	if (!CommandType.Equals(TEXT("create_world_partition_map"), ESearchCase::IgnoreCase) || !PayloadFromEnvelope(Envelope).IsValid())
+	// Recorded AFTER the call, only on success and only when the reply says this call created the
+	// map (created=true): recording it before would refuse loading a map that was never created, and
+	// a map that already existed is only returned, not created here.
+	if (!CommandType.Equals(TEXT("create_world_partition_map"), ESearchCase::IgnoreCase))
 	{
 		return;
 	}
-	FString Folder = TextOf(Params, TEXT("package_path"));
-	while (Folder.EndsWith(TEXT("/")))
+	const TSharedPtr<FJsonObject> Payload = PayloadFromEnvelope(Envelope);
+	if (!Payload.IsValid() || !Truthy(Payload, TEXT("created")))
 	{
-		Folder.LeftChopInline(1);
+		return;
 	}
-	const FString Name = TextOf(Params, TEXT("name"));
-	if (!Folder.IsEmpty() && !Name.IsEmpty())
+	// The map path the handler reports covers its default folder; the params are the fallback.
+	FString MapPath = TextOf(Payload, TEXT("map_path"));
+	if (MapPath.IsEmpty())
 	{
-		GWpMapsCreated.Add(NormPkg(Folder + TEXT("/") + Name));
+		FString Folder = TextOf(Params, TEXT("package_path"));
+		while (Folder.EndsWith(TEXT("/")))
+		{
+			Folder.LeftChopInline(1);
+		}
+		const FString Name = TextOf(Params, TEXT("name"));
+		if (!Folder.IsEmpty() && !Name.IsEmpty())
+		{
+			MapPath = Folder + TEXT("/") + Name;
+		}
+	}
+	if (!MapPath.IsEmpty())
+	{
+		GWpMapsCreated.Add(NormPkg(MapPath));
 	}
 }
 

@@ -607,7 +607,7 @@ const TCHAR* FindStandardMacroAlias(const FString& NodeType)
 //   @param node_type - One of event, custom_event, call_function, print_string, variable_get, variable_set, branch, sequence, self, cast, spawn_actor (alias spawn_actor_from_class), create_widget, make_struct, break_struct, get_array_item, select, make_array, make_set, make_map, switch_int, switch_string, switch_name, switch_enum, enum_literal, format_text, foreach, foreach_with_break, do_once, gate, flipflop, for_loop, while_loop, is_valid, add_delegate, macro_instance
 //   @param event_name - Event name; required for event and custom_event node types
 //   @param function_name - Function to call; required for call_function node type
-//   @param target_class - Class owning the function or cast/spawn target class. For variable_get/variable_set it names the class that owns the variable, producing a non-self member-access node (with a 'target' pin) instead of a self-context node. For create_widget it names the widget class to construct (e.g. WBP_Foo_C, a full asset path, or the widget Blueprint short name); the node exposes that widget's Expose-On-Spawn pins.
+//   @param target_class - Class owning the function or cast/spawn target class; required for cast and create_widget. For variable_get/variable_set it names the class that owns the variable, producing a non-self member-access node (with a 'target' pin) instead of a self-context node. For create_widget it names the widget class to construct (e.g. WBP_Foo_C, a full asset path, or the widget Blueprint short name); the node exposes that widget's Expose-On-Spawn pins.
 //   @param variable_name - Variable to get/set; required for variable_get and variable_set
 //   @param scope - Optional scope hint for variable_get/variable_set: 'auto' (default; a function-local variable declared in the target graph wins, else a self/member variable), 'local' (function-local variable ONLY), or 'member' (member variable only -- self, or on target_class when supplied). Ignored by other node types.
 //   @param struct_type - Struct type; required for make_struct and break_struct nodes
@@ -644,10 +644,14 @@ TSharedPtr<FJsonObject> HandleAddGraphNode(const TSharedPtr<FJsonObject>& Params
     UEdGraphNode* NewNode = nullptr;
     FString ErrorMessage;
 
+    // Each node type reads only the params it needs, into a bool tested afterwards. A read negated
+    // inside the if would make the catalog publish that param as required for EVERY node type, so
+    // the server would refuse a call that omits, say, enum_path for an event node.
     if (NodeType == TEXT("event"))
     {
         FString EventName;
-        if (!Params->TryGetStringField(TEXT("event_name"), EventName))
+        const bool bHasEventName = Params->TryGetStringField(TEXT("event_name"), EventName);
+        if (!bHasEventName)
         {
             return mcp_common::MakeErrorReply(TEXT("event node requires 'event_name'"));
         }
@@ -657,7 +661,8 @@ TSharedPtr<FJsonObject> HandleAddGraphNode(const TSharedPtr<FJsonObject>& Params
     else if (NodeType == TEXT("custom_event"))
     {
         FString EventName;
-        if (!Params->TryGetStringField(TEXT("event_name"), EventName))
+        const bool bHasEventName = Params->TryGetStringField(TEXT("event_name"), EventName);
+        if (!bHasEventName)
         {
             return mcp_common::MakeErrorReply(TEXT("custom_event node requires 'event_name'"));
         }
@@ -675,7 +680,8 @@ TSharedPtr<FJsonObject> HandleAddGraphNode(const TSharedPtr<FJsonObject>& Params
         }
         else
         {
-            if (!Params->TryGetStringField(TEXT("function_name"), FunctionName))
+            const bool bHasFunctionName = Params->TryGetStringField(TEXT("function_name"), FunctionName);
+            if (!bHasFunctionName)
             {
                 return mcp_common::MakeErrorReply(TEXT("call_function node requires 'function_name'"));
             }
@@ -692,7 +698,8 @@ TSharedPtr<FJsonObject> HandleAddGraphNode(const TSharedPtr<FJsonObject>& Params
     else if (NodeType == TEXT("variable_get") || NodeType == TEXT("variable_set"))
     {
         FString VarName;
-        if (!Params->TryGetStringField(TEXT("variable_name"), VarName))
+        const bool bHasVarName = Params->TryGetStringField(TEXT("variable_name"), VarName);
+        if (!bHasVarName)
         {
             return mcp_common::MakeErrorReply(FString::Printf(TEXT("%s node requires 'variable_name'"), *NodeType));
         }
@@ -746,7 +753,8 @@ TSharedPtr<FJsonObject> HandleAddGraphNode(const TSharedPtr<FJsonObject>& Params
     else if (NodeType == TEXT("cast") || NodeType == TEXT("dynamic_cast"))
     {
         FString TargetClassName;
-        if (!Params->TryGetStringField(TEXT("target_class"), TargetClassName))
+        const bool bHasTargetClass = Params->TryGetStringField(TEXT("target_class"), TargetClassName);
+        if (!bHasTargetClass)
         {
             return mcp_common::MakeErrorReply(TEXT("cast node requires 'target_class'"));
         }
@@ -788,7 +796,8 @@ TSharedPtr<FJsonObject> HandleAddGraphNode(const TSharedPtr<FJsonObject>& Params
     else if (NodeType == TEXT("make_struct") || NodeType == TEXT("break_struct"))
     {
         FString StructTypeName;
-        if (!Params->TryGetStringField(TEXT("struct_type"), StructTypeName))
+        const bool bHasStructType = Params->TryGetStringField(TEXT("struct_type"), StructTypeName);
+        if (!bHasStructType)
         {
             return mcp_common::MakeErrorReply(FString::Printf(TEXT("%s node requires 'struct_type'"), *NodeType));
         }
@@ -866,7 +875,8 @@ TSharedPtr<FJsonObject> HandleAddGraphNode(const TSharedPtr<FJsonObject>& Params
     else if (NodeType == TEXT("switch_enum") || NodeType == TEXT("enum_literal"))
     {
         FString EnumPath;
-        if (!Params->TryGetStringField(TEXT("enum_path"), EnumPath))
+        const bool bHasEnumPath = Params->TryGetStringField(TEXT("enum_path"), EnumPath);
+        if (!bHasEnumPath)
         {
             return mcp_common::MakeErrorReply(FString::Printf(TEXT("%s node requires 'enum_path'"), *NodeType));
         }
@@ -924,7 +934,8 @@ TSharedPtr<FJsonObject> HandleAddGraphNode(const TSharedPtr<FJsonObject>& Params
     else if (NodeType == TEXT("add_delegate"))
     {
         FString DispatcherName;
-        if (!Params->TryGetStringField(TEXT("dispatcher"), DispatcherName))
+        const bool bHasDispatcher = Params->TryGetStringField(TEXT("dispatcher"), DispatcherName);
+        if (!bHasDispatcher)
         {
             return mcp_common::MakeErrorReply(TEXT("add_delegate node requires 'dispatcher'"));
         }
@@ -954,7 +965,8 @@ TSharedPtr<FJsonObject> HandleAddGraphNode(const TSharedPtr<FJsonObject>& Params
     else if (NodeType == TEXT("create_widget"))
     {
         FString TargetClassName;
-        if (!Params->TryGetStringField(TEXT("target_class"), TargetClassName) || TargetClassName.IsEmpty())
+        const bool bHasTargetClass = Params->TryGetStringField(TEXT("target_class"), TargetClassName);
+        if (!bHasTargetClass || TargetClassName.IsEmpty())
         {
             return mcp_common::MakeErrorReply(TEXT("create_widget node requires 'target_class' (the widget class, e.g. WBP_Foo_C or a full asset path)"));
         }
@@ -1001,7 +1013,8 @@ TSharedPtr<FJsonObject> HandleAddGraphNode(const TSharedPtr<FJsonObject>& Params
     else if (NodeType == TEXT("macro_instance"))
     {
         FString MacroGraphName;
-        if (!Params->TryGetStringField(TEXT("macro_graph_name"), MacroGraphName) || MacroGraphName.IsEmpty())
+        const bool bHasMacroGraphName = Params->TryGetStringField(TEXT("macro_graph_name"), MacroGraphName);
+        if (!bHasMacroGraphName || MacroGraphName.IsEmpty())
         {
             return mcp_common::MakeErrorReply(TEXT("macro_instance node requires 'macro_graph_name'"));
         }

@@ -21,6 +21,7 @@
 #include "LightingBuildOptions.h"
 #include "Misc/ConfigCacheIni.h"
 #include "ScopedTransaction.h"
+#include "UObject/Package.h"
 
 #define LOCTEXT_NAMESPACE "UEAgentScene"
 
@@ -44,6 +45,36 @@ namespace UEAgentSceneCommandsImpl
             return mcp_common::MakeErrorReply(FString::Printf(TEXT("Actor not found: %s"), *NameOrLabel));
         }
         return nullptr;
+    }
+
+    // Why AActor::AttachToActor refused to attach Child to Parent: the refusals of
+    // USceneComponent::AttachToComponent that can be told apart from outside, else a pointer to the editor
+    // log, where the engine writes its reason.
+    FString AttachRefusalReason(const AActor* Child, const AActor* Parent)
+    {
+        const USceneComponent* ChildRoot = Child->GetRootComponent();
+        const USceneComponent* ParentComponent = Parent->GetDefaultAttachComponent();
+        if (ChildRoot == nullptr)
+        {
+            return TEXT("the child has no root component");
+        }
+        if (ParentComponent == nullptr)
+        {
+            return TEXT("the parent has no component to attach to");
+        }
+        if (Child == Parent || ChildRoot == ParentComponent)
+        {
+            return TEXT("an actor cannot be attached to itself");
+        }
+        if (ParentComponent->IsAttachedTo(ChildRoot))
+        {
+            return TEXT("the parent is attached under the child, so the attachment would form a cycle");
+        }
+        if (ChildRoot->GetMobility() == EComponentMobility::Static && ParentComponent->GetMobility() != EComponentMobility::Static)
+        {
+            return TEXT("the child's root component is Static and the parent's is not; a Static component attaches only to a Static parent");
+        }
+        return TEXT("the engine refused the attachment (its reason is in the editor log)");
     }
 }
 
@@ -129,7 +160,7 @@ TSharedPtr<FJsonObject> HandleGetActorFolder(const TSharedPtr<FJsonObject>& Para
     return Reply;
 }
 
-// MCP:attach_actor - Attach one editor-world actor to another, both found by internal name or outliner label (first match), optionally at a socket of the parent, keeping the child's world transform, in one undo step; the level is marked dirty, not saved. A child that already has a parent moves to the new one, and repeating the same attachment changes nothing (idempotent). attached is the engine's verdict: an attachment it refuses still returns success with attached false, so check it. The socket name is not checked against the parent. A missing child or parent is an error. Inverse: detach_actor; for a component inside a Blueprint use attach_blueprint_component; to attach over time in a Level Sequence use add_attach_track.
+// MCP:attach_actor - Attach one editor-world actor to another, both found by internal name or outliner label (first match), optionally at a socket of the parent, keeping the child's world transform, in one undo step; the level is marked dirty, not saved. A child that already has a parent moves to the new one, and repeating the same attachment changes nothing (idempotent). attached is the engine's verdict: an attachment it refuses (to the actor itself, into a cycle, a Static child under a non-Static parent) is an error naming the reason, with attached false and no undo step left. The socket name is not checked against the parent. A missing child or parent is an error. Inverse: detach_actor; for a component inside a Blueprint use attach_blueprint_component; to attach over time in a Level Sequence use add_attach_track.
 //   @param child_actor_name - Internal name or outliner label of the child actor to attach (first match in the editor world)
 //   @param parent_actor_name - Internal name or outliner label of the parent actor to attach to (first match in the editor world)
 //   @param socket_name - Optional socket name on the parent, not checked; omitted or empty attaches without a socket
@@ -149,6 +180,9 @@ TSharedPtr<FJsonObject> HandleAttachActor(const TSharedPtr<FJsonObject>& Params)
     if (!Parent)
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("Parent actor not found: %s"), *ParentName));
 
+    UPackage* ChildPackage = Child->GetPackage();
+    const bool bChildPackageWasDirty = ChildPackage != nullptr && ChildPackage->IsDirty();
+
     const FScopedTransaction Transaction(LOCTEXT("AttachActor", "MCP: Attach Actor"));
     Child->Modify();
     const bool bAttached = Child->AttachToActor(Parent, FAttachmentTransformRules::KeepWorldTransform,
@@ -158,6 +192,18 @@ TSharedPtr<FJsonObject> HandleAttachActor(const TSharedPtr<FJsonObject>& Params)
     Result->SetStringField(TEXT("child"), Child->GetName());
     Result->SetStringField(TEXT("parent"), Parent->GetName());
     Result->SetBoolField(TEXT("attached"), bAttached);
+    if (!bAttached)
+    {
+        // The engine refuses before it changes anything, so only Modify() touched the child: put its package's
+        // dirty flag back and drop the call's undo step, which would undo nothing.
+        if (ChildPackage != nullptr)
+        {
+            ChildPackage->SetDirtyFlag(bChildPackageWasDirty);
+        }
+        mcp_common::DiscardUndoStepOfThisCall();
+        return mcp_common::MakeOutcomeReply(Result, false, FString::Printf(TEXT("attach_actor: %s was not attached to %s: %s"),
+            *Child->GetName(), *Parent->GetName(), *UEAgentSceneCommandsImpl::AttachRefusalReason(Child, Parent)));
+    }
     return Result;
 }
 

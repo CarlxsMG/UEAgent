@@ -860,7 +860,7 @@ Import a .ttf/.otf/.ttc/.otc font from disk as a UFontFace, and optionally the c
 
 *Destructive, idempotent.*
 
-Bind a UMediaTexture asset to a UMediaPlayer asset (both by asset path) so the texture shows that player's video, in place of any player it was bound to, in one undo step; then save the texture package (the player asset is not modified). linked confirms the texture now reports that player, and bound_player_path names the player it reports. Idempotent: linking the same pair again writes and saves the same state. A missing texture or player is an error; a failed save makes success false with saved=false and save_error. Create the assets with create_media_texture and create_media_player (which can also make a linked texture); read back with get_media_info.
+Bind a UMediaTexture asset to a UMediaPlayer asset (both by asset path) so the texture shows that player's video, in place of any player it was bound to, in one undo step; then save the texture package (the player asset is not modified). The link is written to the texture's saved MediaPlayer property, so it survives a reload; linked confirms both that property and the player the texture now reports (bound_player_path), and a link that did not take is an error with linked false and nothing saved. Idempotent: linking the same pair again writes and saves the same state. A missing texture or player is an error; a failed save makes success false with saved=false and save_error. Create the assets with create_media_texture and create_media_player (which can also make a linked texture); read back with get_media_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1401,11 +1401,11 @@ Turn Game View on or off on the active level editor viewport, the focused one or
 
 *Destructive, idempotent.*
 
-Override the near clip plane distance, in cm, of the active level editor viewport, the focused one or else the first; no viewport is an error. A negative distance (-1 by convention) drops the override so the engine near plane, GNearClippingPlane, applies again; 0 or more becomes the override as given, unvalidated, so use a small positive value. It lasts for this editor session with no undo step and no save, and the previous value is not returned. near_clip_plane is the effective near plane read back and override_active says whether an override is now set. get_near_clip_plane reads both clip planes; the far plane is set_far_clip_plane.
+Override the near clip plane distance, in cm, of the active level editor viewport, the focused one or else the first; no viewport is an error. A negative distance (-1 by convention) drops the override so the engine near plane, GNearClippingPlane, applies again; a distance of at least 0.001, the smallest the editor's Near View Plane control allows, becomes the override. 0 (a degenerate projection), anything else below 0.001 and a value too large for a float are errors before anything changes. It lasts for this editor session with no undo step and no save, and the previous value is not returned. near_clip_plane is the effective near plane read back and override_active says whether an override is now set. get_near_clip_plane reads both clip planes; the far plane is set_far_clip_plane.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `distance` | number | yes | Near clip distance in cm; any negative value (-1 by convention) clears the override and falls back to GNearClippingPlane |
+| `distance` | number | yes | Near clip distance in cm, at least 0.001; any negative value (-1 by convention) clears the override and falls back to GNearClippingPlane |
 
 **Returns:** `{ applied: bool, requested: number, near_clip_plane: number, override_active: bool }`
 
@@ -1501,13 +1501,13 @@ Set the exposure of the active level editor viewport: fixed at ev100 when fixed 
 
 *Destructive, idempotent.*
 
-Set the perspective field of view, in degrees, of the active level editor viewport, the focused one or else the first; no viewport is an error. The value goes into the viewport's current view FOV as given -- no clamp and no range check -- and fov is read straight back; an orthographic view ignores it. It lasts for this editor session with no undo step and no save, and the previous FOV is not returned. Only the current view FOV changes, not the value the toolbar FOV slider stores, so a camera reset or the end of a PIE session brings the slider's value back, and a viewport piloting a camera actor shows that camera's FOV instead. Read it with get_viewport_fov; a camera actor's own FOV is set_camera_fov.
+Set the perspective field of view, in degrees, of the active level editor viewport, the focused one or else the first; no viewport is an error. fov must lie in 5..170, the range of the editor's Field of View control, and a value outside it is an error before anything changes. Like that control it sets both the current view FOV and the stored one that a camera reset or the end of a PIE session restores; fov and stored_fov are read back, and an orthographic view ignores them. There is no undo step and no asset is saved, and the previous FOV is not returned. A viewport piloting a camera actor keeps showing that camera's FOV until it stops piloting it. Read it with get_viewport_fov; a camera actor's own FOV is set_camera_fov.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `fov` | number | yes | Field of view in degrees; stored as given, with no clamp or validation (the editor's FOV slider spans 5..170) |
+| `fov` | number | yes | Field of view in degrees, from 5 to 170 (the range of the editor's FOV slider) |
 
-**Returns:** `{ applied: bool, requested: number, fov: number }`
+**Returns:** `{ applied: bool, requested: number, fov: number, stored_fov: number }`
 
 ## `set_viewport_realtime`
 
@@ -1525,11 +1525,11 @@ Enable or disable realtime rendering on the active editor viewport
 
 *Destructive, idempotent.*
 
-Set the rendering view mode (Lit, Unlit, Wireframe, ShaderComplexity...) of the active level editor viewport, the focused one or else the first; no viewport is an error. view_mode is matched without case, and an unknown name is an error before anything changes. The mode is stored for the viewport's current projection only (perspective and orthographic keep separate modes) and lasts for this editor session: no undo step, nothing saved, no asset touched, and the previous mode is not returned. view_mode and view_mode_index are read back. Read it without changing it with get_viewport_state; single show flags are set_show_flag, the projection set_view_type, game view set_game_view.
+Set the rendering view mode (Lit, Unlit, Wireframe, ShaderComplexity...) of the active level editor viewport, the focused one or else the first; no viewport is an error. view_mode is matched without case, and an unknown name is an error before anything changes. The mode is stored for the viewport's current projection only (perspective and orthographic keep separate modes) and lasts for this editor session: no undo step, nothing saved, no asset touched, and the previous mode is not returned. view_mode and view_mode_index are read back, view_mode as the name get_viewport_state reports and this tool takes back. Read it without changing it with get_viewport_state; single show flags are set_show_flag, the projection set_view_type, game view set_game_view.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `view_mode` | string | yes | One of Lit, Unlit, Wireframe, DetailLighting, LightingOnly, BrushWireframe, ShaderComplexity, LightComplexity, LightmapDensity, Reflections, matched without case. Wireframe and BrushWireframe select the same brush wireframe mode; CSGWireframe (read back as BrushWireframe) and ReflectionOverride are accepted too. |
+| `view_mode` | string | yes | One of Lit, Unlit, Wireframe, DetailLighting, LightingOnly, BrushWireframe, ShaderComplexity, LightComplexity, LightmapDensity, Reflections, matched without case. Wireframe and BrushWireframe select the same brush wireframe mode, read back as Wireframe; CSGWireframe (the BSP wireframe) and ReflectionOverride (read back as Reflections) are accepted too. |
 
 **Returns:** `{ applied: bool, requested: string, view_mode_index: int, view_mode: string }`
 

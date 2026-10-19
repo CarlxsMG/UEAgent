@@ -82,9 +82,9 @@ List all save games for a given user index. The list is what the platform's save
 
 ## `load_game`
 
-*Destructive.*
+*Read-only.*
 
-Load the SaveGame stored in a slot with LoadGameFromSlot and report the transient object: save_game_instance, save_game_class and save_game_path. success is false when the slot is empty or unreadable, or holds a class other than save_game_class; does_save_game_exist tells missing from corrupt.
+Load the SaveGame stored in a slot with LoadGameFromSlot and report the transient object: save_game_instance, save_game_class and save_game_path. success is false when the slot is empty or unreadable, or holds a class other than save_game_class; does_save_game_exist tells missing from corrupt. It only reads: the slot file is not changed and the object is transient. Write a slot with save_game; the same read without the class check is load_game_async.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -109,9 +109,9 @@ Load the SaveGame stored in a slot and report the object it rebuilds (save_game_
 
 ## `load_game_from_memory`
 
-*Destructive.*
+*Read-only.*
 
-Deserialize a SaveGame from a base64 blob (the memory_base64 of save_game_to_memory) with LoadGameFromMemory; returns the transient object save_game_instance, save_game_class and save_game_path. Invalid base64 is an error; success is false when the blob is corrupt, truncated or from another SaveGame class.
+Deserialize a SaveGame from a base64 blob (the memory_base64 of save_game_to_memory) with LoadGameFromMemory; returns the transient object save_game_instance, save_game_class and save_game_path. Invalid base64 is an error; success is false when the blob is corrupt, truncated or from another SaveGame class. It only reads: nothing is written to disk and the object is transient. Make a blob with save_game_to_memory; to read a slot file use load_game.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

@@ -109,43 +109,86 @@ namespace
         return false;
     }
 
-    /** Map a string view-mode name to EViewModeIndex. Returns false if unknown. */
+    /** A view mode this API sets: the name it reports, and another spelling it also accepts (or null). */
+    struct FViewportControl_ViewModeName
+    {
+        EViewModeIndex Index;
+        const TCHAR* Name;
+        const TCHAR* Alias;
+    };
+
+    /**
+     * The view modes set_viewport_view_mode sets, each with ONE name: the one the readers report and the
+     * setter accepts back, so a name read from get_viewport_state always selects the same mode again.
+     * Wireframe is VMI_BrushWireframe and CSGWireframe is VMI_Wireframe, as the engine's EViewModeIndex
+     * display names ("Wireframe", "CSG Wireframe") put it.
+     */
+    const FViewportControl_ViewModeName ViewportControl_ViewModes[] =
+    {
+        { VMI_Lit,                 TEXT("Lit"),              nullptr },
+        { VMI_Unlit,               TEXT("Unlit"),            nullptr },
+        { VMI_BrushWireframe,      TEXT("Wireframe"),        TEXT("BrushWireframe") },
+        { VMI_Wireframe,           TEXT("CSGWireframe"),     nullptr },
+        { VMI_Lit_DetailLighting,  TEXT("DetailLighting"),   nullptr },
+        { VMI_LightingOnly,        TEXT("LightingOnly"),     nullptr },
+        { VMI_LightComplexity,     TEXT("LightComplexity"),  nullptr },
+        { VMI_ShaderComplexity,    TEXT("ShaderComplexity"), nullptr },
+        { VMI_LightmapDensity,     TEXT("LightmapDensity"),  nullptr },
+        { VMI_ReflectionOverride,  TEXT("Reflections"),      TEXT("ReflectionOverride") },
+    };
+
+    /** Map a view-mode name or its alias (without case) to EViewModeIndex. Returns false if unknown. */
     bool ViewModeNameToIndex(const FString& Name, EViewModeIndex& OutIndex)
     {
-        const FString N = Name.ToLower();
-        if (N == TEXT("lit"))                 { OutIndex = VMI_Lit; return true; }
-        if (N == TEXT("unlit"))               { OutIndex = VMI_Unlit; return true; }
-        if (N == TEXT("wireframe"))           { OutIndex = VMI_BrushWireframe; return true; }
-        if (N == TEXT("brushwireframe"))      { OutIndex = VMI_BrushWireframe; return true; }
-        if (N == TEXT("csgwireframe"))        { OutIndex = VMI_Wireframe; return true; }
-        if (N == TEXT("detaillighting"))      { OutIndex = VMI_Lit_DetailLighting; return true; }
-        if (N == TEXT("lightingonly"))        { OutIndex = VMI_LightingOnly; return true; }
-        if (N == TEXT("lightcomplexity"))     { OutIndex = VMI_LightComplexity; return true; }
-        if (N == TEXT("shadercomplexity"))    { OutIndex = VMI_ShaderComplexity; return true; }
-        if (N == TEXT("lightmapdensity"))     { OutIndex = VMI_LightmapDensity; return true; }
-        if (N == TEXT("reflections"))         { OutIndex = VMI_ReflectionOverride; return true; }
-        if (N == TEXT("reflectionoverride"))  { OutIndex = VMI_ReflectionOverride; return true; }
+        for (const FViewportControl_ViewModeName& Mode : ViewportControl_ViewModes)
+        {
+            if (Name.Equals(Mode.Name, ESearchCase::IgnoreCase)
+                || (Mode.Alias && Name.Equals(Mode.Alias, ESearchCase::IgnoreCase)))
+            {
+                OutIndex = Mode.Index;
+                return true;
+            }
+        }
         return false;
     }
 
-    /** Map an EViewModeIndex back to the canonical string used by this API. */
+    /** The name of a view mode this API sets; ViewMode_<index> for an engine mode it does not set. */
     FString ViewModeIndexToName(EViewModeIndex Index)
     {
-        switch (Index)
+        for (const FViewportControl_ViewModeName& Mode : ViewportControl_ViewModes)
         {
-        case VMI_Lit:                 return TEXT("Lit");
-        case VMI_Unlit:               return TEXT("Unlit");
-        case VMI_BrushWireframe:      return TEXT("Wireframe");
-        case VMI_Wireframe:           return TEXT("BrushWireframe");
-        case VMI_Lit_DetailLighting:  return TEXT("DetailLighting");
-        case VMI_LightingOnly:        return TEXT("LightingOnly");
-        case VMI_LightComplexity:     return TEXT("LightComplexity");
-        case VMI_ShaderComplexity:    return TEXT("ShaderComplexity");
-        case VMI_LightmapDensity:     return TEXT("LightmapDensity");
-        case VMI_ReflectionOverride:  return TEXT("Reflections");
-        default:                      return FString::Printf(TEXT("ViewMode_%d"), (int32)Index);
+            if (Mode.Index == Index)
+            {
+                return Mode.Name;
+            }
         }
+        return FString::Printf(TEXT("ViewMode_%d"), (int32)Index);
     }
+
+    /** Every name ViewModeNameToIndex accepts, comma-separated, for its error. */
+    FString ViewportControl_ValidViewModeNames()
+    {
+        TArray<FString> Names;
+        for (const FViewportControl_ViewModeName& Mode : ViewportControl_ViewModes)
+        {
+            Names.Add(Mode.Name);
+            if (Mode.Alias)
+            {
+                Names.Add(Mode.Alias);
+            }
+        }
+        return FString::Join(Names, TEXT(", "));
+    }
+
+    /** The range of the level viewport's Field of View control (the editor clamps its own FOV setters to it). */
+    constexpr double ViewportControl_MinFOV = 5.0;
+    constexpr double ViewportControl_MaxFOV = 170.0;
+
+    /**
+     * The smallest near plane the editor's Near View Plane control allows. A near plane of 0 makes the
+     * reversed-Z perspective projection degenerate (every depth comes out 0), so 0 up to this is refused.
+     */
+    constexpr double ViewportControl_MinNearClipPlane = 0.001;
 
     /** The name this API uses for a level viewport type; "Unknown" for any other value. */
     FString ViewportControl_ViewTypeName(ELevelViewportType Type)
@@ -228,8 +271,8 @@ TSharedPtr<FJsonObject> HandleSetViewportRealtime(const TSharedPtr<FJsonObject>&
 // set_viewport_view_mode
 // ---------------------------------------------------------------------------
 
-// MCP:set_viewport_view_mode - Set the rendering view mode (Lit, Unlit, Wireframe, ShaderComplexity...) of the active level editor viewport, the focused one or else the first; no viewport is an error. view_mode is matched without case, and an unknown name is an error before anything changes. The mode is stored for the viewport's current projection only (perspective and orthographic keep separate modes) and lasts for this editor session: no undo step, nothing saved, no asset touched, and the previous mode is not returned. view_mode and view_mode_index are read back. Read it without changing it with get_viewport_state; single show flags are set_show_flag, the projection set_view_type, game view set_game_view.
-//   @param view_mode - One of Lit, Unlit, Wireframe, DetailLighting, LightingOnly, BrushWireframe, ShaderComplexity, LightComplexity, LightmapDensity, Reflections, matched without case. Wireframe and BrushWireframe select the same brush wireframe mode; CSGWireframe (read back as BrushWireframe) and ReflectionOverride are accepted too.
+// MCP:set_viewport_view_mode - Set the rendering view mode (Lit, Unlit, Wireframe, ShaderComplexity...) of the active level editor viewport, the focused one or else the first; no viewport is an error. view_mode is matched without case, and an unknown name is an error before anything changes. The mode is stored for the viewport's current projection only (perspective and orthographic keep separate modes) and lasts for this editor session: no undo step, nothing saved, no asset touched, and the previous mode is not returned. view_mode and view_mode_index are read back, view_mode as the name get_viewport_state reports and this tool takes back. Read it without changing it with get_viewport_state; single show flags are set_show_flag, the projection set_view_type, game view set_game_view.
+//   @param view_mode - One of Lit, Unlit, Wireframe, DetailLighting, LightingOnly, BrushWireframe, ShaderComplexity, LightComplexity, LightmapDensity, Reflections, matched without case. Wireframe and BrushWireframe select the same brush wireframe mode, read back as Wireframe; CSGWireframe (the BSP wireframe) and ReflectionOverride (read back as Reflections) are accepted too.
 //   @returns { applied: bool, requested: string, view_mode_index: int, view_mode: string }
 TSharedPtr<FJsonObject> HandleSetViewportViewMode(const TSharedPtr<FJsonObject>& Params)
 {
@@ -240,7 +283,7 @@ TSharedPtr<FJsonObject> HandleSetViewportViewMode(const TSharedPtr<FJsonObject>&
     if (!ViewModeNameToIndex(ViewModeStr, DesiredIndex))
     {
         return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Unknown view_mode '%s'. Valid: Lit, Unlit, Wireframe, DetailLighting, LightingOnly, BrushWireframe, ShaderComplexity, LightComplexity, LightmapDensity, Reflections"), *ViewModeStr));
+            FString::Printf(TEXT("Unknown view_mode '%s'. Valid: %s"), *ViewModeStr, *ViewportControl_ValidViewModeNames()));
     }
 
     FEditorViewportClient* Client = nullptr;
@@ -451,17 +494,27 @@ TSharedPtr<FJsonObject> HandleGetViewportState(const TSharedPtr<FJsonObject>& Pa
 // set_viewport_fov
 // ---------------------------------------------------------------------------
 
-// MCP:set_viewport_fov - Set the perspective field of view, in degrees, of the active level editor viewport, the focused one or else the first; no viewport is an error. The value goes into the viewport's current view FOV as given -- no clamp and no range check -- and fov is read straight back; an orthographic view ignores it. It lasts for this editor session with no undo step and no save, and the previous FOV is not returned. Only the current view FOV changes, not the value the toolbar FOV slider stores, so a camera reset or the end of a PIE session brings the slider's value back, and a viewport piloting a camera actor shows that camera's FOV instead. Read it with get_viewport_fov; a camera actor's own FOV is set_camera_fov.
-//   @param fov - Field of view in degrees; stored as given, with no clamp or validation (the editor's FOV slider spans 5..170)
-//   @returns { applied: bool, requested: number, fov: number }
+// MCP:set_viewport_fov - Set the perspective field of view, in degrees, of the active level editor viewport, the focused one or else the first; no viewport is an error. fov must lie in 5..170, the range of the editor's Field of View control, and a value outside it is an error before anything changes. Like that control it sets both the current view FOV and the stored one that a camera reset or the end of a PIE session restores; fov and stored_fov are read back, and an orthographic view ignores them. There is no undo step and no asset is saved, and the previous FOV is not returned. A viewport piloting a camera actor keeps showing that camera's FOV until it stops piloting it. Read it with get_viewport_fov; a camera actor's own FOV is set_camera_fov.
+//   @param fov - Field of view in degrees, from 5 to 170 (the range of the editor's FOV slider)
+//   @returns { applied: bool, requested: number, fov: number, stored_fov: number }
 TSharedPtr<FJsonObject> HandleSetViewportFOV(const TSharedPtr<FJsonObject>& Params)
 {
     double FovNum = 0.0;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("fov"), FovNum)) { return Missing; }
 
+    if (!(FovNum >= ViewportControl_MinFOV && FovNum <= ViewportControl_MaxFOV))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("fov %g is outside %g..%g degrees, the range of the editor's Field of View control; the FOV was not changed"),
+            FovNum, ViewportControl_MinFOV, ViewportControl_MaxFOV));
+    }
+
     FEditorViewportClient* Client = nullptr;
     if (TSharedPtr<FJsonObject> Error = ViewportControl_RequireClient(Client)) { return Error; }
 
+    // As the level viewport's Field of View control does: FOVAngle is the stored FOV that a camera reset,
+    // the end of a PIE session or an actor unlock put back into ViewFOV, the FOV the view draws with now.
+    Client->FOVAngle = (float)FovNum;
     Client->ViewFOV = (float)FovNum;
     Client->Invalidate();
 
@@ -469,6 +522,7 @@ TSharedPtr<FJsonObject> HandleSetViewportFOV(const TSharedPtr<FJsonObject>& Para
     Data->SetBoolField(TEXT("applied"), true);
     Data->SetNumberField(TEXT("requested"), FovNum);
     Data->SetNumberField(TEXT("fov"), Client->ViewFOV);
+    Data->SetNumberField(TEXT("stored_fov"), Client->FOVAngle);
     return mcp_common::MakeOkReply(Data);
 }
 
@@ -492,13 +546,22 @@ TSharedPtr<FJsonObject> HandleGetViewportFOV(const TSharedPtr<FJsonObject>& Para
 // set_near_clip_plane
 // ---------------------------------------------------------------------------
 
-// MCP:set_near_clip_plane - Override the near clip plane distance, in cm, of the active level editor viewport, the focused one or else the first; no viewport is an error. A negative distance (-1 by convention) drops the override so the engine near plane, GNearClippingPlane, applies again; 0 or more becomes the override as given, unvalidated, so use a small positive value. It lasts for this editor session with no undo step and no save, and the previous value is not returned. near_clip_plane is the effective near plane read back and override_active says whether an override is now set. get_near_clip_plane reads both clip planes; the far plane is set_far_clip_plane.
-//   @param distance - Near clip distance in cm; any negative value (-1 by convention) clears the override and falls back to GNearClippingPlane
+// MCP:set_near_clip_plane - Override the near clip plane distance, in cm, of the active level editor viewport, the focused one or else the first; no viewport is an error. A negative distance (-1 by convention) drops the override so the engine near plane, GNearClippingPlane, applies again; a distance of at least 0.001, the smallest the editor's Near View Plane control allows, becomes the override. 0 (a degenerate projection), anything else below 0.001 and a value too large for a float are errors before anything changes. It lasts for this editor session with no undo step and no save, and the previous value is not returned. near_clip_plane is the effective near plane read back and override_active says whether an override is now set. get_near_clip_plane reads both clip planes; the far plane is set_far_clip_plane.
+//   @param distance - Near clip distance in cm, at least 0.001; any negative value (-1 by convention) clears the override and falls back to GNearClippingPlane
 //   @returns { applied: bool, requested: number, near_clip_plane: number, override_active: bool }
 TSharedPtr<FJsonObject> HandleSetNearClipPlane(const TSharedPtr<FJsonObject>& Params)
 {
     double Dist = 0.0;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("distance"), Dist)) { return Missing; }
+
+    // A negative distance clears the override; any other must give a usable near plane once stored as a
+    // float (an infinite one is as degenerate as 0).
+    if (Dist >= 0.0 && (Dist < ViewportControl_MinNearClipPlane || Dist > (double)TNumericLimits<float>::Max()))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("distance %g is not a usable near plane: give at least %g cm (the smallest the editor's Near View Plane control allows; 0 makes the projection degenerate) and no more than a float holds, or a negative value (-1) to clear the override; the near plane was not changed"),
+            Dist, ViewportControl_MinNearClipPlane));
+    }
 
     FEditorViewportClient* Client = nullptr;
     if (TSharedPtr<FJsonObject> Error = ViewportControl_RequireClient(Client)) { return Error; }

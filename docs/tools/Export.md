@@ -54,7 +54,7 @@ Deletes a job from the editor Movie Render Queue (headless-safe).  Removes a sin
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `job_name` | string | yes | Name of the render job to delete (required unless delete_all is true). |
+| `job_name` | string | no | Name of the render job to delete (required unless delete_all is true). |
 | `delete_all` | boolean | no | Optional bool; when true, clears every job from the queue and ignores job_name. |
 
 **Returns:** `{ job_name?: string, deleted?: bool, already_absent?: bool, deleted_all?: bool, queue_job_count: number }`

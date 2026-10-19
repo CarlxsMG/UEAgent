@@ -321,8 +321,8 @@ TSharedPtr<FJsonObject> HandleGetActorNetUpdateFrequency(const TSharedPtr<FJsonO
 	return mcp_common::MakeOkReply(Resp);
 }
 
-// MCP:get_actor_net_cull_distance - Read an actor's net cull distance (read-side of set_actor_net_cull_distance). It returns BOTH forms: net_cull_distance_squared, which is how UE 5.8 actually stores it (AActor::NetCullDistanceSquared), and net_cull_distance_cm, the plain linear distance -- so you never have to remember which one you are looking at.
-//   @param actor_name - Engine name of the actor
+// MCP:get_actor_net_cull_distance - Read an actor's net cull distance (read-side of set_actor_net_cull_distance). It returns BOTH forms: net_cull_distance_squared, which is how UE 5.8 actually stores it (AActor::NetCullDistanceSquared), and net_cull_distance_cm, the plain linear distance -- so you never have to remember which one you are looking at. Read-only; the actor is found by label in the editor world, as the other replication tools find it, and the placed instance is read, not a PIE copy. The reply actor_name is the engine object name. An unknown label is an error.
+//   @param actor_name - Label of the actor in the editor world (matched against labels, not engine object names, despite the parameter name); first match.
 //   @returns { actor_name, net_cull_distance_squared, net_cull_distance_cm }
 
 TSharedPtr<FJsonObject> HandleGetActorNetCullDistance(const TSharedPtr<FJsonObject>& Params)

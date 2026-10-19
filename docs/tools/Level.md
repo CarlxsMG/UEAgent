@@ -181,7 +181,7 @@ Assigns an editor-world actor to a data layer instance.  Uses UDataLayerEditorSu
 
 *Destructive, idempotent.*
 
-Attach one editor-world actor to another, both found by internal name or outliner label (first match), optionally at a socket of the parent, keeping the child's world transform, in one undo step; the level is marked dirty, not saved. A child that already has a parent moves to the new one, and repeating the same attachment changes nothing (idempotent). attached is the engine's verdict: an attachment it refuses still returns success with attached false, so check it. The socket name is not checked against the parent. A missing child or parent is an error. Inverse: detach_actor; for a component inside a Blueprint use attach_blueprint_component; to attach over time in a Level Sequence use add_attach_track.
+Attach one editor-world actor to another, both found by internal name or outliner label (first match), optionally at a socket of the parent, keeping the child's world transform, in one undo step; the level is marked dirty, not saved. A child that already has a parent moves to the new one, and repeating the same attachment changes nothing (idempotent). attached is the engine's verdict: an attachment it refuses (to the actor itself, into a cycle, a Static child under a non-Static parent) is an error naming the reason, with attached false and no undo step left. The socket name is not checked against the parent. A missing child or parent is an error. Inverse: detach_actor; for a component inside a Blueprint use attach_blueprint_component; to attach over time in a Level Sequence use add_attach_track.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -296,7 +296,7 @@ Clone a rectangle of terrain relief: copy a heightmap region between two landsca
 
 *Additive, idempotent.*
 
-Create a UDataLayerAsset (the World Partition data layer definition) at package_path/name with its type and debug color, and save it. This is only the asset: put it in a map with create_data_layer_instance and add actors with assign_actor_to_data_layer_instance. data_layer_type is matched without case and anything but Runtime gives Editor; a debug_color missing or shorter than 3 numbers gives the default color. A data layer asset already at that path is returned unchanged (created=false, already_exists=true; type and color are not applied, and saved reads true though nothing is written), so repeat calls are idempotent; another asset class there, or an invalid path, is an error. No undo step is recorded; a failed save, as during PIE, makes success false. Later changes: set_data_layer_type or set_data_layer_debug_color; read back: get_data_layer_asset_info; list them: get_data_layer_assets.
+Create a UDataLayerAsset (the World Partition data layer definition) at package_path/name with its type and debug color, and save it. This is only the asset: put it in a map with create_data_layer_instance and add actors with assign_actor_to_data_layer_instance. data_layer_type is matched without case and anything but Runtime gives Editor; a debug_color missing or shorter than 3 numbers gives the default color. A data layer asset already at that path is returned unchanged (created=false, already_exists=true, saved=false; type and color are not applied) and nothing is saved, so repeat calls are idempotent; another asset class there, an external data layer asset included, or an invalid path, is an error. No undo step is recorded; a failed save, as during PIE, makes success false. Later changes: set_data_layer_type or set_data_layer_debug_color; read back: get_data_layer_asset_info; list them: get_data_layer_assets.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -396,7 +396,7 @@ Spawns an ALevelInstance actor in the editor world and binds it to a saved map (
 
 *Additive.*
 
-Creates and saves a new World Partition-enabled UWorld map asset on disk.  The editor world is NOT swapped: a new Inactive UWorld is created inside a /Game package with World Partition enabled (mirroring UWorldFactory's headless creation path) and saved as a .umap.
+Creates and saves a new World Partition-enabled UWorld map asset on disk.  The editor world is NOT swapped: a new Inactive UWorld is created inside a /Game package with World Partition enabled (mirroring UWorldFactory's headless creation path) and saved as a .umap. A map already at the path is returned unchanged with created=false, already_exists=true and saved=false, and nothing is saved; its world_partition_enabled says whether it has World Partition. An asset of another class there is an error. With Play-in-Editor running, or a path under a read-only content root, a new map is refused before anything is created: success false with save_error. A failed save makes success false with saved=false and save_error. Read a map's state with get_world_partition_info once it is open.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -404,7 +404,7 @@ Creates and saves a new World Partition-enabled UWorld map asset on disk.  The e
 | `package_path` | string | no | Destination /Game folder (default /Game/Maps). |
 | `enable_streaming` | boolean | no | bool, enable World Partition streaming (default true). |
 
-**Returns:** `{ name: string, package_path: string, map_path: string, world_partition_enabled: bool, runtime_hash_type: string, created: bool, already_exists: bool, saved: bool, message: string, note: string }`
+**Returns:** `{ name: string, package_path: string, map_path: string, world_partition_enabled: bool, runtime_hash_type: string, created: bool, already_exists: bool, saved: bool, save_error?: string, message: string, note: string }`
 
 ## `detach_actor`
 
@@ -694,7 +694,7 @@ Read one grass variety of a LandscapeGrassType asset: mesh, density, placement j
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `grass_path` | string | yes | Asset path of the ULandscapeGrassType |
-| `variety_index` | integer | yes | Index of the FGrassVariety to read, default 0 |
+| `variety_index` | integer | no | Optional index of the FGrassVariety to read, default 0 when omitted; an index outside the grass type's varieties is an error |
 
 **Returns:** `{ asset_path, grass_class, variety_index, variety_count, grass_mesh, grass_density, placement_jitter, start_cull_distance, end_cull_distance, min_lod, scaling, scale_x:{min,max}, scale_y, scale_z, random_rotation, align_to_surface, use_grid, cast_dynamic_shadow, receives_decals, keep_instance_buffer_cpu_copy }`
 
@@ -1179,7 +1179,7 @@ Scatter N seeded-random foliage instances of a type inside a world-space box (sa
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `foliage_type_path` | string | yes | Full path of the UFoliageType asset |
-| `count` | integer | yes | Number of instances to scatter, default 8 |
+| `count` | integer | no | Optional number of instances to scatter, default 8 when omitted; a negative count is taken as 0 |
 | `seed` | string | no | Seed for the random stream, default 1337 |
 | `center` | array | no | [x, y, z] box center in world space, default [0,0,0] |
 | `extent` | array | no | [x, y, z] box half-extents, default [500,500,0] |

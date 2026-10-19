@@ -129,6 +129,12 @@ namespace
 
         FString Key;
         if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("key"), Key, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+        // FStringTable::SetSourceString checkf()s a non-empty key, so an empty one would stop the editor:
+        // refused here, before the table is loaded or touched.
+        if (Key.IsEmpty())
+        {
+            return mcp_common::MakeErrorReply(TEXT("key is empty: a string table entry needs a non-empty key (the engine asserts on an empty one); nothing was changed"));
+        }
 
         FString SourceString;
         if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("source_string"), SourceString, mcp_common::EAllowEmpty::Yes)) { return Missing; }
@@ -216,11 +222,11 @@ namespace
 // --------------------------------------------------------------------------- //
 // create_string_table
 // --------------------------------------------------------------------------- //
-// MCP:create_string_table - Creates a UStringTable asset at package_path/name with the given namespace and no entries, then saves it. A string table already there is returned unchanged (namespace not applied, already_exists true). Returns asset_path, string_table_id, namespace, entry_count, created, saved. Add entries with set_string_table_entry.
+// MCP:create_string_table - Creates a UStringTable asset at package_path/name with the given namespace and no entries, then saves it. A string table already there is returned unchanged (namespace not applied, already_exists true, saved false) and nothing is saved; an asset of another class there is an error naming that class. A failed save makes success false with saved=false and save_error, the new table staying in memory. Returns asset_path, string_table_id, namespace, entry_count, created, saved. Add entries with set_string_table_entry; list them with get_string_table_entries.
 //   @param name - Name of the new StringTable asset
 //   @param package_path - Target content path, defaults to /Game/StringTables
 //   @param namespace - Optional namespace for all entries, defaults to asset name
-//   @returns { name: string, package_path: string, asset_path: string, string_table_path: string, string_table_id: string, namespace: string, entry_count: int, created: bool, already_exists: bool, saved: bool, message: string }
+//   @returns { name: string, package_path: string, asset_path: string, string_table_path: string, string_table_id: string, namespace: string, entry_count: int, created: bool, already_exists: bool, saved: bool, message: string, save_error?: string }
 TSharedPtr<FJsonObject> HandleCreateStringTable(const TSharedPtr<FJsonObject>& Params)
 {
     FString Name;
@@ -243,18 +249,18 @@ TSharedPtr<FJsonObject> HandleCreateStringTable(const TSharedPtr<FJsonObject>& P
     const FString FullPath = FString::Printf(TEXT("%s/%s"), *PackagePath, *Name);
     if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(FullPath)) { return Invalid; }
 
-    // Idempotent: if it already exists, load it and return a STABLE payload.
+    // Idempotent: a string table already there is returned unchanged and nothing is saved; an asset of any other
+    // class there is not the one asked for.
     if (UEditorAssetLibrary::DoesAssetExist(FullPath))
     {
         UStringTable* Existing = LoadStringTableAt(FullPath);
-        if (Existing)
+        if (Existing && Existing->GetClass() == UStringTable::StaticClass())
         {
             TSharedPtr<FJsonObject> ExistObj = StringTable_CreatedReply(Name, PackagePath, Existing);
-            DataAuthoringUtils::AddAlreadyExistsFlags(ExistObj);
+            DataAuthoringUtils::AddAlreadyExistsFlags(ExistObj, TEXT("StringTable"));
             return mcp_common::MakeOkReply(ExistObj);
         }
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Asset already exists at %s but could not be loaded as UStringTable"), *FullPath));
+        return DataAuthoringUtils::OtherClassAtPathReply(FullPath, Existing, UStringTable::StaticClass());
     }
 
     FString CreateError;
@@ -285,7 +291,7 @@ TSharedPtr<FJsonObject> HandleCreateStringTable(const TSharedPtr<FJsonObject>& P
 // --------------------------------------------------------------------------- //
 // set_string_table_entry  (upsert)
 // --------------------------------------------------------------------------- //
-// MCP:set_string_table_entry - Set the source string of key in a UStringTable asset loaded by path, adding the entry when the key is new (created=true) or overwriting its source string when it exists (updated=true, its metadata kept), in one undo step, then save the asset. Every call writes and saves, even with the same string; entry_set and verified both mean the read-back matched. The key must not be empty: an empty one is not refused here and trips an engine assertion that stops the editor. A missing table is an error. A failed save, as during PIE, still answers success, with saved=false and a message, and the entry set in memory only. Create the table with create_string_table; list entries with get_string_table_entries; take one out with remove_string_table_entry; per-entry metadata: set_string_table_metadata.
+// MCP:set_string_table_entry - Set the source string of key in a UStringTable asset loaded by path, adding the entry when the key is new (created=true) or overwriting its source string when it exists (updated=true, its metadata kept), in one undo step, then save the asset. Every call writes and saves, even with the same string; entry_set and verified both mean the read-back matched. The key must not be empty: an empty one, which the engine asserts on, is refused before anything changes. A missing table is an error. A failed save, as during PIE, still answers success, with saved=false and a message, and the entry set in memory only. Create the table with create_string_table; list entries with get_string_table_entries; take one out with remove_string_table_entry; per-entry metadata: set_string_table_metadata.
 //   @param string_table_path - Asset path of the UStringTable, e.g. "/Game/StringTables/ST_UI".
 //   @param key - Entry key, unique within the table and never empty, e.g. "Menu_Play"; an existing key gets the new source string.
 //   @param source_string - Source text for the key, e.g. "Play"; an empty string is accepted.

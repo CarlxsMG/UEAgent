@@ -87,13 +87,13 @@ Add a USpringArmComponent (camera boom) to an actor placed in the editor world, 
 
 *Destructive.*
 
-Build a Gameplay Cameras UCameraRigAsset, found by content path, in memory as the rig editor's Build does: its node hierarchy, interface and parameters are rebuilt from the current nodes, replacing the previous build data. built is true whenever the rig resolves; the outcome to read is build_status -- Clean, CleanWithWarnings or WithErrors -- with the build messages in the editor log. Nothing is saved (saving the rig builds it again anyway); what the build changes is recorded in the call's undo step. A rig that does not resolve is an error. Edit the rig first with set_camera_rig_root_node, set_camera_node_parameters or add_camera_node_child; read its nodes with get_camera_rig_nodes; create one with create_camera_rig_asset.
+Build a Gameplay Cameras UCameraRigAsset, found by content path, in memory as the rig editor's Build does: its node hierarchy, interface and parameters are rebuilt from the current nodes, replacing the previous build data. built is true when build_status comes back Clean or CleanWithWarnings; WithErrors fails the call with the build errors in its message, and messages lists every build message with its severity (the editor log gets them too). Nothing is saved (saving the rig builds it again anyway); what the build changes is recorded in the call's undo step. A rig that does not resolve is an error. Edit the rig first with set_camera_rig_root_node, set_camera_node_parameters or add_camera_node_child; read its nodes with get_camera_rig_nodes; create one with create_camera_rig_asset.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `camera_rig_path` | string | yes | Content path to the UCameraRigAsset, e.g. "/Game/Cameras/CR_Player" (required) |
 
-**Returns:** `{ camera_rig_path, built, build_status }`
+**Returns:** `{ camera_rig_path, built, build_status, messages: [{ severity, message }] }`
 
 ## `create_camera`
 

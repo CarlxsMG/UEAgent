@@ -14,6 +14,7 @@
 #include "Misc/PackageName.h"
 #include "UObject/Package.h"
 #include "UObject/SavePackage.h"
+#include "UObject/UnrealType.h"   // FMapProperty / FScriptMapHelper: the protected list of running behaviors
 
 /**
  * Gameplay Behavior commands.
@@ -115,6 +116,48 @@ namespace
 			OutError = mcp_common::MakeErrorReply(NotPawnError);
 		}
 		return LabelledPawn;
+	}
+
+	/**
+	 * How many behaviors that are a BehaviorClass Subsystem tracks as running on Avatar, read by reflection because
+	 * UGameplayBehaviorSubsystem::AgentGameplayBehaviors is protected. A behavior leaves that list when it ends
+	 * (OnBehaviorFinished), so this is what is still running. INDEX_NONE when the property does not have the layout
+	 * this reads (TMap<AActor*, FAgentGameplayBehaviors> whose value holds a Behaviors object array).
+	 */
+	int32 GameplayBehavior_CountRunning(UGameplayBehaviorSubsystem* Subsystem, const AActor* Avatar, const UClass* BehaviorClass)
+	{
+		const FMapProperty* MapProp = CastField<FMapProperty>(
+			UGameplayBehaviorSubsystem::StaticClass()->FindPropertyByName(TEXT("AgentGameplayBehaviors")));
+		const FObjectPropertyBase* KeyProp = MapProp ? CastField<FObjectPropertyBase>(MapProp->GetKeyProperty()) : nullptr;
+		const FStructProperty* ValueProp = MapProp ? CastField<FStructProperty>(MapProp->GetValueProperty()) : nullptr;
+		const FArrayProperty* BehaviorsProp = ValueProp
+			? CastField<FArrayProperty>(ValueProp->Struct->FindPropertyByName(TEXT("Behaviors"))) : nullptr;
+		const FObjectPropertyBase* BehaviorProp = BehaviorsProp ? CastField<FObjectPropertyBase>(BehaviorsProp->Inner) : nullptr;
+		if (!KeyProp || !BehaviorProp)
+		{
+			return INDEX_NONE;
+		}
+
+		FScriptMapHelper Agents(MapProp, MapProp->ContainerPtrToValuePtr<void>(Subsystem));
+		for (FScriptMapHelper::FIterator It(Agents); It; ++It)
+		{
+			if (KeyProp->GetObjectPropertyValue(Agents.GetKeyPtr(It)) != Avatar)
+			{
+				continue;
+			}
+			FScriptArrayHelper Behaviors(BehaviorsProp, BehaviorsProp->ContainerPtrToValuePtr<void>(Agents.GetValuePtr(It)));
+			int32 Count = 0;
+			for (int32 Index = 0; Index < Behaviors.Num(); ++Index)
+			{
+				const UObject* Behavior = BehaviorProp->GetObjectPropertyValue(Behaviors.GetRawPtr(Index));
+				if (Behavior && Behavior->IsA(BehaviorClass))
+				{
+					++Count;
+				}
+			}
+			return Count;
+		}
+		return 0;
 	}
 }
 
@@ -296,18 +339,33 @@ TSharedPtr<FJsonObject> HandleTriggerBehaviorOnActor(
 }
 
 // ---------------------------------------------------------------------------
-// end_behavior_on_actor  — calls StopBehavior on the subsystem
+// end_behavior_on_actor  — calls StopBehavior on the subsystem, then reads back what still runs
 // ---------------------------------------------------------------------------
-// MCP:end_behavior_on_actor - Interrupt the gameplay behaviors that the editor world UGameplayBehaviorSubsystem runs on a Pawn found by its label: every tracked behavior that is a behavior_class (subclasses included) gets EndBehavior with interrupted=true, and with behavior_class omitted every behavior on the pawn ends. behavior_class must be a full class path (a short name does not resolve), and one that does not resolve to a UGameplayBehavior subclass falls back silently to all of them; the reply behavior_class names the class used. ended carries the engine StopBehavior result, always false in UE 5.8, so it does not tell whether anything stopped. Runtime only: nothing is saved or undoable, and a repeat call finds nothing left to stop (idempotent). A missing actor, a non-Pawn or no subsystem is an error. Start one: trigger_behavior_on_actor; subsystem check: get_behavior_subsystem_info.
+// MCP:end_behavior_on_actor - Interrupt the gameplay behaviors that the editor world UGameplayBehaviorSubsystem runs on a Pawn found by its label: every running behavior that is a behavior_class (subclasses included), or every one when behavior_class is omitted, gets EndBehavior with interrupted=true. behavior_class must be the full class path of a UGameplayBehavior subclass; a short name, or a path that does not resolve to one, is an error and nothing stops. ended is read back from the subsystem: true once every matching behavior stopped, while still_running counts the ones that did not and makes success false. With none running it succeeds with ended false and a note, so a repeat call is idempotent. Runtime only: nothing is saved or undoable. A missing actor, a non-Pawn or no subsystem is an error. Start one: trigger_behavior_on_actor; subsystem check: get_behavior_subsystem_info.
 //   @param actor_label - Label of the Pawn actor in the editor world.
-//   @param behavior_class - Optional full path of the UGameplayBehavior subclass to stop, e.g. "/Script/GameplayBehaviorsModule.GameplayBehavior_AnimationBased"; omitted, or a path that does not resolve, stops every behavior on the pawn
-//   @returns { actor_label: string, behavior_class: string, ended: bool }
+//   @param behavior_class - Optional full path of the UGameplayBehavior subclass to stop, e.g. "/Script/GameplayBehaviorsModule.GameplayBehavior_AnimationBased"; omitted stops every behavior on the pawn, and a path that does not resolve to such a class is an error
+//   @returns { actor_label: string, behavior_class: string, ended: bool, stopped_count: int, still_running: int, note?: string }
 TSharedPtr<FJsonObject> HandleEndBehaviorOnActor(
     const TSharedPtr<FJsonObject>& Params)
 {
 	FString ActorLabel, BehaviorClass;
 	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("actor_label"), ActorLabel)) { return Missing; }
 	Params->TryGetStringField(TEXT("behavior_class"), BehaviorClass);
+
+	// The class to stop. StopBehavior ends every tracked behavior that IsA it, so UGameplayBehavior stops them all;
+	// a named class that does not resolve is refused rather than widened to that.
+	UClass* ClsToStop = UGameplayBehavior::StaticClass();
+	if (!BehaviorClass.IsEmpty())
+	{
+		UClass* C = GameplayBehavior_FindClass(BehaviorClass);
+		if (!C || !C->IsChildOf(UGameplayBehavior::StaticClass()))
+		{
+			return mcp_common::MakeErrorReply(FString::Printf(
+				TEXT("behavior_class '%s' does not resolve to a UGameplayBehavior subclass (pass a full class path, e.g. /Script/GameplayBehaviorsModule.GameplayBehavior_AnimationBased); nothing was stopped"),
+				*BehaviorClass));
+		}
+		ClsToStop = C;
+	}
 
 	// The recipient is addressed by its editor label and must be a Pawn.
 	UGameplayBehaviorSubsystem* Sub = nullptr;
@@ -319,27 +377,39 @@ TSharedPtr<FJsonObject> HandleEndBehaviorOnActor(
 		return Err;
 	}
 
-	// Resolve the behavior class to stop. If not provided, StopBehavior
-	// will need a TSubclassOf<UGameplayBehavior>; we can pass null
-	// to stop ALL behaviors on the actor (per 5.7 signature the
-	// parameter is required, so we use UGameplayBehavior::StaticClass()
-	// as a "stop all" hint — the subsystem may still filter by class).
-	UClass* ClsToStop = UGameplayBehavior::StaticClass();
-	if (!BehaviorClass.IsEmpty())
-	{
-		UClass* C = GameplayBehavior_FindClass(BehaviorClass);
-		if (C && C->IsChildOf(UGameplayBehavior::StaticClass()))
-		{
-			ClsToStop = C;
-		}
-	}
-	const bool bStopped = Sub->StopBehavior(*LabelledPawn, ClsToStop);
-
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("actor_label"), ActorLabel);
 	Data->SetStringField(TEXT("behavior_class"), ClsToStop->GetName());
-	Data->SetBoolField(TEXT("ended"), bStopped);
-	return mcp_common::MakeOkReply(Data);
+
+	// StopBehavior returns false whatever it does in UE 5.8, so the outcome is read from the subsystem's own list.
+	const int32 RunningBefore = GameplayBehavior_CountRunning(Sub, LabelledPawn, ClsToStop);
+	if (RunningBefore == 0)
+	{
+		Data->SetBoolField(TEXT("ended"), false);
+		Data->SetNumberField(TEXT("stopped_count"), 0);
+		Data->SetNumberField(TEXT("still_running"), 0);
+		Data->SetStringField(TEXT("note"), FString::Printf(
+			TEXT("No %s behavior is running on %s; nothing was stopped."), *ClsToStop->GetName(), *ActorLabel));
+		return mcp_common::MakeOkReply(Data);
+	}
+
+	Sub->StopBehavior(*LabelledPawn, ClsToStop);
+
+	if (RunningBefore == INDEX_NONE)
+	{
+		// This engine's subsystem does not have the layout read above: the stop ran but cannot be verified.
+		Data->SetStringField(TEXT("note"),
+			TEXT("StopBehavior ran, but this engine version does not expose the running behaviors, so whether any ended is unknown."));
+		return mcp_common::MakeOkReply(Data);
+	}
+
+	const int32 RunningAfter = GameplayBehavior_CountRunning(Sub, LabelledPawn, ClsToStop);
+	const bool bEnded = RunningAfter == 0;
+	Data->SetBoolField(TEXT("ended"), bEnded);
+	Data->SetNumberField(TEXT("stopped_count"), FMath::Max(RunningBefore - RunningAfter, 0));
+	Data->SetNumberField(TEXT("still_running"), RunningAfter);
+	return mcp_common::MakeOutcomeReply(Data, bEnded,
+		bEnded ? FString() : mcp_common::MeasuredOutcomeError(TEXT("end_behavior_on_actor"), TEXT("ended")));
 }
 
 // ---------------------------------------------------------------------------

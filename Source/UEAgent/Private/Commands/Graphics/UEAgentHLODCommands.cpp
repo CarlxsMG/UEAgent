@@ -164,7 +164,7 @@ namespace
     }
 }
 
-// MCP:create_hlod_layer - Creates and saves a new UHLODLayer (World Partition HLOD layer) asset.  Idempotent on re-run. Sets default streaming-grid cell_size=25600, loading_range=51200. Layer type accepts 'Instancing', 'MeshApproximate' (also 'Custom'/'CustomHLODActor'). Defaults to 'Instancing'.
+// MCP:create_hlod_layer - Creates and saves a new UHLODLayer (World Partition HLOD layer) asset.  Idempotent on re-run: an HLOD layer already at the path is returned unchanged with created=false, already_exists=true and saved=false, layer_type not applied and nothing saved; an asset of another class there is an error. Sets default streaming-grid cell_size=25600, loading_range=51200. Layer type accepts 'Instancing', 'MeshApproximate' (also 'Custom'/'CustomHLODActor'). Defaults to 'Instancing'. A failed save makes success false with saved=false. Change it later with set_hlod_layer_settings.
 //   @param name - Name of the new HLOD layer asset
 //   @param package_path - Content folder; defaults to /Game/HLOD
 //   @param layer_type - Optional EHLODLayerType string; defaults to "Instancing"
@@ -198,11 +198,17 @@ TSharedPtr<FJsonObject> HandleCreateHLODLayer(const TSharedPtr<FJsonObject>& Par
     // Idempotent: if it already exists, load and return a STABLE payload. Resolve via LoadHLODLayerAt
     // (StaticLoadObject; registry-independent) — NOT UEditorAssetLibrary::DoesAssetExist, which is
     // unreliable in headless for an asset created earlier this session (asset registry not synced)
-    // and would break idempotency under accumulated state.
+    // and would break idempotency under accumulated state. The layer found is returned unchanged and nothing is
+    // saved; a subclass of UHLODLayer is not the asset asked for. An asset of an unrelated class does not load
+    // here, and NewAssetInPackage below refuses it.
     if (UHLODLayer* Existing = LoadHLODLayerAt(FullPath))
     {
+        if (Existing->GetClass() != UHLODLayer::StaticClass())
+        {
+            return DataAuthoringUtils::OtherClassAtPathReply(FullPath, Existing, UHLODLayer::StaticClass());
+        }
         TSharedPtr<FJsonObject> ExistObj = HLOD_CreatedReply(AssetName, PackagePath, Existing);
-        DataAuthoringUtils::AddAlreadyExistsFlags(ExistObj);
+        DataAuthoringUtils::AddAlreadyExistsFlags(ExistObj, TEXT("HLOD layer"));
         return mcp_common::MakeOkReply(ExistObj);
     }
 
@@ -528,10 +534,10 @@ TSharedPtr<FJsonObject> HandleBuildHLOD(const TSharedPtr<FJsonObject>& Params)
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:remove_hlod_layer - Destroy a UHLODLayer asset at a /Game path (mirror of create_hlod_layer). Typed-delete: it loads the asset and REFUSES to delete it if it is not a UHLODLayer, so it cannot wipe the wrong asset the way the generic delete_asset can. Idempotent on missing assets.
+// MCP:remove_hlod_layer - Delete a UHLODLayer asset at a /Game path, the mirror of create_hlod_layer. Typed delete: it loads the asset first and refuses one that is not a UHLODLayer with success false, its asset_class and a note, deleting nothing, so it cannot wipe the wrong asset the way the generic delete_asset can. Idempotent: a path with no asset is a no-op, success true with deleted=false and already_existed=false. The delete removes the asset and its file and cannot be undone; when the engine refuses it (Play-in-Editor running, an asset the Asset Registry does not list, a file it cannot delete) success is false with deleted=false. List layers with get_hlod_layers; inspect one with get_hlod_layer_info.
 //   @param asset_path - Full /Game/.../LayerName asset path.
-//   @returns { asset_path, deleted, already_existed, layer_type?, note? }
-//   NOTE (impl): delegates the actual delete to UEditorAssetLibrary::DeleteAsset once the type check passes.
+//   @returns { asset_path, deleted, already_existed?, layer_type?, asset_class?, note? }
+//   NOTE (impl): delegates the actual delete to UEditorAssetLibrary::DeleteLoadedAsset once the type check passes.
 
 TSharedPtr<FJsonObject> HandleRemoveHLODLayer(const TSharedPtr<FJsonObject>& Params)
 {
@@ -555,11 +561,12 @@ TSharedPtr<FJsonObject> HandleRemoveHLODLayer(const TSharedPtr<FJsonObject>& Par
         }
         else
         {
-            // Asset exists but is not a UHLODLayer — typed-delete guard.
+            // Asset exists but is not a UHLODLayer: the typed-delete guard fails the call and deletes nothing.
+            const FString Refusal = FString::Printf(TEXT("asset is not a UHLODLayer (got %s) - wrong type, refusing to delete"),
+                *Asset->GetClass()->GetName());
             Resp->SetStringField(TEXT("asset_class"), Asset->GetClass()->GetName());
-            Resp->SetStringField(TEXT("note"),
-                FString::Printf(TEXT("asset is not a UHLODLayer (got %s) - wrong type, refusing to delete"),
-                    *Asset->GetClass()->GetName()));
+            Resp->SetStringField(TEXT("note"), Refusal);
+            return mcp_common::MakeOutcomeReply(Resp, false, FString::Printf(TEXT("remove_hlod_layer: %s at %s"), *Refusal, *AssetPath));
         }
         return mcp_common::MakeOkReply(Resp);
     }
@@ -577,7 +584,10 @@ TSharedPtr<FJsonObject> HandleRemoveHLODLayer(const TSharedPtr<FJsonObject>& Par
     Resp->SetStringField(TEXT("layer_type"), LayerTypeStr);
     Resp->SetBoolField(TEXT("deleted"), bDeleted);
     Resp->SetBoolField(TEXT("already_existed"), true);
-    return mcp_common::MakeOkReply(Resp);
+    return mcp_common::MakeOutcomeReply(Resp, bDeleted, FString::Printf(
+        TEXT("remove_hlod_layer: the HLOD layer at %s was not deleted (UEditorAssetLibrary::DeleteLoadedAsset returned false: ")
+        TEXT("a Play-in-Editor session running, an asset the Asset Registry does not list, or a file that cannot be deleted; ")
+        TEXT("the Output Log names which)"), *AssetPath));
 }
 
 // ---------------------------------------------------------------------------

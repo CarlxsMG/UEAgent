@@ -563,11 +563,11 @@ TSharedPtr<FJsonObject> HandleSetStateTreeRoot(
 //   Build one descriptor (name + scalar type) and read back via the public
 //   GetRootParametersPropertyBag() getter.
 // ---------------------------------------------------------------------------
-// MCP:add_tree_parameter - Add a typed parameter to the root parameter bag of a StateTree asset (the parameters that bindings and per-component overrides read), then save the asset without compiling it; there is no undo step. The engine keeps names unique: when a parameter of that name already exists it is left as it is and the new one gets a numbered suffix (e.g. Speed_0), while parameter_name still echoes the requested name and added only confirms that a parameter with that name exists, so check with list_tree_parameters first. A missing tree or editor data is an error; a failed save (for example while PIE runs) makes success false with the change only in memory. Set its value with set_tree_parameter; inverse: remove_tree_parameter; bind it with add_state_tree_binding; per-actor values: set_component_parameter_override.
+// MCP:add_tree_parameter - Add a typed parameter to the root parameter bag of a StateTree asset (the parameters that bindings and per-component overrides read), then save the asset without compiling it; there is no undo step. Idempotent: when the tree already has a parameter of that name (case-insensitive) and type, nothing is changed or saved and the reply says added false and already_existed true; the same name with another type is an error and nothing changes. parameter_name is the name in the tree. A missing tree or editor data is an error; a failed save (for example while PIE runs) makes success false with the change only in memory. Set its value with set_tree_parameter; inverse: remove_tree_parameter; bind it with add_state_tree_binding; per-actor values: set_component_parameter_override.
 //   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
-//   @param parameter_name - Name of the parameter to add, e.g. "Speed"; a name already in the bag yields a second parameter with a numbered suffix.
+//   @param parameter_name - Name of the parameter to add, e.g. "Speed"; a name already in the bag, compared case-insensitively, is never added a second time.
 //   @param parameter_type - Scalar type: bool, int (default), int64, float, double, name, string, text, byte; case is ignored, int32 and fstring are accepted as aliases, and an unrecognised type silently becomes a string parameter
-//   @returns { tree_path, parameter_name, parameter_type, parameter_count, added, saved }
+//   @returns { tree_path, parameter_name, parameter_type, parameter_count, added, already_existed, saved, note? }
 TSharedPtr<FJsonObject> HandleAddTreeParameter(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -584,14 +584,44 @@ TSharedPtr<FJsonObject> HandleAddTreeParameter(
 
 	UE::PropertyBinding::FPropertyCreationDescriptor Desc;
 	Desc.PropertyDesc = FPropertyBagPropertyDesc(FName(*ParamName), MapFriendlyType(TypeStr));
+
+	// CreateRootProperties gives a name already in the bag a numbered suffix instead of failing, so a name that is
+	// taken is settled here (FName compares case-insensitively, as the bag does): the same type is the parameter the
+	// call asks for, and nothing is changed or saved; another type is an error.
+	if (const FPropertyBagPropertyDesc* Existing = StateTree_FindRootParameter(ED, Desc.PropertyDesc.Name))
+	{
+		const bool bSameType = Existing->ValueType == Desc.PropertyDesc.ValueType
+			&& Existing->ContainerTypes.IsEmpty()
+			&& Existing->ValueTypeObject == Desc.PropertyDesc.ValueTypeObject;
+		if (!bSameType)
+		{
+			return mcp_common::MakeErrorReply(FString::Printf(
+				TEXT("The tree already has a parameter '%s' of type %s%s, not %s; nothing was changed. Remove it with remove_tree_parameter or pick another name."),
+				*Existing->Name.ToString(), *EnumToName(Existing->ValueType),
+				Existing->ContainerTypes.IsEmpty() ? TEXT("") : TEXT(" (a container)"), *EnumToName(Desc.PropertyDesc.ValueType)));
+		}
+		TSharedPtr<FJsonObject> Data = StateTree_NewTreeData(Tree);
+		Data->SetStringField(TEXT("parameter_name"), Existing->Name.ToString());
+		Data->SetStringField(TEXT("parameter_type"), TypeStr);
+		Data->SetNumberField(TEXT("parameter_count"), StateTree_RootParameterCount(ED));
+		Data->SetBoolField(TEXT("added"), false);
+		Data->SetBoolField(TEXT("already_existed"), true);
+		Data->SetBoolField(TEXT("saved"), false);
+		Data->SetStringField(TEXT("note"), TEXT("The tree already has a parameter of that name and type; nothing was changed or saved."));
+		return mcp_common::MakeOkReply(Data);
+	}
+
+	// CreateRootProperties writes the name the parameter really got back into the descriptor.
 	ED->CreateRootProperties(MakeArrayView(&Desc, 1));
+	const FName AddedName = Desc.PropertyDesc.Name;
 	const bool bSaved = mcp_common::SaveAssetPackage(Tree->GetPackage(), Tree);
 
 	TSharedPtr<FJsonObject> Data = StateTree_NewTreeData(Tree);
-	Data->SetStringField(TEXT("parameter_name"), ParamName);
+	Data->SetStringField(TEXT("parameter_name"), AddedName.ToString());
 	Data->SetStringField(TEXT("parameter_type"), TypeStr);
 	Data->SetNumberField(TEXT("parameter_count"), StateTree_RootParameterCount(ED));
-	Data->SetBoolField(TEXT("added"), StateTree_FindRootParameter(ED, FName(*ParamName)) != nullptr);
+	Data->SetBoolField(TEXT("added"), StateTree_FindRootParameter(ED, AddedName) != nullptr);
+	Data->SetBoolField(TEXT("already_existed"), false);
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("add_tree_parameter"));
 }
 
@@ -931,7 +961,7 @@ TSharedPtr<FJsonObject> HandleAddStateTreeGlobalTask(
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("add_state_tree_global_task"));
 }
 
-// MCP:set_transition_properties - Change the trigger, priority, enabled flag and delay of an existing transition of a state of a StateTree asset, then save the asset without compiling it; there is no undo step. The transition is addressed by state_name and transition_index (0-based, as list_transitions or get_state_tree_info report it). Only the fields you pass are written, overwriting their old values; the reply reads every field back. An unknown trigger or priority name, a missing or out-of-range transition_index, or a missing tree or state is an error and nothing is saved; a failed save (for example while PIE runs) makes success false. Target state, transition type, event tag or payload: update_transition; a new transition: add_state_transition; inverse: remove_transition; conditions: add_transition_condition.
+// MCP:set_transition_properties - Change the trigger, priority, enabled flag and delay of an existing transition of a state of a StateTree asset, then save the asset without compiling it; there is no undo step. The transition is addressed by state_name and transition_index (0-based, as list_transitions or get_state_tree_info report it). Only the fields you pass are written, overwriting their old values; the reply reads every field back. An unknown trigger or priority name, a missing or out-of-range transition_index, or a missing tree or state is an error and nothing is changed or saved; a failed save (for example while PIE runs) makes success false. Target state, transition type, event tag or payload: update_transition; a new transition: add_state_transition; inverse: remove_transition; conditions: add_transition_condition.
 //   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
 //   @param state_name [string!] - Name of the state owning the transition; the first state with that name in a depth-first walk of the hierarchy is used
 //   @param transition_index - 0-based index of the transition within that state (the index field of list_transitions or get_state_tree_info); required
@@ -956,28 +986,26 @@ TSharedPtr<FJsonObject> HandleSetTransitionProperties(
 	}
 	FStateTreeTransition& T = State->Transitions[Ti];
 
+	// Every input is parsed before any is written, so an error leaves the transition as it was.
 	FString TriggerStr;
-	if (Params->TryGetStringField(TEXT("trigger"), TriggerStr) && !TriggerStr.IsEmpty())
+	const bool bHasTrigger = Params->TryGetStringField(TEXT("trigger"), TriggerStr) && !TriggerStr.IsEmpty();
+	EStateTreeTransitionTrigger Trig = EStateTreeTransitionTrigger::OnStateCompleted;
+	if (bHasTrigger && !ResolveEnumByName(TriggerStr, Trig))
 	{
-		EStateTreeTransitionTrigger Trig = EStateTreeTransitionTrigger::OnStateCompleted;
-		if (!ResolveEnumByName(TriggerStr, Trig))
-		{
-			return mcp_common::MakeErrorReply(
-				FString::Printf(TEXT("Unknown trigger: %s"), *TriggerStr));
-		}
-		T.Trigger = Trig;
+		return mcp_common::MakeErrorReply(
+			FString::Printf(TEXT("Unknown trigger: %s; nothing was changed"), *TriggerStr));
 	}
 	FString PriorityStr;
-	if (Params->TryGetStringField(TEXT("priority"), PriorityStr) && !PriorityStr.IsEmpty())
+	const bool bHasPriority = Params->TryGetStringField(TEXT("priority"), PriorityStr) && !PriorityStr.IsEmpty();
+	EStateTreeTransitionPriority Prio = EStateTreeTransitionPriority::Normal;
+	if (bHasPriority && !ResolveEnumByName(PriorityStr, Prio))
 	{
-		EStateTreeTransitionPriority Prio = EStateTreeTransitionPriority::Normal;
-		if (!ResolveEnumByName(PriorityStr, Prio))
-		{
-			return mcp_common::MakeErrorReply(
-				FString::Printf(TEXT("Unknown priority: %s"), *PriorityStr));
-		}
-		T.Priority = Prio;
+		return mcp_common::MakeErrorReply(
+			FString::Printf(TEXT("Unknown priority: %s; nothing was changed"), *PriorityStr));
 	}
+
+	if (bHasTrigger) { T.Trigger = Trig; }
+	if (bHasPriority) { T.Priority = Prio; }
 	bool bEnabled = true;
 	if (Params->TryGetBoolField(TEXT("enabled"), bEnabled)) { T.bTransitionEnabled = bEnabled; }
 	bool bDelay = false;
@@ -1307,7 +1335,7 @@ TSharedPtr<FJsonObject> HandleListStateTrees(
 // ---------------------------------------------------------------------------
 // list_states — recursive walk of the state tree hierarchy
 // ---------------------------------------------------------------------------
-// MCP:list_states - Walk the state hierarchy of a UStateTree, returning a flat list with parent/child/sibling info plus a recursive child_count.
+// MCP:list_states - List every state of a StateTree asset, found by asset path, as one flat breadth-first list, read as loaded in memory (unsaved edits included) without changing anything: the top-level states (SubTrees) at depth 0 first, then each level of children. Each entry gives the name, type (State, Group, Linked, LinkedAsset or Subtree), task completion (All or Any), parent name (empty at depth 0), depth, child_count (direct children only, not recursive), and task, enter-condition and transition counts. root_state, matched by name (case-insensitive, first match in tree order), lists only that state, at depth 0, and its descendants. An unknown tree or root_state, or a tree without editor data, is an error. Whole structure with transitions: get_state_tree_info; one state's details: list_transitions, list_tasks, list_conditions; finding trees: list_state_trees.
 //   @param tree_path - Asset path to the UStateTree.
 //   @param root_state - Optional. If set, walk from this state as root (top-level SubTrees are skipped).
 //   @returns { tree_path, count, states: [{ name, type, completion, has_children, child_count, depth, parent }] }
@@ -1318,8 +1346,11 @@ TSharedPtr<FJsonObject> HandleListStates(
 	UStateTreeState* StartFrom = ResolveTreeAndState(Params, TEXT("root_state"), Tree, ED, Err);
 
 	// ResolveTreeAndState fails on missing root_state — fall back to walking all SubTrees if so.
-	const bool bStartFromSupplied = Params->HasField(TEXT("root_state"))
-		&& !Params->GetStringField(TEXT("root_state")).IsEmpty();
+	// Read into a string, not negated off the getter: the catalog generator reads
+	// `!Params->GetStringField(...)` as a required param, and root_state is optional.
+	FString RootStateName;
+	const bool bStartFromSupplied = Params->TryGetStringField(TEXT("root_state"), RootStateName)
+		&& !RootStateName.IsEmpty();
 	if (bStartFromSupplied && !StartFrom)
 	{
 		return Err;
@@ -3400,8 +3431,8 @@ TSharedPtr<FJsonObject> HandleSetStateThemeColor(
 
 // MCP:set_component_parameter_override - Override a single UStateTree root parameter on a UStateTreeComponent living on a placed actor. CRITICAL: the implementation calls UStateTreeStateTreeReference::SetPropertyOverridden(ParamGuid, true) — without this, the runtime reads from the asset default and the per-instance value is silently dropped. The value is written via FInstancedPropertyBag::SetValueSerializedString so the engine parses the string into the parameter's actual type (Bool/Int/Float/Vector/Struct/...). The tree must already declare the parameter; add it with add_tree_parameter first. Use clear_overrides=true to remove the override (asset default takes over again) without writing a value. If the component has no bound tree, pass state_tree_path to auto-bind before overriding (cold-start convenience); the public UStateTreeComponent::SetStateTree(UStateTree*) handles the bind through reflection on the protected StateTreeRef member.
 //   @param actor_label - Actor label/name that owns the UStateTreeComponent (resolved against the editor world)
-//   @param parameter_name - Root parameter name to override (must exist on the bound tree)
-//   @param value - Optional string-encoded value; type-driven by the parameter's FPropertyBagPropertyDesc
+//   @param parameter_name - Root parameter name to override (must exist on the bound tree); required unless clear_overrides is true
+//   @param value - String-encoded value; type-driven by the parameter's FPropertyBagPropertyDesc. Required unless clear_overrides is true
 //   @param state_tree_path - Optional path to a UStateTree to bind the component to if no tree is already bound
 //   @param clear_overrides - If true, drop all per-instance overrides on the component (asset defaults take over); value is ignored
 //   @returns { actor_label, component_class, parameter_name, parameter_id, value, was_overridden, cleared, saved, bound_tree }
@@ -3486,13 +3517,17 @@ TSharedPtr<FJsonObject> HandleSetComponentParameterOverride(
 		return mcp_common::MakeOkReply(Data);
 	}
 
-	// Add/update path: locate the parameter, set its value, mark as overridden.
+	// Add/update path: locate the parameter, set its value, mark as overridden. Both reads go into
+	// bools, not negated in the if: they are needed only here (the clear path returned above), and a
+	// negated read would make the catalog require them for clear_overrides=true too.
 	FString ParameterName, ValueStr;
-	if (!Params->TryGetStringField(TEXT("parameter_name"), ParameterName) || ParameterName.IsEmpty())
+	const bool bHasParameterName = Params->TryGetStringField(TEXT("parameter_name"), ParameterName);
+	if (!bHasParameterName || ParameterName.IsEmpty())
 	{
 		return mcp_common::MakeErrorReply(TEXT("parameter_name is required when clear_overrides is false"));
 	}
-	if (!Params->TryGetStringField(TEXT("value"), ValueStr))
+	const bool bHasValue = Params->TryGetStringField(TEXT("value"), ValueStr);
+	if (!bHasValue)
 	{
 		return mcp_common::MakeErrorReply(TEXT("value is required when clear_overrides is false"));
 	}
@@ -3541,7 +3576,7 @@ TSharedPtr<FJsonObject> HandleSetComponentParameterOverride(
 // update_transition (comprehensive transition metadata update)
 // ===========================================================================
 
-// MCP:update_transition - Update any subset of a transition's metadata fields on a state. Only fields explicitly passed are written; everything else is preserved. Unknown enum strings are rejected (no silent no-ops on bad input). Superset of set_transition_properties: adds transition_type (None|Succeeded|Failed|GotoState|Parent|NextState|...), target_state (rebind by name), event_tag (FGameplayTag, when trigger=OnEvent), and payload_struct (event-payload struct, when trigger=OnEvent). Use this when set_transition_properties doesn't expose the field you need.
+// MCP:update_transition - Update any subset of a transition's metadata fields on a state. Only fields explicitly passed are written; everything else is preserved. Every input is checked before any is written: an unknown enum name, target_state, event_tag or payload_struct is an error naming each bad input, and nothing is changed or saved, so errors in a reply is always empty. Superset of set_transition_properties: adds transition_type (None|Succeeded|Failed|GotoState|Parent|NextState|...), target_state (rebind by name), event_tag (FGameplayTag, when trigger=OnEvent), and payload_struct (event-payload struct, when trigger=OnEvent). Use this when set_transition_properties doesn't expose the field you need.
 //   @param tree_path - Asset path of the UStateTree
 //   @param state_name [string!] - State that owns the transition
 //   @param transition_index - Index into the state's Transitions array (0-based)
@@ -3571,110 +3606,103 @@ TSharedPtr<FJsonObject> HandleUpdateTransition(
 	}
 	FStateTreeTransition& T = State->Transitions[Ti];
 
-	TArray<TSharedPtr<FJsonValue>> AppliedFieldsJson;
-	TArray<TSharedPtr<FJsonValue>> ErrorsJson;
+	// Every input is parsed before any is written: an input that does not resolve makes the call an error that
+	// names each such input, and the transition is left as it was.
+	TArray<FString> Errors;
 
 	// --- trigger (EStateTreeTransitionTrigger) ---
 	FString TriggerStr;
-	if (Params->TryGetStringField(TEXT("trigger"), TriggerStr) && !TriggerStr.IsEmpty())
+	const bool bHasTrigger = Params->TryGetStringField(TEXT("trigger"), TriggerStr) && !TriggerStr.IsEmpty();
+	EStateTreeTransitionTrigger Trig = EStateTreeTransitionTrigger::None;
+	if (bHasTrigger && !ResolveEnumByName(TriggerStr, Trig))
 	{
-		EStateTreeTransitionTrigger Trig = EStateTreeTransitionTrigger::None;
-		if (!ResolveEnumByName(TriggerStr, Trig))
-		{
-			ErrorsJson.Add(MakeShared<FJsonValueString>(FString::Printf(
-				TEXT("Unknown trigger: '%s'"), *TriggerStr)));
-		}
-		else
-		{
-			T.Trigger = Trig;
-			AppliedFieldsJson.Add(MakeShared<FJsonValueString>(TEXT("trigger")));
-		}
+		Errors.Add(FString::Printf(TEXT("Unknown trigger: '%s'"), *TriggerStr));
 	}
 
 	// --- priority (EStateTreeTransitionPriority) ---
 	FString PriorityStr;
-	if (Params->TryGetStringField(TEXT("priority"), PriorityStr) && !PriorityStr.IsEmpty())
+	const bool bHasPriority = Params->TryGetStringField(TEXT("priority"), PriorityStr) && !PriorityStr.IsEmpty();
+	EStateTreeTransitionPriority Prio = EStateTreeTransitionPriority::Normal;
+	if (bHasPriority && !ResolveEnumByName(PriorityStr, Prio))
 	{
-		EStateTreeTransitionPriority Prio = EStateTreeTransitionPriority::Normal;
-		if (!ResolveEnumByName(PriorityStr, Prio))
-		{
-			ErrorsJson.Add(MakeShared<FJsonValueString>(FString::Printf(
-				TEXT("Unknown priority: '%s'"), *PriorityStr)));
-		}
-		else
-		{
-			T.Priority = Prio;
-			AppliedFieldsJson.Add(MakeShared<FJsonValueString>(TEXT("priority")));
-		}
+		Errors.Add(FString::Printf(TEXT("Unknown priority: '%s'"), *PriorityStr));
 	}
 
-	// --- transition_type (EStateTreeTransitionType) — applied to T.State.LinkType ---
+	// --- transition_type (EStateTreeTransitionType), applied to T.State.LinkType ---
 	FString TypeStr;
-	if (Params->TryGetStringField(TEXT("transition_type"), TypeStr) && !TypeStr.IsEmpty())
+	const bool bHasType = Params->TryGetStringField(TEXT("transition_type"), TypeStr) && !TypeStr.IsEmpty();
+	EStateTreeTransitionType NewType = EStateTreeTransitionType::None;
+	if (bHasType && !ResolveEnumByName(TypeStr, NewType))
 	{
-		EStateTreeTransitionType NewType = EStateTreeTransitionType::None;
-		if (!ResolveEnumByName(TypeStr, NewType))
-		{
-			ErrorsJson.Add(MakeShared<FJsonValueString>(FString::Printf(
-				TEXT("Unknown transition_type: '%s'"), *TypeStr)));
-		}
-		else
-		{
-			T.State.LinkType = NewType;
-			AppliedFieldsJson.Add(MakeShared<FJsonValueString>(TEXT("transition_type")));
-		}
+		Errors.Add(FString::Printf(TEXT("Unknown transition_type: '%s'"), *TypeStr));
 	}
 
 	// --- target_state (rebind by name -> resolve to state ID) ---
 	FString TargetStateName;
-	if (Params->TryGetStringField(TEXT("target_state"), TargetStateName) && !TargetStateName.IsEmpty())
+	const bool bHasTarget = Params->TryGetStringField(TEXT("target_state"), TargetStateName) && !TargetStateName.IsEmpty();
+	UStateTreeState* TargetState = bHasTarget ? FindStateByName(ED, FName(*TargetStateName)) : nullptr;
+	if (bHasTarget && !TargetState)
 	{
-		UStateTreeState* TargetState = FindStateByName(ED, FName(*TargetStateName));
-		if (!TargetState)
-		{
-			ErrorsJson.Add(MakeShared<FJsonValueString>(FString::Printf(
-				TEXT("target_state not found: '%s'"), *TargetStateName)));
-		}
-		else
-		{
-			T.State.Name = FName(*TargetStateName);
-			T.State.ID = TargetState->ID;
-			AppliedFieldsJson.Add(MakeShared<FJsonValueString>(TEXT("target_state")));
-		}
+		Errors.Add(FString::Printf(TEXT("target_state not found: '%s'"), *TargetStateName));
 	}
 
-	// --- event_tag (FGameplayTag string) — only meaningful when trigger=OnEvent ---
+	// --- event_tag (FGameplayTag string), only meaningful when trigger=OnEvent ---
 	FString EventTagStr;
-	if (Params->TryGetStringField(TEXT("event_tag"), EventTagStr) && !EventTagStr.IsEmpty())
+	const bool bHasEventTag = Params->TryGetStringField(TEXT("event_tag"), EventTagStr) && !EventTagStr.IsEmpty();
+	const FGameplayTag Tag = bHasEventTag
+		? FGameplayTag::RequestGameplayTag(FName(*EventTagStr), /*ErrorIfNotFound=*/false) : FGameplayTag();
+	if (bHasEventTag && !Tag.IsValid())
 	{
-		const FGameplayTag Tag = FGameplayTag::RequestGameplayTag(FName(*EventTagStr), /*ErrorIfNotFound=*/false);
-		if (!Tag.IsValid())
-		{
-			ErrorsJson.Add(MakeShared<FJsonValueString>(FString::Printf(
-				TEXT("event_tag is not a registered FGameplayTag: '%s' (add it to a GameplayTag table first)"), *EventTagStr)));
-		}
-		else
-		{
-			T.RequiredEvent.Tag = Tag;
-			AppliedFieldsJson.Add(MakeShared<FJsonValueString>(TEXT("event_tag")));
-		}
+		Errors.Add(FString::Printf(
+			TEXT("event_tag is not a registered FGameplayTag: '%s' (add it to a GameplayTag table first)"), *EventTagStr));
 	}
 
-	// --- payload_struct (UScriptStruct name) — only meaningful when trigger=OnEvent ---
+	// --- payload_struct (UScriptStruct name), only meaningful when trigger=OnEvent ---
 	FString PayloadStructName;
-	if (Params->TryGetStringField(TEXT("payload_struct"), PayloadStructName) && !PayloadStructName.IsEmpty())
+	const bool bHasPayload = Params->TryGetStringField(TEXT("payload_struct"), PayloadStructName) && !PayloadStructName.IsEmpty();
+	UScriptStruct* PayloadType = bHasPayload ? ResolveScriptStructByName(PayloadStructName) : nullptr;
+	if (bHasPayload && !PayloadType)
 	{
-		UScriptStruct* PayloadType = ResolveScriptStructByName(PayloadStructName);
-		if (!PayloadType)
-		{
-			ErrorsJson.Add(MakeShared<FJsonValueString>(FString::Printf(
-				TEXT("payload_struct not found: '%s' (use full struct name or /Script path)"), *PayloadStructName)));
-		}
-		else
-		{
-			T.RequiredEvent.PayloadStruct = PayloadType;
-			AppliedFieldsJson.Add(MakeShared<FJsonValueString>(TEXT("payload_struct")));
-		}
+		Errors.Add(FString::Printf(
+			TEXT("payload_struct not found: '%s' (use full struct name or /Script path)"), *PayloadStructName));
+	}
+
+	if (Errors.Num() > 0)
+	{
+		return mcp_common::MakeErrorReply(FString::Join(Errors, TEXT("; ")) + TEXT("; nothing was changed"));
+	}
+
+	TArray<TSharedPtr<FJsonValue>> AppliedFieldsJson;
+	if (bHasTrigger)
+	{
+		T.Trigger = Trig;
+		AppliedFieldsJson.Add(MakeShared<FJsonValueString>(TEXT("trigger")));
+	}
+	if (bHasPriority)
+	{
+		T.Priority = Prio;
+		AppliedFieldsJson.Add(MakeShared<FJsonValueString>(TEXT("priority")));
+	}
+	if (bHasType)
+	{
+		T.State.LinkType = NewType;
+		AppliedFieldsJson.Add(MakeShared<FJsonValueString>(TEXT("transition_type")));
+	}
+	if (TargetState)
+	{
+		T.State.Name = FName(*TargetStateName);
+		T.State.ID = TargetState->ID;
+		AppliedFieldsJson.Add(MakeShared<FJsonValueString>(TEXT("target_state")));
+	}
+	if (bHasEventTag)
+	{
+		T.RequiredEvent.Tag = Tag;
+		AppliedFieldsJson.Add(MakeShared<FJsonValueString>(TEXT("event_tag")));
+	}
+	if (PayloadType)
+	{
+		T.RequiredEvent.PayloadStruct = PayloadType;
+		AppliedFieldsJson.Add(MakeShared<FJsonValueString>(TEXT("payload_struct")));
 	}
 
 	// --- enabled (bTransitionEnabled) ---
@@ -3722,7 +3750,8 @@ TSharedPtr<FJsonObject> HandleUpdateTransition(
 	Data->SetNumberField(TEXT("delay_duration"), T.DelayDuration);
 	Data->SetNumberField(TEXT("delay_variance"), T.DelayRandomVariance);
 	Data->SetArrayField(TEXT("applied_fields"), AppliedFieldsJson);
-	Data->SetArrayField(TEXT("errors"), ErrorsJson);
+	// A bad input is an error before anything is written, so a reply that gets here has none.
+	Data->SetArrayField(TEXT("errors"), TArray<TSharedPtr<FJsonValue>>());
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("update_transition"));
 }
 

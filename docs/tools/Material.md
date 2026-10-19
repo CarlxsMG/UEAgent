@@ -229,7 +229,7 @@ Copy parameter values from a source material or material instance into a transie
 
 *Destructive.*
 
-Give one material slot of a mesh component on an editor-world actor its own Material Instance Dynamic (UPrimitiveComponent::CreateDynamicMaterialInstance), which replaces the slot's material with the MID, in one undo step that marks the level dirty; no asset is created or saved. The actor is matched by object name or label (first match), the component is its first StaticMeshComponent, else its first mesh component. Without parent_material_path the MID wraps the slot's current material, and a slot already holding a MID returns that same MID (created still says true); with it, the slot is first set to that material. Pass mid_object_path to set_mid_scalar_param, set_mid_vector_param, set_mid_texture_param or get_mid_all_params; verified confirms the slot holds the MID. A missing actor, mesh component or material, or an out-of-range element_index, is an error. Unowned MID: create_material_instance_dynamic; saved asset: create_material_instance_constant.
+Give one material slot of a mesh component on an editor-world actor its own Material Instance Dynamic (UPrimitiveComponent::CreateDynamicMaterialInstance), which replaces the slot's material with the MID, in one undo step that marks the level dirty; no asset is created or saved. The actor is matched by object name or label (first match), the component is its first StaticMeshComponent, else its first mesh component. Without parent_material_path the MID wraps the slot's current material, and a slot already holding a MID returns that same MID with created false, changing nothing; with it, the slot is first set to that material. Pass mid_object_path to set_mid_scalar_param, set_mid_vector_param, set_mid_texture_param or get_mid_all_params; verified confirms the slot holds the MID. A missing actor, mesh component or material, or an out-of-range element_index, is an error. Unowned MID: create_material_instance_dynamic; saved asset: create_material_instance_constant.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -237,7 +237,7 @@ Give one material slot of a mesh component on an editor-world actor its own Mate
 | `element_index` | number | no | Material slot index on the mesh component (default 0); must be below the component's slot count |
 | `parent_material_path` | string | no | Optional source material for the MID (default slot's current material); when given it is assigned to the slot before the MID is made from it |
 
-**Returns:** `{ actor_name, actor_label, component_name, element_index, mid_object_path, mid_name, parent_material_path, verified, created }`
+**Returns:** `{ actor_name, actor_label, component_name, element_index, mid_object_path, mid_name, parent_material_path, verified, created, note? }`
 
 ## `create_material`
 
@@ -271,7 +271,7 @@ Add ONE node to a material graph, by expression class path (e.g. /Script/Engine.
 
 *Additive, idempotent.*
 
-Create a UMaterialFunction asset at package_path/name through the editor factory, exposed to the function library, and save it. Idempotent: an existing function is returned untouched with already_exists=true; another asset class at that path is an error. Returns function_path, num_inputs, num_outputs and saved.
+Create an empty UMaterialFunction asset named name in package_path through the editor factory, exposed to the material function library, with the optional description stored as its tooltip, then save it. Idempotent: an existing function at that path is returned untouched with already_exists=true, created=false and saved=false, and nothing is saved (description is ignored then and comes back as the function's own); another asset class there, or an invalid package path, is an error. A failed save (PIE running, read-only file) still answers success, with created=true and saved=false and the function kept in memory. Then add pins with add_material_function_input and add_material_function_output and nodes with create_material_function_expression; read it back with get_material_function_graph; a variant with overrides: create_material_function_instance; use it in a material: add_material_function_call; inverse: delete_material_function.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -279,7 +279,7 @@ Create a UMaterialFunction asset at package_path/name through the editor factory
 | `name` | string | yes | Asset name for the new material function |
 | `description` | string | no | Text stored as the function Description, the tooltip shown wherever the function is used; default empty. Ignored when the function already exists. |
 
-**Returns:** `{ function_path: string, name: string, package_path: string, description: string, num_inputs: number, num_outputs: number, created: bool, saved: bool, already_exists: bool? }`
+**Returns:** `{ function_path: string, name: string, package_path: string, description: string, num_inputs: number, num_outputs: number, created: bool, saved: bool, already_exists?: bool }`
 
 ## `create_material_function_expression`
 
@@ -298,13 +298,13 @@ Create a new UMaterialExpression node inside a UMaterialFunction's internal grap
 
 ## `create_material_function_instance`
 
-*Additive.*
+*Additive, idempotent.*
 
-Create a UMaterialFunctionInstance (asset, with parent set) and save it.
+Create a UMaterialFunctionInstance asset named instance_name in package_path through the editor factory, parented to the material function or function instance at parent_function_path, then save it. package_path is any long package path, such as /Game/Materials or a plugin's /MyPlugin/Funcs; a relative folder is read under /Game, a missing folder is made, and an unmounted or malformed path is an error. Idempotent: an instance already at that path is returned unchanged with already_existed=true, created=false and saved=false, its own parent in parent_function_path (the requested one is ignored) and nothing saved; another asset class there is an error. A parent that does not load is an error and nothing, not even the folder, is created; a failed save (PIE running, read-only file) makes success false, with the new instance kept in memory and saved=false. Re-parent later: set_material_function_instance_parent; a new base function: create_material_function.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `package_path` | string | yes | Target /Game package path (auto-prefixed with /Game/ if missing) |
+| `package_path` | string | yes | Target folder as a long package path, e.g. /Game/Materials or /MyPlugin/Funcs; a relative folder is read under /Game |
 | `instance_name` | string | yes | Name for the new UMaterialFunctionInstance asset |
 | `parent_function_path` | string | yes | Asset path of the parent UMaterialFunctionInterface |
 
@@ -342,7 +342,7 @@ Create a material instance (MIC) asset under a /Game path, optionally parented t
 
 *Additive.*
 
-Create a Material Instance Dynamic (MID) of a parent material in the transient package: a runtime-only object that is never saved, belongs to no actor and has no undo step. Nothing references it, so the next garbage collection can free it: set its parameters right away with set_mid_scalar_param, set_mid_vector_param or set_mid_texture_param, which take its mid_object_path, or use create_dynamic_material_on_actor to have a mesh component own a MID it renders. A name already taken in the transient package gets a numbered suffix, so keep mid_name and mid_object_path from the reply; each call creates another MID. A parent that cannot be loaded is an error. Read its values with get_mid_all_params; a saved, reusable instance asset: create_material_instance_constant.
+Create a Material Instance Dynamic (MID) of a parent material in the transient package: a runtime-only object that is never saved, belongs to no actor and has no undo step. The plugin keeps a reference to every MID it makes this way, so garbage collection does not free it; no tool releases one, so each lives until the editor closes. Set its parameters with set_mid_scalar_param, set_mid_vector_param or set_mid_texture_param, which take its mid_object_path, or use create_dynamic_material_on_actor to have a mesh component own a MID it renders. A name another MID holds gets a numbered suffix, so keep mid_name and mid_object_path from the reply; each call creates another MID. A parent that cannot be loaded, or a name held by an object of another class, is an error. Read its values with get_mid_all_params; a saved, reusable instance asset: create_material_instance_constant.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -381,7 +381,7 @@ Creates a UMaterialFunctionMaterialLayerBlend asset (usage MaterialLayerBlend, e
 
 *Additive, idempotent.*
 
-Create a UMaterialParameterCollection asset at package_path/name and save it to disk. Idempotent: an existing collection there is returned with created=false and already_exists=true, while another asset type at that path is an error. Returns collection_path, scalar_count, vector_count and saved.
+Create a UMaterialParameterCollection asset at package_path/name and save it to disk. Idempotent: an existing collection there is returned unchanged with created=false, already_exists=true and saved=false, and nothing is saved, while another asset type at that path is an error naming it. A failed save makes success false with saved=false. Returns collection_path, scalar_count, vector_count and saved. Add parameters with add_collection_scalar_param and add_collection_vector_param; read them with get_collection_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -419,16 +419,16 @@ Create a material instance from a base material AND apply a dict of parameter ov
 
 ## `create_post_process_material`
 
-*Additive.*
+*Destructive, idempotent.*
 
-Create a UMaterial configured as a post-process material (MD_PostProcess).
+Create a UMaterial named name in package_path through the editor factory, configured as a post-process material (domain PostProcess, blended after tonemapping), then recompile and save it. Idempotent create or convert: an existing UMaterial at that path has those two settings overwritten, is recompiled and saved, and answers created=false, already_exists=true and a note with its old domain; one that already has them is left as it is (changed=false, saved=false, a note), nothing recompiled or saved. Another asset class there, or an invalid path, is an error. A failed save makes success false with saved=false and save_error, the material kept in memory. Add nodes with create_material_expression and wire them with connect_to_material_output; another domain: set_material_domain.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `package_path` | string | yes | /Game package directory, e.g. '/Game/MyGame' |
 | `name` | string | yes | Asset name for the new material |
 
-**Returns:** `{ material_path: string, name: string, package_path: string, domain: string, blendable_location: number, is_post_process: bool, created: bool, already_exists: bool, saved: bool }`
+**Returns:** `{ material_path: string, name: string, package_path: string, domain: string, blendable_location: number, is_post_process: bool, created: bool, already_exists: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `create_substrate_slab_node`
 
@@ -448,14 +448,14 @@ Add a Substrate Slab BSDF node to a UMaterial asset.  Performs a real CreateMate
 
 *Additive, idempotent.*
 
-Create a USubsurfaceProfile data asset (NewObject + save).  Idempotent: if the asset already exists it is loaded and returned.
+Create a USubsurfaceProfile asset named name in package_path (default /Game/Gameplay; trailing slashes trimmed) with the engine's default settings, then save it; mean_free_path_distance reads one of those settings back. Idempotent: an asset at that path that loads as a subsurface profile is returned as it is, with already_existed=true, created=false and saved=false, and nothing is saved; one of another class is an error, and so is an invalid package path. A failed save (PIE running, read-only file) makes success false with saved=false and save_error, but the new profile stays registered in memory, so a repeat call answers already_existed=true for an asset that is not on disk: persist it with save_asset. Edit its Settings struct with set_property_value or set_properties on the asset path, then save_asset.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | yes | Asset name (e.g. SSP_Example) |
 | `package_path` | string | no | Target /Game package path (optional, default "/Game/Gameplay") |
 
-**Returns:** `{ name: string, asset_path: string, asset_class: string, mean_free_path_distance: number, is_subsurface_profile: bool, already_existed: bool, created: bool }`
+**Returns:** `{ name: string, asset_path: string, asset_class: string, mean_free_path_distance: number, is_subsurface_profile: bool, already_existed: bool, created: bool, saved: bool, save_error?: string }`
 
 ## `delete_material_expression`
 
@@ -679,7 +679,7 @@ List the FunctionInput and FunctionOutput nodes of a UMaterialFunction asset: no
 
 *Read-only.*
 
-Read the expression graph of a UMaterial asset without changing it: every expression node with its object name (the node_id other material tools take) and class, its inputs by index, and the node-to-node connections flattened into connections[], each with the source output index. Only wiring between expressions is listed -- what feeds the material's main outputs (BaseColor, Normal...) is not -- and node positions and property values are not read. input_name and to_input are each input's own name, which can be None on built-in nodes, so match inputs by index. A material instance or a path that does not load is an error (Material not found). Material functions: get_material_function_graph; node descriptions: get_material_expressions; shader stats: get_material_stats; wiring: connect_material_expressions, connect_to_material_output.
+Read the expression graph of a UMaterial asset without changing it: every expression node with its object name (the node_id other material tools take) and class, its inputs by index, and the node-to-node connections flattened into connections[], each with the source output index. Only wiring between expressions is listed -- what feeds the material's main outputs (BaseColor, Normal...) is not -- and node positions and property values are not read. input_name and to_input are each input's name as the node reports it (GetInputName, e.g. A, B, Alpha), and node_count counts the nodes listed. A material instance or a path that does not load is an error (Material not found). Material functions: get_material_function_graph; node descriptions: get_material_expressions; shader stats: get_material_stats; wiring: connect_material_expressions, connect_to_material_output.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1277,7 +1277,7 @@ Rebuild the Material Parameter Collection Instance (MPCI: the transient per-worl
 
 *Destructive, idempotent.*
 
-Override one scalar parameter on the Material Parameter Collection Instance (MPCI: the transient per-world values) of a collection asset on one world, creating the instance when needed, and push the value to the renderer. The world is the editor world by default, or the Play-in-Editor world world_label selects; world_package and world_type say which one was reached. Runtime only: the asset is untouched, nothing is saved, no undo, and the override is lost when the instance is rebuilt. A missing value, a collection that does not load, an unmatched world, or a parameter_name that is not a scalar of the collection is an error; readback_value and readback_ok report what the instance holds afterwards. Saved default: set_collection_param_default; vectors: set_mpci_vector_parameter_value; drop every override: clear_mpci_parameter_overrides; read values: get_mpci_info.
+Override one scalar parameter on the Material Parameter Collection Instance (MPCI: the transient per-world values) of a collection asset on one world, creating the instance when needed, and push the value to the renderer. The world is the editor world by default, or the Play-in-Editor world world_label selects; world_package and world_type say which one was reached. Runtime only: the asset is untouched, nothing is saved, no undo, and the override is lost when the instance is rebuilt. A missing value, a collection that does not load, an unmatched world, or a parameter_name that is not a scalar of the collection is an error; readback_value is what the instance holds afterwards, and one that differs from value makes success false with readback_ok=false. Saved default: set_collection_param_default; vectors: set_mpci_vector_parameter_value; drop every override: clear_mpci_parameter_overrides; read values: get_mpci_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1292,7 +1292,7 @@ Override one scalar parameter on the Material Parameter Collection Instance (MPC
 
 *Destructive, idempotent.*
 
-Override one vector parameter on the Material Parameter Collection Instance (MPCI: the transient per-world values) of a collection on a world, creating the instance when needed, and push it to the renderer. The world is the editor world by default, or the Play-in-Editor world world_label selects; world_package and world_type say which one was reached. Pass rgba or r/g/b/a: r/g/b/a override the matching rgba entries, and channels given by neither are 0 (alpha 1), not the current value. Runtime only: the asset is untouched (set_collection_param_default edits it), nothing saved, no undo. Errors when parameter_name is not a vector parameter of the collection; scalars: set_mpci_scalar_parameter_value.
+Override one vector parameter on the Material Parameter Collection Instance (MPCI: the transient per-world values) of a collection on a world, creating the instance when needed, and push it to the renderer. The world is the editor world by default, or the Play-in-Editor world world_label selects; world_package and world_type say which one was reached. Pass rgba or r/g/b/a: r/g/b/a override the matching rgba entries, and channels given by neither are 0 (alpha 1), not the current value. Runtime only: the asset is untouched (set_collection_param_default edits it), nothing saved, no undo. Errors when parameter_name is not a vector parameter of the collection; readback_rgba is what the instance holds afterwards, and one that differs from value_rgba makes success false with readback_ok=false. Scalars: set_mpci_scalar_parameter_value.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

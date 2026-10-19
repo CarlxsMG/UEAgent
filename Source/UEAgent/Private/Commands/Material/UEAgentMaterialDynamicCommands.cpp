@@ -8,6 +8,7 @@
 #include "Engine/Texture.h"
 #include "UObject/Package.h"
 #include "UObject/UObjectIterator.h"
+#include "UObject/GCObject.h"   // FGCObject: keeps the MIDs create_material_instance_dynamic makes
 
 #include "Editor.h"
 #include "Engine/World.h"
@@ -135,6 +136,39 @@ namespace
 			*ParamName, TypeLabel, *MID->GetPathName(), *ListLabel, *FString::Join(Known, TEXT(", "))));
 	}
 
+	/**
+	 * Holds every MID create_material_instance_dynamic makes. Nothing else references such a MID (it lives in the
+	 * transient package and belongs to no actor), so without this the next garbage collection could free it before
+	 * the set_mid_* calls that address it by path. No tool releases a MID, so they stay until the editor closes.
+	 */
+	class FCreatedMidKeeper final : public FGCObject
+	{
+	public:
+		void Keep(UMaterialInstanceDynamic* MID)
+		{
+			Mids.Add(MID);
+		}
+
+		virtual void AddReferencedObjects(FReferenceCollector& Collector) override
+		{
+			Collector.AddReferencedObjects(Mids);
+		}
+
+		virtual FString GetReferencerName() const override
+		{
+			return TEXT("UEAgent create_material_instance_dynamic");
+		}
+
+	private:
+		TArray<TObjectPtr<UMaterialInstanceDynamic>> Mids;
+	};
+
+	FCreatedMidKeeper& CreatedMidKeeper()
+	{
+		static FCreatedMidKeeper Keeper;
+		return Keeper;
+	}
+
 	/** The MID's non-static parameters measured against a copy source. */
 	struct FMidCopyTally
 	{
@@ -192,7 +226,7 @@ namespace
 // ---------------------------------------------------------------------------
 // create_material_instance_dynamic
 // ---------------------------------------------------------------------------
-// MCP:create_material_instance_dynamic - Create a Material Instance Dynamic (MID) of a parent material in the transient package: a runtime-only object that is never saved, belongs to no actor and has no undo step. Nothing references it, so the next garbage collection can free it: set its parameters right away with set_mid_scalar_param, set_mid_vector_param or set_mid_texture_param, which take its mid_object_path, or use create_dynamic_material_on_actor to have a mesh component own a MID it renders. A name already taken in the transient package gets a numbered suffix, so keep mid_name and mid_object_path from the reply; each call creates another MID. A parent that cannot be loaded is an error. Read its values with get_mid_all_params; a saved, reusable instance asset: create_material_instance_constant.
+// MCP:create_material_instance_dynamic - Create a Material Instance Dynamic (MID) of a parent material in the transient package: a runtime-only object that is never saved, belongs to no actor and has no undo step. The plugin keeps a reference to every MID it makes this way, so garbage collection does not free it; no tool releases one, so each lives until the editor closes. Set its parameters with set_mid_scalar_param, set_mid_vector_param or set_mid_texture_param, which take its mid_object_path, or use create_dynamic_material_on_actor to have a mesh component own a MID it renders. A name another MID holds gets a numbered suffix, so keep mid_name and mid_object_path from the reply; each call creates another MID. A parent that cannot be loaded, or a name held by an object of another class, is an error. Read its values with get_mid_all_params; a saved, reusable instance asset: create_material_instance_constant.
 //   @param parent_material_path - Content path to the parent material (e.g. /Game/MyGame/M_Example.M_Example); a material or a material instance
 //   @param name - Optional name for the MID (default auto-generated from MID_ and the parent's name)
 //   @returns { mid_object_path, mid_name, parent_material_path, parent_material_name, created }
@@ -215,12 +249,26 @@ TSharedPtr<FJsonObject> HandleCreateMaterialInstanceDynamic(
 	Params->TryGetStringField(TEXT("name"), MIDName);
 	FName InstanceName = MIDName.IsEmpty() ? NAME_None : FName(*MIDName);
 
+	// UMaterialInstanceDynamic::Create gives a name another MID holds a numbered suffix, but NewObject over an object
+	// of another class with that name aborts the editor ("Cannot replace existing object of a different class").
+	if (InstanceName != NAME_None)
+	{
+		const UObject* Occupant = StaticFindObjectFast(UObject::StaticClass(), GetTransientPackage(), InstanceName);
+		if (Occupant != nullptr && Occupant->GetClass() != UMaterialInstanceDynamic::StaticClass())
+		{
+			return mcp_common::MakeErrorReply(FString::Printf(
+				TEXT("The name '%s' is taken in the transient package by a %s; nothing was created. Pick another name or omit it."),
+				*MIDName, *Occupant->GetClass()->GetName()));
+		}
+	}
+
 	// Create MID in transient package
 	UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(ParentMat, GetTransientPackage(), InstanceName);
 	if (!MID)
 	{
 		return mcp_common::MakeErrorReply(TEXT("Failed to create Material Instance Dynamic"));
 	}
+	CreatedMidKeeper().Keep(MID);
 
 	// Get the object path for later reference
 	FString ObjectPath = MID->GetPathName();
@@ -541,11 +589,11 @@ TSharedPtr<FJsonObject> HandleSetMidTextureParam(
 // ---------------------------------------------------------------------------
 // create_dynamic_material_on_actor
 // ---------------------------------------------------------------------------
-// MCP:create_dynamic_material_on_actor - Give one material slot of a mesh component on an editor-world actor its own Material Instance Dynamic (UPrimitiveComponent::CreateDynamicMaterialInstance), which replaces the slot's material with the MID, in one undo step that marks the level dirty; no asset is created or saved. The actor is matched by object name or label (first match), the component is its first StaticMeshComponent, else its first mesh component. Without parent_material_path the MID wraps the slot's current material, and a slot already holding a MID returns that same MID (created still says true); with it, the slot is first set to that material. Pass mid_object_path to set_mid_scalar_param, set_mid_vector_param, set_mid_texture_param or get_mid_all_params; verified confirms the slot holds the MID. A missing actor, mesh component or material, or an out-of-range element_index, is an error. Unowned MID: create_material_instance_dynamic; saved asset: create_material_instance_constant.
+// MCP:create_dynamic_material_on_actor - Give one material slot of a mesh component on an editor-world actor its own Material Instance Dynamic (UPrimitiveComponent::CreateDynamicMaterialInstance), which replaces the slot's material with the MID, in one undo step that marks the level dirty; no asset is created or saved. The actor is matched by object name or label (first match), the component is its first StaticMeshComponent, else its first mesh component. Without parent_material_path the MID wraps the slot's current material, and a slot already holding a MID returns that same MID with created false, changing nothing; with it, the slot is first set to that material. Pass mid_object_path to set_mid_scalar_param, set_mid_vector_param, set_mid_texture_param or get_mid_all_params; verified confirms the slot holds the MID. A missing actor, mesh component or material, or an out-of-range element_index, is an error. Unowned MID: create_material_instance_dynamic; saved asset: create_material_instance_constant.
 //   @param actor_name - Name or label of the actor in the editor world; the first actor whose object name or label matches is used
 //   @param element_index - Material slot index on the mesh component (default 0); must be below the component's slot count
 //   @param parent_material_path - Optional source material for the MID (default slot's current material); when given it is assigned to the slot before the MID is made from it
-//   @returns { actor_name, actor_label, component_name, element_index, mid_object_path, mid_name, parent_material_path, verified, created }
+//   @returns { actor_name, actor_label, component_name, element_index, mid_object_path, mid_name, parent_material_path, verified, created, note? }
 TSharedPtr<FJsonObject> HandleCreateDynamicMaterialOnActor(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -598,19 +646,40 @@ TSharedPtr<FJsonObject> HandleCreateDynamicMaterialOnActor(
 				ElementIndex, NumMaterials));
 	}
 
-	const FScopedTransaction Transaction(LOCTEXT("CreateDynamicMaterialOnActor", "MCP: Create Dynamic Material On Actor"));
-	MeshComp->Modify();
-
-	// CreateDynamicMaterialInstance creates a component-owned MID and assigns it to
-	// the given element. With a null SourceMaterial it derives from the current slot.
-	UMaterialInstanceDynamic* MID = MeshComp->CreateDynamicMaterialInstance(ElementIndex, ParentMat);
-	if (!MID)
+	// Without a source material, CreateDynamicMaterialInstance returns a MID the slot already holds instead of making
+	// one; that MID is answered as it is, with nothing modified or recorded.
+	UMaterialInstanceDynamic* const SlotMID = Cast<UMaterialInstanceDynamic>(MeshComp->GetMaterial(ElementIndex));
+	const bool bReused = ParentMat == nullptr && SlotMID != nullptr;
+	UMaterialInstanceDynamic* MID = nullptr;
+	bool bCreated = false;
+	if (bReused)
 	{
-		return mcp_common::MakeErrorReply(
-			FString::Printf(TEXT("CreateDynamicMaterialInstance failed for element %d (slot may have no source material)"), ElementIndex));
+		MID = SlotMID;
+	}
+	else
+	{
+		// A slot with no material and no source material gives the engine nothing to derive a MID from.
+		if (ParentMat == nullptr && MeshComp->GetMaterial(ElementIndex) == nullptr)
+		{
+			return mcp_common::MakeErrorReply(FString::Printf(
+				TEXT("Material slot %d has no material and no parent_material_path was given; nothing was changed"), ElementIndex));
+		}
+		const FScopedTransaction Transaction(LOCTEXT("CreateDynamicMaterialOnActor", "MCP: Create Dynamic Material On Actor"));
+		MeshComp->Modify();
+
+		// CreateDynamicMaterialInstance creates a component-owned MID and assigns it to
+		// the given element. With a null SourceMaterial it derives from the current slot.
+		MID = MeshComp->CreateDynamicMaterialInstance(ElementIndex, ParentMat);
+		if (!MID)
+		{
+			return mcp_common::MakeErrorReply(
+				FString::Printf(TEXT("CreateDynamicMaterialInstance failed for element %d (slot may have no source material)"), ElementIndex));
+		}
+		// A source material that is itself a MID is assigned to the slot and returned, not created.
+		bCreated = MID != SlotMID && MID != ParentMat;
 	}
 
-	// Verify the slot now holds the MID we created.
+	// Verify the slot now holds the MID.
 	UMaterialInterface* AssignedMat = MeshComp->GetMaterial(ElementIndex);
 	const bool bVerified = (AssignedMat == MID);
 
@@ -623,7 +692,11 @@ TSharedPtr<FJsonObject> HandleCreateDynamicMaterialOnActor(
 	Data->SetStringField(TEXT("mid_name"), MID->GetName());
 	Data->SetStringField(TEXT("parent_material_path"), MID->Parent ? MID->Parent->GetPathName() : TEXT(""));
 	Data->SetBoolField(TEXT("verified"), bVerified);
-	Data->SetBoolField(TEXT("created"), true);
+	Data->SetBoolField(TEXT("created"), bCreated);
+	if (bReused)
+	{
+		Data->SetStringField(TEXT("note"), TEXT("The slot already holds this MID; nothing was created or changed."));
+	}
 	return mcp_common::MakeOkReply(Data);
 }
 

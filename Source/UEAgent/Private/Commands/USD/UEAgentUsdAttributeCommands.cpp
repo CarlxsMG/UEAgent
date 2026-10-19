@@ -42,10 +42,10 @@
  *   - USD type names are tokens ("float", "float3", "token", ...) — normalize to
  *     lowercase before dispatch (the dispatch whitelist covers the common
  *     types; unsupported types fall back to the type-name string).
- *   - `Attr.Set(VtValue)` with the wrong type is a SILENT FAIL in pxr::.
- *     `UEAgent::UsdCommon::VtValueFromJson` enforces a type whitelist so the LLM
- *     never sends a malformed payload; mismatched types are reported honestly
- *     via `set:false`.
+ *   - `Attr.Set(VtValue)` with the wrong type is a SILENT FAIL in pxr::: it does
+ *     not convert a double into a float attribute. set_usd_attribute_value builds
+ *     the value in the attribute's declared type with
+ *     `UEAgent::UsdCommon::VtValueForDeclaredType` before anything is written.
  *   - `HasAuthoredValue` differs from `HasValue` — the latter also returns
  *     true for fallback values. We report both where useful.
  *   - `Time` parameter is optional (`TOptional<double>` default =
@@ -220,6 +220,12 @@ TSharedPtr<FJsonObject> HandleCreateUsdAttribute(const TSharedPtr<FJsonObject>& 
 	FString TypeName;
 	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("type_name"), TypeName)) { return Missing; }
 
+	// The type name becomes an FName, and an FName of NAME_SIZE characters or more fails a check().
+	if (TypeName.Len() >= NAME_SIZE)
+	{
+		return mcp_common::MakeErrorReply(FString::Printf(TEXT("type_name is %d characters long, longer than any USD type name"), TypeName.Len()));
+	}
+
 	UE::FUsdPrim Prim;
 	if (TSharedPtr<FJsonObject> Error = UsdAttribute_FindPrim(StageName, PrimPath, Prim))
 	{
@@ -370,14 +376,14 @@ TSharedPtr<FJsonObject> HandleGetUsdAttributeValue(const TSharedPtr<FJsonObject>
 // ---------------------------------------------------------------------------
 // set_usd_attribute_value
 // ---------------------------------------------------------------------------
-// MCP:set_usd_attribute_value - Author a value on a USD attribute (creating it if missing)
-//   @param stage_name [string!] - Stage cache key
-//   @param prim_path [string!] - Target prim path
-//   @param attr_name [string!] - Attribute name to set
-//   @param type_name [string] - USD type name; REQUIRED when the attribute does not exist yet (used to CreateAttribute). When the attribute already exists this is ignored.
-//   @param value [object!] - {type: "float"|"int"|"string"|"token"|"asset"|..., value: <scalar>}; explicit type preferred; implicit by JSON runtime type otherwise.
-//   @param time [number] - Optional time code (default: unset = static default)
-//   @returns { prim_path: string, attr_name: string, set: bool, type_name: string, type: string, created: bool, time: number? }
+// MCP:set_usd_attribute_value - Author one value on an attribute of a prim on a registered USD stage, at the current edit target: a time sample at time, or the default value when time is omitted; a missing attribute is created with type_name. The JSON value is converted to the attribute's declared scalar type before anything is written: bool takes a boolean; uchar, int, uint, int64 and uint64 a whole number in range; half, float, double and timecode a number; string, token and asset a string. Another type (float3, arrays), a value that does not fit, a missing attribute without type_name, an unregistered stage or a missing prim is an error and writes nothing. If USD still refuses the value, success is false and an attribute this call created is taken out again. In memory only: save_usd_stage writes it. Read it back with get_usd_attribute_value.
+//   @param stage_name [string!] - Name the stage was registered under by open_usd_stage (default the file basename) or create_usd_stage (default "Untitled").
+//   @param prim_path [string!] - Absolute SdfPath of an existing prim on that stage, e.g. "/World/Cube".
+//   @param attr_name [string!] - Attribute name to set, e.g. "size"
+//   @param type_name [string] - USD type name of the attribute to create when it does not exist yet, e.g. "float" or "token"; required in that case, and ignored (with a note when it differs) for an existing attribute, whose declared type decides.
+//   @param value [object!] - The value: a JSON scalar, e.g. 2.5, "inherited" or true, or an object {"value": <scalar>} whose "type" key, if any, is not used; it is converted to the declared type of the attribute.
+//   @param time [number] - Optional USD time code to author a time sample at, e.g. 24; when omitted the default value is authored
+//   @returns { prim_path: string, attr_name: string, set: bool, type_name: string, type: string, created: bool, time?: number, note?: string }
 
 TSharedPtr<FJsonObject> HandleSetUsdAttributeValue(const TSharedPtr<FJsonObject>& Params)
 {
@@ -394,22 +400,12 @@ TSharedPtr<FJsonObject> HandleSetUsdAttributeValue(const TSharedPtr<FJsonObject>
 	FString TypeName;
 	Params->TryGetStringField(TEXT("type_name"), TypeName);
 
-	// A raw scalar under "value" is promoted to a {value: ...} object, so the same
-	// VtValueFromJson dispatch applies (as in set_usd_prim_metadata).
+	// A raw scalar under "value" is promoted to a {value: ...} object; only its "value" is read.
 	TSharedPtr<FJsonObject> ValueObj = UEAgent::UsdCommon::TypedValueObject(Params->TryGetField(TEXT("value")));
 	if (!ValueObj.IsValid())
 	{
 		return mcp_common::MakeErrorReply(
-			TEXT("value is required (object {type, value} or scalar)"));
-	}
-
-	// If the value object did not specify an explicit "type", inherit from
-	// the caller's "type_name" param (which is normally used for the
-	// CreateAttribute path) so the same JSON shape works for both create +
-	// set in one call.
-	if (!ValueObj->HasField(TEXT("type")) && !TypeName.IsEmpty())
-	{
-		ValueObj->SetStringField(TEXT("type"), TypeName);
+			TEXT("value is required (a scalar, or an object {value})"));
 	}
 
 	const TOptional<double> TimeOpt = UsdAttribute_ReadTime(Params);
@@ -420,57 +416,72 @@ TSharedPtr<FJsonObject> HandleSetUsdAttributeValue(const TSharedPtr<FJsonObject>
 		return Error;
 	}
 
-	// Create-if-missing. The type_name required-when-missing check uses the
-	// caller's explicit type_name param, or the explicit "type" on the value
-	// object, or the value's JSON runtime type via the implicit dispatch in
-	// VtValueFromJson.
-	bool bCreated = false;
+	// The declared type decides the C++ type of the value: UsdAttribute::Set authors nothing for a value of another
+	// type (a double for a float attribute, an int for a uint one). It is converted BEFORE a missing attribute is
+	// created, so a value that does not fit leaves the stage as it was.
 	UE::FUsdAttribute Attr = Prim.GetAttribute(*AttrName);
-	if (!Attr)
+	const bool bExisted = static_cast<bool>(Attr);
+	if (!bExisted && TypeName.IsEmpty())
 	{
-		if (TypeName.IsEmpty())
-		{
-			return mcp_common::MakeErrorReply(
-				FString::Printf(TEXT("attribute '%s' does not exist on prim '%s'; provide type_name to create it"),
-					*AttrName, *PrimPath));
-		}
-		Attr = Prim.CreateAttribute(*AttrName, FName(*TypeName));
-		bCreated = true;
-		if (!Attr)
-		{
-			return mcp_common::MakeErrorReply(
-				FString::Printf(TEXT("CreateAttribute('%s', '%s') returned an invalid attribute"),
-					*AttrName, *TypeName));
-		}
+		return mcp_common::MakeErrorReply(
+			FString::Printf(TEXT("attribute '%s' does not exist on prim '%s'; provide type_name to create it"),
+				*AttrName, *PrimPath));
 	}
+	const FString DeclaredType = bExisted ? Attr.GetTypeName().ToString() : TypeName;
 
 	UE::FVtValue Vt;
 	FString VtErr;
-	if (!UEAgent::UsdCommon::VtValueFromJson(ValueObj, Vt, VtErr))
+	if (!UEAgent::UsdCommon::VtValueForDeclaredType(DeclaredType, ValueObj->TryGetField(TEXT("value")), Vt, VtErr))
 	{
-		return mcp_common::MakeErrorReply(
-			FString::Printf(TEXT("value is not convertible to a supported USD type: %s"), *VtErr));
+		return mcp_common::MakeErrorReply(FString::Printf(
+			TEXT("value cannot be authored on %s.%s: %s. Nothing was written."), *PrimPath, *AttrName, *VtErr));
 	}
 
-	// Attr.Set returns false silently on type mismatch in pxr::. We surface
-	// set:false honestly rather than throwing.
-	const bool Set = Attr.Set(Vt, TimeOpt);
+	bool bCreated = false;
+	if (!bExisted)
+	{
+		Attr = Prim.CreateAttribute(*AttrName, FName(*TypeName));
+		if (!Attr)
+		{
+			return mcp_common::MakeErrorReply(
+				FString::Printf(TEXT("CreateAttribute('%s', '%s') returned an invalid attribute; nothing was written"),
+					*AttrName, *TypeName));
+		}
+		bCreated = true;
+	}
 
+	const bool bSet = Attr.Set(Vt, TimeOpt);
 	const FString ActualTypeName = Attr.GetTypeName().ToString();
+
+	// Nothing is left half-written: an attribute created for a value USD then refused is taken out again.
+	bool bRemovedAgain = false;
+	if (!bSet && bCreated)
+	{
+		bRemovedAgain = Prim.RemoveProperty(FName(*AttrName));
+	}
 
 	TSharedPtr<FJsonObject> Data = UsdAttribute_NewPayload(PrimPath, AttrName);
 	Data->SetStringField(TEXT("type_name"), ActualTypeName);
 	Data->SetStringField(TEXT("type"), ActualTypeName.ToLower());
-	Data->SetBoolField(TEXT("set"), Set);
-	Data->SetBoolField(TEXT("created"), bCreated);
+	Data->SetBoolField(TEXT("set"), bSet);
+	Data->SetBoolField(TEXT("created"), bCreated && !bRemovedAgain);
 	if (TimeOpt.IsSet())
 	{
 		Data->SetNumberField(TEXT("time"), TimeOpt.GetValue());
 	}
-	if (!Set)
+	if (bExisted && !TypeName.IsEmpty() && !TypeName.Equals(ActualTypeName, ESearchCase::IgnoreCase))
 	{
-		Data->SetStringField(TEXT("note"),
-			TEXT("Attr.Set returned false (likely type mismatch -- the JSON value's UE type does not match the USD attribute's declared type)"));
+		Data->SetStringField(TEXT("note"), FString::Printf(
+			TEXT("type_name %s was not used: the attribute already exists as %s"), *TypeName, *ActualTypeName));
+	}
+	if (!bSet)
+	{
+		return mcp_common::MakeOutcomeReply(Data, false, FString::Printf(
+			TEXT("set_usd_attribute_value: USD did not author the %s value on %s.%s (UsdAttribute::Set returned false; the ")
+			TEXT("edit target may not be editable)%s"), *ActualTypeName, *PrimPath, *AttrName,
+			bCreated ? (bRemovedAgain ? TEXT("; the attribute this call created was removed again")
+			                         : TEXT("; the attribute this call created could not be removed and stays, without a value"))
+			         : TEXT("")));
 	}
 	return mcp_common::MakeOkReply(Data);
 }

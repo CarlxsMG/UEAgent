@@ -132,7 +132,48 @@ namespace
         return KeysArr;
     }
 
-    /** { <PathField>, name, parent?, keys, key_count } of a blackboard asset. */
+    /**
+     * BBData and its parent chain, root blackboard first and BBData last: the order in which the engine numbers
+     * their keys (UBlackboardData::UpdateKeyIDs starts a blackboard's IDs after all of its parent's). A Parent
+     * loop is cut where an asset would repeat.
+     */
+    TArray<const UBlackboardData*> BehaviorTree_BlackboardChain(const UBlackboardData* BBData)
+    {
+        TArray<const UBlackboardData*> Chain;
+        for (const UBlackboardData* It = BBData; It != nullptr && !Chain.Contains(It); It = It->Parent.Get())
+        {
+            Chain.Insert(It, 0);
+        }
+        return Chain;
+    }
+
+    /** Adds inherited (whether Owner is not BBData) and defined_in (Owner's path) to a key's JSON. */
+    void BehaviorTree_AddKeyOwner(const TSharedPtr<FJsonObject>& KeyObj, const UBlackboardData* Owner, const UBlackboardData* BBData)
+    {
+        KeyObj->SetBoolField(TEXT("inherited"), Owner != BBData);
+        KeyObj->SetStringField(TEXT("defined_in"), Owner->GetPathName());
+    }
+
+    /**
+     * MakeKeyJson of every key BBData gives its users in key-ID order: the keys of its parent chain first, then
+     * its own, each with inherited and defined_in. GetKeys() alone holds only the asset's own keys.
+     */
+    TArray<TSharedPtr<FJsonValue>> BehaviorTree_AllKeysToJson(const UBlackboardData* BBData)
+    {
+        TArray<TSharedPtr<FJsonValue>> KeysArr;
+        for (const UBlackboardData* Owner : BehaviorTree_BlackboardChain(BBData))
+        {
+            for (const FBlackboardEntry& Entry : Owner->GetKeys())
+            {
+                TSharedPtr<FJsonObject> KeyObj = MakeKeyJson(Entry);
+                BehaviorTree_AddKeyOwner(KeyObj, Owner, BBData);
+                KeysArr.Add(MakeShared<FJsonValueObject>(KeyObj));
+            }
+        }
+        return KeysArr;
+    }
+
+    /** { <PathField>, name, parent?, keys, key_count } of a blackboard asset, its inherited keys included. */
     TSharedPtr<FJsonObject> BehaviorTree_BlackboardAssetData(const UBlackboardData* BBData, const TCHAR* PathField)
     {
         TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
@@ -143,7 +184,7 @@ namespace
             Result->SetStringField(TEXT("parent"), BBData->Parent->GetPathName());
         }
 
-        const TArray<TSharedPtr<FJsonValue>> KeysArr = BehaviorTree_KeysToJson(BBData);
+        const TArray<TSharedPtr<FJsonValue>> KeysArr = BehaviorTree_AllKeysToJson(BBData);
         Result->SetArrayField(TEXT("keys"), KeysArr);
         Result->SetNumberField(TEXT("key_count"), KeysArr.Num());
         return Result;
@@ -518,9 +559,9 @@ UBlackboardComponent* ReadBlackboardKey(const TSharedPtr<FJsonObject>& Params, F
 // Asset-based reads
 //----------------------------------------------------------------------//
 
-// MCP:get_behavior_tree_info - Read a UBehaviorTree asset found by content path: its name, its blackboard asset with that blackboard's own keys (name, type, instance_synced and the base class or enum subsettings; keys inherited from a parent blackboard are not listed), and the node tree from RootNode -- each node's name and class, a composite's services and children, and the decorators on each child edge, nested up to 64 levels. Nothing is written. A missing path, or one that does not load as a behavior tree, is an error; a tree with no root gives root_node null. The runtime state of a tree running on an AI actor is get_behavior_tree_status; blackboard asset details: get_blackboard_keys_asset; build the tree with set_behavior_tree_root, add_bt_composite_child, add_bt_task_child, add_bt_decorator and add_bt_service.
+// MCP:get_behavior_tree_info - Read a UBehaviorTree asset found by content path: its name, its blackboard asset with every key it holds in key-ID order, parent blackboard keys first (name, type, instance_synced, the base class or enum subsettings, inherited, and defined_in naming the blackboard that declares the key), and the node tree from RootNode -- each node's name and class, a composite's services and children, and the decorators on each child edge, nested up to 64 levels. Nothing is written. A missing path, or one that does not load as a behavior tree, is an error; a tree with no root gives root_node null. The runtime state of a tree running on an AI actor is get_behavior_tree_status; blackboard asset details: get_blackboard_keys_asset; build the tree with set_behavior_tree_root, add_bt_composite_child, add_bt_task_child, add_bt_decorator and add_bt_service.
 //   @param behavior_tree_path - Content path of the UBehaviorTree asset, e.g. "/Game/AI/BT_Enemy"; a bare asset name is not resolved
-//   @returns { behavior_tree_path: string, name: string, blackboard_asset: string|null, blackboard_keys: [{ name: string, type: string, instance_synced: bool }], root_node: object|null }
+//   @returns { behavior_tree_path: string, name: string, blackboard_asset: string|null, blackboard_keys: [{ name: string, type: string, instance_synced: bool, inherited: bool, defined_in: string }], root_node: object|null }
 
 TSharedPtr<FJsonObject> HandleGetBehaviorTreeInfo(const TSharedPtr<FJsonObject>& Params)
 {
@@ -546,7 +587,7 @@ TSharedPtr<FJsonObject> HandleGetBehaviorTreeInfo(const TSharedPtr<FJsonObject>&
     if (BBData)
     {
         Result->SetStringField(TEXT("blackboard_asset"), BBData->GetPathName());
-        Result->SetArrayField(TEXT("blackboard_keys"), BehaviorTree_KeysToJson(BBData));
+        Result->SetArrayField(TEXT("blackboard_keys"), BehaviorTree_AllKeysToJson(BBData));
     }
     else
     {
@@ -682,9 +723,9 @@ TSharedPtr<FJsonObject> HandleStopBehaviorTree(const TSharedPtr<FJsonObject>& Pa
 // Runtime blackboard
 //----------------------------------------------------------------------//
 
-// MCP:get_blackboard_component - Read the UBlackboardComponent of an editor-world actor (its AIController blackboard, else one on the actor): component_name, has_valid_asset, num_keys and the key list. Read-only. Editor world only, never PIE, where pawns are not auto-possessed; for asset keys use get_blackboard_keys_asset.
+// MCP:get_blackboard_component - Read the UBlackboardComponent of an editor-world actor (its AIController blackboard, else one on the actor): component_name, has_valid_asset, num_keys and the key list. The list holds every key num_keys counts, in key-ID order: the keys inherited from parent blackboards first, each with inherited and defined_in naming the blackboard asset that declares it. Read-only, nothing is written. Editor world only, never PIE, where pawns are not auto-possessed; an actor not found by object name or label, or one with no blackboard component, is an error. Current values: get_blackboard_data; one key: get_blackboard_value; asset keys: get_blackboard_keys_asset.
 //   @param actor_name - Object name or label of the pawn, its AIController, or an actor with its own UBlackboardComponent, in the editor world (first match).
-//   @returns { actor_name: string, component_name: string, has_valid_asset: bool, num_keys: number, blackboard_asset: string?, keys: [{ name: string, type: string, instance_synced: bool }]? }
+//   @returns { actor_name: string, component_name: string, has_valid_asset: bool, num_keys: number, blackboard_asset: string?, keys: [{ name: string, type: string, instance_synced: bool, inherited: bool, defined_in: string }]? }
 
 TSharedPtr<FJsonObject> HandleGetBlackboardComponent(const TSharedPtr<FJsonObject>& Params)
 {
@@ -710,7 +751,7 @@ TSharedPtr<FJsonObject> HandleGetBlackboardComponent(const TSharedPtr<FJsonObjec
     if (UBlackboardData* BBData = BB->GetBlackboardAsset())
     {
         Result->SetStringField(TEXT("blackboard_asset"), BBData->GetPathName());
-        Result->SetArrayField(TEXT("keys"), BehaviorTree_KeysToJson(BBData));
+        Result->SetArrayField(TEXT("keys"), BehaviorTree_AllKeysToJson(BBData));
     }
 
     return mcp_common::MakeOkReply(Result);
@@ -885,10 +926,10 @@ TSharedPtr<FJsonObject> HandleGetBlackboardValue(const TSharedPtr<FJsonObject>& 
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:get_blackboard_keys - List blackboard key definitions (name, type, instance_synced, base_class or enum subsettings): of the running blackboard of an editor-world actor when actor_name is given, else of the UBlackboardData asset at blackboard_path. Read-only; returns keys and key_count. Editor world only, never PIE.
+// MCP:get_blackboard_keys - List blackboard key definitions (name, type, instance_synced, base_class or enum subsettings): of the running blackboard of an editor-world actor when actor_name is given, else of the UBlackboardData asset at blackboard_path. Every key the blackboard holds is listed in key-ID order, the keys inherited from parent blackboards first, each with inherited and defined_in naming the asset that declares it; key_count counts them all. Read-only, nothing is written. Editor world only, never PIE. Neither param, an actor or asset not found, or an actor with no blackboard component is an error; a component with no asset gives an empty list. Current values: get_blackboard_data; asset name and parent: get_blackboard_keys_asset.
 //   @param actor_name - Object name or label of an editor-world actor whose live blackboard to read; takes precedence over blackboard_path.
 //   @param blackboard_path - Path to a UBlackboardData asset (alternative to actor_name)
-//   @returns { actor_name: string?, blackboard_asset: string?, keys: [{ name: string, type: string, instance_synced: bool }], key_count: number }
+//   @returns { actor_name: string?, blackboard_asset: string?, keys: [{ name: string, type: string, instance_synced: bool, inherited: bool, defined_in: string }], key_count: number }
 
 TSharedPtr<FJsonObject> HandleGetBlackboardKeys(const TSharedPtr<FJsonObject>& Params)
 {
@@ -935,7 +976,7 @@ TSharedPtr<FJsonObject> HandleGetBlackboardKeys(const TSharedPtr<FJsonObject>& P
     if (BBData)
     {
         Result->SetStringField(TEXT("blackboard_asset"), BBData->GetPathName());
-        KeysArr = BehaviorTree_KeysToJson(BBData);
+        KeysArr = BehaviorTree_AllKeysToJson(BBData);
     }
     Result->SetArrayField(TEXT("keys"), KeysArr);
     Result->SetNumberField(TEXT("key_count"), KeysArr.Num());
@@ -943,10 +984,10 @@ TSharedPtr<FJsonObject> HandleGetBlackboardKeys(const TSharedPtr<FJsonObject>& P
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:get_blackboard_data - Dump a blackboard from its asset or from a running component. With blackboard_path, which wins when both are given, it reads the UBlackboardData asset: name, parent and key definitions (name, type, instance_synced, base class or enum subsettings). With actor_name, it reads the running UBlackboardComponent of that actor in the editor world, never PIE (its AIController blackboard, else one on the actor), as entries with each key's name, type and current value as text. Either way only the asset's own keys are listed, not those inherited from a parent blackboard. Nothing is written. No parameter, an asset that does not load, an actor not found by object name or label, or no running blackboard is an error. One key: get_blackboard_value; definitions only: get_blackboard_keys; component state: get_blackboard_component; write a value: set_blackboard_value.
+// MCP:get_blackboard_data - Dump a blackboard from its asset or from a running component. With blackboard_path, which wins when both are given, it reads the UBlackboardData asset: name, parent and key definitions (name, type, instance_synced, base class or enum subsettings). With actor_name, it reads the running UBlackboardComponent of that actor in the editor world, never PIE (its AIController blackboard, else one on the actor), as entries with each key's name, type and current value as text. Either way every key is listed in key-ID order, those inherited from parent blackboards first, each with inherited and defined_in naming the asset that declares it. Nothing is written. No parameter, an asset that does not load, an actor not found by object name or label, or no running blackboard is an error. One key: get_blackboard_value; definitions only: get_blackboard_keys; component state: get_blackboard_component; write a value: set_blackboard_value.
 //   @param actor_name - Object name or label of the editor-world pawn or AIController whose running blackboard to dump; ignored when blackboard_path is given
 //   @param blackboard_path - Content path of a UBlackboardData asset to read instead, e.g. "/Game/AI/BB_Enemy"; takes precedence over actor_name
-//   @returns { actor_name: string?, blackboard_asset: string?, name: string?, parent: string?, keys: [{ name, type, instance_synced }]?, entries: [{ name, type, value }]?, key_count: number }
+//   @returns { actor_name: string?, blackboard_asset: string?, name: string?, parent: string?, keys: [{ name, type, instance_synced, inherited, defined_in }]?, entries: [{ name, type, value, inherited, defined_in }]?, key_count: number }
 
 TSharedPtr<FJsonObject> HandleGetBlackboardData(const TSharedPtr<FJsonObject>& Params)
 {
@@ -968,9 +1009,11 @@ TSharedPtr<FJsonObject> HandleGetBlackboardData(const TSharedPtr<FJsonObject>& P
         return mcp_common::MakeOkReply(BehaviorTree_BlackboardAssetData(BBData, TEXT("blackboard_asset")));
     }
 
-    // Live mode
+    // Live mode. actor_name is needed only here, so it is read as an optional param: blackboard_path alone is
+    // a complete request.
     FString ActorName;
-    if (!Params.IsValid() || !Params->TryGetStringField(TEXT("actor_name"), ActorName) || ActorName.IsEmpty())
+    const bool bHasActor = Params.IsValid() && Params->TryGetStringField(TEXT("actor_name"), ActorName) && !ActorName.IsEmpty();
+    if (!bHasActor)
     {
         return mcp_common::MakeErrorReply(TEXT("Provide 'blackboard_path' (asset) or 'actor_name' (running blackboard)"));
     }
@@ -991,16 +1034,21 @@ TSharedPtr<FJsonObject> HandleGetBlackboardData(const TSharedPtr<FJsonObject>& P
         Result->SetStringField(TEXT("blackboard_asset"), BBData->GetPathName());
     }
 
+    // Every key the component holds, in key-ID order: the parent chain's keys first, then the asset's own.
     TArray<TSharedPtr<FJsonValue>> EntriesArr;
     if (BBData)
     {
-        for (const FBlackboardEntry& Entry : BBData->GetKeys())
+        for (const UBlackboardData* Owner : BehaviorTree_BlackboardChain(BBData))
         {
-            TSharedPtr<FJsonObject> EntryObj = MakeShared<FJsonObject>();
-            EntryObj->SetStringField(TEXT("name"), Entry.EntryName.ToString());
-            EntryObj->SetStringField(TEXT("type"), DescribeKeyTypeClass(Entry.KeyType));
-            EntryObj->SetStringField(TEXT("value"), BB->DescribeKeyValue(Entry.EntryName, EBlackboardDescription::OnlyValue));
-            EntriesArr.Add(MakeShared<FJsonValueObject>(EntryObj));
+            for (const FBlackboardEntry& Entry : Owner->GetKeys())
+            {
+                TSharedPtr<FJsonObject> EntryObj = MakeShared<FJsonObject>();
+                EntryObj->SetStringField(TEXT("name"), Entry.EntryName.ToString());
+                EntryObj->SetStringField(TEXT("type"), DescribeKeyTypeClass(Entry.KeyType));
+                EntryObj->SetStringField(TEXT("value"), BB->DescribeKeyValue(Entry.EntryName, EBlackboardDescription::OnlyValue));
+                BehaviorTree_AddKeyOwner(EntryObj, Owner, BBData);
+                EntriesArr.Add(MakeShared<FJsonValueObject>(EntryObj));
+            }
         }
     }
     Result->SetArrayField(TEXT("entries"), EntriesArr);
@@ -1289,9 +1337,9 @@ TSharedPtr<FJsonObject> HandleRemoveBlackboardKey(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeSavedReply(Result, bSaved, TEXT("remove_blackboard_key"), SaveError);
 }
 
-// MCP:get_blackboard_keys_asset - Read key definitions from a UBlackboardData asset (no live component needed).
+// MCP:get_blackboard_keys_asset - Read the key definitions of a UBlackboardData asset found by content path, with no live component needed: its name, its parent blackboard when it has one, and every key it holds in key-ID order, the keys inherited from the parent chain first. Each key has name, type, instance_synced, the base class or enum subsettings, inherited, and defined_in naming the asset that declares it; key_count counts them all. Read-only, nothing is written. A missing path, or one that does not load as a blackboard, is an error. A running blackboard: get_blackboard_keys or get_blackboard_data; add a key: add_blackboard_key; remove one: remove_blackboard_key.
 //   @param blackboard_path - Path to the UBlackboardData asset.
-//   @returns { blackboard_path: string, name: string, parent: string?, keys: [{ name: string, type: string, instance_synced: bool }], key_count: number }
+//   @returns { blackboard_path: string, name: string, parent: string?, keys: [{ name: string, type: string, instance_synced: bool, inherited: bool, defined_in: string }], key_count: number }
 
 TSharedPtr<FJsonObject> HandleGetBlackboardKeysAsset(const TSharedPtr<FJsonObject>& Params)
 {

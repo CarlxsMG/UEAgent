@@ -70,11 +70,11 @@ namespace
 // ---------------------------------------------------------------------------
 // create_editable_skeleton
 // ---------------------------------------------------------------------------
-// MCP:create_editable_skeleton - Create a USkeleton at package_path/name by duplicating an existing skeleton (default /Engine/EngineMeshes/SkeletalCube_Skeleton), then save it, so add_bone, set_bone_transform, add_virtual_bone and the other bone tools edit a project copy instead of engine content. Idempotent by path: a skeleton already there is returned untouched with created=false, and nothing is saved. A package_path that does not start with a slash, a source that does not exist, or another kind of asset at the target is an error; so is a source that is not a skeleton, though the copy it made is left behind unsaved. A failed save, as during PIE, makes success false with save_error and keeps the new skeleton in memory. A mesh to go with it: create_editable_skeletal_mesh; inspect the result: get_skeleton_asset_info.
+// MCP:create_editable_skeleton - Create a USkeleton at package_path/name by duplicating an existing skeleton (default /Engine/EngineMeshes/SkeletalCube_Skeleton), then save it, so add_bone, set_bone_transform, add_virtual_bone and the other bone tools edit a project copy instead of engine content. Idempotent by path: a skeleton already there is returned untouched with created=false and saved=false. A package_path that does not start with a slash, a source that does not exist or is not a skeleton, or another kind of asset at the target is an error, and nothing is created. A failed save, as during PIE, makes success false with save_error and keeps the new skeleton in memory. A mesh to go with it: create_editable_skeletal_mesh; inspect the result: get_skeleton_asset_info.
 //   @param package_path - UE content folder starting with a slash, e.g. /Game/MyGame
 //   @param name - Asset name for the new skeleton, e.g. "SK_Creature_Skeleton"; with package_path it gives the asset path.
 //   @param source_skeleton - Asset path of the skeleton to duplicate, e.g. "/Engine/EngineMeshes/SkeletalCube_Skeleton", which is also the default.
-//   @returns { asset_path: string, name: string, source: string, bone_count: int, created: bool, saved?: bool, save_error?: string }
+//   @returns { asset_path: string, name: string, source: string, bone_count: int, created: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleCreateEditableSkeleton(const TSharedPtr<FJsonObject>& Params)
 {
     FString PackagePath, Name;
@@ -103,22 +103,34 @@ TSharedPtr<FJsonObject> HandleCreateEditableSkeleton(const TSharedPtr<FJsonObjec
     if (UEditorAssetLibrary::DoesAssetExist(FullPath))
     {
         USkeleton* Existing = mcp_common::LoadAssetOrSoftPath<USkeleton>(FullPath);
-        if (Existing)
-        {
-            return mcp_common::MakeOkReply(BuildPayload(Existing, false));
-        }
+        if (!Existing)
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("an asset that does not load as a USkeleton already exists at %s; nothing was created"), *FullPath));
+        TSharedPtr<FJsonObject> Resp = BuildPayload(Existing, false);
+        Resp->SetBoolField(TEXT("saved"), false);
+        return mcp_common::MakeOkReply(Resp);
     }
 
     if (!UEditorAssetLibrary::DoesAssetExist(SourceSkeleton))
         return mcp_common::MakeErrorReply(
             FString::Printf(TEXT("Source skeleton does not exist: %s"), *SourceSkeleton));
 
+    // The source must be a skeleton BEFORE it is duplicated: DuplicateAsset copies any asset, and a copy of
+    // another kind would be left behind at the target.
+    const UObject* SourceAsset = UEditorAssetLibrary::LoadAsset(SourceSkeleton);
+    if (!SourceAsset)
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("source_skeleton %s does not load; nothing was created"), *SourceSkeleton));
+    if (!SourceAsset->IsA<USkeleton>())
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("source_skeleton %s is a %s, not a USkeleton; nothing was created"),
+            *SourceSkeleton, *SourceAsset->GetClass()->GetName()));
+
     UObject* Duplicated = UEditorAssetLibrary::DuplicateAsset(SourceSkeleton, FullPath);
     USkeleton* NewSkeleton = Cast<USkeleton>(Duplicated);
     if (!NewSkeleton)
         return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("DuplicateAsset failed for %s -> %s (or source is not a USkeleton)"),
-                *SourceSkeleton, *FullPath));
+            FString::Printf(TEXT("DuplicateAsset failed for %s -> %s"), *SourceSkeleton, *FullPath));
 
     FString SaveErr;
     const bool bSaved = mcp_common::SaveAssetPackage(NewSkeleton->GetOutermost(), NewSkeleton, SaveErr);
@@ -130,7 +142,7 @@ TSharedPtr<FJsonObject> HandleCreateEditableSkeleton(const TSharedPtr<FJsonObjec
 // ---------------------------------------------------------------------------
 // add_virtual_bone
 // ---------------------------------------------------------------------------
-// MCP:add_virtual_bone - Add a virtual bone from a source bone to a target bone of a USkeleton asset, named "VB <source>_<target>" by the engine, then save. Bone names are not checked against the skeleton; an existing pair returns that bone with already_exists true. Returns virtual_bone_name and virtual_bone_count.
+// MCP:add_virtual_bone - Add a virtual bone from source_bone to target_bone to a USkeleton asset loaded by asset path, then save the skeleton; the engine names it "VB <source>_<target>", returned as virtual_bone_name. An omitted source_bone is the first bone of the reference skeleton (usually the root) and an omitted target_bone the first other bone. Bone names are not checked against the skeleton, so a misspelt one is stored as given; the same bone for both, or a skeleton with fewer than 2 bones, is an error. Idempotent: a virtual bone that already joins that exact pair is returned with already_exists=true and saved=false, nothing written. A failed save (PIE running, read-only file) makes success false with save_error, the bone kept in memory. Inverse: remove_virtual_bone; list them: get_skeleton_asset_info; a project copy to edit: create_editable_skeleton.
 //   @param skeleton_path - USkeleton asset path, e.g. "/Game/Characters/SK_Hero_Skeleton".
 //   @param source_bone - Bone the virtual bone starts from (default the first bone, usually the root); not validated.
 //   @param target_bone - Bone the virtual bone points to (default the first bone that differs from source_bone); not validated.
@@ -202,7 +214,7 @@ TSharedPtr<FJsonObject> HandleAddVirtualBone(const TSharedPtr<FJsonObject>& Para
         {
             // Virtual bone already exists — return success (idempotent)
             TSharedPtr<FJsonObject> Resp = BuildPayload(VB.VirtualBoneName);
-            Resp->SetBoolField(TEXT("saved"), true);
+            Resp->SetBoolField(TEXT("saved"), false);
             Resp->SetBoolField(TEXT("already_exists"), true);
             return mcp_common::MakeOkReply(Resp);
         }
@@ -486,7 +498,7 @@ TSharedPtr<FJsonObject> HandleRemoveVirtualBone(const TSharedPtr<FJsonObject>& P
     {
         // Idempotent: nothing to remove.
         TSharedPtr<FJsonObject> Resp = BuildPayload(/*bRemoved=*/false);
-        Resp->SetBoolField(TEXT("saved"), true);
+        Resp->SetBoolField(TEXT("saved"), false);
         return mcp_common::MakeOkReply(Resp);
     }
 
@@ -536,7 +548,7 @@ TSharedPtr<FJsonObject> HandleRemoveAnimSlotGroup(const TSharedPtr<FJsonObject>&
     if (Skeleton->FindAnimSlotGroup(Group) == nullptr)
     {
         TSharedPtr<FJsonObject> Resp = BuildPayload(/*bRemoved=*/false);
-        Resp->SetBoolField(TEXT("saved"), true);
+        Resp->SetBoolField(TEXT("saved"), false);
         return mcp_common::MakeOkReply(Resp);
     }
 
@@ -588,7 +600,7 @@ TSharedPtr<FJsonObject> HandleRemoveSkeletonSocket(const TSharedPtr<FJsonObject>
     {
         // Idempotent: nothing to remove.
         TSharedPtr<FJsonObject> Resp = BuildPayload(/*bRemoved=*/false);
-        Resp->SetBoolField(TEXT("saved"), true);
+        Resp->SetBoolField(TEXT("saved"), false);
         return mcp_common::MakeOkReply(Resp);
     }
 
@@ -1166,7 +1178,7 @@ TSharedPtr<FJsonObject> HandleRemoveAnimCurveName(const TSharedPtr<FJsonObject>&
         Resp->SetBoolField(TEXT("present"), false);
         Resp->SetNumberField(TEXT("curve_count"), PreNames.Num());
         Resp->SetArrayField(TEXT("curve_names"), BuildNames());
-        Resp->SetBoolField(TEXT("saved"), true);
+        Resp->SetBoolField(TEXT("saved"), false);
         return mcp_common::MakeOkReply(Resp);
     }
 
@@ -1242,7 +1254,7 @@ TSharedPtr<FJsonObject> HandleRemoveBlendProfile(const TSharedPtr<FJsonObject>& 
     {
         // Idempotent: nothing to remove.
         TSharedPtr<FJsonObject> Resp = BuildPayload(/*bRemoved=*/false);
-        Resp->SetBoolField(TEXT("saved"), true);
+        Resp->SetBoolField(TEXT("saved"), false);
         return mcp_common::MakeOkReply(Resp);
     }
 

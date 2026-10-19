@@ -1245,11 +1245,14 @@ TSharedPtr<FJsonObject> HandleOverlapScene(const TSharedPtr<FJsonObject>& Params
     }
     const FVector Location = mcp_common::ReadJsonVector(Params, TEXT("location"));
 
+    // radius and half_height are read into bools tested afterwards: each shape needs only its own,
+    // and a read negated inside the if would make the catalog require both for every shape.
     FCollisionShape CollisionShape;
     if (Shape.Equals(TEXT("sphere"), ESearchCase::IgnoreCase))
     {
         double Radius = 0.0;
-        if (!Params->TryGetNumberField(TEXT("radius"), Radius) || Radius <= 0.0)
+        const bool bHasRadius = Params->TryGetNumberField(TEXT("radius"), Radius);
+        if (!bHasRadius || Radius <= 0.0)
         {
             return mcp_common::MakeErrorReply(TEXT("shape=sphere requires a positive 'radius'"));
         }
@@ -1266,8 +1269,9 @@ TSharedPtr<FJsonObject> HandleOverlapScene(const TSharedPtr<FJsonObject>& Params
     else if (Shape.Equals(TEXT("capsule"), ESearchCase::IgnoreCase))
     {
         double Radius = 0.0, HalfHeight = 0.0;
-        if (!Params->TryGetNumberField(TEXT("radius"), Radius) || Radius <= 0.0
-            || !Params->TryGetNumberField(TEXT("half_height"), HalfHeight) || HalfHeight <= 0.0)
+        const bool bHasRadius = Params->TryGetNumberField(TEXT("radius"), Radius);
+        const bool bHasHalfHeight = Params->TryGetNumberField(TEXT("half_height"), HalfHeight);
+        if (!bHasRadius || Radius <= 0.0 || !bHasHalfHeight || HalfHeight <= 0.0)
         {
             return mcp_common::MakeErrorReply(TEXT("shape=capsule requires positive 'radius' and 'half_height'"));
         }

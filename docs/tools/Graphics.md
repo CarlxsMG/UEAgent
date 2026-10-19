@@ -20,7 +20,7 @@ Read the full UDecalComponent state (size, sort order, fade screen size, fade-ou
 
 *Destructive, idempotent.*
 
-Set DecalColor on an editor-world ADecalActor found by label; it only shows if the decal material uses a Decal Color node. A color that is not a 4-number array is ignored (current color kept). No undo, dirty flag or save; returns the resulting r, g, b, a.
+Set DecalColor on an editor-world ADecalActor found by label; it only shows if the decal material uses a Decal Color node. A color that is not a 4-number array is ignored (current color kept). A change is one undo step that dirties the level; nothing is saved. Returns the resulting r, g, b, a. An unknown label is an error; read it back with get_decal_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -33,7 +33,7 @@ Set DecalColor on an editor-world ADecalActor found by label; it only shows if t
 
 *Destructive, idempotent.*
 
-Toggle the bDestroyOwnerAfterFade bit on a UDecalComponent. The existing set_decal_fade cmd always passes DestroyOwnerAfterFade=true to SetFadeOut; this cmd lets callers flip it independently and read it back. Implementation: writes the FadeOut triad through SetFadeOut(start, duration, destroy) using the current FadeStartDelay/FadeDuration so the other two fields are preserved.
+Set the bDestroyOwnerAfterFade bit of the UDecalComponent of an ADecalActor in the editor world, found by actor label: whether the actor is destroyed once its fade-out ends at runtime. The bit is written directly, as the details panel does, so FadeStartDelay and FadeDuration come back unchanged and no lifespan timer starts in the editor. A change is one undo step that dirties the level; nothing is saved. An unknown label is an error. set_decal_fade sets this bit together with the fade timing; read it back with get_decal_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -90,7 +90,7 @@ Set the FadeScreenSize on a UDecalComponent (the screen-size fraction below whic
 
 *Destructive, idempotent.*
 
-Assign a material to the UDecalComponent of an ADecalActor in the editor world, found by actor label (not object name), in place of its current one. material_path is loaded as a UMaterialInterface (it renders only with the Deferred Decal material domain) and echoed back as given, not read back. No undo step, dirty flag or save: the component is written without Modify. Assigning the material it already has rewrites the same value. An unknown label, an actor without a decal component, or a path that does not load as a material is an error. Read back with get_decal_info; spawn_decal_actor can set one at creation; tint: set_decal_color; projection box: set_decal_size.
+Assign a material to the UDecalComponent of an ADecalActor in the editor world, found by actor label (not object name), in place of its current one. material_path is loaded as a UMaterialInterface (it renders only with the Deferred Decal material domain) and echoed back as given, not read back. The change is one undo step and dirties the level; nothing is saved. Assigning the material it already has changes nothing and adds no undo step. An unknown label, an actor without a decal component, or a path that does not load as a material is an error. Read back with get_decal_info; spawn_decal_actor can set one at creation; tint: set_decal_color; projection box: set_decal_size.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -103,7 +103,7 @@ Assign a material to the UDecalComponent of an ADecalActor in the editor world, 
 
 *Destructive, idempotent.*
 
-Set the DecalSize half-extents (cm, in the decal's local space, before actor scale) of an ADecalActor's UDecalComponent in the editor world, found by actor label, and refresh its render state. A valid decal_size [x, y, z] wins over size_x, size_y and size_z; without it each given axis changes and the rest keep their value, and a call with none changes nothing. X is the projection depth, Y and Z the footprint. Values are not validated, and there is no undo step, dirty flag or save. An unknown label or an actor without a decal component is an error. Read back with get_decal_info; set it at spawn with spawn_decal_actor; draw order: set_decal_sort_order.
+Set the DecalSize half-extents (cm, in the decal's local space, before actor scale) of an ADecalActor's UDecalComponent in the editor world, found by actor label, and refresh its render state. A valid decal_size [x, y, z] wins over size_x, size_y and size_z; without it each given axis changes and the rest keep their value, and a call with none changes nothing. X is the projection depth, Y and Z the footprint. Values are not validated; a change is one undo step that dirties the level, and nothing is saved. An unknown label or an actor without a decal component is an error. Read back with get_decal_info; set it at spawn with spawn_decal_actor; draw order: set_decal_sort_order.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -119,12 +119,12 @@ Set the DecalSize half-extents (cm, in the decal's local space, before actor sca
 
 *Destructive, idempotent.*
 
-Set the SortOrder int on a UDecalComponent (lower draws first within the same decal bucket).
+Set the SortOrder of the UDecalComponent of an ADecalActor in the editor world, found by actor label: where decals overlap, a higher sort order draws later, on top of a lower one. sort_order is required; a missing one is an error and nothing is written. A change is one undo step that dirties the level; the order the decal already has changes nothing, and nothing is saved. An unknown label or an actor without a decal component is an error. Read it back with get_decal_info; set the material with set_decal_material and the projection box with set_decal_size.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_label` | string | yes | Label of the ADecalActor in the editor world. |
-| `sort_order` | number | no | New sort order value. |
+| `sort_order` | number | yes | New sort order value, a whole number (a fraction is rounded); required. |
 
 **Returns:** `{ actor_label: string, sort_order: int }`
 

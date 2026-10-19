@@ -32,11 +32,11 @@ Call AActor::ForceNetUpdate on an actor placed in the editor world, found by lab
 
 *Read-only.*
 
-Read an actor's net cull distance (read-side of set_actor_net_cull_distance). It returns BOTH forms: net_cull_distance_squared, which is how UE 5.8 actually stores it (AActor::NetCullDistanceSquared), and net_cull_distance_cm, the plain linear distance -- so you never have to remember which one you are looking at.
+Read an actor's net cull distance (read-side of set_actor_net_cull_distance). It returns BOTH forms: net_cull_distance_squared, which is how UE 5.8 actually stores it (AActor::NetCullDistanceSquared), and net_cull_distance_cm, the plain linear distance -- so you never have to remember which one you are looking at. Read-only; the actor is found by label in the editor world, as the other replication tools find it, and the placed instance is read, not a PIE copy. The reply actor_name is the engine object name. An unknown label is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Engine name of the actor |
+| `actor_name` | string | yes | Label of the actor in the editor world (matched against labels, not engine object names, despite the parameter name); first match. |
 
 **Returns:** `{ actor_name, net_cull_distance_squared, net_cull_distance_cm }`
 

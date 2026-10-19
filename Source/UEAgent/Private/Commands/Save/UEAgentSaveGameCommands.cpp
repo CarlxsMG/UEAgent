@@ -188,11 +188,12 @@ TSharedPtr<FJsonObject> HandleSaveGame(const TSharedPtr<FJsonObject>& Params)
     return mcp_common::MakeOutcomeReply(Payload, bWritten, Failure);
 }
 
-// MCP:load_game - Load the SaveGame stored in a slot with LoadGameFromSlot and report the transient object: save_game_instance, save_game_class and save_game_path. success is false when the slot is empty or unreadable, or holds a class other than save_game_class; does_save_game_exist tells missing from corrupt.
+// MCP:load_game - Load the SaveGame stored in a slot with LoadGameFromSlot and report the transient object: save_game_instance, save_game_class and save_game_path. success is false when the slot is empty or unreadable, or holds a class other than save_game_class; does_save_game_exist tells missing from corrupt. It only reads: the slot file is not changed and the object is transient. Write a slot with save_game; the same read without the class check is load_game_async.
 //   @param slot_name - Save slot name to load from
 //   @param user_index - Platform user index for the save system; default 0 (the generic desktop save system ignores it)
 //   @param save_game_class - Optional SaveGame subclass the slot is expected to hold. A slot file records its own class and is rebuilt as that; when the loaded object is not this class (or a child of it) the load is reported as failed. An unknown class name is an error.
 //   @returns { slot_name: string, user_index: int, success: bool, save_game_instance: string, save_game_class: string, save_game_path: string, expected_class?: string, error: string }
+//   @hints read-only
 TSharedPtr<FJsonObject> HandleLoadGame(const TSharedPtr<FJsonObject>& Params)
 {
     FString Slot;
@@ -524,9 +525,10 @@ TSharedPtr<FJsonObject> HandleSaveGameToMemory(const TSharedPtr<FJsonObject>& Pa
     return mcp_common::MakeOutcomeReply(Payload, bSerialized, Failure);
 }
 
-// MCP:load_game_from_memory - Deserialize a SaveGame from a base64 blob (the memory_base64 of save_game_to_memory) with LoadGameFromMemory; returns the transient object save_game_instance, save_game_class and save_game_path. Invalid base64 is an error; success is false when the blob is corrupt, truncated or from another SaveGame class.
+// MCP:load_game_from_memory - Deserialize a SaveGame from a base64 blob (the memory_base64 of save_game_to_memory) with LoadGameFromMemory; returns the transient object save_game_instance, save_game_class and save_game_path. Invalid base64 is an error; success is false when the blob is corrupt, truncated or from another SaveGame class. It only reads: nothing is written to disk and the object is transient. Make a blob with save_game_to_memory; to read a slot file use load_game.
 //   @param memory_base64 - Base64 text of a serialized SaveGame, as returned in memory_base64 by save_game_to_memory
 //   @returns { success: bool, memory_size: int, save_game_instance: string, save_game_class: string, save_game_path: string, error: string }
+//   @hints read-only
 TSharedPtr<FJsonObject> HandleLoadGameFromMemory(const TSharedPtr<FJsonObject>& Params)
 {
     FString Base64Data;

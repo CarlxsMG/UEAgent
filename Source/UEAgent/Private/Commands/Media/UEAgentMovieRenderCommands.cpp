@@ -436,9 +436,11 @@ TSharedPtr<FJsonObject> HandleDeleteRenderJob(const TSharedPtr<FJsonObject>& Par
         return mcp_common::MakeOkReply(Data);
     }
 
-    // Single-job delete by name.
+    // Single-job delete by name. Read into a bool, not negated in the if: job_name is needed only
+    // here (delete_all returned above), and a negated read would make the catalog require it always.
     FString JobName;
-    if (!Params->TryGetStringField(TEXT("job_name"), JobName) || JobName.IsEmpty())
+    const bool bHasJobName = Params->TryGetStringField(TEXT("job_name"), JobName);
+    if (!bHasJobName || JobName.IsEmpty())
     {
         return mcp_common::MakeErrorReply(TEXT("'job_name' is required (unless 'delete_all' is true)"));
     }
