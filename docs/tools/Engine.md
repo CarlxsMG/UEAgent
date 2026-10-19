@@ -721,13 +721,13 @@ Sets a bool override parameter on a spawned Niagara component.  Resolves the UNi
 
 *Destructive, idempotent.*
 
-Sets a LinearColor override parameter on a spawned Niagara component.  Resolves the UNiagaraComponent on the owner actor and calls SetVariableLinearColor, then reads it back.
+Set a LinearColor override (a user parameter value) on the Niagara component of an actor in the editor world, the actor found by internal name or editor label and the first UNiagaraComponent on it used, through UNiagaraComponent::SetVariableLinearColor, which adds the override when needed. color is [r, g, b] or [r, g, b, a] in numbers within the float range; an omitted alpha is 1 and an omitted color is opaque black. Any other color, a missing actor_name or variable_name, or an actor without a Niagara component is an error and nothing changes. The value is set on the component in memory with no undo step; the level is neither marked dirty nor saved. verified is whether GetVariableColor finds the variable, and value_read_back is what it reads. Four plain components: set_niagara_component_vec4; the asset default: set_niagara_user_parameter.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Owner actor identifier (internal name or editor label). |
 | `variable_name` | string | yes | Niagara variable name (override is added locally if needed). |
-| `color` | array | no | Color value [R, G, B, A] (A defaults to 1.0 if omitted). |
+| `color` | array | no | Color as [R, G, B] or [R, G, B, A], numbers within the float range; A is 1.0 when omitted, and an omitted color is opaque black. Any other value is an error. |
 
 **Returns:** `{ actor_name: string, variable_name: string, variable_type: string, set: bool, verified: bool, value_read_back: [number, number, number, number] }`
 
@@ -1104,7 +1104,7 @@ Enable or disable a UNiagaraNodeFunctionCall module in a Niagara emitter's spawn
 
 *Destructive, idempotent.*
 
-Override a Niagara module input by writing the rapid-iteration store.  Locates the module function-call node (by its module_node_name, as returned by add_niagara_module_to_stack) on the emitter's spawn or update stack, matches the input by its leaf name, and writes the value into the owning group script's RapidIterationParameters store. The system is recompiled and saved. For a float or int input, value is required and must be a JSON number; a missing or mistyped one is an error and nothing changes.  HONEST GATE: bool / enum / data-interface / object inputs are not rapid-iteration eligible and return a clean error ("override of &lt;type> inputs requires the linked-value path, not supported headless"). The packed value_type must also match the input's actual type or a clean error is returned.
+Override a Niagara module input by writing the rapid-iteration store. Locates the module function-call node (by its module_node_name, as returned by add_niagara_module_to_stack) on the emitter's spawn or update stack, matches the input by its leaf name, and writes the value into the owning group script's RapidIterationParameters store. The system is recompiled and saved. value is required: a JSON number for a float or int input, [x, y, z] for a vector, [r, g, b] or [r, g, b, a] for a color; a missing or malformed one is an error and nothing changes. HONEST GATE: bool / enum / data-interface / object inputs are not rapid-iteration eligible and return a clean error. The packed value_type must also match the input's actual type or a clean error is returned. Read it back with get_niagara_module_input.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1113,7 +1113,7 @@ Override a Niagara module input by writing the rapid-iteration store.  Locates t
 | `module_node_name` | string | yes | The module function-call node name (from add_niagara_module_to_stack's module_node_name). |
 | `input_name` | string | yes | Leaf name of the module input (e.g. "Drag" for "Module.Drag"). |
 | `value_type` | string | no | One of "float", "int", "vector", or "color"; defaults to "float" |
-| `value` | any | no | For float/int: a JSON number, required (a missing or mistyped one is an error). For vector: an [x, y, z] list. For color: an [r, g, b, a] list. |
+| `value` | any | no | Required. For float/int: a JSON number. For vector: [x, y, z], numbers within the float range. For color: [r, g, b] or [r, g, b, a], alpha 1 when omitted. A missing or malformed value is an error. |
 
 **Returns:** `{ system_path: string, emitter_name: string, module_node_name: string, input_name: string, value_type: string, ri_param_name: string, verified: bool, success: bool, saved: bool, save_error?: string }`
 

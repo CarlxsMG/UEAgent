@@ -937,6 +937,22 @@ TSharedPtr<FJsonObject> HandleBulkRenameAssets(
         const FString NewObjectPath  = NewPackageName + TEXT(".") + NewName;
         ResultEntry->SetStringField(TEXT("new_path"), NewPackageName);
 
+        // The load makes a package name of old_path and RenameAssets creates the joined new package and renames the
+        // asset's objects after the new object path: a name past the FName limit aborts the editor.
+        FString InvalidPath = mcp_common::InvalidPackageName(OldPath);
+        if (InvalidPath.IsEmpty())
+        {
+            InvalidPath = mcp_common::InvalidPackageName(NewObjectPath);
+        }
+        if (!InvalidPath.IsEmpty())
+        {
+            ResultEntry->SetBoolField(TEXT("success"), false);
+            ResultEntry->SetStringField(TEXT("error"), InvalidPath);
+            ResultEntries.Add(ResultEntry);
+            ++FailedCount;
+            continue;
+        }
+
         // -- guard 2: read-only roots, source AND destination -----------------
         if (mcp_common::IsUnderReadOnlyRoot(OldPath, ReadOnlyRoots))
         {
@@ -964,6 +980,16 @@ TSharedPtr<FJsonObject> HandleBulkRenameAssets(
         {
             ResultEntry->SetBoolField(TEXT("success"), false);
             ResultEntry->SetStringField(TEXT("error"), FString::Printf(TEXT("Cannot load asset: %s"), *OldPath));
+            ResultEntries.Add(ResultEntry);
+            ++FailedCount;
+            continue;
+        }
+        // The rename carries the asset's objects under the new object path: its deepest object, measured now that it
+        // is loaded, must stay under the FName limit there.
+        if (const FString TooLong = AssetCommandHelpers::CopiedObjectPathsTooLong(AssetObj, NewObjectPath); !TooLong.IsEmpty())
+        {
+            ResultEntry->SetBoolField(TEXT("success"), false);
+            ResultEntry->SetStringField(TEXT("error"), TooLong);
             ResultEntries.Add(ResultEntry);
             ++FailedCount;
             continue;
@@ -1415,26 +1441,49 @@ TSharedPtr<FJsonObject> HandleIngestExternalUAssets(const TSharedPtr<FJsonObject
     TSet<FString> ScanPackageDirs;   // long package PATHS (folders) to rescan
     TArray<TSharedPtr<FJsonValue>> CopiedArr;
 
-    for (FString& SrcFile : SrcFiles)
+    // Whether SrcFile is one to ingest; OutSrcNorm is it with forward slashes and OutRel its path relative to the
+    // Content root, e.g. "Characters/Foo/SK.uasset".
+    const auto ToIngest = [&ContentRoot, ContentRootLen, &PathFilters](const FString& SrcFile, FString& OutSrcNorm, FString& OutRel)
     {
-        FString SrcNorm = SrcFile;
-        SrcNorm.ReplaceInline(TEXT("\\"), TEXT("/"));
-        if (!SrcNorm.StartsWith(ContentRoot)) { continue; }
+        OutSrcNorm = SrcFile;
+        OutSrcNorm.ReplaceInline(TEXT("\\"), TEXT("/"));
+        if (!OutSrcNorm.StartsWith(ContentRoot)) { return false; }
 
-        // Rel path relative to the Content root, e.g. "Characters/Foo/SK.uasset".
-        FString Rel = SrcNorm.RightChop(ContentRootLen);
-        Rel.RemoveFromStart(TEXT("/"));
-        if (Rel.IsEmpty()) { continue; }
+        OutRel = OutSrcNorm.RightChop(ContentRootLen);
+        OutRel.RemoveFromStart(TEXT("/"));
+        if (OutRel.IsEmpty()) { return false; }
 
         if (PathFilters.Num() > 0)
         {
             bool bMatch = false;
             for (const FString& Filter : PathFilters)
             {
-                if (Rel.StartsWith(Filter, ESearchCase::IgnoreCase)) { bMatch = true; break; }
+                if (OutRel.StartsWith(Filter, ESearchCase::IgnoreCase)) { bMatch = true; break; }
             }
-            if (!bMatch) { continue; }
+            if (!bMatch) { return false; }
         }
+        return true;
+    };
+
+    // Each copy becomes the package dest_root/<relative path>, and the registry scan below makes an FName of it: one
+    // past the FName limit would abort the editor there, and again at every start while the file stays. The whole
+    // set is checked before anything is copied.
+    for (const FString& SrcFile : SrcFiles)
+    {
+        FString SrcNorm, Rel;
+        if (ToIngest(SrcFile, SrcNorm, Rel))
+        {
+            if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(DestRoot / FPaths::GetBaseFilename(Rel, /*bRemovePath=*/false)))
+            {
+                return Invalid;
+            }
+        }
+    }
+
+    for (FString& SrcFile : SrcFiles)
+    {
+        FString SrcNorm, Rel;
+        if (!ToIngest(SrcFile, SrcNorm, Rel)) { continue; }
 
         const FString DestFile = DestBaseDir / Rel;
         if (!bOverwrite && PF.FileExists(*DestFile)) { ++Skipped; continue; }

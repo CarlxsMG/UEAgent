@@ -633,6 +633,7 @@ TSharedPtr<FJsonObject> HandleInterchangeCreatePipelineAsset(const TSharedPtr<FJ
 
     // Idempotency: if it already exists, return it.
     const FString FullPath = PackagePath / AssetName + TEXT(".") + AssetName;
+    if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(FullPath)) { return Invalid; }
     if (UObject* Existing = LoadObject<UObject>(nullptr, *FullPath))
     {
         TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();

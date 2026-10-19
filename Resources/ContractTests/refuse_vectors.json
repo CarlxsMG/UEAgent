@@ -2645,12 +2645,12 @@
      "op": "check",
      "command": "check_asset_circular_dependency",
      "params": {
-      "asset_name": "/Game/MyGame/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      "asset_name": "/Game/MyGame/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
      },
      "probes": {},
      "expect": {
       "refused": true,
-      "message": "check_asset_circular_dependency: asset_name is 1024 characters long. An FName holds at most 1023 characters, and the engine aborts the editor when it builds one from a longer string (UnrealNames.cpp, NAME_SIZE), so no name or path that long exists or can be created. Refused before the tool ran: nothing was changed. WHAT WORKS: a name or path of at most 1023 characters."
+      "message": "check_asset_circular_dependency: asset_name is 960 characters long. An FName holds at most 1023 characters, and the engine aborts the editor when it builds one from a longer string (UnrealNames.cpp, NAME_SIZE); a tool may add a prefix or suffix of up to 64 characters to a name before it builds one, so a name or path of 960 characters or more is refused. Refused before the tool ran: nothing was changed. WHAT WORKS: a name or path of at most 959 characters."
      },
      "expect_probe_calls": []
     }
@@ -2663,7 +2663,7 @@
      "op": "check",
      "command": "check_asset_circular_dependency",
      "params": {
-      "asset_name": "/Game/MyGame/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      "asset_name": "/Game/MyGame/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
      },
      "probes": {},
      "expect": {
@@ -2689,7 +2689,7 @@
      "probes": {},
      "expect": {
       "refused": true,
-      "message": "reload_asset_package: package_names[1] is 1500 characters long. An FName holds at most 1023 characters, and the engine aborts the editor when it builds one from a longer string (UnrealNames.cpp, NAME_SIZE), so no name or path that long exists or can be created. Refused before the tool ran: nothing was changed. WHAT WORKS: a name or path of at most 1023 characters."
+      "message": "reload_asset_package: package_names[1] is 1500 characters long. An FName holds at most 1023 characters, and the engine aborts the editor when it builds one from a longer string (UnrealNames.cpp, NAME_SIZE); a tool may add a prefix or suffix of up to 64 characters to a name before it builds one, so a name or path of 960 characters or more is refused. Refused before the tool ran: nothing was changed. WHAT WORKS: a name or path of at most 959 characters."
      },
      "expect_probe_calls": []
     }
@@ -2822,6 +2822,613 @@
      "expect": {
       "refused": false,
       "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "name_length-10",
+   "steps": [
+    {
+     "op": "check",
+     "command": "bulk_rename_assets",
+     "params": {
+      "assets": [
+       {
+        "old_path": "/Game/MyGame/BP_Door",
+        "new_name": "NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN"
+       }
+      ]
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "bulk_rename_assets: assets[0].new_name is 960 characters long. An FName holds at most 1023 characters, and the engine aborts the editor when it builds one from a longer string (UnrealNames.cpp, NAME_SIZE); a tool may add a prefix or suffix of up to 64 characters to a name before it builds one, so a name or path of 960 characters or more is refused. Refused before the tool ran: nothing was changed. WHAT WORKS: a name or path of at most 959 characters."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "name_length-11",
+   "steps": [
+    {
+     "op": "check",
+     "command": "bulk_rename_assets",
+     "params": {
+      "assets": [
+       {
+        "old_path": "/Game/MyGame/BP_Door",
+        "new_name": "NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN"
+       }
+      ]
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "name_length-12",
+   "steps": [
+    {
+     "op": "check",
+     "command": "build_blueprint_graph",
+     "params": {
+      "blueprint_name": "/Game/MyGame/BP_Door",
+      "nodes": [
+       {
+        "id": "n0",
+        "command_type": "add_graph_node",
+        "params": {
+         "pin_names": [
+          "Exec",
+          "PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP"
+         ]
+        }
+       }
+      ]
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "build_blueprint_graph: nodes[0].params.pin_names[1] is 1000 characters long. An FName holds at most 1023 characters, and the engine aborts the editor when it builds one from a longer string (UnrealNames.cpp, NAME_SIZE); a tool may add a prefix or suffix of up to 64 characters to a name before it builds one, so a name or path of 960 characters or more is refused. Refused before the tool ran: nothing was changed. WHAT WORKS: a name or path of at most 959 characters."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "name_length-13",
+   "steps": [
+    {
+     "op": "check",
+     "command": "build_blueprint_graph",
+     "params": {
+      "blueprint_name": "/Game/MyGame/BP_Door",
+      "nodes": [
+       {
+        "id": "n0",
+        "command_type": "add_comment_node",
+        "params": {
+         "text": "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
+         "comment": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
+        }
+       }
+      ]
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "name_length-14",
+   "steps": [
+    {
+     "op": "check",
+     "command": "bulk_rename_assets",
+     "params": {
+      "assets": [
+       {
+        "old_path": "/Game/MyGame/BP_Door",
+        "source_file": "D:/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd.fbx"
+       }
+      ]
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "name_length-15",
+   "steps": [
+    {
+     "op": "check",
+     "command": "set_usd_attribute_value",
+     "params": {
+      "stage_name": "S",
+      "prim_path": "/World",
+      "attr_name": "a",
+      "value": {
+       "prim_path": "/pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp"
+      }
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "vector_shape-01",
+   "steps": [
+    {
+     "op": "check",
+     "command": "spawn_actor",
+     "params": {
+      "type": "StaticMeshActor",
+      "name": "SM_Door",
+      "location": "100, 200, 300"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "spawn_actor: location is a string, not an array of 3 numbers. The tool reads location as [X, Y, Z], and any other value would have been read as something the call did not ask for (most of them as 0, 0, 0) with no error. Refused before the tool ran: nothing was changed. WHAT WORKS: an array of 3 numbers, [X, Y, Z], or leave location out for its default."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "vector_shape-02",
+   "steps": [
+    {
+     "op": "check",
+     "command": "spawn_actor",
+     "params": {
+      "type": "StaticMeshActor",
+      "name": "SM_Door",
+      "location": [
+       100,
+       200
+      ]
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "spawn_actor: location is an array of 2 elements, not an array of 3 numbers. The tool reads location as [X, Y, Z], and any other value would have been read as something the call did not ask for (most of them as 0, 0, 0) with no error. Refused before the tool ran: nothing was changed. WHAT WORKS: an array of 3 numbers, [X, Y, Z], or leave location out for its default."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "vector_shape-03",
+   "steps": [
+    {
+     "op": "check",
+     "command": "spawn_actor",
+     "params": {
+      "type": "StaticMeshActor",
+      "name": "SM_Door",
+      "scale": [
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "spawn_actor: scale is an array of 4 elements, not an array of 3 numbers. The tool reads scale as [X, Y, Z], and any other value would have been read as something the call did not ask for (most of them as 0, 0, 0) with no error. Refused before the tool ran: nothing was changed. WHAT WORKS: an array of 3 numbers, [X, Y, Z], or leave scale out for its default."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "vector_shape-04",
+   "steps": [
+    {
+     "op": "check",
+     "command": "spawn_actor",
+     "params": {
+      "type": "StaticMeshActor",
+      "name": "SM_Door",
+      "location": [
+       100,
+       "200",
+       300
+      ]
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "spawn_actor: location[1] is a string, not a finite number within the float range. The tool reads location as [X, Y, Z], and any other value would have been read as something the call did not ask for (most of them as 0, 0, 0) with no error. Refused before the tool ran: nothing was changed. WHAT WORKS: an array of 3 numbers, [X, Y, Z], or leave location out for its default."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "vector_shape-05",
+   "steps": [
+    {
+     "op": "check",
+     "command": "spawn_actor",
+     "params": {
+      "type": "StaticMeshActor",
+      "name": "SM_Door",
+      "scale": [
+       1,
+       1,
+       1e+39
+      ]
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "spawn_actor: scale[2] is a number outside the float range, not a finite number within the float range. The tool reads scale as [X, Y, Z], and any other value would have been read as something the call did not ask for (most of them as 0, 0, 0) with no error. Refused before the tool ran: nothing was changed. WHAT WORKS: an array of 3 numbers, [X, Y, Z], or leave scale out for its default."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "vector_shape-06",
+   "steps": [
+    {
+     "op": "check",
+     "command": "set_actor_transform",
+     "params": {
+      "name": "SM_Door",
+      "location": {
+       "x": 1,
+       "y": 2,
+       "z": 3
+      }
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "set_actor_transform: location is an object, not an array of 3 numbers. The tool reads location as [X, Y, Z], and any other value would have been read as something the call did not ask for (most of them as 0, 0, 0) with no error. Refused before the tool ran: nothing was changed. WHAT WORKS: an array of 3 numbers, [X, Y, Z], or leave location out for its default."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "vector_shape-07",
+   "steps": [
+    {
+     "op": "check",
+     "command": "spawn_actor",
+     "params": {
+      "type": "StaticMeshActor",
+      "name": "SM_Door",
+      "location": [
+       100,
+       200,
+       300
+      ],
+      "rotation": [
+       0,
+       90,
+       0
+      ],
+      "scale": [
+       1,
+       1,
+       1
+      ]
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "vector_shape-08",
+   "steps": [
+    {
+     "op": "check",
+     "command": "spawn_actor",
+     "params": {
+      "type": "StaticMeshActor",
+      "name": "SM_Door",
+      "rotation": {
+       "Yaw": 90,
+       "pitch": -10
+      }
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "vector_shape-09",
+   "steps": [
+    {
+     "op": "check",
+     "command": "spawn_actor",
+     "params": {
+      "type": "StaticMeshActor",
+      "name": "SM_Door",
+      "rotation": {}
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "vector_shape-10",
+   "steps": [
+    {
+     "op": "check",
+     "command": "spawn_actor",
+     "params": {
+      "type": "StaticMeshActor",
+      "name": "SM_Door"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "vector_shape-11",
+   "steps": [
+    {
+     "op": "check",
+     "command": "spawn_actor",
+     "params": {
+      "type": "StaticMeshActor",
+      "name": "SM_Door",
+      "location": null,
+      "rotation": null,
+      "scale": null
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "spawn_actor: location is null, not an array of 3 numbers. The tool reads location as [X, Y, Z], and any other value would have been read as something the call did not ask for (most of them as 0, 0, 0) with no error. Refused before the tool ran: nothing was changed. WHAT WORKS: an array of 3 numbers, [X, Y, Z], or leave location out for its default."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "vector_shape-12",
+   "steps": [
+    {
+     "op": "check",
+     "command": "spawn_actor",
+     "params": {
+      "type": "StaticMeshActor",
+      "name": "SM_Door",
+      "rotation": {
+       "x": 0,
+       "y": 0,
+       "z": 90
+      }
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "spawn_actor: rotation is an object with the key \"x\", not an object of roll, pitch and yaw. The tool reads rotation as [Pitch, Yaw, Roll] or {\"roll\": R, \"pitch\": P, \"yaw\": Y}, and any other value would have been read as something the call did not ask for (most of them as a zero rotation) with no error. Refused before the tool ran: nothing was changed. WHAT WORKS: {\"roll\": R, \"pitch\": P, \"yaw\": Y} with any of the three axes, or an array of 3 numbers, [Pitch, Yaw, Roll], or leave rotation out for its default."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "vector_shape-13",
+   "steps": [
+    {
+     "op": "check",
+     "command": "spawn_actor",
+     "params": {
+      "type": "StaticMeshActor",
+      "name": "SM_Door",
+      "rotation": {
+       "yaw": "90"
+      }
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "spawn_actor: rotation.yaw is a string, not a finite number. The tool reads rotation as [Pitch, Yaw, Roll] or {\"roll\": R, \"pitch\": P, \"yaw\": Y}, and any other value would have been read as something the call did not ask for (most of them as a zero rotation) with no error. Refused before the tool ran: nothing was changed. WHAT WORKS: {\"roll\": R, \"pitch\": P, \"yaw\": Y} with any of the three axes, or an array of 3 numbers, [Pitch, Yaw, Roll], or leave rotation out for its default."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "vector_shape-14",
+   "steps": [
+    {
+     "op": "check",
+     "command": "spawn_actor",
+     "params": {
+      "type": "StaticMeshActor",
+      "name": "SM_Door",
+      "rotation": [
+       0,
+       90
+      ]
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "spawn_actor: rotation is an array of 2 elements, not an array of 3 numbers or an object of roll, pitch and yaw. The tool reads rotation as [Pitch, Yaw, Roll] or {\"roll\": R, \"pitch\": P, \"yaw\": Y}, and any other value would have been read as something the call did not ask for (most of them as a zero rotation) with no error. Refused before the tool ran: nothing was changed. WHAT WORKS: {\"roll\": R, \"pitch\": P, \"yaw\": Y} with any of the three axes, or an array of 3 numbers, [Pitch, Yaw, Roll], or leave rotation out for its default."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "vector_shape-15",
+   "steps": [
+    {
+     "op": "check",
+     "command": "spawn_actor",
+     "params": {
+      "type": "StaticMeshActor",
+      "name": "SM_Door",
+      "rotation": 90
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "spawn_actor: rotation is a number, not an array of 3 numbers or an object of roll, pitch and yaw. The tool reads rotation as [Pitch, Yaw, Roll] or {\"roll\": R, \"pitch\": P, \"yaw\": Y}, and any other value would have been read as something the call did not ask for (most of them as a zero rotation) with no error. Refused before the tool ran: nothing was changed. WHAT WORKS: {\"roll\": R, \"pitch\": P, \"yaw\": Y} with any of the three axes, or an array of 3 numbers, [Pitch, Yaw, Roll], or leave rotation out for its default."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "vector_shape-16",
+   "steps": [
+    {
+     "op": "check",
+     "command": "add_branch_node",
+     "params": {
+      "blueprint_name": "/Game/MyGame/BP_Door",
+      "node_position": [
+       10,
+       20,
+       30
+      ]
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "add_branch_node: node_position is an array of 3 elements, not an array of 2 numbers. The tool reads node_position as [X, Y], and any other value would have been read as something the call did not ask for (most of them as 0, 0) with no error. Refused before the tool ran: nothing was changed. WHAT WORKS: an array of 2 numbers, [X, Y], or leave node_position out for its default."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "vector_shape-17",
+   "steps": [
+    {
+     "op": "check",
+     "command": "add_branch_node",
+     "params": {
+      "blueprint_name": "/Game/MyGame/BP_Door",
+      "node_position": [
+       10,
+       20
+      ]
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "vector_shape-18",
+   "steps": [
+    {
+     "op": "check",
+     "command": "play_sound_at_location",
+     "params": {
+      "sound_path": "/Game/MyGame/S_Bell",
+      "location": "here"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "vector_shape-19",
+   "steps": [
+    {
+     "op": "check",
+     "command": "batch",
+     "params": {
+      "commands": [
+       {
+        "command_type": "spawn_actor",
+        "params": {
+         "type": "StaticMeshActor",
+         "name": "SM_Door",
+         "location": "origin"
+        }
+       }
+      ]
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "vector_shape-20",
+   "steps": [
+    {
+     "op": "check",
+     "command": "spawn_actor",
+     "params": {
+      "type": "StaticMeshActor",
+      "name": "SM_Door",
+      "rotation": null
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "spawn_actor: rotation is null, not an array of 3 numbers or an object of roll, pitch and yaw. The tool reads rotation as [Pitch, Yaw, Roll] or {\"roll\": R, \"pitch\": P, \"yaw\": Y}, and any other value would have been read as something the call did not ask for (most of them as a zero rotation) with no error. Refused before the tool ran: nothing was changed. WHAT WORKS: {\"roll\": R, \"pitch\": P, \"yaw\": Y} with any of the three axes, or an array of 3 numbers, [Pitch, Yaw, Roll], or leave rotation out for its default."
      },
      "expect_probe_calls": []
     }

@@ -2538,13 +2538,13 @@ Replace the keys of one bone track of a UAnimSequence with the given per-key tra
 
 *Destructive, idempotent.*
 
-Set the editor display color of a FLOAT curve on a UAnimSequence through its data controller (one undo step), then save the package (cosmetic: it tints the curve in the editor, it does not affect evaluation). FLOAT-CURVE ONLY: a name that is not a float curve of the sequence, a transform curve included, is an error and nothing is written. The color the curve already has is a success with applied=false and saved=false, and nothing is written or saved. A failed save makes success false, with saved=false and save_error.
+Set the editor display color of a FLOAT curve on a UAnimSequence through its data controller (one undo step), then save the package (cosmetic: it tints the curve in the editor, it does not affect evaluation). FLOAT-CURVE ONLY: a name that is not a float curve of the sequence, a transform curve included, is an error and nothing is written; so is a color that is not 3 or 4 numbers. The color the curve already has is a success with applied=false and saved=false, and nothing is written or saved. A failed save makes success false, with saved=false and save_error. Create the curve with add_anim_float_curve; its comment: set_anim_curve_comment.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `anim_sequence_path` | string | yes | Asset path of the UAnimSequence. |
 | `curve_name` | string | yes | Name of the float curve. |
-| `color` | array | no | RGBA color as [r, g, b, a] in 0..1 (default [1,1,1,1]). |
+| `color` | array | no | Color as [r, g, b] or [r, g, b, a], usually 0..1 (numbers within the float range); a is 1 when omitted, and an omitted color is white [1,1,1,1]. Any other value is an error. |
 
 **Returns:** `{ anim_sequence_path, curve_name, color, applied, saved, save_error, message }`
 

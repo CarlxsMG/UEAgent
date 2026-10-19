@@ -1606,6 +1606,7 @@ TSharedPtr<FJsonObject> HandleCreateBehaviorTree(const TSharedPtr<FJsonObject>& 
     }
 
     const FString FullPath = FString::Printf(TEXT("%s/%s"), *PackagePath, *Name);
+    if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(FullPath)) { return Invalid; }
 
     // Idempotent: load + (optionally) bind blackboard + return.
     UBehaviorTree* Existing = mcp_common::LoadAssetOrSoftPath<UBehaviorTree>(FullPath);

@@ -19,6 +19,7 @@
 #include "Engine/Level.h"
 #include "Sound/SoundWave.h"
 #include "Misc/FileHelper.h"
+#include "Misc/Paths.h"                        // FPaths::RemoveDuplicateSlashes (get_asset_metadata)
 #include "HAL/PlatformFilemanager.h"
 #include "ThumbnailRendering/ThumbnailManager.h"
 #include "ThumbnailRendering/ThumbnailRenderer.h"
@@ -534,8 +535,11 @@ TSharedPtr<FJsonObject> HandleGetAssetMetadata(const TSharedPtr<FJsonObject>& Pa
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("asset_name"), RelativePath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
 
     // Despite its name, asset_name is a path RELATIVE to /Game: the root is prepended here, and the asset
-    // is loaded to resolve it.
-    const FString FullPath = TEXT("/Game/") + RelativePath;
+    // is loaded to resolve it. LoadAsset collapses doubled slashes, so the path is checked as it resolves: with the
+    // root, a name under the limit can join to a package name past it, which aborts the editor.
+    FString FullPath = TEXT("/Game/") + RelativePath;
+    FPaths::RemoveDuplicateSlashes(FullPath);
+    if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(FullPath)) { return Invalid; }
     UObject* Loaded = UEditorAssetLibrary::LoadAsset(FullPath);
     if (Loaded == nullptr)
     {

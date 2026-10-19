@@ -1010,7 +1010,7 @@ Drop whatever copy_actors left on the editor clipboard into the current level (e
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `location` | array | no | Optional world point to centre the pasted group on, ARRAY form only [x, y, z] (the group's average is moved there, each actor's offset preserved). Omit to paste where the originals were; a malformed array silently means the origin. |
+| `location` | array | no | Optional world point to centre the pasted group on, ARRAY form only [x, y, z] (the group's average is moved there, each actor's offset preserved). Omit to paste where the originals were; any other value (an object, another length) is an error and nothing is pasted. |
 
 **Returns:** `{ pasted_actors: [actor JSON with the new auto-assigned names], pasted_count: int, success: bool }`
 
@@ -1278,9 +1278,9 @@ Move, rotate and/or scale ONE actor (omitted components are left as they are) an
 |---|---|---|---|
 | `name` | string | yes | Actor's internal name (GetName) or editor label (GetActorLabel), case-insensitive whole-string match. |
 | `world` | string | no | Optional: "editor" (default) \| "pie" \| "server" \| "client" \| "pie:N". In co-op the authoritative pawn lives on the server, and a move written to the client world will be corrected by replication. |
-| `location` | array | no | Optional new WORLD location, ARRAY form only: [x, y, z]. Absolute, not a delta; an object or a shorter array is silently read as the origin, which teleports the actor to 0,0,0. |
+| `location` | array | no | Optional new WORLD location, ARRAY form only: [x, y, z]. Absolute, not a delta; any other value (an object, another length) is an error and the actor is not touched. |
 | `rotation` | array | no | Optional new WORLD rotation as the array [pitch, yaw, roll] -- note index 2 is ROLL, not yaw -- or, unambiguously, the object {"pitch":..,"yaw":..,"roll":..}, which is the recommended form. |
-| `scale` | array | no | Optional new WORLD scale, ARRAY form only: [x, y, z]. A malformed value silently becomes 0,0,0 and the actor disappears. |
+| `scale` | array | no | Optional new WORLD scale, ARRAY form only: [x, y, z]. Any other value (an object, another length) is an error and the actor is not touched. |
 
 **Returns:** `{ actor JSON via DescribeActorObject, transform RE-READ off the actor after the write }`
 
@@ -1572,9 +1572,9 @@ Place a BUILT-IN engine actor (StaticMeshActor, PointLight, SpotLight, Direction
 |---|---|---|---|
 | `type` | string | yes | One of StaticMeshActor, PointLight, SpotLight, DirectionalLight, CameraActor. Anything else is a clean error; Blueprints go through spawn_blueprint_actor. |
 | `name` | string | yes | Internal name for the new actor; must be unused in the target world or the call is refused. |
-| `location` | array | no | Optional world location, ARRAY form only: [x, y, z]. An object or a shorter array is silently read as the origin. |
+| `location` | array | no | Optional world location, ARRAY form only: [x, y, z]; the origin when omitted. Any other value (an object, another length) is an error and nothing is spawned. |
 | `rotation` | array | no | Optional world rotation as the array [pitch, yaw, roll] -- note index 2 is ROLL, not yaw -- or, unambiguously, the object {"pitch":..,"yaw":..,"roll":..}, which is the recommended form. Defaults to zero. |
-| `scale` | array | no | Optional world scale, ARRAY form only: [x, y, z]. Defaults to 1,1,1; a malformed value silently becomes 0,0,0 (an invisible actor). |
+| `scale` | array | no | Optional world scale, ARRAY form only: [x, y, z]. Defaults to 1,1,1; any other value (an object, another length) is an error and nothing is spawned. |
 | `static_mesh` | string | no | Optional UStaticMesh asset path, only honoured for type=StaticMeshActor (e.g. /Engine/BasicShapes/Cube). |
 | `world` | string | no | Optional world selector for WHERE the actor is spawned: absent/'editor' (default) \| 'pie' (ambiguous: PlayWorld, else the first PIE context) \| 'game' (alias of 'pie') \| 'server' (the PIE world with authority -- what you want for anything replicated) \| 'client' \| 'pie:N'. Case-insensitive; an unrecognised value is a clean error listing the worlds present, never a silent spawn into the editor world. |
 

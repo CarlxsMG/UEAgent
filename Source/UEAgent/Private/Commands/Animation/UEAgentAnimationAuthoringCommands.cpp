@@ -3034,10 +3034,10 @@ TSharedPtr<FJsonObject> HandleRemovePoseCurve(const TSharedPtr<FJsonObject>& Par
 // ---------------------------------------------------------------------------
 // set_anim_curve_color
 // ---------------------------------------------------------------------------
-// MCP:set_anim_curve_color - Set the editor display color of a FLOAT curve on a UAnimSequence through its data controller (one undo step), then save the package (cosmetic: it tints the curve in the editor, it does not affect evaluation). FLOAT-CURVE ONLY: a name that is not a float curve of the sequence, a transform curve included, is an error and nothing is written. The color the curve already has is a success with applied=false and saved=false, and nothing is written or saved. A failed save makes success false, with saved=false and save_error.
+// MCP:set_anim_curve_color - Set the editor display color of a FLOAT curve on a UAnimSequence through its data controller (one undo step), then save the package (cosmetic: it tints the curve in the editor, it does not affect evaluation). FLOAT-CURVE ONLY: a name that is not a float curve of the sequence, a transform curve included, is an error and nothing is written; so is a color that is not 3 or 4 numbers. The color the curve already has is a success with applied=false and saved=false, and nothing is written or saved. A failed save makes success false, with saved=false and save_error. Create the curve with add_anim_float_curve; its comment: set_anim_curve_comment.
 //   @param anim_sequence_path - Asset path of the UAnimSequence.
 //   @param curve_name - Name of the float curve.
-//   @param color - RGBA color as [r, g, b, a] in 0..1 (default [1,1,1,1]).
+//   @param color - Color as [r, g, b] or [r, g, b, a], usually 0..1 (numbers within the float range); a is 1 when omitted, and an omitted color is white [1,1,1,1]. Any other value is an error.
 //   @returns { anim_sequence_path, curve_name, color, applied, saved, save_error, message }
 //   NOTE (impl): wraps IAnimationDataController::SetCurveColor.
 TSharedPtr<FJsonObject> HandleSetAnimCurveColor(const TSharedPtr<FJsonObject>& Params)
@@ -3048,10 +3048,12 @@ TSharedPtr<FJsonObject> HandleSetAnimCurveColor(const TSharedPtr<FJsonObject>& P
         return Error;
     }
 
-    // Parse color=[r,g,b,a]; default opaque white.
-    const TArray<TSharedPtr<FJsonValue>>* ColorArr = nullptr;
-    Params->TryGetArrayField(TEXT("color"), ColorArr);
-    const FLinearColor Color = mcp_common::LinearColorFromJsonArray(ColorArr, FLinearColor(1.0f, 1.0f, 1.0f, 1.0f));
+    // color=[r, g, b] or [r, g, b, a], default opaque white; any other value is refused before the asset is touched.
+    FLinearColor Color = FLinearColor::White;
+    if (TSharedPtr<FJsonObject> Malformed = mcp_common::ReadJsonLinearColor(Params, TEXT("color"), FLinearColor::White, Color))
+    {
+        return Malformed;
+    }
 
     UAnimSequence* Seq = nullptr;
     if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadOrError(AnimPath, TEXT("AnimSequence"), Seq)) { return Error; }

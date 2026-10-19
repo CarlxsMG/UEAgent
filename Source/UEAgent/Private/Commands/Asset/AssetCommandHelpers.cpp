@@ -8,7 +8,9 @@
 #include "GameFramework/Actor.h"
 #include "Kismet2/CompilerResultsLog.h"
 #include "Logging/TokenizedMessage.h"
+#include "Misc/PackageName.h"      // FPackageName::ObjectPathToPackageName / GetShortName
 #include "UObject/Package.h"
+#include "UObject/UObjectHash.h"   // GetObjectsWithOuter
 #include "UObject/UObjectGlobals.h"
 
 namespace AssetCommandHelpers
@@ -216,5 +218,73 @@ namespace AssetCommandHelpers
             return nullptr;
         }
         return CDO;
+    }
+
+    FString MapPathTooLongForExternalPackages(const FString& MapPackageName)
+    {
+        // The object path is at least two characters longer than the package name, so its margin covering the actor
+        // packages' overhead means the world's object paths always reach the limit first.
+        static_assert(mcp_common::ObjectPathSubobjectMargin + 2 > MapExternalPackageOverhead,
+            "the object path limit must keep a map's actor and actor folder packages under NAME_SIZE");
+        return mcp_common::InvalidPackageName(MapPackageName);
+    }
+
+    int32 DeepestSubobjectPathDepth(const UObject* Asset, FString* OutDeepestSuffix)
+    {
+        if (OutDeepestSuffix)
+        {
+            OutDeepestSuffix->Reset();
+        }
+        if (!Asset)
+        {
+            return 0;
+        }
+        const FString AssetPath = Asset->GetPathName();
+        TArray<UObject*> Inner;
+        GetObjectsWithOuter(Asset, Inner, EGetObjectsFlags::IncludeNestedObjects, RF_NoFlags, EInternalObjectFlags::Garbage);
+        int32 Deepest = 0;
+        for (const UObject* Object : Inner)
+        {
+            const FString Path = Object->GetPathName();
+            if (Path.Len() - AssetPath.Len() > Deepest)
+            {
+                Deepest = Path.Len() - AssetPath.Len();
+                if (OutDeepestSuffix)
+                {
+                    *OutDeepestSuffix = Path.RightChop(AssetPath.Len());
+                }
+            }
+        }
+        return Deepest;
+    }
+
+    FString CopiedObjectPathsTooLong(const UObject* Asset, const FString& NewObjectPath)
+    {
+        if (FString Invalid = mcp_common::InvalidPackageName(NewObjectPath); !Invalid.IsEmpty())
+        {
+            return Invalid;
+        }
+        if (!Asset)
+        {
+            return FString();
+        }
+        FString DeepestSuffix;
+        const int32 Depth = DeepestSubobjectPathDepth(Asset, &DeepestSuffix);
+        // The destination's object path: its package, a '.', and the object name given or else the last path segment.
+        const FString PackageName = FPackageName::ObjectPathToPackageName(NewObjectPath);
+        int32 Dot = INDEX_NONE;
+        const FString AssetName = NewObjectPath.FindChar(TEXT('.'), Dot) ? NewObjectPath.Mid(Dot + 1)
+            : FPackageName::GetShortName(PackageName);
+        const int32 ObjectPathLength = PackageName.Len() + 1 + AssetName.Len();
+        if (ObjectPathLength + Depth < NAME_SIZE)
+        {
+            return FString();
+        }
+        return FString::Printf(TEXT("Invalid destination '%s...': its object path (package.asset) is %d characters long, and the ")
+            TEXT("deepest object inside '%s' reaches %d characters past the asset's object path ('%s...'), which the copy or rename ")
+            TEXT("keeps under the new path: %d characters, and an FName holds at most %d (the engine aborts the editor on a longer ")
+            TEXT("one). For this asset the longest destination object path accepted is %d. Use a shorter folder or asset name."),
+            *NewObjectPath.Left(64), ObjectPathLength, *Asset->GetName(), Depth, *DeepestSuffix.Left(64), ObjectPathLength + Depth,
+            NAME_SIZE - 1, NAME_SIZE - 1 - Depth);
     }
 }

@@ -292,6 +292,9 @@ namespace
     {
         const FString PackageName = FString::Printf(TEXT("%s/%s"), *PackagePath, *Name);
         OutObjectPath = FString::Printf(TEXT("%s.%s"), *PackageName, *Name);
+        // Before the lookup and its delete: the folder and the name each fit an FName and can still join past one,
+        // which the lookup aborts the editor on.
+        if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(PackageName)) { return Invalid; }
         if (UEditorAssetLibrary::DoesAssetExist(OutObjectPath))
         {
             UEditorAssetLibrary::DeleteAsset(OutObjectPath);
@@ -435,6 +438,7 @@ TSharedPtr<FJsonObject> HandleCreateStaticTextureFromRenderTarget(const TSharedP
 
     const FString PackageName = FString::Printf(TEXT("%s/%s"), *PackagePath, *Name);
     const FString ObjectPath  = FString::Printf(TEXT("%s.%s"), *PackageName, *Name);
+    if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(PackageName)) { return Invalid; }
 
     // Idempotent: delete any existing asset at the destination so the Kismet
     // CreateUniqueAssetName path produces our exact requested name (no _1 suffix).

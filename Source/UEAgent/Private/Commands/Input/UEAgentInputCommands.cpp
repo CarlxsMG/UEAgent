@@ -314,6 +314,9 @@ namespace UEAgentInputCommandsImpl
     TSharedPtr<FJsonObject> NewInputAsset(const FString& AssetPath, const FString& AssetName, const TCHAR* TypeName,
         UPackage*& OutPackage, AssetType*& OutAsset)
     {
+        // AssetPath joins a folder and a name, each short enough, into a package name that may not be: the existence
+        // check below aborts the editor on one past the FName limit.
+        if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(AssetPath)) { return Invalid; }
         if (UEditorAssetLibrary::DoesAssetExist(AssetPath))
         {
             return mcp_common::MakeErrorReply(FString::Printf(TEXT("%s already exists: %s"), TypeName, *AssetPath));

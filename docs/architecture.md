@@ -53,11 +53,24 @@ On the game thread, `UUEAgentBridge::DispatchSingleCommand` runs every call, and
    prevent a crash and cannot verify, it refuses; any other check lets the call through. A number
    outside the integer range its parameter is read into (`intRange` in the catalog) is refused too:
    the engine cannot read it, and the tool would otherwise go on with its default. So is a string of
-   1024 characters or more, or an array element that long, in a parameter that carries a name or a
+   960 characters or more, or an array element that long, in a parameter that carries a name or a
    content path (`nameLike` in the catalog: its name ends in a word such as name, path, class or
-   tag, or its description calls it an FName): an FName holds at most 1023 characters, and the
-   engine aborts the editor when it builds a longer one. Disk paths, USD paths and free text are not
-   marked; a `batch` item whose `command_type` is that long refuses the whole batch.
+   tag, or its description calls it an FName): an FName holds at most 1023 characters, the engine
+   aborts the editor when it builds a longer one, and a tool may add up to 64 characters around a
+   name before it builds one (a class prefix, `/Game/Blueprints/`, a `_Font` suffix; the longest the
+   commands add is 36). Inside an object of an argument (a rename row, a node spec), a string that
+   long under a key the same word rule passes is refused too, at any depth; the catalog publishes
+   the rule as `nameLikeRule`. Disk paths, USD paths and free text are not names; a `batch` item
+   whose `command_type` is 1024 characters or more refuses the whole batch, and each item's own
+   arguments are checked when it is dispatched. And so is a vector of another shape in a parameter
+   every read of which is one of the vector readers (`vectorShape` in the catalog: `vector` for
+   `[X, Y, Z]`, `vector2d` for `[X, Y]`, `rotator` for `[pitch, yaw, roll]` or a `{roll, pitch, yaw}`
+   object): a value that is not an array (or, for a rotation, an object), an array of another length,
+   or an element or axis that is not a finite number. The reader would turn it into the origin, a
+   zero scale or a zero rotation, with no error. A parameter also read another way is not marked, and
+   an omitted vector keeps its default. A null argument of `tools/call` is dropped before the dispatch
+   and so counts as omitted; a null that still arrives (in a `batch` item's params) is refused, since
+   a handler that tests the param with `HasField` takes it as present and reads it as zero.
 5. **The tool.** Each command family registers its tools in a route table
    (`Mcp/McpCommandFamilies`), and the registry runs the one named, inside one undo transaction
    named after it ("UEAgent: spawn_actor"): Ctrl+Z reverts the whole call, and a `batch` as one

@@ -112,11 +112,38 @@ namespace mcp_common
     }
 
     /**
+     * How many characters past an asset's object path ("<package>.<asset>") the paths of the objects the engine
+     * creates inside it reach. The transaction buffer makes an FName of the full path of every transactional object
+     * it records (FTransactionObjectId::SetObject), and every call runs inside a transaction. The longest such
+     * paths measured in the engine source, with the tools' default names:
+     * - an anim blueprint scaffolded with a state machine, 136:
+     *   ":AnimGraph.AnimGraphNode_StateMachine_0.Locomotion.AnimStateTransitionNode_0.AnimationTransitionGraph_0.AnimGraphNode_TransitionResult_0";
+     * - an actor placed in a World Partition map, 92:
+     *   ":PersistentLevel.SkeletalMeshActor_UAID_<18 hex>_<10 digits>.SkeletalMeshComponent0";
+     * - a level sequence's track and section, 85: ":MovieScene_0.MovieSceneSkeletalAnimationTrack_0.MovieSceneSkeletalAnimationSection_0";
+     * - a new World Partition map's minimap actor, 80: ":PersistentLevel.WorldPartitionMiniMap_UAID_<18 hex>_<10 digits>.Sprite",
+     *   and its runtime hash, 78: ":PersistentLevel.WorldSettings.WorldPartition_0.WorldPartitionRuntimeHashSet_0";
+     * - a Blueprint's SCS node, 40 ("_C:SimpleConstructionScript_0.SCS_Node_0"), and its CDO, 16 ("Default__" and "_C").
+     * The margin keeps 24 characters past the longest for names longer than the defaults.
+     */
+    constexpr int32 ObjectPathSubobjectMargin = 160;
+
+    /**
+     * The same, for the objects the engine names after the asset itself, past the object path plus the asset name:
+     * a material's "<object path>:<asset>EditorOnlyData" (15) and a map's level script blueprint graph,
+     * "<object path>:PersistentLevel.<asset>.EventGraph.K2Node_Event_0" (43), rounded up.
+     */
+    constexpr int32 NamedSubobjectPathMargin = 64;
+
+    /**
      * Why PackageName (a package or object path) cannot name an asset, or empty when it can. CreatePackage,
      * and every LoadObject that has to create the package it resolves, aborts the editor with a Fatal error
      * on a name containing "//" -- what joining a folder that ends in '/', or a name that is itself a path,
-     * produces -- and FName's checkf aborts it on a package name of NAME_SIZE characters or more, which a folder
-     * and a name can join to although each is shorter. Call it on the joined path before the first load or create.
+     * produces -- and FName's checkf aborts it on a name of NAME_SIZE characters or more: the package name, which
+     * a folder and a name can join to although each is shorter, and the path of every object the engine creates
+     * inside the asset, which this refuses through the asset's object path (the package, a '.', and the object
+     * name given or else the last path segment) plus ObjectPathSubobjectMargin, or plus the asset name and
+     * NamedSubobjectPathMargin. Call it on the joined path before the first load or create.
      */
     UEAGENT_API FString InvalidPackageName(const FString& PackageName);
 
@@ -1112,8 +1139,19 @@ namespace mcp_common
     UEAGENT_API TArray<TSharedPtr<FJsonValue>> ConcreteSubclassesToJson(UClass* BaseClass);
 
     /** Default with each channel Values holds replaced by that number, in [R, G, B, A] order; Default when Values
-     *  is null. */
+     *  is null. Nothing is checked: an element that is not a number is lexed or read as 0 (ReadJsonLinearColor
+     *  checks). */
     UEAGENT_API FLinearColor LinearColorFromJsonArray(const TArray<TSharedPtr<FJsonValue>>* Values, const FLinearColor& Default);
+
+    /**
+     * Read the optional color param Key of Params, [R, G, B] or [R, G, B, A] in finite numbers within the float range,
+     * into OutColor: Default with each given channel replaced (an omitted A keeps Default's alpha), or Default itself
+     * when the param is absent or null. Null when it reads; otherwise an error reply naming Key and what it holds (a
+     * value that is not an array, an array of another length, an element that is not such a number) and saying nothing
+     * was changed, with OutColor left alone. The catalog generator reads the call as an array param.
+     */
+    UEAGENT_API TSharedPtr<FJsonObject> ReadJsonLinearColor(const TSharedPtr<FJsonObject>& Params, const TCHAR* Key,
+        const FLinearColor& Default, FLinearColor& OutColor);
 
     /** "Blueprint not found: <Requested>". */
     UEAGENT_API TSharedPtr<FJsonObject> BlueprintNotFoundReply(const FString& Requested);

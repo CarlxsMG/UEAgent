@@ -31,6 +31,7 @@ import re
 import sys
 import glob
 from collections import defaultdict, OrderedDict
+from functools import lru_cache
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -208,11 +209,14 @@ def assemble_params(extracted: list, ann_params: dict, domain: str = "") -> list
     otherwise from the `[type!]` hint (default string/optional). Descriptions come
     from the annotation. Following the documented order keeps the schema stable
     when a handler moves its reads into a helper. A param every read of which
-    lands in an integer variable also carries `intRange` (see _int_range), and a
-    string the engine makes a name of carries `nameLike` (see _is_name_like)."""
+    lands in an integer variable also carries `intRange` (see _int_range), a
+    string the engine makes a name of carries `nameLike` (see _is_name_like), and a
+    param every read of which is one vector reader carries `vectorShape` (see
+    _vector_shape)."""
     code: dict[str, tuple[str, bool]] = {}
     chains: dict[str, str] = {}
     ranges: dict[str, list[int]] = {}
+    shapes: dict[str, str] = {}
     for item in extracted:
         pname, jt, req, chain_key = item[0], item[1], item[2], item[3]
         if pname not in code:
@@ -221,6 +225,8 @@ def assemble_params(extracted: list, ann_params: dict, domain: str = "") -> list
                 chains[pname] = chain_key
             if len(item) > 4 and item[4]:
                 ranges[pname] = list(item[4])
+            if len(item) > 5 and item[5]:
+                shapes[pname] = item[5]
     rows: list[tuple[str, str, bool, str]] = []
     for pname in [*ann_params, *(n for n in code if n not in ann_params)]:
         a = ann_params.get(pname)
@@ -238,6 +244,8 @@ def assemble_params(extracted: list, ann_params: dict, domain: str = "") -> list
             param["intRange"] = ranges[pname]
         if pname in name_like:
             param["nameLike"] = True
+        if pname in shapes:
+            param["vectorShape"] = shapes[pname]
         param["description"] = desc
         params.append(param)
     # Within an alias chain, the REQUIRED name must be the one the `@param`
@@ -260,14 +268,14 @@ JSON_TYPE = {
 # an invalid jsonType "bool"/"int". Params read off the code already map via
 # JSON_TYPE (GetBoolField -> "boolean"), so this just makes the two paths agree.
 HINT_TYPE_ALIAS = {"bool": "boolean", "int": "integer"}
-# Vector/rotator helpers (mcp_common::ReadJson{Vector,Vector2D,Rotator})
-# read the field as a JSON array via TryGetArrayField and default to zero when it is
-# missing, so a param passed to one is an OPTIONAL array. The field name lives at the
-# call site (the cross-file helper reads it through its FieldName arg, which the
-# extractor cannot follow), so match the call site directly. Anchored to `Params` like
-# FIELD_RE so reads off a sub-object are not mistaken for inputs.
+# Vector/rotator/color helpers (mcp_common::ReadJson{Vector,Vector2D,Rotator,LinearColor})
+# read the field as a JSON array via TryGetArrayField and default to zero (the color: to
+# its caller's default) when it is missing, so a param passed to one is an OPTIONAL array.
+# The field name lives at the call site (the cross-file helper reads it through its
+# FieldName arg, which the extractor cannot follow), so match the call site directly.
+# Anchored to `Params` like FIELD_RE so reads off a sub-object are not mistaken for inputs.
 VECTOR_HELPER_RE = re.compile(
-    r'\bReadJson(?:Vector2D|Vector|Rotator)\s*\(\s*Params\s*,\s*TEXT\("([^"]+)"\)'
+    r'\bReadJson(?:Vector2D|Vector|Rotator|LinearColor)\s*\(\s*Params\s*,\s*TEXT\("([^"]+)"\)'
 )
 # mcp_common::ResolveWorldSelector(Params, ...) reads the optional string param `world`.
 WORLD_SELECTOR_RE = re.compile(r'\bResolveWorldSelector\s*\(\s*Params\b')
@@ -656,7 +664,14 @@ def _int_range(types: list) -> tuple[int, int] | None:
 # an asset, actor, class, property, tag, bone or key become FNames on the way (FName(*X),
 # CreatePackage, LoadObject, FSoftObjectPath, FKey), so the catalog marks each param that carries
 # one (`nameLike`), and the dispatcher refuses such a string, or a string element of such an array,
-# of NAME_SIZE characters or more before the handler runs (McpPreconditions, check "name_length").
+# of NAME_SIZE - 64 (960) characters or more before the handler runs (McpPreconditions, check
+# "name_length"): a tool may add up to 64 characters around a name before it makes an FName of it
+# (a class prefix, "/Game/Blueprints/", "/Script/Niagara.NiagaraDataInterface", "_Sub"...).
+#
+# The same rule, without the description half, judges the keys of objects INSIDE an argument (a
+# rename row, a node spec): the catalog publishes it as `nameLikeRule` (name_like_rule), and the
+# dispatcher refuses a string that long under a key it passes, at any depth (FMcpToolCatalog::
+# IsNameLikeKey, which lower-cases the key first).
 #
 # The param's NAME says what it carries: its last word, once a trailing number or single letter is
 # dropped (object_path_1, table_a), is one of _NAME_WORDS; or its description calls it an FName, an
@@ -688,6 +703,19 @@ _DISK_PATH_DOC_RE = re.compile(
     r'\b[A-Za-z]:[/\\]|^Absolute\b|(?<!not a )\b[Dd]isk (?:path|dir)|\bon disk \(|\bOS path|\b[Ff]ile ?system path')
 _NAME_DOC_RE = re.compile(r'\bFName\b|\bFKey\b|\b[Kk]ey name\b')
 _NOT_NAME_DOMAINS = frozenset({"USD"})
+_NOT_NAME_DOMAIN_KEEP_WORD = "actor"  # in those domains a param naming the actor a tool spawns is still a name
+
+
+def name_like_rule() -> dict:
+    """The name half of _is_name_like, as the catalog publishes it (`nameLikeRule`) for the dispatcher's check of
+    the keys inside an argument, which have no description."""
+    return {
+        "nameWords": sorted(_NAME_WORDS),
+        "diskWords": sorted(_DISK_WORDS),
+        "diskPathSuffixes": list(_DISK_PATH_SUFFIXES),
+        "notNameDomains": sorted(_NOT_NAME_DOMAINS),
+        "notNameDomainKeepWord": _NOT_NAME_DOMAIN_KEEP_WORD,
+    }
 
 
 def _is_name_like(name: str, json_type: str, description: str, domain: str) -> bool:
@@ -697,13 +725,129 @@ def _is_name_like(name: str, json_type: str, description: str, domain: str) -> b
     words = name.split("_")
     while len(words) > 1 and (words[-1].isdigit() or len(words[-1]) == 1):
         words.pop()
-    if domain in _NOT_NAME_DOMAINS and "actor" not in words:
+    if domain in _NOT_NAME_DOMAINS and _NOT_NAME_DOMAIN_KEEP_WORD not in words:
         return False
     if any(w in _DISK_WORDS for w in words) or name.endswith(_DISK_PATH_SUFFIXES) or _DISK_PATH_DOC_RE.search(description):
         return False
     if words[-1] in _NAME_WORDS:
         return True
     return words[-1] not in _FREE_TEXT_WORDS and bool(_NAME_DOC_RE.search(description))
+
+
+# A vector param (`vectorShape`). mcp_common::ReadJsonVector, ReadJsonVector2D and ReadJsonRotator read an array of
+# 3 numbers ([X, Y, Z]), of 2 ([X, Y]) and, for the rotator, also an object of roll, pitch and yaw, and turn ANY other
+# value into zero: a string, an object, a short array or a string element became the origin, a zero scale or a zero
+# rotation while the call answered success. The catalog marks a param with its reader's shape ("vector", "vector2d",
+# "rotator") when every read of its value is that reader, and the dispatcher refuses a present value of another shape
+# before the handler runs (McpPreconditions, check "vector_shape"). An absent one keeps the tool's default; a null is
+# refused, since a handler that tests the param with HasField takes it as present and reads it as zero (tools/call
+# drops a null argument before the dispatch, so this concerns a batch item's params and in-process calls).
+#
+# Every `TEXT("p")` of the scanned bodies is a read of p's value except a presence test (`Params->HasField`), a write
+# into a reply or a read of another object's field (any receiver but Params), an error naming it and
+# AddRequestedEcho's list. So a param also read another way -- a raw array or a typed read, a validator of its own, a
+# string compare -- is not marked, and neither is any param of a command that hands Params to code the scan does not
+# read (_hands_params_unscanned), since that code could read it another way.
+_VECTOR_SHAPES = {"Vector": "vector", "Vector2D": "vector2d", "Rotator": "rotator"}
+_TEXT_LITERAL_RE = re.compile(r'TEXT\("([^"]+)"\)')
+_VECTOR_READ_BEFORE_RE = re.compile(r'\bReadJson(Vector2D|Vector|Rotator)\s*\(\s*([\w*]+)\s*,\s*$')
+_PRESENCE_BEFORE_RE = re.compile(r'\bParams\s*->\s*HasField\s*\(\s*$')
+_MISSING_BEFORE_RE = re.compile(r'\bMissingParameterReply\s*\(\s*$')
+_RECEIVER_BEFORE_RE = re.compile(r'\b(\w+)\s*(?:->|\.)\s*(?:Set|TryGet|Get|Has)\w*(?:\s*<[^<>;]*>)?\s*\(\s*$')
+_ADD_FIELD_BEFORE_RE = re.compile(r'\bAdd\w*Field\s*\(\s*(\w+)\s*,\s*$')
+_ECHO_LIST_RE = re.compile(r'\bAddRequestedEcho\s*\(\s*\w+\s*,\s*Params\s*,\s*\{([^{}]*)\}')
+# Params handed over as a value: not dereferenced (`Params->`, `Params.`) and not a member of something else.
+_PARAMS_VALUE_RE = re.compile(r'(?<![\w>.:])Params\b(?!\s*(?:->|\.))')
+_PARAMS_VALUES_RE = re.compile(r'\bParams\s*->\s*Values\b')
+# The mcp_common readers whose fields are literal arguments at the call site, or a fixed name that is never a vector:
+# handing Params to one hides no read of a vector param.
+_LITERAL_FIELD_READERS = frozenset({
+    "ReadJsonVector", "ReadJsonVector2D", "ReadJsonRotator", "ReadJsonLinearColor", "ReadJsonFloatArray", "ReadRequiredString",
+    "ReadRequiredNumber", "ReadRequiredBool", "ResolveWorldSelector", "ResolveWorldFromParams", "ExtractStringPath",
+    "AddRequestedEcho",
+})
+_UNSEEN = ""  # the key of vec_reads that says some code reads Params unseen (no param has an empty name)
+
+
+def _value_reads(body: str) -> list[tuple[str, str]]:
+    """(param, how) for each `TEXT("param")` of `body` that reads a param's value (see the block above): how is the
+    vector reader's shape for a read through ReadJsonVector, ReadJsonVector2D or ReadJsonRotator on Params, and
+    "other" for any other read."""
+    echo = [(m.start(1), m.end(1)) for m in _ECHO_LIST_RE.finditer(body)]
+    reads = []
+    for t in _TEXT_LITERAL_RE.finditer(body):
+        before = body[max(0, t.start() - 160):t.start()]
+        if any(s <= t.start() < e for s, e in echo) or _PRESENCE_BEFORE_RE.search(before) \
+                or _MISSING_BEFORE_RE.search(before):
+            continue
+        vector = _VECTOR_READ_BEFORE_RE.search(before)
+        if vector:
+            if vector.group(2) == "Params":
+                reads.append((t.group(1), _VECTOR_SHAPES[vector.group(1)]))
+            elif re.fullmatch(r'\w+', vector.group(2)):
+                continue  # the same reader on another object: a field of that object
+            else:
+                reads.append((t.group(1), "other"))
+            continue
+        receiver = _RECEIVER_BEFORE_RE.search(before) or _ADD_FIELD_BEFORE_RE.search(before)
+        if receiver and receiver.group(1) != "Params":
+            continue
+        reads.append((t.group(1), "other"))
+    return reads
+
+
+def _enclosing_call(code: str, pos: int) -> tuple[str | None, int]:
+    """(name, open) of the call whose argument list holds `pos` (literals blanked), or (None, -1) when `pos` is not
+    inside one within its statement."""
+    depth, k = 0, pos - 1
+    while k >= 0:
+        c = code[k]
+        if c == ")":
+            depth += 1
+        elif c == "(":
+            if depth == 0:
+                m = re.search(r'([A-Za-z_]\w*)\s*(?:<[^<>;(){}]*>\s*)?$', code[:k])
+                return (m.group(1) if m else None), k
+            depth -= 1
+        elif c in ";{}" and depth == 0:
+            break
+        k -= 1
+    return None, -1
+
+
+@lru_cache(maxsize=None)
+def _is_defined(text: str, name: str) -> bool:
+    """Whether `text` holds the definition of `name` (memoized: asked at every hand-over of Params)."""
+    return bool(_find_function_def(text, name)[1])
+
+
+def _hands_params_unscanned(text: str, body: str, visited: set) -> bool:
+    """Whether `body` hands Params to code the scan does not read: its values (`Params->Values`), a call that takes it
+    as a later argument or dereferenced, a function the scan did not follow (`visited` holds the ones it reached; one
+    not defined in `text` lives in another file, one past the depth limit was never reached), or a name it is assigned
+    to. The literal-field readers, control keywords and a lambda capture do not count."""
+    if _PARAMS_VALUES_RE.search(body):
+        return True
+    code = _blank_literals(body)
+    for m in _PARAMS_VALUE_RE.finditer(code):
+        before = code[:m.start()].rstrip()
+        if before.endswith(("[", "[&", "[=")) or re.search(r'\[[^\[\]();]*$', before):
+            continue  # a lambda capture: the lambda's body is part of this body
+        callee, open_at = _enclosing_call(code, m.start())
+        if callee is None:
+            return True
+        if callee in _CPP_KEYWORDS or callee in _LITERAL_FIELD_READERS:
+            continue
+        first = not code[open_at + 1:m.start()].strip()
+        if not first or callee not in visited or not _is_defined(text, callee):
+            return True
+    return False
+
+
+def _vector_shape(reads: list) -> str | None:
+    """The shape of the one vector reader every read of a param goes through, else None."""
+    kinds = set(reads)
+    return kinds.pop() if len(kinds) == 1 and kinds <= set(_VECTOR_SHAPES.values()) else None
 
 
 def _missing_value_fails(body: str, start: int, target: str) -> bool:
@@ -855,7 +999,7 @@ def _guard_runs_always(body: str, pos: int) -> bool:
 
 
 def _collect_params(text, body, visited, depth, ordered, required, chains=None, sig="", num_types=None,
-                    conditional=False):
+                    conditional=False, vec_reads=None):
     """Scan `body` for param reads, then follow `Params`-passing calls (forwarders
     and helpers like ResolveSkeleton) up to `depth` levels deep.
 
@@ -874,7 +1018,10 @@ def _collect_params(text, body, visited, depth, ordered, required, chains=None, 
 
     An untyped guard (`!Params->HasField(...)`, `!Params->TryGetField(...)`, RAW_REQUIRED_RE) makes
     its param required only when it runs on every path (_guard_runs_always), and never in a body
-    reached through a call that runs only on some paths (`conditional`, see _runs_always)."""
+    reached through a call that runs only on some paths (`conditional`, see _runs_always).
+
+    `vec_reads` collects how each param's value is read (_value_reads), and `vec_reads[_UNSEEN]` is set
+    when a body hands Params to code the scan does not read (_hands_params_unscanned)."""
     for m in REQUIRED_RE.finditer(body):
         name = m.group(1)
         guarded = _guarded_statement(body, m.start())
@@ -934,7 +1081,7 @@ def _collect_params(text, body, visited, depth, ordered, required, chains=None, 
         _put(pname, jt)
     for pname in RAW_FIELD_RE.findall(body):          # raw TryGetField -> any JSON type
         _put(pname, "any")
-    for pname in VECTOR_HELPER_RE.findall(body):      # ReadJson{Vector,Vector2D,Rotator} -> array
+    for pname in VECTOR_HELPER_RE.findall(body):      # ReadJson{Vector,Vector2D,Rotator,LinearColor} -> array
         _put(pname, "array")
     if WORLD_SELECTOR_RE.search(body):                # ResolveWorldSelector -> optional `world`
         _put("world", "string")
@@ -947,45 +1094,56 @@ def _collect_params(text, body, visited, depth, ordered, required, chains=None, 
             num_types.setdefault(m.group(3), []).append(_numeric_read_type(sig + body, body, m))
         for m in _REQUIRED_NUM_READ_RE.finditer(body):  # ReadRequiredNumber(Params, TEXT("k"), Var) reads into Var
             num_types.setdefault(m.group(1), []).append(_declared_type(sig + body, m.group(2)))
-    if depth <= 0:
-        return
-    for call in CALLEE_RE.finditer(body):
-        callee = call.group(1)
-        if callee in visited or callee in _CPP_KEYWORDS:
-            continue
-        visited.add(callee)
-        csig, cbody = _find_function_def(text, callee)
-        if cbody:
-            _collect_params(text, cbody, visited, depth - 1, ordered, required, chains, csig, num_types,
-                            conditional or not _runs_always(body, call.start()))
+    if vec_reads is not None:                         # what each param's value is read as (see _vector_shape)
+        for pname, how in _value_reads(body):
+            vec_reads.setdefault(pname, []).append(how)
+    if depth > 0:
+        for call in CALLEE_RE.finditer(body):
+            callee = call.group(1)
+            if callee in visited or callee in _CPP_KEYWORDS:
+                continue
+            visited.add(callee)
+            csig, cbody = _find_function_def(text, callee)
+            if cbody:
+                _collect_params(text, cbody, visited, depth - 1, ordered, required, chains, csig, num_types,
+                                conditional or not _runs_always(body, call.start()), vec_reads)
+    # Checked once this body's calls are followed: every function it hands Params to that the scan read is visited.
+    if vec_reads is not None and _hands_params_unscanned(text, body, visited):
+        vec_reads[_UNSEEN] = ["unseen"]
 
 
-def _scan_params(text: str, body: str, sig: str = "") -> list[tuple[str, str, bool, str | None, tuple[int, int] | None]]:
-    """Extract (param_name, jsonType, required, chain_key, int_range), following Params-passing calls.
+def _scan_params(text: str, body: str, sig: str = "") -> list[tuple[str, str, bool, str | None, tuple[int, int] | None, str | None]]:
+    """Extract (param_name, jsonType, required, chain_key, int_range, vector_shape), following Params-passing calls.
 
     `chain_key` groups the alternative spellings of one param (the `&&` chain of
     negated reads); it is `None` for everything else. `int_range` is the range of a
-    number param whose every read lands in an integer variable (_int_range), else None."""
+    number param whose every read lands in an integer variable (_int_range), else None.
+    `vector_shape` is the shape of the one vector reader every read of the param goes
+    through (_vector_shape), else None; no param has one when the handler hands Params
+    to code the scan does not read."""
     ordered: "OrderedDict[str, str]" = OrderedDict()
     required: set[str] = set()
     chains: dict[str, str] = {}
     num_types: dict[str, list] = {}
-    _collect_params(text, body, set(), 2, ordered, required, chains, sig, num_types)
+    vec_reads: dict[str, list] = {}
+    _collect_params(text, body, set(), 2, ordered, required, chains, sig, num_types, vec_reads=vec_reads)
     # An alias in an `&&` chain is still a VALID param (the handler reads it), but it is
     # NOT required: demanding both names at once would be the generator's invention, not
     # the handler's. The HEAD stays required; if it turns out not to be the documented one,
     # the merge with the annotation fixes that later (`_prefer_documented`), which is where
     # the descriptions are.
     required -= {a for a, cab in chains.items() if a != cab}
-    return [(p, jt, p in required, chains.get(p), _int_range(num_types.get(p, [])) if jt == "number" else None)
+    shapes = {} if _UNSEEN in vec_reads else {p: _vector_shape(h) for p, h in vec_reads.items()}
+    return [(p, jt, p in required, chains.get(p), _int_range(num_types.get(p, [])) if jt == "number" else None,
+             shapes.get(p))
             for p, jt in ordered.items()]
 
 
-def parse_handler_cpp(path: str) -> tuple[list[str], dict[str, list[tuple[str, str, bool, "str | None", "tuple[int, int] | None"]]], dict[str, dict], dict[str, int], list]:
+def parse_handler_cpp(path: str) -> tuple[list[str], dict[str, list[tuple[str, str, bool, "str | None", "tuple[int, int] | None", "str | None"]]], dict[str, dict], dict[str, int], list]:
     """Returns:
         - list of command strings this handler responds to
-        - dict: command_string -> list of (param_name, jsonType, required, chain_key, int_range)
-          NOTE: FIVE-tuples, straight from _scan_params. Consumers should index, not
+        - dict: command_string -> list of (param_name, jsonType, required, chain_key, int_range, vector_shape)
+          NOTE: SIX-tuples, straight from _scan_params. Consumers should index, not
           unpack by arity.
         - dict: command_string -> annotation block {description, params, returns}
         - dict: command_string -> duplicate count (>1 = same cmd annotated 2+ times)
@@ -1111,7 +1269,7 @@ def describe_drift(want: dict, have_text: str | None) -> list[str]:
             if field == "params" and isinstance(a, list) and isinstance(b, list) and shape(a) == shape(b):
                 groups["param descriptions differ"].append(name)
             elif field == "params":
-                groups["params differ (name, type, required, aliasOf, intRange or nameLike)"].append(name)
+                groups["params differ (name, type, required, aliasOf, intRange, nameLike or vectorShape)"].append(name)
             else:
                 groups[f"{field} differs"].append(name)
     lines = [f"{label} ({len(names)}): {', '.join(map(str, names[:10]))}{' ...' if len(names) > 10 else ''}"
@@ -1323,6 +1481,7 @@ def build(args) -> int:
             "source": "the command families' route tables + // MCP: annotations",
             "warning": "AUTO-GENERATED -- DO NOT EDIT BY HAND; run Tools/codegen_command_catalog.py --write",
         },
+        "nameLikeRule": name_like_rule(),
         "domains": domains_list,
     }
 

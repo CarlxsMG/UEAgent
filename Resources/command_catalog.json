@@ -4,6 +4,102 @@
     "source": "the command families' route tables + // MCP: annotations",
     "warning": "AUTO-GENERATED -- DO NOT EDIT BY HAND; run Tools/codegen_command_catalog.py --write"
   },
+  "nameLikeRule": {
+    "nameWords": [
+      "action",
+      "actor",
+      "actors",
+      "asset",
+      "assets",
+      "attribute",
+      "blueprint",
+      "bone",
+      "bp",
+      "chain",
+      "channel",
+      "class",
+      "classes",
+      "column",
+      "component",
+      "components",
+      "composite",
+      "cubemap",
+      "curve",
+      "dispatcher",
+      "enum",
+      "event",
+      "folder",
+      "function",
+      "graph",
+      "group",
+      "guid",
+      "handle",
+      "id",
+      "ids",
+      "input",
+      "interface",
+      "label",
+      "labels",
+      "layer",
+      "level",
+      "library",
+      "macro",
+      "map",
+      "material",
+      "materials",
+      "mesh",
+      "mode",
+      "name",
+      "names",
+      "namespace",
+      "node",
+      "package",
+      "parameter",
+      "path",
+      "paths",
+      "pin",
+      "primitive",
+      "profile",
+      "property",
+      "section",
+      "skeleton",
+      "slot",
+      "socket",
+      "state",
+      "struct",
+      "symbol",
+      "table",
+      "tables",
+      "tag",
+      "tags",
+      "texture",
+      "track",
+      "trigger",
+      "type",
+      "variable",
+      "widget",
+      "widgets",
+      "world"
+    ],
+    "diskWords": [
+      "dir",
+      "directory",
+      "file",
+      "filename",
+      "files",
+      "uproject",
+      "url"
+    ],
+    "diskPathSuffixes": [
+      "output_path",
+      "export_path",
+      "rel_path"
+    ],
+    "notNameDomains": [
+      "USD"
+    ],
+    "notNameDomainKeepWord": "actor"
+  },
   "domains": [
     {
       "domain": "AI",
@@ -2236,18 +2332,21 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional [x, y, z] world location for the new bone."
             },
             {
               "name": "rotation",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "rotator",
               "description": "Optional [pitch, yaw, roll] world rotation for the new bone."
             },
             {
               "name": "scale",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional [x, y, z] scale for the new bone."
             }
           ],
@@ -2343,6 +2442,7 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional [x, y, z] location in rig global space for the new null; defaults to the origin."
             }
           ],
@@ -2483,12 +2583,14 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional [x, y, z] relative location"
             },
             {
               "name": "rotation",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "rotator",
               "description": "Optional [pitch, yaw, roll] relative rotation"
             }
           ],
@@ -2529,12 +2631,14 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Socket location relative to its bone as [x, y, z] (default 0,0,0)"
             },
             {
               "name": "rotation",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "rotator",
               "description": "Socket rotation relative to its bone as [pitch, yaw, roll] (default 0,0,0)"
             }
           ],
@@ -2608,6 +2712,7 @@
               "name": "rotation",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "rotator",
               "description": "Optional world [pitch, yaw, roll] rotation in degrees for the target."
             },
             {
@@ -7120,7 +7225,7 @@
         },
         {
           "name": "set_anim_curve_color",
-          "description": "Set the editor display color of a FLOAT curve on a UAnimSequence through its data controller (one undo step), then save the package (cosmetic: it tints the curve in the editor, it does not affect evaluation). FLOAT-CURVE ONLY: a name that is not a float curve of the sequence, a transform curve included, is an error and nothing is written. The color the curve already has is a success with applied=false and saved=false, and nothing is written or saved. A failed save makes success false, with saved=false and save_error.",
+          "description": "Set the editor display color of a FLOAT curve on a UAnimSequence through its data controller (one undo step), then save the package (cosmetic: it tints the curve in the editor, it does not affect evaluation). FLOAT-CURVE ONLY: a name that is not a float curve of the sequence, a transform curve included, is an error and nothing is written; so is a color that is not 3 or 4 numbers. The color the curve already has is a success with applied=false and saved=false, and nothing is written or saved. A failed save makes success false, with saved=false and save_error. Create the curve with add_anim_float_curve; its comment: set_anim_curve_comment.",
           "params": [
             {
               "name": "anim_sequence_path",
@@ -7140,7 +7245,7 @@
               "name": "color",
               "jsonType": "array",
               "required": false,
-              "description": "RGBA color as [r, g, b, a] in 0..1 (default [1,1,1,1])."
+              "description": "Color as [r, g, b] or [r, g, b, a], usually 0..1 (numbers within the float range); a is 1 when omitted, and an omitted color is white [1,1,1,1]. Any other value is an error."
             }
           ],
           "returns": "{ anim_sequence_path, curve_name, color, applied, saved, save_error, message }",
@@ -8702,12 +8807,14 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "[x, y, z] world location"
             },
             {
               "name": "rotation",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "rotator",
               "description": "Optional [pitch, yaw, roll] rotation; defaults to ZeroRotator"
             }
           ],
@@ -8741,6 +8848,7 @@
               "name": "location_offset",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "[x, y, z] offset applied to the target relative to its LocationOffsetDirection"
             }
           ],
@@ -8774,6 +8882,7 @@
               "name": "rotation",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "rotator",
               "description": "New world rotation in degrees as [pitch, yaw, roll]; omitted means [0, 0, 0]."
             }
           ],
@@ -9264,18 +9373,21 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional [X, Y, Z] gizmo location."
             },
             {
               "name": "rotation",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "rotator",
               "description": "Optional [Pitch, Yaw, Roll] gizmo rotation."
             },
             {
               "name": "scale",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional [X, Y, Z] gizmo scale."
             }
           ],
@@ -10029,18 +10141,21 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional [x, y, z] relative location"
             },
             {
               "name": "rotation",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "rotator",
               "description": "Optional [pitch, yaw, roll] relative rotation (degrees)"
             },
             {
               "name": "scale",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional [x, y, z] relative scale"
             }
           ],
@@ -14602,6 +14717,7 @@
               "name": "rotation",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "rotator",
               "description": "Optional [pitch, yaw, roll] rotation of the sound (it matters to a directional attenuation)"
             }
           ],
@@ -17061,6 +17177,7 @@
               "name": "node_position",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector2d",
               "description": "Node canvas position as [x, y]; takes precedence over position_x/position_y"
             }
           ],
@@ -17267,6 +17384,7 @@
               "name": "node_position",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector2d",
               "description": "Node canvas position as [x, y]; takes precedence over position_x/position_y"
             }
           ],
@@ -17371,6 +17489,7 @@
               "name": "node_position",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector2d",
               "description": "Node canvas position as [x, y]; takes precedence over position_x/position_y"
             }
           ],
@@ -17430,6 +17549,7 @@
               "name": "node_position",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector2d",
               "description": "Node canvas position as [x, y]; takes precedence over position_x/position_y"
             }
           ],
@@ -17490,6 +17610,7 @@
               "name": "node_position",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector2d",
               "description": "Node canvas position as [x, y]; takes precedence over position_x/position_y"
             }
           ],
@@ -17553,6 +17674,7 @@
               "name": "node_position",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector2d",
               "description": "Node canvas position as [x, y]; takes precedence over position_x/position_y"
             }
           ],
@@ -17612,6 +17734,7 @@
               "name": "node_position",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector2d",
               "description": "Node canvas position as [x, y]; takes precedence over position_x/position_y"
             }
           ],
@@ -17736,6 +17859,7 @@
               "name": "node_position",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector2d",
               "description": "Node canvas position as [x, y]; takes precedence over position_x/position_y"
             }
           ],
@@ -17788,6 +17912,7 @@
               "name": "node_position",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector2d",
               "description": "Node canvas position as [x, y]; takes precedence over position_x/position_y"
             }
           ],
@@ -17961,6 +18086,7 @@
               "name": "node_position",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector2d",
               "description": "Node canvas position as [x, y]; takes precedence over position_x/position_y"
             }
           ],
@@ -18099,6 +18225,7 @@
               "name": "node_position",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector2d",
               "description": "Node canvas position as [x, y]; takes precedence over position_x/position_y"
             }
           ],
@@ -18151,6 +18278,7 @@
               "name": "node_position",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector2d",
               "description": "Node canvas position as [x, y]; takes precedence over position_x/position_y"
             }
           ],
@@ -18210,6 +18338,7 @@
               "name": "node_position",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector2d",
               "description": "Node canvas position as [x, y]; takes precedence over position_x/position_y"
             }
           ],
@@ -18328,6 +18457,7 @@
               "name": "node_position",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector2d",
               "description": "Node canvas position as [x, y]; takes precedence over position_x/position_y"
             }
           ],
@@ -18380,6 +18510,7 @@
               "name": "node_position",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector2d",
               "description": "Node canvas position as [x, y]; takes precedence over position_x/position_y"
             }
           ],
@@ -18425,6 +18556,7 @@
               "name": "node_position",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector2d",
               "description": "Node canvas position as [x, y]; takes precedence over position_x/position_y"
             }
           ],
@@ -18490,6 +18622,7 @@
               "name": "node_position",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector2d",
               "description": "Node canvas position as [x, y]; takes precedence over position_x/position_y."
             }
           ],
@@ -18535,6 +18668,7 @@
               "name": "node_position",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector2d",
               "description": "Node canvas position as [x, y]; takes precedence over position_x/position_y"
             }
           ],
@@ -18593,6 +18727,7 @@
               "name": "node_position",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector2d",
               "description": "Node canvas position as [x, y]; takes precedence over position_x/position_y"
             }
           ],
@@ -20015,6 +20150,7 @@
               "name": "node_position",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector2d",
               "description": "Node canvas position as [x, y]; takes precedence over position_x/position_y"
             }
           ],
@@ -21345,12 +21481,14 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional [x, y, z] world location"
             },
             {
               "name": "rotation",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "rotator",
               "description": "Optional [pitch, yaw, roll] world rotation"
             },
             {
@@ -21524,12 +21662,14 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional [X, Y, Z] relative location vs parent."
             },
             {
               "name": "rotation",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "rotator",
               "description": "Optional [Pitch, Yaw, Roll] relative rotation vs parent."
             },
             {
@@ -21663,12 +21803,14 @@
               "name": "socket_offset",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional [X, Y, Z] relative offset applied at the spring-arm tip."
             },
             {
               "name": "target_offset",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional [X, Y, Z] world-space offset applied at the start of the spring."
             },
             {
@@ -25467,18 +25609,21 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional [x, y, z] relative location (for scene components)"
             },
             {
               "name": "rotation",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "rotator",
               "description": "Optional [pitch, yaw, roll] relative rotation (for scene components)"
             },
             {
               "name": "scale",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional [x, y, z] relative scale (for scene components)"
             },
             {
@@ -27478,7 +27623,8 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
-              "description": "Optional world point to centre the pasted group on, ARRAY form only [x, y, z] (the group's average is moved there, each actor's offset preserved). Omit to paste where the originals were; a malformed array silently means the origin."
+              "vectorShape": "vector",
+              "description": "Optional world point to centre the pasted group on, ARRAY form only [x, y, z] (the group's average is moved there, each actor's offset preserved). Omit to paste where the originals were; any other value (an object, another length) is an error and nothing is pasted."
             }
           ],
           "returns": "{ pasted_actors: [actor JSON with the new auto-assigned names], pasted_count: int, success: bool }",
@@ -28023,19 +28169,22 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
-              "description": "Optional new WORLD location, ARRAY form only: [x, y, z]. Absolute, not a delta; an object or a shorter array is silently read as the origin, which teleports the actor to 0,0,0."
+              "vectorShape": "vector",
+              "description": "Optional new WORLD location, ARRAY form only: [x, y, z]. Absolute, not a delta; any other value (an object, another length) is an error and the actor is not touched."
             },
             {
               "name": "rotation",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "rotator",
               "description": "Optional new WORLD rotation as the array [pitch, yaw, roll] -- note index 2 is ROLL, not yaw -- or, unambiguously, the object {\"pitch\":..,\"yaw\":..,\"roll\":..}, which is the recommended form."
             },
             {
               "name": "scale",
               "jsonType": "array",
               "required": false,
-              "description": "Optional new WORLD scale, ARRAY form only: [x, y, z]. A malformed value silently becomes 0,0,0 and the actor disappears."
+              "vectorShape": "vector",
+              "description": "Optional new WORLD scale, ARRAY form only: [x, y, z]. Any other value (an object, another length) is an error and the actor is not touched."
             }
           ],
           "returns": "{ actor JSON via DescribeActorObject, transform RE-READ off the actor after the write }",
@@ -28586,19 +28735,22 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
-              "description": "Optional world location, ARRAY form only: [x, y, z]. An object or a shorter array is silently read as the origin."
+              "vectorShape": "vector",
+              "description": "Optional world location, ARRAY form only: [x, y, z]; the origin when omitted. Any other value (an object, another length) is an error and nothing is spawned."
             },
             {
               "name": "rotation",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "rotator",
               "description": "Optional world rotation as the array [pitch, yaw, roll] -- note index 2 is ROLL, not yaw -- or, unambiguously, the object {\"pitch\":..,\"yaw\":..,\"roll\":..}, which is the recommended form. Defaults to zero."
             },
             {
               "name": "scale",
               "jsonType": "array",
               "required": false,
-              "description": "Optional world scale, ARRAY form only: [x, y, z]. Defaults to 1,1,1; a malformed value silently becomes 0,0,0 (an invisible actor)."
+              "vectorShape": "vector",
+              "description": "Optional world scale, ARRAY form only: [x, y, z]. Defaults to 1,1,1; any other value (an object, another length) is an error and nothing is spawned."
             },
             {
               "name": "static_mesh",
@@ -28995,6 +29147,7 @@
               "name": "color_add",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional [r, g, b] static color shift."
             }
           ],
@@ -30422,7 +30575,7 @@
         },
         {
           "name": "set_niagara_component_color",
-          "description": "Sets a LinearColor override parameter on a spawned Niagara component.  Resolves the UNiagaraComponent on the owner actor and calls SetVariableLinearColor, then reads it back.",
+          "description": "Set a LinearColor override (a user parameter value) on the Niagara component of an actor in the editor world, the actor found by internal name or editor label and the first UNiagaraComponent on it used, through UNiagaraComponent::SetVariableLinearColor, which adds the override when needed. color is [r, g, b] or [r, g, b, a] in numbers within the float range; an omitted alpha is 1 and an omitted color is opaque black. Any other color, a missing actor_name or variable_name, or an actor without a Niagara component is an error and nothing changes. The value is set on the component in memory with no undo step; the level is neither marked dirty nor saved. verified is whether GetVariableColor finds the variable, and value_read_back is what it reads. Four plain components: set_niagara_component_vec4; the asset default: set_niagara_user_parameter.",
           "params": [
             {
               "name": "actor_name",
@@ -30442,7 +30595,7 @@
               "name": "color",
               "jsonType": "array",
               "required": false,
-              "description": "Color value [R, G, B, A] (A defaults to 1.0 if omitted)."
+              "description": "Color as [R, G, B] or [R, G, B, A], numbers within the float range; A is 1.0 when omitted, and an omitted color is opaque black. Any other value is an error."
             }
           ],
           "returns": "{ actor_name: string, variable_name: string, variable_type: string, set: bool, verified: bool, value_read_back: [number, number, number, number] }",
@@ -30612,6 +30765,7 @@
               "name": "position",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "World-space position override as [x, y, z]."
             }
           ],
@@ -30786,6 +30940,7 @@
               "name": "vector",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Vector value [X, Y, Z]."
             }
           ],
@@ -31425,7 +31580,7 @@
         },
         {
           "name": "set_niagara_module_input",
-          "description": "Override a Niagara module input by writing the rapid-iteration store.  Locates the module function-call node (by its module_node_name, as returned by add_niagara_module_to_stack) on the emitter's spawn or update stack, matches the input by its leaf name, and writes the value into the owning group script's RapidIterationParameters store. The system is recompiled and saved. For a float or int input, value is required and must be a JSON number; a missing or mistyped one is an error and nothing changes.  HONEST GATE: bool / enum / data-interface / object inputs are not rapid-iteration eligible and return a clean error (\"override of <type> inputs requires the linked-value path, not supported headless\"). The packed value_type must also match the input's actual type or a clean error is returned.",
+          "description": "Override a Niagara module input by writing the rapid-iteration store. Locates the module function-call node (by its module_node_name, as returned by add_niagara_module_to_stack) on the emitter's spawn or update stack, matches the input by its leaf name, and writes the value into the owning group script's RapidIterationParameters store. The system is recompiled and saved. value is required: a JSON number for a float or int input, [x, y, z] for a vector, [r, g, b] or [r, g, b, a] for a color; a missing or malformed one is an error and nothing changes. HONEST GATE: bool / enum / data-interface / object inputs are not rapid-iteration eligible and return a clean error. The packed value_type must also match the input's actual type or a clean error is returned. Read it back with get_niagara_module_input.",
           "params": [
             {
               "name": "system_path",
@@ -31466,7 +31621,7 @@
               "name": "value",
               "jsonType": "any",
               "required": false,
-              "description": "For float/int: a JSON number, required (a missing or mistyped one is an error). For vector: an [x, y, z] list. For color: an [r, g, b, a] list."
+              "description": "Required. For float/int: a JSON number. For vector: [x, y, z], numbers within the float range. For color: [r, g, b] or [r, g, b, a], alpha 1 when omitted. A missing or malformed value is an error."
             }
           ],
           "returns": "{ system_path: string, emitter_name: string, module_node_name: string, input_name: string, value_type: string, ri_param_name: string, verified: bool, success: bool, saved: bool, save_error?: string }",
@@ -31884,12 +32039,14 @@
               "name": "min",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Local-space bounds minimum [X, Y, Z]."
             },
             {
               "name": "max",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Local-space bounds maximum [X, Y, Z]."
             }
           ],
@@ -32168,12 +32325,14 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "World location [X, Y, Z]."
             },
             {
               "name": "rotation",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "rotator",
               "description": "Optional [pitch, yaw, roll]; defaults to identity"
             },
             {
@@ -32936,12 +33095,14 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "[X, Y, Z] world location for the spawn point."
             },
             {
               "name": "rotation",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "rotator",
               "description": "Optional world rotation. TWO forms: the unambiguous OBJECT form {\"roll\":R,\"pitch\":P,\"yaw\":Y} (RECOMMENDED) or the ambiguous ARRAY form [Pitch, Yaw, Roll] -- note the array order, index 2 is ROLL, not yaw. Default identity."
             },
             {
@@ -36226,6 +36387,7 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional local [x, y, z] offset for the primitive"
             },
             {
@@ -36272,6 +36434,7 @@
               "name": "append_transform",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional [x,y,z] world-space transform applied to the source mesh before merging (default identity)"
             }
           ],
@@ -36362,6 +36525,7 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional tool [x, y, z] offset"
             },
             {
@@ -37189,7 +37353,7 @@
         },
         {
           "name": "get_mesh_open_border_loops",
-          "description": "Count the open border loops of a UStaticMesh asset: closed chains of boundary edges (edges with one adjacent triangle), so each hole or open rim counts once and a closed mesh gives 0. Computed on a transient dynamic-mesh copy with build settings applied; read-only. A chain the engine cannot close into a loop, at a bowtie vertex, is left out of the count, and ambiguous_topology does not flag it: with the engine's default loop settings it stays false. lod_index picks the LOD (default 0), and one the mesh lacks is an error; a LOD without source geometry, as a reduced one, is read from its render data, split at UV and normal seams (read_render_data). A path that is not a static mesh, or one with no geometry, is an error. Yes or no: get_mesh_is_closed; a DynamicMeshActor in the level: get_num_open_border_edges.",
+          "description": "Count the open border loops of a UStaticMesh asset: closed chains of boundary edges (edges with one adjacent triangle), one per hole or open rim, 0 for a closed mesh. Read-only, on a transient dynamic-mesh copy with build settings applied. A chain the engine cannot close into a loop, as across mismatched winding, counts in open_border_spans instead. ambiguous_topology is true when there is a span or a boundary vertex with more than two boundary edges (a bowtie, split as the engine chooses). lod_index picks the LOD (default 0), and one the mesh lacks is an error; a LOD without source geometry is read from its render data, split at UV and normal seams (read_render_data). A path that is not a static mesh, or has no geometry, is an error. Yes or no: get_mesh_is_closed; a DynamicMeshActor in the level: get_num_open_border_edges.",
           "params": [
             {
               "name": "static_mesh_path",
@@ -37209,7 +37373,7 @@
               "description": "LOD to read (default 0), from 0 to the mesh's last LOD, echoed as requested_lod_index; a LOD the mesh does not have is an error and nothing is read."
             }
           ],
-          "returns": "{ static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, read_render_data, open_border_loops, ambiguous_topology }",
+          "returns": "{ static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, read_render_data, open_border_loops, open_border_spans, ambiguous_topology }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -38644,12 +38808,14 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "World location [x, y, z] in cm (default the world origin)."
             },
             {
               "name": "rotation",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "rotator",
               "description": "World rotation in degrees as [pitch, yaw, roll] (default no rotation)."
             }
           ],
@@ -38682,6 +38848,7 @@
               "name": "rotation",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "rotator",
               "description": "Optional [pitch, yaw, roll] rotation; default (0,0,0)"
             },
             {
@@ -41128,6 +41295,7 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "[x, y, z] in landscape-local space, default [0,0,0]"
             },
             {
@@ -41192,12 +41360,14 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
-              "description": "[x, y, z] world location in cm; default [0, 0, 0], also when the array has fewer than 3 numbers."
+              "vectorShape": "vector",
+              "description": "[x, y, z] world location in cm; default [0, 0, 0]. Any other value (an object, another length) is an error and no light is spawned."
             },
             {
               "name": "rotation",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "rotator",
               "description": "World rotation in degrees as [pitch, yaw, roll], default [0, 0, 0]; directional, spot and rect lights shine along its forward axis."
             },
             {
@@ -41210,7 +41380,8 @@
               "name": "color",
               "jsonType": "array",
               "required": false,
-              "description": "[r, g, b] linear color, usually 0..1; default white. Any other form (an object, a hex string, fewer than 3 numbers) sets black."
+              "vectorShape": "vector",
+              "description": "[r, g, b] linear color, usually 0..1; default white. Any other value (an object, a hex string, another length) is an error and no light is spawned."
             }
           ],
           "returns": "{ light_type: string, actor_name: string }",
@@ -41748,6 +41919,7 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional [x, y, z] world location"
             }
           ],
@@ -42263,7 +42435,8 @@
               "name": "center",
               "jsonType": "array",
               "required": false,
-              "description": "World-space center, ARRAY form only: [x, y, z]. Omitted -- or given as an object, or with fewer than 3 numbers -- it silently becomes the origin [0,0,0], which reads exactly like \"nothing is near there\"."
+              "vectorShape": "vector",
+              "description": "World-space center, ARRAY form only: [x, y, z]. Omitted, it is the origin [0,0,0], which reads exactly like \"nothing is near there\"; any other value (an object, another length) is an error."
             },
             {
               "name": "world",
@@ -42637,7 +42810,8 @@
               "name": "center",
               "jsonType": "array",
               "required": false,
-              "description": "World-space center, ARRAY form only: [x, y, z]. Omitted -- or given as an object, or with fewer than 3 numbers -- it silently becomes the origin [0,0,0], which reads exactly like \"there are no lights here\"."
+              "vectorShape": "vector",
+              "description": "World-space center, ARRAY form only: [x, y, z]. Omitted, it is the origin [0,0,0], which reads exactly like \"there are no lights here\"; any other value (an object, another length) is an error."
             },
             {
               "name": "world",
@@ -43433,12 +43607,14 @@
               "name": "center",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "[x, y, z] box center in world space, default [0,0,0]"
             },
             {
               "name": "extent",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "[x, y, z] box half-extents, default [500,500,0]"
             },
             {
@@ -43485,12 +43661,14 @@
               "name": "center",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional [x,y,z] world center of the scatter box (default 0,0,0)"
             },
             {
               "name": "extent",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional [x,y,z] half-extent of the scatter box (default 500,500,0)"
             },
             {
@@ -44334,6 +44512,7 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional [x, y, z] in landscape-local space; only applied if provided"
             },
             {
@@ -44669,12 +44848,14 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "[x, y, z] world location for the volume (default [0,0,0])."
             },
             {
               "name": "extent",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional [x, y, z] box half-extent (default [100,100,100]); each axis is clamped > 0."
             },
             {
@@ -44719,12 +44900,14 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional [X, Y, Z] world location (defaults to origin)"
             },
             {
               "name": "extent",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional [X, Y, Z] **SEMI-EXTENT** (half-extent) in cm (defaults to [1000, 1000, 500]). The built cube's FULL edge length is 2x this on every axis -- e.g. extent [1000, 1000, 500] yields a 2000 x 2000 x 1000 cube. Echoed back under `requested.extent`; what the actor ended up with is `bounds_extent_actual`."
             }
           ],
@@ -44750,12 +44933,14 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional [x, y, z] world location"
             },
             {
               "name": "rotation",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "rotator",
               "description": "Optional [pitch, yaw, roll] world rotation"
             },
             {
@@ -46165,6 +46350,7 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional [X, Y, Z] world location (defaults to origin)"
             },
             {
@@ -46190,7 +46376,8 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
-              "description": "Optional [X, Y, Z] world location in cm (defaults to origin); fewer than 3 numbers also means the origin"
+              "vectorShape": "vector",
+              "description": "Optional [X, Y, Z] world location in cm (defaults to origin); any other value is an error and nothing is spawned"
             },
             {
               "name": "fog_density",
@@ -46215,7 +46402,8 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
-              "description": "[X, Y, Z] world location in cm; defaults to the origin, also when fewer than 3 numbers are given."
+              "vectorShape": "vector",
+              "description": "[X, Y, Z] world location in cm; defaults to the origin. Any other value (an object, another length) is an error and nothing is spawned."
             },
             {
               "name": "unbound",
@@ -46240,12 +46428,14 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
-              "description": "Optional [X, Y, Z] world location; missing or shorter than three numbers means the origin"
+              "vectorShape": "vector",
+              "description": "Optional [X, Y, Z] world location; missing means the origin, and any other value is an error and nothing is spawned"
             },
             {
               "name": "rotation",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "rotator",
               "description": "Optional world rotation in degrees, as [Pitch, Yaw, Roll] or {\"pitch\", \"yaw\", \"roll\"} by name (defaults to zero)"
             }
           ],
@@ -46265,7 +46455,8 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
-              "description": "[X, Y, Z] world location in cm; defaults to the origin, also when fewer than 3 numbers are given."
+              "vectorShape": "vector",
+              "description": "[X, Y, Z] world location in cm; defaults to the origin. Any other value (an object, another length) is an error and nothing is spawned."
             }
           ],
           "returns": "{ actor_name: string, actor_internal_name: string, actor_class: string, has_component: bool, spawned: bool }",
@@ -46284,6 +46475,7 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional [X, Y, Z] world location (defaults to origin)"
             },
             {
@@ -46315,6 +46507,7 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional [X, Y, Z] world location (defaults to origin)"
             },
             {
@@ -46346,7 +46539,8 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
-              "description": "[X, Y, Z] world location in cm; defaults to the origin, also when fewer than 3 numbers are given."
+              "vectorShape": "vector",
+              "description": "[X, Y, Z] world location in cm; defaults to the origin. Any other value (an object, another length) is an error and nothing is spawned."
             }
           ],
           "returns": "{ actor_name: string, actor_internal_name: string, actor_class: string, has_component: bool, spawned: bool }",
@@ -51910,7 +52104,8 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
-              "description": "[x, y, z] world location for the nav link proxy in cm; missing or shorter than 3 numbers spawns at the origin"
+              "vectorShape": "vector",
+              "description": "[x, y, z] world location for the nav link proxy in cm; missing spawns at the origin, and any other value is an error and nothing is spawned"
             }
           ],
           "returns": "{ actor_name, actor_label, actor_path, actor_class, success }",
@@ -51929,7 +52124,8 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
-              "description": "[x, y, z] world location for the volume in cm; missing or shorter than 3 numbers spawns at the origin"
+              "vectorShape": "vector",
+              "description": "[x, y, z] world location for the volume in cm; missing spawns at the origin, and any other value is an error and nothing is spawned"
             },
             {
               "name": "area_class",
@@ -51942,6 +52138,7 @@
               "name": "extent",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional [x, y, z] box half-extent in cm (default 100,100,100, a 200 cm box); a component of 0 or less becomes 100"
             }
           ],
@@ -52619,6 +52816,7 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional [x,y,z] spawn location (default [0,0,0]; overridden by the bounds-align when bounds_align_actor is given)."
             }
           ],
@@ -52945,12 +53143,14 @@
               "name": "position",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional [x, y, z] world / center position"
             },
             {
               "name": "direction",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional [x, y, z]; uniform-vector direction, plane normal (PlaneFalloff), or rotation axis (RotatedRadialVector)"
             },
             {
@@ -53099,6 +53299,7 @@
               "name": "impulse",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "[x, y, z] impulse vector in world units (required)"
             },
             {
@@ -53178,12 +53379,14 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "[x, y, z] world-space translation (required)"
             },
             {
               "name": "rotation",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "rotator",
               "description": "Optional [pitch, yaw, roll] world rotation (defaults to zero)"
             },
             {
@@ -53832,6 +54035,7 @@
               "name": "half_extent",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Box HALF-extent [x, y, z], not the full size (required for box)"
             },
             {
@@ -55099,6 +55303,7 @@
               "name": "additional_offset",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "[x, y, z] additional offset applied to the wheel. Optional."
             }
           ],
@@ -55198,6 +55403,7 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional [x, y, z] world location in cm; defaults to (0,0,0)"
             }
           ],
@@ -55217,6 +55423,7 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "World [x, y, z] for the constraint actor (defaults to origin)"
             },
             {
@@ -55270,12 +55477,14 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "[x, y, z] new translation"
             },
             {
               "name": "rotation",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "rotator",
               "description": "Optional [pitch, yaw, roll]"
             },
             {
@@ -55858,12 +56067,14 @@
               "name": "extent",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Cube HALF-size [x, y, z] in unreal units, each > 0 (same convention as spawn_box_volume / spawn_navmesh_bounds_volume). STRONGLY RECOMMENDED: omitting it leaves the volume with extent (0,0,0) and the PCG component generates 0 instances with no error and no warning."
             },
             {
               "name": "rotation",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "rotator",
               "description": "Optional [pitch, yaw, roll] rotation for the volume (default 0,0,0)."
             },
             {
@@ -62278,18 +62489,21 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional [x, y, z] world location."
             },
             {
               "name": "rotation",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "rotator",
               "description": "Optional [pitch, yaw, roll] world rotation."
             },
             {
               "name": "scale",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional [x, y, z] scale (default 1,1,1)."
             }
           ],
@@ -62683,12 +62897,14 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "Optional [x, y, z] world location for the camera's key at frame 0."
             },
             {
               "name": "rotation",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "rotator",
               "description": "Optional [pitch, yaw, roll] world rotation for the camera's key at frame 0."
             }
           ],
@@ -66026,6 +66242,7 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "World [x, y, z] location to spawn the trigger (default 0,0,0)"
             }
           ],
@@ -66059,6 +66276,7 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "World location [x, y, z] in cm of the volume center (default [0, 0, 0])."
             },
             {
@@ -66347,6 +66565,7 @@
               "name": "location",
               "jsonType": "array",
               "required": false,
+              "vectorShape": "vector",
               "description": "World [x, y, z] location to spawn the volume (default 0,0,0)"
             },
             {
@@ -69209,7 +69428,7 @@
         },
         {
           "name": "get_usd_attribute_value",
-          "description": "Read the composed value of one attribute on a prim of a registered USD stage, at the time code in time, else at the default time (the static default, not a sample), possibly a schema fallback (has_value true, has_authored_value false). value is {type, value}: a scalar as a boolean, number or string; a vector, color or point as an array of numbers; a quaternion as [x, y, z, w], real part last; a matrix as an array of rows; an array attribute as a JSON array of those plus length and truncated, cut to its first 600 numbers or strings (200 float3, fewer long strings). Another type, or no value, gives null with a note. A missing attribute is present=false; a missing stage or prim is an error. Read-only. Every attribute: list_usd_prim_attributes; sampled times: get_usd_attribute_time_samples; author a value: set_usd_attribute_value.",
+          "description": "Read the composed value of one attribute on a prim of a registered USD stage, at the time code in time, else at the default time (the static default, not a sample), possibly a schema fallback (has_value true, has_authored_value false). value is {type, value}: a scalar as a boolean, number or string; a pathExpression as its text; a vector, color or point as an array of numbers; a quaternion as [x, y, z, w], real part last; a matrix as an array of rows; an array attribute as a JSON array of those plus length and truncated, cut at 600 numbers or strings (fewer long strings). Another type, or no value, gives null with a note. A missing attribute is present=false; a missing stage or prim is an error. Read-only. Every attribute: list_usd_prim_attributes; sampled times: get_usd_attribute_time_samples; author a value: set_usd_attribute_value.",
           "params": [
             {
               "name": "stage_name",
@@ -69352,7 +69571,7 @@
         },
         {
           "name": "get_usd_prim_metadata",
-          "description": "Read the metadata of a prim on a registered USD stage: one key (present plus value as {type, value}) or, with no key, all entries (authored and fallback) plus count. Above 100 entries only count and a note return. Values read as get_usd_attribute_value reads them: scalars as booleans, numbers or strings, vectors and arrays as JSON arrays (an array with length and truncated, cut to its first 600 numbers or strings, fewer long strings), matrices as arrays of rows; an Sdf enum such as specifier gives its number, and a dictionary or list op (apiSchemas, references) a placeholder string. Read-only. Author one field with set_usd_prim_metadata; prim summary: get_usd_prim_info.",
+          "description": "Read the metadata of a prim on a registered USD stage as USD resolves it: one key (present plus value as {type, value}) or, with no key, all entries (authored and fallback) plus count; composition arcs such as references are read by key only, as their strongest opinion. Values read as get_usd_attribute_value reads them, an Sdf enum such as specifier as its number; a dictionary (customData, with the schema's fallback entries) as an object of {type, value} entries; a list op as {explicit} or {prepended, appended, deleted, ordered?, added?} arrays of item texts, apiSchemas composed into one explicit list; both with length and truncated. One reply holds about 30000 characters of values: past that, values are cut and further entries listed in omitted_keys. Above 100 entries only count and a note return. Read-only. Author with set_usd_prim_metadata; prim summary: get_usd_prim_info.",
           "params": [
             {
               "name": "prim_path",
@@ -69373,7 +69592,7 @@
               "description": "Metadata field to read, e.g. \"documentation\"; empty or omitted (default) returns all entries."
             }
           ],
-          "returns": "{ present: bool, key: string, value: { type: string, value: any, length?: number, truncated?: bool }, metadata: object, count: number, note?: string }",
+          "returns": "{ present: bool, key: string, value: { type: string, value: any, length?: number, truncated?: bool, note?: string }, metadata: object, count: number, truncated?: bool, omitted_keys?: [string], note?: string }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -69907,7 +70126,7 @@
         },
         {
           "name": "set_usd_attribute_value",
-          "description": "Author one attribute value on a prim of a registered USD stage, at the current edit target: a time sample at time, else the default; a missing attribute is created with type_name. The JSON value is converted to the declared type: bool takes a boolean; integer types a whole number in range; half, float, double and timecode a number; string, token and asset a string; vectors, colors, points and texCoords an array of numbers; a quaternion [x, y, z, w], real part last; a matrix an array of rows; an array type a JSON array of those. A value of another shape or range, an opaque type, or a new attribute without type_name fails and writes nothing. If USD refuses it, success is false and an attribute it created is removed. In memory: save_usd_stage writes it; get_usd_attribute_value reads it back.",
+          "description": "Author one attribute value on a prim of a registered USD stage, at the current edit target: a time sample at time, else the default; a missing attribute is created with type_name. The JSON value converts to the declared type: bool takes a boolean; integer types a whole number in range; half, float, double and timecode a number; string, token and asset a string; vectors, colors, points and texCoords an array of numbers; a quaternion [x, y, z, w]; a matrix an array of rows; an array type a JSON array of those. Another shape or range, opaque or group (valueless by design), pathExpression (the wrapper cannot build one) or a new attribute without type_name fails, writing nothing. If USD refuses it, success is false and a created attribute is removed. In memory: save_usd_stage writes it; get_usd_attribute_value reads it back.",
           "params": [
             {
               "name": "stage_name",
@@ -70078,7 +70297,7 @@
         },
         {
           "name": "set_usd_prim_metadata",
-          "description": "Author one metadata field (e.g. \"comment\", \"documentation\", \"kind\" or \"hidden\") on an existing prim of a registered USD stage, at the current edit target. The value is converted to the field's own type, read from the value the field resolves to (authored or fallback), so a bare string fits a token field; a value that does not fit that type is an error and writes nothing. A field that resolves to no scalar value (an unregistered key, an unauthored field without a fallback, an array or dictionary field) takes the type the value names, such as {\"type\": \"token\"}. When USD still refuses the write, success is false with set=false and the USD errors. The reply echoes the converted value. In memory only: save_usd_stage writes it; read it back with get_usd_prim_metadata.",
+          "description": "Author one metadata field (e.g. \"comment\", \"kind\", \"customData\" or \"apiSchemas\") on an existing prim of a registered USD stage, at the current edit target. The value is converted to the field's type, read from its resolved value or, for a standard field resolving to nothing (kind, comment, hidden, customData, apiSchemas, references...), the type Sdf registers: scalars, vectors, matrices and arrays as set_usd_attribute_value converts them; a dictionary from an object of entries; a list op from {explicit} or {prepended, appended, deleted, ordered, added} arrays of item texts. Any other field takes the type value names, else its JSON type. A value that does not fit writes nothing; if USD refuses the write, success is false with set=false and its errors. In memory: save_usd_stage writes it; get_usd_prim_metadata reads it back as USD resolves it.",
           "params": [
             {
               "name": "prim_path",
@@ -70090,7 +70309,7 @@
               "name": "key",
               "jsonType": "string",
               "required": true,
-              "description": "Registered USD prim metadata field, e.g. \"comment\", \"documentation\", \"kind\" or \"hidden\"; a key USD does not register as prim metadata fails with success false and set=false."
+              "description": "Registered USD prim metadata field, e.g. \"comment\", \"kind\", \"customData\" or \"apiSchemas\"; a key USD does not register as prim metadata fails with success false and set=false."
             },
             {
               "name": "stage_name",
@@ -70102,7 +70321,7 @@
               "name": "value",
               "jsonType": "any",
               "required": false,
-              "description": "{type?: \"bool|int|int64|float|double|string|token|asset\", value: <scalar>} OR a bare scalar. It is converted to the field's type when that can be read, and type is then not used; otherwise type, or without it the JSON type, decides (bool, number stored as double, string)."
+              "description": "The value itself (a scalar, an array, or an object of dictionary entries) or {type?, value}. It is converted to the field's type when that is known, and type is then not used; else type, or the JSON type, decides (bool, number as double, string, object as dictionary). A list op is {\"explicit\": [...]} or {\"prepended\": [...], \"appended\", \"deleted\", \"ordered\", \"added\"}, a reference item \"@a.usda@</Prim>\"."
             }
           ],
           "returns": "{ set: bool, key: string, value: object, declared_type?: string, errors?: [string] }",

@@ -1,5 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Commands/Asset/AssetCommandHelpers.h"  // CopiedObjectPathsTooLong
 #include "EditorAssetLibrary.h"
 #include "Misc/PackageName.h"
 #include "Misc/DateTime.h"
@@ -44,6 +45,16 @@ FString BackupAsset(const FString& AssetPath, FString& OutError)
     const FString AssetName = FPackageName::GetShortName(PackagePath);
     const FString TimeStamp = FDateTime::Now().ToString(TEXT("%Y%m%d_%H%M%S"));
     const FString DestPath = FString::Printf(TEXT("%s/%s/%s"), *GetBackupRoot(), *TimeStamp, *AssetName);
+
+    // The engine refuses a destination past the FName limit, but not one too long for the objects it copies with the
+    // asset, which are named after the copy's object path (a map's actors are packaged after its package name too): it
+    // aborts the editor on those. The asset is loaded here as the duplicate below would load it, and its deepest object
+    // measured.
+    OutError = AssetCommandHelpers::CopiedObjectPathsTooLong(UEditorAssetLibrary::LoadAsset(PackagePath), DestPath);
+    if (!OutError.IsEmpty())
+    {
+        return FString();
+    }
 
     UObject* Duplicated = UEditorAssetLibrary::DuplicateAsset(PackagePath, DestPath);
     if (!Duplicated)

@@ -42,7 +42,8 @@ namespace UEAgentMediaImpl
         FString ObjectPath;
     };
 
-    // Reads package_path and the required name into Out; the missing-parameter reply when name is absent.
+    // Reads package_path and the required name into Out; the missing-parameter reply when name is absent, the
+    // InvalidPackageNameReply when they do not join into a package name.
     TSharedPtr<FJsonObject> ReadAssetTarget(const TSharedPtr<FJsonObject>& Params, FMediaAssetTarget& Out)
     {
         Params->TryGetStringField(TEXT("package_path"), Out.PackagePath);
@@ -53,7 +54,8 @@ namespace UEAgentMediaImpl
         }
         Out.PackageName = FString::Printf(TEXT("%s/%s"), *Out.PackagePath, *Out.Name);
         Out.ObjectPath = FString::Printf(TEXT("%s.%s"), *Out.PackageName, *Out.Name);
-        return nullptr;
+        // The folder and the name each fit an FName and can still join past one, which the lookups abort on.
+        return mcp_common::InvalidPackageNameReply(Out.PackageName);
     }
 
     // Registers a newly created asset and saves its package; false, with OutSaveError, when the save fails.
@@ -117,6 +119,8 @@ TSharedPtr<FJsonObject> HandleCreateMediaPlayer(const TSharedPtr<FJsonObject>& P
     const FString TexName = FString::Printf(TEXT("%s_T"), *Target.Name);
     const FString TexPackageName = FString::Printf(TEXT("%s/%s"), *Target.PackagePath, *TexName);
     const FString TexObjectPath = FString::Printf(TEXT("%s.%s"), *TexPackageName, *TexName);
+    // The texture's name adds a suffix to the player's: its package is checked too, before anything is created.
+    if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(TexPackageName)) { return Invalid; }
 
     // Idempotent: load+return a stable payload if the player already exists.
     if (UMediaPlayer* Existing = mcp_common::ResolveAsset<UMediaPlayer>(Target.ObjectPath))

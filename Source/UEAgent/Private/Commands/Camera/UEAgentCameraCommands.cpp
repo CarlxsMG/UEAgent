@@ -79,6 +79,11 @@ namespace
 
         const FString Folder = PackagePath.IsEmpty() ? FString(TEXT("/Game/Cameras")) : PackagePath;
         const FString PkgPath = Folder / Name;
+        // Before the lookup, which aborts the editor on a joined package name past the FName limit.
+        if (const FString Invalid = mcp_common::InvalidPackageName(PkgPath); !Invalid.IsEmpty())
+        {
+            return CreationFailed(Invalid);
+        }
         UObject* Asset = mcp_common::ResolveObjectByPath(PkgPath, AssetClass);
         const bool bAlreadyExisted = Asset != nullptr && Asset->IsA(AssetClass);
         if (bAlreadyExisted)

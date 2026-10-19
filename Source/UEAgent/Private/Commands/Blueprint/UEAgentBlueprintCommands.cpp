@@ -246,6 +246,8 @@ TSharedPtr<FJsonObject> HandleCreateBlueprint(const TSharedPtr<FJsonObject>& Par
         return mcp_common::MakeErrorReply(
             FString::Printf(TEXT("Invalid blueprint package path resolved from name='%s': '%s'"), *BlueprintName, *PackageName));
     }
+    // The folder and the name each fit an FName and can still join past one, which the existence check below aborts on.
+    if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(PackageName)) { return Invalid; }
     const FString AssetName = FPackageName::GetShortName(PackageName);
 
     // The reply: the Blueprint, the parent class it reports and whether this call saved it.

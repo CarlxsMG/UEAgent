@@ -127,52 +127,33 @@ namespace
 	}
 
 	/**
-	 * The scalar USD type of the metadata field Key on Prim, spelled as VtValueForDeclaredType takes it ("bool",
-	 * "double", "string", "token"...), read from the value the field resolves to: the authored one, or the fallback a
-	 * registered field has. Empty when the field resolves to nothing or holds an array, a dictionary or another type
-	 * that has no such spelling. The held type is named as VtValueToJson reads it: the demangled C++ type or the USD name.
+	 * The type of the metadata field Key on Prim, spelled as VtValueForMetadataType takes it, read from the value the
+	 * field resolves to (the authored one, or the fallback a registered field has): a scalar, vector, matrix or array
+	 * as its Sdf value type ("token", "double3", "string[]"), a dictionary as "dictionary", a list op as its held type
+	 * ("SdfListOp<TfToken>"). A field that resolves to nothing (no prim definition gives kind, comment, apiSchemas...
+	 * a fallback), or to a type the converters do not author, takes the type USD registers for it when it is a standard
+	 * prim field (UsdWellKnownMetadataType); else empty.
 	 */
 	FString UsdPrim_MetadataDeclaredType(const UE::FUsdPrim& Prim, const FString& Key)
 	{
 		UE::FVtValue Current;
-		if (!Prim.GetMetadata(*Key, Current) || Current.IsEmpty() || Current.IsArrayValued())
+		if (Prim.GetMetadata(*Key, Current))
 		{
-			return FString();
-		}
-		static const TCHAR* const Spellings[][2] = {
-			{ TEXT("bool"), TEXT("bool") },
-			{ TEXT("unsigned char"), TEXT("uchar") }, { TEXT("uchar"), TEXT("uchar") },
-			{ TEXT("int"), TEXT("int") }, { TEXT("int32"), TEXT("int") },
-			{ TEXT("unsigned int"), TEXT("uint") }, { TEXT("uint"), TEXT("uint") },
-			{ TEXT("__int64"), TEXT("int64") }, { TEXT("int64"), TEXT("int64") },
-			{ TEXT("unsigned __int64"), TEXT("uint64") }, { TEXT("uint64"), TEXT("uint64") },
-			{ TEXT("pxr_half::half"), TEXT("half") }, { TEXT("half"), TEXT("half") },
-			{ TEXT("float"), TEXT("float") }, { TEXT("double"), TEXT("double") },
-			{ TEXT("SdfTimeCode"), TEXT("timecode") }, { TEXT("timecode"), TEXT("timecode") },
-			{ TEXT("SdfAssetPath"), TEXT("asset") }, { TEXT("asset"), TEXT("asset") },
-			{ TEXT("string"), TEXT("string") },
-			{ TEXT("TfToken"), TEXT("token") }, { TEXT("token"), TEXT("token") } };
-		const FString TypeName = Current.GetTypeName();
-		for (const auto& Spelling : Spellings)
-		{
-			if (TypeName.Equals(Spelling[0], ESearchCase::IgnoreCase))
+			const FString Declared = UEAgent::UsdCommon::UsdDeclaredTypeOf(Current);
+			if (!Declared.IsEmpty())
 			{
-				return Spelling[1];
+				return Declared;
 			}
 		}
-		return FString();
+		return UEAgent::UsdCommon::UsdWellKnownMetadataType(Key);
 	}
 
-	// {"type", "value"} of Value (UEAgent::UsdCommon::VtValueToJson); a type with no JSON form (a dictionary, a list op
-	// such as apiSchemas) gets a placeholder string as its "value".
+	// {"type", "value"} of Value (UEAgent::UsdCommon::VtValueToJson); a type with no JSON form gets a null "value" and a
+	// "note" naming it.
 	TSharedPtr<FJsonObject> UsdPrim_VtValueToJson(const UE::FVtValue& Value)
 	{
 		TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
-		if (!UEAgent::UsdCommon::VtValueToJson(Value, *Out))
-		{
-			Out->SetStringField(TEXT("value"),
-				FString::Printf(TEXT("<unsupported type '%s' -- string repr not available>"), *Value.GetTypeName()));
-		}
+		UEAgent::UsdCommon::VtValueToJson(Value, *Out);
 		return Out;
 	}
 }
@@ -408,11 +389,11 @@ TSharedPtr<FJsonObject> HandleSetUsdPrimSpecifier(const TSharedPtr<FJsonObject>&
 	return mcp_common::MakeOutcomeReply(Data, SetOk, mcp_common::MeasuredOutcomeError(TEXT("set_usd_prim_specifier"), TEXT("set")));
 }
 
-// MCP:set_usd_prim_metadata - Author one metadata field (e.g. "comment", "documentation", "kind" or "hidden") on an existing prim of a registered USD stage, at the current edit target. The value is converted to the field's own type, read from the value the field resolves to (authored or fallback), so a bare string fits a token field; a value that does not fit that type is an error and writes nothing. A field that resolves to no scalar value (an unregistered key, an unauthored field without a fallback, an array or dictionary field) takes the type the value names, such as {"type": "token"}. When USD still refuses the write, success is false with set=false and the USD errors. The reply echoes the converted value. In memory only: save_usd_stage writes it; read it back with get_usd_prim_metadata.
+// MCP:set_usd_prim_metadata - Author one metadata field (e.g. "comment", "kind", "customData" or "apiSchemas") on an existing prim of a registered USD stage, at the current edit target. The value is converted to the field's type, read from its resolved value or, for a standard field resolving to nothing (kind, comment, hidden, customData, apiSchemas, references...), the type Sdf registers: scalars, vectors, matrices and arrays as set_usd_attribute_value converts them; a dictionary from an object of entries; a list op from {explicit} or {prepended, appended, deleted, ordered, added} arrays of item texts. Any other field takes the type value names, else its JSON type. A value that does not fit writes nothing; if USD refuses the write, success is false with set=false and its errors. In memory: save_usd_stage writes it; get_usd_prim_metadata reads it back as USD resolves it.
 //   @param stage_name [string!] - Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier.
 //   @param prim_path [string!] - Absolute SdfPath of an existing prim, e.g. "/World/Cube".
-//   @param key [string!] - Registered USD prim metadata field, e.g. "comment", "documentation", "kind" or "hidden"; a key USD does not register as prim metadata fails with success false and set=false.
-//   @param value [object!] - {type?: "bool|int|int64|float|double|string|token|asset", value: <scalar>} OR a bare scalar. It is converted to the field's type when that can be read, and type is then not used; otherwise type, or without it the JSON type, decides (bool, number stored as double, string).
+//   @param key [string!] - Registered USD prim metadata field, e.g. "comment", "kind", "customData" or "apiSchemas"; a key USD does not register as prim metadata fails with success false and set=false.
+//   @param value [object!] - The value itself (a scalar, an array, or an object of dictionary entries) or {type?, value}. It is converted to the field's type when that is known, and type is then not used; else type, or the JSON type, decides (bool, number as double, string, object as dictionary). A list op is {"explicit": [...]} or {"prepended": [...], "appended", "deleted", "ordered", "added"}, a reference item "@a.usda@</Prim>".
 //   @returns { set: bool, key: string, value: object, declared_type?: string, errors?: [string] }
 TSharedPtr<FJsonObject> HandleSetUsdPrimMetadata(const TSharedPtr<FJsonObject>& Params)
 {
@@ -427,15 +408,21 @@ TSharedPtr<FJsonObject> HandleSetUsdPrimMetadata(const TSharedPtr<FJsonObject>& 
 	FString Key;
 	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("key"), Key)) { return Missing; }
 
-	// The "value" param carries either a primitive (implicit type) or an
-	// object {"type": "...", "value": ...} (explicit type). We promote raw
-	// primitives to {value: <primitive>} so the same dispatch path applies.
-	TSharedPtr<FJsonObject> ValueObj = UEAgent::UsdCommon::TypedValueObject(Params->TryGetField(TEXT("value")));
-
-	if (!ValueObj.IsValid())
+	// The "value" param: an object with a "value" member is {type?, value}; any other object is the value itself, the
+	// entries of a dictionary; a scalar or an array is the value.
+	const TSharedPtr<FJsonValue> ValueParam = Params->TryGetField(TEXT("value"));
+	if (!ValueParam.IsValid() || ValueParam->IsNull())
 	{
 		return mcp_common::MakeErrorReply(
-			TEXT("value is required (object {type, value} or scalar)"));
+			TEXT("value is required (a scalar, an array, an object of dictionary entries, or an object {type?, value})"));
+	}
+	TSharedPtr<FJsonValue> RawValue = ValueParam;
+	FString NamedType;
+	const TSharedPtr<FJsonObject>* ValueObject = nullptr;
+	if (ValueParam->TryGetObject(ValueObject) && ValueObject != nullptr && ValueObject->IsValid() && (*ValueObject)->HasField(TEXT("value")))
+	{
+		RawValue = (*ValueObject)->TryGetField(TEXT("value"));
+		(*ValueObject)->TryGetStringField(TEXT("type"), NamedType);
 	}
 
 	UE::FUsdPrim Prim;
@@ -446,23 +433,26 @@ TSharedPtr<FJsonObject> HandleSetUsdPrimMetadata(const TSharedPtr<FJsonObject>& 
 
 	// USD authors nothing for a value whose type is not the field's own (a string for the token field "kind"), so the
 	// value is built in the field's type when it can be read; only a field whose type cannot be read falls back to the
-	// type the value object names, or its JSON type.
+	// type the value object names, or the one its JSON type implies.
 	const FString DeclaredType = UsdPrim_MetadataDeclaredType(Prim, Key);
-	UE::FVtValue Vt;
-	FString VtError;
-	if (!DeclaredType.IsEmpty())
-	{
-		if (!UEAgent::UsdCommon::VtValueForDeclaredType(DeclaredType, ValueObj->TryGetField(TEXT("value")), Vt, VtError))
-		{
-			return mcp_common::MakeErrorReply(FString::Printf(
-				TEXT("value cannot be authored as metadata '%s' on %s, a field of type %s: %s. Nothing was written."),
-				*Key, *PrimPath, *DeclaredType, *VtError));
-		}
-	}
-	else if (!UEAgent::UsdCommon::VtValueFromJson(ValueObj, Vt, VtError))
+	const FString Type = !DeclaredType.IsEmpty() ? DeclaredType
+		: !NamedType.IsEmpty() ? NamedType
+		: UEAgent::UsdCommon::UsdTypeOfJson(RawValue);
+	if (Type.IsEmpty())
 	{
 		return mcp_common::MakeErrorReply(FString::Printf(
-			TEXT("value is not convertible to a supported USD type (bool|int|int64|float|double|string|token): %s"), *VtError));
+			TEXT("the type of metadata '%s' on %s cannot be read and the value, %s, implies none: give it as {\"type\": \"double[]\", ")
+			TEXT("\"value\": [...]}. Nothing was written."), *Key, *PrimPath, *UEAgent::UsdCommon::JsonShapeName(RawValue)));
+	}
+	UE::FVtValue Vt;
+	FString VtError;
+	if (!UEAgent::UsdCommon::VtValueForMetadataType(Type, RawValue, Vt, VtError, 0))
+	{
+		return mcp_common::MakeErrorReply(!DeclaredType.IsEmpty()
+			? FString::Printf(TEXT("value cannot be authored as metadata '%s' on %s, a field of type %s: %s. Nothing was written."),
+				*Key, *PrimPath, *DeclaredType, *VtError)
+			: FString::Printf(TEXT("value cannot be authored as metadata '%s' on %s as type %s: %s. Nothing was written."),
+				*Key, *PrimPath, *Type, *VtError));
 	}
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
@@ -492,11 +482,11 @@ TSharedPtr<FJsonObject> HandleSetUsdPrimMetadata(const TSharedPtr<FJsonObject>& 
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_usd_prim_metadata - Read the metadata of a prim on a registered USD stage: one key (present plus value as {type, value}) or, with no key, all entries (authored and fallback) plus count. Above 100 entries only count and a note return. Values read as get_usd_attribute_value reads them: scalars as booleans, numbers or strings, vectors and arrays as JSON arrays (an array with length and truncated, cut to its first 600 numbers or strings, fewer long strings), matrices as arrays of rows; an Sdf enum such as specifier gives its number, and a dictionary or list op (apiSchemas, references) a placeholder string. Read-only. Author one field with set_usd_prim_metadata; prim summary: get_usd_prim_info.
+// MCP:get_usd_prim_metadata - Read the metadata of a prim on a registered USD stage as USD resolves it: one key (present plus value as {type, value}) or, with no key, all entries (authored and fallback) plus count; composition arcs such as references are read by key only, as their strongest opinion. Values read as get_usd_attribute_value reads them, an Sdf enum such as specifier as its number; a dictionary (customData, with the schema's fallback entries) as an object of {type, value} entries; a list op as {explicit} or {prepended, appended, deleted, ordered?, added?} arrays of item texts, apiSchemas composed into one explicit list; both with length and truncated. One reply holds about 30000 characters of values: past that, values are cut and further entries listed in omitted_keys. Above 100 entries only count and a note return. Read-only. Author with set_usd_prim_metadata; prim summary: get_usd_prim_info.
 //   @param stage_name [string!] - Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier.
 //   @param prim_path [string!] - Absolute SdfPath of an existing prim, e.g. "/World/Cube".
 //   @param key [string] - Metadata field to read, e.g. "documentation"; empty or omitted (default) returns all entries.
-//   @returns { present: bool, key: string, value: { type: string, value: any, length?: number, truncated?: bool }, metadata: object, count: number, note?: string }
+//   @returns { present: bool, key: string, value: { type: string, value: any, length?: number, truncated?: bool, note?: string }, metadata: object, count: number, truncated?: bool, omitted_keys?: [string], note?: string }
 TSharedPtr<FJsonObject> HandleGetUsdPrimMetadata(const TSharedPtr<FJsonObject>& Params)
 {
 	UE::FUsdStage Stage;
@@ -521,7 +511,9 @@ TSharedPtr<FJsonObject> HandleGetUsdPrimMetadata(const TSharedPtr<FJsonObject>& 
 
 	if (!Key.IsEmpty())
 	{
-		// Specific-key read.
+		// One key, as UsdObject::GetMetadata resolves it: a dictionary merged across layers and with the prim
+		// definition's fallback entries, a list op such as apiSchemas composed into one explicit list, a composition arc
+		// (references, payload, inheritPaths, specializes, variantSetNames) only its strongest opinion.
 		UE::FVtValue Vt;
 		const bool Got = Prim.GetMetadata(*Key, Vt);
 		Data->SetStringField(TEXT("key"), Key);
@@ -545,13 +537,33 @@ TSharedPtr<FJsonObject> HandleGetUsdPrimMetadata(const TSharedPtr<FJsonObject>& 
 		return mcp_common::MakeOkReply(Data);
 	}
 
+	// One size budget for the whole reply, so it stays under the bridge's offload threshold: the containers among the
+	// fields are cut within it, and the first field that does not fit what is left is left out, with every field after it.
+	UEAgent::UsdCommon::FUsdJsonBudget Budget;
 	TSharedPtr<FJsonObject> MetaObj = MakeShared<FJsonObject>();
+	TArray<TSharedPtr<FJsonValue>> Omitted;
 	for (const TPair<FString, UE::FVtValue>& Entry : All)
 	{
-		MetaObj->SetObjectField(Entry.Key, UsdPrim_VtValueToJson(Entry.Value));
+		TSharedPtr<FJsonObject> EntryJson = MakeShared<FJsonObject>();
+		if (Omitted.Num() == 0
+			&& Budget.Take(UEAgent::UsdCommon::UsdJsonEntryCost(Entry.Key, Entry.Value.GetTypeName(), 0))
+			&& UEAgent::UsdCommon::UsdValueToJson(Entry.Value, *EntryJson, Budget, 0, true) != UEAgent::UsdCommon::EUsdJsonRead::OverBudget)
+		{
+			MetaObj->SetObjectField(Entry.Key, EntryJson);
+			continue;
+		}
+		Omitted.Add(MakeShared<FJsonValueString>(Entry.Key));
 	}
 	Data->SetObjectField(TEXT("metadata"), MetaObj);
 	Data->SetBoolField(TEXT("present"), Count > 0);
+	if (Omitted.Num() > 0)
+	{
+		Data->SetBoolField(TEXT("truncated"), true);
+		Data->SetArrayField(TEXT("omitted_keys"), Omitted);
+		Data->SetStringField(TEXT("note"), FString::Printf(
+			TEXT("%d of %d fields are left out (omitted_keys): with them the reply would pass the size one reply may take; read each with key=..."),
+			Omitted.Num(), Count));
+	}
 	return mcp_common::MakeOkReply(Data);
 }
 

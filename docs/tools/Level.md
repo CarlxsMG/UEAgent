@@ -99,10 +99,10 @@ Spawn a Directional, Point, Spot, Rect or Sky light actor in the editor world (n
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `light_type` | string | yes | Directional, Point, Spot, Rect, or Sky (case-insensitive); anything else is an error. |
-| `location` | array | no | [x, y, z] world location in cm; default [0, 0, 0], also when the array has fewer than 3 numbers. |
+| `location` | array | no | [x, y, z] world location in cm; default [0, 0, 0]. Any other value (an object, another length) is an error and no light is spawned. |
 | `rotation` | array | no | World rotation in degrees as [pitch, yaw, roll], default [0, 0, 0]; directional, spot and rect lights shine along its forward axis. |
 | `intensity` | number | no | Value for the Intensity property in the units of the light (Directional: lux; Sky: a multiplier); engine default when omitted. |
-| `color` | array | no | [r, g, b] linear color, usually 0..1; default white. Any other form (an object, a hex string, fewer than 3 numbers) sets black. |
+| `color` | array | no | [r, g, b] linear color, usually 0..1; default white. Any other value (an object, a hex string, another length) is an error and no light is spawned. |
 
 **Returns:** `{ light_type: string, actor_name: string }`
 
@@ -595,7 +595,7 @@ Spatial query: every actor whose ORIGIN (not its bounds) lies within radius cm o
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `radius` | number | yes | Search radius in centimetres (Unreal units), measured to each actor's origin. |
-| `center` | array | no | World-space center, ARRAY form only: [x, y, z]. Omitted -- or given as an object, or with fewer than 3 numbers -- it silently becomes the origin [0,0,0], which reads exactly like "nothing is near there". |
+| `center` | array | no | World-space center, ARRAY form only: [x, y, z]. Omitted, it is the origin [0,0,0], which reads exactly like "nothing is near there"; any other value (an object, another length) is an error. |
 | `world` | string | no | Optional world selector: absent/'editor' (default) \| 'pie' (ambiguous: PlayWorld, else the first PIE context) \| 'server' (the PIE world with authority) \| 'client' \| 'pie:N' \| 'game' (alias of 'pie'). An unrecognised value FAILS naming the worlds that exist; it never falls back to another world in silence. |
 
 **Returns:** `{ center_x: number, center_y: number, center_z: number, radius: number, world: string, actors: [{ name: string, class: string, distance: number, location: { x: number, y: number, z: number } }], actors_count: number, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }`
@@ -802,7 +802,7 @@ Light-only spatial query: every actor carrying a LightComponent within radius cm
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `radius` | number | yes | Search radius in centimetres (Unreal units), measured to each light actor's origin. |
-| `center` | array | no | World-space center, ARRAY form only: [x, y, z]. Omitted -- or given as an object, or with fewer than 3 numbers -- it silently becomes the origin [0,0,0], which reads exactly like "there are no lights here". |
+| `center` | array | no | World-space center, ARRAY form only: [x, y, z]. Omitted, it is the origin [0,0,0], which reads exactly like "there are no lights here"; any other value (an object, another length) is an error. |
 | `world` | string | no | Optional world selector: absent/'editor' (default) \| 'pie' (ambiguous: PlayWorld, else the first PIE context) \| 'server' (the PIE world with authority) \| 'client' \| 'pie:N' \| 'game' (alias of 'pie'). An unrecognised value FAILS naming the worlds that exist; it never falls back to another world in silence. |
 
 **Returns:** `{ center_x: number, center_y: number, center_z: number, radius: number, world: string, lights: [{ actor_name: string, light_type: string, intensity: number, light_color: string, distance: number, location: { x: number, y: number, z: number } }], lights_count: number, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }`

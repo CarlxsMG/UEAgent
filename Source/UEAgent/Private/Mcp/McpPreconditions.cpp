@@ -412,8 +412,9 @@ namespace McpPreconditionsPrivate
 		return Refuse(Message, TEXT("integer_range"));
 	}
 
-	/** A name or path argument (`nameLike` in the catalog) of NAME_SIZE characters or more: the FName the tool
-	 *  builds from it is a checkf in UnrealNames.cpp, which aborts the editor. */
+	/** A name or path argument (`nameLike` in the catalog, or a string under a name key inside an object of an argument)
+	 *  of FMcpToolCatalog::NameLengthLimit characters or more: the FName the tool builds from it, with the prefix or
+	 *  suffix it may add, reaches NAME_SIZE, a checkf in UnrealNames.cpp that aborts the editor. */
 	static TOptional<FRefusal> RefuseNameTooLong(const FString& CommandType, const TSharedPtr<FJsonObject>& Params)
 	{
 		const FString Message = FMcpToolCatalog::CheckNameLengths(CommandType, Params);
@@ -422,6 +423,18 @@ namespace McpPreconditionsPrivate
 			return {};
 		}
 		return Refuse(Message, TEXT("name_length"));
+	}
+
+	/** A vector argument (`vectorShape` in the catalog) of another shape: mcp_common's vector readers turn it into zero,
+	 *  and the tool would go on with the origin, a zero scale or a zero rotation as if the call had asked for it. */
+	static TOptional<FRefusal> RefuseMalformedVector(const FString& CommandType, const TSharedPtr<FJsonObject>& Params)
+	{
+		const FString Message = FMcpToolCatalog::CheckVectorShapes(CommandType, Params);
+		if (Message.IsEmpty())
+		{
+			return {};
+		}
+		return Refuse(Message, TEXT("vector_shape"));
 	}
 
 	/** A batch item whose command_type has NAME_SIZE characters or more: the dispatch makes an FName of each
@@ -774,6 +787,7 @@ TOptional<McpPreconditions::FRefusal> McpPreconditions::Check(const FString& Com
 	if (TOptional<FRefusal> Refusal = RefuseDoubleSlashPath(Params)) { return Refusal; }
 	if (TOptional<FRefusal> Refusal = RefuseIntegerOutOfRange(CommandType, Params)) { return Refusal; }
 	if (TOptional<FRefusal> Refusal = RefuseNameTooLong(CommandType, Params)) { return Refusal; }
+	if (TOptional<FRefusal> Refusal = RefuseMalformedVector(CommandType, Params)) { return Refusal; }
 	if (CommandType == TEXT("batch")) { return RefuseBatchCommandTypeTooLong(Params); }
 	if (CommandType == TEXT("create_material_expression")) { return RefuseSetMaterialAttributes(Params); }
 	if (CommandType == TEXT("scatter_foliage_in_box") || CommandType == TEXT("add_foliage_instances")) { return RefuseFoliage(Params); }

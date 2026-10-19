@@ -939,10 +939,10 @@ TSharedPtr<FJsonObject> HandleSetNiagaraComponentVector(const TSharedPtr<FJsonOb
 // ---------------------------------------------------------------------------
 // set_niagara_component_color
 // ---------------------------------------------------------------------------
-// MCP:set_niagara_component_color - Sets a LinearColor override parameter on a spawned Niagara component.  Resolves the UNiagaraComponent on the owner actor and calls SetVariableLinearColor, then reads it back.
+// MCP:set_niagara_component_color - Set a LinearColor override (a user parameter value) on the Niagara component of an actor in the editor world, the actor found by internal name or editor label and the first UNiagaraComponent on it used, through UNiagaraComponent::SetVariableLinearColor, which adds the override when needed. color is [r, g, b] or [r, g, b, a] in numbers within the float range; an omitted alpha is 1 and an omitted color is opaque black. Any other color, a missing actor_name or variable_name, or an actor without a Niagara component is an error and nothing changes. The value is set on the component in memory with no undo step; the level is neither marked dirty nor saved. verified is whether GetVariableColor finds the variable, and value_read_back is what it reads. Four plain components: set_niagara_component_vec4; the asset default: set_niagara_user_parameter.
 //   @param actor_name - Owner actor identifier (internal name or editor label).
 //   @param variable_name - Niagara variable name (override is added locally if needed).
-//   @param color - Color value [R, G, B, A] (A defaults to 1.0 if omitted).
+//   @param color - Color as [R, G, B] or [R, G, B, A], numbers within the float range; A is 1.0 when omitted, and an omitted color is opaque black. Any other value is an error.
 //   @returns { actor_name: string, variable_name: string, variable_type: string, set: bool, verified: bool, value_read_back: [number, number, number, number] }
 
 TSharedPtr<FJsonObject> HandleSetNiagaraComponentColor(const TSharedPtr<FJsonObject>& Params)
@@ -953,10 +953,13 @@ TSharedPtr<FJsonObject> HandleSetNiagaraComponentColor(const TSharedPtr<FJsonObj
         return Error;
     }
 
-    // Read RGBA from the "color" array (RGBA, defaulting A=1).
-    const TArray<TSharedPtr<FJsonValue>>* ColorArr = nullptr;
-    Params->TryGetArrayField(TEXT("color"), ColorArr);
-    const FLinearColor Color = mcp_common::LinearColorFromJsonArray(ColorArr, FLinearColor(0.f, 0.f, 0.f, 1.f));
+    // RGB or RGBA from the "color" array (A defaults to 1, the whole color to opaque black); any other value is refused
+    // before the component is touched.
+    FLinearColor Color = FLinearColor::Black;
+    if (TSharedPtr<FJsonObject> Malformed = mcp_common::ReadJsonLinearColor(Params, TEXT("color"), FLinearColor::Black, Color))
+    {
+        return Malformed;
+    }
 
     const FName VarName(*Target.VariableName);
     Target.Component->SetVariableLinearColor(VarName, Color);
@@ -3597,13 +3600,13 @@ namespace
 //   FNiagaraTypeDefinition (from GetStackFunctionInputs) or a clean error is returned.
 // HONEST GATE: bool/enum/data-interface/object inputs are not RI-eligible -> clean error.
 // ---------------------------------------------------------------------------
-// MCP:set_niagara_module_input - Override a Niagara module input by writing the rapid-iteration store.  Locates the module function-call node (by its module_node_name, as returned by add_niagara_module_to_stack) on the emitter's spawn or update stack, matches the input by its leaf name, and writes the value into the owning group script's RapidIterationParameters store. The system is recompiled and saved. For a float or int input, value is required and must be a JSON number; a missing or mistyped one is an error and nothing changes.  HONEST GATE: bool / enum / data-interface / object inputs are not rapid-iteration eligible and return a clean error ("override of <type> inputs requires the linked-value path, not supported headless"). The packed value_type must also match the input's actual type or a clean error is returned.
+// MCP:set_niagara_module_input - Override a Niagara module input by writing the rapid-iteration store. Locates the module function-call node (by its module_node_name, as returned by add_niagara_module_to_stack) on the emitter's spawn or update stack, matches the input by its leaf name, and writes the value into the owning group script's RapidIterationParameters store. The system is recompiled and saved. value is required: a JSON number for a float or int input, [x, y, z] for a vector, [r, g, b] or [r, g, b, a] for a color; a missing or malformed one is an error and nothing changes. HONEST GATE: bool / enum / data-interface / object inputs are not rapid-iteration eligible and return a clean error. The packed value_type must also match the input's actual type or a clean error is returned. Read it back with get_niagara_module_input.
 //   @param system_path - Asset path of the Niagara System (e.g. "/Game/Niagara/NS_Example").
 //   @param emitter_name - Display name of the emitter handle.
 //   @param module_node_name - The module function-call node name (from add_niagara_module_to_stack's module_node_name).
 //   @param input_name - Leaf name of the module input (e.g. "Drag" for "Module.Drag").
 //   @param value_type - One of "float", "int", "vector", or "color"; defaults to "float"
-//   @param value - For float/int: a JSON number, required (a missing or mistyped one is an error). For vector: an [x, y, z] list. For color: an [r, g, b, a] list.
+//   @param value - Required. For float/int: a JSON number. For vector: [x, y, z], numbers within the float range. For color: [r, g, b] or [r, g, b, a], alpha 1 when omitted. A missing or malformed value is an error.
 //   @returns { system_path: string, emitter_name: string, module_node_name: string, input_name: string, value_type: string, ri_param_name: string, verified: bool, success: bool, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleSetNiagaraModuleInput(const TSharedPtr<FJsonObject>& Params)
@@ -3678,8 +3681,22 @@ TSharedPtr<FJsonObject> HandleSetNiagaraModuleInput(const TSharedPtr<FJsonObject
             return mcp_common::MakeErrorReply(
                 FString::Printf(TEXT("Input '%s' is of type %s, not vector"), *Target.InputName, *InputType.GetName()));
         }
-        const FVector Vec = mcp_common::ReadJsonVector(Params, TEXT("value"));
-        FVector3f V3((float)Vec.X, (float)Vec.Y, (float)Vec.Z);
+        // Three finite numbers within the float range: a lenient read would write 0, 0, 0 for a missing or malformed value.
+        const TSharedPtr<FJsonValue> VectorValue = Params->TryGetField(TEXT("value"));
+        if (!VectorValue.IsValid() || VectorValue->IsNull())
+        {
+            return mcp_common::MissingParameterReply(TEXT("value"));
+        }
+        static const TArray<TSharedPtr<FJsonValue>> NoItems;
+        const TArray<TSharedPtr<FJsonValue>>* Items = nullptr;
+        float Components[3] = { 0.f, 0.f, 0.f };
+        FString ValueError;
+        if (!ReadFloatComponents(VectorValue->TryGetArray(Items) && Items ? *Items : NoItems, 3, 3, Components, ValueError))
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("value must be %s for a vector input. Nothing was written."), *ValueError));
+        }
+        const FVector3f V3(Components[0], Components[1], Components[2]);
         Bytes.Append((const uint8*)&V3, sizeof(FVector3f));
         CanonicalType = TEXT("vector");
     }
@@ -3690,9 +3707,17 @@ TSharedPtr<FJsonObject> HandleSetNiagaraModuleInput(const TSharedPtr<FJsonObject
             return mcp_common::MakeErrorReply(
                 FString::Printf(TEXT("Input '%s' is of type %s, not color"), *Target.InputName, *InputType.GetName()));
         }
-        const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
-        Params->TryGetArrayField(TEXT("value"), Arr);
-        const FLinearColor Color = mcp_common::LinearColorFromJsonArray(Arr, FLinearColor(0.f, 0.f, 0.f, 1.f));
+        // [r, g, b] or [r, g, b, a] (alpha 1 when omitted); a missing or malformed value is refused, not written as black.
+        const TSharedPtr<FJsonValue> ColorValue = Params->TryGetField(TEXT("value"));
+        if (!ColorValue.IsValid() || ColorValue->IsNull())
+        {
+            return mcp_common::MissingParameterReply(TEXT("value"));
+        }
+        FLinearColor Color = FLinearColor::Black;
+        if (TSharedPtr<FJsonObject> Malformed = mcp_common::ReadJsonLinearColor(Params, TEXT("value"), FLinearColor::Black, Color))
+        {
+            return Malformed;
+        }
         Bytes.Append((const uint8*)&Color, sizeof(FLinearColor));
         CanonicalType = TEXT("color");
     }

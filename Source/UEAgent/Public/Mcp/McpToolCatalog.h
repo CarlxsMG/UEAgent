@@ -29,6 +29,18 @@ class FJsonObject;
 class UEAGENT_API FMcpToolCatalog
 {
 public:
+	/** The value a vector reader takes (`vectorShape` in the catalog: "vector", "vector2d", "rotator"). */
+	enum class EVectorShape : uint8
+	{
+		None,
+		/** [X, Y, Z], read by mcp_common::ReadJsonVector. */
+		Vector,
+		/** [X, Y], read by mcp_common::ReadJsonVector2D. */
+		Vector2D,
+		/** [Pitch, Yaw, Roll] or {"roll", "pitch", "yaw"}, read by mcp_common::ReadJsonRotator. */
+		Rotator,
+	};
+
 	struct FParam
 	{
 		FString Name;
@@ -51,8 +63,11 @@ public:
 		double IntRangeMax = 0.0;
 		/** A string, or array of strings, the engine makes a name of (`nameLike` in the catalog): an FName
 		 *  holds fewer than NAME_SIZE characters and building a longer one aborts the editor, so
-		 *  McpPreconditions refuses such a value before the handler runs. */
+		 *  McpPreconditions refuses such a value of NameLengthLimit characters or more before the handler runs. */
 		bool bNameLike = false;
+		/** A param every read of which is one vector reader (`vectorShape` in the catalog): the reader turns any
+		 *  other value into zero, so McpPreconditions refuses a value of another shape before the handler runs. */
+		EVectorShape VectorShape = EVectorShape::None;
 	};
 
 	struct FTool
@@ -113,13 +128,41 @@ public:
 	 */
 	static FString CheckIntegerRanges(const FString& CommandType, const TSharedPtr<FJsonObject>& Params);
 
+	/** Characters a tool may add around a name argument before it builds an FName from it: a class prefix ("A",
+	 *  "U"), a folder ("/Game/Blueprints/"), a module path ("/Script/Niagara.NiagaraDataInterface", 36, the longest
+	 *  the commands add), a suffix ("_Sub", "_Font", the "_N" of a unique name)... A name of NameLengthLimit
+	 *  characters or more cannot be made a name safely. */
+	static constexpr int32 NameAffixMargin = 64;
+	static constexpr int32 NameLengthLimit = NAME_SIZE - NameAffixMargin;
+
 	/**
-	 * The first name-like argument (FParam::bNameLike), a string or a string element of an array, of
-	 * NAME_SIZE characters or more, as an error message naming the parameter, its length and the
-	 * limit; empty when every one fits or the catalog does not know CommandType. Game thread
-	 * (McpPreconditions::Check).
+	 * The first name argument of NameLengthLimit characters or more, as an error message naming where it sits, its
+	 * length and the limit: a name-like parameter (FParam::bNameLike) that is a string or holds one as an array
+	 * element, or a string at any depth inside an argument under an object key IsNameLikeKey passes, or a string
+	 * element of an array under such a key ("renames[0].new_name"). A batch's items are left to their own dispatch.
+	 * Empty when every one fits or the catalog does not know CommandType. Game thread (McpPreconditions::Check).
 	 */
 	static FString CheckNameLengths(const FString& CommandType, const TSharedPtr<FJsonObject>& Params);
+
+	/**
+	 * Whether a key of an object inside an argument names a name, by the rule the catalog generator marks name-like
+	 * params with (`nameLikeRule` in the catalog): the key in lower case, split at "_", without a trailing number or
+	 * single letter, ends in a name word and holds no disk word; in a domain whose paths are not names (USD) only an
+	 * actor key passes. False when the catalog carries no rule.
+	 */
+	bool IsNameLikeKey(const FString& Key, const FString& Domain) const;
+
+	/**
+	 * The first argument of a vector parameter (FParam::VectorShape) that does not have its shape: null, not an array
+	 * (for a rotator, not an array or an object), an array of another length, an element that is not a finite JSON
+	 * number within the float range (the array form is read through float), or a rotator object with a key other
+	 * than roll, pitch or yaw or an axis that is not a finite JSON number. A null is refused because the handlers
+	 * that test the param with HasField read it as present, as 0, 0, 0; tools/call and call_tool drop a null argument
+	 * before the dispatch, so a null reaches this check from a batch item's params or an in-process call. Returned as
+	 * an error message naming the parameter, what was given and the shape expected; empty when every one has its
+	 * shape or is absent, or the catalog does not know CommandType. Game thread (McpPreconditions::Check).
+	 */
+	static FString CheckVectorShapes(const FString& CommandType, const TSharedPtr<FJsonObject>& Params);
 
 	/** Does the parameter NAME read as a rotation: rot, *rotation or *rotator? */
 	static bool LooksLikeRotationName(const FString& ParamName);
@@ -140,4 +183,11 @@ private:
 	TArray<uint8> CompactToolsListUtf8;
 	FString SourcePath;
 	int32 TotalParams = 0;
+	/** The catalog's `nameLikeRule` (IsNameLikeKey); bHasNameRule is false when the catalog has none. */
+	bool bHasNameRule = false;
+	TSet<FString> NameWords;
+	TSet<FString> NameDiskWords;
+	TArray<FString> NameDiskSuffixes;
+	TSet<FString> NotNameDomains;
+	FString NotNameDomainKeepWord;
 };

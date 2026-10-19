@@ -41,6 +41,7 @@
 #include "VectorTypes.h"                          // UE::Geometry::Normalized / IsNormalized (GeometryCore): the ray direction check of find_nearest_ray_intersection_with_mesh
 // Mesh map ("what is this piece?") + UV unwrapping.
 #include "Selections/MeshConnectedComponents.h"   // UE::Geometry::FMeshConnectedComponents::FindConnectedTriangles (per-island triangle lists; READ-ONLY, unlike SplitMeshByComponents)
+#include "MeshBoundaryLoops.h"                    // UE::Geometry::FMeshBoundaryLoops (GeometryCore): the loops AND open spans of get_mesh_open_border_loops
 #include "GeometryScript/MeshSelectionQueryFunctions.h" // UGeometryScriptLibrary_MeshSelectionQueryFunctions::GetMeshSelectionBoundingBox
 #include "Engine/StaticMesh.h"                   // UStaticMesh (loaded by path -> CopyMeshFromStaticMesh / CopyMeshToStaticMesh)
 #include "StaticMeshResources.h"                 // MAX_STATIC_MESH_LODS (the LOD range copy_dynamic_mesh_to_static_mesh accepts)
@@ -1928,10 +1929,10 @@ TSharedPtr<FJsonObject> HandleGetMeshIsClosed(
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_mesh_open_border_loops - Count the open border loops of a UStaticMesh asset: closed chains of boundary edges (edges with one adjacent triangle), so each hole or open rim counts once and a closed mesh gives 0. Computed on a transient dynamic-mesh copy with build settings applied; read-only. A chain the engine cannot close into a loop, at a bowtie vertex, is left out of the count, and ambiguous_topology does not flag it: with the engine's default loop settings it stays false. lod_index picks the LOD (default 0), and one the mesh lacks is an error; a LOD without source geometry, as a reduced one, is read from its render data, split at UV and normal seams (read_render_data). A path that is not a static mesh, or one with no geometry, is an error. Yes or no: get_mesh_is_closed; a DynamicMeshActor in the level: get_num_open_border_edges.
+// MCP:get_mesh_open_border_loops - Count the open border loops of a UStaticMesh asset: closed chains of boundary edges (edges with one adjacent triangle), one per hole or open rim, 0 for a closed mesh. Read-only, on a transient dynamic-mesh copy with build settings applied. A chain the engine cannot close into a loop, as across mismatched winding, counts in open_border_spans instead. ambiguous_topology is true when there is a span or a boundary vertex with more than two boundary edges (a bowtie, split as the engine chooses). lod_index picks the LOD (default 0), and one the mesh lacks is an error; a LOD without source geometry is read from its render data, split at UV and normal seams (read_render_data). A path that is not a static mesh, or has no geometry, is an error. Yes or no: get_mesh_is_closed; a DynamicMeshActor in the level: get_num_open_border_edges.
 //   @param static_mesh_path - Content path to the UStaticMesh asset
 //   @param lod_index - LOD to read (default 0), from 0 to the mesh's last LOD, echoed as requested_lod_index; a LOD the mesh does not have is an error and nothing is read.
-//   @returns { static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, read_render_data, open_border_loops, ambiguous_topology }
+//   @returns { static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, read_render_data, open_border_loops, open_border_spans, ambiguous_topology }
 TSharedPtr<FJsonObject> HandleGetMeshOpenBorderLoops(
     const TSharedPtr<FJsonObject>& Params)
 {
@@ -1941,12 +1942,37 @@ TSharedPtr<FJsonObject> HandleGetMeshOpenBorderLoops(
     if (TSharedPtr<FJsonObject> Failure = GeometryScript_CopyStaticMeshParam(Params, MeshPath, LOD, DynMesh))
         return Failure;
 
-    bool bAmbiguous = false;
-    const int32 NumLoops = UGeometryScriptLibrary_MeshQueryFunctions::GetNumOpenBorderLoops(DynMesh, bAmbiguous);
+    // FMeshBoundaryLoops is run here rather than through GetNumOpenBorderLoops, whose ambiguity flag is
+    // only Compute() failing: with the default settings Compute() never fails, it keeps every boundary
+    // chain it cannot close as an open span and leaves it out of the loop count. The spans are reported,
+    // and a bowtie (a boundary vertex with more than two boundary edges, where the engine chooses how
+    // the boundary splits into loops) or a span makes the topology ambiguous.
+    int32 NumLoops = 0;
+    int32 NumSpans = 0;
+    bool bComputed = true;
+    bool bHasBowtie = false;
+    DynMesh->ProcessMesh([&](const UE::Geometry::FDynamicMesh3& Mesh)
+    {
+        UE::Geometry::FMeshBoundaryLoops BoundaryLoops(&Mesh, false);
+        bComputed = BoundaryLoops.Compute();
+        NumLoops = BoundaryLoops.GetLoopCount();
+        NumSpans = BoundaryLoops.GetSpanCount();
+        for (const int32 VertexID : Mesh.VertexIndicesItr())
+        {
+            int32 Edge0 = -1;
+            int32 Edge1 = -1;
+            if (Mesh.GetVtxBoundaryEdges(VertexID, Edge0, Edge1) > 2)
+            {
+                bHasBowtie = true;
+                break;
+            }
+        }
+    });
 
     TSharedPtr<FJsonObject> Data = GeometryScript_NewStaticMeshData(MeshPath, LOD);
     Data->SetNumberField(TEXT("open_border_loops"), NumLoops);
-    Data->SetBoolField(TEXT("ambiguous_topology"), bAmbiguous);
+    Data->SetNumberField(TEXT("open_border_spans"), NumSpans);
+    Data->SetBoolField(TEXT("ambiguous_topology"), !bComputed || bHasBowtie || NumSpans > 0);
     return mcp_common::MakeOkReply(Data);
 }
 

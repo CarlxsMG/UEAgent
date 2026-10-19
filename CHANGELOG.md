@@ -4,6 +4,30 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 ## Unreleased
 
+## 1.2.7 - 2026-10-19
+
+- A malformed vector is refused instead of read as zeros: 123 location, rotation, scale, center and color-style
+  parameters of 85 tools take exactly their 2 or 3 finite numbers (a rotation also its `{pitch, yaw, roll}`
+  object), and anything else -- another length, a string, a `null` in a `batch` item -- is refused before the
+  tool runs. A color
+  array (`set_anim_curve_color`, `set_niagara_component_color`, `set_niagara_module_input`) must be 3 or 4
+  numbers.
+- Names stop at 959 characters, leaving room for the prefixes and suffixes tools add before they build an Unreal
+  name, and the limit now also applies to name fields nested inside objects (`bulk_rename_assets` rows,
+  `build_blueprint_graph` nodes).
+- An asset path is checked as the engine names it: the object path (package, a dot, the asset name) plus room for
+  the objects created inside the asset must fit in an Unreal name, so an object path of at most 863 characters
+  is accepted (less for a long asset name). The editor builds a name from every object it records while it
+  creates an asset, so a package name under the limit could still kill it. 37 tools that join a folder and a
+  name, or add a suffix (`_T`, `_Font`, `_Sub`), check the joined path before the engine builds it, a World
+  Partition map includes its external actor packages, and copies and renames also measure the source asset's
+  deepest object.
+- USD dictionaries (`customData`, `assetInfo`) and list ops (`apiSchemas`, references, payloads) read as JSON,
+  path expressions read as text, and `set_usd_prim_metadata` writes vectors, arrays, dictionaries and list ops;
+  one reply's values share a size budget so it stays inline.
+- `get_mesh_open_border_loops` reports `ambiguous_topology` for real (a bowtie vertex, or a boundary the engine
+  could not close) and counts the open spans it used to drop, in `open_border_spans`.
+
 ## 1.2.6 - 2026-10-19
 
 - A name of 1024 characters or more no longer kills the editor: Unreal's names hold at most 1023, and any

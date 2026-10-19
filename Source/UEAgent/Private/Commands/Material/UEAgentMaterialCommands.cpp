@@ -458,6 +458,7 @@ TSharedPtr<FJsonObject> HandleCreateMaterial(const TSharedPtr<FJsonObject>& Para
     FolderPath.RemoveFromEnd(TEXT("/"));
     const FString PackageName = FolderPath / AssetName;
     const FString ReportedPath = FString::Printf(TEXT("%s.%s"), *PackageName, *AssetName);
+    if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(PackageName)) { return Invalid; }
     if (UEditorAssetLibrary::DoesAssetExist(PackageName))
     {
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("Material already exists at path: %s"), *ReportedPath));

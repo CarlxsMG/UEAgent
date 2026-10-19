@@ -15,6 +15,7 @@
 #include "Misc/ScopeLock.h"
 #include "Interfaces/IPluginManager.h"
 #include "Internationalization/Regex.h"
+#include "Algo/AllOf.h"
 
 // Namespace name unique per file: the module builds as unity, and two same-named helpers in
 // anonymous namespaces of different files collide in the same blob (see Build.cs).
@@ -227,6 +228,124 @@ namespace McpToolCatalogPrivate
 		const TSharedPtr<FJsonValue> Value = Args->TryGetField(Key);
 		return !Value.IsValid() || Value->IsNull();
 	}
+
+	/** How a refusal of a vector parameter names its shape (FMcpToolCatalog::CheckVectorShapes). */
+	struct FVectorShapeText
+	{
+		/** Numbers in the array form. */
+		int32 Count;
+		/** What the parameter should have been. */
+		const TCHAR* Expected;
+		/** The form the reader takes. */
+		const TCHAR* ReadAs;
+		/** What the reader makes of most other values. */
+		const TCHAR* Zero;
+		/** The WHAT WORKS line. */
+		const TCHAR* WhatWorks;
+	};
+
+	static const FVectorShapeText& VectorShapeText(FMcpToolCatalog::EVectorShape Shape)
+	{
+		static const FVectorShapeText Vector = { 3, TEXT("an array of 3 numbers"), TEXT("[X, Y, Z]"), TEXT("0, 0, 0"),
+			TEXT("an array of 3 numbers, [X, Y, Z]") };
+		static const FVectorShapeText Vector2D = { 2, TEXT("an array of 2 numbers"), TEXT("[X, Y]"), TEXT("0, 0"),
+			TEXT("an array of 2 numbers, [X, Y]") };
+		static const FVectorShapeText Rotator = { 3, TEXT("an array of 3 numbers or an object of roll, pitch and yaw"),
+			TEXT("[Pitch, Yaw, Roll] or {\"roll\": R, \"pitch\": P, \"yaw\": Y}"), TEXT("a zero rotation"),
+			TEXT("{\"roll\": R, \"pitch\": P, \"yaw\": Y} with any of the three axes, or an array of 3 numbers, [Pitch, Yaw, Roll]") };
+		return Shape == FMcpToolCatalog::EVectorShape::Vector2D ? Vector2D
+			: Shape == FMcpToolCatalog::EVectorShape::Rotator ? Rotator : Vector;
+	}
+
+	/** A JSON number the readers can use: finite (the JSON reader also parses NaN and Inf tokens as numbers) and, when
+	 *  bFloat, within the float range, since the array form is narrowed through float and a larger number becomes
+	 *  infinite. */
+	static bool IsReadableNumber(const TSharedPtr<FJsonValue>& Value, bool bFloat)
+	{
+		return Value.IsValid() && Value->Type == EJson::Number && FMath::IsFinite(Value->AsNumber())
+			&& (!bFloat || FMath::Abs(Value->AsNumber()) <= static_cast<double>(TNumericLimits<float>::Max()));
+	}
+
+	/** What a JSON value is, for a refusal message: "a string", "an array of 2 elements", "NaN"... */
+	static FString DescribeJsonValue(const TSharedPtr<FJsonValue>& Value)
+	{
+		if (!Value.IsValid())
+		{
+			return TEXT("null");
+		}
+		switch (Value->Type)
+		{
+		case EJson::String:  return TEXT("a string");
+		case EJson::Boolean: return TEXT("a boolean");
+		case EJson::Object:  return TEXT("an object");
+		case EJson::Null:    return TEXT("null");
+		case EJson::Number:
+		{
+			const double Number = Value->AsNumber();
+			return FMath::IsNaN(Number) ? TEXT("NaN") : !FMath::IsFinite(Number) ? TEXT("an infinite number")
+				: FMath::Abs(Number) > static_cast<double>(TNumericLimits<float>::Max()) ? TEXT("a number outside the float range")
+				: TEXT("a number");
+		}
+		case EJson::Array:
+		{
+			const int32 Count = Value->AsArray().Num();
+			return FString::Printf(TEXT("an array of %d element%s"), Count, Count == 1 ? TEXT("") : TEXT("s"));
+		}
+		default:             return TEXT("a value of no JSON type");
+		}
+	}
+
+	/**
+	 * The first string of NameLengthLimit characters or more inside Value whose nearest object key is a name
+	 * (bNameKey, FMcpToolCatalog::IsNameLikeKey), and where it sits: the walk of the double_slash_path precondition,
+	 * at the same depth limit. A string reached from the top-level argument through arrays only is the param's own
+	 * (FParam::bNameLike), so the walk starts with bNameKey false.
+	 */
+	static bool FindLongNestedName(const FMcpToolCatalog& Catalog, const FString& Domain, const TSharedPtr<FJsonValue>& Value,
+		const FString& Where, bool bNameKey, int32 Depth, FString& OutWhere, int32& OutLength)
+	{
+		if (!Value.IsValid() || Depth > 16)
+		{
+			return false;
+		}
+		if (Value->Type == EJson::String)
+		{
+			const int32 Length = Value->AsString().Len();
+			if (bNameKey && Length >= FMcpToolCatalog::NameLengthLimit)
+			{
+				OutWhere = Where;
+				OutLength = Length;
+				return true;
+			}
+			return false;
+		}
+		if (Value->Type == EJson::Array)
+		{
+			const TArray<TSharedPtr<FJsonValue>>& Items = Value->AsArray();
+			for (int32 Index = 0; Index < Items.Num(); ++Index)
+			{
+				if (FindLongNestedName(Catalog, Domain, Items[Index], FString::Printf(TEXT("%s[%d]"), *Where, Index), bNameKey,
+					Depth + 1, OutWhere, OutLength))
+				{
+					return true;
+				}
+			}
+			return false;
+		}
+		if (Value->Type == EJson::Object && Value->AsObject().IsValid())
+		{
+			for (const auto& Field : Value->AsObject()->Values)
+			{
+				const FString Key(*Field.Key);
+				if (FindLongNestedName(Catalog, Domain, Field.Value, Where + TEXT(".") + Key, Catalog.IsNameLikeKey(Key, Domain),
+					Depth + 1, OutWhere, OutLength))
+				{
+					return true;
+				}
+			}
+		}
+		return false;
+	}
 }
 
 const FMcpToolCatalog::FParam* FMcpToolCatalog::FTool::FindParam(const FString& ParamName) const
@@ -270,6 +389,46 @@ bool FMcpToolCatalog::LooksLikeRotationName(const FString& ParamName)
 	return Low == TEXT("rot") || Low.EndsWith(TEXT("rotation")) || Low.EndsWith(TEXT("rotator"));
 }
 
+bool FMcpToolCatalog::IsNameLikeKey(const FString& Key, const FString& Domain) const
+{
+	if (!bHasNameRule)
+	{
+		return false;
+	}
+	// The generator's _is_name_like on a param name, without the description half (a nested key has none).
+	const FString Low = Key.ToLower();
+	TArray<FString> Words;
+	Low.ParseIntoArray(Words, TEXT("_"), /*InCullEmpty=*/false);
+	auto IsNumber = [](const FString& Word) { return !Word.IsEmpty() && Algo::AllOf(Word, [](TCHAR C) { return FChar::IsDigit(C); }); };
+	while (Words.Num() > 1 && (IsNumber(Words.Last()) || Words.Last().Len() == 1))
+	{
+		Words.Pop();
+	}
+	if (Words.IsEmpty())
+	{
+		return false;
+	}
+	if (NotNameDomains.Contains(Domain) && !Words.Contains(NotNameDomainKeepWord))
+	{
+		return false;
+	}
+	for (const FString& Word : Words)
+	{
+		if (NameDiskWords.Contains(Word))
+		{
+			return false;
+		}
+	}
+	for (const FString& Suffix : NameDiskSuffixes)
+	{
+		if (Low.EndsWith(Suffix))
+		{
+			return false;
+		}
+	}
+	return NameWords.Contains(Words.Last());
+}
+
 TSharedPtr<const FMcpToolCatalog> FMcpToolCatalog::LoadFromFile(const FString& Path, FString& OutError)
 {
 	using namespace McpToolCatalogPrivate;
@@ -296,6 +455,27 @@ TSharedPtr<const FMcpToolCatalog> FMcpToolCatalog::LoadFromFile(const FString& P
 	TSharedRef<FMcpToolCatalog> Catalog = MakeShared<FMcpToolCatalog>();
 	Catalog->SourcePath = Path;
 	TArray<TSharedPtr<FJsonValue>> ToolsJson;
+
+	// The generator's name-word rule, for the keys of objects inside arguments (IsNameLikeKey).
+	const TSharedPtr<FJsonObject>* NameRule = nullptr;
+	if (Root->TryGetObjectField(TEXT("nameLikeRule"), NameRule) && NameRule && NameRule->IsValid())
+	{
+		auto ReadWords = [&NameRule](const TCHAR* Field, auto& Out)
+		{
+			TArray<FString> Words;
+			(*NameRule)->TryGetStringArrayField(Field, Words);
+			for (const FString& Word : Words)
+			{
+				Out.Add(Word.ToLower());
+			}
+		};
+		ReadWords(TEXT("nameWords"), Catalog->NameWords);
+		ReadWords(TEXT("diskWords"), Catalog->NameDiskWords);
+		ReadWords(TEXT("diskPathSuffixes"), Catalog->NameDiskSuffixes);
+		ReadWords(TEXT("notNameDomains"), Catalog->NotNameDomains);
+		(*NameRule)->TryGetStringField(TEXT("notNameDomainKeepWord"), Catalog->NotNameDomainKeepWord);
+		Catalog->bHasNameRule = Catalog->NameWords.Num() > 0;
+	}
 
 	for (const TSharedPtr<FJsonValue>& DomainValue : *Domains)
 	{
@@ -359,6 +539,14 @@ TSharedPtr<const FMcpToolCatalog> FMcpToolCatalog::LoadFromFile(const FString& P
 						Param.bHasIntRange = true;
 					}
 					(*ParamObj)->TryGetBoolField(TEXT("nameLike"), Param.bNameLike);
+					FString VectorShape;
+					if ((*ParamObj)->TryGetStringField(TEXT("vectorShape"), VectorShape))
+					{
+						Param.VectorShape = VectorShape == TEXT("vector") ? EVectorShape::Vector
+							: VectorShape == TEXT("vector2d") ? EVectorShape::Vector2D
+							: VectorShape == TEXT("rotator") ? EVectorShape::Rotator
+							: EVectorShape::None;
+					}
 					if (Param.Name.IsEmpty() || Tool.FindParam(Param.Name))
 					{
 						continue;
@@ -566,6 +754,81 @@ FString FMcpToolCatalog::CheckIntegerRanges(const FString& CommandType, const TS
 
 FString FMcpToolCatalog::CheckNameLengths(const FString& CommandType, const TSharedPtr<FJsonObject>& Params)
 {
+	using namespace McpToolCatalogPrivate;
+
+	if (!Params.IsValid())
+	{
+		return FString();
+	}
+	const TSharedPtr<const FMcpToolCatalog> Catalog = GetCurrent();
+	const FTool* Tool = Catalog.IsValid() ? Catalog->FindTool(CommandType) : nullptr;
+	if (!Tool)
+	{
+		return FString();
+	}
+	FString Where;
+	int32 Length = 0;
+	for (const FParam& Param : Tool->Params)
+	{
+		const TSharedPtr<FJsonValue> Value = Param.bNameLike ? Params->TryGetField(Param.Name) : nullptr;
+		if (!Value.IsValid())
+		{
+			continue;
+		}
+		// The string itself, or each string element of an array: the handlers make names of both.
+		if (Value->Type == EJson::String)
+		{
+			Where = Param.Name;
+			Length = Value->AsString().Len();
+		}
+		else if (Value->Type == EJson::Array)
+		{
+			const TArray<TSharedPtr<FJsonValue>>& Items = Value->AsArray();
+			for (int32 Index = 0; Index < Items.Num() && Length < NameLengthLimit; ++Index)
+			{
+				if (Items[Index].IsValid() && Items[Index]->Type == EJson::String)
+				{
+					Where = FString::Printf(TEXT("%s[%d]"), *Param.Name, Index);
+					Length = Items[Index]->AsString().Len();
+				}
+			}
+		}
+		if (Length >= NameLengthLimit)
+		{
+			break;
+		}
+	}
+	// A name inside an object of an argument (a rename row, a node spec): the key says whether it is one. A batch's
+	// items are checked when each is dispatched, against its own tool.
+	if (Length < NameLengthLimit && CommandType != TEXT("batch"))
+	{
+		for (const auto& Field : Params->Values)
+		{
+			const FString Key(*Field.Key);
+			if (FindLongNestedName(*Catalog, Tool->Domain, Field.Value, Key, /*bNameKey=*/false, 1, Where, Length))
+			{
+				break;
+			}
+		}
+	}
+	// FName's checkf fires at NAME_SIZE characters (UnrealNames.cpp, FindOrStoreString), and the tool may add a prefix or
+	// suffix of up to NameAffixMargin characters before it builds one.
+	if (Length >= NameLengthLimit)
+	{
+		return FString::Printf(
+			TEXT("%s: %s is %d characters long. An FName holds at most %d characters, and the engine aborts the editor when it builds ")
+			TEXT("one from a longer string (UnrealNames.cpp, NAME_SIZE); a tool may add a prefix or suffix of up to %d characters to a ")
+			TEXT("name before it builds one, so a name or path of %d characters or more is refused. Refused before the tool ran: ")
+			TEXT("nothing was changed. WHAT WORKS: a name or path of at most %d characters."),
+			*CommandType, *Where, Length, NAME_SIZE - 1, NameAffixMargin, NameLengthLimit, NameLengthLimit - 1);
+	}
+	return FString();
+}
+
+FString FMcpToolCatalog::CheckVectorShapes(const FString& CommandType, const TSharedPtr<FJsonObject>& Params)
+{
+	using namespace McpToolCatalogPrivate;
+
 	if (!Params.IsValid())
 	{
 		return FString();
@@ -578,39 +841,69 @@ FString FMcpToolCatalog::CheckNameLengths(const FString& CommandType, const TSha
 	}
 	for (const FParam& Param : Tool->Params)
 	{
-		const TSharedPtr<FJsonValue> Value = Param.bNameLike ? Params->TryGetField(Param.Name) : nullptr;
+		const TSharedPtr<FJsonValue> Value = Param.VectorShape != EVectorShape::None ? Params->TryGetField(Param.Name) : nullptr;
+		// An absent value keeps the tool's documented default. A null falls through to "not an array": the handlers that
+		// test the param with HasField take a null as present, and the reader makes it 0, 0, 0. tools/call drops a null
+		// argument before the dispatch (McpHttpServer), so one arrives here from a batch item or an in-process call.
 		if (!Value.IsValid())
 		{
 			continue;
 		}
-		// The string itself, or each string element of an array: the handlers make names of both.
-		FString Where;
-		int32 Length = 0;
-		if (Value->Type == EJson::String)
+		const FVectorShapeText& Shape = VectorShapeText(Param.VectorShape);
+		FString Where = Param.Name;
+		FString Given;
+		FString Expected = Shape.Expected;
+		if (Value->Type == EJson::Array)
 		{
-			Where = Param.Name;
-			Length = Value->AsString().Len();
-		}
-		else if (Value->Type == EJson::Array)
-		{
+			// The readers take the first Count numbers and drop the rest; an element of another type is lexed or zeroed.
 			const TArray<TSharedPtr<FJsonValue>>& Items = Value->AsArray();
-			for (int32 Index = 0; Index < Items.Num() && Length < NAME_SIZE; ++Index)
+			if (Items.Num() != Shape.Count)
 			{
-				if (Items[Index].IsValid() && Items[Index]->Type == EJson::String)
+				Given = DescribeJsonValue(Value);
+			}
+			for (int32 Index = 0; Given.IsEmpty() && Index < Items.Num(); ++Index)
+			{
+				if (!IsReadableNumber(Items[Index], /*bFloat=*/true))
 				{
 					Where = FString::Printf(TEXT("%s[%d]"), *Param.Name, Index);
-					Length = Items[Index]->AsString().Len();
+					Given = DescribeJsonValue(Items[Index]);
+					Expected = TEXT("a finite number within the float range");
 				}
 			}
 		}
-		// FName's checkf fires at NAME_SIZE characters (UnrealNames.cpp, FindOrStoreString), so the longest name is NAME_SIZE - 1.
-		if (Length >= NAME_SIZE)
+		else if (Value->Type == EJson::Object && Param.VectorShape == EVectorShape::Rotator)
+		{
+			// The object form: any subset of the three axes (the schema allows no other key), each a number. The keys
+			// are matched as the dispatch's rotation rewrite matches them (FMcpToolCatalog::NormalizeRotationParams).
+			for (const auto& Axis : Value->AsObject()->Values)
+			{
+				const FString Key = FString(*Axis.Key).ToLower().TrimStartAndEnd();
+				if (Key != TEXT("roll") && Key != TEXT("pitch") && Key != TEXT("yaw"))
+				{
+					Given = FString::Printf(TEXT("an object with the key \"%s\""), *Axis.Key);
+					Expected = TEXT("an object of roll, pitch and yaw");
+					break;
+				}
+				if (!IsReadableNumber(Axis.Value, /*bFloat=*/false))
+				{
+					Where = FString::Printf(TEXT("%s.%s"), *Param.Name, *Axis.Key);
+					Given = DescribeJsonValue(Axis.Value);
+					Expected = TEXT("a finite number");
+					break;
+				}
+			}
+		}
+		else
+		{
+			Given = DescribeJsonValue(Value);
+		}
+		if (!Given.IsEmpty())
 		{
 			return FString::Printf(
-				TEXT("%s: %s is %d characters long. An FName holds at most %d characters, and the engine aborts the editor when it builds ")
-				TEXT("one from a longer string (UnrealNames.cpp, NAME_SIZE), so no name or path that long exists or can be created. Refused ")
-				TEXT("before the tool ran: nothing was changed. WHAT WORKS: a name or path of at most %d characters."),
-				*CommandType, *Where, Length, NAME_SIZE - 1, NAME_SIZE - 1);
+				TEXT("%s: %s is %s, not %s. The tool reads %s as %s, and any other value would have been read as something the call ")
+				TEXT("did not ask for (most of them as %s) with no error. Refused before the tool ran: nothing was changed. WHAT ")
+				TEXT("WORKS: %s, or leave %s out for its default."),
+				*CommandType, *Where, *Given, *Expected, *Param.Name, Shape.ReadAs, Shape.Zero, Shape.WhatWorks, *Param.Name);
 		}
 	}
 	return FString();

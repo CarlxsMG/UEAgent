@@ -348,10 +348,10 @@ TSharedPtr<FJsonObject> HandleFocusViewport(const TSharedPtr<FJsonObject>& Param
 
 // MCP:add_light - Spawn a Directional, Point, Spot, Rect or Sky light actor in the editor world (not PIE) at location and rotation, optionally setting intensity and color, outside any undo transaction; nothing is saved. Returns light_type and the internal actor_name of the new actor.
 //   @param light_type - Directional, Point, Spot, Rect, or Sky (case-insensitive); anything else is an error.
-//   @param location - [x, y, z] world location in cm; default [0, 0, 0], also when the array has fewer than 3 numbers.
+//   @param location - [x, y, z] world location in cm; default [0, 0, 0]. Any other value (an object, another length) is an error and no light is spawned.
 //   @param rotation - World rotation in degrees as [pitch, yaw, roll], default [0, 0, 0]; directional, spot and rect lights shine along its forward axis.
 //   @param intensity - Value for the Intensity property in the units of the light (Directional: lux; Sky: a multiplier); engine default when omitted.
-//   @param color - [r, g, b] linear color, usually 0..1; default white. Any other form (an object, a hex string, fewer than 3 numbers) sets black.
+//   @param color - [r, g, b] linear color, usually 0..1; default white. Any other value (an object, a hex string, another length) is an error and no light is spawned.
 //   @returns { light_type: string, actor_name: string }
 TSharedPtr<FJsonObject> HandleAddLight(const TSharedPtr<FJsonObject>& Params)
 {
