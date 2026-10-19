@@ -3889,21 +3889,21 @@
         },
         {
           "name": "get_anim_sequence_info",
-          "description": "Read a UAnimSequence without changing it: skeleton, play_length, frame_rate, num_frames, the bone track, float curve and transform curve counts and NAMES from its data model, num_sync_markers, enable_root_motion, retarget_source and ref_pose_seq.",
+          "description": "Summarise one animation sequence (a UAnimSequence asset) from its data model: the skeleton it plays on, its length, frame rate and frame count, the names of its bone tracks, float curves and transform curves with their counts, how many sync markers it has, whether root motion is enabled, and its retarget source and reference-pose sequence. Read-only: it changes nothing and needs no PIE. A path that does not load as an AnimSequence is refused, a montage or blend space included -- get_anim_asset_info reads any animation asset. The keys of one curve come from get_anim_curve_data and the notify events from get_anim_notifies.",
           "params": [
             {
               "name": "anim_sequence_path",
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Asset path of the UAnimSequence."
+              "description": "Asset path of the sequence, e.g. \"/Game/Anims/Run_Fwd\" (package or object path)."
             },
             {
               "name": "sequence_path",
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "description": "Alias of anim_sequence_path.",
+              "description": "Alias of anim_sequence_path; read only when anim_sequence_path is absent.",
               "aliasOf": "anim_sequence_path"
             }
           ],
@@ -35208,17 +35208,17 @@
         },
         {
           "name": "register_interchange_factory",
-          "description": "Load a factory class and register it with the Interchange manager. Idempotent: a class already registered is a no-op.",
+          "description": "Register a factory class -- the Interchange step that creates one kind of asset, such as a texture or a static mesh, from translated data -- with the Interchange manager for this editor session. Nothing is written to disk and the registration ends when the editor closes; the engine registers its own factories on startup, so this is for a class whose plugin did not. The manager keeps one factory per asset class and the first one registered stays: when another factory already makes that asset class the call is refused and names it. Registering the factory that is already active changes nothing and reports already_registered=true, so a repeat call is harmless (idempotent). A class that does not load, is abstract or is not a UInterchangeFactoryBase subclass is refused. The reader of a source file format registers with register_interchange_translator.",
           "params": [
             {
               "name": "factory_class_path",
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Class path of the factory UClass to instantiate and register (e.g. \"/Script/InterchangeEngine.InterchangeTextureFactory\"), loaded via LoadClass."
+              "description": "Class path of the factory class, e.g. \"/Script/InterchangeImport.InterchangeTextureFactory\"; loaded with LoadClass."
             }
           ],
-          "returns": "{ factory_class_path: string, class: string, registered: bool, note: string }",
+          "returns": "{ factory_class_path, class, asset_class, registered, already_registered }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
@@ -35228,17 +35228,17 @@
         },
         {
           "name": "register_interchange_translator",
-          "description": "Load a translator class (e.g. /Script/InterchangeEngine.InterchangeTextureTranslator) and register it with the Interchange manager. Idempotent: a class already registered is a no-op.",
+          "description": "Register a translator class -- the Interchange reader of one or more source file formats -- with the Interchange manager for this editor session, so imports and get_interchange_supported_formats pick up its formats. Nothing is written to disk and the registration ends when the editor closes; the engine registers its own translators on startup, so this is for a class whose plugin did not. The class must load and be a concrete UInterchangeTranslatorBase subclass: anything else is refused before it is registered, since the manager would assert on the next format query. A class already registered changes nothing and reports already_registered=true, so a repeat call is harmless (idempotent). A factory, which turns translated data into assets, registers with register_interchange_factory; whether a given file can be read: can_translate_interchange_source_data.",
           "params": [
             {
               "name": "translator_class_path",
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Class path of the translator UClass to instantiate and register (e.g. \"/Script/InterchangeEngine.InterchangeTextureTranslator\"), loaded via LoadClass."
+              "description": "Class path of the translator class, e.g. \"/Script/InterchangeImport.InterchangeImageWrapperTranslator\"; loaded with LoadClass."
             }
           ],
-          "returns": "{ translator_class_path: string, class: string, registered: bool, note: string }",
+          "returns": "{ translator_class_path, class, registered, already_registered?, supported_formats: [string] }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
@@ -35348,23 +35348,23 @@
         },
         {
           "name": "set_interchange_pipeline_properties",
-          "description": "Set properties of an Interchange pipeline asset by reflection: properties is {name: value}, where a value can be a scalar, an object (a struct) or an array (a TArray).",
+          "description": "Write settings of an Interchange pipeline asset -- what a pipeline does at import, such as whether it imports materials or how it names the assets -- by reflection, from a {name: value} object in which a value is a scalar, an object for a struct or an array for a TArray. Each value overwrites the one in memory, records no undo step and is not saved: save_interchange_pipeline writes the asset to disk. Names are applied one by one; one that does not exist, is not editable in the editor or does not convert is skipped and listed with the reason in skipped, and the others are still written. An empty properties object is refused. Writing the same values again leaves the asset as it was (idempotent). The names, types and current values come from get_interchange_pipeline_properties; to choose which pipelines an imported asset uses, set_interchange_pipelines.",
           "params": [
             {
               "name": "pipeline_path",
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Object path of the pipeline asset to modify (loaded via LoadObject, must be a UInterchangePipelineBase)."
+              "description": "Object path of the pipeline asset, e.g. \"/Game/Pipelines/MyMeshPipeline.MyMeshPipeline\"; it must load as a UInterchangePipelineBase."
             },
             {
               "name": "properties",
               "jsonType": "object",
               "required": true,
-              "description": "JSON object of { propertyName: value } pairs applied by reflection to the pipeline's EditAnywhere UPROPERTYs. Values may be scalars, nested objects (structs), or arrays; non-editable or unknown fields are skipped and reported."
+              "description": "{property_name: value}, with names as get_interchange_pipeline_properties lists them; a struct takes an object of its fields and a TArray an array."
             }
           ],
-          "returns": "{ pipeline_path: string, applied_count: number, skipped_count: number, skipped: [string], note: string }",
+          "returns": "{ pipeline_path, applied_count, skipped_count, skipped?: [string], note }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -35374,23 +35374,23 @@
         },
         {
           "name": "set_interchange_pipeline_stack_default",
-          "description": "Set the default Interchange pipeline stack for content or scene import (DefaultPipelineStack of the project's ContentImportSettings or SceneImportSettings), saved to the project's default config.",
+          "description": "Choose the named pipeline stack Interchange uses by default for content imports (assets) or scene imports (levels) -- the DefaultPipelineStack that Project Settings > Interchange shows -- and write it to the project's DefaultEngine.ini, so it outlives the editor session. The stack must already exist in that import path's pipeline stacks: an unknown name is refused with the list of the ones there, and so is a read-only DefaultEngine.ini, both before anything changes. The previous default is overwritten and returned in previous_stack_name; choosing the stack that is already the default changes nothing (changed=false), so a repeat call is harmless (idempotent). No undo step is recorded. The content stacks and both current defaults are listed by get_interchange_project_settings; to choose the pipelines of one imported asset instead, use set_interchange_pipelines.",
           "params": [
             {
               "name": "content_or_scene",
               "jsonType": "string",
               "required": true,
-              "description": "Which import path's default stack to set: \"content\" (ContentImportSettings) or \"scene\" (SceneImportSettings). Case-insensitive."
+              "description": "Which default to set: \"content\" for asset imports (ContentImportSettings) or \"scene\" for level imports (SceneImportSettings). Case-insensitive."
             },
             {
               "name": "stack_name",
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Name of the pipeline stack to make the default (an FName key into the project's PipelineStacks map)."
+              "description": "Name of an existing pipeline stack of that import path, e.g. \"Assets\"; matched without case."
             }
           ],
-          "returns": "{ content_or_scene: string, stack_name: string, applied: bool }",
+          "returns": "{ content_or_scene, stack_name, previous_stack_name, changed, config_file, applied }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -57751,17 +57751,17 @@
         },
         {
           "name": "remove_trigger",
-          "description": "Delete one shape trigger (ATriggerBase: TriggerBox, TriggerSphere or TriggerCapsule) from the editor world, found by its object name (matched without case; the editor label is not), after checking its class, through UWorld::DestroyActor: no undo step is recorded and the level is not saved (save_level). A name that matches no actor is not an error: the reply has deleted=false and a note; already_existed=false means nothing was found, and a repeat call finds nothing more to do (idempotent). An actor of another class, a TriggerVolume included, is refused with success false and deleted=false, nothing destroyed, and so is a destroy the world refuses. A missing actor_name or no editor world is an error. A brush volume (TriggerVolume too): remove_volume; any actor, undoably: delete_actor; create one: create_trigger.",
+          "description": "Delete one shape trigger -- a TriggerBox, TriggerSphere or TriggerCapsule -- from the editor world. The actor is found by its object name and its class is checked first: any other class, a TriggerVolume included, is refused and nothing is destroyed. The deletion records no undo step and does not save the level (save_level does). A name that matches no actor is a success with deleted=false, so a repeat call is harmless (idempotent). For a brush volume use remove_volume; to delete any actor with undo, delete_actor.",
           "params": [
             {
               "name": "actor_name",
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Object name of the trigger actor, e.g. TriggerBox_0 or TriggerSphere_0, matched without case (its editor label is not matched); the command fails without it."
+              "description": "The trigger's object name, not its editor label (e.g. TriggerBox_0, as get_actors_in_trigger reports it in actor_name); matched without case."
             }
           ],
-          "returns": "{ actor_name, actor_class, deleted, already_existed, note? }",
+          "returns": "{ actor_name, actor_class, deleted (false when nothing was destroyed), already_existed (false when no actor had that name), note? }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,

@@ -70,13 +70,13 @@ Read a volume actor in the editor world without changing it: its class, whether 
 
 *Destructive, idempotent.*
 
-Delete one shape trigger (ATriggerBase: TriggerBox, TriggerSphere or TriggerCapsule) from the editor world, found by its object name (matched without case; the editor label is not), after checking its class, through UWorld::DestroyActor: no undo step is recorded and the level is not saved (save_level). A name that matches no actor is not an error: the reply has deleted=false and a note; already_existed=false means nothing was found, and a repeat call finds nothing more to do (idempotent). An actor of another class, a TriggerVolume included, is refused with success false and deleted=false, nothing destroyed, and so is a destroy the world refuses. A missing actor_name or no editor world is an error. A brush volume (TriggerVolume too): remove_volume; any actor, undoably: delete_actor; create one: create_trigger.
+Delete one shape trigger -- a TriggerBox, TriggerSphere or TriggerCapsule -- from the editor world. The actor is found by its object name and its class is checked first: any other class, a TriggerVolume included, is refused and nothing is destroyed. The deletion records no undo step and does not save the level (save_level does). A name that matches no actor is a success with deleted=false, so a repeat call is harmless (idempotent). For a brush volume use remove_volume; to delete any actor with undo, delete_actor.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Object name of the trigger actor, e.g. TriggerBox_0 or TriggerSphere_0, matched without case (its editor label is not matched); the command fails without it. |
+| `actor_name` | string | yes | The trigger's object name, not its editor label (e.g. TriggerBox_0, as get_actors_in_trigger reports it in actor_name); matched without case. |
 
-**Returns:** `{ actor_name, actor_class, deleted, already_existed, note? }`
+**Returns:** `{ actor_name, actor_class, deleted (false when nothing was destroyed), already_existed (false when no actor had that name), note? }`
 
 ## `remove_volume`
 

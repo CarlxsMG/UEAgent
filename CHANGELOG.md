@@ -4,6 +4,29 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 ## Unreleased
 
+## 2.0.1 - 2026-10-20
+
+A patch release: an Interchange registration that closed the editor is refused, and three other Interchange tools
+refuse what they used to accept silently.
+
+### Fixed
+
+- `register_interchange_translator` refuses a class that is not a concrete Interchange translator. It used to register
+  any class, such as `/Script/Engine.Actor`, and the next format query (`get_interchange_supported_formats`, or the
+  editor's import dialog) failed an engine assertion and closed the editor. The reply adds `already_registered` and
+  `supported_formats`.
+- `register_interchange_factory` refuses a class that is not a concrete Interchange factory; it used to answer success
+  with `registered: false`. It also refuses a factory for an asset class that already has one: the Interchange
+  manager keeps the first, so the call used to report success without registering anything. The reply adds
+  `asset_class` and `already_registered`.
+- `set_interchange_pipeline_stack_default` refuses a stack name that the import path does not have, and lists the ones
+  it has; it used to write any name to `DefaultEngine.ini`. It also refuses a read-only `DefaultEngine.ini` before
+  changing anything, and reports `previous_stack_name`, `changed` and `config_file`.
+- `set_interchange_pipeline_properties` refuses an empty `properties` object, and skips properties that are read-only
+  in the editor.
+- Clearer descriptions for these four tools, `get_anim_sequence_info` and `remove_trigger`. The example class paths of
+  the two registration tools named classes that do not exist.
+
 ## 2.0.0 - 2026-10-20
 
 A consolidation release: 1742 tools instead of 2097, with one tool per job and every name verb-first. Old names are
