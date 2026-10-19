@@ -4,6 +4,49 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 ## Unreleased
 
+## 1.2.5 - 2026-10-19
+
+- More calls that killed the editor are refused before anything runs: an empty key in `set_string_table_entry`,
+  an `input_key` before the first spline point in `set_river_width_depth_at_point` and
+  `set_water_body_properties`, a static mesh with no source model in the `get_mesh_*` queries and
+  `copy_static_mesh_to_dynamic_mesh`, a name held by another class in `create_material_instance_dynamic`, a
+  link that would make a loop in `connect_sound_cue_nodes`, an empty renderer slot in `remove_niagara_renderer`,
+  and USD tokens and type names of 1024 characters or more.
+- Parameters that could not be left out now can: 22 parameters of 12 tools were published as required although
+  the handler needs them only in some cases. `add_graph_node` demanded all of `event_name`, `function_name`,
+  `target_class`, `variable_name`, `struct_type`, `enum_path`, `dispatcher` and `macro_graph_name` for any node;
+  the others are in `overlap_scene`, `diff_data_tables`, `delete_render_job`, `list_states`,
+  `set_component_parameter_override`, the static mesh collision tools (`dest_path`), two Niagara tools,
+  `set_water_body_properties` (`input_key`), `get_blackboard_data` (`actor_name`), the landscape grass and
+  foliage tools, and `set_spawn_ownership`, whose `sequence_path` is now an alias of `sequence_name` and takes a
+  path.
+- A failure is no longer answered as a success: an attach the engine refused, a link that did not take, a
+  camera rig built with errors, a skeletal mesh LOD bake refused in Play-in-Editor, a view model that was not
+  assigned, a USD attribute or metadata value USD refused, a MetaSound value of the wrong type, a light the
+  engine would not change, a failed weld or polygroup paint, a removal that did not delete, and the save of
+  about 20 Niagara tools, which was ignored.
+- `saved: true` without a save is gone: the create tools that find their asset already there answer
+  `saved: false` and save nothing, as do the other calls that change nothing.
+- Undo and the dirty flag: the water, decal, light, EQS, Smart Object and Niagara emitter setters record the
+  object before they write it, so the change is one undo step and the level or asset is marked for saving.
+  Setters that write several values check them all first, so a refusal leaves nothing half-written.
+- Values that were wrong: USD float, half, unsigned, 64-bit, token and asset values read back as 0 or null and
+  could not be written; an audio section's start offset was converted at the display rate instead of the tick
+  resolution; view mode names did not round-trip; `set_viewport_fov` was lost on the next camera reset;
+  `get_material_graph_info` named most node inputs None; the blackboard listings left out inherited keys; the
+  `get_mesh_*` queries reported a LOD they had not read; `configure_post_processing` set four console variables
+  that UE 5.8 does not have and reported them on; `set_anim_transition_rule_from_comparison` failed on float
+  variables and could leave a half-built rule; `end_behavior_on_actor` always said `ended: false`, and stopped
+  every behavior when its class did not resolve; `link_media_texture_to_player` never saved the link;
+  `create_material_instance_dynamic` handed out instances the next garbage collection could free; and
+  `run_asset_action_utility` ran actions on the class default object, which the editor never does.
+- Changed: `set_decal_sort_order` requires `sort_order` (a missing one wrote 0); `configure_post_processing`
+  drops `anti_aliasing_enabled`, `global_illumination_enabled` and `color_grading_enabled`, which no 5.8 console
+  variable backs, and reports each variable it sets as read back; `set_section_blend_type` refuses a blend type
+  the section does not support; `add_list_view` reports `list_view_class` as `UListView`, like its siblings.
+- 40 more integer parameters are checked against their range before the call runs.
+- 22 more short tool descriptions are rewritten from the handlers' code.
+
 ## 1.2.4 - 2026-10-18
 
 - Dynamic mesh edits can be undone: the 38 tools that edit a DynamicMeshActor's mesh (booleans, remeshes,
