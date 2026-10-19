@@ -4,6 +4,16 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 ## Unreleased
 
+## 1.2.9 - 2026-10-19
+
+- USD integer list ops (`inactiveIds` and other int, uint, int64 and uint64 list ops) read and write as JSON lists of
+  numbers, a `pathExpression[]` array reads as an array of strings, and a path expression (or an array of them) is
+  written from its text, an unparsable one refused with USD's parse error. They go through a new small module,
+  UEAgentUsdSdk, built against the USD SDK the way the engine's own USD modules are.
+- The double-slash guard no longer refuses a USD path expression such as `/World//Mesh` in the `value` that
+  `set_usd_attribute_value` and `set_usd_prim_metadata` write; every other argument, including those of a `batch`
+  item, is still checked.
+
 ## 1.2.8 - 2026-10-19
 
 - A name created inside an asset no longer kills the editor when the asset's path and the name are long together: a
