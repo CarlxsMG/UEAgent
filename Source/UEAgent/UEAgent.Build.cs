@@ -119,7 +119,8 @@ public class UEAgent : ModuleRules
 				"Kismet",                   // FBlueprintEditorUtils, FKismetEditorUtilities
 				"KismetCompiler",           // Blueprint compilation
 				"Projects",                 // IPluginManager (plugin paths, enabled plugins)
-				"UnrealEd"                  // GEditor and the editor framework
+				"UnrealEd",                 // GEditor and the editor framework
+				"UEAgentUsdSdk"             // the USD values the engine's USD wrapper cannot convert (integer list ops, path expressions)
 			}
 		);
 
