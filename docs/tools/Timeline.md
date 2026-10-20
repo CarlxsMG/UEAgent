@@ -785,7 +785,7 @@ Set the attach and detach transform rules of one 3D-attach section on an object-
 
 *Destructive, idempotent.*
 
-Set playback properties of one section (section_index) on a root audio track (audio_track_index) of a Level Sequence, in one undo step, then save the sequence: sound, looping (SetRepeating), play until finished, subtitle suppression, attenuation override and asset, volume, pitch and start offset. Use it rather than set_properties: volume and pitch are keyed channels, not plain properties, the start offset is converted to tick-resolution frames, and the section's own setters run (setting a sound re-derives looping). Only fields you pass change; a sound or attenuation path that does not load, or an offset outside the frame range, is an error before anything changes. volume/pitch without time_seconds become one constant key at frame 0; with time_seconds a linear key is ADDED at that time, rounded to a tick, even over an existing key. When nothing changes, nothing is saved and no undo step is left (changed false). Read: get_audio_section_properties; add: add_audio_section.
+Set playback properties of one section (section_index) on a root audio track (audio_track_index) of a Level Sequence, in one undo step, then save the sequence: sound, looping, play until finished (UE 5.8), subtitle suppression, attenuation override and asset, volume, pitch and start offset. Use it rather than set_properties: volume and pitch are keyed channels, not plain properties, the start offset is converted to tick-resolution frames, and the section's own setters run (setting a sound re-derives looping). Only fields you pass change; a sound or attenuation path that does not load, or an offset outside the frame range, is an error before anything changes. volume/pitch without time_seconds become one constant key at frame 0; with time_seconds a linear key is ADDED at that time, rounded to a tick, even over an existing key. When nothing changes, nothing is saved and no undo step is left (changed false). Read: get_audio_section_properties; add: add_audio_section.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -794,7 +794,7 @@ Set playback properties of one section (section_index) on a root audio track (au
 | `audio_track_index` | number | no | Index of the root audio track, counting root audio tracks only (default 0). |
 | `section_index` | number | no | Index of the section on the resolved root audio track (default 0). |
 | `sound_path` | string | no | Optional content path of a USoundBase to set as the section's sound. |
-| `looping` | boolean | no | Section repeating/looping (maps to SetRepeating, the engine's loop knob; omit to leave unchanged). |
+| `looping` | boolean | no | Section looping, through the section's own setter (SetRepeating on UE 5.8, SetLooping on 5.7); omit to leave unchanged. |
 | `play_until_finished` | boolean | no | SetPlayUntilFinished (omit to leave unchanged). Needs UE 5.8. |
 | `suppress_subtitles` | boolean | no | SetSuppressSubtitles (omit to leave unchanged). |
 | `override_attenuation` | boolean | no | SetOverrideAttenuation; must be true for attenuation_path to take effect (omit to leave unchanged). |

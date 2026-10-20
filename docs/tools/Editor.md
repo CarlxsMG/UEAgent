@@ -108,11 +108,11 @@ Open one undoable transaction so a whole batch of edits collapses into a SINGLE 
 
 *Destructive.*
 
-Abort the transaction opened by begin_transaction: the edits made inside it are rolled back and NO entry is written to the undo stack (undo_count is unchanged). The escape hatch when a multi-step edit goes wrong halfway -- cleaner than committing with end_transaction and then calling undo, which leaves history behind.
+Abort the transaction opened by begin_transaction: the edits made inside it are rolled back (rolled_back true) and NO entry is written to the undo stack (undo_count is unchanged). The escape hatch when a multi-step edit goes wrong halfway -- cleaner than committing with end_transaction and then calling undo, which leaves history behind. Only what the transaction recorded rolls back: a change the editor does not record for undo (one to a Play-in-Editor object, for instance) stays, and rolled_back is false when nothing was recorded.
 
 No parameters.
 
-**Returns:** `{ success: bool, transaction_index: int (the one that was cancelled), undo_count: int (unchanged -- nothing was recorded) }`
+**Returns:** `{ success: bool, transaction_index: int (the one that was cancelled), rolled_back: bool (whether recorded edits were reverted), undo_count: int (unchanged -- nothing was recorded), note?: string }`
 
 ## `capture_high_res_screenshot`
 
@@ -373,11 +373,11 @@ Copy one editor-world actor in place through the editor's duplicate path, keepin
 
 *Destructive.*
 
-Close the transaction opened by begin_transaction and COMMIT it, so everything done inside becomes one entry on the editor's undo stack (undo_count grows by one). Pair it with every begin_transaction -- leaving one open makes later edits silently join it. Use cancel_transaction instead when you want the batch thrown away rather than kept.
+Close the transaction opened by begin_transaction and COMMIT it, so everything done inside becomes one entry on the editor's undo stack (undo_count grows by one). Pair it with every begin_transaction -- leaving one open makes later edits silently join it. Use cancel_transaction instead when you want the batch thrown away rather than kept. A transaction that holds objects of the running Play-in-Editor session (a widget made with create_widget) is closed without an undo entry, recorded false: the edits stay, and keeping it would close the editor when PIE stops.
 
 No parameters.
 
-**Returns:** `{ success: bool, transaction_index: int (the one that was closed), undo_count: int after the commit }`
+**Returns:** `{ success: bool, transaction_index: int (the one that was closed), recorded: bool (false: no undo entry, see note), undo_count: int after the commit, note?: string }`
 
 ## `execute_console_command`
 
@@ -690,7 +690,7 @@ No parameters.
 
 *Destructive.*
 
-Import a .ttf/.otf/.ttc/.otc font from disk as a UFontFace, and optionally the companion UFont that a FSlateFontInfo needs to actually render text. This is the only way to get a typeface into the project headlessly: import_texture_file imports images only, and nothing else in the toolset touches fonts. Drives UFontFileImportFactory inline (never IAssetTools::ImportAssets, which asserts when re-entered from the engine tick) and ALWAYS sets BatchCreateFontAsset explicitly -- left at its default the factory pops a MODAL DIALOG asking whether to create the UFont, which would hang the editor on a click that is never coming. Once imported, point a widget at it with set_widget_property on the dotted path "Font.FontObject" (a UFont) plus "Font.TypefaceFontName", or "Font.Size" for the size.
+Import a .ttf/.otf/.ttc/.otc font from disk as a UFontFace, and optionally the companion UFont that a FSlateFontInfo needs to actually render text. This is the only way to get a typeface into the project headlessly: import_texture_file imports images only, and nothing else in the toolset touches fonts. Drives UFontFileImportFactory inline (never IAssetTools::ImportAssets, which asserts when re-entered from the engine tick) and never lets the factory ask: left at its default it pops a MODAL DIALOG asking whether to create the UFont, which would hang the editor on a click that is never coming, so on UE 5.8 BatchCreateFontAsset is set explicitly and on 5.7 the import runs as automated and the UFont is created by the tool. Once imported, point a widget at it with set_widget_property on the dotted path "Font.FontObject" (a UFont) plus "Font.TypefaceFontName", or "Font.Size" for the size.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

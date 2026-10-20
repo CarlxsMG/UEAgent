@@ -32,6 +32,7 @@
 #include "Dom/JsonObject.h"                // diff_data_tables: FJsonObject::Values / TryGetField
 // External .uasset read via throwaway mount + collision-safe LoadPackage
 #include "Misc/Paths.h"                    // FPaths::FileExists / GetPath / GetBaseFilename / ConvertRelativePathToFull
+#include "HAL/FileManager.h"              // IFileManager::Copy / DeleteDirectory: the throwaway copy of read_data_table_from_package_file
 #include "Misc/FileHelper.h"               // FFileHelper::SaveStringToFile for export_data_table_as_{json,csv} file_path
 #include "UObject/UnrealType.h"            // FMapProperty / FSoftObjectProperty / FStructProperty for get_data_table_info columns
 #include "HAL/IConsoleManager.h"           // CVar guard (DataTableJSON.ExportUsingPropertyVisitor) in MCPExt_RowToNativeJsonObject
@@ -2909,11 +2910,13 @@ TSharedPtr<FJsonObject> HandleGetCurveKeys(const TSharedPtr<FJsonObject>& Params
 //
 // read_data_table_from_package_file: the file declares a /Game/... package name shared with the LIVE project, so a
 // plain LoadPackage(nullptr, "/Game/...", ...) would collide with the in-memory copy.
-// We dodge that by registering a THROWAWAY, uniquely-named mount point over the file's
-// directory and loading it under that private root (/MCPExtRead_<guid>/<Asset>), so the
-// live /Game/... object is never rebound or touched. Rows are serialized with the SAME
-// native UDataTable::WriteRowAsJSON path as get_data_table_row include_native_json. The mount is
-// unregistered + the throwaway load's keep-flags cleared + GC'd afterward.
+// We dodge that the way the editor loads a source-control revision for a diff: the file (and its .uexp/.ubulk
+// companions) is copied into a throwaway folder under Saved/Diff and loaded from there under the /Temp/ root
+// (/Temp/Diff/MCPExtRead_<guid>/<Asset>), so the live /Game/... object is never rebound or touched. LOAD_ForDiff
+// requires a /Temp/ package: a private mount over the file's own folder made the engine raise an ensure on every
+// call. Rows are serialized with the SAME native UDataTable::WriteRowAsJSON path as get_data_table_row
+// include_native_json. Afterward the throwaway load's keep-flags are cleared, its loader released, it is GC'd, and
+// the copy is deleted.
 //
 // diff_data_tables: builds rowName->row-object maps for both sides (via that same native writer for
 // assets, or by normalizing before/after JSON dumps) and reports added/removed/changed
@@ -3158,7 +3161,7 @@ namespace
     }
 } // namespace
 
-// MCP:read_data_table_from_package_file - Read a DataTable from any .uasset file on disk (e.g. a backup) under a throwaway mount, so a live asset with the same /Game name is untouched; then unmounts and, by default, garbage-collects. Returns table_name, row_struct, row_count and rows as native JSON, or one row via row_name.
+// MCP:read_data_table_from_package_file - Read a DataTable from any .uasset file on disk (e.g. a backup) through a throwaway copy loaded under /Temp/, so a live asset with the same /Game name is untouched; then deletes the copy and, by default, garbage-collects. Returns table_name, row_struct, row_count and rows as native JSON, or one row via row_name.
 //   @param package_file - Absolute filesystem path to the external .uasset (alias: file_path)
 //   @param object_name - Optional name of the DataTable object inside the package (defaults to the first UDataTable / the package's primary asset)
 //   @param row_name - Optional single row to return; when omitted every row is returned
@@ -3190,12 +3193,36 @@ TSharedPtr<FJsonObject> HandleReadDataTableFromPackageFile(const TSharedPtr<FJso
     const FString ContentDir = FPaths::GetPath(PackageFile);
     const FString BaseName   = FPaths::GetBaseFilename(PackageFile);
 
-    // Unique throwaway root so the load never shadows/rebinds the live /Game/... package.
-    const FString MountRoot = FString::Printf(TEXT("/MCPExtRead_%s/"),
-        *FGuid::NewGuid().ToString(EGuidFormats::Digits));
-    const FString LongPackageName = MountRoot + BaseName;
-
-    FPackageName::RegisterMountPoint(MountRoot, ContentDir);
+    // A unique throwaway folder under Saved/Diff, which the /Temp/ root maps, so the load never shadows/rebinds the
+    // live /Game/... package and LOAD_ForDiff gets the /Temp/ package it requires.
+    const FString CopyDir = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::DiffDir(),
+        FString::Printf(TEXT("MCPExtRead_%s"), *FGuid::NewGuid().ToString(EGuidFormats::Digits))));
+    IFileManager& FileManager = IFileManager::Get();
+    const FString CopiedFile = FPaths::Combine(CopyDir, FPaths::GetCleanFilename(PackageFile));
+    if (FileManager.Copy(*CopiedFile, *PackageFile) != COPY_OK)
+    {
+        FileManager.DeleteDirectory(*CopyDir, false, true);
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Could not copy %s into %s to read it; nothing was loaded"), *PackageFile, *CopyDir));
+    }
+    for (const TCHAR* Companion : { TEXT(".uexp"), TEXT(".ubulk"), TEXT(".uptnl") })
+    {
+        const FString Source = FPaths::Combine(ContentDir, BaseName + Companion);
+        if (FPaths::FileExists(Source))
+        {
+            FileManager.Copy(*FPaths::Combine(CopyDir, BaseName + Companion), *Source);
+        }
+    }
+    FString LongPackageName;
+    if (!FPackageName::TryConvertFilenameToLongPackageName(CopiedFile, LongPackageName)
+        || !FPackageName::IsTempPackage(LongPackageName))
+    {
+        FileManager.DeleteDirectory(*CopyDir, false, true);
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("The copy %s has no /Temp/ package name, so it cannot be read apart from the live project; nothing was loaded"),
+            *CopiedFile));
+    }
+    const FString MountRoot = FPackageName::GetLongPackagePath(LongPackageName) + TEXT("/");
 
     TSharedPtr<FJsonObject> Response;
     UPackage* LoadedPkg = nullptr;
@@ -3299,7 +3326,7 @@ TSharedPtr<FJsonObject> HandleReadDataTableFromPackageFile(const TSharedPtr<FJso
     }
 
     // Cleanup: clear the keep-flags GC honors in-editor (RF_Standalone) so the throwaway
-    // load is reclaimable, drop the private mount, then optionally purge it.
+    // load is reclaimable, release its loader (the copy's file handle), optionally purge it, and delete the copy.
     if (LoadedPkg)
     {
         LoadedPkg->ClearFlags(RF_Standalone | RF_Public);
@@ -3313,12 +3340,13 @@ TSharedPtr<FJsonObject> HandleReadDataTableFromPackageFile(const TSharedPtr<FJso
         }, EGetObjectsFlags::IncludeNestedObjects);
 #endif
         LoadedPkg->ClearDirtyFlag();
+        ResetLoaders(LoadedPkg);
     }
-    FPackageName::UnRegisterMountPoint(MountRoot, ContentDir);
     if (bCollectGarbage)
     {
         CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
     }
+    FileManager.DeleteDirectory(*CopyDir, false, true);
 
     return Response;
 }

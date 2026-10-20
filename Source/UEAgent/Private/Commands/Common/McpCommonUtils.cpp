@@ -38,6 +38,8 @@
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraph.h" // FGraphNodeCreator
 #include "Editor.h"                                    // GEditor
+#include "Editor/Transactor.h"                         // FTransaction::GetTransactionObjects -- the PIE-session check of a transaction
+#include "Engine/GameInstance.h"                       // UGameInstance::GetWorldContext -- the same check
 #include "FileHelpers.h"                               // UEditorLoadingAndSavingUtils::SavePackages -- the editor's map save
 #include "Editor/LevelEditor/Public/LevelEditorSubsystem.h"  // IsInPlayInEditor/EditorRequestEndPlay -- same API stop_play_in_editor uses
 #include "HAL/PlatformProcess.h"                       // Sleep, while waiting for PIE teardown
@@ -1639,6 +1641,52 @@ namespace mcp_common
         return MakeErrorReply(FString::Printf(
             TEXT("%s needs Unreal Engine %s or later (%s); this editor runs Unreal Engine %d.%d. Nothing was changed."),
             Tool, MinVersion, Why, ENGINE_MAJOR_VERSION, ENGINE_MINOR_VERSION));
+    }
+
+    bool TransactionHoldsPieSessionObjects(const FTransaction* Transaction)
+    {
+        if (!Transaction)
+        {
+            return false;
+        }
+        TArray<UObject*> Objects;
+        Transaction->GetTransactionObjects(Objects);
+        for (const UObject* Object : Objects)
+        {
+            for (const UObject* Outer = Object; Outer; Outer = Outer->GetOuter())
+            {
+                if (Outer->GetOutermost()->HasAnyPackageFlags(PKG_PlayInEditor))
+                {
+                    return true;
+                }
+                const UGameInstance* GameInstance = Cast<UGameInstance>(Outer);
+                const FWorldContext* Context = GameInstance ? GameInstance->GetWorldContext() : nullptr;
+                if (Context && Context->WorldType == EWorldType::PIE)
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    bool ResetUndoHistoryHoldingPieSession()
+    {
+        UTransactor* Trans = GEditor ? GEditor->Trans.Get() : nullptr;
+        if (!Trans)
+        {
+            return false;
+        }
+        for (int32 Index = 0; Index < Trans->GetQueueLength(); ++Index)
+        {
+            if (TransactionHoldsPieSessionObjects(Trans->GetTransaction(Index)))
+            {
+                GEditor->ResetTransaction(NSLOCTEXT("UEAgent", "PieSessionInUndoHistory",
+                    "An object of the ending Play-in-Editor session was in the undo history"));
+                return true;
+            }
+        }
+        return false;
     }
 
     bool ImportPropertyTextStrict(const FProperty* Property, const FString& Text, void* ValuePtr, UObject* Owner,

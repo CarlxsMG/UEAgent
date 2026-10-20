@@ -4086,6 +4086,17 @@ TSharedPtr<FJsonObject> HandleReparentWidget(const TSharedPtr<FJsonObject>& Para
             TEXT("new_parent_name '%s' is a %s, not a panel widget, and cannot host children"),
             *NewParentName, *NewParentAsWidget->GetClass()->GetName()));
     }
+    // MoveWidget does not catch a widget moved into itself: it was moved, saved, and the tree held a cycle. The new
+    // parent can be neither the widget nor one of its descendants.
+    for (const UWidget* Ancestor = NewParent; Ancestor; Ancestor = Ancestor->GetParent())
+    {
+        if (Ancestor == Widget)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("'%s' cannot become a child of itself or of its children ('%s' is %s); nothing was changed"),
+                *WidgetName, *NewParentName, NewParent == Widget ? TEXT("the widget itself") : TEXT("one of its descendants")));
+        }
+    }
 
     int32 TargetIndex = -1; // -1 = append (MoveWidget's own convention)
     double IndexNum = 0.0;
@@ -4357,12 +4368,6 @@ TSharedPtr<FJsonObject> HandleDuplicateWidget(const TSharedPtr<FJsonObject>& Par
         return mcp_common::MakeErrorReply(FString::Printf(
             TEXT("duplicate_widget: cannot name the duplicate '%s': %s"), *NewName, *VerifyError.ToString()));
     }
-#if UE_VERSION_OLDER_THAN(5, 8, 0)
-    RenameWidget_Widget(WidgetBP, NewWidget, NewName);
-#else
-    FWidgetBlueprintOperationUtils::RenameWidget(WidgetBP, NewWidget, NewName);
-#endif
-
     UPanelSlot* NewSlot = TargetParent->AddChild(NewWidget);
     if (!NewSlot)
     {
@@ -4390,13 +4395,23 @@ TSharedPtr<FJsonObject> HandleDuplicateWidget(const TSharedPtr<FJsonObject>& Par
         }
     }
 
+    // The copy joins the Blueprint under its auto-unique name first, and only then takes the requested one through
+    // the rename primitive, which renames a widget variable the Blueprint knows. Renamed before it was added, the copy
+    // made the Blueprint rename a variable it never had (an engine ensure), and the next compile trashed the copy as
+    // TRASH_<name> while the call answered success.
     WidgetBP->OnVariableAdded(NewWidget->GetFName());
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    RenameWidget_Widget(WidgetBP, NewWidget, NewName);
+#else
+    FWidgetBlueprintOperationUtils::RenameWidget(WidgetBP, NewWidget, NewName);
+#endif
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WidgetBP);
 
     FString SaveErr;
     const bool bSaved = SaveWidgetBlueprint(WidgetBP, SaveErr);
 
-    UWidget* Verify = WidgetTree->FindWidget(FName(*NewName));
+    // The rename sanitizes the name the way the Designer does, so the copy is looked up by the name it took.
+    UWidget* Verify = WidgetTree->FindWidget(NewWidget->GetFName()) == NewWidget ? NewWidget : nullptr;
 
     TSharedPtr<FJsonObject> Resp = StartReply_Widget(WidgetBPPath, TEXT("source_widget_name"), WidgetName);
     Resp->SetStringField(TEXT("new_widget_name"), NewWidget->GetName());
@@ -4406,6 +4421,12 @@ TSharedPtr<FJsonObject> HandleDuplicateWidget(const TSharedPtr<FJsonObject>& Par
     Resp->SetBoolField(TEXT("slot_class_matched_source"), bSlotClassMatched);
     Resp->SetNumberField(TEXT("slot_properties_copied"), SlotPropsCopied);
     Resp->SetBoolField(TEXT("duplicated"), Verify != nullptr);
+    if (Verify == nullptr)
+    {
+        // The reply said success with duplicated false; a copy that is not in the tree is a failure.
+        return mcp_common::MakeOutcomeReply(Resp, false, FString::Printf(
+            TEXT("duplicate_widget: the copy '%s' is not in the widget tree after the save; nothing usable was added"), *NewName));
+    }
     return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("duplicate_widget"), SaveErr);
 }
 

@@ -21799,7 +21799,7 @@
         },
         {
           "name": "read_data_table_from_package_file",
-          "description": "Read a DataTable from any .uasset file on disk (e.g. a backup) under a throwaway mount, so a live asset with the same /Game name is untouched; then unmounts and, by default, garbage-collects. Returns table_name, row_struct, row_count and rows as native JSON, or one row via row_name.",
+          "description": "Read a DataTable from any .uasset file on disk (e.g. a backup) through a throwaway copy loaded under /Temp/, so a live asset with the same /Game name is untouched; then deletes the copy and, by default, garbage-collects. Returns table_name, row_struct, row_count and rows as native JSON, or one row via row_name.",
           "params": [
             {
               "name": "package_file",
@@ -21837,9 +21837,9 @@
           ],
           "returns": "{ package_file, mount_root, package_name, table_name, row_struct, row_count, rows:[{row_name,row_data}] } (or, for a single row_name, { ..., row_name, row_json, row_data })",
           "annotations": {
-            "readOnlyHint": true,
-            "destructiveHint": false,
-            "idempotentHint": true,
+            "readOnlyHint": false,
+            "destructiveHint": true,
+            "idempotentHint": false,
             "openWorldHint": false
           }
         },
@@ -22763,9 +22763,9 @@
         },
         {
           "name": "cancel_transaction",
-          "description": "Abort the transaction opened by begin_transaction: the edits made inside it are rolled back and NO entry is written to the undo stack (undo_count is unchanged). The escape hatch when a multi-step edit goes wrong halfway -- cleaner than committing with end_transaction and then calling undo, which leaves history behind.",
+          "description": "Abort the transaction opened by begin_transaction: the edits made inside it are rolled back (rolled_back true) and NO entry is written to the undo stack (undo_count is unchanged). The escape hatch when a multi-step edit goes wrong halfway -- cleaner than committing with end_transaction and then calling undo, which leaves history behind. Only what the transaction recorded rolls back: a change the editor does not record for undo (one to a Play-in-Editor object, for instance) stays, and rolled_back is false when nothing was recorded.",
           "params": [],
-          "returns": "{ success: bool, transaction_index: int (the one that was cancelled), undo_count: int (unchanged -- nothing was recorded) }",
+          "returns": "{ success: bool, transaction_index: int (the one that was cancelled), rolled_back: bool (whether recorded edits were reverted), undo_count: int (unchanged -- nothing was recorded), note?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -23334,9 +23334,9 @@
         },
         {
           "name": "end_transaction",
-          "description": "Close the transaction opened by begin_transaction and COMMIT it, so everything done inside becomes one entry on the editor's undo stack (undo_count grows by one). Pair it with every begin_transaction -- leaving one open makes later edits silently join it. Use cancel_transaction instead when you want the batch thrown away rather than kept.",
+          "description": "Close the transaction opened by begin_transaction and COMMIT it, so everything done inside becomes one entry on the editor's undo stack (undo_count grows by one). Pair it with every begin_transaction -- leaving one open makes later edits silently join it. Use cancel_transaction instead when you want the batch thrown away rather than kept. A transaction that holds objects of the running Play-in-Editor session (a widget made with create_widget) is closed without an undo entry, recorded false: the edits stay, and keeping it would close the editor when PIE stops.",
           "params": [],
-          "returns": "{ success: bool, transaction_index: int (the one that was closed), undo_count: int after the commit }",
+          "returns": "{ success: bool, transaction_index: int (the one that was closed), recorded: bool (false: no undo entry, see note), undo_count: int after the commit, note?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -23976,7 +23976,7 @@
         },
         {
           "name": "import_font_file",
-          "description": "Import a .ttf/.otf/.ttc/.otc font from disk as a UFontFace, and optionally the companion UFont that a FSlateFontInfo needs to actually render text. This is the only way to get a typeface into the project headlessly: import_texture_file imports images only, and nothing else in the toolset touches fonts. Drives UFontFileImportFactory inline (never IAssetTools::ImportAssets, which asserts when re-entered from the engine tick) and ALWAYS sets BatchCreateFontAsset explicitly -- left at its default the factory pops a MODAL DIALOG asking whether to create the UFont, which would hang the editor on a click that is never coming. Once imported, point a widget at it with set_widget_property on the dotted path \"Font.FontObject\" (a UFont) plus \"Font.TypefaceFontName\", or \"Font.Size\" for the size.",
+          "description": "Import a .ttf/.otf/.ttc/.otc font from disk as a UFontFace, and optionally the companion UFont that a FSlateFontInfo needs to actually render text. This is the only way to get a typeface into the project headlessly: import_texture_file imports images only, and nothing else in the toolset touches fonts. Drives UFontFileImportFactory inline (never IAssetTools::ImportAssets, which asserts when re-entered from the engine tick) and never lets the factory ask: left at its default it pops a MODAL DIALOG asking whether to create the UFont, which would hang the editor on a click that is never coming, so on UE 5.8 BatchCreateFontAsset is set explicitly and on 5.7 the import runs as automated and the UFont is created by the tool. Once imported, point a widget at it with set_widget_property on the dotted path \"Font.FontObject\" (a UFont) plus \"Font.TypefaceFontName\", or \"Font.Size\" for the size.",
           "params": [
             {
               "name": "source_file_path",
@@ -44676,10 +44676,10 @@
               "name": "transaction",
               "jsonType": "boolean",
               "required": false,
-              "description": "Wrap the whole run in one undo transaction, so a single undo reverts all of it (begin_transaction / end_transaction, or cancel_transaction instead when stop_on_error tripped on an error). Default false."
+              "description": "Wrap the whole run in one undo transaction, so a single undo reverts all of it (begin_transaction / end_transaction). When stop_on_error trips on an error, cancel_transaction closes it instead and rolls back what the run had recorded, items reported ok included: transaction_rolled_back says whether it did. Default false."
             }
           ],
-          "returns": "{ success: bool, results: [{index: int, command_type: string, ok: bool, payload?: any, error?: string}], stopped_early: bool }",
+          "returns": "{ success: bool, results: [{index: int, command_type: string, ok: bool, payload?: any, error?: string}], stopped_early: bool, transaction_rolled_back?: bool (with transaction, when stop_on_error tripped) }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -55866,7 +55866,7 @@
         },
         {
           "name": "set_audio_section_properties",
-          "description": "Set playback properties of one section (section_index) on a root audio track (audio_track_index) of a Level Sequence, in one undo step, then save the sequence: sound, looping (SetRepeating), play until finished, subtitle suppression, attenuation override and asset, volume, pitch and start offset. Use it rather than set_properties: volume and pitch are keyed channels, not plain properties, the start offset is converted to tick-resolution frames, and the section's own setters run (setting a sound re-derives looping). Only fields you pass change; a sound or attenuation path that does not load, or an offset outside the frame range, is an error before anything changes. volume/pitch without time_seconds become one constant key at frame 0; with time_seconds a linear key is ADDED at that time, rounded to a tick, even over an existing key. When nothing changes, nothing is saved and no undo step is left (changed false). Read: get_audio_section_properties; add: add_audio_section.",
+          "description": "Set playback properties of one section (section_index) on a root audio track (audio_track_index) of a Level Sequence, in one undo step, then save the sequence: sound, looping, play until finished (UE 5.8), subtitle suppression, attenuation override and asset, volume, pitch and start offset. Use it rather than set_properties: volume and pitch are keyed channels, not plain properties, the start offset is converted to tick-resolution frames, and the section's own setters run (setting a sound re-derives looping). Only fields you pass change; a sound or attenuation path that does not load, or an offset outside the frame range, is an error before anything changes. volume/pitch without time_seconds become one constant key at frame 0; with time_seconds a linear key is ADDED at that time, rounded to a tick, even over an existing key. When nothing changes, nothing is saved and no undo step is left (changed false). Read: get_audio_section_properties; add: add_audio_section.",
           "params": [
             {
               "name": "sequence_path",
@@ -55914,7 +55914,7 @@
               "name": "looping",
               "jsonType": "boolean",
               "required": false,
-              "description": "Section repeating/looping (maps to SetRepeating, the engine's loop knob; omit to leave unchanged)."
+              "description": "Section looping, through the section's own setter (SetRepeating on UE 5.8, SetLooping on 5.7); omit to leave unchanged."
             },
             {
               "name": "play_until_finished",

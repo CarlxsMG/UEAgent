@@ -12,7 +12,7 @@ class AActor; class FJsonObject; class FProperty; class UBlueprint; class UClass
 class UEdGraphNode; class UEdGraphPin; class UFactory; class UFunction; class UObject; class UPackage;
 class UStruct; class UWorld; struct FAssetData; struct FGameplayTagContainer; class IAssetRegistry;
 class UK2Node_CallFunction; class UK2Node_Event; class UK2Node_Self;
-class UK2Node_VariableGet; class UK2Node_VariableSet;
+class UK2Node_VariableGet; class UK2Node_VariableSet; class FTransaction;
 
 #include "Json.h"
 
@@ -583,6 +583,23 @@ namespace mcp_common
      * instead of failing to compile.
      */
     UEAGENT_API TSharedPtr<FJsonObject> MakeRequiresEngineReply(const TCHAR* Tool, const TCHAR* MinVersion, const TCHAR* Why);
+
+    /**
+     * Whether Transaction records an object of a Play-in-Editor session: one in a PIE package, or one outered to a
+     * PIE GameInstance (a widget made with CreateWidget). The engine only knows the first kind
+     * (FTransaction::ContainsPieObjects): it drops such a transaction, and resets the undo history at PIE end if one
+     * is still there. A GameInstance lives in the transient package, so a transaction holding the second kind is
+     * kept, the history keeps the PIE GameInstance alive after PIE ends, and the engine's check for leaked worlds
+     * closes the editor on Stop. A null Transaction holds nothing.
+     */
+    UEAGENT_API bool TransactionHoldsPieSessionObjects(const FTransaction* Transaction);
+
+    /**
+     * Reset the editor's undo history when a transaction in it holds an object of a Play-in-Editor session
+     * (TransactionHoldsPieSessionObjects), as the engine resets it for its own PIE objects. Call it while the PIE
+     * worlds still exist (FEditorDelegates::EndPIE). Returns whether it reset the history.
+     */
+    UEAGENT_API bool ResetUndoHistoryHoldingPieSession();
 
     /**
      * Import Text into the value at ValuePtr with Property's own text parser, and only when the parser reads ALL of it

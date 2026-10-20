@@ -2991,8 +2991,8 @@ TSharedPtr<FJsonObject> HandleBeginTransaction(const TSharedPtr<FJsonObject>& Pa
     return ResultObj;
 }
 
-// MCP:end_transaction - Close the transaction opened by begin_transaction and COMMIT it, so everything done inside becomes one entry on the editor's undo stack (undo_count grows by one). Pair it with every begin_transaction -- leaving one open makes later edits silently join it. Use cancel_transaction instead when you want the batch thrown away rather than kept.
-//   @returns { success: bool, transaction_index: int (the one that was closed), undo_count: int after the commit }
+// MCP:end_transaction - Close the transaction opened by begin_transaction and COMMIT it, so everything done inside becomes one entry on the editor's undo stack (undo_count grows by one). Pair it with every begin_transaction -- leaving one open makes later edits silently join it. Use cancel_transaction instead when you want the batch thrown away rather than kept. A transaction that holds objects of the running Play-in-Editor session (a widget made with create_widget) is closed without an undo entry, recorded false: the edits stay, and keeping it would close the editor when PIE stops.
+//   @returns { success: bool, transaction_index: int (the one that was closed), recorded: bool (false: no undo entry, see note), undo_count: int after the commit, note?: string }
 TSharedPtr<FJsonObject> HandleEndTransaction(const TSharedPtr<FJsonObject>& Params)
 {
     UTransactor* Trans = GetEditorTransactor();
@@ -3007,19 +3007,45 @@ TSharedPtr<FJsonObject> HandleEndTransaction(const TSharedPtr<FJsonObject>& Para
             TEXT("end_transaction called with no open transaction (begin_transaction opens one)"));
     }
 
-    const int32 EndedIndex = Trans->End();
     const int32 ClosedIdx = ActiveTransactionIndex;
     ActiveTransactionIndex = INDEX_NONE;
 
+    // GUndo is the open transaction; the editor's buffer makes only FTransactions.
+    const bool bHoldsPieSession = GEditor && GEditor->PlayWorld && GUndo
+        && mcp_common::TransactionHoldsPieSessionObjects(static_cast<const FTransaction*>(GUndo));
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-    ResultObj->SetBoolField(TEXT("success"), EndedIndex != INDEX_NONE);
+    if (!Trans->IsActive())
+    {
+        // Nothing is open any more: a reset of the undo history purged the transaction while it was open.
+        ResultObj->SetBoolField(TEXT("success"), true);
+        ResultObj->SetBoolField(TEXT("recorded"), false);
+        ResultObj->SetStringField(TEXT("note"), TEXT("The undo history was reset while this transaction was open (a "
+            "map load, reset_transaction_buffer, or the end of a Play-in-Editor session it held objects of), so "
+            "nothing was recorded; the edits stay."));
+    }
+    else if (bHoldsPieSession)
+    {
+        // UTransBuffer::Cancel removes the entry without applying it: what was done inside stays.
+        Trans->Cancel(0);
+        ResultObj->SetBoolField(TEXT("success"), true);
+        ResultObj->SetBoolField(TEXT("recorded"), false);
+        ResultObj->SetStringField(TEXT("note"), TEXT("The transaction held objects of the running Play-in-Editor "
+            "session, so it was closed without an undo entry: the edits stay, but undo cannot revert them. Kept, it "
+            "would have closed the editor when PIE stops."));
+    }
+    else
+    {
+        const int32 EndedIndex = Trans->End();
+        ResultObj->SetBoolField(TEXT("success"), EndedIndex != INDEX_NONE);
+        ResultObj->SetBoolField(TEXT("recorded"), EndedIndex != INDEX_NONE);
+    }
     ResultObj->SetNumberField(TEXT("transaction_index"), ClosedIdx);
     ResultObj->SetNumberField(TEXT("undo_count"), UEAgentEditorCommandsImpl::UndoableCount(Trans));
     return ResultObj;
 }
 
-// MCP:cancel_transaction - Abort the transaction opened by begin_transaction: the edits made inside it are rolled back and NO entry is written to the undo stack (undo_count is unchanged). The escape hatch when a multi-step edit goes wrong halfway -- cleaner than committing with end_transaction and then calling undo, which leaves history behind.
-//   @returns { success: bool, transaction_index: int (the one that was cancelled), undo_count: int (unchanged -- nothing was recorded) }
+// MCP:cancel_transaction - Abort the transaction opened by begin_transaction: the edits made inside it are rolled back (rolled_back true) and NO entry is written to the undo stack (undo_count is unchanged). The escape hatch when a multi-step edit goes wrong halfway -- cleaner than committing with end_transaction and then calling undo, which leaves history behind. Only what the transaction recorded rolls back: a change the editor does not record for undo (one to a Play-in-Editor object, for instance) stays, and rolled_back is false when nothing was recorded.
+//   @returns { success: bool, transaction_index: int (the one that was cancelled), rolled_back: bool (whether recorded edits were reverted), undo_count: int (unchanged -- nothing was recorded), note?: string }
 TSharedPtr<FJsonObject> HandleCancelTransaction(const TSharedPtr<FJsonObject>& Params)
 {
     UTransactor* Trans = GetEditorTransactor();
@@ -3035,12 +3061,37 @@ TSharedPtr<FJsonObject> HandleCancelTransaction(const TSharedPtr<FJsonObject>& P
     }
 
     const int32 ClosedIdx = ActiveTransactionIndex;
-    Trans->Cancel(ClosedIdx);
     ActiveTransactionIndex = INDEX_NONE;
 
+    // UTransBuffer::Cancel only removes the entry: the edits made inside stayed, though this tool said they were
+    // rolled back. So the transaction is closed and then undone without a redo entry, which reverts what it recorded
+    // and leaves the stack as it was. Begin put it last in the buffer; End drops it when it recorded nothing.
+    const int32 LastIndex = Trans->GetQueueLength() - 1;
+    const FTransaction* Open = LastIndex >= 0 ? Trans->GetTransaction(LastIndex) : nullptr;
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    bool bRolledBack = false;
+    Trans->End();
+    if (Trans->IsActive())
+    {
+        // A transaction opened inside this one was never closed: the lot is dropped without applying anything.
+        Trans->Cancel(0);
+        ResultObj->SetStringField(TEXT("note"), TEXT("Another transaction was still open inside this one, so the "
+            "edits could not be rolled back; the transactions were dropped and the edits stay."));
+    }
+    else if (Open && Trans->GetQueueLength() == LastIndex + 1 && Trans->GetTransaction(LastIndex) == Open
+        && !Open->HasExpired())
+    {
+        bRolledBack = Trans->Undo(/*bCanRedo=*/false);
+    }
+    else
+    {
+        ResultObj->SetStringField(TEXT("note"), TEXT("The transaction recorded no undoable change, so there was "
+            "nothing to roll back."));
+    }
+
     ResultObj->SetBoolField(TEXT("success"), true);
     ResultObj->SetNumberField(TEXT("transaction_index"), ClosedIdx);
+    ResultObj->SetBoolField(TEXT("rolled_back"), bRolledBack);
     ResultObj->SetNumberField(TEXT("undo_count"), UEAgentEditorCommandsImpl::UndoableCount(Trans));
     return ResultObj;
 }

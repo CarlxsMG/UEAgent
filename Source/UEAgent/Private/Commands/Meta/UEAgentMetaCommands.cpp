@@ -15,8 +15,8 @@ namespace UEAgentMetaCommands
 // MCP:execute_batch - Run SEVERAL commands back-to-back inside the SAME game-thread pass, with no intermediate MCP round-trips -- the way to cut N calls to 1 when you are authoring in bulk. Any command the bridge dispatches can go in the list. By default every item runs even if an earlier one failed, and each result is reported individually; set stop_on_error to abort at the first failure, and transaction to make the whole run a single undo step.
 //   @param commands [array!] - [{command_type: string, params?: object}, ...] (required, non-empty)
 //   @param stop_on_error [bool] - Stop after the first failing sub-command (default false)
-//   @param transaction [bool] - Wrap the whole run in one undo transaction, so a single undo reverts all of it (begin_transaction / end_transaction, or cancel_transaction instead when stop_on_error tripped on an error). Default false.
-//   @returns { success: bool, results: [{index: int, command_type: string, ok: bool, payload?: any, error?: string}], stopped_early: bool }
+//   @param transaction [bool] - Wrap the whole run in one undo transaction, so a single undo reverts all of it (begin_transaction / end_transaction). When stop_on_error trips on an error, cancel_transaction closes it instead and rolls back what the run had recorded, items reported ok included: transaction_rolled_back says whether it did. Default false.
+//   @returns { success: bool, results: [{index: int, command_type: string, ok: bool, payload?: any, error?: string}], stopped_early: bool, transaction_rolled_back?: bool (with transaction, when stop_on_error tripped) }
 TSharedPtr<FJsonObject> HandleBatch(const TSharedPtr<FJsonObject>& Params)
 {
     // Every item runs through UUEAgentBridge::DispatchSingleCommand, on this thread and in this pass: never
@@ -126,12 +126,22 @@ TSharedPtr<FJsonObject> HandleBatch(const TSharedPtr<FJsonObject>& Params)
         }
     }
 
+    TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     if (bTransaction)
     {
         TSharedPtr<FJsonObject> EmptyParams = MakeShared<FJsonObject>();
         if (bStoppedEarly && bAnyError)
         {
-            Bridge->DispatchSingleCommand(TEXT("cancel_transaction"), EmptyParams);
+            // cancel_transaction rolls back what the run recorded: the items reported ok above are reverted too.
+            const TSharedPtr<FJsonObject> Cancelled = Bridge->DispatchSingleCommand(TEXT("cancel_transaction"), EmptyParams);
+            // The outer envelope: {status, result: {rolled_back, ...}}.
+            bool bRolledBack = false;
+            const TSharedPtr<FJsonObject>* CancelResult = nullptr;
+            if (Cancelled.IsValid() && Cancelled->TryGetObjectField(TEXT("result"), CancelResult) && CancelResult && CancelResult->IsValid())
+            {
+                (*CancelResult)->TryGetBoolField(TEXT("rolled_back"), bRolledBack);
+            }
+            Result->SetBoolField(TEXT("transaction_rolled_back"), bRolledBack);
         }
         else
         {
@@ -139,7 +149,6 @@ TSharedPtr<FJsonObject> HandleBatch(const TSharedPtr<FJsonObject>& Params)
         }
     }
 
-    TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetBoolField(TEXT("success"), true);
     Result->SetArrayField(TEXT("results"), ResultsArray);
     Result->SetBoolField(TEXT("stopped_early"), bStoppedEarly);
