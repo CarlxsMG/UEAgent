@@ -106,6 +106,68 @@ namespace UEAgentAudioImpl
         return nullptr;
     }
 
+    // get_audio_component_properties' lookup: EVERY audio component of every editor-world actor takes part (not
+    // only each actor's first, as in FindAudioComponent), the name compared without case, and a non-empty
+    // OwnerName keeps only the actor of that object name. Component names are unique per actor only -- every
+    // AmbientSound's is AudioComponent0 -- so a name that matches on several actors is an error naming the owners,
+    // never the first one the iterator happens to reach.
+    TSharedPtr<FJsonObject> LocateAnyInEditorWorld(const FString& ComponentName, const FString& OwnerName, UAudioComponent*& OutComponent)
+    {
+        OutComponent = nullptr;
+        UWorld* EditorWorld = mcp_common::GetEditorWorld();
+        if (EditorWorld == nullptr || !EditorWorld->IsValidLowLevel())
+        {
+            return mcp_common::MakeErrorReply(TEXT("No valid world found"));
+        }
+        const bool bOwnerFilter = !OwnerName.IsEmpty();
+        bool bOwnerSeen = false;
+        TArray<UAudioComponent*> Matches;
+        for (TActorIterator<AActor> Owner(EditorWorld); Owner; ++Owner)
+        {
+            if (bOwnerFilter)
+            {
+                if (Owner->GetName() != OwnerName)
+                {
+                    continue;
+                }
+                bOwnerSeen = true;
+            }
+            TInlineComponentArray<UAudioComponent*> AudioComponents(*Owner);
+            for (UAudioComponent* Candidate : AudioComponents)
+            {
+                if (Candidate->GetName() == ComponentName)
+                {
+                    Matches.Add(Candidate);
+                }
+            }
+        }
+        if (bOwnerFilter && !bOwnerSeen)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("Actor not found in the editor world: %s (actor_name is the object name, not the label)"), *OwnerName));
+        }
+        if (Matches.IsEmpty())
+        {
+            return mcp_common::MakeErrorReply(bOwnerFilter
+                ? FString::Printf(TEXT("Audio component not found: %s on actor %s"), *ComponentName, *OwnerName)
+                : FString::Printf(TEXT("Audio component not found: %s"), *ComponentName));
+        }
+        if (Matches.Num() > 1)
+        {
+            TArray<FString> Owners;
+            for (const UAudioComponent* Match : Matches)
+            {
+                Owners.Add(Match->GetOwner() != nullptr ? Match->GetOwner()->GetName() : FString(TEXT("None")));
+            }
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("Audio component name '%s' matches %d audio components, owned by %s; %s"),
+                *ComponentName, Matches.Num(), *FString::Join(Owners, TEXT(", ")),
+                bOwnerFilter ? TEXT("several actors share that object name.") : TEXT("pass actor_name to pick one.")));
+        }
+        OutComponent = Matches[0];
+        return nullptr;
+    }
+
     // A plain LoadObject first; on a miss, one retry through FSoftObjectPath, which also
     // understands the quoted export-text spelling (Class'/Path.Object').
     USoundBase* LoadSound(const FString& Path)
@@ -500,20 +562,28 @@ namespace UEAgentAudioImpl
 
 // Audio components
 
-// MCP:get_audio_component_properties - Retrieves comprehensive properties of an audio component including volume, pitch, position, rotation, scale, and sound details.
-//   @param audio_component_name - Name of the audio component to query
-//   @returns { audio_component_name: string, audio_component_found: bool, audio_component_message: string, component_class: string, component_type: string, audio_volume: number, audio_pitch: number, audio_position: { x, y, z }, audio_rotation: { pitch, yaw, roll }, audio_scale: { x, y, z }, audio_enabled: bool, audio_auto_activate: bool, audio_sound_name: string, audio_sound_class: string, audio_sound_path: string, audio_sound_duration: number, audio_3d_enabled: bool, audio_3d_attenuation_radius: number, audio_mobility: string, audio_owner_name: string, audio_level: string, audio_world: string }
+// MCP:get_audio_component_properties - Read an editor-level audio component by object name: volume, pitch, active state, transform, sound and its duration, and the attenuation really applied (override, else asset, else sound). Use it for these derived values; get_component_properties reads raw UPROPERTYs. Every audio component of every actor is searched, the name compared without case. Component names are unique only per actor (every AmbientSound's is AudioComponent0), so a name that several actors carry is an error listing the owners unless actor_name (object name, not label) picks one; an actor_name that names no actor, or whose actor has no component of that name, is an error too. Read-only.
+//   @param audio_component_name - Object name of the audio component to query (e.g. "AudioComponent0"), compared without case against EVERY audio component of every actor in the editor world.
+//   @param actor_name - Optional object name (not label) of the actor that owns the component, compared without case. Needed when several actors own an audio component of that name (every AmbientSound's is AudioComponent0): without it that is an error listing the owners. An actor_name that names no actor, or whose actor has no such component, is an error.
+//   @returns { audio_component_name: string, audio_component_found: bool, audio_component_message: string, component_class: string, component_type: string, audio_volume: number, audio_pitch: number, audio_enabled: bool (IsActive), audio_auto_activate: bool, audio_mobility: string, audio_position: { x, y, z }, audio_rotation: { pitch, yaw, roll }, audio_scale: { x, y, z } (component world transform), audio_sound_name: string, audio_sound_class: string, audio_sound_duration: number, audio_sound_path: string ("None" with no sound), audio_sound_is_sound_wave: bool, audio_sound_is_sound_cue: bool, audio_3d_enabled: bool (bAllowSpatialization), audio_3d_attenuation_radius: number (shape extent X), audio_3d_attenuation_falloff: number (both 0 with no attenuation applied), audio_3d_attenuation_cone_angle: number, audio_3d_attenuation_cone_feather: number (cone shape only, else 0), audio_owner_name: string, audio_owner_class: string, audio_owner_path: string, audio_owner_position: { x, y, z }, audio_owner_rotation: { pitch, yaw, roll }, audio_level: string, audio_world: string }
 
 TSharedPtr<FJsonObject> HandleGetAudioComponentProperties(const TSharedPtr<FJsonObject>& Params)
 {
     FString Wanted;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("audio_component_name"), Wanted, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+    // Optional owner filter; an empty one is refused rather than read as "any actor".
+    FString OwnerFilter;
+    const bool bOwnerGiven = Params->TryGetStringField(TEXT("actor_name"), OwnerFilter);
     if (Wanted.IsEmpty())
     {
         return mcp_common::MakeErrorReply(UEAgentAudioImpl::EmptyParameter(TEXT("audio_component_name")));
     }
+    if (bOwnerGiven && OwnerFilter.IsEmpty())
+    {
+        return mcp_common::MakeErrorReply(UEAgentAudioImpl::EmptyParameter(TEXT("actor_name")));
+    }
     UAudioComponent* AudioComp = nullptr;
-    if (const TSharedPtr<FJsonObject> Failure = UEAgentAudioImpl::LocateInEditorWorld(Wanted, AudioComp))
+    if (const TSharedPtr<FJsonObject> Failure = UEAgentAudioImpl::LocateAnyInEditorWorld(Wanted, OwnerFilter, AudioComp))
     {
         return Failure;
     }

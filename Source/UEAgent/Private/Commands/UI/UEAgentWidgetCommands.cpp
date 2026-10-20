@@ -1924,7 +1924,7 @@ TSharedPtr<FJsonObject> HandleAddWidgetToBlueprint(const TSharedPtr<FJsonObject>
 // ---------------------------------------------------------------------------
 // set_widget_property
 // ---------------------------------------------------------------------------
-// MCP:set_widget_property - Set ONE or MANY reflected properties on a widget of a Widget Blueprint, addressing NESTED STYLE FIELDS by dotted path ("WidgetStyle.Normal.TintColor", "WidgetStyle.Hovered.OutlineSettings.CornerRadii") and reporting FIELD BY FIELD what actually landed.  Two calling shapes over one write path: property_name+value writes a single path; `properties` writes a whole map with ONE Modify + ONE compile + ONE save (a FButtonStyle is ~30 leaf fields -- one call, not 30 recompiles). WARNING: The oracle is `applied[]`/`ignored[]`/`errors[]`, NOT success: a JSON key that matches no reflected field lands in `ignored[]` and `all_applied` goes false instead of the silent no-op the engine's converter reports as success. Read the result back with get_widget_blueprint_tree(property_paths=[...]).
+// MCP:set_widget_property - Set ONE or MANY reflected properties on a widget of a Widget Blueprint, addressing NESTED STYLE FIELDS by dotted path ("WidgetStyle.Normal.TintColor", "Items[0].Label") and reporting FIELD BY FIELD what landed, then compile and save it (save=false defers). Use it instead of set_properties for widgets: it finds the widget by name in the tree, writes leaf fields inside structs, takes color/margin/brush shorthands and compiles; set_properties takes only top-level names and compiles nothing. Two calling shapes over one write path: property_name+value, or a properties map under ONE Modify + ONE compile + ONE save (a FButtonStyle is ~30 leaf fields -- one call, not 30 recompiles). WARNING: the oracle is applied[]/ignored[]/errors[], NOT success: a key matching no reflected field lands in ignored[] and all_applied goes false. Refused while PIE runs unless force=true. Read back with get_widget_blueprint_tree(property_paths=[...]); slot layout: set_slot_properties.
 //   @param widget_bp_path - /Game path of the Widget Blueprint asset
 //   @param widget_name - name of the widget in the tree (get_widget_blueprint_tree lists them)
 //   @param property_name - Single reflected property name ("Text") OR a dotted path into nested structs ("WidgetStyle.Normal.TintColor"); array indices are supported ("Items[0].Label"). Requires `value`. Omit when using `properties`.
@@ -2008,16 +2008,84 @@ TSharedPtr<FJsonObject> HandleSetWidgetProperty(const TSharedPtr<FJsonObject>& P
 // ---------------------------------------------------------------------------
 // set_widget_slot_properties (CanvasPanelSlot anchors / offsets / position / size)
 // ---------------------------------------------------------------------------
-// MCP:set_widget_slot_properties - Set the CanvasPanelSlot layout of a widget inside a CanvasPanel of a Widget Blueprint asset -- anchors, offsets, position, size, z_order and auto_size, only those passed -- then compile and save the blueprint; the reply reads the whole slot back. position and size write the same fields as offsets (Left/Top and Right/Bottom) and are applied after it, so they win when both are given. A widget not under a CanvasPanel, or a call with none of the six fields, is an error. Refused while PIE runs unless force=true. For other slot types use set_box_slot_properties, set_grid_slot_properties or set_slot_properties.
+namespace
+{
+    /**
+     * Reads the optional slot param Key as a JSON array of numbers -- exactly Count of them, or any number when Count
+     * is 0 -- into OutValues; Shape describes what is expected, for the error. Absent or null: true with bOutGiven
+     * false. Anything else (not an array, an entry that is not a number, a wrong length): false with OutError naming
+     * it, so the slot shortcuts refuse the call before any write instead of skipping the value.
+     */
+    bool ReadSlotNumbers_Widget(const TSharedPtr<FJsonObject>& Params, const TCHAR* Key, int32 Count, const TCHAR* Shape,
+                                TArray<double>& OutValues, bool& bOutGiven, FString& OutError)
+    {
+        bOutGiven = false;
+        OutValues.Reset();
+        const TSharedPtr<FJsonValue> Value = Params->TryGetField(Key);
+        if (!Value.IsValid() || Value->IsNull())
+        {
+            return true;
+        }
+        const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
+        const bool bArray = Value->TryGetArray(Arr) && Arr;
+        bool bNumbers = bArray;
+        for (int32 Index = 0; bNumbers && Index < Arr->Num(); ++Index)
+        {
+            double Number = 0.0;
+            bNumbers = (*Arr)[Index].IsValid() && (*Arr)[Index]->TryGetNumber(Number);
+            OutValues.Add(Number);
+        }
+        FString Got;
+        if (!bArray)                                         { Got = TEXT("a value that is not an array"); }
+        else if (!bNumbers)                                  { Got = TEXT("an entry that is not a number"); }
+        else if (Count > 0 && OutValues.Num() != Count)      { Got = FString::Printf(TEXT("%d values"), OutValues.Num()); }
+        if (!Got.IsEmpty())
+        {
+            OutError = FString::Printf(TEXT("%s must be %s; got %s; nothing was changed"), Key, Shape, *Got);
+            return false;
+        }
+        bOutGiven = true;
+        return true;
+    }
+
+    /**
+     * The optional padding of a box or grid slot: [uniform], [horizontal, vertical] or [Left, Top, Right, Bottom].
+     * Same contract as ReadSlotNumbers_Widget: any other shape is an error, never a skipped value.
+     */
+    bool ReadSlotPadding_Widget(const TSharedPtr<FJsonObject>& Params, FMargin& OutPadding, bool& bOutGiven, FString& OutError)
+    {
+        const TCHAR* Shape = TEXT("[uniform], [horizontal, vertical] or [Left, Top, Right, Bottom] numbers");
+        TArray<double> Values;
+        if (!ReadSlotNumbers_Widget(Params, TEXT("padding"), 0, Shape, Values, bOutGiven, OutError))
+        {
+            return false;
+        }
+        if (!bOutGiven)
+        {
+            return true;
+        }
+        if (Values.Num() != 1 && Values.Num() != 2 && Values.Num() != 4)
+        {
+            bOutGiven = false;
+            OutError = FString::Printf(TEXT("padding must be %s; got %d values; nothing was changed"), Shape, Values.Num());
+            return false;
+        }
+        // The shape is checked, so the shared margin reader takes it as it is.
+        TryGetMarginField(Params, TEXT("padding"), OutPadding);
+        return true;
+    }
+}
+
+// MCP:set_widget_slot_properties - Set the CanvasPanelSlot layout of a widget inside a CanvasPanel of a Widget Blueprint asset -- anchors, offsets, position, size, z_order and auto_size, only those passed -- then compile and save the blueprint; the reply reads the whole slot back. Use it rather than set_slot_properties for canvas layout: it takes plain arrays ([MinX,MinY,MaxX,MaxY], [L,T,R,B], [X,Y]) instead of LayoutData.* paths. position and size write the same fields as offsets (Left/Top and Right/Bottom) and are applied after it, so they win when both are given. An anchors or offsets that is not exactly 4 numbers, or a position or size that is not exactly 2, fails the call before anything is written, compiled or saved. A widget not under a CanvasPanel, or a call with none of the six fields, is an error. Refused while PIE runs unless force=true. For other slot types use set_box_slot_properties, set_grid_slot_properties or set_slot_properties.
 //   @param widget_bp_path - /Game path of the Widget Blueprint asset
 //   @param widget_name - name of the widget whose canvas slot to edit
-//   @param anchors - Optional [MinX, MinY, MaxX, MaxY] anchor floats.
-//   @param offsets - Optional [Left, Top, Right, Bottom] offset floats.
-//   @param position - Optional [X, Y] position.
-//   @param size - Optional [X, Y] size.
+//   @param anchors [array] - Optional [MinX, MinY, MaxX, MaxY] anchor floats; anything but an array of exactly 4 numbers fails the call and nothing is changed.
+//   @param offsets [array] - Optional [Left, Top, Right, Bottom] offset floats; anything but an array of exactly 4 numbers fails the call and nothing is changed.
+//   @param position [array] - Optional [X, Y] position; anything but an array of exactly 2 numbers fails the call and nothing is changed.
+//   @param size [array] - Optional [X, Y] size; anything but an array of exactly 2 numbers fails the call and nothing is changed.
 //   @param z_order - Optional int draw/hit-test order (higher draws on top); use with reorder_widget_child's note for CanvasPanel stacking.
 //   @param auto_size - Optional bool: when true, the slot sizes itself to the widget's desired size instead of `size`.
-//   @returns { widget_bp_path: string, widget_name: string, anchors_set: bool, offsets_set: bool, position_set: bool, size_set: bool, z_order_set: bool, auto_size_set: bool, current_anchors: [float], current_offsets: [float], current_position: [float], current_size: [float], current_z_order: int, current_auto_size: bool, saved: bool, save_error: string }
+//   @returns { widget_bp_path: string, widget_name: string, anchors_set: bool, offsets_set: bool, position_set: bool, size_set: bool, z_order_set: bool, auto_size_set: bool, current_anchors: [float], current_offsets: [float], current_position: [float], current_size: [float], current_z_order: int, current_auto_size: bool, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleSetWidgetSlotProperties(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2036,16 +2104,18 @@ TSharedPtr<FJsonObject> HandleSetWidgetSlotProperties(const TSharedPtr<FJsonObje
             FString::Printf(TEXT("Widget '%s' is not parented under a CanvasPanel (slot is not a CanvasPanelSlot)"), *WidgetName));
     }
 
-    // Which of the six fields the call carries, read before anything is touched: a call with none
-    // of them is refused with the slot exactly as it was.
-    const TArray<TSharedPtr<FJsonValue>>* AnchorsArr = nullptr;
-    const bool bSetAnchors = Params->TryGetArrayField(TEXT("anchors"), AnchorsArr) && AnchorsArr && AnchorsArr->Num() >= 4;
-    const TArray<TSharedPtr<FJsonValue>>* OffsetsArr = nullptr;
-    const bool bSetOffsets = Params->TryGetArrayField(TEXT("offsets"), OffsetsArr) && OffsetsArr && OffsetsArr->Num() >= 4;
-    const TArray<TSharedPtr<FJsonValue>>* PositionArr = nullptr;
-    const bool bSetPosition = Params->TryGetArrayField(TEXT("position"), PositionArr) && PositionArr && PositionArr->Num() >= 2;
-    const TArray<TSharedPtr<FJsonValue>>* SizeArr = nullptr;
-    const bool bSetSize = Params->TryGetArrayField(TEXT("size"), SizeArr) && SizeArr && SizeArr->Num() >= 2;
+    // Which of the six fields the call carries, read and checked before anything is touched: a
+    // malformed array, or a call with none of them, is refused with the slot exactly as it was.
+    TArray<double> AnchorsArr, OffsetsArr, PositionArr, SizeArr;
+    bool bSetAnchors = false, bSetOffsets = false, bSetPosition = false, bSetSize = false;
+    FString ArrayError;
+    if (!ReadSlotNumbers_Widget(Params, TEXT("anchors"), 4, TEXT("[MinX, MinY, MaxX, MaxY] (4 numbers)"), AnchorsArr, bSetAnchors, ArrayError)
+        || !ReadSlotNumbers_Widget(Params, TEXT("offsets"), 4, TEXT("[Left, Top, Right, Bottom] (4 numbers)"), OffsetsArr, bSetOffsets, ArrayError)
+        || !ReadSlotNumbers_Widget(Params, TEXT("position"), 2, TEXT("[X, Y] (2 numbers)"), PositionArr, bSetPosition, ArrayError)
+        || !ReadSlotNumbers_Widget(Params, TEXT("size"), 2, TEXT("[X, Y] (2 numbers)"), SizeArr, bSetSize, ArrayError))
+    {
+        return mcp_common::MakeErrorReply(ArrayError);
+    }
     double ZOrderNum = 0.0;
     const bool bSetZOrder = Params->TryGetNumberField(TEXT("z_order"), ZOrderNum);
     bool AutoSizeVal = false;
@@ -2063,10 +2133,10 @@ TSharedPtr<FJsonObject> HandleSetWidgetSlotProperties(const TSharedPtr<FJsonObje
     if (bSetAnchors)
     {
         FAnchors NewAnchors(
-            static_cast<float>((*AnchorsArr)[0]->AsNumber()),
-            static_cast<float>((*AnchorsArr)[1]->AsNumber()),
-            static_cast<float>((*AnchorsArr)[2]->AsNumber()),
-            static_cast<float>((*AnchorsArr)[3]->AsNumber()));
+            static_cast<float>(AnchorsArr[0]),
+            static_cast<float>(AnchorsArr[1]),
+            static_cast<float>(AnchorsArr[2]),
+            static_cast<float>(AnchorsArr[3]));
         CanvasSlot->SetAnchors(NewAnchors);
     }
 
@@ -2074,28 +2144,24 @@ TSharedPtr<FJsonObject> HandleSetWidgetSlotProperties(const TSharedPtr<FJsonObje
     if (bSetOffsets)
     {
         FMargin NewOffsets(
-            static_cast<float>((*OffsetsArr)[0]->AsNumber()),
-            static_cast<float>((*OffsetsArr)[1]->AsNumber()),
-            static_cast<float>((*OffsetsArr)[2]->AsNumber()),
-            static_cast<float>((*OffsetsArr)[3]->AsNumber()));
+            static_cast<float>(OffsetsArr[0]),
+            static_cast<float>(OffsetsArr[1]),
+            static_cast<float>(OffsetsArr[2]),
+            static_cast<float>(OffsetsArr[3]));
         CanvasSlot->SetOffsets(NewOffsets);
     }
 
     // position: [X, Y]
     if (bSetPosition)
     {
-        FVector2D NewPos(
-            (*PositionArr)[0]->AsNumber(),
-            (*PositionArr)[1]->AsNumber());
+        FVector2D NewPos(PositionArr[0], PositionArr[1]);
         CanvasSlot->SetPosition(NewPos);
     }
 
     // size: [X, Y]
     if (bSetSize)
     {
-        FVector2D NewSize(
-            (*SizeArr)[0]->AsNumber(),
-            (*SizeArr)[1]->AsNumber());
+        FVector2D NewSize(SizeArr[0], SizeArr[1]);
         CanvasSlot->SetSize(NewSize);
     }
 
@@ -2594,15 +2660,15 @@ TSharedPtr<FJsonObject> HandleStopWidgetAnimation(const TSharedPtr<FJsonObject>&
 // support (Size on Overlay/Border/SizeBox) is an honest note, not a silent drop.
 // Setting the same values again is naturally idempotent.
 // ---------------------------------------------------------------------------
-// MCP:set_box_slot_properties - Configure a widget's box-family slot layout (alignment/padding/size).  Applies when the widget is parented under a HorizontalBox/VerticalBox/Overlay/Border/SizeBox/ScrollBox; dispatches by the concrete slot type. Size only applies to Horizontal/Vertical/ScrollBox slots -- on the others it is returned as an honest note. For a CanvasPanel child use set_widget_slot_properties; for a GridPanel child use set_grid_slot_properties.
+// MCP:set_box_slot_properties - Configure a widget's box-family slot layout (alignment/padding/size) in a Widget Blueprint, found by the child widget's name, then compile and save the Widget Blueprint. Applies under a HorizontalBox/VerticalBox/Overlay/Border/SizeBox/ScrollBox, dispatching by slot type through the slot's own setters; set_properties would need the slot object's path and neither compiles nor saves. A padding that is not 1, 2 or 4 numbers, or an unknown alignment or size_rule, fails the call before anything is written. Size only applies to Horizontal/Vertical/ScrollBox slots -- on the others it comes back as a note. No undo step. CanvasPanel child: set_widget_slot_properties; GridPanel child: set_grid_slot_properties.
 //   @param widget_bp_path - /Game path of the Widget Blueprint asset
 //   @param widget_name - name of the child widget whose box slot to edit
 //   @param horizontal_alignment - Optional alignment: Fill | Left | Center | Right
 //   @param vertical_alignment - Optional alignment: Fill | Top | Center | Bottom
-//   @param padding [array] - Optional [Left, Top, Right, Bottom] floats (also accepts [uniform] or [horizontal, vertical]).
+//   @param padding [array] - Optional [Left, Top, Right, Bottom] floats (also accepts [uniform] or [horizontal, vertical]); any other shape, or an entry that is not a number, fails the call and nothing is changed.
 //   @param size_rule - Optional Fill | Auto (Horizontal/Vertical/ScrollBox slots only).
 //   @param size_value - Optional float fill weight (used with size_rule = Fill; default 1.0).
-//   @returns { widget_bp_path: string, widget_name: string, slot_type: string, settings_applied: object, applied_count: int, notes: [string], saved: bool, save_error: string }
+//   @returns { widget_bp_path: string, widget_name: string, slot_type: string, settings_applied: object, applied_count: int, notes: [string], saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleSetBoxSlotProperties(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2628,7 +2694,11 @@ TSharedPtr<FJsonObject> HandleSetBoxSlotProperties(const TSharedPtr<FJsonObject>
         return mcp_common::MakeErrorReply(Error);
     }
     FMargin Pad;
-    const bool bHasPad = TryGetMarginField(Params, TEXT("padding"), Pad);
+    bool bHasPad = false;
+    if (!ReadSlotPadding_Widget(Params, Pad, bHasPad, Error))
+    {
+        return mcp_common::MakeErrorReply(Error);
+    }
 
     bool bHasSize = false;
     FSlateChildSize SizeVal;
@@ -2746,7 +2816,7 @@ TSharedPtr<FJsonObject> HandleSetBoxSlotProperties(const TSharedPtr<FJsonObject>
 // add_widget_to_blueprint widget_type="GridPanel"). Uses the typed UMG_API setters
 // (the direct members are UE_DEPRECATED(5.1)). Idempotent.
 // ---------------------------------------------------------------------------
-// MCP:set_grid_slot_properties - Configure a widget's UGridSlot layout (row/column/spans/alignment/padding/layer/nudge).  Applies when the widget is parented under a GridPanel (create one with add_widget_to_blueprint widget_type="GridPanel"). Setting the same values again is idempotent.
+// MCP:set_grid_slot_properties - Configure the UGridSlot of a widget under a GridPanel in a Widget Blueprint, found by the child widget's name: row, column, spans, alignment, padding, layer, nudge. Over set_properties it needs no slot object path, uses the slot's own setters, and compiles and saves the Widget Blueprint; no undo step. A padding that is not 1, 2 or 4 numbers, a nudge that is not exactly 2, or an unknown alignment fails the call before anything is written. Idempotent. GridPanel: add_widget_to_blueprint widget_type="GridPanel"; other panels: set_box_slot_properties, set_widget_slot_properties.
 //   @param widget_bp_path - /Game path of the Widget Blueprint asset
 //   @param widget_name - name of the child widget whose grid slot to edit
 //   @param row - Optional int row index of the cell
@@ -2755,10 +2825,10 @@ TSharedPtr<FJsonObject> HandleSetBoxSlotProperties(const TSharedPtr<FJsonObject>
 //   @param column_span - Optional int number of columns this slot spans
 //   @param horizontal_alignment - Optional alignment: Fill | Left | Center | Right
 //   @param vertical_alignment - Optional alignment: Fill | Top | Center | Bottom
-//   @param padding [array] - Optional [Left, Top, Right, Bottom] floats.
+//   @param padding [array] - Optional [Left, Top, Right, Bottom] floats (also accepts [uniform] or [horizontal, vertical]); any other shape, or an entry that is not a number, fails the call and nothing is changed.
 //   @param layer - Optional int draw/hit-test layer offset (positive draws on top).
-//   @param nudge - Optional [X, Y] content offset.
-//   @returns { widget_bp_path: string, widget_name: string, slot_type: string, settings_applied: object, applied_count: int, saved: bool, save_error: string }
+//   @param nudge [array] - Optional [X, Y] content offset; anything but an array of exactly 2 numbers fails the call and nothing is changed.
+//   @returns { widget_bp_path: string, widget_name: string, slot_type: string, settings_applied: object, applied_count: int, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleSetGridSlotProperties(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2778,40 +2848,47 @@ TSharedPtr<FJsonObject> HandleSetGridSlotProperties(const TSharedPtr<FJsonObject
                 *WidgetName, *SlotType));
     }
 
-    // Parse + validate alignment up-front.
+    // Parse + validate every input up-front: a malformed value, or a call with none, is refused
+    // with the slot exactly as it was.
     FString Error;
     FSlotAlignment_Widget Align;
     if (!ReadSlotAlignment_Widget(Params, Align, Error))
     {
         return mcp_common::MakeErrorReply(Error);
     }
-
-    Grid->Modify();
-    int32 AppliedCount = 0;
-    double Num = 0.0;
-    if (Params->TryGetNumberField(TEXT("row"), Num))         { Grid->SetRow(FMath::RoundToInt(Num)); ++AppliedCount; }
-    if (Params->TryGetNumberField(TEXT("column"), Num))      { Grid->SetColumn(FMath::RoundToInt(Num)); ++AppliedCount; }
-    if (Params->TryGetNumberField(TEXT("row_span"), Num))    { Grid->SetRowSpan(FMath::RoundToInt(Num)); ++AppliedCount; }
-    if (Params->TryGetNumberField(TEXT("column_span"), Num)) { Grid->SetColumnSpan(FMath::RoundToInt(Num)); ++AppliedCount; }
-    if (Params->TryGetNumberField(TEXT("layer"), Num))       { Grid->SetLayer(FMath::RoundToInt(Num)); ++AppliedCount; }
-    if (Align.bHasH) { Grid->SetHorizontalAlignment(Align.H); ++AppliedCount; }
-    if (Align.bHasV) { Grid->SetVerticalAlignment(Align.V); ++AppliedCount; }
-
     FMargin Pad;
-    if (TryGetMarginField(Params, TEXT("padding"), Pad)) { Grid->SetPadding(Pad); ++AppliedCount; }
-
-    const TArray<TSharedPtr<FJsonValue>>* NudgeArr = nullptr;
-    if (Params->TryGetArrayField(TEXT("nudge"), NudgeArr) && NudgeArr && NudgeArr->Num() >= 2)
+    bool bHasPad = false;
+    TArray<double> NudgeArr;
+    bool bHasNudge = false;
+    if (!ReadSlotPadding_Widget(Params, Pad, bHasPad, Error)
+        || !ReadSlotNumbers_Widget(Params, TEXT("nudge"), 2, TEXT("[X, Y] (2 numbers)"), NudgeArr, bHasNudge, Error))
     {
-        Grid->SetNudge(FVector2D((*NudgeArr)[0]->AsNumber(), (*NudgeArr)[1]->AsNumber()));
-        ++AppliedCount;
+        return mcp_common::MakeErrorReply(Error);
     }
-
-    if (AppliedCount == 0)
+    double Row = 0.0, Column = 0.0, RowSpan = 0.0, ColumnSpan = 0.0, Layer = 0.0;
+    const bool bHasRow = Params->TryGetNumberField(TEXT("row"), Row);
+    const bool bHasColumn = Params->TryGetNumberField(TEXT("column"), Column);
+    const bool bHasRowSpan = Params->TryGetNumberField(TEXT("row_span"), RowSpan);
+    const bool bHasColumnSpan = Params->TryGetNumberField(TEXT("column_span"), ColumnSpan);
+    const bool bHasLayer = Params->TryGetNumberField(TEXT("layer"), Layer);
+    if (!bHasRow && !bHasColumn && !bHasRowSpan && !bHasColumnSpan && !bHasLayer
+        && !Align.bHasH && !Align.bHasV && !bHasPad && !bHasNudge)
     {
         return mcp_common::MakeErrorReply(
             TEXT("No slot properties provided. Supply at least one of: row, column, row_span, column_span, horizontal_alignment, vertical_alignment, padding, layer, nudge"));
     }
+
+    Grid->Modify();
+    int32 AppliedCount = 0;
+    if (bHasRow)        { Grid->SetRow(FMath::RoundToInt(Row)); ++AppliedCount; }
+    if (bHasColumn)     { Grid->SetColumn(FMath::RoundToInt(Column)); ++AppliedCount; }
+    if (bHasRowSpan)    { Grid->SetRowSpan(FMath::RoundToInt(RowSpan)); ++AppliedCount; }
+    if (bHasColumnSpan) { Grid->SetColumnSpan(FMath::RoundToInt(ColumnSpan)); ++AppliedCount; }
+    if (bHasLayer)      { Grid->SetLayer(FMath::RoundToInt(Layer)); ++AppliedCount; }
+    if (Align.bHasH) { Grid->SetHorizontalAlignment(Align.H); ++AppliedCount; }
+    if (Align.bHasV) { Grid->SetVerticalAlignment(Align.V); ++AppliedCount; }
+    if (bHasPad)     { Grid->SetPadding(Pad); ++AppliedCount; }
+    if (bHasNudge)   { Grid->SetNudge(FVector2D(NudgeArr[0], NudgeArr[1])); ++AppliedCount; }
 
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WidgetBP);
     FString SaveErr;

@@ -45,6 +45,12 @@ INSTRUCTIONS = (
     "This server lists UEAgent's tools without the Unreal Editor. The tools themselves run inside the "
     "editor: install the UEAgent plugin (https://github.com/CarlxsMG/UEAgent) in an Unreal Engine 5.8 "
     f"project, open the project, and connect your MCP client to {EDITOR_URL}."
+    "\n\nSimilar tools: get_properties reads named properties of one "
+    "object you can path to, inspect_object one you know nothing about, get_actor_properties_by_class "
+    "placed actors by class or label, get_component_properties a whole component. set_properties writes "
+    "any object in the editor; set_component_property a placed actor's component, also in a live PIE "
+    "world. A typed tool (set_light_properties, spawn_sky_atmosphere, add_spline_component...) says in "
+    "its description what it does that the generic one does not."
 )
 CALL_ERROR = (
     "UEAgent's tools run inside the Unreal Editor, and this server only lists them. Install the UEAgent "

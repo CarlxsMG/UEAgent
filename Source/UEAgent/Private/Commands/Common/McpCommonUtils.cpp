@@ -17,6 +17,7 @@
 #include "UObject/UnrealType.h"
 #include "UObject/TextProperty.h"          // FTextProperty -- attributes the FText localization-only diff
 #include "UObject/PropertyPortFlags.h"     // PPF_DeepComparison / PPF_None
+#include "Misc/StringOutputDevice.h"       // ImportPropertyTextStrict: the parser's own error text
 #include "UObject/Field.h"
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
@@ -1513,6 +1514,175 @@ namespace mcp_common
     // scalars, enums (by name or value), structs, arrays, sets and
     // maps from nested JSON straight onto the value pointer and
     // reports a precise reason on failure.
+    // A JSON string where a number or a bool is expected. FJsonObjectConverter reads it with AsNumber / AsBool, which
+    // turn text they cannot parse into 0 or false without an error ("abc" -> 0, "12abc" -> 12, "maybe" -> false).
+    // Walks structs, arrays, sets and map values the way the converter does and refuses such a string, before anything
+    // is written; JSON numbers and bools, and enum names, pass untouched.
+    static bool ValidateScalarStringsInJson(const FProperty* Property, const TSharedPtr<FJsonValue>& Value, const FString& Path,
+        FString& OutError)
+    {
+        if (!Property || !Value.IsValid() || Value->Type == EJson::Null)
+        {
+            return true;
+        }
+        if (const FNumericProperty* Numeric = CastField<FNumericProperty>(Property))
+        {
+            if (Numeric->IsEnum() || Value->Type != EJson::String)
+            {
+                return true;
+            }
+            // The whole text must be a number: [sign] digits, and for a decimal type an optional fraction, exponent
+            // and trailing f.
+            const FString Text = Value->AsString().TrimStartAndEnd();
+            const bool bDecimal = Numeric->IsFloatingPoint();
+            int32 At = 0;
+            const auto Digits = [&Text, &At]()
+            {
+                const int32 From = At;
+                while (At < Text.Len() && FChar::IsDigit(Text[At])) { ++At; }
+                return At - From;
+            };
+            if (At < Text.Len() && (Text[At] == TCHAR('+') || Text[At] == TCHAR('-'))) { ++At; }
+            int32 Mantissa = Digits();
+            if (bDecimal && At < Text.Len() && Text[At] == TCHAR('.')) { ++At; Mantissa += Digits(); }
+            bool bNumber = Mantissa > 0;
+            if (bNumber && bDecimal && At < Text.Len() && (Text[At] == TCHAR('e') || Text[At] == TCHAR('E')))
+            {
+                ++At;
+                if (At < Text.Len() && (Text[At] == TCHAR('+') || Text[At] == TCHAR('-'))) { ++At; }
+                bNumber = Digits() > 0;
+            }
+            if (bNumber && bDecimal && At < Text.Len() && (Text[At] == TCHAR('f') || Text[At] == TCHAR('F'))) { ++At; }
+            if (!bNumber || At != Text.Len())
+            {
+                OutError = FString::Printf(TEXT("'%s' is not a %s number (%s is %s)"), *Text,
+                    Numeric->IsFloatingPoint() ? TEXT("decimal") : TEXT("whole"), *Path, *Property->GetCPPType());
+                return false;
+            }
+            return true;
+        }
+        if (CastField<FBoolProperty>(Property))
+        {
+            if (Value->Type != EJson::String)
+            {
+                return true;
+            }
+            const FString Text = Value->AsString().TrimStartAndEnd();
+            for (const TCHAR* Word : { TEXT("true"), TEXT("false"), TEXT("1"), TEXT("0"), TEXT("yes"), TEXT("no"), TEXT("on"), TEXT("off") })
+            {
+                if (Text.Equals(Word, ESearchCase::IgnoreCase))
+                {
+                    return true;
+                }
+            }
+            OutError = FString::Printf(TEXT("'%s' is not a bool (%s): use true or false"), *Text, *Path);
+            return false;
+        }
+        if (const FStructProperty* StructProp = CastField<FStructProperty>(Property))
+        {
+            const TSharedPtr<FJsonObject>* Fields = nullptr;
+            if (!Value->TryGetObject(Fields) || !Fields || !Fields->IsValid())
+            {
+                return true;
+            }
+            for (TFieldIterator<FProperty> It(StructProp->Struct); It; ++It)
+            {
+                // FJsonObject keys compare without case, as the converter's field lookup does.
+                const TSharedPtr<FJsonValue> Field = (*Fields)->TryGetField(It->GetName());
+                if (Field.IsValid() && !ValidateScalarStringsInJson(*It, Field, Path + TEXT(".") + It->GetName(), OutError))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+        const FProperty* Element = nullptr;
+        if (const FArrayProperty* ArrayProp = CastField<FArrayProperty>(Property)) { Element = ArrayProp->Inner; }
+        else if (const FSetProperty* SetProp = CastField<FSetProperty>(Property)) { Element = SetProp->ElementProp; }
+        if (Element)
+        {
+            const TArray<TSharedPtr<FJsonValue>>* Items = nullptr;
+            if (!Value->TryGetArray(Items) || !Items)
+            {
+                return true;
+            }
+            for (int32 Index = 0; Index < Items->Num(); ++Index)
+            {
+                if (!ValidateScalarStringsInJson(Element, (*Items)[Index], FString::Printf(TEXT("%s[%d]"), *Path, Index), OutError))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+        if (const FMapProperty* MapProp = CastField<FMapProperty>(Property))
+        {
+            const TSharedPtr<FJsonObject>* Entries = nullptr;
+            if (!Value->TryGetObject(Entries) || !Entries || !Entries->IsValid())
+            {
+                return true;
+            }
+            for (const auto& Entry : (*Entries)->Values)
+            {
+                if (!ValidateScalarStringsInJson(MapProp->ValueProp, Entry.Value, FString::Printf(TEXT("%s[%s]"), *Path, *Entry.Key), OutError))
+                {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    bool ImportPropertyTextStrict(const FProperty* Property, const FString& Text, void* ValuePtr, UObject* Owner,
+        FString& OutError)
+    {
+        if (!Property || !ValuePtr)
+        {
+            OutError = TEXT("null property or value pointer");
+            return false;
+        }
+        const FString Trimmed = Text.TrimStartAndEnd();
+        if (Trimmed.IsEmpty() && (Property->IsA<FNumericProperty>() || Property->IsA<FBoolProperty>()))
+        {
+            OutError = FString::Printf(TEXT("an empty value is not a %s"), *Property->GetCPPType());
+            return false;
+        }
+
+        void* Scratch = Property->AllocateAndInitializeValue();
+        Property->CopyCompleteValue(Scratch, ValuePtr);
+        FStringOutputDevice ParserErrors;
+        const TCHAR* End = Property->ImportText_Direct(*Trimmed, Scratch, Owner, PPF_None, &ParserErrors);
+        bool bImported = End != nullptr;
+        if (!bImported)
+        {
+            OutError = ParserErrors.IsEmpty()
+                ? FString::Printf(TEXT("'%s' is not a valid %s"), *Trimmed, *Property->GetCPPType())
+                : FString::Printf(TEXT("'%s' is not a valid %s: %s"), *Trimmed, *Property->GetCPPType(), *ParserErrors);
+        }
+        else
+        {
+            while (FChar::IsWhitespace(*End))
+            {
+                ++End;
+            }
+            if (*End != TCHAR('\0'))
+            {
+                bImported = false;
+                const int32 Read = UE_PTRDIFF_TO_INT32(End - *Trimmed);
+                OutError = Read == 0
+                    ? FString::Printf(TEXT("'%s' is not a valid %s"), *Trimmed, *Property->GetCPPType())
+                    : FString::Printf(TEXT("'%s' is not a valid %s: only '%s' could be read"), *Trimmed,
+                        *Property->GetCPPType(), *Trimmed.Left(Read));
+            }
+        }
+        if (bImported)
+        {
+            Property->CopyCompleteValue(ValuePtr, Scratch);
+        }
+        Property->DestroyAndFreeValue(Scratch);
+        return bImported;
+    }
+
     bool SetObjectProperty(UObject* Object, const FString& PropertyName,
                            const TSharedPtr<FJsonValue>& Value, FString& OutErrorMessage)
     {
@@ -1538,13 +1708,25 @@ namespace mcp_common
             {
                 if (StructProp->Struct == FGameplayTagContainer::StaticStruct())
                 {
+                    // Every name must be a registered tag, as for a single FGameplayTag below: one that is not is
+                    // refused with the container untouched, instead of being left out of it.
                     FGameplayTagContainer Container;
+                    TArray<FString> Unregistered;
                     for (const TSharedPtr<FJsonValue>& Entry : Value->AsArray())
                     {
-                        const FString TagName = Entry.IsValid() ? Entry->AsString() : FString();
+                        const FString TagName = Entry.IsValid() ? Entry->AsString().TrimStartAndEnd() : FString();
                         if (TagName.IsEmpty()) { continue; }
                         const FGameplayTag Tag = FGameplayTag::RequestGameplayTag(FName(*TagName), /*ErrorIfNotFound=*/ false);
                         if (Tag.IsValid()) { Container.AddTag(Tag); }
+                        else { Unregistered.Add(TagName); }
+                    }
+                    if (Unregistered.Num() > 0)
+                    {
+                        OutErrorMessage = FString::Printf(
+                            TEXT("Unregistered gameplay tag(s) %s for property '%s' (not in the tag registry). ")
+                            TEXT("Register them (create_gameplay_tag / a tag table) or fix the spelling; nothing was written."),
+                            *FString::Join(Unregistered, TEXT(", ")), *PropertyName);
+                        return false;
                     }
                     *static_cast<FGameplayTagContainer*>(PropertyAddr) = MoveTemp(Container);
                     return true;
@@ -1609,6 +1791,14 @@ namespace mcp_common
             if (!ValidateGameplayTagsInJson(Property, Value, TagError, &TagsChecked))
             {
                 OutErrorMessage = FString::Printf(TEXT("Failed to set '%s': %s"), *PropertyName, *TagError);
+                return false;
+            }
+        }
+        {
+            FString ScalarError;
+            if (!ValidateScalarStringsInJson(Property, Value, PropertyName, ScalarError))
+            {
+                OutErrorMessage = FString::Printf(TEXT("Failed to set '%s': %s; nothing was written"), *PropertyName, *ScalarError);
                 return false;
             }
         }

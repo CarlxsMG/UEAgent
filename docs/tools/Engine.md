@@ -327,7 +327,7 @@ Reads metadata for a UNiagaraSystem: emitter count, exposed user parameters, and
 
 *Read-only.*
 
-Read the render/system flags + fixed bounds of a UNiagaraSystem asset via reflection (GetPropertyValue_InContainer + GetFixedBounds). Read-only; no recompile.
+Read the render flags (cast shadow, decals, custom depth/stencil, translucency sort, each with its bOverride companion), the large-world/current-frame flags and the fixed bounds of a Niagara System asset, under the names set_niagara_system_properties takes. A curated view; get_properties reads any other UPROPERTY on the system. Read-only, no recompile.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -933,7 +933,7 @@ Set the Material UPROPERTY on a Niagara renderer (Sprite, Ribbon, Mesh or Decal:
 
 *Destructive, idempotent.*
 
-Set properties of one renderer (Sprite, Mesh, Ribbon, Light or Decal) of a Niagara emitter by reflection, in one undo step, then request a system compile and save. Only the supplied fields are written, with ClampMin/ClampMax applied; enum fields (alignment, facing_mode, sort_mode, motion_vector_setting, decal_source_mode) also fire PostEditChangeProperty so derived state updates. Every field is converted before the first write, so a value that does not convert (an unknown enum name, an array for a struct field) is an error and nothing changes. Values the renderer already holds are a success with changed=false and saved=false, nothing written. A renderer_index that is not a JSON number is an error. Keys the renderer class lacks are listed in not_applicable. A failed save makes success false, with saved=false and save_error. Materials: set_niagara_renderer_material; read back with get_niagara_renderer_info.
+Set properties of one renderer (Sprite, Mesh, Ribbon, Light or Decal) of a Niagara emitter, found by emitter_name and renderer_index, in one undo step, then request a system compile and save. Use it over set_properties, which neither finds the renderer nor applies ClampMin/ClampMax, compiles or saves. Only supplied fields are written; enum fields (alignment, facing_mode, sort_mode, motion_vector_setting, decal_source_mode) also fire PostEditChangeProperty. Every field is converted before the first write, so a value that does not convert (an unknown enum name, an array for a struct field) or a non-number renderer_index is an error and nothing changes. Values already held: changed=false, saved=false. Keys the renderer class lacks are listed in not_applicable. A failed save makes success false with save_error. Materials: set_niagara_renderer_material; mesh: set_niagara_mesh_renderer_mesh; read back: get_niagara_renderer_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -976,7 +976,7 @@ Set properties of one renderer (Sprite, Mesh, Ribbon, Light or Decal) of a Niaga
 
 *Destructive, idempotent.*
 
-Set the enum, bool, name and FIntPoint properties of one generic simulation stage (UNiagaraSimulationStageGeneric) of a Niagara emitter, found by stage_index or stage_name, in one undo step, then request a system compile and save. Only the supplied fields are written, by reflection with ClampMin/ClampMax applied; enabled goes through SetEnabled and enum writes fire PostEditChangeProperty. Every field is converted before the first write, so a value that does not convert, an enabled that does not read as a bool or a stage_index that is not a JSON number is an error and nothing changes. Values the stage already holds are a success with changed=false and saved=false, nothing written. Binding fields (num_iterations, iteration_count, element_count_x|y|z, data_interface) are listed in not_supported, never written; the iteration count is set by add_niagara_simulation_stage. A failed save makes success false, with saved=false and save_error. List stages with get_niagara_simulation_stages.
+Set the enum, bool, name and FIntPoint properties of one generic simulation stage (UNiagaraSimulationStageGeneric) of a Niagara emitter, found by stage_index or stage_name, in one undo step, then request a system compile and save. Use it over set_properties, which neither finds the stage nor applies ClampMin/ClampMax, compiles or saves. Only supplied fields are written; enabled goes through SetEnabled and enum writes fire PostEditChangeProperty. Every field is converted before the first write, so a value that does not convert, a non-bool enabled or a non-number stage_index is an error and nothing changes. Values already held: changed=false, saved=false. Binding fields (num_iterations, iteration_count, element_count_x|y|z, data_interface) go to not_supported, never written; add_niagara_simulation_stage sets the iteration count. A failed save makes success false with save_error. List: get_niagara_simulation_stages.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1014,7 +1014,7 @@ Set the system-wide determinism flag (bDeterminism, written by reflection) of a 
 
 *Destructive, idempotent.*
 
-Set render and system flags of a Niagara System asset by reflection, without PostEditChangeProperty (so no compile or scalability update runs), in one undo step, then save it. Only the supplied fields are written; a render value (cast_shadow, receives_decals, render_custom_depth, custom_depth_stencil_value, translucency_sort_priority, translucency_sort_distance_offset) also sets its bOverride companion to true unless that override_ key is sent. fixed_bounds is parsed and every field located before the first write, so a corner that is not 3 numbers, a number field that is not a JSON number, or a property the engine lacks is an error and nothing changes. Values the system already holds are a success with changed=false and saved=false, nothing written. A failed save makes success false, with saved=false and save_error. Read them back with get_niagara_system_properties.
+Set the render and system flags of a Niagara System asset (cast shadow, decals, custom depth/stencil, translucency sort, large world coordinates, current-frame data, fixed bounds) and save it. Use it instead of set_properties for these fields: a render value also turns its bOverride companion on unless that override_ key is sent, the asset is saved, and PostEditChangeProperty is skipped (no scalability refresh); set_properties writes any other UPROPERTY and leaves it unsaved. Only supplied fields are written, in one undo step. Every field and fixed_bounds is checked before the first write: a corner that is not 3 numbers, a number field that is not a JSON number, or a property the engine lacks is an error and nothing changes. Values the system already holds are a success with changed=false and saved=false. A failed save makes success false with save_error. Read back with get_niagara_system_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1099,13 +1099,13 @@ Set the default value of one user parameter (the User. namespace) of a Niagara S
 
 *Additive.*
 
-Spawns a Niagara System as a persistent UNiagaraComponent in the editor world.  Spawns via UNiagaraFunctionLibrary::SpawnSystemAtLocation with bAutoDestroy disabled so the component persists for follow-up parameter calls. The owner actor can later be targeted by either its internal object name (``owner_actor_name``) or its editor label (``owner_actor_label``).
+Place a Niagara System in the editor level as a new ANiagaraActor (the actor a drag of the system into the viewport makes, through the editor's Niagara actor factory) whose root UNiagaraComponent runs the system, at an optional location and rotation, for previews and set_niagara_component_* calls. For a Niagara component on an actor that already exists use add_component_to_actor (NiagaraComponent) and set its Asset with set_properties. actor_label labels the new actor (default: the system's name, made unique); a label that is "None" or blank, or that another editor-world actor already has as label or internal name, is an error and nothing is spawned, so set_niagara_component_* (actor_name = owner_actor_name or the label) reach this actor. A system the factory refuses (settings requiring an effect type) is an error too. One undo step; the level is marked dirty, not saved (save_level keeps it). Editor world only, PIE or not. location and rotation are read back.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `system_path` | string | yes | Asset path of the Niagara System to spawn (e.g. /Game/MyGame/NS_Example) |
-| `location` | array | no | World location [X, Y, Z]. |
-| `rotation` | array | no | Optional [pitch, yaw, roll]; defaults to identity |
-| `actor_label` | string | no | Optional desired editor label for the owner actor |
+| `system_path` | string | yes | Asset path of the Niagara System to place (e.g. /Game/MyGame/NS_Example); one that does not load is an error and nothing is spawned. |
+| `location` | array | no | Optional world location [X, Y, Z]; the origin when omitted. |
+| `rotation` | array | no | Optional world rotation, the object {"pitch":..,"yaw":..,"roll":..} or the array [pitch, yaw, roll] (index 2 is ROLL); zero when omitted. |
+| `actor_label` | string | no | Optional editor label for the new actor; when omitted the factory labels it after the system, made unique. A label that is not a valid actor label ("None", blank), or that another actor of the editor world already has as its label or internal name, is an error and nothing is spawned. |
 
-**Returns:** `{ system_path: string, component_name: string, owner_actor_name: string, owner_actor_label: string, is_registered: bool, is_active: bool, location: [number, number, number] }`
+**Returns:** `{ system_path: string, owner_actor_name: string, owner_actor_label: string, actor_class: string, actor_path: string, component_name: string, is_registered: bool, is_active: bool, location: [number, number, number], rotation: { roll: number, pitch: number, yaw: number } }`

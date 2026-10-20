@@ -355,13 +355,13 @@ Add an empty slot animation track with the given slot name to a UAnimMontage in 
 
 *Additive, idempotent.*
 
-Attach a UMotionWarpingComponent to an actor in the editor world. Idempotent: if the actor already has one, returns the existing instance with already_existed:true instead of creating a duplicate. The component is NewObject&lt;UMotionWarpingComponent>(Actor, FName("MotionWarping")) followed by RegisterComponent() so it shows up in GetComponents() immediately. The owning world's level is marked dirty so the editor persists the change on save; no explicit SavePackage call (avoids the noise of saving a transient actor out of an editor world).
+Attach a UMotionWarpingComponent named MotionWarping to an editor-world actor given by full object path, internal name or label. add_component_to_actor (component_type MotionWarpingComponent, idempotent=true) does the same for an actor's internal name only; this tool adds the path/label lookup. Idempotent: if the actor already has one, it is returned with already_existed:true and nothing is written. A new one is an instance component (save_level keeps it, and construction-script reruns do not drop it) added in one undo step; the actor's package is marked dirty, not saved. When another object of the actor already holds the name MotionWarping, the new component gets a unique variant, returned in component_name. Add targets with add_motion_warping_target, read them with inspect_motion_warping_component.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_path` | string | yes | Full editor path (e.g. "/Game/Maps/Test.Test:PersistentLevel.ActorName") or short name of the actor. |
+| `actor_path` | string | yes | Full editor path (e.g. "/Game/Maps/Test.Test:PersistentLevel.ActorName"), internal name or label of the actor. |
 
-**Returns:** `{ actor_path: string, component_path: string, already_existed: bool }`
+**Returns:** `{ actor_path: string, component_name: string, component_path: string, already_existed: bool }`
 
 ## `add_motion_warping_target`
 
@@ -1086,7 +1086,7 @@ Read one curve of a UAnimSequence without changing it: for a float curve its fla
 
 *Read-only.*
 
-Read the internal FAnimNode struct of an AnimGraphNode as typed JSON (the runtime settings, not the K2 pin surface get_graph_nodes reports). Use it to mirror a reference ABP's settings when grafting nodes: Pose History PoseCount/CollectorName, Slot SlotName, blend params...
+Read the internal FAnimNode struct of one AnimGraphNode, found by NodeGuid (node_id) in the AnimGraph or a nested graph_name, as typed JSON: the runtime settings (Pose History PoseCount/CollectorName, Slot SlotName, blend params), not the pin surface get_graph_nodes reports. Use it instead of get_properties, which cannot address a graph node by GUID; a non-anim node returns its EditAnywhere properties. Read-only; write with set_anim_graph_node_property.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2248,7 +2248,7 @@ Bind an AnimGraph node input pin to a variable or property path in the node prop
 
 *Destructive, idempotent.*
 
-Write a property of an AnimGraphNode's internal FAnimNode struct by (dotted) name. Saves the ABP but does NOT recompile it -- run compile_anim_blueprint after your edits for runtime effect.
+Write one field of an AnimGraphNode's internal FAnimNode struct (runtime settings, not pins): node by NodeGuid, field by name or dotted path. set_properties cannot address a graph node by GUID; this also takes a dotted path, rebuilds the node's pins, is undoable and saves the ABP, but does NOT recompile -- run compile_anim_blueprint. Read: get_anim_graph_node_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2434,7 +2434,7 @@ Set a blend space's INPUT-SMOOTHING (interpolation) per axis: smoothing time, da
 
 *Destructive, idempotent.*
 
-Configure an existing blend space's X and (for 2D) Y axis: name, min, max, grid divisions.  create_blend_space only sets X; this sets the Y axis too (and can change X after creation). On a 1D blend space the y_axis_* params are reported as an honest note and ignored. Only the supplied fields change, in one undo transaction, then the blend space is saved; values the axes already have are a success with changed=false, applied_count 0, saved=false and a note, and nothing is modified or saved. A failed save makes success false, with saved=false and save_error.
+Configure an existing blend space's X and (2D only) Y axis: name, min, max, grid divisions. Over set_properties it addresses each axis field by name, clamps grid to >= 1, rebuilds the runtime sample data (ValidateSampleData/ResampleData) and saves. On a 1D blend space the y_axis_* params are ignored with a note. Only the supplied fields change, in one undo step; min below max is not checked. Values the axes already have are a success with changed=false, applied_count 0, saved=false and a note, and nothing is modified or saved. A failed save makes success false, with saved=false and save_error. New blend space: create_blend_space.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2571,7 +2571,7 @@ Set detailed solver-specific settings on a solver in an IK Rig, as one undo tran
 
 *Destructive, idempotent.*
 
-Set only the supplied blend-in/blend-out times, global rate scale, blend modes, auto blend out, trigger time, sync group/slot and deprecated root motion fields of a UAnimMontage in one undo step and save it; bad enum names, or no field, are refused before any change, and supplied values the montage already has are a success with changed=false, applied_count 0 and saved=false, with nothing modified or saved. A failed save makes success false, with saved=false and save_error.
+Set only the supplied blend-in/blend-out times, global rate scale, blend modes, auto blend out, trigger time, sync group/slot and deprecated root motion fields of a UAnimMontage in one undo step and save it. Over set_properties it sets the blend times through FAlphaBlend::SetBlendTime (clamped to >= 0), validates enum names before any write and saves in the same call; other montage properties: set_properties. Bad enum names, or no field, are refused before any change; values the montage already has give changed=false, applied_count 0 and saved=false, nothing modified or saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2763,14 +2763,14 @@ Bind (or rebind) the UMirrorDataTable of the schema's FPoseSearchRoledSkeleton e
 
 *Destructive, idempotent.*
 
-Author UPoseSearchSchema scalar tunables via reflection (partial merge + clamp). Replaces the 8 former per-field set_pose_search_schema_* setters.
+Write scalar UPROPERTYs of a PoseSearchSchema asset (SampleRate, permutations, padding, DataPreprocessor...), clamp them to ClampMin/ClampMax, re-finalize the schema and save; set_properties neither clamps nor saves. changed says whether any written value differs from what the schema held. Keys match property names case-insensitively; an empty object, a key that names no property (the error lists them), Channels or another instanced or deprecated property, a null value, or a value of the wrong kind or that does not convert is an error and nothing changes. Skeleton, mirror table, role: set_pose_search_schema_* tools.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `asset_path` | string | yes | Asset path of the target UPoseSearchSchema (required). |
-| `properties` | object | yes | Object of UPoseSearchSchema UPROPERTY fields to merge; keys are the C++ property NAMES (case-insensitive), absent keys untouched. Covers: SampleRate(int, ClampMin=1 ClampMax=240), bAddDataPadding(bool), bInjectAdditionalDebugChannels(bool), bDrawInjectAdditionalDebugChannels(bool), NumberOfPermutations(int, ClampMin=1), PermutationsSampleRate(int, ClampMin=1 ClampMax=240), PermutationsTimeOffset(float), DataPreprocessor(enum name: None/Normalize/NormalizeOnlyByDeviation/NormalizeWithCommonSchema). Object-refs (skeleton, mirror_data_table) and the role tag are set via their dedicated commands, not here. |
+| `properties` | object | yes | Object of UPoseSearchSchema UPROPERTY fields to merge; keys are the C++ property NAMES (case-insensitive), absent keys untouched. Covers: SampleRate(int, ClampMin=1 ClampMax=240), bAddDataPadding(bool), bInjectAdditionalDebugChannels(bool), bDrawInjectAdditionalDebugChannels(bool), NumberOfPermutations(int, ClampMin=1), PermutationsSampleRate(int, ClampMin=1 ClampMax=240), PermutationsTimeOffset(float), DataPreprocessor(enum name: None/Normalize/NormalizeOnlyByDeviation/NormalizeWithCommonSchema). Object-refs (skeleton, mirror_data_table) and the role tag are set via their dedicated commands, not here. An empty object, a key that names no property (or a deprecated one, or one holding instanced subobjects such as Channels), a null value or a value that does not convert is an error and nothing is changed. |
 
-**Returns:** `{ asset_path, asset_class, settings, applied_keys, changed, saved }`
+**Returns:** `{ asset_path, asset_class, settings, applied_keys, changed, saved, save_error? }`
 
 ## `set_pose_search_schema_role`
 

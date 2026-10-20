@@ -32,6 +32,7 @@
 // ============================================================================================
 
 #include "Commands/Common/McpJsonPropertyApply.h"
+#include "Commands/Common/McpCommonUtils.h"   // mcp_common::ImportPropertyTextStrict
 
 #include "Dom/JsonObject.h"
 #include "UObject/UnrealType.h"
@@ -263,28 +264,12 @@ namespace
     // Text import (the last resort for any type)
     // ----------------------------------------------------------------------------------------
 
-    // ImportText_Direct returns nullptr when it cannot parse (UnrealType.h). It is given an
-    // FStringOutputDevice instead of GWarn so the REAL reason goes into the report instead of
-    // being buried in the log. OwnerObject is null: only instanced properties use it to
-    // pick an outer, and here the writes go to loose value pointers.
+    // Through the strict importer: ImportText_Direct alone takes "abc" as 0 for a number and reports success.
+    // OwnerObject is null: only instanced properties use it to pick an outer, and here the writes go to loose
+    // value pointers.
     bool ImportTextInto_JsonApply(FProperty* Property, void* ValuePtr, const FString& Text, FString& OutReason)
     {
-        if (!Property || !ValuePtr)
-        {
-            OutReason = TEXT("null property or value pointer");
-            return false;
-        }
-
-        FStringOutputDevice ErrorCapture;
-        const TCHAR* Consumed = Property->ImportText_Direct(*Text, ValuePtr, nullptr, PPF_None, &ErrorCapture);
-        if (Consumed == nullptr)
-        {
-            OutReason = ErrorCapture.IsEmpty()
-                ? FString::Printf(TEXT("'%s' is not a valid value for type %s"), *Text, *Property->GetCPPType())
-                : FString::Printf(TEXT("'%s' rejected by type %s: %s"), *Text, *Property->GetCPPType(), *ErrorCapture);
-            return false;
-        }
-        return true;
+        return mcp_common::ImportPropertyTextStrict(Property, Text, ValuePtr, nullptr, OutReason);
     }
 
     // ----------------------------------------------------------------------------------------

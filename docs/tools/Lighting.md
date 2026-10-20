@@ -45,7 +45,7 @@ Read the seven Cascaded Shadow Map (CSM) settings of a directional light: dynami
 
 *Read-only.*
 
-Read the properties of an ExponentialHeightFog actor's UExponentialHeightFogComponent, under the names set_exponential_height_fog_properties takes.
+Read the fog of an ExponentialHeightFog actor's component, found by label or name in the editor world, under the snake_case names set_exponential_height_fog_properties takes (density, falloff, inscattering, distances, volumetric fog, second layer). A curated view; get_properties (internal names only) reads any other UPROPERTY on the component.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -57,13 +57,13 @@ Read the properties of an ExponentialHeightFog actor's UExponentialHeightFogComp
 
 *Read-only.*
 
-Retrieve comprehensive properties of a light actor including intensity, color, position, rotation, scale, and type-specific settings. Reads back every field set_light_properties writes (including IES, light function, shadow bias, contact shadow, cast/volumetric shadow, inverse-squared falloff, and RectLight source size / barn doors / source texture).
+Read a light actor of the editor level, found by object name (not label), in one call: owner transform, intensity, color, mobility and every field set_light_properties writes, plus the type-specific ones (point/spot falloff and cones, RectLight source and barn doors, directional sun-light flags). A convenience view of the actor and its first light component; get_properties reads any other UPROPERTY. Every value is read off the component: light_intensity_units is the unit name (Unitless, Candelas, Lumens, EV or Nits) on point, spot and rect lights and is left out for a directional light, whose intensity is lux; the falloff keys appear only on point and spot lights; light_lighting_channel_mask packs LightingChannels (1 = channel 0, 2 = channel 1, 4 = channel 2). light_type is always 'Light Component'; the kind is light_subtype. An unknown name is an error. Read-only.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `light_name` | string | yes | Name of the light actor to query |
 
-**Returns:** `{ light_name, light_found, light_message, light_class, light_type, light_intensity, light_intensity_units, r, g, b, a, x, y, z, pitch, yaw, roll, light_enabled, light_cast_shadows, light_affect_world, light_use_inverse_squared_falloff, light_falloff_exponent, light_min_roughness, light_lighting_channel_mask, light_temperature, light_use_temperature, light_indirect_lighting_intensity, light_volumetric_scattering_intensity, light_affect_translucent_lighting, light_use_ies_brightness, light_ies_brightness_scale, light_ies_texture, light_function_scale, light_function_fade_distance, light_function_disabled_brightness, light_function_material, light_shadow_bias, light_cast_volumetric_shadow, light_contact_shadow_length, light_contact_shadow_length_in_ws, light_subtype, light_atmosphere_sun_light, light_atmosphere_sun_light_index, light_atmosphere_sun_disk_color_scale: { r, g, b, a }, light_attenuation_radius, light_source_radius, light_soft_source_radius, light_source_length, light_source_width, light_source_height, light_barn_door_angle, light_barn_door_length, light_source_texture, light_inner_cone_angle, light_outer_cone_angle, light_mobility, light_tags, light_level, light_world }`
+**Returns:** `{ light_name, light_found, light_message, light_class (owner actor class), light_type ("Light Component" for every light; the kind is light_subtype), light_position: { x, y, z }, light_rotation: { pitch, yaw, roll }, light_scale: { x, y, z } (owner actor transform), light_intensity, light_intensity_units? (point/spot/rect only: Unitless, Candelas, Lumens, EV or Nits), light_color: { r, g, b, a }, light_enabled, light_cast_shadows, light_affect_world, light_mobility, light_use_inverse_squared_falloff? (point/spot only), light_falloff_exponent? (point/spot only), light_lighting_channel_mask (1 = channel 0, 2 = channel 1, 4 = channel 2), light_temperature, light_use_temperature, light_indirect_lighting_intensity, light_volumetric_scattering_intensity, light_affect_translucent_lighting, light_use_ies_brightness, light_ies_brightness_scale, light_ies_texture, light_function_scale: { x, y, z }, light_function_fade_distance, light_function_disabled_brightness, light_function_material, light_shadow_bias, light_cast_volumetric_shadow, light_contact_shadow_length, light_contact_shadow_length_in_ws, light_subtype (DirectionalLight, PointLight, SpotLight, RectLight or Unknown), light_atmosphere_sun_light? (directional: 1 or 0), light_atmosphere_sun_light_index? (directional), light_atmosphere_sun_disk_color_scale?: { r, g, b, a } (directional), light_attenuation_radius? (point/spot/rect), light_source_radius? (point/spot), light_soft_source_radius? (point/spot), light_source_length? (point/spot), light_inner_cone_angle? (spot), light_outer_cone_angle? (spot), light_source_width? (rect), light_source_height? (rect), light_barn_door_angle? (rect), light_barn_door_length? (rect), light_source_texture? (rect), light_tags: [string], light_level, light_world }`
 
 ## `get_lighting_quality`
 
@@ -91,7 +91,7 @@ Read a PostProcessVolume without changing it: the actor-level enabled / unbounde
 
 *Read-only.*
 
-Read back every property of an existing reflection-capture actor (Sphere or Box): InfluenceRadius (Sphere), BoxTransitionDistance (Box), Brightness, the actor scale exposed as box_extent, the Cubemap path and ReflectionSourceType. Round-trip reader for set_reflection_capture_properties.
+Read a Sphere or Box reflection-capture actor of the editor level, found by label or internal name: capture_type, InfluenceRadius (Sphere), BoxTransitionDistance (Box), Brightness, the actor scale reported as box_extent, the Cubemap path and ReflectionSourceType. A curated round-trip view for set_reflection_capture_properties, not every property; get_properties (internal names only) reads any other UPROPERTY. Pure reader, no recapture.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -113,7 +113,7 @@ No parameters.
 
 *Read-only.*
 
-Read back every data property of an existing SceneCapture2D actor's USceneCaptureComponent2D: CaptureSource (base), TextureTarget path, FOVAngle, ProjectionType, OrthoWidth and the bCaptureEveryFrame / bCaptureOnMovement bitfields (base). Pure reader — no Modify, no capture, no save. Round-trip reader for set_scene_capture_2d_properties.
+Read a SceneCapture2D actor's USceneCaptureComponent2D, found by label or internal name in the editor world: CaptureSource, TextureTarget path, FOVAngle, ProjectionType, OrthoWidth and the bCaptureEveryFrame / bCaptureOnMovement bitfields. A curated round-trip view for set_scene_capture_2d_properties, not every property; get_properties (internal names only) reads any other UPROPERTY on the component. Pure reader -- no Modify, no capture, no save.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -135,7 +135,7 @@ No parameters.
 
 *Read-only.*
 
-Read the atmosphere properties of a SkyAtmosphere actor's USkyAtmosphereComponent, under the names set_sky_atmosphere_properties takes.
+Read the atmosphere settings of a SkyAtmosphere actor's component, found by label or name in the editor world, under the snake_case names set_sky_atmosphere_properties takes (Rayleigh/Mie scattering, ground albedo, planet radius, height). A curated view; get_properties (internal names only) reads any other UPROPERTY on the component.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -147,7 +147,7 @@ Read the atmosphere properties of a SkyAtmosphere actor's USkyAtmosphereComponen
 
 *Read-only.*
 
-Read the properties of a SkyLight actor's USkyLightComponent, under the names set_sky_light_properties takes.
+Read the intensity, color and occlusion settings of a SkyLight actor's component, found by label or name in the editor world, under the snake_case names set_sky_light_properties takes. A curated view; get_properties (internal names only) reads any other UPROPERTY on it.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -159,7 +159,7 @@ Read the properties of a SkyLight actor's USkyLightComponent, under the names se
 
 *Read-only.*
 
-Read the properties of a VolumetricCloud actor's UVolumetricCloudComponent, under the names set_volumetric_cloud_properties takes.
+Read the layer and tracing settings of a VolumetricCloud actor's component, found by label or name in the editor world, under the snake_case names set_volumetric_cloud_properties takes. A curated view; get_properties (internal names only) reads any other UPROPERTY on the component.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -190,7 +190,7 @@ Configure Cascaded Shadow Map (CSM) settings on a directional light: dynamic sha
 
 *Destructive, idempotent.*
 
-Set the properties of an ExponentialHeightFog actor's UExponentialHeightFogComponent: density and falloff, inscattering, distances, max opacity, volumetric fog, the second fog layer and directional inscattering. Only the supplied fields change (applied_count counts them) and the reply reads every property back. Colors are [R,G,B] or [R,G,B,A].
+Set an ExponentialHeightFog actor's fog component, actor found by label or name in the editor world: density, falloff, inscattering, distances, max opacity, volumetric fog, second fog layer, directional inscattering. Over set_properties it needs no component path and goes through the component's own setters; other fog properties: set_properties. Supplied fields only, one undo step, not saved (save_level); applied_count counts them and every property is read back. Colors are [R,G,B(,A)] floats, volumetric_fog_albedo [R,G,B(,A)] whole 0-255 bytes. Every field is checked before any write: a color that is not 3 or 4 numbers, a byte color with a fraction or a value past 255, a number given as a string or a non-boolean volumetric_fog is an error and nothing changes.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -204,7 +204,7 @@ Set the properties of an ExponentialHeightFog actor's UExponentialHeightFogCompo
 | `fog_cutoff_distance` | number | no | Optional fog cutoff distance. |
 | `volumetric_fog` | boolean | no | Optional enable volumetric fog. |
 | `volumetric_fog_scattering_distribution` | number | no | Optional volumetric scattering distribution (-1..1). |
-| `volumetric_fog_albedo` | array | no | Optional [R,G,B] volumetric albedo as 0-255 bytes (FColor). |
+| `volumetric_fog_albedo` | array | no | Optional [R,G,B] or [R,G,B,A] volumetric albedo, each a whole number from 0 to 255 (FColor; A defaults to 255). |
 | `volumetric_fog_emissive` | array | no | Optional [R,G,B(,A)] volumetric emissive color. |
 | `volumetric_fog_extinction_scale` | number | no | Optional volumetric extinction scale. |
 | `second_fog_density` | number | no | Optional second fog layer density. |
@@ -246,7 +246,7 @@ Set the Intensity of one light actor with ULightComponent::SetIntensity and read
 
 *Destructive, idempotent.*
 
-Set component-level light properties: attenuation radius, source radius/length, cone angles, color temperature, indirect/volumetric intensity, translucent lighting, plus RectLight source size + barn doors + source texture, IES profile (texture/brightness scale/use-brightness), light-function (material/scale/fade distance/disabled brightness), shadow bias, cast/volumetric shadow, contact-shadow length (+ world-space flag), and inverse-squared falloff. Round-trips with get_light_properties. Partial update (idempotent): only fields present are written; a field that doesn't apply to the light's type returns an honest note instead of an error. The edit is one undo step that marks the level dirty, nothing is saved, and a call that changes nothing leaves neither and says changed false. On a Static-mobility light a field whose engine setter skips static lights (IES, light function, shadow bias, cast flags, falloff, RectLight source and barn doors) is an error and nothing is written. Verify by read-back via get_light_properties (light_* keys).
+Set component-level properties of one light actor, found by object name (not Outliner label) in the first world context: attenuation and source radius/length, cone angles, temperature, indirect/volumetric intensity, translucency, RectLight source size, barn doors and texture, IES profile, light function, shadow bias, cast/volumetric shadows, contact shadows and inverse-squared falloff. Over set_properties it needs no component path, returns a note for a field that does not apply to the light's type, and on a Static-mobility light refuses, writing nothing, any field whose engine setter skips static lights (IES, light function, shadow bias, cast flags, falloff, RectLight source and barn doors). Only fields present change, as one undo step that dirties the level; nothing is saved; a no-op says changed false. Intensity: set_light_intensity; color: set_light_color. Read back with get_light_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -358,7 +358,7 @@ Set enabled, priority, film_grain_intensity and motion_blur_amount of a PostProc
 
 *Destructive, idempotent.*
 
-Set properties on an existing reflection-capture actor (Sphere or Box). Dispatches by the actor's concrete capture-component class; a sphere-only param on a box (or vice versa) is a no-op and reports its &lt;prop>_set=false. box_extent maps to the actor scale (the box capture has no extent UPROPERTY; its size derives from the transform scale). cubemap loads a UTextureCube by path and flips ReflectionSourceType to SpecifiedCubemap. Marks the capture dirty for recapture; reads every set property back.
+Set influence radius (Sphere), transition distance and extent (Box), brightness or cubemap of a Sphere or Box reflection-capture actor found by label or name in the editor world, then mark it dirty for recapture and read each field back. Over set_properties: box_extent maps to the actor scale (the box capture has no extent property), brightness is clamped to [0.5, 4] and a cubemap also switches ReflectionSourceType to SpecifiedCubemap. A param for the other capture shape is a no-op reported as &lt;prop>_set=false. A box_extent that is not exactly 3 numbers, or a cubemap path that does not load as a TextureCube, fails the call before anything is written. Nothing is saved (save_level).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -366,8 +366,8 @@ Set properties on an existing reflection-capture actor (Sphere or Box). Dispatch
 | `influence_radius` | number | no | Sphere capture InfluenceRadius in cm (Sphere only) |
 | `box_transition_distance` | number | no | Box capture BoxTransitionDistance (Box only) |
 | `brightness` | number | no | Capture Brightness multiplier (clamped to [0.5, 4]) |
-| `box_extent` | array | no | Box capture extent as actor scale [X, Y, Z] (Box only; SetActorScale3D) |
-| `cubemap` | string | no | Path to a UTextureCube; assigning it sets ReflectionSourceType=SpecifiedCubemap |
+| `box_extent` | array | no | Box capture extent as actor scale [X, Y, Z] (Box only; SetActorScale3D). Anything but an array of exactly 3 numbers fails the call and nothing is changed, on a Sphere capture too. |
+| `cubemap` | string | no | Path to a UTextureCube; assigning it sets ReflectionSourceType=SpecifiedCubemap. A path that does not load as a TextureCube fails the call and nothing is changed. |
 
 **Returns:** `{ actor_name: string, actor_internal_name: string, capture_type: string, influence_radius_set: bool, influence_radius: number, box_transition_distance_set: bool, box_transition_distance: number, brightness_set: bool, brightness: number, box_extent_set: bool, box_extent: [number], cubemap_set: bool, cubemap: string, reflection_source_type: string, marked_dirty: bool }`
 
@@ -375,15 +375,15 @@ Set properties on an existing reflection-capture actor (Sphere or Box). Dispatch
 
 *Destructive, idempotent.*
 
-Sets the given CaptureSource, ProjectionType, FOVAngle, TextureTarget and bCaptureEveryFrame of the USceneCaptureComponent2D on a SceneCapture2D actor in the editor world, without capturing or saving; undoable. An invalid value fails the call, but fields applied before it stay set. Returns each field read back with a *_set flag.
+Set CaptureSource, ProjectionType, FOVAngle, TextureTarget and bCaptureEveryFrame of a SceneCapture2D actor's capture component, found by label or name in the editor world, without capturing or saving. Beyond set_properties it adds only the label lookup and lenient enum names (SCS_ prefix optional, case-insensitive); write any other field with set_properties. An unknown capture_source or projection_type, or a texture_target that does not load as a TextureRenderTarget2D, fails the call before anything is written. Returns each field read back with a *_set flag; get_scene_capture_2d_properties reads them.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Label or internal name of the SceneCapture2D actor |
-| `capture_source` | string | no | ESceneCaptureSource (e.g. SceneColorHDR \| FinalColorLDR \| FinalColorHDR \| SceneDepth); the SCS_ prefix is optional |
-| `projection_type` | string | no | Projection mode, "Perspective" or "Orthographic" (case-insensitive); any other value fails the call; omit to keep the current one |
+| `capture_source` | string | no | ESceneCaptureSource (e.g. SceneColorHDR \| FinalColorLDR \| FinalColorHDR \| SceneDepth); the SCS_ prefix is optional; any other value fails the call and nothing is changed |
+| `projection_type` | string | no | Projection mode, "Perspective" or "Orthographic" (case-insensitive); any other value fails the call and nothing is changed; omit to keep the current one |
 | `fov_angle` | number | no | Field-of-view angle in degrees (FOVAngle field) |
-| `texture_target` | string | no | Path to a UTextureRenderTarget2D to assign |
+| `texture_target` | string | no | Path to a UTextureRenderTarget2D to assign; a path that does not load as one fails the call and nothing is changed |
 | `capture_every_frame` | boolean | no | Whether the component captures every frame (bCaptureEveryFrame) |
 
 **Returns:** `{ actor_name: string, actor_internal_name: string, capture_source_set: bool, capture_source: string, projection_type_set: bool, projection_type: string, fov_angle_set: bool, fov_angle: number, texture_target_set: bool, texture_target: string, has_render_target: bool, capture_every_frame_set: bool, capture_every_frame: bool }`
@@ -392,7 +392,7 @@ Sets the given CaptureSource, ProjectionType, FOVAngle, TextureTarget and bCaptu
 
 *Destructive, idempotent.*
 
-Set the atmosphere properties of a SkyAtmosphere actor's USkyAtmosphereComponent. Only the supplied fields change (applied_count counts them) and the reply reads every property back. Colors are [R,G,B] or [R,G,B,A].
+Set atmosphere fields (Rayleigh/Mie scattering, anisotropy, ground albedo, radius, height, multi-scattering, aerial perspective, height fog) of a SkyAtmosphere actor found by label or name, through the component's setters, which refresh its render state; set_properties writes any other field. Only supplied fields change, in one undo step; all are read back. Colors are linear [R,G,B(,A)], ground_albedo [R,G,B(,A)] whole 0-255 bytes. A malformed field, or a component of Static mobility (its setters change nothing; make it Movable first), is an error and nothing changes. Not saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -402,7 +402,7 @@ Set the atmosphere properties of a SkyAtmosphere actor's USkyAtmosphereComponent
 | `mie_scattering` | array | no | Optional [R,G,B(,A)] Mie scattering color. |
 | `mie_scattering_scale` | number | no | Optional Mie scattering scale. |
 | `mie_anisotropy` | number | no | Optional Mie anisotropy (0..1). |
-| `ground_albedo` | array | no | Optional [R,G,B] ground albedo as 0-255 bytes (FColor). |
+| `ground_albedo` | array | no | Optional [R,G,B] or [R,G,B,A] ground albedo, each a whole number from 0 to 255 (FColor; A defaults to 255). |
 | `bottom_radius` | number | no | Optional planet bottom radius (km). |
 | `atmosphere_height` | number | no | Optional atmosphere height (km). |
 | `multi_scattering_factor` | number | no | Optional multi-scattering factor (0..2). |
@@ -415,7 +415,7 @@ Set the atmosphere properties of a SkyAtmosphere actor's USkyAtmosphereComponent
 
 *Destructive, idempotent.*
 
-Set the properties of a SkyLight actor's USkyLightComponent: intensity, light color, indirect and volumetric intensity, lower-hemisphere color and occlusion. Only the supplied fields change (applied_count counts them) and the reply reads every property back. Colors are [R,G,B] or [R,G,B,A].
+Set intensity, light color, indirect and volumetric intensity, lower-hemisphere color and occlusion of a SkyLight actor found by label or name, through the component's setters, which update its rendering state; set_properties writes any other field. Only supplied fields change, in one undo step, and all are read back. light_color and lower_hemisphere_color are linear [R,G,B(,A)]; occlusion_tint is [R,G,B(,A)] in whole 0-255 bytes. A Static SkyLight is refused, since its setters change nothing (make it Stationary or Movable first), and so is a malformed field; nothing changes then. Not saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -425,7 +425,7 @@ Set the properties of a SkyLight actor's USkyLightComponent: intensity, light co
 | `indirect_lighting_intensity` | number | no | Optional indirect lighting intensity scale. |
 | `volumetric_scattering_intensity` | number | no | Optional volumetric scattering intensity. |
 | `lower_hemisphere_color` | array | no | Optional [R,G,B(,A)] lower-hemisphere color (FLinearColor). |
-| `occlusion_tint` | array | no | Optional [R,G,B] occlusion tint as 0-255 bytes (FColor). |
+| `occlusion_tint` | array | no | Optional [R,G,B] or [R,G,B,A] occlusion tint, each a whole number from 0 to 255 (FColor; A defaults to 255). |
 | `occlusion_contrast` | number | no | Optional AO contrast (0..1). |
 | `occlusion_exponent` | number | no | Optional AO exponent. |
 | `min_occlusion` | number | no | Optional minimum occlusion (0..1). |
@@ -436,7 +436,7 @@ Set the properties of a SkyLight actor's USkyLightComponent: intensity, light co
 
 *Destructive, idempotent.*
 
-Set the properties of a VolumetricCloud actor's UVolumetricCloudComponent: layer and planet geometry, ground albedo, tracing distances and sample counts. Only the supplied fields change (applied_count counts them) and the reply reads every property back. ground_albedo is [R,G,B] in 0-255 bytes.
+Set layer and planet geometry, ground albedo, tracing distances and sample counts of a VolumetricCloud actor found by label or name, through the component's setters, which refresh its render state; set_properties writes any other field. Only supplied fields change, in one undo step (applied_count counts them), and the reply reads every property back. ground_albedo is [R,G,B(,A)] in whole 0-255 bytes. A malformed field, or a component of Static mobility (its setters change nothing; make it Movable first), is an error and nothing changes. Not saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -444,7 +444,7 @@ Set the properties of a VolumetricCloud actor's UVolumetricCloudComponent: layer
 | `layer_bottom_altitude` | number | no | Optional layer bottom altitude (km). |
 | `layer_height` | number | no | Optional layer height (km). |
 | `planet_radius` | number | no | Optional planet radius (km). |
-| `ground_albedo` | array | no | Optional [R,G,B] ground albedo as 0-255 bytes (FColor). |
+| `ground_albedo` | array | no | Optional [R,G,B] or [R,G,B,A] ground albedo, each a whole number from 0 to 255 (FColor; A defaults to 255). |
 | `tracing_start_max_distance` | number | no | Optional tracing start max distance. |
 | `tracing_max_distance` | number | no | Optional tracing max distance. |
 | `sky_light_cloud_bottom_occlusion` | number | no | Optional sky light cloud bottom occlusion (0..1). |
@@ -460,7 +460,7 @@ Set the properties of a VolumetricCloud actor's UVolumetricCloudComponent: layer
 
 *Additive.*
 
-Spawns a BoxReflectionCapture actor into the editor world.  Optionally sets the capture component's Brightness (read back), marks it dirty for recapture.
+Spawn a BoxReflectionCapture actor into the editor world at location in one undo step, optionally set its Brightness (read back), and mark it dirty for recapture. spawn_actor has no reflection-capture type; spawn_sphere_reflection_capture places a sphere probe. Each call adds an actor; not saved (save_level). Tune: set_reflection_capture_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -473,7 +473,7 @@ Spawns a BoxReflectionCapture actor into the editor world.  Optionally sets the 
 
 *Additive.*
 
-Spawn a new ExponentialHeightFog actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one, so each call adds another fog actor (not idempotent); nothing is saved (save_level). fog_density, when given, is written to its UExponentialHeightFogComponent with SetFogDensity and density_set turns true; either way the reply reads fog_density back from the component, so without the param it shows the class default. No editor world, or a failed spawn, is an error. actor_name is the label and actor_internal_name the object name. Tune or inspect an existing fog with set_exponential_height_fog_properties and get_exponential_height_fog_properties; other atmosphere actors: spawn_sky_atmosphere, spawn_volumetric_cloud or spawn_sky_light.
+Spawn a new ExponentialHeightFog actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one, so each call adds another fog actor (not idempotent); nothing is saved (save_level). spawn_actor has no fog type, and this one also seeds fog_density: when given, it is written to its UExponentialHeightFogComponent with SetFogDensity and density_set turns true; either way the reply reads fog_density back from the component, so without the param it shows the class default. No editor world, or a failed spawn, is an error. actor_name is the label and actor_internal_name the object name. Tune or inspect an existing fog with set_exponential_height_fog_properties and get_exponential_height_fog_properties; other atmosphere actors: spawn_sky_atmosphere, spawn_volumetric_cloud or spawn_sky_light.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -486,7 +486,7 @@ Spawn a new ExponentialHeightFog actor in the editor world at location (no rotat
 
 *Additive.*
 
-Spawn a new PostProcessVolume actor in the editor world at location as one undoable transaction, unbound (affecting the whole world) by default; nothing is saved. Returns actor_name (the label), actor_internal_name, unbound and enabled. Configure it with set_post_process_setting or set_post_process_color_grading.
+Spawn a new PostProcessVolume actor in the editor world at location in one undo step, unbound (affecting the whole world) by default; not saved (save_level). It builds NO brush, so unbound=false covers no space: for a bounded volume use spawn_box_volume(volume_class='PostProcessVolume'). spawn_actor has no post-process type. Returns actor_name (the label), actor_internal_name, unbound and enabled. Configure it with set_post_process_setting or set_post_process_color_grading.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -499,7 +499,7 @@ Spawn a new PostProcessVolume actor in the editor world at location as one undoa
 
 *Additive.*
 
-Spawn a SceneCapture2D actor in the editor world (also while PIE runs, never into PIE) at location and rotation, in one undo step; the level is marked dirty but not saved. Each call spawns another actor (not idempotent) under the engine default label: actor_name is that label, actor_internal_name the object name to address it by later. A fresh capture has no render target, so has_render_target is false until one is assigned. Set its TextureTarget, capture source, projection and FOV with set_scene_capture_2d_properties (a target comes from create_render_target_2d), read them back with get_scene_capture_2d_properties. A reflection probe is spawn_sphere_reflection_capture or spawn_box_reflection_capture; any other actor class: spawn_actor.
+Spawn a SceneCapture2D actor in the editor world (also while PIE runs, never into PIE) at location and rotation, in one undo step; the level is marked dirty but not saved. spawn_actor has no scene-capture type. Each call spawns another actor (not idempotent) under the engine default label: actor_name is that label, actor_internal_name the object name to address it by later. A fresh capture has no render target, so has_render_target is false until one is assigned. Set its TextureTarget, capture source, projection and FOV with set_scene_capture_2d_properties (a target comes from create_render_target_2d), read them back with get_scene_capture_2d_properties. A reflection probe is spawn_sphere_reflection_capture or spawn_box_reflection_capture.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -512,7 +512,7 @@ Spawn a SceneCapture2D actor in the editor world (also while PIE runs, never int
 
 *Additive.*
 
-Spawn a new SkyAtmosphere actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one; nothing is saved. Returns actor_name (the label), actor_internal_name, actor_class and has_component. Tune it with set_sky_atmosphere_properties.
+Spawn a new SkyAtmosphere actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one, so each call adds another; nothing is saved (save_level). spawn_actor has no atmosphere type. Returns actor_name (the label), actor_internal_name, actor_class and has_component. Tune it with set_sky_atmosphere_properties; the rest of a sky: spawn_sky_light, spawn_volumetric_cloud, spawn_exponential_height_fog.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -524,7 +524,7 @@ Spawn a new SkyAtmosphere actor in the editor world at location (no rotation) as
 
 *Additive.*
 
-Spawn a new SkyLight actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one; nothing is saved. intensity, when given, is set on its USkyLightComponent, and recapture=true calls RecaptureSky so the light refreshes its captured sky lighting now. The reply reads intensity back from the component and names the actor (actor_name is the label). Tune an existing sky light with set_sky_light_properties; spawn_sky_atmosphere adds the atmosphere.
+Spawn a new SkyLight actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one; nothing is saved. intensity, when given, is set on its USkyLightComponent, and recapture=true calls RecaptureSky so the light refreshes its captured sky lighting now. spawn_actor(type='SkyLight') also spawns one and adds color, a name and a PIE world; pick this one for the recapture. The reply reads intensity back from the component and names the actor (actor_name is the label). Tune an existing sky light with set_sky_light_properties; spawn_sky_atmosphere adds the atmosphere.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -538,7 +538,7 @@ Spawn a new SkyLight actor in the editor world at location (no rotation) as one 
 
 *Additive.*
 
-Spawns a SphereReflectionCapture actor into the editor world.  Sets the sphere capture component's InfluenceRadius / Brightness if given (read back to verify), marks it dirty for recapture.
+Spawn a SphereReflectionCapture actor into the editor world at location in one undo step, optionally set its InfluenceRadius (cm) and Brightness (read back), and mark it dirty for recapture; spawn_actor has no reflection-capture type, and spawn_box_reflection_capture places a box probe. Each call adds another actor; not saved (save_level). Tune it with set_reflection_capture_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -552,7 +552,7 @@ Spawns a SphereReflectionCapture actor into the editor world.  Sets the sphere c
 
 *Additive.*
 
-Spawn a new VolumetricCloud actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one; nothing is saved. Returns actor_name (the label), actor_internal_name, actor_class and has_component. Tune it with set_volumetric_cloud_properties.
+Spawn a new VolumetricCloud actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one, so each call adds another; nothing is saved (save_level). spawn_actor has no cloud type. Returns actor_name (the label), actor_internal_name, actor_class and has_component. Tune it with set_volumetric_cloud_properties; the rest of a sky: spawn_sky_atmosphere, spawn_sky_light, spawn_exponential_height_fog.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

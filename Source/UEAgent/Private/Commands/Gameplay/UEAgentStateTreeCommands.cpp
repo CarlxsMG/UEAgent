@@ -1933,11 +1933,13 @@ namespace
 	}
 
 	/**
-	 * Write Value into the property PropName of Node's instance, then Owner->Modify() and save the tree; on failure
-	 * returns the error reply, on success adds property, set, value_changed, saved and new_value to Data.
+	 * Owner->Modify(), write Value into the property PropName of Node's struct, and save the tree. Returns the error
+	 * reply when the write fails, or when the save fails (success false, saved false, save_error); otherwise nullptr,
+	 * having added property, set, value_changed, saved and new_value to Data.
 	 */
 	TSharedPtr<FJsonObject> StateTree_WriteNodeProperty(const TSharedPtr<FJsonObject>& Data, FStateTreeEditorNode& Node,
-		const FString& PropName, const TSharedPtr<FJsonValue>& Value, const TCHAR* NoStructError, UObject* Owner, UStateTree* Tree)
+		const FString& PropName, const TSharedPtr<FJsonValue>& Value, const TCHAR* NoStructError, UObject* Owner, UStateTree* Tree,
+		const TCHAR* Command)
 	{
 		TSharedPtr<FJsonObject> Error;
 		FProperty* Prop = StateTree_FindNodeProperty(Node, PropName, NoStructError, Error);
@@ -1945,6 +1947,8 @@ namespace
 
 		// Snapshot the old value to report value_changed (idempotent semantics).
 		const TSharedPtr<FJsonValue> OldValue = PropertyToJsonValue(Prop, Node.Node.GetMemory());
+		// Modify() before the write, so a transaction around the call records the old value, not the new one.
+		Owner->Modify();
 		void* Mem = Node.Node.GetMutableMemory();
 		if (!ApplyJsonValueToProperty(Prop, Mem, Value))
 		{
@@ -1956,15 +1960,15 @@ namespace
 		const bool bValueChanged = !(OldValue.IsValid() && NewValue.IsValid()
 			&& JsonValueToSerializedString(OldValue) == JsonValueToSerializedString(NewValue));
 
-		Owner->Modify();
-		const bool bSaved = mcp_common::SaveAssetPackage(Tree->GetPackage(), Tree);
+		FString SaveError;
+		const bool bSaved = mcp_common::SaveAssetPackage(Tree->GetPackage(), Tree, SaveError);
 
 		Data->SetStringField(TEXT("property"),      PropName);
 		Data->SetBoolField  (TEXT("set"),           true);
 		Data->SetBoolField  (TEXT("value_changed"), bValueChanged);
 		Data->SetBoolField  (TEXT("saved"),         bSaved);
 		if (NewValue.IsValid()) { Data->SetField(TEXT("new_value"), NewValue); }
-		return nullptr;
+		return bSaved ? nullptr : mcp_common::MakeSavedReply(Data, false, Command, SaveError);
 	}
 
 	/**
@@ -2042,13 +2046,13 @@ TSharedPtr<FJsonObject> HandleGetTaskInfo(
 // ---------------------------------------------------------------------------
 // set_task_property — edit one field of a task instance via reflection
 // ---------------------------------------------------------------------------
-// MCP:set_task_property - Set a single field of a task instance by reflection (FJsonObjectConverter::JsonValueToFProperty). Idempotent — re-applying the same value is a no-op (returns set:true, value_changed:false).
+// MCP:set_task_property - Write one property of a task's node struct on a StateTree state (state_name + task_index) and save the tree. set_properties cannot reach a StateTree node, so use this; instance data is not reachable. value_changed is false when the value was already held (the tree is still saved). A failed save makes success false, with saved=false and save_error. No undo step, not compiled (compile_state_tree). Read with get_task_property.
 //   @param tree_path - Asset path to the UStateTree.
 //   @param state_name [string!] - Name of the state.
 //   @param task_index - 0-based index into State->Tasks.
 //   @param property - FProperty name on the task struct.
 //   @param value [any!] - JSON value to apply (any FJsonObjectConverter-supported type).
-//   @returns { tree_path, state_name, task_index, property, set, value_changed, saved }
+//   @returns { tree_path, state_name, task_index, property, set, value_changed, saved, new_value?, save_error? }
 TSharedPtr<FJsonObject> HandleSetTaskProperty(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -2072,7 +2076,7 @@ TSharedPtr<FJsonObject> HandleSetTaskProperty(
 	TSharedPtr<FJsonObject> Data = StateTree_NewStateData(Tree, State);
 	Data->SetNumberField(TEXT("task_index"),   Index);
 	if (TSharedPtr<FJsonObject> WriteError = StateTree_WriteNodeProperty(Data, *Node, PropName, Value,
-		TEXT("Task node has no script struct"), State, Tree))
+		TEXT("Task node has no script struct"), State, Tree, TEXT("set_task_property")))
 	{
 		return WriteError;
 	}
@@ -2082,7 +2086,7 @@ TSharedPtr<FJsonObject> HandleSetTaskProperty(
 // ---------------------------------------------------------------------------
 // get_task_property — read one field of a task instance
 // ---------------------------------------------------------------------------
-// MCP:get_task_property - Read one property of a task node on a StateTree state by reflection, without changing the asset. Returns the value as JSON with its C++ type and has_value; only node struct properties are reachable, not instance data. Use get_task_info for the whole node and set_task_property to write.
+// MCP:get_task_property - Read one property of a task node on a StateTree state (task_index, from list_tasks) by reflection, without changing the asset. Use it instead of get_properties, which cannot address a node inside a state's Tasks array. Returns the value as JSON with its C++ type and has_value; only node struct properties are reachable, not instance data. Whole node: get_task_info; write: set_task_property.
 //   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
 //   @param state_name [string!] - Name of the state that owns the task; the command fails without it.
 //   @param task_index - 0-based index into the state Tasks, as listed by list_tasks.
@@ -2214,13 +2218,13 @@ TSharedPtr<FJsonObject> HandleGetConsiderationInfo(
 // ---------------------------------------------------------------------------
 // set_consideration_property — edit one field of a consideration instance via reflection
 // ---------------------------------------------------------------------------
-// MCP:set_consideration_property - Set a single field of a consideration instance by reflection (FJsonObjectConverter::JsonValueToFProperty). Idempotent — re-applying the same value is a no-op (returns set:true, value_changed:false).
+// MCP:set_consideration_property - Write one property of a utility consideration node of a StateTree state (state_name, consideration_index) and save the asset. set_properties cannot reach it: the node is a struct in the state's Considerations list. Node struct properties only, not instance data. No undo, no compile (compile_state_tree); the same value again gives value_changed false yet saves, and a failed save makes success false, with saved=false and save_error. Read: get_consideration_property.
 //   @param tree_path - Asset path to the UStateTree.
 //   @param state_name [string!] - Name of the state.
 //   @param consideration_index - 0-based index into State->Considerations.
 //   @param property - FProperty name on the consideration struct.
 //   @param value [any!] - JSON value to apply (any FJsonObjectConverter-supported type).
-//   @returns { tree_path, state_name, consideration_index, property, set, value_changed, saved }
+//   @returns { tree_path, state_name, consideration_index, property, set, value_changed, saved, new_value?, save_error? }
 TSharedPtr<FJsonObject> HandleSetConsiderationProperty(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -2244,7 +2248,7 @@ TSharedPtr<FJsonObject> HandleSetConsiderationProperty(
 	TSharedPtr<FJsonObject> Data = StateTree_NewStateData(Tree, State);
 	Data->SetNumberField(TEXT("consideration_index"), Index);
 	if (TSharedPtr<FJsonObject> WriteError = StateTree_WriteNodeProperty(Data, *Node, PropName, Value,
-		TEXT("Consideration node has no script struct"), State, Tree))
+		TEXT("Consideration node has no script struct"), State, Tree, TEXT("set_consideration_property")))
 	{
 		return WriteError;
 	}
@@ -2254,7 +2258,7 @@ TSharedPtr<FJsonObject> HandleSetConsiderationProperty(
 // ---------------------------------------------------------------------------
 // get_consideration_property — read one field of a consideration instance
 // ---------------------------------------------------------------------------
-// MCP:get_consideration_property - Read one property of a consideration node on a StateTree state by reflection, without changing the asset. Returns the value as JSON with its C++ type and has_value; only node struct properties are reachable, not instance data. Find the index with list_considerations.
+// MCP:get_consideration_property - Read one property of a utility consideration node on a StateTree state (consideration_index, from list_considerations) by reflection, without changing the asset. Use it instead of get_properties, which cannot address a node inside a state's Considerations array. Returns the value as JSON with its C++ type and has_value; only node struct properties are reachable, not instance data. Whole node: get_consideration_info; write: set_consideration_property.
 //   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
 //   @param state_name [string!] - Name of the state that owns the consideration; the command fails without it.
 //   @param consideration_index - 0-based index into the state Considerations, as listed by list_considerations.
@@ -2374,7 +2378,7 @@ TSharedPtr<FJsonObject> HandleGetConditionInfo(
 //   Same shape as task property helpers but routed to either EnterConditions
 //   or a transition's Conditions list by `target_kind`.
 // ---------------------------------------------------------------------------
-// MCP:set_condition_property - Write one property of a condition node on a StateTree state by reflection and save the asset: an enter condition, or a transition condition with target_kind "transition". Only node struct properties are reachable, not instance data. Returns value_changed, new_value and saved; the same value again gives value_changed false.
+// MCP:set_condition_property - Write one property of a condition node on a StateTree state by reflection and save the asset: an enter condition, or with target_kind "transition" a condition of transition transition_index. set_properties cannot reach it: the node is a struct in the state's condition list, addressed here by state_name and condition_index. Only node struct properties, not instance data. No undo step, no compile (compile_state_tree). The same value again gives value_changed false and still saves; a failed save makes success false, with saved=false and save_error. Read: get_condition_property.
 //   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
 //   @param state_name [string!] - Name of the state that owns the condition; the command fails without it.
 //   @param target_kind - Which list holds the condition: "state" (default, EnterConditions) or "transition" (Conditions of transition transition_index); any other value means "state".
@@ -2382,7 +2386,7 @@ TSharedPtr<FJsonObject> HandleGetConditionInfo(
 //   @param condition_index - 0-based index into the selected condition list; omitting it fails as out of range.
 //   @param property - Name of a property on the condition node struct, e.g. "bInvert" on a compare condition; case-insensitive.
 //   @param value [any!] - New value as JSON: a number, bool or string, or an object for a struct property, applied through FJsonObjectConverter.
-//   @returns { tree_path, state_name, target_kind, transition_index, condition_index, property, set, value_changed, saved }
+//   @returns { tree_path, state_name, target_kind, transition_index, condition_index, property, set, value_changed, saved, new_value?, save_error? }
 TSharedPtr<FJsonObject> HandleSetConditionProperty(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -2411,14 +2415,14 @@ TSharedPtr<FJsonObject> HandleSetConditionProperty(
 	if (TransitionIdx != INDEX_NONE) { Data->SetNumberField(TEXT("transition_index"), TransitionIdx); }
 	Data->SetNumberField(TEXT("condition_index"), CondIndex);
 	if (TSharedPtr<FJsonObject> WriteError = StateTree_WriteNodeProperty(Data, *Node, PropName, Value,
-		TEXT("Condition node has no script struct"), State, Tree))
+		TEXT("Condition node has no script struct"), State, Tree, TEXT("set_condition_property")))
 	{
 		return WriteError;
 	}
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_condition_property - Read one property of a condition node on a StateTree state by reflection, without changing the asset: an enter condition, or a transition condition with target_kind "transition". Returns the value as JSON with its C++ type and has_value; only node struct properties are reachable, not instance data.
+// MCP:get_condition_property - Read one property of a condition node on a StateTree state by reflection, without changing the asset: an enter condition (condition_index), or with target_kind "transition" a condition of transition transition_index. Use it instead of get_properties, which cannot address a node inside a state's condition arrays. Returns the value as JSON with its C++ type and has_value; only node struct properties are reachable, not instance data. Whole node: get_condition_info; write: set_condition_property.
 //   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
 //   @param state_name [string!] - Name of the state that owns the condition; the command fails without it.
 //   @param property - Name of a property on the condition node struct, e.g. "bInvert" on a compare condition; case-insensitive.
@@ -2582,12 +2586,12 @@ TSharedPtr<FJsonObject> HandleGetEvaluatorInfo(
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:set_evaluator_property - Write one property of a tree-scoped evaluator node of a StateTree asset by reflection and save the asset. Only node struct properties are reachable, not instance data. Returns value_changed, new_value and saved; the same value again gives value_changed false. Read it back with get_evaluator_property.
+// MCP:set_evaluator_property - Write one property of a tree-scoped evaluator node of a StateTree asset (evaluator_index) by reflection and save the asset. set_properties cannot reach it: the evaluator is a struct in the tree's Evaluators list, not an addressable object. Only node struct properties are reachable, not instance data. No undo step and no compile (compile_state_tree). value_changed false means the value was already there; the asset is saved anyway, and a failed save makes success false, with saved=false and save_error. Read: get_evaluator_property; indexes: list_evaluators.
 //   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
 //   @param evaluator_index - 0-based index into the tree Evaluators, as listed by list_evaluators; out of range is an error.
 //   @param property - Name of a property on the evaluator node struct; case-insensitive.
 //   @param value [any!] - New value as JSON: a number, bool or string, or an object for a struct property, applied through FJsonObjectConverter.
-//   @returns { tree_path, evaluator_index, property, set, value_changed, saved }
+//   @returns { tree_path, evaluator_index, property, set, value_changed, saved, new_value?, save_error? }
 TSharedPtr<FJsonObject> HandleSetEvaluatorProperty(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -2613,14 +2617,14 @@ TSharedPtr<FJsonObject> HandleSetEvaluatorProperty(
 	TSharedPtr<FJsonObject> Data = StateTree_NewTreeData(Tree);
 	Data->SetNumberField(TEXT("evaluator_index"), Index);
 	if (TSharedPtr<FJsonObject> WriteError = StateTree_WriteNodeProperty(Data, ED->Evaluators[Index], PropName, Value,
-		TEXT("Evaluator node has no script struct"), ED, Tree))
+		TEXT("Evaluator node has no script struct"), ED, Tree, TEXT("set_evaluator_property")))
 	{
 		return WriteError;
 	}
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_evaluator_property - Read one property of a tree-scoped evaluator node of a StateTree asset by reflection, without changing it. Returns the value as JSON with its C++ type and has_value; only node struct properties are reachable, not instance data. Write it with set_evaluator_property.
+// MCP:get_evaluator_property - Read one property of a tree-scoped evaluator node of a StateTree asset (evaluator_index, from list_evaluators) by reflection, without changing it. Use it instead of get_properties, which cannot address a node inside the tree's Evaluators array. Returns the value as JSON with its C++ type and has_value; only node struct properties are reachable, not instance data. Whole node: get_evaluator_info; write: set_evaluator_property.
 //   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
 //   @param evaluator_index - 0-based index into the tree Evaluators, as listed by list_evaluators; omitting it fails as out of range.
 //   @param property - Name of a property on the evaluator node struct, e.g. "Name"; case-insensitive.
@@ -2903,12 +2907,12 @@ TSharedPtr<FJsonObject> HandleSetTreeParameter(
 // ---------------------------------------------------------------------------
 // set_state_tree_global_task_property — set a property on a tree-scoped global task
 // ---------------------------------------------------------------------------
-// MCP:set_state_tree_global_task_property - Write one property of an existing global task of a StateTree asset by reflection and save the asset; despite the name it adds nothing (create the task with add_state_tree_global_task). Only node struct properties are reachable, not instance data. Returns value_changed, new_value and saved.
+// MCP:set_state_tree_global_task_property - Write one property of an existing global task's node struct in a StateTree asset, by global_task_index, and save the asset; despite the name it adds nothing (create the task with add_state_tree_global_task). set_properties cannot reach a StateTree node, so use this; instance data is not reachable. The tree is not compiled (compile_state_tree). Returns value_changed, new_value and saved; a failed save makes success false, with saved=false and save_error.
 //   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
 //   @param global_task_index - 0-based index into the tree GlobalTasks, as listed by list_state_tree_global_tasks; out of range is an error.
 //   @param property - Name of a property on the global task node struct, e.g. "FontScale" on a debug text task; case-insensitive.
 //   @param value [any!] - New value as JSON: a number, bool or string, or an object for a struct property, applied through FJsonObjectConverter.
-//   @returns { tree_path, global_task_index, property, set, value_changed, saved }
+//   @returns { tree_path, global_task_index, property, set, value_changed, saved, new_value?, save_error? }
 TSharedPtr<FJsonObject> HandleAddStateTreeGlobalTaskProperty(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -2935,7 +2939,7 @@ TSharedPtr<FJsonObject> HandleAddStateTreeGlobalTaskProperty(
 	TSharedPtr<FJsonObject> Data = StateTree_NewTreeData(Tree);
 	Data->SetNumberField(TEXT("global_task_index"), Index);
 	if (TSharedPtr<FJsonObject> WriteError = StateTree_WriteNodeProperty(Data, ED->GlobalTasks[Index], PropName, Value,
-		TEXT("Global task node has no script struct"), ED, Tree))
+		TEXT("Global task node has no script struct"), ED, Tree, TEXT("set_state_tree_global_task_property")))
 	{
 		return WriteError;
 	}

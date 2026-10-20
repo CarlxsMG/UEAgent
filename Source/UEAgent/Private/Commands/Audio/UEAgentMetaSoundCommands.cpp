@@ -1995,7 +1995,7 @@ TSharedPtr<FJsonObject> HandleGetMetaSoundNodeInfo(
 //   The Configuration struct is per-subclass — for example ArrayGet's config has
 //   NumOutputs, Index pin references, etc. We round-trip via FJsonObjectConverter.
 // ---------------------------------------------------------------------------
-// MCP:set_metasound_node_property - Write one field of a MetaSound Source node's Configuration struct by reflection, directly in the document (not through the MetaSound builder), then save the asset. Re-applying a value returns value_changed false but still saves. Succeeds only when the asset reaches disk; a failed save leaves the value in memory only (saved false, save_error).
+// MCP:set_metasound_node_property - Write one field of a MetaSound Source node's Configuration struct, node found by GUID, by reflection directly in the frontend document (not through the MetaSound builder), then save the asset. set_properties cannot reach it: frontend nodes are document data, not UObjects. No undo step. Re-applying a value returns value_changed false but still saves. Succeeds only when the asset reaches disk; a failed save leaves the value in memory only (saved false, save_error). Read: get_metasound_node_property; GUIDs: list_metasound_nodes.
 //   @param metasound_path - MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain"; MetaSound Patches are not accepted.
 //   @param node_id - Node GUID, as list_metasound_nodes returns it in id; a value that is not a GUID is refused.
 //   @param property - FProperty name on the Configuration struct.
@@ -2092,7 +2092,7 @@ TSharedPtr<FJsonObject> HandleSetMetaSoundNodeProperty(
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_metasound_node_property"), SaveError);
 }
 
-// MCP:get_metasound_node_property - Read one field of the Configuration struct of a MetaSound Source node by property name, returning its C++ type, has_value and value as JSON. Fails when the node has no Configuration struct or the struct has no such property. Read-only; write it with set_metasound_node_property.
+// MCP:get_metasound_node_property - Read one field of the Configuration struct of a MetaSound Source node, found by its node GUID (from list_metasound_nodes), returning its C++ type, has_value and value as JSON. Use it because MetaSound nodes are document structs, not UObjects, so get_properties cannot reach them; input defaults are set_metasound_node_input_default. Fails when the node has no Configuration struct or no such property; Patches are refused. Read-only; write with set_metasound_node_property.
 //   @param metasound_path - MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain"; MetaSound Patches are not accepted.
 //   @param node_id - Node GUID, as list_metasound_nodes returns it in id; a value that is not a GUID is refused.
 //   @param property - FProperty name on the Configuration struct.

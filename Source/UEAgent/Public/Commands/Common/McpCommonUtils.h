@@ -576,6 +576,16 @@ namespace mcp_common
         UClass* TargetClass = nullptr, const FString& Scope = TEXT("auto"), FString* OutError = nullptr);
 
     /**
+     * Import Text into the value at ValuePtr with Property's own text parser, and only when the parser reads ALL of it
+     * (surrounding whitespace aside). FProperty::ImportText_Direct alone answers success for text it did not read:
+     * a float or integer takes "abc" as 0 and "1e5" as 1. The text is parsed into a scratch copy, so ValuePtr is left
+     * untouched when it is refused; an empty text is refused for a number or a bool. Owner is passed to the parser
+     * (instanced properties use it as the outer). Returns false and fills OutError on a refusal.
+     */
+    UEAGENT_API bool ImportPropertyTextStrict(const FProperty* Property, const FString& Text, void* ValuePtr, UObject* Owner,
+        FString& OutError);
+
+    /**
      * Set a UObject property from a JSON value. Single canonical
      * route for every FProperty kind (scalars, enums, structs, arrays,
      * sets, maps) via FJsonObjectConverter::JsonValueToUProperty.

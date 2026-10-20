@@ -8,7 +8,7 @@
 
 *Additive, idempotent.*
 
-Attach a PCG component (the procedural generation engine) to an actor and optionally point it at a PCG graph -- what turns a plain actor or volume into something that scatters meshes and points by rule. Idempotent: an actor that already has one gets it back. The component generates within the actor's BOUNDS, so on a volume with no brush geometry it produces zero instances with no error at all -- confirm the extent with get_actor_bounds first. Then run generate_pcg_component and inspect with get_pcg_component_info.
+Attach a PCG component (the procedural generation engine) to an editor-world actor, found by name or label, and optionally point it at a PCG graph -- what turns a plain actor or volume into something that scatters meshes and points by rule. Over add_component_to_actor it assigns the graph via UPCGComponent::SetGraph, which set_properties cannot (the graph lives in a read-only GraphInstance). Idempotent: an actor that already has one (an APCGVolume does) gets it back, graph re-assigned. It generates within the actor's BOUNDS, so a volume with no brush geometry yields zero instances with no error -- check get_actor_bounds first. Then generate_pcg_component and get_pcg_component_info. Not saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -180,7 +180,7 @@ List a PCG graph's user parameters with name, type and current value -- and the 
 
 *Read-only.*
 
-Reads every editable property of a PCG node's settings object via reflection.  The node is resolved by name from get_pcg_graph_info (or the "Input"/"Output" tokens); its UPCGSettings is serialized to JSON. Read-only.
+Read the reflected properties of one PCG node's settings object (UPCGSettings), serialized to JSON, the node found by its node_name from get_pcg_graph_info or the "Input"/"Output" tokens. Use it instead of get_properties, which would need the settings subobject's path. Read-only; write with set_pcg_node_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -216,7 +216,7 @@ Removes a user-added node from a PCG graph by name.  Uses UPCGGraph::RemoveNode,
 
 *Destructive, idempotent.*
 
-Sets properties on an actor's UPCGComponent by reflection (Seed, bActivated, bIsComponentPartitioned, GenerationTrigger, ...). Reads the stored values back into the response.
+Write UPROPERTYs (Seed, bActivated, GenerationTrigger, ...) on the PCG component of an editor-world actor found by label or name, reading each stored value back. Over set_properties: no component path and no edit gate, but no PostEditChange is sent, so the component is not refreshed -- run generate_pcg_component. Nothing is saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -243,21 +243,21 @@ Write the value of an existing PCG graph user parameter (bool / int / float / do
 
 *Destructive, idempotent.*
 
-Authors a PCG node's settings object via reflection (partial merge + clamp).  Only the keys present in ``properties`` are written; absent keys are untouched. After the merge, PostEditChange() invalidates the node's cached CRC and regenerates its pins. The graph is re-saved and the persisted settings are read back. Idempotent: re-applying the same values is a no-op.
+Write fields of one PCG node's settings object, picked by node_name in a PCG Graph asset, then save the graph and read the settings back. Use it instead of set_properties, which needs the settings object's path: this also clamps numbers to ClampMin/ClampMax and runs PostEditChange, invalidating the node's cached CRC and rebuilding its pins. Only keys in properties are written, in one undo step; keys match property names case-insensitively. An empty object, a key that names no property (the error lists them), a deprecated or instanced one, a null value, or a value of the wrong kind or that does not convert is an error and nothing changes. A call that changes no value still runs PostEditChange and re-saves. "Input"/"Output" address the endpoints. Read: get_pcg_node_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `pcg_graph_path` | string | yes | Asset path of the PCG Graph (e.g. "/Game/PCG/PCG_Example" or fully-qualified "/Game/PCG/PCG_Example.PCG_Example"). |
 | `node_name` | string | yes | The node_name from get_pcg_graph_info of the node to author (the tokens "Input"/"Output" address the implicit endpoints). |
-| `properties` | object | yes | Object of UPCGSettings fields to merge (e.g. for a SurfaceSampler: bApplyDensityToPoints(bool), PointsPerSquaredMeter(float>=0), Looseness(float)); absent keys untouched. |
+| `properties` | object | yes | Object of UPCGSettings fields to merge, keyed by property name (matched case-insensitively) (e.g. for a SurfaceSampler: bApplyDensityToPoints(bool), PointsPerSquaredMeter(float>=0), Looseness(float)); absent keys untouched. An empty object, a key that names no property of the settings class (or a deprecated one, or one holding instanced subobjects), a null value or a value that does not convert is an error and nothing is changed. |
 
-**Returns:** `{ graph_name: string, asset_path: string, node_name: string, settings_class: string, applied_keys: [string], properties: object, saved: bool, save_error: string }`
+**Returns:** `{ graph_name: string, asset_path: string, node_name: string, settings_class: string, applied_keys: [string], properties: object, saved: bool, save_error?: string }`
 
 ## `spawn_pcg_volume`
 
 *Additive.*
 
-Spawns an APCGVolume in the editor world with a REAL cube brush (from ``extent``), optionally assigning a graph. Bounds, origin, scale and brush geometry are RE-READ from the spawned actor, never echoed. Without ``extent`` the volume is spawned brush-less (kept for compatibility) and the response says so explicitly, because a PCG component with null bounds generates 0 instances in total silence.
+Spawn an APCGVolume in the editor world with a REAL cube brush of half-extent extent and optionally assign a PCG graph, in one undo step. Over spawn_box_volume(volume_class='PCGVolume') it adds the graph (UPCGComponent::SetGraph), a rotation and a name (used only when free); add_pcg_component sets a graph on an existing actor. Bounds, scale and brush are RE-READ, never echoed. Without extent the volume is brush-less (kept for compatibility) and the reply warns: null bounds generate 0 instances in total silence. Not saved (save_level).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

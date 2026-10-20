@@ -69,14 +69,14 @@ Kick a physics body: apply an impulse (or, with vel_change, a mass-independent v
 
 *Additive, idempotent.*
 
-Attach an InstancedStaticMeshComponent (ISM) to a placed editor-world actor so you can then scatter many copies of one static mesh through it with add_instanced_static_mesh_instance. Idempotent: if the actor already has an ISM it returns that one with already_existed=true instead of adding a second. This is the working alternative to the foliage scatter tools, which crash the editor in this build.
+Attach an InstancedStaticMeshComponent (ISM) with an optional static mesh to a placed editor-world actor (name or label), in one undo step, to scatter copies of one mesh through it with add_instanced_static_mesh_instance. Over add_component_to_actor it only saves the separate mesh write, and it is idempotent: an existing ISM (a HISM counts) is returned with already_existed=true and its mesh left as it is (static_mesh in the reply says which). Without static_mesh_path the new ISM has no mesh; a path that does not load is an error and nothing is added. Not saved (save_level). The working alternative to the foliage scatter tools, which crash the editor in this build.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Display label or internal name of the target editor-world actor (required) |
-| `static_mesh_path` | string | no | Optional /Game/... path to a UStaticMesh asset (defaults to engine cube if absent) |
+| `static_mesh_path` | string | no | Optional /Game/... path to a UStaticMesh asset; without it the ISM has no mesh. A path that does not load is an error and nothing is added; on an existing ISM it is not applied. |
 
-**Returns:** `{ actor_name: string, component_name: string, component_class: string, num_instances: int, already_existed: bool }`
+**Returns:** `{ actor_name: string, component_name: string, component_class: string, num_instances: int, static_mesh: string (the ISM's mesh path, empty when none), already_existed: bool }`
 
 ## `add_instanced_static_mesh_instance`
 
@@ -533,7 +533,7 @@ Writes the mass settings of a UGeometryCollection asset (mass, mass_as_density, 
 
 *Destructive, idempotent.*
 
-Load a UPhysicalMaterial, set surface/object properties, save, and read back (read-modify-write; only provided fields change; idempotent set-to-fixed-value).
+Set friction, restitution, density, combine modes, surface type, mass power and sleep thresholds of a PhysicalMaterial asset as one undo step, then save it. Over set_properties: it clamps to the engine ranges, turns combine-mode overrides on, and saves; like a Details-panel edit it runs PostEditChange, so bodies using the material in this session see the new values. Bad enum names, or a call with no field, fail before writing. Values the material already has give changed=false and saved=false; a failed save makes success false, with saved=false and save_error, and still returns the values read back.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -549,7 +549,7 @@ Load a UPhysicalMaterial, set surface/object properties, save, and read back (re
 | `sleep_linear_velocity_threshold` | number | no | Optional SleepLinearVelocityThreshold (>= 0) |
 | `sleep_angular_velocity_threshold` | number | no | Optional SleepAngularVelocityThreshold (>= 0) |
 
-**Returns:** `{ physical_material_path: string, friction: number, static_friction: number, restitution: number, density: number, friction_combine_mode: string, override_friction_combine_mode: bool, restitution_combine_mode: string, override_restitution_combine_mode: bool, surface_type: string, raise_mass_to_power: number, sleep_linear_velocity_threshold: number, sleep_angular_velocity_threshold: number, friction_applied: bool, static_friction_applied: bool, restitution_applied: bool, density_applied: bool, friction_combine_mode_applied: bool, restitution_combine_mode_applied: bool, surface_type_applied: bool, raise_mass_to_power_applied: bool, sleep_linear_velocity_threshold_applied: bool, sleep_angular_velocity_threshold_applied: bool, updated: bool }`
+**Returns:** `{ physical_material_path: string, friction: number, static_friction: number, restitution: number, density: number, friction_combine_mode: string, override_friction_combine_mode: bool, restitution_combine_mode: string, override_restitution_combine_mode: bool, surface_type: string, raise_mass_to_power: number, sleep_linear_velocity_threshold: number, sleep_angular_velocity_threshold: number, friction_applied: bool, static_friction_applied: bool, restitution_applied: bool, density_applied: bool, friction_combine_mode_applied: bool, restitution_combine_mode_applied: bool, surface_type_applied: bool, raise_mass_to_power_applied: bool, sleep_linear_velocity_threshold_applied: bool, sleep_angular_velocity_threshold_applied: bool, updated: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_physics_asset_constraint_drives`
 
@@ -614,7 +614,7 @@ Set the linear/angular motion types and limits of an existing constraint inside 
 
 *Destructive, idempotent.*
 
-Set the physics type, a mass override and/or the advanced FBodyInstance fields (damping, mass scale, inertia scale, centre-of-mass nudge, gravity, mass update on scale) of one body of a UPhysicsAsset, chosen by body_index or else bone_name, in an undo transaction, then save the asset. Only the fields you pass change; passing none is an error and nothing is written. An asset with no bodies, no body found, an unknown physics_type, a mass_scale below 0.001 or a vector that is not 3 numbers is an error, checked before any write. Every field is read back from the authored body (not the live physics actor, which is absent headless). success is false, with save_error, when the save fails (during PIE, for one). get_physics_asset_info reads the body count.
+Set the physics type, a mass override and/or the advanced FBodyInstance fields (damping, mass scale, inertia scale, centre-of-mass nudge, gravity, mass update on scale) of one body of a UPhysicsAsset, chosen by body_index or else bone_name, then save the asset. Use it rather than set_properties, which needs the body setup's object path and the nested DefaultInstance struct: this picks the body by bone, goes through the engine setters for mass (which also switches the override on), mass scale and gravity, and saves. Only the fields you pass change; passing none is an error and nothing is written. An asset with no bodies, no body found, an unknown physics_type, a mass_scale below 0.001 or a vector that is not 3 numbers is an error, checked before any write. Every field is read back from the authored body (not the live physics actor, which is absent headless). success is false, with save_error, when the save fails (during PIE, for one).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -739,7 +739,7 @@ Slices all transforms of a UGeometryCollection asset with a regular grid of slic
 
 *Additive.*
 
-Spawn a new AFieldSystemActor in the editor world (not PIE) at location, unrotated, assign an existing UFieldSystem asset to its field system component, and set its outliner label. Every call spawns another actor; nothing is saved. A field system asset that does not load, or no editor world, is an error and spawns nothing; has_field_system confirms the assignment by reading it back. actor_label in the reply echoes the request, and actor_name is the new actor's internal name. Create the asset with create_field_system_asset, author its commands with add_field_node and inspect them with get_field_system_info; for any other actor class use spawn_actor.
+Spawn a new AFieldSystemActor in the editor world (not PIE) at location, unrotated, assign an existing UFieldSystem asset to its field system component, and set its outliner label. spawn_actor has no field-system type and could not assign the asset. Every call spawns another actor; no undo step, nothing is saved (save_level). A field system asset that does not load, or no editor world, is an error and spawns nothing; has_field_system confirms the assignment by reading it back. actor_label in the reply echoes the request, and actor_name is the new actor's internal name. Create the asset with create_field_system_asset, author its commands with add_field_node and inspect them with get_field_system_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -753,7 +753,7 @@ Spawn a new AFieldSystemActor in the editor world (not PIE) at location, unrotat
 
 *Additive.*
 
-Spawns an APhysicsConstraintActor in the editor world at location (zero rotation) in an undo transaction and optionally sets the two actors it constrains, found by object name or label (first match), then recomputes the joint frames. A name that matches no actor is skipped, not an error: check actor1_wired and actor2_wired. Each call adds a new actor; the level is not saved. Tune it with set_physics_constraint_limits and set_physics_constraint_drives, read it with get_physics_constraint_info; for joints inside a Physics Asset use add_physics_asset_constraint.
+Spawns an APhysicsConstraintActor in the editor world at location (zero rotation) in an undo transaction and optionally sets the two actors it constrains, found by object name or label (first match), then recomputes the joint frames; spawn_actor has no constraint type. A name that matches no actor is skipped, not an error: check actor1_wired and actor2_wired. Each call adds a new actor; the level is not saved. Tune it with set_physics_constraint_limits and set_physics_constraint_drives, read it with get_physics_constraint_info; for joints inside a Physics Asset use add_physics_asset_constraint.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

@@ -91,9 +91,9 @@ Set the SortOrder of the UDecalComponent of an ADecalActor in the editor world, 
 
 ## `spawn_decal_actor`
 
-*Additive.*
+*Destructive, idempotent.*
 
-Spawns a DecalActor into the editor world.  If material_path loads as a UMaterialInterface it is assigned to the UDecalComponent (SetDecalMaterial). Size may be a uniform number or an [x, y, z] half-extent applied to DecalSize (read back).
+Spawn a DecalActor labelled actor_label in the editor world with its DecalSize half-extent and optional material in one call; spawn_actor has no decal type. Idempotent by label: an existing one is REUSED, moved to location/rotation (origin/zero when omitted) and DecalSize reset (default 128,256,256). decal_size must be [x, y, z]; a material_path that does not load is an error and nothing is spawned or moved. No undo; not saved (save_level).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -101,6 +101,6 @@ Spawns a DecalActor into the editor world.  If material_path loads as a UMateria
 | `location` | string | no | Optional [x, y, z] world location (default 0,0,0). |
 | `rotation` | array | no | Optional [pitch, yaw, roll] world rotation. |
 | `decal_size` | string | no | Optional [x, y, z] half-extent for DecalSize (default 128,256,256). |
-| `material_path` | string | no | Optional content path of a UMaterialInterface to assign to the decal. |
+| `material_path` | string | no | Optional content path of a UMaterialInterface to assign to the decal; a path that does not load is an error and nothing is spawned or changed. |
 
 **Returns:** `{ actor_label: string, actor_name: string, reused: bool, decal_size_x: float, decal_size_y: float, decal_size_z: float, decal_material: string }`

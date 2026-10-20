@@ -203,7 +203,7 @@ Dump one condition node of a StateTree state as JSON without changing the asset:
 
 *Read-only.*
 
-Read one property of a condition node on a StateTree state by reflection, without changing the asset: an enter condition, or a transition condition with target_kind "transition". Returns the value as JSON with its C++ type and has_value; only node struct properties are reachable, not instance data.
+Read one property of a condition node on a StateTree state by reflection, without changing the asset: an enter condition (condition_index), or with target_kind "transition" a condition of transition transition_index. Use it instead of get_properties, which cannot address a node inside a state's condition arrays. Returns the value as JSON with its C++ type and has_value; only node struct properties are reachable, not instance data. Whole node: get_condition_info; write: set_condition_property.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -234,7 +234,7 @@ Serialize a single consideration's instance data (FJsonObjectConverter over the 
 
 *Read-only.*
 
-Read one property of a consideration node on a StateTree state by reflection, without changing the asset. Returns the value as JSON with its C++ type and has_value; only node struct properties are reachable, not instance data. Find the index with list_considerations.
+Read one property of a utility consideration node on a StateTree state (consideration_index, from list_considerations) by reflection, without changing the asset. Use it instead of get_properties, which cannot address a node inside a state's Considerations array. Returns the value as JSON with its C++ type and has_value; only node struct properties are reachable, not instance data. Whole node: get_consideration_info; write: set_consideration_property.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -262,7 +262,7 @@ Dump one tree-scoped evaluator of a StateTree asset as JSON without changing it.
 
 *Read-only.*
 
-Read one property of a tree-scoped evaluator node of a StateTree asset by reflection, without changing it. Returns the value as JSON with its C++ type and has_value; only node struct properties are reachable, not instance data. Write it with set_evaluator_property.
+Read one property of a tree-scoped evaluator node of a StateTree asset (evaluator_index, from list_evaluators) by reflection, without changing it. Use it instead of get_properties, which cannot address a node inside the tree's Evaluators array. Returns the value as JSON with its C++ type and has_value; only node struct properties are reachable, not instance data. Whole node: get_evaluator_info; write: set_evaluator_property.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -315,7 +315,7 @@ Read one task of a named state in a StateTree asset without changing it: the tas
 
 *Read-only.*
 
-Read one property of a task node on a StateTree state by reflection, without changing the asset. Returns the value as JSON with its C++ type and has_value; only node struct properties are reachable, not instance data. Use get_task_info for the whole node and set_task_property to write.
+Read one property of a task node on a StateTree state (task_index, from list_tasks) by reflection, without changing the asset. Use it instead of get_properties, which cannot address a node inside a state's Tasks array. Returns the value as JSON with its C++ type and has_value; only node struct properties are reachable, not instance data. Whole node: get_task_info; write: set_task_property.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -588,7 +588,7 @@ Remove one condition, by index, from a transition of a StateTree state and save 
 
 *Destructive, idempotent.*
 
-Write one property of a condition node on a StateTree state by reflection and save the asset: an enter condition, or a transition condition with target_kind "transition". Only node struct properties are reachable, not instance data. Returns value_changed, new_value and saved; the same value again gives value_changed false.
+Write one property of a condition node on a StateTree state by reflection and save the asset: an enter condition, or with target_kind "transition" a condition of transition transition_index. set_properties cannot reach it: the node is a struct in the state's condition list, addressed here by state_name and condition_index. Only node struct properties, not instance data. No undo step, no compile (compile_state_tree). The same value again gives value_changed false and still saves; a failed save makes success false, with saved=false and save_error. Read: get_condition_property.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -600,13 +600,13 @@ Write one property of a condition node on a StateTree state by reflection and sa
 | `transition_index` | number | no | 0-based index into the state transitions; used only when target_kind is "transition", where omitting it fails. |
 | `condition_index` | number | no | 0-based index into the selected condition list; omitting it fails as out of range. |
 
-**Returns:** `{ tree_path, state_name, target_kind, transition_index, condition_index, property, set, value_changed, saved }`
+**Returns:** `{ tree_path, state_name, target_kind, transition_index, condition_index, property, set, value_changed, saved, new_value?, save_error? }`
 
 ## `set_consideration_property`
 
 *Destructive, idempotent.*
 
-Set a single field of a consideration instance by reflection (FJsonObjectConverter::JsonValueToFProperty). Idempotent — re-applying the same value is a no-op (returns set:true, value_changed:false).
+Write one property of a utility consideration node of a StateTree state (state_name, consideration_index) and save the asset. set_properties cannot reach it: the node is a struct in the state's Considerations list. Node struct properties only, not instance data. No undo, no compile (compile_state_tree); the same value again gives value_changed false yet saves, and a failed save makes success false, with saved=false and save_error. Read: get_consideration_property.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -616,13 +616,13 @@ Set a single field of a consideration instance by reflection (FJsonObjectConvert
 | `property` | string | yes | FProperty name on the consideration struct. |
 | `value` | any | yes | JSON value to apply (any FJsonObjectConverter-supported type). |
 
-**Returns:** `{ tree_path, state_name, consideration_index, property, set, value_changed, saved }`
+**Returns:** `{ tree_path, state_name, consideration_index, property, set, value_changed, saved, new_value?, save_error? }`
 
 ## `set_evaluator_property`
 
 *Destructive, idempotent.*
 
-Write one property of a tree-scoped evaluator node of a StateTree asset by reflection and save the asset. Only node struct properties are reachable, not instance data. Returns value_changed, new_value and saved; the same value again gives value_changed false. Read it back with get_evaluator_property.
+Write one property of a tree-scoped evaluator node of a StateTree asset (evaluator_index) by reflection and save the asset. set_properties cannot reach it: the evaluator is a struct in the tree's Evaluators list, not an addressable object. Only node struct properties are reachable, not instance data. No undo step and no compile (compile_state_tree). value_changed false means the value was already there; the asset is saved anyway, and a failed save makes success false, with saved=false and save_error. Read: get_evaluator_property; indexes: list_evaluators.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -631,7 +631,7 @@ Write one property of a tree-scoped evaluator node of a StateTree asset by refle
 | `property` | string | yes | Name of a property on the evaluator node struct; case-insensitive. |
 | `value` | any | yes | New value as JSON: a number, bool or string, or an object for a struct property, applied through FJsonObjectConverter. |
 
-**Returns:** `{ tree_path, evaluator_index, property, set, value_changed, saved }`
+**Returns:** `{ tree_path, evaluator_index, property, set, value_changed, saved, new_value?, save_error? }`
 
 ## `set_state_completion_type`
 
@@ -681,7 +681,7 @@ Override a single UStateTree root parameter on a UStateTreeComponent living on a
 
 *Destructive, idempotent.*
 
-Write one property of an existing global task of a StateTree asset by reflection and save the asset; despite the name it adds nothing (create the task with add_state_tree_global_task). Only node struct properties are reachable, not instance data. Returns value_changed, new_value and saved.
+Write one property of an existing global task's node struct in a StateTree asset, by global_task_index, and save the asset; despite the name it adds nothing (create the task with add_state_tree_global_task). set_properties cannot reach a StateTree node, so use this; instance data is not reachable. The tree is not compiled (compile_state_tree). Returns value_changed, new_value and saved; a failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -690,7 +690,7 @@ Write one property of an existing global task of a StateTree asset by reflection
 | `property` | string | yes | Name of a property on the global task node struct, e.g. "FontScale" on a debug text task; case-insensitive. |
 | `value` | any | yes | New value as JSON: a number, bool or string, or an object for a struct property, applied through FJsonObjectConverter. |
 
-**Returns:** `{ tree_path, global_task_index, property, set, value_changed, saved }`
+**Returns:** `{ tree_path, global_task_index, property, set, value_changed, saved, new_value?, save_error? }`
 
 ## `set_state_tree_parameter`
 
@@ -755,7 +755,7 @@ Set the type of one state of a StateTree asset (EStateTreeStateType: State, Grou
 
 *Destructive, idempotent.*
 
-Set a single field of a task instance by reflection (FJsonObjectConverter::JsonValueToFProperty). Idempotent — re-applying the same value is a no-op (returns set:true, value_changed:false).
+Write one property of a task's node struct on a StateTree state (state_name + task_index) and save the tree. set_properties cannot reach a StateTree node, so use this; instance data is not reachable. value_changed is false when the value was already held (the tree is still saved). A failed save makes success false, with saved=false and save_error. No undo step, not compiled (compile_state_tree). Read with get_task_property.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -765,7 +765,7 @@ Set a single field of a task instance by reflection (FJsonObjectConverter::JsonV
 | `property` | string | yes | FProperty name on the task struct. |
 | `value` | any | yes | JSON value to apply (any FJsonObjectConverter-supported type). |
 
-**Returns:** `{ tree_path, state_name, task_index, property, set, value_changed, saved }`
+**Returns:** `{ tree_path, state_name, task_index, property, set, value_changed, saved, new_value?, save_error? }`
 
 ## `update_transition`
 

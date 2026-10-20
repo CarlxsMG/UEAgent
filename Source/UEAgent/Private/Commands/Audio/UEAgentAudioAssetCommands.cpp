@@ -22,6 +22,9 @@
 #include "EditorAssetLibrary.h"
 #include "Misc/PackageName.h"
 #include "JsonObjectConverter.h"        // FJsonObjectConverter (UStruct<->JSON reflection)
+#include "UObject/StructOnScope.h"      // FStructOnScope (the scratch copy a settings merge runs on)
+#include "UObject/UnrealType.h"         // FProperty / FNumericProperty (staged sound wave properties)
+#include "UObject/EnumProperty.h"       // FEnumProperty (the JSON kind a settings key of an enum must hold)
 
 /**
  * Sound asset authoring commands: sound classes and their hierarchy, mixes, attenuation, concurrency,
@@ -134,6 +137,160 @@ namespace
         ResultObj->SetStringField(TEXT("asset_class"), Wave->GetClass()->GetName());
         ResultObj->SetObjectField(TEXT("settings"), SettingsOut);
         return ResultObj;
+    }
+
+    // The values of one settings object staged for a write into an object: each converted into a copy of the current
+    // value of the property its key names. The copies are freed with it.
+    struct FAudioAssetStagedProperties
+    {
+        TArray<TPair<FProperty*, void*>> Values;
+
+        FAudioAssetStagedProperties() = default;
+        FAudioAssetStagedProperties(const FAudioAssetStagedProperties&) = delete;
+        FAudioAssetStagedProperties& operator=(const FAudioAssetStagedProperties&) = delete;
+        ~FAudioAssetStagedProperties()
+        {
+            for (const TPair<FProperty*, void*>& Value : Values)
+            {
+                Value.Key->DestroyAndFreeValue(Value.Value);
+            }
+        }
+    };
+
+    // Value, a value of Property, clamped to Property's ClampMin/ClampMax meta, which FJsonObjectConverter ignores:
+    // what mcp_common::ClampNumericByMeta does to each property of a container.
+    void AudioAsset_ClampToMeta(const FProperty& Property, void* Value)
+    {
+        const FNumericProperty* Numeric = CastField<FNumericProperty>(&Property);
+        const bool bHasMin = Property.HasMetaData(TEXT("ClampMin"));
+        const bool bHasMax = Property.HasMetaData(TEXT("ClampMax"));
+        if (!Numeric || (!bHasMin && !bHasMax))
+        {
+            return;
+        }
+        if (Numeric->IsFloatingPoint())
+        {
+            double Number = Numeric->GetFloatingPointPropertyValue(Value);
+            if (bHasMin) { Number = FMath::Max(Number, FCString::Atod(*Property.GetMetaData(TEXT("ClampMin")))); }
+            if (bHasMax) { Number = FMath::Min(Number, FCString::Atod(*Property.GetMetaData(TEXT("ClampMax")))); }
+            Numeric->SetFloatingPointPropertyValue(Value, Number);
+        }
+        else if (Numeric->IsInteger())
+        {
+            int64 Number = Numeric->GetSignedIntPropertyValue(Value);
+            if (bHasMin) { Number = FMath::Max<int64>(Number, FCString::Atoi64(*Property.GetMetaData(TEXT("ClampMin")))); }
+            if (bHasMax) { Number = FMath::Min<int64>(Number, FCString::Atoi64(*Property.GetMetaData(TEXT("ClampMax")))); }
+            Numeric->SetIntPropertyValue(Value, Number);
+        }
+    }
+
+    // What Value must be for Property when it is not that, else empty. FJsonObjectConverter reads a number or a bool
+    // out of any JSON value without an error -- a string that is not a number becomes 0, any string a bool -- so
+    // those kinds are checked here; the converter refuses a wrong kind for the others itself.
+    FString AudioAsset_ExpectedJsonKind(const FProperty& Property, const FJsonValue& Value)
+    {
+        if (Property.ArrayDim != 1)
+        {
+            return FString();
+        }
+        const FNumericProperty* Numeric = CastField<FNumericProperty>(&Property);
+        if (CastField<FEnumProperty>(&Property) || (Numeric && Numeric->IsEnum()))
+        {
+            return Value.Type == EJson::String || Value.Type == EJson::Number ? FString() : FString(TEXT("an enum name"));
+        }
+        if (Numeric)
+        {
+            const bool bNumber = Value.Type == EJson::Number || (Value.Type == EJson::String && Value.AsString().IsNumeric());
+            return bNumber ? FString() : FString(TEXT("a number"));
+        }
+        if (CastField<FBoolProperty>(&Property))
+        {
+            return Value.Type == EJson::Boolean ? FString() : FString(TEXT("true or false"));
+        }
+        return FString();
+    }
+
+    // Stages every key of Json for a write into Object, before anything is written (Param names the param in the
+    // errors). Null when each key names a property of Object's class -- matched case-insensitively, as
+    // FJsonObjectConverter matches them -- that is neither deprecated nor holds instanced subobjects (the staging
+    // conversion would create those outside Object), holds a value of its kind (AudioAsset_ExpectedJsonKind), and the
+    // value converts; it is then clamped (AudioAsset_ClampToMeta). Else the error reply naming the key, with nothing
+    // changed: merging into Object directly would skip a key that names no property without a word, and stop at
+    // the first value that does not convert with the keys before it already written.
+    TSharedPtr<FJsonObject> AudioAsset_StageProperties(const FJsonObject& Json, UObject& Object, const TCHAR* Param,
+        FAudioAssetStagedProperties& OutStaged)
+    {
+        const UClass* Class = Object.GetClass();
+        auto IsWritable = [](const FProperty& Property)
+        {
+            return !Property.HasAnyPropertyFlags(
+                CPF_Deprecated | CPF_InstancedReference | CPF_ContainsInstancedReference | CPF_PersistentInstance);
+        };
+        for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Json.Values)
+        {
+            FProperty* Property = nullptr;
+            for (TFieldIterator<FProperty> It(Class); It && !Property; ++It)
+            {
+                if (Class->GetAuthoredNameForField(*It).Equals(Pair.Key, ESearchCase::IgnoreCase))
+                {
+                    Property = *It;
+                }
+            }
+            if (!Property || !IsWritable(*Property))
+            {
+                TArray<FString> Names;
+                for (TFieldIterator<FProperty> It(Class); It; ++It)
+                {
+                    if (IsWritable(**It))
+                    {
+                        Names.Add(Class->GetAuthoredNameForField(*It));
+                    }
+                }
+                const FString Problem = Property
+                    ? FString::Printf(TEXT("names %s, which is deprecated or holds instanced subobjects and is not written here"), *Property->GetName())
+                    : FString::Printf(TEXT("names no property of %s"), *Class->GetName());
+                return mcp_common::MakeErrorReply(FString::Printf(
+                    TEXT("%s key '%s' %s; nothing was changed. Writable properties (keys match them case-insensitively): %s"),
+                    Param, *Pair.Key, *Problem, *FString::Join(Names, TEXT(", "))));
+            }
+            if (!Pair.Value.IsValid() || Pair.Value->IsNull())
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(
+                    TEXT("%s.%s is null: give it a value or leave the key out; nothing was changed."), Param, *Pair.Key));
+            }
+            const FString Expected = AudioAsset_ExpectedJsonKind(*Property, *Pair.Value);
+            if (!Expected.IsEmpty())
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(TEXT("%s.%s must be %s for %s (%s); nothing was changed."),
+                    Param, *Pair.Key, *Expected, *Property->GetName(), *Property->GetCPPType()));
+            }
+            void* Value = Property->AllocateAndInitializeValue();
+            OutStaged.Values.Emplace(Property, Value);
+            Property->CopyCompleteValue(Value, Property->ContainerPtrToValuePtr<void>(&Object));
+            FText Reason;
+            if (!FJsonObjectConverter::JsonValueToUProperty(Pair.Value, Property, Value, 0, 0, false, &Reason))
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(
+                    TEXT("%s.%s does not convert to %s (%s): %s; nothing was changed."), Param, *Pair.Key,
+                    *Property->GetName(), *Property->GetCPPType(), *Reason.ToString().Replace(TEXT("\n"), TEXT(" "))));
+            }
+            AudioAsset_ClampToMeta(*Property, Value);
+        }
+        return nullptr;
+    }
+
+    // Whether Object already holds Value, a value of Property, in every element of it.
+    bool AudioAsset_HoldsValue(const FProperty& Property, const UObject& Object, const void* Value)
+    {
+        for (int32 Index = 0; Index < Property.ArrayDim; ++Index)
+        {
+            if (!Property.Identical(Property.ContainerPtrToValuePtr<void>(&Object, Index),
+                    static_cast<const uint8*>(Value) + Index * Property.GetElementSize(), PPF_None))
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
     // Find a concrete (non-abstract, non-deprecated) USoundEffectSubmixPreset subclass
@@ -658,10 +815,84 @@ namespace
         return Data;
     }
 
+    // What Value must be for Field when it is not that, else empty. FJsonObjectConverter reads a number or a bool out
+    // of any JSON value without an error -- a string that is not a number becomes 0, any string a bool -- so those
+    // kinds are checked here; the converter refuses a wrong kind for the others itself.
+    FString PropertyHandlers_ExpectedJsonKind(const FProperty& Field, const FJsonValue& Value)
+    {
+        if (Field.ArrayDim != 1)
+        {
+            return FString();
+        }
+        const FNumericProperty* Numeric = CastField<FNumericProperty>(&Field);
+        if (CastField<FEnumProperty>(&Field) || (Numeric && Numeric->IsEnum()))
+        {
+            return Value.Type == EJson::String || Value.Type == EJson::Number ? FString() : FString(TEXT("an enum name"));
+        }
+        if (Numeric)
+        {
+            const bool bNumber = Value.Type == EJson::Number || (Value.Type == EJson::String && Value.AsString().IsNumeric());
+            return bNumber ? FString() : FString(TEXT("a number"));
+        }
+        if (CastField<FBoolProperty>(&Field))
+        {
+            return Value.Type == EJson::Boolean ? FString() : FString(TEXT("true or false"));
+        }
+        return FString();
+    }
+
+    // Null when every key of Json names a field of SettingsStruct that is not deprecated -- matched case-insensitively,
+    // as FJsonObjectConverter matches them -- and holds a value of its kind (PropertyHandlers_ExpectedJsonKind); else
+    // the error reply naming the first key that does not, with the fields. The converter skips a key that names no
+    // field without a word, so it would read as applied.
+    TSharedPtr<FJsonObject> PropertyHandlers_CheckSettingsKeys(const FJsonObject& Json, const UScriptStruct* SettingsStruct)
+    {
+        for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Json.Values)
+        {
+            const FProperty* Field = nullptr;
+            for (TFieldIterator<FProperty> It(SettingsStruct); It && !Field; ++It)
+            {
+                if (!It->HasAnyPropertyFlags(CPF_Deprecated)
+                    && SettingsStruct->GetAuthoredNameForField(*It).Equals(Pair.Key, ESearchCase::IgnoreCase))
+                {
+                    Field = *It;
+                }
+            }
+            if (!Field)
+            {
+                TArray<FString> Fields;
+                for (TFieldIterator<FProperty> It(SettingsStruct); It; ++It)
+                {
+                    if (!It->HasAnyPropertyFlags(CPF_Deprecated))
+                    {
+                        Fields.Add(SettingsStruct->GetAuthoredNameForField(*It));
+                    }
+                }
+                return mcp_common::MakeErrorReply(FString::Printf(
+                    TEXT("settings key '%s' matches no field of %s (keys are field names, matched case-insensitively); ")
+                    TEXT("nothing was changed. Fields: %s"),
+                    *Pair.Key, *SettingsStruct->GetName(), *FString::Join(Fields, TEXT(", "))));
+            }
+            if (!Pair.Value.IsValid() || Pair.Value->IsNull())
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(
+                    TEXT("settings.%s is null: give it a value or leave the key out; nothing was changed."), *Pair.Key));
+            }
+            const FString Expected = PropertyHandlers_ExpectedJsonKind(*Field, *Pair.Value);
+            if (!Expected.IsEmpty())
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(TEXT("settings.%s must be %s for %s (%s); nothing was changed."),
+                    *Pair.Key, *Expected, *Field->GetName(), *Field->GetCPPType()));
+            }
+        }
+        return nullptr;
+    }
+
     // Merges the required settings param into Settings, the SettingsStruct value Asset holds: only the keys it
     // carries change, and MergeJsonWithClamp also enforces the ClampMin/ClampMax meta the JSON converter ignores.
-    // Then saves Asset and replies with PropertyHandlers_SettingsData and the keys applied; the reply succeeds
-    // only when the save reached disk (Command names the command in its error).
+    // An empty settings object, a key PropertyHandlers_CheckSettingsKeys refuses or a value that does not convert
+    // is an error, with nothing changed. Then saves Asset and replies with PropertyHandlers_SettingsData and the
+    // keys applied; the reply succeeds only when the save reached disk (Command names the command in its error).
     TSharedPtr<FJsonObject> PropertyHandlers_MergeSettings(
         const TSharedPtr<FJsonObject>& Params,
         UObject* Asset,
@@ -675,13 +906,27 @@ namespace
         {
             return mcp_common::MakeErrorReply(TEXT("Missing required parameter: settings (object)"));
         }
-
-        Asset->Modify();
-        FString MergeError;
-        if (!mcp_common::MergeJsonWithClamp(*SettingsJson, SettingsStruct, Settings, MergeError))
+        if ((*SettingsJson)->Values.Num() == 0)
         {
-            return mcp_common::MakeErrorReply(MergeError);
+            return mcp_common::MakeErrorReply(TEXT("settings is empty: give at least one field to set; nothing was changed."));
         }
+        if (TSharedPtr<FJsonObject> Refused = PropertyHandlers_CheckSettingsKeys(**SettingsJson, SettingsStruct))
+        {
+            return Refused;
+        }
+
+        // The merge runs on a copy that replaces Settings only once all of it converted: the converter writes field
+        // by field and stops at the first value that does not convert, which would leave the asset half-written.
+        FStructOnScope Merged(SettingsStruct);
+        SettingsStruct->CopyScriptStruct(Merged.GetStructMemory(), Settings);
+        FString MergeError;
+        if (!mcp_common::MergeJsonWithClamp(*SettingsJson, SettingsStruct, Merged.GetStructMemory(), MergeError))
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(TEXT("settings does not convert to %s: %s; nothing was changed."),
+                *SettingsStruct->GetName(), *MergeError.Replace(TEXT("\n"), TEXT(" "))));
+        }
+        Asset->Modify();
+        SettingsStruct->CopyScriptStruct(Settings, Merged.GetStructMemory());
         FString SaveError;
         const bool bSaved = mcp_common::SaveAssetPackage(Asset->GetOutermost(), Asset, SaveError);
 
@@ -710,9 +955,9 @@ namespace
     }
 }
 
-// MCP:set_sound_concurrency_properties - Author FSoundConcurrencySettings on a USoundConcurrency via reflection (partial merge + clamp).
+// MCP:set_sound_concurrency_properties - Merge fields into a SoundConcurrency asset's Concurrency settings (maxCount, resolutionRule, volume scaling...; absent keys kept), clamp to ClampMin/ClampMax and save; set_properties neither clamps nor saves. Keys match field names case-insensitively. An empty settings object, a key that names no field (the error lists them), a null value, or a value that is not of the field's kind or does not convert is an error and nothing changes. A failed save makes success false.
 //   @param concurrency_path - Full content path of the target USoundConcurrency.
-//   @param settings - Object of FSoundConcurrencySettings fields to merge (maxCount(int>=1), bLimitToOwner(bool), resolutionRule(enum name), retriggerTime, volumeScale(0..1), volumeScaleMode(enum), bVolumeScaleCanRelease, volumeScaleAttackTime, volumeScaleReleaseTime, voiceStealReleaseTime); absent keys untouched.
+//   @param settings - Object of FSoundConcurrencySettings fields to merge (maxCount(int>=1), bLimitToOwner(bool), resolutionRule(enum name), retriggerTime, volumeScale(0..1), volumeScaleMode(enum), bVolumeScaleCanRelease, volumeScaleAttackTime, volumeScaleReleaseTime, voiceStealReleaseTime); absent keys untouched. Keys match the field names case-insensitively; an empty object, a key that names no field, a null value or a value that does not convert is an error and nothing is changed.
 //   @returns { concurrency_path: string, asset_class: string, settings: object, applied_keys: [string], saved: bool }
 TSharedPtr<FJsonObject> HandleSetSoundConcurrencyProperties(const TSharedPtr<FJsonObject>& Params)
 {
@@ -727,7 +972,7 @@ TSharedPtr<FJsonObject> HandleSetSoundConcurrencyProperties(const TSharedPtr<FJs
         TEXT("set_sound_concurrency_properties"));
 }
 
-// MCP:get_sound_concurrency_properties - Read every FSoundConcurrencySettings field (maxCount, bLimitToOwner, resolutionRule, retriggerTime, volume scaling, voice stealing) of a USoundConcurrency asset as one settings object, with the keys set_sound_concurrency_properties takes, plus asset_class. Read-only.
+// MCP:get_sound_concurrency_properties - Read the whole FSoundConcurrencySettings struct (maxCount, bLimitToOwner, resolutionRule, retriggerTime, volume scaling, voice stealing) of a USoundConcurrency asset as one settings object, with the keys set_sound_concurrency_properties takes, plus asset_class. A convenience over get_properties on its Concurrency property, shaped for that write tool. Read-only.
 //   @param concurrency_path - Full content path of the target USoundConcurrency.
 //   @returns { concurrency_path: string, asset_class: string, settings: object }
 TSharedPtr<FJsonObject> HandleGetSoundConcurrencyProperties(const TSharedPtr<FJsonObject>& Params)
@@ -756,9 +1001,9 @@ namespace
     }
 }
 
-// MCP:set_sound_attenuation_properties - Author FSoundAttenuationSettings on a USoundAttenuation via reflection (partial merge + clamp).
+// MCP:set_sound_attenuation_properties - Merge fields into a SoundAttenuation asset's Attenuation settings (absent keys kept), clamp to ClampMin/ClampMax and save; set_properties neither clamps nor saves. Keys match field names case-insensitively. An empty settings object, a key that names no field (the error lists them), a null value, or a value that is not of the field's kind or does not convert is an error and nothing changes. Plugin sub-objects are not reached. A failed save makes success false.
 //   @param attenuation_path - Full content path of the target USoundAttenuation.
-//   @param settings - Object of FSoundAttenuationSettings/FBaseAttenuationSettings fields to merge; absent keys untouched. e.g. bAttenuate, bSpatialize, attenuationShape(Sphere/Capsule/Box/Cone), distanceAlgorithm, falloffDistance, dBAttenuationAtMax(-60..0), attenuationShapeExtents{x,y,z}, bAttenuateWithLPF, lPFFrequencyAtMin/Max, bEnableOcclusion, occlusionVolumeAttenuation, bEnableReverbSend, reverbWetLevelMin/Max. Nested plugin sub-objects (pluginSettings, audioLinkSettingsOverride) are NOT authored here.
+//   @param settings - Object of FSoundAttenuationSettings/FBaseAttenuationSettings fields to merge; absent keys untouched. e.g. bAttenuate, bSpatialize, attenuationShape(Sphere/Capsule/Box/Cone), distanceAlgorithm, falloffDistance, dBAttenuationAtMax(-60..0), attenuationShapeExtents{x,y,z}, bAttenuateWithLPF, lPFFrequencyAtMin/Max, bEnableOcclusion, occlusionVolumeAttenuation, bEnableReverbSend, reverbWetLevelMin/Max. Nested plugin sub-objects (pluginSettings, audioLinkSettingsOverride) are NOT authored here. Keys match the field names case-insensitively; an empty object, a key that names no field, a null value or a value that does not convert is an error and nothing is changed.
 //   @returns { attenuation_path: string, asset_class: string, settings: object, applied_keys: [string], saved: bool }
 TSharedPtr<FJsonObject> HandleSetSoundAttenuationProperties(const TSharedPtr<FJsonObject>& Params)
 {
@@ -773,7 +1018,7 @@ TSharedPtr<FJsonObject> HandleSetSoundAttenuationProperties(const TSharedPtr<FJs
         TEXT("set_sound_attenuation_properties"));
 }
 
-// MCP:get_sound_attenuation_properties - Read every FSoundAttenuationSettings field (shape, falloff, spatialization, LPF, occlusion, reverb send) of a USoundAttenuation asset as one settings object, with the keys set_sound_attenuation_properties takes, plus asset_class. Read-only.
+// MCP:get_sound_attenuation_properties - Read the whole FSoundAttenuationSettings struct (shape, falloff, spatialization, LPF, occlusion, reverb send) of a USoundAttenuation asset as one settings object, with the keys set_sound_attenuation_properties takes, plus asset_class. A convenience over get_properties on its Attenuation property, shaped for that write tool; it reads the asset, not what an audio component applies (get_audio_component_properties). Read-only.
 //   @param attenuation_path - Full content path of the target USoundAttenuation.
 //   @returns { attenuation_path: string, asset_class: string, settings: object }
 TSharedPtr<FJsonObject> HandleGetSoundAttenuationProperties(const TSharedPtr<FJsonObject>& Params)
@@ -793,19 +1038,22 @@ TSharedPtr<FJsonObject> HandleGetSoundAttenuationProperties(const TSharedPtr<FJs
 // ---------------------------------------------------------------------------- //
 // set_sound_wave_properties  (REAL reflection-authored tunable edit)
 //
-// Loads a USoundWave (concrete) and partial-merges a JSON object of UPROPERTY
-// fields into the Wave object ITSELF via FJsonObjectConverter (absent keys
-// untouched — the reflection target is the object, not a sub-struct member),
-// then re-applies ClampMin/ClampMax meta generically over USoundWave's own
-// properties (the converter ignores clamp meta), and saves. Enum fields map by
-// NAME automatically. The `bLooping` bitfield is authored manually via a
-// dedicated `looping` bool param (bitfields don't round-trip through JSON).
+// Loads a USoundWave (concrete) and writes a JSON object of UPROPERTY fields into
+// the Wave object ITSELF (absent keys untouched -- the reflection target is the
+// object, not a sub-struct member). Every key is staged first through
+// FJsonObjectConverter, into a copy of the property's value clamped to its
+// ClampMin/ClampMax meta (the converter ignores clamp meta), so an unknown key or
+// a value that does not convert fails the call with nothing written. Enum fields
+// map by NAME automatically. Each property whose value changes then goes through
+// PreEditChange / PostEditChangeProperty, as an edit in the details panel does,
+// so USoundWave's reactions run in-session. The `bLooping` bitfield is authored
+// through a dedicated `looping` bool param, never through settings. Saves.
 // ---------------------------------------------------------------------------- //
-// MCP:set_sound_wave_properties - Author USoundWave tunables on an imported sound wave via reflection (partial merge + clamp).
+// MCP:set_sound_wave_properties - Merge USoundWave/USoundBase fields into a SoundWave asset (absent keys kept), set bLooping via looping, clamp to ClampMin/ClampMax and save; set_properties neither clamps nor saves. Each property whose value changes runs PostEditChangeProperty, as a details-panel edit does: compression settings rebuild the audio and MaxDistance follows AttenuationSettings. Keys match property names case-insensitively. A key that names no property (the error lists them), a deprecated or instanced-subobject one, a null value, a value of the wrong kind or that does not convert, bLooping inside settings, or a looping that is not true or false is an error and nothing changes. A failed save makes success false.
 //   @param sound_wave_path - Full content path of the target USoundWave (e.g. /Game/Audio/MySound).
-//   @param settings - Object of USoundWave/USoundBase UPROPERTY fields to merge; absent keys untouched. e.g. CompressionQuality(1..100), SampleRateQuality(Max/High/Medium/Low/Min), SoundGroup(SOUNDGROUP_Default/SOUNDGROUP_Effects/SOUNDGROUP_UI/SOUNDGROUP_Music/SOUNDGROUP_Voice), SoundAssetCompressionType(BinkAudio/ADPCM/PCM/Opus/PlatformSpecific/ProjectDefined), Volume(>=0), Pitch(0.125..4.0), Priority(0..100), VirtualizationMode(Disabled/PlayWhenSilent/Restart/SeekRestart), SoundClassObject(asset path), AttenuationSettings(asset path). Do NOT put `bLooping` here — use the `looping` param.
-//   @param looping - Optional bool; sets the bLooping bitfield directly (when this sound is played directly, not via a cue).
-//   @returns { sound_wave_path: string, asset_class: string, settings: object, applied_keys: [string], applied_looping: bool, looping: bool, saved: bool }
+//   @param settings - Object of USoundWave/USoundBase UPROPERTY fields to merge, keyed by property name (matched case-insensitively); absent keys untouched. e.g. CompressionQuality(1..100), SampleRateQuality(Max/High/Medium/Low/Min), SoundGroup(SOUNDGROUP_Default/SOUNDGROUP_Effects/SOUNDGROUP_UI/SOUNDGROUP_Music/SOUNDGROUP_Voice), SoundAssetCompressionType(BinkAudio/ADPCM/PCM/Opus/PlatformSpecific/ProjectDefined), Volume(>=0), Pitch(0.125..4.0), Priority(0..100), VirtualizationMode(Disabled/PlayWhenSilent/Restart/SeekRestart), SoundClassObject(asset path), AttenuationSettings(asset path). A key that names no property, a deprecated one or one holding instanced subobjects, a null value, a value that does not convert, a settings value that is not an object, or `bLooping` (use the `looping` param) is an error and nothing is changed.
+//   @param looping - Optional bool; sets the bLooping bitfield directly (when this sound is played directly, not via a cue). A value that is not true or false is an error and nothing is changed.
+//   @returns { sound_wave_path: string, asset_class: string, settings: object, applied_keys: [string], applied_looping: bool, looping: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleSetSoundWaveProperties(const TSharedPtr<FJsonObject>& Params)
 {
     FString SoundWavePath;
@@ -814,58 +1062,80 @@ TSharedPtr<FJsonObject> HandleSetSoundWaveProperties(const TSharedPtr<FJsonObjec
     USoundWave* Wave = nullptr;
     if (TSharedPtr<FJsonObject> Error = AudioAsset_Load(SoundWavePath, TEXT("USoundWave"), Wave)) { return Error; }
 
+    // Both params are optional (null counts as absent), but one that holds another JSON type is refused, not skipped.
     const TSharedPtr<FJsonObject>* SettingsJsonPtr = nullptr;
     const bool bHasSettings =
         Params->TryGetObjectField(TEXT("settings"), SettingsJsonPtr) && SettingsJsonPtr && SettingsJsonPtr->IsValid();
-    bool bHasLooping = false;
-    bool bLooping = false;
-    bHasLooping = Params->TryGetBoolField(TEXT("looping"), bLooping);
-
-    if (!bHasSettings && !bHasLooping)
+    if (!bHasSettings && Params->HasField(TEXT("settings")) && !Params->HasTypedField<EJson::Null>(TEXT("settings")))
     {
         return mcp_common::MakeErrorReply(
-            TEXT("Nothing to set: provide a 'settings' object and/or a 'looping' bool"));
+            TEXT("settings must be an object of USoundWave property names and values; nothing was changed."));
+    }
+    const TSharedPtr<FJsonObject> SettingsJson = bHasSettings ? *SettingsJsonPtr : nullptr;
+    bool bLooping = false;
+    const bool bHasLooping = Params->TryGetBoolField(TEXT("looping"), bLooping);
+    if (Params->HasField(TEXT("looping")) && !Params->HasTypedField<EJson::Null>(TEXT("looping"))
+        && !Params->HasTypedField<EJson::Boolean>(TEXT("looping")))
+    {
+        return mcp_common::MakeErrorReply(TEXT("looping must be true or false; nothing was changed."));
+    }
+
+    if ((!SettingsJson.IsValid() || SettingsJson->Values.Num() == 0) && !bHasLooping)
+    {
+        return mcp_common::MakeErrorReply(
+            TEXT("Nothing to set: provide a non-empty 'settings' object and/or a 'looping' bool"));
+    }
+
+    FAudioAssetStagedProperties Staged;
+    if (SettingsJson.IsValid())
+    {
+        // bLooping has its own param; taking it here as well would give the bitfield two sources.
+        if (SettingsJson->HasField(TEXT("bLooping")))
+        {
+            return mcp_common::MakeErrorReply(
+                TEXT("settings.bLooping is set through the looping param, not settings; nothing was changed."));
+        }
+        if (TSharedPtr<FJsonObject> Refused = AudioAsset_StageProperties(*SettingsJson, *Wave, TEXT("settings"), Staged))
+        {
+            return Refused;
+        }
     }
 
     Wave->Modify();
 
-    TArray<TSharedPtr<FJsonValue>> AppliedKeys;
-    if (bHasSettings)
+    // A property whose value changes goes through PreEditChange and PostEditChangeProperty, as an edit in the details
+    // panel does: USoundWave reacts there -- CompressionQuality, SampleRateQuality and LoadingBehavior rebuild the
+    // compressed audio, SoundAssetCompressionType switches the codec, and every change recomputes MaxDistance.
+    for (const TPair<FProperty*, void*>& Value : Staged.Values)
     {
-        const TSharedPtr<FJsonObject>& SettingsJson = *SettingsJsonPtr;
-
-        // The bLooping bitfield does not round-trip through JsonObjectToUStruct; it is
-        // authored exclusively via the dedicated `looping` param. Drop it defensively
-        // so a stray settings key can't half-write the bitfield.
-        SettingsJson->RemoveField(TEXT("bLooping"));
-
-        // Partial merge directly into the USoundWave object: only the keys present in
-        // SettingsJson are written; every other property is left untouched.
-        FString JsonErr;
-        if (!mcp_common::JsonToStruct(
-                SettingsJson,
-                USoundWave::StaticClass(),
-                Wave, JsonErr, 0, 0))
+        if (AudioAsset_HoldsValue(*Value.Key, *Wave, Value.Value))
         {
-            return mcp_common::MakeErrorReply(JsonErr);
+            continue;
         }
+        Wave->PreEditChange(Value.Key);
+        Value.Key->CopyCompleteValue(Value.Key->ContainerPtrToValuePtr<void>(Wave), Value.Value);
+        FPropertyChangedEvent ChangedEvent(Value.Key, EPropertyChangeType::ValueSet);
+        Wave->PostEditChangeProperty(ChangedEvent);
+    }
 
+    // bLooping is a uint8 : 1 bitfield, set directly.
+    if (bHasLooping && (Wave->bLooping != 0) != bLooping)
+    {
+        FProperty* LoopingProperty = USoundWave::StaticClass()->FindPropertyByName(GET_MEMBER_NAME_CHECKED(USoundWave, bLooping));
+        Wave->PreEditChange(LoopingProperty);
+        Wave->bLooping = bLooping ? 1 : 0;
+        FPropertyChangedEvent ChangedEvent(LoopingProperty, EPropertyChangeType::ValueSet);
+        Wave->PostEditChangeProperty(ChangedEvent);
+    }
+
+    TArray<TSharedPtr<FJsonValue>> AppliedKeys;
+    if (SettingsJson.IsValid())
+    {
         for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : SettingsJson->Values)
         {
             AppliedKeys.Add(MakeShared<FJsonValueString>(Pair.Key));
         }
     }
-
-    // bLooping is a uint8 : 1 bitfield — set it directly (idempotent fixed value).
-    if (bHasLooping)
-    {
-        Wave->bLooping = bLooping ? 1 : 0;
-    }
-
-    // JsonObjectToUStruct ignores ClampMin/ClampMax meta, so re-apply it generically:
-    // clamp every numeric property on USoundWave that declares a clamp range
-    // (CompressionQuality 1..100, Volume >=0, Pitch 0.125..4.0, Priority 0..100, ...).
-    mcp_common::ClampNumericByMeta(USoundWave::StaticClass(), Wave);
 
     UE_LOG(LogTemp, Verbose,
         TEXT("set_sound_wave_properties: %s applied %d setting key(s), looping=%s"),
@@ -886,7 +1156,7 @@ TSharedPtr<FJsonObject> HandleSetSoundWaveProperties(const TSharedPtr<FJsonObjec
 // ---------------------------------------------------------------------------- //
 // get_sound_wave_properties  (REAL read)
 // ---------------------------------------------------------------------------- //
-// MCP:get_sound_wave_properties - Read every reflected property of a USoundWave asset, its USoundBase fields included (CompressionQuality, SampleRateQuality, SoundGroup, Volume, Pitch, Priority, SoundClassObject, AttenuationSettings and the rest), as the settings object FJsonObjectConverter exports, so keys start lower-case (compressionQuality); settings also carries bLooping, echoed as looping. Read-only: it loads the asset if needed and changes nothing. A path that does not load as a USoundWave is an error. Write the same fields back with set_sound_wave_properties (bLooping through its looping param); a sound class is read with get_sound_class_properties and a level's audio component with get_audio_component_properties.
+// MCP:get_sound_wave_properties - Read every reflected property of a USoundWave asset, its USoundBase fields included (CompressionQuality, SampleRateQuality, SoundGroup, Volume, Pitch, Priority, SoundClassObject, AttenuationSettings and the rest), as the settings object FJsonObjectConverter exports, so keys start lower-case (compressionQuality); settings also carries bLooping, echoed as looping. Like inspect_object on the asset, but keyed as set_sound_wave_properties accepts it; get_properties reads a few named fields. Read-only: it loads the asset if needed and changes nothing. A path that does not load as a USoundWave is an error. Write the same fields back with set_sound_wave_properties (bLooping through its looping param); a sound class is read with get_sound_class_properties and a level's audio component with get_audio_component_properties.
 //   @param sound_wave_path - Full content path of the target USoundWave, e.g. "/Game/Audio/MySound".
 //   @returns { sound_wave_path: string, asset_class: string, settings: object, looping: bool }
 TSharedPtr<FJsonObject> HandleGetSoundWaveProperties(const TSharedPtr<FJsonObject>& Params)

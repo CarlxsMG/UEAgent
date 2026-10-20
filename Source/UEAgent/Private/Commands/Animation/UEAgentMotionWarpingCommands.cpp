@@ -7,6 +7,7 @@
 #include "GameFramework/Actor.h"
 #include "Components/ActorComponent.h"
 #include "Components/SceneComponent.h"
+#include "ScopedTransaction.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/UnrealType.h"
 
@@ -261,9 +262,9 @@ namespace
 // ---------------------------------------------------------------------------
 // add_motion_warping_component
 // ---------------------------------------------------------------------------
-// MCP:add_motion_warping_component - Attach a UMotionWarpingComponent to an actor in the editor world. Idempotent: if the actor already has one, returns the existing instance with already_existed:true instead of creating a duplicate. The component is NewObject<UMotionWarpingComponent>(Actor, FName("MotionWarping")) followed by RegisterComponent() so it shows up in GetComponents() immediately. The owning world's level is marked dirty so the editor persists the change on save; no explicit SavePackage call (avoids the noise of saving a transient actor out of an editor world).
-//   @param actor_path [string!] - Full editor path (e.g. "/Game/Maps/Test.Test:PersistentLevel.ActorName") or short name of the actor.
-//   @returns { actor_path: string, component_path: string, already_existed: bool }
+// MCP:add_motion_warping_component - Attach a UMotionWarpingComponent named MotionWarping to an editor-world actor given by full object path, internal name or label. add_component_to_actor (component_type MotionWarpingComponent, idempotent=true) does the same for an actor's internal name only; this tool adds the path/label lookup. Idempotent: if the actor already has one, it is returned with already_existed:true and nothing is written. A new one is an instance component (save_level keeps it, and construction-script reruns do not drop it) added in one undo step; the actor's package is marked dirty, not saved. When another object of the actor already holds the name MotionWarping, the new component gets a unique variant, returned in component_name. Add targets with add_motion_warping_target, read them with inspect_motion_warping_component.
+//   @param actor_path [string!] - Full editor path (e.g. "/Game/Maps/Test.Test:PersistentLevel.ActorName"), internal name or label of the actor.
+//   @returns { actor_path: string, component_name: string, component_path: string, already_existed: bool }
 
 // ---------------------------------------------------------------------------
 // add_motion_warping_target
@@ -302,38 +303,51 @@ TSharedPtr<FJsonObject> HandleAddMotionWarpingComponent(
     if (TSharedPtr<FJsonObject> Error = MW_ResolveActor(ActorPath, Actor)) { return Error; }
 
     // Idempotency check: if the actor already has a UMotionWarpingComponent,
-    // return it with already_existed:true (idempotent authoring).
+    // return it with already_existed:true (idempotent authoring); nothing is written.
     if (UMotionWarpingComponent* Existing = MW_FindMotionWarpingComponent(Actor))
     {
         UE_LOG(LogTemp, Verbose, TEXT("[MCP] add_motion_warping_component: actor '%s' already has MotionWarping at '%s'"),
             *Actor->GetName(), *Existing->GetPathName());
 
         TSharedPtr<FJsonObject> Data = MW_StartReply(Actor);
+        Data->SetStringField(TEXT("component_name"), Existing->GetName());
         Data->SetStringField(TEXT("component_path"), Existing->GetPathName());
         Data->SetBoolField(TEXT("already_existed"), true);
         return mcp_common::MakeOkReply(Data);
     }
 
+    // One undo step: Modify() records the actor (and marks its package dirty) before the component joins it.
+    const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "AddMotionWarpingComponent", "Add Motion Warping Component (MCP)"));
+    Actor->Modify();
+
+    // NewObject with a name another object of the actor already holds is fatal when that object has another class
+    // ("Cannot replace existing object of a different class"), and replaces it in place when it is a motion warping
+    // component (a removed one still waiting for GC). Any holder counts, garbage included, so a taken name gets a
+    // unique variant, returned in component_name.
+    FName NewName(TEXT("MotionWarping"));
+    if (StaticFindObjectFast(nullptr, Actor, NewName) != nullptr)
+    {
+        NewName = MakeUniqueObjectName(Actor, UMotionWarpingComponent::StaticClass(), NewName);
+    }
     UMotionWarpingComponent* NewComp = NewObject<UMotionWarpingComponent>(
-        Actor, UMotionWarpingComponent::StaticClass(), FName(TEXT("MotionWarping")));
+        Actor, UMotionWarpingComponent::StaticClass(), NewName, RF_Transactional);
     if (!NewComp)
     {
         return mcp_common::MakeErrorReply(
             FString::Printf(TEXT("Failed to create UMotionWarpingComponent for actor '%s'"), *Actor->GetName()));
     }
 
+    // An instance component, as the editor's Add Component makes one: the level saves it with the actor, and a
+    // construction-script rerun keeps it instead of throwing it away.
+    NewComp->CreationMethod = EComponentCreationMethod::Instance;
+    Actor->AddInstanceComponent(NewComp);
     NewComp->RegisterComponent();
 
-    // Mark the owning level dirty so the editor persists the new component on save.
-    if (ULevel* Level = Actor->GetLevel())
-    {
-        Level->MarkPackageDirty();
-    }
-
-    UE_LOG(LogTemp, Verbose, TEXT("[MCP] add_motion_warping_component: created MotionWarping at '%s' on actor '%s'"),
-        *NewComp->GetPathName(), *Actor->GetName());
+    UE_LOG(LogTemp, Verbose, TEXT("[MCP] add_motion_warping_component: created %s at '%s' on actor '%s'"),
+        *NewComp->GetName(), *NewComp->GetPathName(), *Actor->GetName());
 
     TSharedPtr<FJsonObject> Data = MW_StartReply(Actor);
+    Data->SetStringField(TEXT("component_name"), NewComp->GetName());
     Data->SetStringField(TEXT("component_path"), NewComp->GetPathName());
     Data->SetBoolField(TEXT("already_existed"), false);
     return mcp_common::MakeOkReply(Data);

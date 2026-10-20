@@ -706,7 +706,7 @@ Set the material domain (EMaterialDomain) of a UMaterial asset, then recompile i
 
 *Destructive, idempotent.*
 
-Write one property of an expression node of a UMaterial asset (not an instance), found by its object name node_id. param_name names the property on every node type (R on Constant, DefaultValue or SliderMax on ScalarParameter, Constant on Constant3Vector and Constant4Vector, DefaultValue on VectorParameter...); ParameterName renames a node that has a parameter name. A value that does not parse for the property is refused and nothing is written. No undo, no save: it runs PostEditChange and marks the material dirty (persist with save_asset). value_after is the property read back. Instances: set_material_instance_parameter.
+Write one property of an expression node of a UMaterial asset (not an instance), found by its object name node_id. param_name names the property on every node type (R on Constant, DefaultValue or SliderMax on ScalarParameter, Constant on Constant3Vector and Constant4Vector, DefaultValue on VectorParameter...); ParameterName renames a parameter node through its own SetParameterName. Over set_properties on the node it also runs PostEditChange on the material and accepts "[r,g,b,a]" or "r,g,b" for a linear color. A value that does not parse for the property is refused and nothing is written. No undo, no save: it marks the material dirty (persist with save_asset). value_after is the property read back. Instances: set_material_instance_parameter.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

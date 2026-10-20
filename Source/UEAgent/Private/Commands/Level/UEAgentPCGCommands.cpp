@@ -23,6 +23,8 @@
 #include "Engine/Level.h"                 // ULevel must be complete -- GetCurrentLevel() feeds StaticFindObjectFast's Outer
 #include "UObject/Class.h"
 #include "UObject/UnrealType.h"      // FProperty (set_pcg_component_properties read-back)
+#include "JsonObjectConverter.h"     // FJsonObjectConverter::JsonValueToUProperty (set_pcg_node_properties stages its keys)
+#include "UObject/EnumProperty.h"    // FEnumProperty (the JSON kind a staged key of an enum must hold)
 #include "Commands/Camera/ClassReflectionUtils.h"  // property writes by reflection
 #include "StructUtils/PropertyBag.h" // FInstancedPropertyBag / FPropertyBagPropertyDesc (graph params)
 #include "PCGData.h"                 // FPCGDataCollection / FPCGTaggedData (get_pcg_generated_data)
@@ -363,6 +365,146 @@ namespace
         }
         return nullptr;
     }
+
+    // The values of one properties object staged for a write into an object: each converted into a copy of the current
+    // value of the property its key names. The copies are freed with it.
+    struct FPCGStagedProperties
+    {
+        TArray<TPair<FProperty*, void*>> Values;
+
+        FPCGStagedProperties() = default;
+        FPCGStagedProperties(const FPCGStagedProperties&) = delete;
+        FPCGStagedProperties& operator=(const FPCGStagedProperties&) = delete;
+        ~FPCGStagedProperties()
+        {
+            for (const TPair<FProperty*, void*>& Value : Values)
+            {
+                Value.Key->DestroyAndFreeValue(Value.Value);
+            }
+        }
+    };
+
+    // Value, a value of Property, clamped to Property's ClampMin/ClampMax meta, which FJsonObjectConverter ignores:
+    // what mcp_common::ClampNumericByMeta does to each property of a container.
+    void PCG_ClampToMeta(const FProperty& Property, void* Value)
+    {
+        const FNumericProperty* Numeric = CastField<FNumericProperty>(&Property);
+        const bool bHasMin = Property.HasMetaData(TEXT("ClampMin"));
+        const bool bHasMax = Property.HasMetaData(TEXT("ClampMax"));
+        if (!Numeric || (!bHasMin && !bHasMax))
+        {
+            return;
+        }
+        if (Numeric->IsFloatingPoint())
+        {
+            double Number = Numeric->GetFloatingPointPropertyValue(Value);
+            if (bHasMin) { Number = FMath::Max(Number, FCString::Atod(*Property.GetMetaData(TEXT("ClampMin")))); }
+            if (bHasMax) { Number = FMath::Min(Number, FCString::Atod(*Property.GetMetaData(TEXT("ClampMax")))); }
+            Numeric->SetFloatingPointPropertyValue(Value, Number);
+        }
+        else if (Numeric->IsInteger())
+        {
+            int64 Number = Numeric->GetSignedIntPropertyValue(Value);
+            if (bHasMin) { Number = FMath::Max<int64>(Number, FCString::Atoi64(*Property.GetMetaData(TEXT("ClampMin")))); }
+            if (bHasMax) { Number = FMath::Min<int64>(Number, FCString::Atoi64(*Property.GetMetaData(TEXT("ClampMax")))); }
+            Numeric->SetIntPropertyValue(Value, Number);
+        }
+    }
+
+    // What Value must be for Property when it is not that, else empty. FJsonObjectConverter reads a number or a bool
+    // out of any JSON value without an error -- a string that is not a number becomes 0, any string a bool -- so
+    // those kinds are checked here; the converter refuses a wrong kind for the others itself.
+    FString PCG_ExpectedJsonKind(const FProperty& Property, const FJsonValue& Value)
+    {
+        if (Property.ArrayDim != 1)
+        {
+            return FString();
+        }
+        const FNumericProperty* Numeric = CastField<FNumericProperty>(&Property);
+        if (CastField<FEnumProperty>(&Property) || (Numeric && Numeric->IsEnum()))
+        {
+            return Value.Type == EJson::String || Value.Type == EJson::Number ? FString() : FString(TEXT("an enum name"));
+        }
+        if (Numeric)
+        {
+            const bool bNumber = Value.Type == EJson::Number || (Value.Type == EJson::String && Value.AsString().IsNumeric());
+            return bNumber ? FString() : FString(TEXT("a number"));
+        }
+        if (CastField<FBoolProperty>(&Property))
+        {
+            return Value.Type == EJson::Boolean ? FString() : FString(TEXT("true or false"));
+        }
+        return FString();
+    }
+
+    // Stages every key of Json for a write into Object, before anything is written (Param names the param in the
+    // errors). Null when each key names a property of Object's class -- matched case-insensitively, as
+    // FJsonObjectConverter matches them -- that is neither deprecated nor holds instanced subobjects (the staging
+    // conversion would create those outside Object), holds a value of its kind (PCG_ExpectedJsonKind), and the
+    // value converts; it is then clamped (PCG_ClampToMeta). Else the error reply naming the key, with nothing
+    // changed: merging into Object directly would skip a key that names no property without a word, and stop at
+    // the first value that does not convert with the keys before it already written.
+    TSharedPtr<FJsonObject> PCG_StageProperties(const FJsonObject& Json, UObject& Object, const TCHAR* Param,
+        FPCGStagedProperties& OutStaged)
+    {
+        const UClass* Class = Object.GetClass();
+        auto IsWritable = [](const FProperty& Property)
+        {
+            return !Property.HasAnyPropertyFlags(
+                CPF_Deprecated | CPF_InstancedReference | CPF_ContainsInstancedReference | CPF_PersistentInstance);
+        };
+        for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Json.Values)
+        {
+            FProperty* Property = nullptr;
+            for (TFieldIterator<FProperty> It(Class); It && !Property; ++It)
+            {
+                if (Class->GetAuthoredNameForField(*It).Equals(Pair.Key, ESearchCase::IgnoreCase))
+                {
+                    Property = *It;
+                }
+            }
+            if (!Property || !IsWritable(*Property))
+            {
+                TArray<FString> Names;
+                for (TFieldIterator<FProperty> It(Class); It; ++It)
+                {
+                    if (IsWritable(**It))
+                    {
+                        Names.Add(Class->GetAuthoredNameForField(*It));
+                    }
+                }
+                const FString Problem = Property
+                    ? FString::Printf(TEXT("names %s, which is deprecated or holds instanced subobjects and is not written here"), *Property->GetName())
+                    : FString::Printf(TEXT("names no property of %s"), *Class->GetName());
+                return mcp_common::MakeErrorReply(FString::Printf(
+                    TEXT("%s key '%s' %s; nothing was changed. Writable properties (keys match them case-insensitively): %s"),
+                    Param, *Pair.Key, *Problem, *FString::Join(Names, TEXT(", "))));
+            }
+            if (!Pair.Value.IsValid() || Pair.Value->IsNull())
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(
+                    TEXT("%s.%s is null: give it a value or leave the key out; nothing was changed."), Param, *Pair.Key));
+            }
+            const FString Expected = PCG_ExpectedJsonKind(*Property, *Pair.Value);
+            if (!Expected.IsEmpty())
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(TEXT("%s.%s must be %s for %s (%s); nothing was changed."),
+                    Param, *Pair.Key, *Expected, *Property->GetName(), *Property->GetCPPType()));
+            }
+            void* Value = Property->AllocateAndInitializeValue();
+            OutStaged.Values.Emplace(Property, Value);
+            Property->CopyCompleteValue(Value, Property->ContainerPtrToValuePtr<void>(&Object));
+            FText Reason;
+            if (!FJsonObjectConverter::JsonValueToUProperty(Pair.Value, Property, Value, 0, 0, false, &Reason))
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(
+                    TEXT("%s.%s does not convert to %s (%s): %s; nothing was changed."), Param, *Pair.Key,
+                    *Property->GetName(), *Property->GetCPPType(), *Reason.ToString().Replace(TEXT("\n"), TEXT(" "))));
+            }
+            PCG_ClampToMeta(*Property, Value);
+        }
+        return nullptr;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -597,7 +739,7 @@ TSharedPtr<FJsonObject> HandleGetPCGGraphInfo(const TSharedPtr<FJsonObject>& Par
 // this one does not), so it is read and, when an extent was requested, normalized so the
 // half-extent means what it says.
 // ---------------------------------------------------------------------------
-// MCP:spawn_pcg_volume - Spawns an APCGVolume in the editor world with a REAL cube brush (from ``extent``), optionally assigning a graph. Bounds, origin, scale and brush geometry are RE-READ from the spawned actor, never echoed. Without ``extent`` the volume is spawned brush-less (kept for compatibility) and the response says so explicitly, because a PCG component with null bounds generates 0 instances in total silence.
+// MCP:spawn_pcg_volume - Spawn an APCGVolume in the editor world with a REAL cube brush of half-extent extent and optionally assign a PCG graph, in one undo step. Over spawn_box_volume(volume_class='PCGVolume') it adds the graph (UPCGComponent::SetGraph), a rotation and a name (used only when free); add_pcg_component sets a graph on an existing actor. Bounds, scale and brush are RE-READ, never echoed. Without extent the volume is brush-less (kept for compatibility) and the reply warns: null bounds generate 0 instances in total silence. Not saved (save_level).
 //   @param location [string!] - World location [X, Y, Z] for the volume.
 //   @param extent - Cube HALF-size [x, y, z] in unreal units, each > 0 (same convention as spawn_box_volume / spawn_navmesh_bounds_volume). STRONGLY RECOMMENDED: omitting it leaves the volume with extent (0,0,0) and the PCG component generates 0 instances with no error and no warning.
 //   @param rotation - Optional [pitch, yaw, roll] rotation for the volume (default 0,0,0).
@@ -828,7 +970,7 @@ namespace
     }
 }
 
-// MCP:add_pcg_component - Attach a PCG component (the procedural generation engine) to an actor and optionally point it at a PCG graph -- what turns a plain actor or volume into something that scatters meshes and points by rule. Idempotent: an actor that already has one gets it back. The component generates within the actor's BOUNDS, so on a volume with no brush geometry it produces zero instances with no error at all -- confirm the extent with get_actor_bounds first. Then run generate_pcg_component and inspect with get_pcg_component_info.
+// MCP:add_pcg_component - Attach a PCG component (the procedural generation engine) to an editor-world actor, found by name or label, and optionally point it at a PCG graph -- what turns a plain actor or volume into something that scatters meshes and points by rule. Over add_component_to_actor it assigns the graph via UPCGComponent::SetGraph, which set_properties cannot (the graph lives in a read-only GraphInstance). Idempotent: an actor that already has one (an APCGVolume does) gets it back, graph re-assigned. It generates within the actor's BOUNDS, so a volume with no brush geometry yields zero instances with no error -- check get_actor_bounds first. Then generate_pcg_component and get_pcg_component_info. Not saved.
 //   @param actor_name - Display label or internal name of the target editor-world actor (required)
 //   @param pcg_graph_path - Optional /Game/... path of a UPCGGraph to assign to the component
 //   @returns { actor_name, component_name, already_existed, graph_path, graph_assigned }
@@ -937,7 +1079,7 @@ TSharedPtr<FJsonObject> HandleCleanupPCGComponent(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:set_pcg_component_properties - Sets properties on an actor's UPCGComponent by reflection (Seed, bActivated, bIsComponentPartitioned, GenerationTrigger, ...). Reads the stored values back into the response.
+// MCP:set_pcg_component_properties - Write UPROPERTYs (Seed, bActivated, GenerationTrigger, ...) on the PCG component of an editor-world actor found by label or name, reading each stored value back. Over set_properties: no component path and no edit gate, but no PostEditChange is sent, so the component is not refreshed -- run generate_pcg_component. Nothing is saved.
 //   @param actor_name - Actor holding the UPCGComponent (required)
 //   @param properties - JSON object { PropertyName: value, ... } applied to the component
 //   @returns { actor_name, set:[name], failed:[{name, error}], applied:{name: stored_value_text} }
@@ -1494,7 +1636,7 @@ TSharedPtr<FJsonObject> HandleRemovePCGNode(const TSharedPtr<FJsonObject>& Param
 // Reads every editable property of a node's UPCGSettings via reflection
 // (mcp_common::StructToJson over Settings->GetClass()). Read-only.
 // ---------------------------------------------------------------------------
-// MCP:get_pcg_node_properties - Reads every editable property of a PCG node's settings object via reflection.  The node is resolved by name from get_pcg_graph_info (or the "Input"/"Output" tokens); its UPCGSettings is serialized to JSON. Read-only.
+// MCP:get_pcg_node_properties - Read the reflected properties of one PCG node's settings object (UPCGSettings), serialized to JSON, the node found by its node_name from get_pcg_graph_info or the "Input"/"Output" tokens. Use it instead of get_properties, which would need the settings subobject's path. Read-only; write with set_pcg_node_properties.
 //   @param pcg_graph_path - Asset path of the PCG Graph (e.g. "/Game/PCG/PCG_Example" or fully-qualified "/Game/PCG/PCG_Example.PCG_Example").
 //   @param node_name - The node_name from get_pcg_graph_info of the node to read (the tokens "Input"/"Output" address the implicit endpoints).
 //   @returns { graph_name: string, asset_path: string, node_name: string, settings_class: string, properties: object }
@@ -1534,17 +1676,19 @@ TSharedPtr<FJsonObject> HandleGetPCGNodeProperties(const TSharedPtr<FJsonObject>
 
 // ---------------------------------------------------------------------------
 // set_pcg_node_properties
-// Authors a node's UPCGSettings via reflection (partial merge of only the present
-// fields + ClampMin/ClampMax meta), then UPCGSettings::PostEditChange() to
-// invalidate the cached CRC / regen pins (the no-arg form forwards an empty
+// Authors a node's UPCGSettings via reflection: every key of properties is staged
+// first (converted into a copy of its property's value, clamped to ClampMin/ClampMax
+// meta), so an unknown key or a value that does not convert fails the call with
+// nothing written; then the staged values are written and UPCGSettings::PostEditChange()
+// invalidates the cached CRC / regens pins (the no-arg form forwards an empty
 // FPropertyChangedEvent, which UPCGSettings treats as the deepest change type).
 // Saves the graph after the mutation and reads the persisted state back.
 // ---------------------------------------------------------------------------
-// MCP:set_pcg_node_properties - Authors a PCG node's settings object via reflection (partial merge + clamp).  Only the keys present in ``properties`` are written; absent keys are untouched. After the merge, PostEditChange() invalidates the node's cached CRC and regenerates its pins. The graph is re-saved and the persisted settings are read back. Idempotent: re-applying the same values is a no-op.
+// MCP:set_pcg_node_properties - Write fields of one PCG node's settings object, picked by node_name in a PCG Graph asset, then save the graph and read the settings back. Use it instead of set_properties, which needs the settings object's path: this also clamps numbers to ClampMin/ClampMax and runs PostEditChange, invalidating the node's cached CRC and rebuilding its pins. Only keys in properties are written, in one undo step; keys match property names case-insensitively. An empty object, a key that names no property (the error lists them), a deprecated or instanced one, a null value, or a value of the wrong kind or that does not convert is an error and nothing changes. A call that changes no value still runs PostEditChange and re-saves. "Input"/"Output" address the endpoints. Read: get_pcg_node_properties.
 //   @param pcg_graph_path - Asset path of the PCG Graph (e.g. "/Game/PCG/PCG_Example" or fully-qualified "/Game/PCG/PCG_Example.PCG_Example").
 //   @param node_name - The node_name from get_pcg_graph_info of the node to author (the tokens "Input"/"Output" address the implicit endpoints).
-//   @param properties [object!] - Object of UPCGSettings fields to merge (e.g. for a SurfaceSampler: bApplyDensityToPoints(bool), PointsPerSquaredMeter(float>=0), Looseness(float)); absent keys untouched.
-//   @returns { graph_name: string, asset_path: string, node_name: string, settings_class: string, applied_keys: [string], properties: object, saved: bool, save_error: string }
+//   @param properties [object!] - Object of UPCGSettings fields to merge, keyed by property name (matched case-insensitively) (e.g. for a SurfaceSampler: bApplyDensityToPoints(bool), PointsPerSquaredMeter(float>=0), Looseness(float)); absent keys untouched. An empty object, a key that names no property of the settings class (or a deprecated one, or one holding instanced subobjects), a null value or a value that does not convert is an error and nothing is changed.
+//   @returns { graph_name: string, asset_path: string, node_name: string, settings_class: string, applied_keys: [string], properties: object, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleSetPCGNodeProperties(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1560,6 +1704,10 @@ TSharedPtr<FJsonObject> HandleSetPCGNodeProperties(const TSharedPtr<FJsonObject>
         return mcp_common::MakeErrorReply(TEXT("Missing required 'properties' parameter (object)"));
     }
     const TSharedPtr<FJsonObject>& PropsJson = *PropsPtr;
+    if (PropsJson->Values.Num() == 0)
+    {
+        return mcp_common::MakeErrorReply(TEXT("properties is empty: give at least one property to set; nothing was changed."));
+    }
 
     UPCGGraph* Graph = nullptr;
     UPCGNode* Node = nullptr;
@@ -1569,17 +1717,21 @@ TSharedPtr<FJsonObject> HandleSetPCGNodeProperties(const TSharedPtr<FJsonObject>
         return Error;
     }
 
+    // Every key is staged before the first write: the converter would skip a key that names no field without a
+    // word and stop at the first value that does not convert, with the keys before it already written.
+    FPCGStagedProperties Staged;
+    if (TSharedPtr<FJsonObject> Refused = PCG_StageProperties(*PropsJson, *Settings, TEXT("properties"), Staged))
+    {
+        return Refused;
+    }
+
     FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetPCGNodeProperties", "Set PCG Node Properties"));
     Settings->Modify();
 
-    // Partial merge: only the keys present in PropsJson are written; the rest of the
-    // settings object is left untouched. MergeJsonWithClamp re-applies the
-    // ClampMin/ClampMax UPROPERTY meta the converter ignores.
-    FString MergeError;
-    if (!mcp_common::MergeJsonWithClamp(
-            PropsJson, Settings->GetClass(), Settings, MergeError, 0, 0))
+    // Only the keys present in PropsJson are written; the rest of the settings object is left untouched.
+    for (const TPair<FProperty*, void*>& Value : Staged.Values)
     {
-        return mcp_common::MakeErrorReply(MergeError);
+        Value.Key->CopyCompleteValue(Value.Key->ContainerPtrToValuePtr<void>(Settings), Value.Value);
     }
 
     // Invalidate the node's cached CRC and regenerate its pins. The no-arg

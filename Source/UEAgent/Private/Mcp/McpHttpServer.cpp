@@ -49,6 +49,11 @@ namespace McpHttpServerPrivate
 		TEXT("- A refusal (isError) comes before the call runs: the call is known to crash or freeze the editor, or is unreliable ")
 		TEXT("while Play-in-Editor runs. The message says what to do instead; stop PIE before compiling Blueprints or saving.\n")
 		TEXT("- Look assets and actors up instead of guessing their names, and name assets by their full path (/Game/...).\n")
+		TEXT("- Similar tools: get_properties reads named properties of one object you can path to, inspect_object one you know ")
+		TEXT("nothing about, get_actor_properties_by_class placed actors by class or label, get_component_properties a whole ")
+		TEXT("component. set_properties writes any object in the editor; set_component_property a placed actor's component, also ")
+		TEXT("in a live PIE world. A typed tool (set_light_properties, spawn_sky_atmosphere, add_spline_component...) says in ")
+		TEXT("its description what it does that the generic one does not.\n")
 		TEXT("- For many small edits, use `execute_batch`: one call, one pass on the game thread.\n")
 		TEXT("- After editing a Blueprint graph, compile it and read the compiler's messages.\n")
 		TEXT("- When no tool fits, `execute_python` runs Unreal's Python API in the editor.");

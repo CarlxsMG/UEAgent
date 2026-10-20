@@ -260,10 +260,10 @@ TSharedPtr<FJsonObject> HandleBuildCameraRig(const TSharedPtr<FJsonObject>& Para
         ErrorTexts.Num() > 0 ? *FString::Join(ErrorTexts, TEXT("; ")) : TEXT("see messages in this payload")));
 }
 
-// MCP:add_gameplay_camera_component - Adds a UGameplayCameraComponent to an actor and points it at a UCameraAsset. Idempotent. Note: activation needs a running game/PIE and is out of scope here.
+// MCP:add_gameplay_camera_component - Add a UGameplayCameraComponent to an editor-world actor (name or label) and point it at a UCameraAsset via SetCameraAsset, which also rebuilds its parameter overrides; add_component_to_actor does neither. A new one is an instance component attached to the actor's root (an actor without a root takes it as its root), in one undo step; parent_component and is_root say where it went. Idempotent: an actor that already has one has that first one re-pointed, its attachment kept, and when it already points at the asset nothing is written (changed false). A camera asset that does not load is an error and nothing changes. The level is marked dirty, not saved (save_level). Activation needs a running game or PIE.
 //   @param actor_name - Display label or internal name of the target editor-world actor (required)
 //   @param camera_asset_path - /Game/... path to the UCameraAsset to reference (required)
-//   @returns { actor_name, component_name, already_existed, camera_asset_path, camera_set }
+//   @returns { actor_name, component_name, already_existed, camera_asset_path, camera_set, changed: bool (false when the component already pointed at the asset: nothing written), parent_component: string (what the component is attached to; empty when it is the root or unattached), is_root: bool }
 TSharedPtr<FJsonObject> HandleAddGameplayCameraComponent(const TSharedPtr<FJsonObject>& Params)
 {
     FString ActorName, CamPath;
@@ -279,16 +279,38 @@ TSharedPtr<FJsonObject> HandleAddGameplayCameraComponent(const TSharedPtr<FJsonO
     if (!Cam)
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("UCameraAsset not found: %s"), *CamPath));
 
+    // The actor's first gameplay camera is re-pointed in place (its attachment kept); only an actor without one gets
+    // a new component. One already pointing at the asset is left alone: nothing to write, no undo step, nothing dirtied.
     UGameplayCameraComponent* Comp = Actor->FindComponentByClass<UGameplayCameraComponent>();
     const bool bAE = (Comp != nullptr);
-    if (!Comp)
+    const bool bChanged = !Comp || Comp->CameraReference.GetCameraAsset() != Cam;
+    if (bChanged)
     {
-        Comp = NewObject<UGameplayCameraComponent>(Actor, UGameplayCameraComponent::StaticClass(), NAME_None, RF_Transactional);
-        Actor->AddInstanceComponent(Comp);
-        Comp->RegisterComponent();
+        // One undo step for the whole call: Modify() records each object before it changes.
+        const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "AddGameplayCameraComponent", "Add Gameplay Camera Component (MCP)"));
         Actor->Modify();
+        if (!Comp)
+        {
+            Comp = NewObject<UGameplayCameraComponent>(Actor, UGameplayCameraComponent::StaticClass(), NAME_None, RF_Transactional);
+            // An instance component before it registers, as the editor's Add Component makes one: OnRegister hands
+            // CreationMethod on to the editor sprite it creates.
+            Comp->CreationMethod = EComponentCreationMethod::Instance;
+            // Attached to the root, so it follows the actor; an actor without a root takes it as its root, the way
+            // the editor roots the first scene component added to a bare actor.
+            if (USceneComponent* Root = Actor->GetRootComponent())
+            {
+                Comp->SetupAttachment(Root);
+            }
+            else
+            {
+                Actor->SetRootComponent(Comp);
+            }
+            Actor->AddInstanceComponent(Comp);
+            Comp->RegisterComponent();
+        }
+        Comp->Modify();
+        Comp->CameraReference.SetCameraAsset(Cam);
     }
-    Comp->CameraReference.SetCameraAsset(Cam);
     const bool bCamSet = (Comp->CameraReference.GetCameraAsset() == Cam);
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
@@ -297,6 +319,9 @@ TSharedPtr<FJsonObject> HandleAddGameplayCameraComponent(const TSharedPtr<FJsonO
     Data->SetBoolField(TEXT("already_existed"), bAE);
     Data->SetStringField(TEXT("camera_asset_path"), Cam->GetPathName());
     Data->SetBoolField(TEXT("camera_set"), bCamSet);
+    Data->SetBoolField(TEXT("changed"), bChanged);
+    Data->SetStringField(TEXT("parent_component"), Comp->GetAttachParent() ? Comp->GetAttachParent()->GetName() : FString());
+    Data->SetBoolField(TEXT("is_root"), Actor->GetRootComponent() == Comp);
     return mcp_common::MakeOkReply(Data);
 }
 
@@ -2335,7 +2360,7 @@ TSharedPtr<FJsonObject> HandleAddSpringArm(const TSharedPtr<FJsonObject>& Params
     return mcp_common::MakeOkReply(Response);
 }
 
-// MCP:add_camera_component - Add a UCameraComponent to an actor placed in the editor world, found by name or label, optionally attaching it to a SpringArm (or any other USceneComponent) on the same actor; if the actor already has a camera component, that first one is configured instead, whatever its name, overwriting only the fields you pass. One undo step; the level is marked dirty, not saved. post_process_settings takes FPostProcessSettings property names, and each value it sets also turns on its bOverride_ flag so that it takes effect. An invalid projection_mode or a rejected post_process_settings (a key that names no property included) is an error and nothing is created or written.
+// MCP:add_camera_component - Add a UCameraComponent to an actor placed in the editor world, found by name or label, attached to its root or to parent_component (e.g. a boom from add_spring_arm), and set FOV, projection, aspect, transform, rotation flags and post-process in one undo step. Pick it over add_component_to_actor for a non-root parent or for post_process_settings: each value it sets also turns on its bOverride_ flag, which a plain property write does not, so it takes effect; for a Blueprint's camera use add_component_to_blueprint. If the actor already has a camera component, that first one is configured instead, whatever its name, overwriting only the fields you pass. The level is marked dirty, not saved. An invalid projection_mode or a post_process_settings key that names no property is an error and nothing is created or written.
 //   @param actor_name - Name or label of the target actor.
 //   @param component_name - Optional name for a new component (defaults to "Camera"); a name another object of the actor already has gets a unique variant, returned in component_name. Ignored when the actor already has a camera component, which is configured whatever its name.
 //   @param parent_component - Optional name of a USceneComponent on the same actor to attach to (e.g. "SpringArm"). Default = actor root component.

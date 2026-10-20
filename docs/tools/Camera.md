@@ -8,7 +8,7 @@
 
 *Destructive.*
 
-Add a UCameraComponent to an actor placed in the editor world, found by name or label, optionally attaching it to a SpringArm (or any other USceneComponent) on the same actor; if the actor already has a camera component, that first one is configured instead, whatever its name, overwriting only the fields you pass. One undo step; the level is marked dirty, not saved. post_process_settings takes FPostProcessSettings property names, and each value it sets also turns on its bOverride_ flag so that it takes effect. An invalid projection_mode or a rejected post_process_settings (a key that names no property included) is an error and nothing is created or written.
+Add a UCameraComponent to an actor placed in the editor world, found by name or label, attached to its root or to parent_component (e.g. a boom from add_spring_arm), and set FOV, projection, aspect, transform, rotation flags and post-process in one undo step. Pick it over add_component_to_actor for a non-root parent or for post_process_settings: each value it sets also turns on its bOverride_ flag, which a plain property write does not, so it takes effect; for a Blueprint's camera use add_component_to_blueprint. If the actor already has a camera component, that first one is configured instead, whatever its name, overwriting only the fields you pass. The level is marked dirty, not saved. An invalid projection_mode or a post_process_settings key that names no property is an error and nothing is created or written.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -47,14 +47,14 @@ Populates the Children of a composite rig node (the rig RootNode must be a UArra
 
 *Additive, idempotent.*
 
-Adds a UGameplayCameraComponent to an actor and points it at a UCameraAsset. Idempotent. Note: activation needs a running game/PIE and is out of scope here.
+Add a UGameplayCameraComponent to an editor-world actor (name or label) and point it at a UCameraAsset via SetCameraAsset, which also rebuilds its parameter overrides; add_component_to_actor does neither. A new one is an instance component attached to the actor's root (an actor without a root takes it as its root), in one undo step; parent_component and is_root say where it went. Idempotent: an actor that already has one has that first one re-pointed, its attachment kept, and when it already points at the asset nothing is written (changed false). A camera asset that does not load is an error and nothing changes. The level is marked dirty, not saved (save_level). Activation needs a running game or PIE.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Display label or internal name of the target editor-world actor (required) |
 | `camera_asset_path` | string | yes | /Game/... path to the UCameraAsset to reference (required) |
 
-**Returns:** `{ actor_name, component_name, already_existed, camera_asset_path, camera_set }`
+**Returns:** `{ actor_name, component_name, already_existed, camera_asset_path, camera_set, changed: bool (false when the component already pointed at the asset: nothing written), parent_component: string (what the component is attached to; empty when it is the root or unattached), is_root: bool }`
 
 ## `add_spring_arm`
 

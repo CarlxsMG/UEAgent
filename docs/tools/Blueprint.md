@@ -115,7 +115,7 @@ Bind a multicast delegate OF ONE OF THIS BLUEPRINT'S OWN COMPONENTS (OnComponent
 
 *Additive.*
 
-Add a component to a Blueprint's SCS (engine class or a Blueprint AC_* class) with an optional relative transform and parent, then compile. TRAP 1: on a CHILD Blueprint whose scene root is INHERITED, a SCENE component can end up written into the PARENT's SCS (source:"inherited", owner_class = the parent) -- which silently edits a vendor/library asset; non-scene ActorComponents land correctly on the child. TRAP 2: a scene component of a BLUEPRINT class, or one given a location, can report success without persisting and then materialize LATER as a duplicate. Both have the same oracle: get_blueprint_components right after, checking owner_class and source of the new node -- never the return value.
+Add a component of any class (engine class or a Blueprint AC_* class) to a Blueprint's SCS, with an optional relative transform and parent, then compile. Pick it to change the Blueprint so every instance gets the component; add_component_to_actor adds one to a single placed actor only, and attach_blueprint_component re-parents a component that already exists. TRAP 1: on a CHILD Blueprint whose scene root is INHERITED, a SCENE component can end up written into the PARENT's SCS (source:"inherited", owner_class = the parent) -- which silently edits a vendor/library asset; non-scene ActorComponents land correctly on the child. TRAP 2: a scene component of a BLUEPRINT class, or one given a location, can report success without persisting and then materialize LATER as a duplicate. Both have the same oracle: get_blueprint_components right after, checking owner_class and source of the new node -- never the return value.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -590,7 +590,7 @@ Resolve a Blueprint component's TEMPLATE archetype and return its object path, s
 
 *Read-only.*
 
-Read the EFFECTIVE default of a property on a Blueprint component TEMPLATE, resolving components INHERITED from a parent/grandparent Blueprint. Read-only twin of set_blueprint_component_properties: it NEVER mints an ICH override. Resolution order: own SCS template -> existing child InheritableComponentHandler override -> ancestor's declaring SCS template -> native CDO subobject. Omit property_name to dump ALL properties of the resolved template.
+Read the EFFECTIVE default of a property (or, without property_name, ALL properties) on a Blueprint component TEMPLATE as typed JSON, resolving components INHERITED from a parent/grandparent Blueprint. Use it instead of get_component_properties with blueprint_name, which sees only own SCS nodes and native subobjects, not inherited SCS components or their ICH overrides. Order: own SCS template -> nearest existing ICH override -> ancestor's declaring SCS template -> native CDO subobject; source says which. NEVER mints an ICH override. group_by_field flags duplicate keys in an array of structs. Write: set_blueprint_component_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1053,7 +1053,7 @@ Set collision on a Blueprint component TEMPLATE (own SCS or inherited via ICH), 
 
 *Destructive, idempotent.*
 
-Set the DEFAULT of one or N properties on Blueprint component TEMPLATES -- own SCS components, components INHERITED from an ancestor Blueprint (routed through this class' InheritableComponentHandler) and native inherited subobjects -- with a SINGLE compile and a SINGLE save, then verify each value against the POST-COMPILE template (what a fresh instance actually reads). One write takes component_name + property_name + property_value; several go in overrides[]. Built for post-reparent re-authoring too, where one call per override means N compiles and N chances for an ICH record not to survive. THREE TRAPS with the same shape (a green return over a different reality): (1) it can drop an entire OTHER component from the Blueprint IN MEMORY while disk and git stay clean -- count get_blueprint_components before and after, and reload_asset_package(on_dirty="discard") is the cure; (2) on an OBJECT-REFERENCE property a write can land None and still report override_persisted:true, wiping the inherited default -- check with get_blueprint_component_overrides; (3) actors ALREADY PLACED in a level keep their serialized value, so only fresh instances change. Collision belongs to set_blueprint_component_collision; read the effective value with get_blueprint_component_property, which never mints an override.
+Set the DEFAULT of one or several properties on Blueprint component TEMPLATES -- own SCS components, ones INHERITED from a parent Blueprint (written as an InheritableComponentHandler override) and native subobjects -- with ONE compile and ONE save, then verify each value on the post-compile template. Use it for component templates: set_properties neither creates an inherited override nor compiles or saves; set_component_property edits placed actors. One write: component_name + property_name + property_value; several: overrides[]. TRAPS behind a green reply: (1) it can drop another component IN MEMORY -- count get_blueprint_components before and after, cure with reload_asset_package(on_dirty="discard"); (2) an object-reference write can land None and still report override_persisted:true -- check get_blueprint_component_overrides; (3) actors already placed keep their serialized value. Collision: set_blueprint_component_collision; override-free read: get_blueprint_component_property.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1255,22 +1255,22 @@ Set the ELifetimeCondition (COND_OwnerOnly, COND_SkipOwner, COND_InitialOnly...)
 
 *Destructive, idempotent.*
 
-Assign a static mesh asset and/or a slot-0 material to a mesh component TEMPLATE of a Blueprint (an OWN SCS node, not a placed actor), in one call. Does NOT compile and does NOT save. Use apply_material_to_blueprint when only a material is changing or the slot is not 0, and get_blueprint_material_info to read the resulting slots back.
+Assign a static mesh asset and/or a slot-0 material to a mesh component TEMPLATE of a Blueprint (an OWN SCS node, not a placed actor) through the component's SetStaticMesh/SetMaterial. Does NOT compile and does NOT save; the reply reads the template back (static_mesh, material and a *_set flag for each). A path that does not load as a mesh or material, or a call with neither, fails with nothing changed. Use apply_material_to_blueprint when only a material is changing or the slot is not 0, and set_blueprint_component_properties for any other template property or an inherited component.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `blueprint_name` | string | yes | Name of the blueprint |
 | `component_name` | string | yes | Name of an OWN SCS mesh component |
-| `static_mesh` | string | no | Optional asset path of the UStaticMesh to assign |
-| `material` | string | no | Optional asset path of the UMaterialInterface for slot 0 |
+| `static_mesh` | string | no | Optional asset path of the UStaticMesh to assign; a path that does not load as a StaticMesh fails the call and nothing is changed |
+| `material` | string | no | Optional asset path of the UMaterialInterface for slot 0; a path that does not load as a material fails the call and nothing is changed. At least one of static_mesh and material is required. |
 
-**Returns:** `{ component: string } -- name only, no verification: read the result with get_blueprint_material_info / get_blueprint_component_property.`
+**Returns:** `{ component: string, static_mesh: string, material: string, static_mesh_set: bool, material_set: bool } -- read back from the template: static_mesh is the mesh it holds and material its slot-0 material (the override, else the mesh's own), each an object path or "None"; <field>_set is true when that field was passed and the template now holds it. Nothing is compiled or saved.`
 
 ## `spawn_blueprint_actor`
 
 *Additive.*
 
-Spawn an instance of a Blueprint class as an actor and report WHICH world took it and whether the actor has AUTHORITY. The default (world absent or 'editor') places it in the EDITOR level, not in play. For anything that must exist for every player during PIE use world='server'; world='pie' is ambiguous and can land on the CLIENT, where the actor has no authority, no AI controller and no server-side existence while looking identical in the payload. The actor is NOT saved into the map: save_level afterwards for an editor-world spawn.
+Spawn an instance of a Blueprint class as an actor and report WHICH world took it and whether the actor has AUTHORITY. Pick it for any Blueprint class; spawn_actor places the built-in engine types (StaticMeshActor, lights, CameraActor, Character), and the typed spawn_* tools place an engine class with its own fields. The default (world absent or 'editor') places it in the EDITOR level, not in play. For anything that must exist for every player during PIE use world='server'; world='pie' is ambiguous and can land on the CLIENT, where the actor has no authority, no AI controller and no server-side existence while looking identical in the payload. The actor is NOT saved into the map: save_level afterwards for an editor-world spawn.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

@@ -66,7 +66,7 @@ namespace UEAgentEnvironmentImpl
     }
 }
 
-// MCP:spawn_sky_atmosphere - Spawn a new SkyAtmosphere actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one; nothing is saved. Returns actor_name (the label), actor_internal_name, actor_class and has_component. Tune it with set_sky_atmosphere_properties.
+// MCP:spawn_sky_atmosphere - Spawn a new SkyAtmosphere actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one, so each call adds another; nothing is saved (save_level). spawn_actor has no atmosphere type. Returns actor_name (the label), actor_internal_name, actor_class and has_component. Tune it with set_sky_atmosphere_properties; the rest of a sky: spawn_sky_light, spawn_volumetric_cloud, spawn_exponential_height_fog.
 //   @param location - [X, Y, Z] world location in cm; defaults to the origin. Any other value (an object, another length) is an error and nothing is spawned.
 //   @returns { actor_name: string, actor_internal_name: string, actor_class: string, has_component: bool, spawned: bool }
 
@@ -90,7 +90,7 @@ TSharedPtr<FJsonObject> HandleSpawnSkyAtmosphere(const TSharedPtr<FJsonObject>& 
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:spawn_volumetric_cloud - Spawn a new VolumetricCloud actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one; nothing is saved. Returns actor_name (the label), actor_internal_name, actor_class and has_component. Tune it with set_volumetric_cloud_properties.
+// MCP:spawn_volumetric_cloud - Spawn a new VolumetricCloud actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one, so each call adds another; nothing is saved (save_level). spawn_actor has no cloud type. Returns actor_name (the label), actor_internal_name, actor_class and has_component. Tune it with set_volumetric_cloud_properties; the rest of a sky: spawn_sky_atmosphere, spawn_sky_light, spawn_exponential_height_fog.
 //   @param location - [X, Y, Z] world location in cm; defaults to the origin. Any other value (an object, another length) is an error and nothing is spawned.
 //   @returns { actor_name: string, actor_internal_name: string, actor_class: string, has_component: bool, spawned: bool }
 
@@ -115,7 +115,7 @@ TSharedPtr<FJsonObject> HandleSpawnVolumetricCloud(const TSharedPtr<FJsonObject>
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:spawn_exponential_height_fog - Spawn a new ExponentialHeightFog actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one, so each call adds another fog actor (not idempotent); nothing is saved (save_level). fog_density, when given, is written to its UExponentialHeightFogComponent with SetFogDensity and density_set turns true; either way the reply reads fog_density back from the component, so without the param it shows the class default. No editor world, or a failed spawn, is an error. actor_name is the label and actor_internal_name the object name. Tune or inspect an existing fog with set_exponential_height_fog_properties and get_exponential_height_fog_properties; other atmosphere actors: spawn_sky_atmosphere, spawn_volumetric_cloud or spawn_sky_light.
+// MCP:spawn_exponential_height_fog - Spawn a new ExponentialHeightFog actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one, so each call adds another fog actor (not idempotent); nothing is saved (save_level). spawn_actor has no fog type, and this one also seeds fog_density: when given, it is written to its UExponentialHeightFogComponent with SetFogDensity and density_set turns true; either way the reply reads fog_density back from the component, so without the param it shows the class default. No editor world, or a failed spawn, is an error. actor_name is the label and actor_internal_name the object name. Tune or inspect an existing fog with set_exponential_height_fog_properties and get_exponential_height_fog_properties; other atmosphere actors: spawn_sky_atmosphere, spawn_volumetric_cloud or spawn_sky_light.
 //   @param location - Optional [X, Y, Z] world location in cm (defaults to origin); any other value is an error and nothing is spawned
 //   @param fog_density - Optional fog density multiplier; if supplied, applied to the component and read back
 //   @returns { actor_name: string, actor_internal_name: string, actor_class: string, density_set: bool, fog_density: number, spawned: bool }
@@ -156,7 +156,7 @@ TSharedPtr<FJsonObject> HandleSpawnExponentialHeightFog(const TSharedPtr<FJsonOb
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:spawn_sky_light - Spawn a new SkyLight actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one; nothing is saved. intensity, when given, is set on its USkyLightComponent, and recapture=true calls RecaptureSky so the light refreshes its captured sky lighting now. The reply reads intensity back from the component and names the actor (actor_name is the label). Tune an existing sky light with set_sky_light_properties; spawn_sky_atmosphere adds the atmosphere.
+// MCP:spawn_sky_light - Spawn a new SkyLight actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one; nothing is saved. intensity, when given, is set on its USkyLightComponent, and recapture=true calls RecaptureSky so the light refreshes its captured sky lighting now. spawn_actor(type='SkyLight') also spawns one and adds color, a name and a PIE world; pick this one for the recapture. The reply reads intensity back from the component and names the actor (actor_name is the label). Tune an existing sky light with set_sky_light_properties; spawn_sky_atmosphere adds the atmosphere.
 //   @param location - Optional [X, Y, Z] world location (defaults to origin)
 //   @param intensity - Optional SkyLight intensity multiplier; if supplied, applied to the component
 //   @param recapture - If true, call RecaptureSky on the component (optional, default false)
@@ -207,7 +207,7 @@ TSharedPtr<FJsonObject> HandleSpawnSkyLight(const TSharedPtr<FJsonObject>& Param
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:spawn_post_process_volume - Spawn a new PostProcessVolume actor in the editor world at location as one undoable transaction, unbound (affecting the whole world) by default; nothing is saved. Returns actor_name (the label), actor_internal_name, unbound and enabled. Configure it with set_post_process_setting or set_post_process_color_grading.
+// MCP:spawn_post_process_volume - Spawn a new PostProcessVolume actor in the editor world at location in one undo step, unbound (affecting the whole world) by default; not saved (save_level). It builds NO brush, so unbound=false covers no space: for a bounded volume use spawn_box_volume(volume_class='PostProcessVolume'). spawn_actor has no post-process type. Returns actor_name (the label), actor_internal_name, unbound and enabled. Configure it with set_post_process_setting or set_post_process_color_grading.
 //   @param location - [X, Y, Z] world location in cm; defaults to the origin. Any other value (an object, another length) is an error and nothing is spawned.
 //   @param unbound - true (default) makes the volume affect the whole world; false limits it to its brush, which this spawn leaves without geometry, so it then covers no space.
 //   @returns { actor_name: string, actor_internal_name: string, actor_class: string, unbound: bool, enabled: bool, spawned: bool }
@@ -568,9 +568,9 @@ TSharedPtr<FJsonObject> HandleGetPostProcessSettings(const TSharedPtr<FJsonObjec
 // Regenerate: python Tools/integrate_property_handlers.py
 
 // Each set handler applies the supplied params through the component's ENGINE_API setters, which update
-// its render state. All but the fog's change nothing on a Static component (AreDynamicDataChangesAllowed());
-// the components default to Movable (SkyLight: Stationary), so the setters apply headless too. The readers
-// read back the public fields the setters write.
+// its render state. All but the fog's change nothing on a Static component (AreDynamicDataChangesAllowed()),
+// so those set handlers refuse one before writing; the components default to Movable (SkyLight: Stationary).
+// Every param is checked before the first write. The readers read back the public fields the setters write.
 namespace
 {
     // The component GetComponent returns for the TActor the required actor_name param names in the editor
@@ -612,32 +612,153 @@ namespace
         return Component;
     }
 
-    // A color param, [R, G, B] or [R, G, B, A] with A defaulting to 1; false when it has fewer than three entries.
-    bool PropertyHandlers_ParseLinearColor(const TArray<TSharedPtr<FJsonValue>>* Values, FLinearColor& OutColor)
+    // How many of Supplied are true: the params a set call supplies.
+    int32 PropertyHandlers_CountSupplied(std::initializer_list<bool> Supplied)
     {
-        FVector4 Rgba;
-        if (!ParseColorVec4(Values, 1.0, Rgba))
+        int32 Count = 0;
+        for (const bool bSupplied : Supplied)
         {
-            return false;
+            Count += bSupplied ? 1 : 0;
         }
-        OutColor = FLinearColor(Rgba.X, Rgba.Y, Rgba.Z, Rgba.W);
-        return true;
+        return Count;
     }
 
-    // An [R, G, B] param of 0-255 bytes as an opaque FColor, each channel clamped; false when it has fewer than
-    // three entries.
-    bool PropertyHandlers_ParseColorBytes(const TArray<TSharedPtr<FJsonValue>>* Values, FColor& OutColor)
+    // What Value holds, for the error of a param reader that expected something else.
+    FString PropertyHandlers_DescribeJson(const TSharedPtr<FJsonValue>& Value)
     {
-        if (!Values || Values->Num() < 3)
+        if (!Value.IsValid())
         {
-            return false;
+            return TEXT("null");
         }
-        auto Channel = [Values](int32 Index)
+        switch (Value->Type)
         {
-            return static_cast<uint8>(FMath::Clamp(static_cast<int32>((*Values)[Index]->AsNumber()), 0, 255));
-        };
-        OutColor = FColor(Channel(0), Channel(1), Channel(2), 255);
-        return true;
+        case EJson::String:  return FString::Printf(TEXT("the string '%s'"), *Value->AsString());
+        case EJson::Number:  return FString::Printf(TEXT("the number %s"), *FString::SanitizeFloat(Value->AsNumber()));
+        case EJson::Boolean: return Value->AsBool() ? TEXT("true") : TEXT("false");
+        case EJson::Array:   return FString::Printf(TEXT("an array of %d element(s)"), Value->AsArray().Num());
+        case EJson::Object:  return TEXT("an object");
+        default:             return TEXT("null");
+        }
+    }
+
+    // The optional number param Key in Out, which stays unset when Key is absent or null. An error reply naming Key,
+    // with nothing changed, when it holds anything but a finite JSON number within the float range.
+    TSharedPtr<FJsonObject> PropertyHandlers_ReadFloat(
+        const TSharedPtr<FJsonObject>& Params, const TCHAR* Key, TOptional<float>& Out)
+    {
+        const TSharedPtr<FJsonValue> Value = Params->TryGetField(Key);
+        if (!Value.IsValid() || Value->IsNull())
+        {
+            return nullptr;
+        }
+        const double Number = Value->Type == EJson::Number ? Value->AsNumber() : 0.0;
+        if (Value->Type != EJson::Number || !FMath::IsFinite(Number)
+            || FMath::Abs(Number) > static_cast<double>(TNumericLimits<float>::Max()))
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("%s must be a finite number within the float range (got %s). Nothing was changed."),
+                Key, *PropertyHandlers_DescribeJson(Value)));
+        }
+        Out = static_cast<float>(Number);
+        return nullptr;
+    }
+
+    // The optional bool param Key in Out, which stays unset when Key is absent or null. An error reply naming Key,
+    // with nothing changed, when it holds anything but a JSON true or false.
+    TSharedPtr<FJsonObject> PropertyHandlers_ReadBool(
+        const TSharedPtr<FJsonObject>& Params, const TCHAR* Key, TOptional<bool>& Out)
+    {
+        const TSharedPtr<FJsonValue> Value = Params->TryGetField(Key);
+        if (!Value.IsValid() || Value->IsNull())
+        {
+            return nullptr;
+        }
+        if (Value->Type != EJson::Boolean)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("%s must be true or false (got %s). Nothing was changed."), Key, *PropertyHandlers_DescribeJson(Value)));
+        }
+        Out = Value->AsBool();
+        return nullptr;
+    }
+
+    // The optional color param Key, [R, G, B] or [R, G, B, A] with A defaulting to 1, in Out, which stays unset when
+    // Key is absent or null. The error reply of mcp_common::ReadJsonLinearColor, naming Key, with nothing changed,
+    // when it is not an array of 3 or 4 finite numbers.
+    TSharedPtr<FJsonObject> PropertyHandlers_ReadLinearColor(
+        const TSharedPtr<FJsonObject>& Params, const TCHAR* Key, TOptional<FLinearColor>& Out)
+    {
+        const TSharedPtr<FJsonValue> Value = Params->TryGetField(Key);
+        if (!Value.IsValid() || Value->IsNull())
+        {
+            return nullptr;
+        }
+        FLinearColor Color;
+        if (TSharedPtr<FJsonObject> Malformed = mcp_common::ReadJsonLinearColor(Params, Key, FLinearColor(0.0f, 0.0f, 0.0f, 1.0f), Color))
+        {
+            return Malformed;
+        }
+        Out = Color;
+        return nullptr;
+    }
+
+    // The optional color param Key of 0-255 bytes, [R, G, B] or [R, G, B, A] with A defaulting to 255, in Out, which
+    // stays unset when Key is absent or null. An error reply naming Key, with nothing changed, when it is not an array
+    // of 3 or 4 whole numbers from 0 to 255: a fraction is most likely a linear 0-1 color, which would turn black.
+    TSharedPtr<FJsonObject> PropertyHandlers_ReadColorBytes(
+        const TSharedPtr<FJsonObject>& Params, const TCHAR* Key, TOptional<FColor>& Out)
+    {
+        const TSharedPtr<FJsonValue> Value = Params->TryGetField(Key);
+        if (!Value.IsValid() || Value->IsNull())
+        {
+            return nullptr;
+        }
+        FString Problem;
+        const TArray<TSharedPtr<FJsonValue>>* Items = nullptr;
+        if (!Value->TryGetArray(Items) || !Items || Items->Num() < 3 || Items->Num() > 4)
+        {
+            Problem = TEXT("got ") + PropertyHandlers_DescribeJson(Value);
+        }
+        uint8 Channels[4] = { 0, 0, 0, 255 };
+        for (int32 Index = 0; Problem.IsEmpty() && Index < Items->Num(); ++Index)
+        {
+            const TSharedPtr<FJsonValue>& Item = (*Items)[Index];
+            const double Number = Item.IsValid() && Item->Type == EJson::Number ? Item->AsNumber() : -1.0;
+            if (Number < 0.0 || Number > 255.0 || Number != FMath::FloorToDouble(Number))
+            {
+                Problem = FString::Printf(TEXT("element %d is %s"), Index, *PropertyHandlers_DescribeJson(Item));
+            }
+            else
+            {
+                Channels[Index] = static_cast<uint8>(Number);
+            }
+        }
+        if (!Problem.IsEmpty())
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("%s must be an array of 3 or 4 whole numbers from 0 to 255, [R, G, B] or [R, G, B, A] (%s). Nothing was changed."),
+                Key, *Problem));
+        }
+        Out = FColor(Channels[0], Channels[1], Channels[2], Channels[3]);
+        return nullptr;
+    }
+
+    // The refusal of a set call on Component when it is registered with Static mobility, and null for any other: the
+    // engine setters change nothing on such a component (USceneComponent::AreDynamicDataChangesAllowed, protected,
+    // outside a construction script), so a write would count fields that never reach it. Kind and ActorName name the
+    // actor in the error.
+    TSharedPtr<FJsonObject> PropertyHandlers_RefuseStaticComponent(
+        const USceneComponent& Component, const TCHAR* Kind, const FString& ActorName)
+    {
+        if (!Component.IsRegistered() || Component.Mobility != EComponentMobility::Static)
+        {
+            return nullptr;
+        }
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("%s '%s' has Static mobility, and the engine's setters do not change a registered static component; ")
+            TEXT("nothing was changed. Make its component Stationary or Movable first (USceneComponent::SetMobility, ")
+            TEXT("e.g. call_function with component_class)."),
+            Kind, *ActorName));
     }
 }
 
@@ -666,14 +787,14 @@ namespace
     }
 }
 
-// MCP:set_sky_atmosphere_properties - Set the atmosphere properties of a SkyAtmosphere actor's USkyAtmosphereComponent. Only the supplied fields change (applied_count counts them) and the reply reads every property back. Colors are [R,G,B] or [R,G,B,A].
+// MCP:set_sky_atmosphere_properties - Set atmosphere fields (Rayleigh/Mie scattering, anisotropy, ground albedo, radius, height, multi-scattering, aerial perspective, height fog) of a SkyAtmosphere actor found by label or name, through the component's setters, which refresh its render state; set_properties writes any other field. Only supplied fields change, in one undo step; all are read back. Colors are linear [R,G,B(,A)], ground_albedo [R,G,B(,A)] whole 0-255 bytes. A malformed field, or a component of Static mobility (its setters change nothing; make it Movable first), is an error and nothing changes. Not saved.
 //   @param actor_name - Label/name of the target SkyAtmosphere actor.
 //   @param rayleigh_scattering [array] - Optional [R,G,B(,A)] Rayleigh scattering color.
 //   @param rayleigh_scattering_scale [number] - Optional Rayleigh scattering scale.
 //   @param mie_scattering [array] - Optional [R,G,B(,A)] Mie scattering color.
 //   @param mie_scattering_scale [number] - Optional Mie scattering scale.
 //   @param mie_anisotropy [number] - Optional Mie anisotropy (0..1).
-//   @param ground_albedo [array] - Optional [R,G,B] ground albedo as 0-255 bytes (FColor).
+//   @param ground_albedo [array] - Optional [R,G,B] or [R,G,B,A] ground albedo, each a whole number from 0 to 255 (FColor; A defaults to 255).
 //   @param bottom_radius [number] - Optional planet bottom radius (km).
 //   @param atmosphere_height [number] - Optional atmosphere height (km).
 //   @param multi_scattering_factor [number] - Optional multi-scattering factor (0..2).
@@ -691,75 +812,89 @@ TSharedPtr<FJsonObject> HandleSetSkyAtmosphereProperties(const TSharedPtr<FJsonO
         return Error;
     }
 
-    const FScopedTransaction Transaction(LOCTEXT("SetSkyAtmosphereProperties", "MCP: Set Sky Atmosphere Properties"));
-    Component->Modify();
+    // Every supplied param is read and checked before the first write, so a malformed one changes nothing.
+    TOptional<FLinearColor> RayleighScattering;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadLinearColor(Params, TEXT("rayleigh_scattering"), RayleighScattering)) { return Malformed; }
+    TOptional<float> RayleighScatteringScale;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("rayleigh_scattering_scale"), RayleighScatteringScale)) { return Malformed; }
+    TOptional<FLinearColor> MieScattering;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadLinearColor(Params, TEXT("mie_scattering"), MieScattering)) { return Malformed; }
+    TOptional<float> MieScatteringScale;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("mie_scattering_scale"), MieScatteringScale)) { return Malformed; }
+    TOptional<float> MieAnisotropy;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("mie_anisotropy"), MieAnisotropy)) { return Malformed; }
+    TOptional<FColor> GroundAlbedo;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadColorBytes(Params, TEXT("ground_albedo"), GroundAlbedo)) { return Malformed; }
+    TOptional<float> BottomRadius;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("bottom_radius"), BottomRadius)) { return Malformed; }
+    TOptional<float> AtmosphereHeight;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("atmosphere_height"), AtmosphereHeight)) { return Malformed; }
+    TOptional<float> MultiScatteringFactor;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("multi_scattering_factor"), MultiScatteringFactor)) { return Malformed; }
+    TOptional<float> AerialPerspectiveViewDistanceScale;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("aerial_perspective_view_distance_scale"), AerialPerspectiveViewDistanceScale)) { return Malformed; }
+    TOptional<float> HeightFogContribution;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("height_fog_contribution"), HeightFogContribution)) { return Malformed; }
 
-    int32 AppliedCount = 0;
-    double Number = 0.0;
-    const TArray<TSharedPtr<FJsonValue>>* Values = nullptr;
-    FLinearColor LinearColor(ForceInit);
-    FColor ByteColor(ForceInit);
-
-    if (Params->TryGetArrayField(TEXT("rayleigh_scattering"), Values) && PropertyHandlers_ParseLinearColor(Values, LinearColor))
-    {
-        Component->SetRayleighScattering(LinearColor);
-        ++AppliedCount;
-    }
-    if (Params->TryGetNumberField(TEXT("rayleigh_scattering_scale"), Number))
-    {
-        Component->SetRayleighScatteringScale(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-    if (Params->TryGetArrayField(TEXT("mie_scattering"), Values) && PropertyHandlers_ParseLinearColor(Values, LinearColor))
-    {
-        Component->SetMieScattering(LinearColor);
-        ++AppliedCount;
-    }
-    if (Params->TryGetNumberField(TEXT("mie_scattering_scale"), Number))
-    {
-        Component->SetMieScatteringScale(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-    if (Params->TryGetNumberField(TEXT("mie_anisotropy"), Number))
-    {
-        Component->SetMieAnisotropy(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-    if (Params->TryGetArrayField(TEXT("ground_albedo"), Values) && PropertyHandlers_ParseColorBytes(Values, ByteColor))
-    {
-        Component->SetGroundAlbedo(ByteColor);
-        ++AppliedCount;
-    }
-    if (Params->TryGetNumberField(TEXT("bottom_radius"), Number))
-    {
-        Component->SetBottomRadius(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-    if (Params->TryGetNumberField(TEXT("atmosphere_height"), Number))
-    {
-        Component->SetAtmosphereHeight(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-    if (Params->TryGetNumberField(TEXT("multi_scattering_factor"), Number))
-    {
-        Component->SetMultiScatteringFactor(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-    if (Params->TryGetNumberField(TEXT("aerial_perspective_view_distance_scale"), Number))
-    {
-        Component->SetAerialPespectiveViewDistanceScale(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-    if (Params->TryGetNumberField(TEXT("height_fog_contribution"), Number))
-    {
-        Component->SetHeightFogContribution(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-
+    const int32 AppliedCount = PropertyHandlers_CountSupplied({ RayleighScattering.IsSet(),
+        RayleighScatteringScale.IsSet(), MieScattering.IsSet(), MieScatteringScale.IsSet(), MieAnisotropy.IsSet(),
+        GroundAlbedo.IsSet(), BottomRadius.IsSet(), AtmosphereHeight.IsSet(), MultiScatteringFactor.IsSet(),
+        AerialPerspectiveViewDistanceScale.IsSet(), HeightFogContribution.IsSet() });
     if (AppliedCount == 0)
     {
         return mcp_common::MakeErrorReply(
             TEXT("No properties provided. Supply at least one of: rayleigh_scattering, rayleigh_scattering_scale, mie_scattering, mie_scattering_scale, mie_anisotropy, ground_albedo, bottom_radius, atmosphere_height, multi_scattering_factor, aerial_perspective_view_distance_scale, height_fog_contribution"));
+    }
+    if (TSharedPtr<FJsonObject> Refused = PropertyHandlers_RefuseStaticComponent(*Component, TEXT("SkyAtmosphere"), ActorName))
+    {
+        return Refused;
+    }
+
+    const FScopedTransaction Transaction(LOCTEXT("SetSkyAtmosphereProperties", "MCP: Set Sky Atmosphere Properties"));
+    Component->Modify();
+    if (RayleighScattering)
+    {
+        Component->SetRayleighScattering(*RayleighScattering);
+    }
+    if (RayleighScatteringScale)
+    {
+        Component->SetRayleighScatteringScale(*RayleighScatteringScale);
+    }
+    if (MieScattering)
+    {
+        Component->SetMieScattering(*MieScattering);
+    }
+    if (MieScatteringScale)
+    {
+        Component->SetMieScatteringScale(*MieScatteringScale);
+    }
+    if (MieAnisotropy)
+    {
+        Component->SetMieAnisotropy(*MieAnisotropy);
+    }
+    if (GroundAlbedo)
+    {
+        Component->SetGroundAlbedo(*GroundAlbedo);
+    }
+    if (BottomRadius)
+    {
+        Component->SetBottomRadius(*BottomRadius);
+    }
+    if (AtmosphereHeight)
+    {
+        Component->SetAtmosphereHeight(*AtmosphereHeight);
+    }
+    if (MultiScatteringFactor)
+    {
+        Component->SetMultiScatteringFactor(*MultiScatteringFactor);
+    }
+    if (AerialPerspectiveViewDistanceScale)
+    {
+        Component->SetAerialPespectiveViewDistanceScale(*AerialPerspectiveViewDistanceScale);
+    }
+    if (HeightFogContribution)
+    {
+        Component->SetHeightFogContribution(*HeightFogContribution);
     }
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
@@ -770,7 +905,7 @@ TSharedPtr<FJsonObject> HandleSetSkyAtmosphereProperties(const TSharedPtr<FJsonO
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:get_sky_atmosphere_properties - Read the atmosphere properties of a SkyAtmosphere actor's USkyAtmosphereComponent, under the names set_sky_atmosphere_properties takes.
+// MCP:get_sky_atmosphere_properties - Read the atmosphere settings of a SkyAtmosphere actor's component, found by label or name in the editor world, under the snake_case names set_sky_atmosphere_properties takes (Rayleigh/Mie scattering, ground albedo, planet radius, height). A curated view; get_properties (internal names only) reads any other UPROPERTY on the component.
 //   @param actor_name - Label/name of the target SkyAtmosphere actor.
 //   @returns { actor_name: string, properties: { rayleigh_scattering:[R,G,B,A], rayleigh_scattering_scale, mie_scattering:[R,G,B,A], mie_scattering_scale, mie_anisotropy, ground_albedo:[R,G,B,A], bottom_radius, atmosphere_height, multi_scattering_factor, aerial_perspective_view_distance_scale, height_fog_contribution } }
 TSharedPtr<FJsonObject> HandleGetSkyAtmosphereProperties(const TSharedPtr<FJsonObject>& Params)
@@ -825,7 +960,7 @@ namespace
     }
 }
 
-// MCP:set_exponential_height_fog_properties - Set the properties of an ExponentialHeightFog actor's UExponentialHeightFogComponent: density and falloff, inscattering, distances, max opacity, volumetric fog, the second fog layer and directional inscattering. Only the supplied fields change (applied_count counts them) and the reply reads every property back. Colors are [R,G,B] or [R,G,B,A].
+// MCP:set_exponential_height_fog_properties - Set an ExponentialHeightFog actor's fog component, actor found by label or name in the editor world: density, falloff, inscattering, distances, max opacity, volumetric fog, second fog layer, directional inscattering. Over set_properties it needs no component path and goes through the component's own setters; other fog properties: set_properties. Supplied fields only, one undo step, not saved (save_level); applied_count counts them and every property is read back. Colors are [R,G,B(,A)] floats, volumetric_fog_albedo [R,G,B(,A)] whole 0-255 bytes. Every field is checked before any write: a color that is not 3 or 4 numbers, a byte color with a fraction or a value past 255, a number given as a string or a non-boolean volumetric_fog is an error and nothing changes.
 //   @param actor_name - Label/name of the target ExponentialHeightFog actor.
 //   @param fog_density [number] - Optional global fog density.
 //   @param fog_height_falloff [number] - Optional height falloff.
@@ -836,7 +971,7 @@ namespace
 //   @param fog_cutoff_distance [number] - Optional fog cutoff distance.
 //   @param volumetric_fog [bool] - Optional enable volumetric fog.
 //   @param volumetric_fog_scattering_distribution [number] - Optional volumetric scattering distribution (-1..1).
-//   @param volumetric_fog_albedo [array] - Optional [R,G,B] volumetric albedo as 0-255 bytes (FColor).
+//   @param volumetric_fog_albedo [array] - Optional [R,G,B] or [R,G,B,A] volumetric albedo, each a whole number from 0 to 255 (FColor; A defaults to 255).
 //   @param volumetric_fog_emissive [array] - Optional [R,G,B(,A)] volumetric emissive color.
 //   @param volumetric_fog_extinction_scale [number] - Optional volumetric extinction scale.
 //   @param second_fog_density [number] - Optional second fog layer density.
@@ -857,111 +992,130 @@ TSharedPtr<FJsonObject> HandleSetExponentialHeightFogProperties(const TSharedPtr
         return Error;
     }
 
-    const FScopedTransaction Transaction(LOCTEXT("SetExpHeightFogProperties", "MCP: Set Exponential Height Fog Properties"));
-    Component->Modify();
+    // Every supplied param is read and checked before the first write, so a malformed one changes nothing.
+    TOptional<float> FogDensity;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("fog_density"), FogDensity)) { return Malformed; }
+    TOptional<float> FogHeightFalloff;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("fog_height_falloff"), FogHeightFalloff)) { return Malformed; }
+    TOptional<FLinearColor> FogInscatteringColor;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadLinearColor(Params, TEXT("fog_inscattering_color"), FogInscatteringColor)) { return Malformed; }
+    TOptional<float> FogMaxOpacity;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("fog_max_opacity"), FogMaxOpacity)) { return Malformed; }
+    TOptional<float> StartDistance;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("start_distance"), StartDistance)) { return Malformed; }
+    TOptional<float> EndDistance;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("end_distance"), EndDistance)) { return Malformed; }
+    TOptional<float> FogCutoffDistance;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("fog_cutoff_distance"), FogCutoffDistance)) { return Malformed; }
+    TOptional<bool> VolumetricFog;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadBool(Params, TEXT("volumetric_fog"), VolumetricFog)) { return Malformed; }
+    TOptional<float> VolumetricFogScatteringDistribution;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("volumetric_fog_scattering_distribution"), VolumetricFogScatteringDistribution)) { return Malformed; }
+    TOptional<FColor> VolumetricFogAlbedo;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadColorBytes(Params, TEXT("volumetric_fog_albedo"), VolumetricFogAlbedo)) { return Malformed; }
+    TOptional<FLinearColor> VolumetricFogEmissive;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadLinearColor(Params, TEXT("volumetric_fog_emissive"), VolumetricFogEmissive)) { return Malformed; }
+    TOptional<float> VolumetricFogExtinctionScale;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("volumetric_fog_extinction_scale"), VolumetricFogExtinctionScale)) { return Malformed; }
+    TOptional<float> SecondFogDensity;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("second_fog_density"), SecondFogDensity)) { return Malformed; }
+    TOptional<float> SecondFogHeightFalloff;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("second_fog_height_falloff"), SecondFogHeightFalloff)) { return Malformed; }
+    TOptional<float> SecondFogHeightOffset;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("second_fog_height_offset"), SecondFogHeightOffset)) { return Malformed; }
+    TOptional<float> DirectionalInscatteringExponent;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("directional_inscattering_exponent"), DirectionalInscatteringExponent)) { return Malformed; }
+    TOptional<float> DirectionalInscatteringStartDistance;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("directional_inscattering_start_distance"), DirectionalInscatteringStartDistance)) { return Malformed; }
+    TOptional<FLinearColor> DirectionalInscatteringColor;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadLinearColor(Params, TEXT("directional_inscattering_color"), DirectionalInscatteringColor)) { return Malformed; }
 
-    int32 AppliedCount = 0;
-    double Number = 0.0;
-    bool bValue = false;
-    const TArray<TSharedPtr<FJsonValue>>* Values = nullptr;
-    FLinearColor LinearColor(ForceInit);
-    FColor ByteColor(ForceInit);
-
-    if (Params->TryGetNumberField(TEXT("fog_density"), Number))
-    {
-        Component->SetFogDensity(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-    if (Params->TryGetNumberField(TEXT("fog_height_falloff"), Number))
-    {
-        Component->SetFogHeightFalloff(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-    if (Params->TryGetArrayField(TEXT("fog_inscattering_color"), Values) && PropertyHandlers_ParseLinearColor(Values, LinearColor))
-    {
-        Component->SetFogInscatteringColor(LinearColor);
-        ++AppliedCount;
-    }
-    if (Params->TryGetNumberField(TEXT("fog_max_opacity"), Number))
-    {
-        Component->SetFogMaxOpacity(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-    if (Params->TryGetNumberField(TEXT("start_distance"), Number))
-    {
-        Component->SetStartDistance(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-    if (Params->TryGetNumberField(TEXT("end_distance"), Number))
-    {
-        Component->SetEndDistance(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-    if (Params->TryGetNumberField(TEXT("fog_cutoff_distance"), Number))
-    {
-        Component->SetFogCutoffDistance(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-    if (Params->TryGetBoolField(TEXT("volumetric_fog"), bValue))
-    {
-        Component->SetVolumetricFog(bValue);
-        ++AppliedCount;
-    }
-    if (Params->TryGetNumberField(TEXT("volumetric_fog_scattering_distribution"), Number))
-    {
-        Component->SetVolumetricFogScatteringDistribution(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-    if (Params->TryGetArrayField(TEXT("volumetric_fog_albedo"), Values) && PropertyHandlers_ParseColorBytes(Values, ByteColor))
-    {
-        Component->SetVolumetricFogAlbedo(ByteColor);
-        ++AppliedCount;
-    }
-    if (Params->TryGetArrayField(TEXT("volumetric_fog_emissive"), Values) && PropertyHandlers_ParseLinearColor(Values, LinearColor))
-    {
-        Component->SetVolumetricFogEmissive(LinearColor);
-        ++AppliedCount;
-    }
-    if (Params->TryGetNumberField(TEXT("volumetric_fog_extinction_scale"), Number))
-    {
-        Component->SetVolumetricFogExtinctionScale(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-    if (Params->TryGetNumberField(TEXT("second_fog_density"), Number))
-    {
-        Component->SetSecondFogDensity(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-    if (Params->TryGetNumberField(TEXT("second_fog_height_falloff"), Number))
-    {
-        Component->SetSecondFogHeightFalloff(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-    if (Params->TryGetNumberField(TEXT("second_fog_height_offset"), Number))
-    {
-        Component->SetSecondFogHeightOffset(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-    if (Params->TryGetNumberField(TEXT("directional_inscattering_exponent"), Number))
-    {
-        Component->SetDirectionalInscatteringExponent(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-    if (Params->TryGetNumberField(TEXT("directional_inscattering_start_distance"), Number))
-    {
-        Component->SetDirectionalInscatteringStartDistance(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-    if (Params->TryGetArrayField(TEXT("directional_inscattering_color"), Values) && PropertyHandlers_ParseLinearColor(Values, LinearColor))
-    {
-        Component->SetDirectionalInscatteringColor(LinearColor);
-        ++AppliedCount;
-    }
-
+    const int32 AppliedCount = PropertyHandlers_CountSupplied({ FogDensity.IsSet(), FogHeightFalloff.IsSet(),
+        FogInscatteringColor.IsSet(), FogMaxOpacity.IsSet(), StartDistance.IsSet(), EndDistance.IsSet(),
+        FogCutoffDistance.IsSet(), VolumetricFog.IsSet(), VolumetricFogScatteringDistribution.IsSet(),
+        VolumetricFogAlbedo.IsSet(), VolumetricFogEmissive.IsSet(), VolumetricFogExtinctionScale.IsSet(),
+        SecondFogDensity.IsSet(), SecondFogHeightFalloff.IsSet(), SecondFogHeightOffset.IsSet(),
+        DirectionalInscatteringExponent.IsSet(), DirectionalInscatteringStartDistance.IsSet(),
+        DirectionalInscatteringColor.IsSet() });
     if (AppliedCount == 0)
     {
         return mcp_common::MakeErrorReply(
             TEXT("No properties provided. Supply at least one of: fog_density, fog_height_falloff, fog_inscattering_color, fog_max_opacity, start_distance, end_distance, fog_cutoff_distance, volumetric_fog, volumetric_fog_scattering_distribution, volumetric_fog_albedo, volumetric_fog_emissive, volumetric_fog_extinction_scale, second_fog_density, second_fog_height_falloff, second_fog_height_offset, directional_inscattering_exponent, directional_inscattering_start_distance, directional_inscattering_color"));
+    }
+
+    const FScopedTransaction Transaction(LOCTEXT("SetExpHeightFogProperties", "MCP: Set Exponential Height Fog Properties"));
+    Component->Modify();
+    if (FogDensity)
+    {
+        Component->SetFogDensity(*FogDensity);
+    }
+    if (FogHeightFalloff)
+    {
+        Component->SetFogHeightFalloff(*FogHeightFalloff);
+    }
+    if (FogInscatteringColor)
+    {
+        Component->SetFogInscatteringColor(*FogInscatteringColor);
+    }
+    if (FogMaxOpacity)
+    {
+        Component->SetFogMaxOpacity(*FogMaxOpacity);
+    }
+    if (StartDistance)
+    {
+        Component->SetStartDistance(*StartDistance);
+    }
+    if (EndDistance)
+    {
+        Component->SetEndDistance(*EndDistance);
+    }
+    if (FogCutoffDistance)
+    {
+        Component->SetFogCutoffDistance(*FogCutoffDistance);
+    }
+    if (VolumetricFog)
+    {
+        Component->SetVolumetricFog(*VolumetricFog);
+    }
+    if (VolumetricFogScatteringDistribution)
+    {
+        Component->SetVolumetricFogScatteringDistribution(*VolumetricFogScatteringDistribution);
+    }
+    if (VolumetricFogAlbedo)
+    {
+        Component->SetVolumetricFogAlbedo(*VolumetricFogAlbedo);
+    }
+    if (VolumetricFogEmissive)
+    {
+        Component->SetVolumetricFogEmissive(*VolumetricFogEmissive);
+    }
+    if (VolumetricFogExtinctionScale)
+    {
+        Component->SetVolumetricFogExtinctionScale(*VolumetricFogExtinctionScale);
+    }
+    if (SecondFogDensity)
+    {
+        Component->SetSecondFogDensity(*SecondFogDensity);
+    }
+    if (SecondFogHeightFalloff)
+    {
+        Component->SetSecondFogHeightFalloff(*SecondFogHeightFalloff);
+    }
+    if (SecondFogHeightOffset)
+    {
+        Component->SetSecondFogHeightOffset(*SecondFogHeightOffset);
+    }
+    if (DirectionalInscatteringExponent)
+    {
+        Component->SetDirectionalInscatteringExponent(*DirectionalInscatteringExponent);
+    }
+    if (DirectionalInscatteringStartDistance)
+    {
+        Component->SetDirectionalInscatteringStartDistance(*DirectionalInscatteringStartDistance);
+    }
+    if (DirectionalInscatteringColor)
+    {
+        Component->SetDirectionalInscatteringColor(*DirectionalInscatteringColor);
     }
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
@@ -972,7 +1126,7 @@ TSharedPtr<FJsonObject> HandleSetExponentialHeightFogProperties(const TSharedPtr
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:get_exponential_height_fog_properties - Read the properties of an ExponentialHeightFog actor's UExponentialHeightFogComponent, under the names set_exponential_height_fog_properties takes.
+// MCP:get_exponential_height_fog_properties - Read the fog of an ExponentialHeightFog actor's component, found by label or name in the editor world, under the snake_case names set_exponential_height_fog_properties takes (density, falloff, inscattering, distances, volumetric fog, second layer). A curated view; get_properties (internal names only) reads any other UPROPERTY on the component.
 //   @param actor_name - Label/name of the target ExponentialHeightFog actor.
 //   @returns { actor_name: string, properties: { fog_density, fog_height_falloff, fog_inscattering_color:[R,G,B,A], fog_max_opacity, start_distance, end_distance, fog_cutoff_distance, volumetric_fog, volumetric_fog_scattering_distribution, volumetric_fog_albedo:[R,G,B,A], volumetric_fog_emissive:[R,G,B,A], volumetric_fog_extinction_scale, second_fog_density, second_fog_height_falloff, second_fog_height_offset, directional_inscattering_exponent, directional_inscattering_start_distance, directional_inscattering_color:[R,G,B,A] } }
 TSharedPtr<FJsonObject> HandleGetExponentialHeightFogProperties(const TSharedPtr<FJsonObject>& Params)
@@ -1021,12 +1175,12 @@ namespace
     }
 }
 
-// MCP:set_volumetric_cloud_properties - Set the properties of a VolumetricCloud actor's UVolumetricCloudComponent: layer and planet geometry, ground albedo, tracing distances and sample counts. Only the supplied fields change (applied_count counts them) and the reply reads every property back. ground_albedo is [R,G,B] in 0-255 bytes.
+// MCP:set_volumetric_cloud_properties - Set layer and planet geometry, ground albedo, tracing distances and sample counts of a VolumetricCloud actor found by label or name, through the component's setters, which refresh its render state; set_properties writes any other field. Only supplied fields change, in one undo step (applied_count counts them), and the reply reads every property back. ground_albedo is [R,G,B(,A)] in whole 0-255 bytes. A malformed field, or a component of Static mobility (its setters change nothing; make it Movable first), is an error and nothing changes. Not saved.
 //   @param actor_name - Label/name of the target VolumetricCloud actor.
 //   @param layer_bottom_altitude [number] - Optional layer bottom altitude (km).
 //   @param layer_height [number] - Optional layer height (km).
 //   @param planet_radius [number] - Optional planet radius (km).
-//   @param ground_albedo [array] - Optional [R,G,B] ground albedo as 0-255 bytes (FColor).
+//   @param ground_albedo [array] - Optional [R,G,B] or [R,G,B,A] ground albedo, each a whole number from 0 to 255 (FColor; A defaults to 255).
 //   @param tracing_start_max_distance [number] - Optional tracing start max distance.
 //   @param tracing_max_distance [number] - Optional tracing max distance.
 //   @param sky_light_cloud_bottom_occlusion [number] - Optional sky light cloud bottom occlusion (0..1).
@@ -1047,80 +1201,96 @@ TSharedPtr<FJsonObject> HandleSetVolumetricCloudProperties(const TSharedPtr<FJso
         return Error;
     }
 
-    const FScopedTransaction Transaction(LOCTEXT("SetVolumetricCloudProperties", "MCP: Set Volumetric Cloud Properties"));
-    Component->Modify();
+    // Every supplied param is read and checked before the first write, so a malformed one changes nothing.
+    TOptional<float> LayerBottomAltitude;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("layer_bottom_altitude"), LayerBottomAltitude)) { return Malformed; }
+    TOptional<float> LayerHeight;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("layer_height"), LayerHeight)) { return Malformed; }
+    TOptional<float> PlanetRadius;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("planet_radius"), PlanetRadius)) { return Malformed; }
+    TOptional<FColor> GroundAlbedo;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadColorBytes(Params, TEXT("ground_albedo"), GroundAlbedo)) { return Malformed; }
+    TOptional<float> TracingStartMaxDistance;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("tracing_start_max_distance"), TracingStartMaxDistance)) { return Malformed; }
+    TOptional<float> TracingMaxDistance;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("tracing_max_distance"), TracingMaxDistance)) { return Malformed; }
+    TOptional<float> SkyLightCloudBottomOcclusion;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("sky_light_cloud_bottom_occlusion"), SkyLightCloudBottomOcclusion)) { return Malformed; }
+    TOptional<float> ViewSampleCountScale;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("view_sample_count_scale"), ViewSampleCountScale)) { return Malformed; }
+    TOptional<float> ShadowViewSampleCountScale;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("shadow_view_sample_count_scale"), ShadowViewSampleCountScale)) { return Malformed; }
+    TOptional<float> ShadowTracingDistance;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("shadow_tracing_distance"), ShadowTracingDistance)) { return Malformed; }
+    TOptional<float> StopTracingTransmittanceThreshold;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("stop_tracing_transmittance_threshold"), StopTracingTransmittanceThreshold)) { return Malformed; }
+    TOptional<bool> UsePerSampleAtmosphericLightTransmittance;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadBool(Params, TEXT("use_per_sample_atmospheric_light_transmittance"), UsePerSampleAtmosphericLightTransmittance)) { return Malformed; }
 
-    int32 AppliedCount = 0;
-    double Number = 0.0;
-    bool bValue = false;
-    const TArray<TSharedPtr<FJsonValue>>* Values = nullptr;
-    FColor ByteColor(ForceInit);
-
-    if (Params->TryGetNumberField(TEXT("layer_bottom_altitude"), Number))
-    {
-        Component->SetLayerBottomAltitude(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-    if (Params->TryGetNumberField(TEXT("layer_height"), Number))
-    {
-        Component->SetLayerHeight(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-    if (Params->TryGetNumberField(TEXT("planet_radius"), Number))
-    {
-        Component->SetPlanetRadius(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-    if (Params->TryGetArrayField(TEXT("ground_albedo"), Values) && PropertyHandlers_ParseColorBytes(Values, ByteColor))
-    {
-        Component->SetGroundAlbedo(ByteColor);
-        ++AppliedCount;
-    }
-    if (Params->TryGetNumberField(TEXT("tracing_start_max_distance"), Number))
-    {
-        Component->SetTracingStartMaxDistance(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-    if (Params->TryGetNumberField(TEXT("tracing_max_distance"), Number))
-    {
-        Component->SetTracingMaxDistance(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-    if (Params->TryGetNumberField(TEXT("sky_light_cloud_bottom_occlusion"), Number))
-    {
-        Component->SetSkyLightCloudBottomOcclusion(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-    if (Params->TryGetNumberField(TEXT("view_sample_count_scale"), Number))
-    {
-        Component->SetViewSampleCountScale(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-    if (Params->TryGetNumberField(TEXT("shadow_view_sample_count_scale"), Number))
-    {
-        Component->SetShadowViewSampleCountScale(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-    if (Params->TryGetNumberField(TEXT("shadow_tracing_distance"), Number))
-    {
-        Component->SetShadowTracingDistance(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-    if (Params->TryGetNumberField(TEXT("stop_tracing_transmittance_threshold"), Number))
-    {
-        Component->SetStopTracingTransmittanceThreshold(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-    if (Params->TryGetBoolField(TEXT("use_per_sample_atmospheric_light_transmittance"), bValue))
-    {
-        Component->SetbUsePerSampleAtmosphericLightTransmittance(bValue);
-        ++AppliedCount;
-    }
-
+    const int32 AppliedCount = PropertyHandlers_CountSupplied({ LayerBottomAltitude.IsSet(), LayerHeight.IsSet(),
+        PlanetRadius.IsSet(), GroundAlbedo.IsSet(), TracingStartMaxDistance.IsSet(), TracingMaxDistance.IsSet(),
+        SkyLightCloudBottomOcclusion.IsSet(), ViewSampleCountScale.IsSet(), ShadowViewSampleCountScale.IsSet(),
+        ShadowTracingDistance.IsSet(), StopTracingTransmittanceThreshold.IsSet(),
+        UsePerSampleAtmosphericLightTransmittance.IsSet() });
     if (AppliedCount == 0)
     {
         return mcp_common::MakeErrorReply(
             TEXT("No properties provided. Supply at least one of: layer_bottom_altitude, layer_height, planet_radius, ground_albedo, tracing_start_max_distance, tracing_max_distance, sky_light_cloud_bottom_occlusion, view_sample_count_scale, shadow_view_sample_count_scale, shadow_tracing_distance, stop_tracing_transmittance_threshold, use_per_sample_atmospheric_light_transmittance"));
+    }
+    if (TSharedPtr<FJsonObject> Refused = PropertyHandlers_RefuseStaticComponent(*Component, TEXT("VolumetricCloud"), ActorName))
+    {
+        return Refused;
+    }
+
+    const FScopedTransaction Transaction(LOCTEXT("SetVolumetricCloudProperties", "MCP: Set Volumetric Cloud Properties"));
+    Component->Modify();
+    if (LayerBottomAltitude)
+    {
+        Component->SetLayerBottomAltitude(*LayerBottomAltitude);
+    }
+    if (LayerHeight)
+    {
+        Component->SetLayerHeight(*LayerHeight);
+    }
+    if (PlanetRadius)
+    {
+        Component->SetPlanetRadius(*PlanetRadius);
+    }
+    if (GroundAlbedo)
+    {
+        Component->SetGroundAlbedo(*GroundAlbedo);
+    }
+    if (TracingStartMaxDistance)
+    {
+        Component->SetTracingStartMaxDistance(*TracingStartMaxDistance);
+    }
+    if (TracingMaxDistance)
+    {
+        Component->SetTracingMaxDistance(*TracingMaxDistance);
+    }
+    if (SkyLightCloudBottomOcclusion)
+    {
+        Component->SetSkyLightCloudBottomOcclusion(*SkyLightCloudBottomOcclusion);
+    }
+    if (ViewSampleCountScale)
+    {
+        Component->SetViewSampleCountScale(*ViewSampleCountScale);
+    }
+    if (ShadowViewSampleCountScale)
+    {
+        Component->SetShadowViewSampleCountScale(*ShadowViewSampleCountScale);
+    }
+    if (ShadowTracingDistance)
+    {
+        Component->SetShadowTracingDistance(*ShadowTracingDistance);
+    }
+    if (StopTracingTransmittanceThreshold)
+    {
+        Component->SetStopTracingTransmittanceThreshold(*StopTracingTransmittanceThreshold);
+    }
+    if (UsePerSampleAtmosphericLightTransmittance)
+    {
+        Component->SetbUsePerSampleAtmosphericLightTransmittance(*UsePerSampleAtmosphericLightTransmittance);
     }
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
@@ -1131,7 +1301,7 @@ TSharedPtr<FJsonObject> HandleSetVolumetricCloudProperties(const TSharedPtr<FJso
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:get_volumetric_cloud_properties - Read the properties of a VolumetricCloud actor's UVolumetricCloudComponent, under the names set_volumetric_cloud_properties takes.
+// MCP:get_volumetric_cloud_properties - Read the layer and tracing settings of a VolumetricCloud actor's component, found by label or name in the editor world, under the snake_case names set_volumetric_cloud_properties takes. A curated view; get_properties (internal names only) reads any other UPROPERTY on the component.
 //   @param actor_name - Label/name of the target VolumetricCloud actor.
 //   @returns { actor_name: string, properties: { layer_bottom_altitude, layer_height, planet_radius, ground_albedo:[R,G,B,A], tracing_start_max_distance, tracing_max_distance, sky_light_cloud_bottom_occlusion, view_sample_count_scale, shadow_view_sample_count_scale, shadow_tracing_distance, stop_tracing_transmittance_threshold, use_per_sample_atmospheric_light_transmittance } }
 TSharedPtr<FJsonObject> HandleGetVolumetricCloudProperties(const TSharedPtr<FJsonObject>& Params)
@@ -1176,14 +1346,14 @@ namespace
     }
 }
 
-// MCP:set_sky_light_properties - Set the properties of a SkyLight actor's USkyLightComponent: intensity, light color, indirect and volumetric intensity, lower-hemisphere color and occlusion. Only the supplied fields change (applied_count counts them) and the reply reads every property back. Colors are [R,G,B] or [R,G,B,A].
+// MCP:set_sky_light_properties - Set intensity, light color, indirect and volumetric intensity, lower-hemisphere color and occlusion of a SkyLight actor found by label or name, through the component's setters, which update its rendering state; set_properties writes any other field. Only supplied fields change, in one undo step, and all are read back. light_color and lower_hemisphere_color are linear [R,G,B(,A)]; occlusion_tint is [R,G,B(,A)] in whole 0-255 bytes. A Static SkyLight is refused, since its setters change nothing (make it Stationary or Movable first), and so is a malformed field; nothing changes then. Not saved.
 //   @param actor_name - Label/name of the target SkyLight actor.
 //   @param intensity [number] - Optional sky light intensity.
 //   @param light_color [array] - Optional [R,G,B(,A)] light color (stored as FColor).
 //   @param indirect_lighting_intensity [number] - Optional indirect lighting intensity scale.
 //   @param volumetric_scattering_intensity [number] - Optional volumetric scattering intensity.
 //   @param lower_hemisphere_color [array] - Optional [R,G,B(,A)] lower-hemisphere color (FLinearColor).
-//   @param occlusion_tint [array] - Optional [R,G,B] occlusion tint as 0-255 bytes (FColor).
+//   @param occlusion_tint [array] - Optional [R,G,B] or [R,G,B,A] occlusion tint, each a whole number from 0 to 255 (FColor; A defaults to 255).
 //   @param occlusion_contrast [number] - Optional AO contrast (0..1).
 //   @param occlusion_exponent [number] - Optional AO exponent.
 //   @param min_occlusion [number] - Optional minimum occlusion (0..1).
@@ -1199,65 +1369,76 @@ TSharedPtr<FJsonObject> HandleSetSkyLightProperties(const TSharedPtr<FJsonObject
         return Error;
     }
 
-    const FScopedTransaction Transaction(LOCTEXT("SetSkyLightProperties", "MCP: Set Sky Light Properties"));
-    Component->Modify();
+    // Every supplied param is read and checked before the first write, so a malformed one changes nothing.
+    TOptional<float> Intensity;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("intensity"), Intensity)) { return Malformed; }
+    TOptional<FLinearColor> LightColor;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadLinearColor(Params, TEXT("light_color"), LightColor)) { return Malformed; }
+    TOptional<float> IndirectLightingIntensity;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("indirect_lighting_intensity"), IndirectLightingIntensity)) { return Malformed; }
+    TOptional<float> VolumetricScatteringIntensity;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("volumetric_scattering_intensity"), VolumetricScatteringIntensity)) { return Malformed; }
+    TOptional<FLinearColor> LowerHemisphereColor;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadLinearColor(Params, TEXT("lower_hemisphere_color"), LowerHemisphereColor)) { return Malformed; }
+    TOptional<FColor> OcclusionTint;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadColorBytes(Params, TEXT("occlusion_tint"), OcclusionTint)) { return Malformed; }
+    TOptional<float> OcclusionContrast;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("occlusion_contrast"), OcclusionContrast)) { return Malformed; }
+    TOptional<float> OcclusionExponent;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("occlusion_exponent"), OcclusionExponent)) { return Malformed; }
+    TOptional<float> MinOcclusion;
+    if (TSharedPtr<FJsonObject> Malformed = PropertyHandlers_ReadFloat(Params, TEXT("min_occlusion"), MinOcclusion)) { return Malformed; }
 
-    int32 AppliedCount = 0;
-    double Number = 0.0;
-    const TArray<TSharedPtr<FJsonValue>>* Values = nullptr;
-    FLinearColor LinearColor(ForceInit);
-    FColor ByteColor(ForceInit);
-
-    if (Params->TryGetNumberField(TEXT("intensity"), Number))
-    {
-        Component->SetIntensity(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-    if (Params->TryGetArrayField(TEXT("light_color"), Values) && PropertyHandlers_ParseLinearColor(Values, LinearColor))
-    {
-        Component->SetLightColor(LinearColor);
-        ++AppliedCount;
-    }
-    if (Params->TryGetNumberField(TEXT("indirect_lighting_intensity"), Number))
-    {
-        Component->SetIndirectLightingIntensity(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-    if (Params->TryGetNumberField(TEXT("volumetric_scattering_intensity"), Number))
-    {
-        Component->SetVolumetricScatteringIntensity(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-    if (Params->TryGetArrayField(TEXT("lower_hemisphere_color"), Values) && PropertyHandlers_ParseLinearColor(Values, LinearColor))
-    {
-        Component->SetLowerHemisphereColor(LinearColor);
-        ++AppliedCount;
-    }
-    if (Params->TryGetArrayField(TEXT("occlusion_tint"), Values) && PropertyHandlers_ParseColorBytes(Values, ByteColor))
-    {
-        Component->SetOcclusionTint(ByteColor);
-        ++AppliedCount;
-    }
-    if (Params->TryGetNumberField(TEXT("occlusion_contrast"), Number))
-    {
-        Component->SetOcclusionContrast(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-    if (Params->TryGetNumberField(TEXT("occlusion_exponent"), Number))
-    {
-        Component->SetOcclusionExponent(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-    if (Params->TryGetNumberField(TEXT("min_occlusion"), Number))
-    {
-        Component->SetMinOcclusion(static_cast<float>(Number));
-        ++AppliedCount;
-    }
-
+    const int32 AppliedCount = PropertyHandlers_CountSupplied({ Intensity.IsSet(), LightColor.IsSet(),
+        IndirectLightingIntensity.IsSet(), VolumetricScatteringIntensity.IsSet(), LowerHemisphereColor.IsSet(),
+        OcclusionTint.IsSet(), OcclusionContrast.IsSet(), OcclusionExponent.IsSet(), MinOcclusion.IsSet() });
     if (AppliedCount == 0)
     {
         return mcp_common::MakeErrorReply(
             TEXT("No properties provided. Supply at least one of: intensity, light_color, indirect_lighting_intensity, volumetric_scattering_intensity, lower_hemisphere_color, occlusion_tint, occlusion_contrast, occlusion_exponent, min_occlusion"));
+    }
+    if (TSharedPtr<FJsonObject> Refused = PropertyHandlers_RefuseStaticComponent(*Component, TEXT("SkyLight"), ActorName))
+    {
+        return Refused;
+    }
+
+    const FScopedTransaction Transaction(LOCTEXT("SetSkyLightProperties", "MCP: Set Sky Light Properties"));
+    Component->Modify();
+    if (Intensity)
+    {
+        Component->SetIntensity(*Intensity);
+    }
+    if (LightColor)
+    {
+        Component->SetLightColor(*LightColor);
+    }
+    if (IndirectLightingIntensity)
+    {
+        Component->SetIndirectLightingIntensity(*IndirectLightingIntensity);
+    }
+    if (VolumetricScatteringIntensity)
+    {
+        Component->SetVolumetricScatteringIntensity(*VolumetricScatteringIntensity);
+    }
+    if (LowerHemisphereColor)
+    {
+        Component->SetLowerHemisphereColor(*LowerHemisphereColor);
+    }
+    if (OcclusionTint)
+    {
+        Component->SetOcclusionTint(*OcclusionTint);
+    }
+    if (OcclusionContrast)
+    {
+        Component->SetOcclusionContrast(*OcclusionContrast);
+    }
+    if (OcclusionExponent)
+    {
+        Component->SetOcclusionExponent(*OcclusionExponent);
+    }
+    if (MinOcclusion)
+    {
+        Component->SetMinOcclusion(*MinOcclusion);
     }
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
@@ -1268,7 +1449,7 @@ TSharedPtr<FJsonObject> HandleSetSkyLightProperties(const TSharedPtr<FJsonObject
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:get_sky_light_properties - Read the properties of a SkyLight actor's USkyLightComponent, under the names set_sky_light_properties takes.
+// MCP:get_sky_light_properties - Read the intensity, color and occlusion settings of a SkyLight actor's component, found by label or name in the editor world, under the snake_case names set_sky_light_properties takes. A curated view; get_properties (internal names only) reads any other UPROPERTY on it.
 //   @param actor_name - Label/name of the target SkyLight actor.
 //   @returns { actor_name: string, properties: { intensity, light_color:[R,G,B,A], indirect_lighting_intensity, volumetric_scattering_intensity, lower_hemisphere_color:[R,G,B,A], occlusion_tint:[R,G,B,A], occlusion_contrast, occlusion_exponent, min_occlusion } }
 TSharedPtr<FJsonObject> HandleGetSkyLightProperties(const TSharedPtr<FJsonObject>& Params)

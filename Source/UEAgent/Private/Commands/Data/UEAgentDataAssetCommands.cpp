@@ -473,11 +473,11 @@ TSharedPtr<FJsonObject> HandleGetDataAssetInfo(const TSharedPtr<FJsonObject>& Pa
     return mcp_common::MakeOkReply(Reply);
 }
 
-// MCP:set_data_asset_property - Write ONE reflected property on a DataAsset from a text value and verify it by reading back, returning old_value and new_value so the reply proves the change instead of merely claiming it. Values use UE text form: structs as "(X=1,Y=2,Z=3)", object references as a full asset path, GameplayTags as (TagName="A.B"). One property per call, so loop for several; get_data_asset_info dumps them all.
+// MCP:set_data_asset_property - Write ONE reflected property on a DataAsset, save the asset, and return old_value and new_value read back. Pick it over set_properties when you want the save in the same call or the before/after proof; set_properties writes several properties at once, undoably, without saving. It runs PreEditChange/PostEditChangeProperty but records no undo step and does not check that the property is editable. A text value uses UE text form: structs as "(X=1,Y=2,Z=3)", object references as a full asset path, GameplayTags as (TagName="A.B"); a JSON object or array goes through the JSON importer instead (a struct as an object, an array as an array). A value that does not import is refused. get_data_asset_info dumps them all.
 //   @param data_asset_path - Full asset path of the DataAsset.
 //   @param property_name - Name of the UPROPERTY to set (class property name).
-//   @param value - New value as a string (numbers/bools accepted); structs use UE text form e.g. "(X=1,Y=2,Z=3)"; object refs use a full asset path.
-//   @returns { data_asset_path: string, property_name: string, property_type: string, old_value: string, new_value: string, applied: bool, saved: bool }
+//   @param value - New value: a string in UE text form (structs "(X=1,Y=2,Z=3)", object refs as a full asset path), a number or a bool; or a JSON object/array, written through the JSON importer (a struct as an object, an array or set as an array, a map as an object). null is refused.
+//   @returns { data_asset_path: string, property_name: string, property_type: string, old_value: string, new_value: string, applied: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleSetDataAssetProperty(const TSharedPtr<FJsonObject>& Params)
 {
     namespace Impl = UEAgentDataAssetCommandsImpl;
@@ -506,18 +506,43 @@ TSharedPtr<FJsonObject> HandleSetDataAssetProperty(const TSharedPtr<FJsonObject>
 
     // The value before the write, read through reflection, so the reply can prove the change.
     const TSharedPtr<FJsonValue> Before = mcp_common::PropertyValueToJson(Property, Property->ContainerPtrToValuePtr<void>(Asset));
-    const FString ValueText = Impl::JsonValueAsImportText(Params->TryGetField(TEXT("value")));
-
-    Asset->PreEditChange(Property);
-    // Imported into the live asset: the container is the DataAsset object itself.
-    if (Property->ImportText_InContainer(*ValueText, Asset, Asset, PPF_None) == nullptr)
+    const TSharedPtr<FJsonValue> RawValue = Params->TryGetField(TEXT("value"));
+    if (!RawValue.IsValid() || RawValue->Type == EJson::Null)
     {
         return mcp_common::MakeErrorReply(FString::Printf(
-            TEXT("Could not import value '%s' for property '%s' (type %s)"),
-            *ValueText, *PropertyName, *Property->GetClass()->GetName()));
+            TEXT("value is null; pass the new value of '%s' as text, a number, a bool, or a JSON object/array"), *PropertyName));
+    }
+    // A JSON object or array has no text form of its own (its string form is empty), so it goes through the
+    // canonical JSON->property importer -- a struct as an object, an array/set as an array, a map as an object.
+    // Scalars keep the UE text route.
+    const bool bStructured = RawValue->Type == EJson::Object || RawValue->Type == EJson::Array;
+
+    Asset->PreEditChange(Property);
+    FString ImportError;
+    bool bImported = false;
+    if (bStructured)
+    {
+        bImported = mcp_common::SetObjectProperty(Asset, PropertyName, RawValue, ImportError);
+    }
+    else
+    {
+        // Strict: a text the property cannot read whole ("abc" for a number) is refused, not written as 0.
+        const FString ValueText = Impl::JsonValueAsImportText(RawValue);
+        FString ParseError;
+        bImported = mcp_common::ImportPropertyTextStrict(Property, ValueText, Property->ContainerPtrToValuePtr<void>(Asset), Asset, ParseError);
+        if (!bImported)
+        {
+            ImportError = FString::Printf(TEXT("Could not import value for property '%s': %s"), *PropertyName, *ParseError);
+        }
     }
     FPropertyChangedEvent ChangeEvent(Property);
     Asset->PostEditChangeProperty(ChangeEvent);
+    if (!bImported)
+    {
+        return mcp_common::MakeErrorReply(ImportError.IsEmpty()
+            ? FString::Printf(TEXT("Could not import the value for property '%s' (type %s)"), *PropertyName, *Property->GetClass()->GetName())
+            : ImportError);
+    }
     Asset->MarkPackageDirty();
 
     FString SaveError;

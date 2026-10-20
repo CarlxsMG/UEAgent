@@ -392,7 +392,7 @@ TSharedPtr<FJsonObject> HandleCreatePhysicalMaterial(const TSharedPtr<FJsonObjec
 // --------------------------------------------------------------------------- //
 // set_physical_material_properties
 // --------------------------------------------------------------------------- //
-// MCP:set_physical_material_properties - Load a UPhysicalMaterial, set surface/object properties, save, and read back (read-modify-write; only provided fields change; idempotent set-to-fixed-value).
+// MCP:set_physical_material_properties - Set friction, restitution, density, combine modes, surface type, mass power and sleep thresholds of a PhysicalMaterial asset as one undo step, then save it. Over set_properties: it clamps to the engine ranges, turns combine-mode overrides on, and saves; like a Details-panel edit it runs PostEditChange, so bodies using the material in this session see the new values. Bad enum names, or a call with no field, fail before writing. Values the material already has give changed=false and saved=false; a failed save makes success false, with saved=false and save_error, and still returns the values read back.
 //   @param physical_material_path - /Game path to the physical material asset.
 //   @param friction - Optional new (kinetic) Friction value (>= 0)
 //   @param static_friction - Optional new StaticFriction value (>= 0)
@@ -404,7 +404,7 @@ TSharedPtr<FJsonObject> HandleCreatePhysicalMaterial(const TSharedPtr<FJsonObjec
 //   @param raise_mass_to_power - Optional RaiseMassToPower (clamped to [0.1,1])
 //   @param sleep_linear_velocity_threshold - Optional SleepLinearVelocityThreshold (>= 0)
 //   @param sleep_angular_velocity_threshold - Optional SleepAngularVelocityThreshold (>= 0)
-//   @returns { physical_material_path: string, friction: number, static_friction: number, restitution: number, density: number, friction_combine_mode: string, override_friction_combine_mode: bool, restitution_combine_mode: string, override_restitution_combine_mode: bool, surface_type: string, raise_mass_to_power: number, sleep_linear_velocity_threshold: number, sleep_angular_velocity_threshold: number, friction_applied: bool, static_friction_applied: bool, restitution_applied: bool, density_applied: bool, friction_combine_mode_applied: bool, restitution_combine_mode_applied: bool, surface_type_applied: bool, raise_mass_to_power_applied: bool, sleep_linear_velocity_threshold_applied: bool, sleep_angular_velocity_threshold_applied: bool, updated: bool }
+//   @returns { physical_material_path: string, friction: number, static_friction: number, restitution: number, density: number, friction_combine_mode: string, override_friction_combine_mode: bool, restitution_combine_mode: string, override_restitution_combine_mode: bool, surface_type: string, raise_mass_to_power: number, sleep_linear_velocity_threshold: number, sleep_angular_velocity_threshold: number, friction_applied: bool, static_friction_applied: bool, restitution_applied: bool, density_applied: bool, friction_combine_mode_applied: bool, restitution_combine_mode_applied: bool, surface_type_applied: bool, raise_mass_to_power_applied: bool, sleep_linear_velocity_threshold_applied: bool, sleep_angular_velocity_threshold_applied: bool, updated: bool, changed: bool, saved: bool, save_error?: string, note?: string }
 
 TSharedPtr<FJsonObject> HandleSetPhysicalMaterialProperties(const TSharedPtr<FJsonObject>& Params)
 {
@@ -456,6 +456,25 @@ TSharedPtr<FJsonObject> HandleSetPhysicalMaterialProperties(const TSharedPtr<FJs
             FString::Printf(TEXT("Invalid surface_type '%s' (use a reflected EPhysicalSurface name e.g. 'SurfaceType_Default' or a numeric value)"), *SurfaceStr));
     }
 
+    const bool bAnyField = bHasFriction || bHasStaticFriction || bHasRestitution || bHasDensity || bHasRaiseMass
+        || bHasSleepLin || bHasSleepAng || bHasFrictionMode || bHasRestitutionMode || bHasSurface;
+    if (!bAnyField)
+    {
+        return mcp_common::MakeErrorReply(TEXT("Pass at least one field to set (friction, static_friction, restitution, density, ")
+            TEXT("friction_combine_mode, restitution_combine_mode, surface_type, raise_mass_to_power, ")
+            TEXT("sleep_linear_velocity_threshold, sleep_angular_velocity_threshold); nothing was changed."));
+    }
+
+    // The authored state before the write, to report whether anything changed.
+    const auto Snapshot = [PhysMat]()
+    {
+        return FString::Printf(TEXT("%g|%g|%g|%g|%g|%g|%g|%d|%d|%d|%d|%d"), PhysMat->Friction, PhysMat->StaticFriction,
+            PhysMat->Restitution, PhysMat->Density, PhysMat->RaiseMassToPower, PhysMat->SleepLinearVelocityThreshold,
+            PhysMat->SleepAngularVelocityThreshold, (int32)PhysMat->bOverrideFrictionCombineMode, (int32)PhysMat->FrictionCombineMode,
+            (int32)PhysMat->bOverrideRestitutionCombineMode, (int32)PhysMat->RestitutionCombineMode, (int32)PhysMat->SurfaceType);
+    };
+    const FString Before = Snapshot();
+
     {
         const FScopedTransaction Transaction(LOCTEXT("SetPhysMatProps", "MCP: Set Physical Material Properties"));
         PhysMat->Modify();
@@ -478,13 +497,15 @@ TSharedPtr<FJsonObject> HandleSetPhysicalMaterialProperties(const TSharedPtr<FJs
             PhysMat->RestitutionCombineMode = RestitutionMode;
         }
         if (bHasSurface) { PhysMat->SurfaceType = Surface; }
+        // As a Details-panel edit would: UPhysicalMaterial::PostEditChangeProperty pushes the new values into the
+        // physics engine's material, so bodies already using it in this session see them.
+        PhysMat->PostEditChange();
     }
 
+    // Values the material already had: nothing to save.
+    const bool bChanged = Snapshot() != Before;
     FString SaveError;
-    if (!mcp_common::SaveAssetPackage(PhysMat->GetPackage(), PhysMat, SaveError))
-    {
-        return mcp_common::MakeErrorReply(SaveError);
-    }
+    const bool bSaved = bChanged && mcp_common::SaveAssetPackage(PhysMat->GetPackage(), PhysMat, SaveError);
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("physical_material_path"), MatPath);
@@ -511,14 +532,21 @@ TSharedPtr<FJsonObject> HandleSetPhysicalMaterialProperties(const TSharedPtr<FJs
     Result->SetBoolField(TEXT("raise_mass_to_power_applied"), bHasRaiseMass);
     Result->SetBoolField(TEXT("sleep_linear_velocity_threshold_applied"), bHasSleepLin);
     Result->SetBoolField(TEXT("sleep_angular_velocity_threshold_applied"), bHasSleepAng);
-    Result->SetBoolField(TEXT("updated"), true);
-    return mcp_common::MakeOkReply(Result);
+    Result->SetBoolField(TEXT("updated"), bChanged);
+    Result->SetBoolField(TEXT("changed"), bChanged);
+    if (!bChanged)
+    {
+        Result->SetBoolField(TEXT("saved"), false);
+        Result->SetStringField(TEXT("note"), TEXT("The material already had these values; nothing was saved."));
+        return mcp_common::MakeOkReply(Result);
+    }
+    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("set_physical_material_properties"), SaveError);
 }
 
 // --------------------------------------------------------------------------- //
 // spawn_physics_constraint
 // --------------------------------------------------------------------------- //
-// MCP:spawn_physics_constraint - Spawns an APhysicsConstraintActor in the editor world at location (zero rotation) in an undo transaction and optionally sets the two actors it constrains, found by object name or label (first match), then recomputes the joint frames. A name that matches no actor is skipped, not an error: check actor1_wired and actor2_wired. Each call adds a new actor; the level is not saved. Tune it with set_physics_constraint_limits and set_physics_constraint_drives, read it with get_physics_constraint_info; for joints inside a Physics Asset use add_physics_asset_constraint.
+// MCP:spawn_physics_constraint - Spawns an APhysicsConstraintActor in the editor world at location (zero rotation) in an undo transaction and optionally sets the two actors it constrains, found by object name or label (first match), then recomputes the joint frames; spawn_actor has no constraint type. A name that matches no actor is skipped, not an error: check actor1_wired and actor2_wired. Each call adds a new actor; the level is not saved. Tune it with set_physics_constraint_limits and set_physics_constraint_drives, read it with get_physics_constraint_info; for joints inside a Physics Asset use add_physics_asset_constraint.
 //   @param location - World [x, y, z] for the constraint actor (defaults to origin)
 //   @param actor1_name - Optional name/label of the first actor to constrain
 //   @param actor2_name - Optional name/label of the second actor to constrain

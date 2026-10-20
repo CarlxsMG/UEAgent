@@ -4689,7 +4689,7 @@ TSharedPtr<FJsonObject> HandleLinkMontageSections(const TSharedPtr<FJsonObject>&
 // array, ArrayDim==3 — same path create_blend_space uses), reads back via
 // GetBlendParameter().
 // ---------------------------------------------------------------------------
-// MCP:set_blend_space_properties - Configure an existing blend space's X and (for 2D) Y axis: name, min, max, grid divisions.  create_blend_space only sets X; this sets the Y axis too (and can change X after creation). On a 1D blend space the y_axis_* params are reported as an honest note and ignored. Only the supplied fields change, in one undo transaction, then the blend space is saved; values the axes already have are a success with changed=false, applied_count 0, saved=false and a note, and nothing is modified or saved. A failed save makes success false, with saved=false and save_error.
+// MCP:set_blend_space_properties - Configure an existing blend space's X and (2D only) Y axis: name, min, max, grid divisions. Over set_properties it addresses each axis field by name, clamps grid to >= 1, rebuilds the runtime sample data (ValidateSampleData/ResampleData) and saves. On a 1D blend space the y_axis_* params are ignored with a note. Only the supplied fields change, in one undo step; min below max is not checked. Values the axes already have are a success with changed=false, applied_count 0, saved=false and a note, and nothing is modified or saved. A failed save makes success false, with saved=false and save_error. New blend space: create_blend_space.
 //   @param blend_space_path - Full asset path of the UBlendSpace / UBlendSpace1D.
 //   @param x_axis_name - Optional X axis display name.
 //   @param x_axis_min [number] - Optional X axis minimum value.
@@ -5337,7 +5337,7 @@ TSharedPtr<FJsonObject> HandleEditAnimNotify(const TSharedPtr<FJsonObject>& Para
     return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("edit_anim_notify"), SaveError);
 }
 
-// MCP:set_montage_properties - Set only the supplied blend-in/blend-out times, global rate scale, blend modes, auto blend out, trigger time, sync group/slot and deprecated root motion fields of a UAnimMontage in one undo step and save it; bad enum names, or no field, are refused before any change, and supplied values the montage already has are a success with changed=false, applied_count 0 and saved=false, with nothing modified or saved. A failed save makes success false, with saved=false and save_error.
+// MCP:set_montage_properties - Set only the supplied blend-in/blend-out times, global rate scale, blend modes, auto blend out, trigger time, sync group/slot and deprecated root motion fields of a UAnimMontage in one undo step and save it. Over set_properties it sets the blend times through FAlphaBlend::SetBlendTime (clamped to >= 0), validates enum names before any write and saves in the same call; other montage properties: set_properties. Bad enum names, or no field, are refused before any change; values the montage already has give changed=false, applied_count 0 and saved=false, nothing modified or saved. A failed save makes success false, with saved=false and save_error.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
 //   @param name - Alias of montage_path.
 //   @param blend_in - Blend-in time in seconds (BlendIn), clamped to >= 0. Optional.

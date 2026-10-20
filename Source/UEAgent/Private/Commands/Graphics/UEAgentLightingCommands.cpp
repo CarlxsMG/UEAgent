@@ -28,6 +28,7 @@
 #include "Components/LightComponent.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Components/LocalLightComponent.h"   // ULocalLightComponent::SetAttenuationRadius
+#include "Engine/Scene.h"                     // ELightUnits, read back as get_light_properties' light_intensity_units
 #include "Components/PointLightComponent.h"
 #include "Components/SpotLightComponent.h"
 #include "Components/RectLightComponent.h"     // URectLightComponent source/barn-door
@@ -452,17 +453,24 @@ namespace UEAgentLightingImpl
         Out->SetObjectField(TEXT("light_rotation"), mcp_common::RotatorToJsonObject(Owner.GetActorRotation()));
         Out->SetObjectField(TEXT("light_scale"), mcp_common::VectorToJsonObject(Owner.GetActorScale3D()));
 
-        // Emission and state. No intensity-units property is read: the field is always 0.
-        Out->SetNumberField(TEXT("light_intensity_units"), 0.0);
+        // Emission and state. Intensity units are a property of local lights (point, spot, rect) only; a
+        // directional light has none (its intensity is lux), so the key is left out rather than given a value.
+        if (const ULocalLightComponent* Local = Cast<ULocalLightComponent>(&Light))
+        {
+            Out->SetStringField(TEXT("light_intensity_units"), StaticEnum<ELightUnits>()->GetNameStringByValue(static_cast<int64>(Local->IntensityUnits)));
+        }
         Out->SetObjectField(TEXT("light_color"), mcp_common::LinearColorToJsonObject(FLinearColor(Light.LightColor)));
         WriteLightStatus(Light, *Out, true, true);
 
-        // Falloff only exists on point and spot lights; every other kind reports the inverse-squared
-        // defaults. Minimum roughness and the channel mask are fixed values for every light.
-        const UPointLightComponent* PointLike = Cast<UPointLightComponent>(&Light);
-        Out->SetBoolField(TEXT("light_use_inverse_squared_falloff"), PointLike != nullptr ? PointLike->bUseInverseSquaredFalloff != 0 : true);
-        Out->SetNumberField(TEXT("light_falloff_exponent"), PointLike != nullptr ? PointLike->LightFalloffExponent : 2.0f);
-        SetNumbers(*Out, { { TEXT("light_min_roughness"), 0.0 }, { TEXT("light_lighting_channel_mask"), 1.0 } });
+        // Falloff only exists on point and spot lights, so the two keys are left out for every other kind.
+        if (const UPointLightComponent* PointLike = Cast<UPointLightComponent>(&Light))
+        {
+            Out->SetBoolField(TEXT("light_use_inverse_squared_falloff"), PointLike->bUseInverseSquaredFalloff != 0);
+            Out->SetNumberField(TEXT("light_falloff_exponent"), PointLike->LightFalloffExponent);
+        }
+        // LightingChannels packed the engine's way: 1 = channel 0, 2 = channel 1, 4 = channel 2. No min-roughness
+        // key: the property is MinRoughness_DEPRECATED and drives nothing.
+        Out->SetNumberField(TEXT("light_lighting_channel_mask"), GetLightingChannelMaskForStruct(Light.LightingChannels));
 
         // The remaining ULightComponent fields set_light_properties can write, so both commands round-trip.
         SetNumbers(*Out, {
@@ -1411,9 +1419,9 @@ UObject* LoadOptionalAssetParam(const TSharedPtr<FJsonObject>& Params, const FSt
 
 // Lights and shadows
 
-// MCP:get_light_properties - Retrieve comprehensive properties of a light actor including intensity, color, position, rotation, scale, and type-specific settings. Reads back every field set_light_properties writes (including IES, light function, shadow bias, contact shadow, cast/volumetric shadow, inverse-squared falloff, and RectLight source size / barn doors / source texture).
+// MCP:get_light_properties - Read a light actor of the editor level, found by object name (not label), in one call: owner transform, intensity, color, mobility and every field set_light_properties writes, plus the type-specific ones (point/spot falloff and cones, RectLight source and barn doors, directional sun-light flags). A convenience view of the actor and its first light component; get_properties reads any other UPROPERTY. Every value is read off the component: light_intensity_units is the unit name (Unitless, Candelas, Lumens, EV or Nits) on point, spot and rect lights and is left out for a directional light, whose intensity is lux; the falloff keys appear only on point and spot lights; light_lighting_channel_mask packs LightingChannels (1 = channel 0, 2 = channel 1, 4 = channel 2). light_type is always 'Light Component'; the kind is light_subtype. An unknown name is an error. Read-only.
 //   @param light_name - Name of the light actor to query
-//   @returns { light_name, light_found, light_message, light_class, light_type, light_intensity, light_intensity_units, r, g, b, a, x, y, z, pitch, yaw, roll, light_enabled, light_cast_shadows, light_affect_world, light_use_inverse_squared_falloff, light_falloff_exponent, light_min_roughness, light_lighting_channel_mask, light_temperature, light_use_temperature, light_indirect_lighting_intensity, light_volumetric_scattering_intensity, light_affect_translucent_lighting, light_use_ies_brightness, light_ies_brightness_scale, light_ies_texture, light_function_scale, light_function_fade_distance, light_function_disabled_brightness, light_function_material, light_shadow_bias, light_cast_volumetric_shadow, light_contact_shadow_length, light_contact_shadow_length_in_ws, light_subtype, light_atmosphere_sun_light, light_atmosphere_sun_light_index, light_atmosphere_sun_disk_color_scale: { r, g, b, a }, light_attenuation_radius, light_source_radius, light_soft_source_radius, light_source_length, light_source_width, light_source_height, light_barn_door_angle, light_barn_door_length, light_source_texture, light_inner_cone_angle, light_outer_cone_angle, light_mobility, light_tags, light_level, light_world }
+//   @returns { light_name, light_found, light_message, light_class (owner actor class), light_type ("Light Component" for every light; the kind is light_subtype), light_position: { x, y, z }, light_rotation: { pitch, yaw, roll }, light_scale: { x, y, z } (owner actor transform), light_intensity, light_intensity_units? (point/spot/rect only: Unitless, Candelas, Lumens, EV or Nits), light_color: { r, g, b, a }, light_enabled, light_cast_shadows, light_affect_world, light_mobility, light_use_inverse_squared_falloff? (point/spot only), light_falloff_exponent? (point/spot only), light_lighting_channel_mask (1 = channel 0, 2 = channel 1, 4 = channel 2), light_temperature, light_use_temperature, light_indirect_lighting_intensity, light_volumetric_scattering_intensity, light_affect_translucent_lighting, light_use_ies_brightness, light_ies_brightness_scale, light_ies_texture, light_function_scale: { x, y, z }, light_function_fade_distance, light_function_disabled_brightness, light_function_material, light_shadow_bias, light_cast_volumetric_shadow, light_contact_shadow_length, light_contact_shadow_length_in_ws, light_subtype (DirectionalLight, PointLight, SpotLight, RectLight or Unknown), light_atmosphere_sun_light? (directional: 1 or 0), light_atmosphere_sun_light_index? (directional), light_atmosphere_sun_disk_color_scale?: { r, g, b, a } (directional), light_attenuation_radius? (point/spot/rect), light_source_radius? (point/spot), light_soft_source_radius? (point/spot), light_source_length? (point/spot), light_inner_cone_angle? (spot), light_outer_cone_angle? (spot), light_source_width? (rect), light_source_height? (rect), light_barn_door_angle? (rect), light_barn_door_length? (rect), light_source_texture? (rect), light_tags: [string], light_level, light_world }
 TSharedPtr<FJsonObject> HandleGetLightProperties(const TSharedPtr<FJsonObject>& Params)
 {
     FString LightName;
@@ -1427,7 +1435,7 @@ TSharedPtr<FJsonObject> HandleGetLightProperties(const TSharedPtr<FJsonObject>& 
     return UEAgentLightingImpl::DescribeLight(LightName, *Found.Actor, *Found.Light);
 }
 
-// MCP:set_light_properties - Set component-level light properties: attenuation radius, source radius/length, cone angles, color temperature, indirect/volumetric intensity, translucent lighting, plus RectLight source size + barn doors + source texture, IES profile (texture/brightness scale/use-brightness), light-function (material/scale/fade distance/disabled brightness), shadow bias, cast/volumetric shadow, contact-shadow length (+ world-space flag), and inverse-squared falloff. Round-trips with get_light_properties. Partial update (idempotent): only fields present are written; a field that doesn't apply to the light's type returns an honest note instead of an error. The edit is one undo step that marks the level dirty, nothing is saved, and a call that changes nothing leaves neither and says changed false. On a Static-mobility light a field whose engine setter skips static lights (IES, light function, shadow bias, cast flags, falloff, RectLight source and barn doors) is an error and nothing is written. Verify by read-back via get_light_properties (light_* keys).
+// MCP:set_light_properties - Set component-level properties of one light actor, found by object name (not Outliner label) in the first world context: attenuation and source radius/length, cone angles, temperature, indirect/volumetric intensity, translucency, RectLight source size, barn doors and texture, IES profile, light function, shadow bias, cast/volumetric shadows, contact shadows and inverse-squared falloff. Over set_properties it needs no component path, returns a note for a field that does not apply to the light's type, and on a Static-mobility light refuses, writing nothing, any field whose engine setter skips static lights (IES, light function, shadow bias, cast flags, falloff, RectLight source and barn doors). Only fields present change, as one undo step that dirties the level; nothing is saved; a no-op says changed false. Intensity: set_light_intensity; color: set_light_color. Read back with get_light_properties.
 //   @param light_name - Name of the light actor to modify.
 //   @param attenuation_radius - float, light reach — local lights only (Point/Spot/Rect).
 //   @param source_radius - float, soft source radius (Point/Spot).
