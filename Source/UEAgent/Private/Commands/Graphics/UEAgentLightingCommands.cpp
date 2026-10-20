@@ -1,6 +1,7 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
 #include "Commands/Common/McpEnumLabels.h"
+#include "Misc/EngineVersionComparison.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Engine/World.h"
 #include "Engine/Level.h"
@@ -486,7 +487,12 @@ namespace UEAgentLightingImpl
         Out->SetBoolField(TEXT("light_affect_translucent_lighting"), Light.bAffectTranslucentLighting != 0);
         Out->SetBoolField(TEXT("light_use_ies_brightness"), Light.bUseIESBrightness != 0);
         Out->SetBoolField(TEXT("light_cast_volumetric_shadow"), Light.bCastVolumetricShadow != 0);
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+        // 5.7 has no GetContactShadowLengthInWS(); 5.8's getter reads this same bitfield.
+        Out->SetBoolField(TEXT("light_contact_shadow_length_in_ws"), Light.ContactShadowLengthInWS != 0);
+#else
         Out->SetBoolField(TEXT("light_contact_shadow_length_in_ws"), Light.GetContactShadowLengthInWS());
+#endif
         Out->SetStringField(TEXT("light_ies_texture"), AssetPathOrEmpty(Light.IESTexture.Get()));
         Out->SetStringField(TEXT("light_function_material"), AssetPathOrEmpty(Light.LightFunctionMaterial.Get()));
         Out->SetObjectField(TEXT("light_function_scale"), mcp_common::VectorToJsonObject(Light.LightFunctionScale));
@@ -1575,7 +1581,11 @@ TSharedPtr<FJsonObject> HandleSetLightProperties(const TSharedPtr<FJsonObject>& 
             LightComponent->ContactShadowLengthInWS = NewVal;
             LightComponent->MarkRenderStateDirty();
         }
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+        Applied->SetBoolField(TEXT("contact_shadow_length_in_ws"), LightComponent->ContactShadowLengthInWS != 0);
+#else
         Applied->SetBoolField(TEXT("contact_shadow_length_in_ws"), LightComponent->GetContactShadowLengthInWS());
+#endif
     }
 
     ULocalLightComponent* Local = Cast<ULocalLightComponent>(LightComponent);

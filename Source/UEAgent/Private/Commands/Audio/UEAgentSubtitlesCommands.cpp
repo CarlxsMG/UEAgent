@@ -1,9 +1,14 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Misc/EngineVersionComparison.h" // UE_VERSION_OLDER_THAN: the UE 5.7 paths
 
 // Engine subtitles (USubtitleAssetUserData + FSubtitleAssetData — Runtime/Engine module,
 // header under Subtitles/; no extra module add needed)
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+#include "Subtitles/SubtitlesAndClosedCaptionsDelegates.h" // UE 5.7: the same types live here (5.8 moved them to SubtitlesAndClosedCaptionsTypes.h)
+#else
 #include "Subtitles/SubtitlesAndClosedCaptionsTypes.h"
+#endif
 
 // Engine / editor
 #include "Editor.h"                          // GEditor

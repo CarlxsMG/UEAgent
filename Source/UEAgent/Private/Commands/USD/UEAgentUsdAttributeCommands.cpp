@@ -379,7 +379,7 @@ TSharedPtr<FJsonObject> HandleGetUsdAttributeValue(const TSharedPtr<FJsonObject>
 //   @param prim_path [string!] - Absolute SdfPath of an existing prim on that stage, e.g. "/World/Cube".
 //   @param attr_name [string!] - Attribute name to set, e.g. "size"
 //   @param type_name [string] - USD type name of the attribute to create when it does not exist yet, e.g. "float" or "token"; required in that case, and ignored (with a note when it differs) for an existing attribute, whose declared type decides.
-//   @param value [object!] - The value: a JSON scalar, e.g. 2.5, "inherited" or true, a JSON array, e.g. [1, 0.5, 0] for a color3f or [[0, 0, 1]] for a float3[], or an object {"value": <value>} whose "type" key, if any, is not used; it is converted to the declared type of the attribute.
+//   @param value [object!] - The value: a JSON scalar, e.g. 2.5, "inherited" or true, a JSON array, e.g. [1, 0.5, 0] for a color3f or [[0, 0, 1]] for a float3[], or an object {"value": <value>} whose "type" key, if any, is not used; it is converted to the declared type of the attribute. On UE 5.7 a pathExpression value cannot be written (needs UE 5.8); reading one works.
 //   @param time [number] - Optional USD time code to author a time sample at, e.g. 24; when omitted the default value is authored
 //   @returns { prim_path: string, attr_name: string, set: bool, type_name: string, type: string, created: bool, time?: number, note?: string }
 

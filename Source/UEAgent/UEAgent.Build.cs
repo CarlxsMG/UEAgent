@@ -69,7 +69,6 @@ public class UEAgent : ModuleRules
 				"MassCommon",        // UMassEntityTraitBase + common fragments
 				"MassSpawner",       // AMassSpawner + FMassEntitySpawnRequest
 				"MassSignals",       // UMassSignalSubsystem (SignalEntity/SignalEntities/NamedSignals)
-				"MassCore",          // FMassEntityHandle/FMassEntityIndex/FMassEntitySubsystem core types (transitive of MassEntity)
 				"GameplayBehaviorsModule", // UGameplayBehaviorConfig/Subsystem
 				"Water",              // AWaterZone/AWaterBody/UWaterBodyComponent
 				"ProceduralMeshComponent", // UProceduralMeshComponent/UKismetProceduralMeshLibrary
@@ -86,7 +85,6 @@ public class UEAgent : ModuleRules
 				"InterchangeCommonParser",           // Parser base
 				"InterchangeMessages",               // Telemetry
 				"InterchangeExport",                 // Writers
-				"InterchangeAnalytics",              // Analytics
 				"InterchangeFbxParser",              // FBX-specific parser (Editor-only at runtime; minimal runtime API)
 				"GLTFCore",                          // Third-party Khronos glTF SDK
 				// (NOT "InterchangeAssets" -- that's a .uplugin plugin name, not a module name; enabled via UEAgent.uplugin's Plugins[])
@@ -107,6 +105,17 @@ public class UEAgent : ModuleRules
 				"ChaosVehicles",                      // UChaosWheeledVehicleMovementComponent/FChaosWheelSetup (CHAOSVEHICLES_API; Runtime module of the ChaosVehiclesPlugin, enabled in UEAgent.uplugin)
 			}
 		);
+
+		// Modules that exist only from UE 5.8 on. On 5.7 the Mass core types still live in MassEntity, and Interchange
+		// has no separate analytics module.
+		if (Target.Version.MajorVersion > 5 || Target.Version.MinorVersion >= 8)
+		{
+			PublicDependencyModuleNames.AddRange(new string[]
+			{
+				"MassCore",          // FMassEntityHandle/FMassEntityIndex/FMassEntitySubsystem core types (transitive of MassEntity)
+				"InterchangeAnalytics",
+			});
+		}
 		
 		// The editor itself: this is an editor-only plugin (the bridge is a UEditorSubsystem).
 		PrivateDependencyModuleNames.AddRange(

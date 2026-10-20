@@ -436,7 +436,7 @@ Read the playback settings of one audio section of a Level Sequence (path or bar
 | `sequence_name` | string | no | Alias for sequence_path. |
 | `section_index` | number | no | Index of the section on the resolved root audio track (default 0). |
 
-**Returns:** `{ sequence_path: string, section_class: string, section_index: int, sound_path: string, start_offset: int, volume: number, pitch: number, volume_key_count: int, pitch_key_count: int, looping: bool, play_until_finished: bool, suppress_subtitles: bool, override_attenuation: bool, attenuation_path: string }`
+**Returns:** `{ sequence_path: string, section_class: string, section_index: int, sound_path: string, start_offset: int, volume: number, pitch: number, volume_key_count: int, pitch_key_count: int, looping: bool, play_until_finished?: bool (needs UE 5.8), suppress_subtitles: bool, override_attenuation: bool, attenuation_path: string }`
 
 ## `get_channel_keyframes`
 
@@ -793,7 +793,7 @@ Set playback properties of one section (section_index) on a root audio track (au
 | `section_index` | number | no | Index of the section on the resolved root audio track (default 0). |
 | `sound_path` | string | no | Optional content path of a USoundBase to set as the section's sound. |
 | `looping` | boolean | no | Section repeating/looping (maps to SetRepeating, the engine's loop knob; omit to leave unchanged). |
-| `play_until_finished` | boolean | no | SetPlayUntilFinished (omit to leave unchanged). |
+| `play_until_finished` | boolean | no | SetPlayUntilFinished (omit to leave unchanged). Needs UE 5.8. |
 | `suppress_subtitles` | boolean | no | SetSuppressSubtitles (omit to leave unchanged). |
 | `override_attenuation` | boolean | no | SetOverrideAttenuation; must be true for attenuation_path to take effect (omit to leave unchanged). |
 | `attenuation_path` | string | no | Optional content path of a USoundAttenuation to set (only effective when override_attenuation is true). |
@@ -803,7 +803,7 @@ Set playback properties of one section (section_index) on a root audio track (au
 | `start_offset_frames` | number | no | Optional start offset in tick-resolution frames (the unit get_audio_section_properties reports), written as-is with fractions truncated; wins over start_offset_seconds. |
 | `start_offset_seconds` | number | no | Optional start offset in seconds, converted to tick-resolution frames and rounded; ignored when start_offset_frames is given. |
 
-**Returns:** `{ sequence_path: string, section_class: string, audio_track_index: int, section_index: int, sound: string, sound_set: bool, looping: bool, play_until_finished: bool, suppress_subtitles: bool, override_attenuation: bool, attenuation: string, attenuation_set: bool, volume?: number, volume_key_count?: int, volume_keys_written?: int, pitch?: number, pitch_key_count?: int, pitch_keys_written?: int, old_start_offset_frames?: int, new_start_offset_frames?: int, new_start_offset_seconds?: number, set: bool, changed: bool, saved: bool, save_error?: string, note?: string } -- the volume/pitch fields only when that value was passed (keys_written 0: the channel already held that constant), the start offset fields only when an offset was passed.`
+**Returns:** `{ sequence_path: string, section_class: string, audio_track_index: int, section_index: int, sound: string, sound_set: bool, looping: bool, play_until_finished?: bool (needs UE 5.8), suppress_subtitles: bool, override_attenuation: bool, attenuation: string, attenuation_set: bool, volume?: number, volume_key_count?: int, volume_keys_written?: int, pitch?: number, pitch_key_count?: int, pitch_keys_written?: int, old_start_offset_frames?: int, new_start_offset_frames?: int, new_start_offset_seconds?: number, set: bool, changed: bool, saved: bool, save_error?: string, note?: string } -- the volume/pitch fields only when that value was passed (keys_written 0: the channel already held that constant), the start offset fields only when an offset was passed.`
 
 ## `set_binding_channel_keyframe_interpolation`
 

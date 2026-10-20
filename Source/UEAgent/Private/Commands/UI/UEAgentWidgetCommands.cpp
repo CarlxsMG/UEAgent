@@ -1,5 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Misc/EngineVersionComparison.h" // UE_VERSION_OLDER_THAN: the UE 5.7 paths
 // JSON applier driven by the JSON (not by the struct) + dotted paths.
 // It is what makes it possible to write WidgetStyle.Normal.TintColor and KNOW whether it landed or was ignored.
 #include "Commands/Common/McpJsonPropertyApply.h"
@@ -68,7 +69,22 @@
 // WidgetTree structural edits via the SAME headless-safe primitives the Designer's
 // F2/drag-reparent/duplicate use (UWidgetBlueprint* + UWidget*, no live FWidgetBlueprintEditor
 // required -- see WidgetBlueprintOperationUtils.cpp).
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+// UE 5.7 has no WidgetBlueprintOperationUtils.h: its VerifyWidgetRename / RenameWidget / MoveWidget are ported
+// below (VerifyWidgetRename_Widget, RenameWidget_Widget, MoveWidget_Widget) onto these 5.7 headers.
+#include "WidgetBlueprintEditor.h"                      // FWidgetBlueprintEditor: the open Designer and its preview
+#include "WidgetBlueprintEditorUtils.h"                 // IsBindWidgetProperty, ReplaceDesiredFocus, named slots, slot properties
+#include "UIComponentWidgetBlueprintExtension.h"        // UI Components: the Blueprint's record of a renamed widget
+#include "Extensions/UIComponentUserWidgetExtension.h"  // UI Components: the preview's record of it
+#include "Kismet2/Kismet2NameValidators.h"              // FKismetNameValidator
+#include "Components/NamedSlotInterface.h"              // INamedSlotInterface (MoveWidget out of a named slot)
+#include "K2Node_Variable.h"                            // variable getters re-pinned after a rename
+#include "ScopedTransaction.h"                          // the rename's undo step
+#include "Subsystems/AssetEditorSubsystem.h"            // FindEditorForAsset: is a Designer open on the Blueprint
+#include "Editor.h"                                     // GEditor
+#else
 #include "WidgetBlueprintOperationUtils.h"
+#endif
 
 // MovieScene track/keyframe authoring on a UWidgetAnimation's inner UMovieScene.
 #include "Tracks/MovieScenePropertyTrack.h"
@@ -3121,14 +3137,23 @@ TSharedPtr<FJsonObject> HandleClickPieWidget(const TSharedPtr<FJsonObject>& Para
     if (ScriptDelegate)
     {
         UFunction* SignatureFunction = DelegateProp->SignatureFunction;
+        // 5.8 renamed TMulticastScriptDelegate::ProcessMulticastDelegate to ProcessDelegate.
         if (SignatureFunction && SignatureFunction->ParmsSize > 0)
         {
             FStructOnScope ParamFrame(SignatureFunction);
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+            ScriptDelegate->ProcessMulticastDelegate<UObject>(ParamFrame.GetStructMemory());
+#else
             ScriptDelegate->ProcessDelegate<UObject>(ParamFrame.GetStructMemory());
+#endif
         }
         else
         {
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+            ScriptDelegate->ProcessMulticastDelegate<UObject>(nullptr);
+#else
             ScriptDelegate->ProcessDelegate<UObject>(nullptr);
+#endif
         }
     }
 
@@ -3391,6 +3416,528 @@ TSharedPtr<FJsonObject> HandleSetPieWidgetValue(const TSharedPtr<FJsonObject>& P
     return mcp_common::MakeOkReply(Resp);
 }
 
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+// ---------------------------------------------------------------------------
+// UE 5.7 has no FWidgetBlueprintOperationUtils (it arrived in 5.8): 5.7's own FWidgetBlueprintEditorUtils::
+// VerifyWidgetRename / RenameWidget need an open FWidgetBlueprintEditor, and 5.7 has no MoveWidget at all.
+// These are the 5.8 bodies of VerifyWidgetRename, RenameWidget and MoveWidget (WidgetBlueprintOperationUtils.cpp),
+// statement for statement, on what 5.7's UMGEditor exports; an open Designer is handled as 5.8 handles it.
+// ---------------------------------------------------------------------------
+namespace
+{
+    // Private::SanitizeWidgetName: the slug an object name can hold, or the current name when nothing survives.
+    FName SanitizeWidgetName_Widget(const FString& NewName, const FName CurrentName)
+    {
+        FString GeneratedName = SlugStringForValidName(NewName);
+
+        // If the new name is empty (for example, because it was composed entirely of invalid characters).
+        // then we'll use the current name
+        if (GeneratedName.IsEmpty())
+        {
+            return CurrentName;
+        }
+
+        const FName GeneratedFName(*GeneratedName);
+        check(GeneratedFName.IsValidXName(INVALID_OBJECTNAME_CHARACTERS));
+
+        return GeneratedFName;
+    }
+
+    // Private::GetWidgetBlueprintEditorIfOpen: the Designer open on WidgetBlueprint (not focused), or null.
+    FWidgetBlueprintEditor* GetWidgetBlueprintEditorIfOpen_Widget(UWidgetBlueprint* WidgetBlueprint)
+    {
+        constexpr bool bFocusIfOpen = false;
+        return static_cast<FWidgetBlueprintEditor*>(GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->FindEditorForAsset(WidgetBlueprint, bFocusIfOpen));
+    }
+
+    // Private::GetPreviewWidgetFromTemplate: the open Designer's preview of TemplateWidget, or null.
+    UWidget* GetPreviewWidgetFromTemplate_Widget(FWidgetBlueprintEditor* BlueprintEditor, UWidget* TemplateWidget)
+    {
+        if (TemplateWidget && BlueprintEditor)
+        {
+            if (UUserWidget* PreviewRoot = BlueprintEditor->GetPreview())
+            {
+                UWidget* PreviewWidget = PreviewRoot->GetWidgetFromName(TemplateWidget->GetFName());
+                return PreviewWidget;
+            }
+        }
+        return nullptr;
+    }
+
+    // FWidgetBlueprintOperationUtils::VerifyWidgetRename (5.8).
+    bool VerifyWidgetRename_Widget(UWidgetBlueprint* WidgetBlueprint, UWidget* TemplateWidget, const FText& NewName, FText& OutErrorMessage)
+    {
+        if (NewName.IsEmptyOrWhitespace())
+        {
+            OutErrorMessage = NSLOCTEXT("UMG", "EmptyWidgetName", "Empty Widget Name");
+            return false;
+        }
+
+        const FString& NewNameString = NewName.ToString();
+
+        if (NewNameString.Len() >= NAME_SIZE)
+        {
+            OutErrorMessage = NSLOCTEXT("UMG", "WidgetNameTooLong", "Widget Name is Too Long");
+            return false;
+        }
+
+        if (!TemplateWidget)
+        {
+            return false;
+        }
+
+        // Slug the new name down to a valid object name
+        const FName NewNameSlug = SanitizeWidgetName_Widget(NewNameString, TemplateWidget->GetFName());
+
+        UWidget* ExistingTemplate = WidgetBlueprint->WidgetTree->FindWidget(NewNameSlug);
+
+        bool bIsSameWidget = false;
+        if (ExistingTemplate != nullptr)
+        {
+            if (TemplateWidget != ExistingTemplate)
+            {
+                OutErrorMessage = NSLOCTEXT("UMG", "ExistingWidgetName", "Existing Widget Name");
+                return false;
+            }
+            else
+            {
+                bIsSameWidget = true;
+            }
+        }
+        else
+        {
+            FWidgetBlueprintEditor* BlueprintEditor = GetWidgetBlueprintEditorIfOpen_Widget(WidgetBlueprint);
+            UWidget* PreviewWidget = GetPreviewWidgetFromTemplate_Widget(BlueprintEditor, TemplateWidget);
+
+            // Not an existing widget in the tree BUT it still mustn't create a UObject name clash
+            if (PreviewWidget)
+            {
+                // Dummy rename with flag REN_Test returns if rename is possible
+                if (!PreviewWidget->Rename(*NewNameSlug.ToString(), nullptr, REN_Test))
+                {
+                    OutErrorMessage = NSLOCTEXT("UMG", "ExistingObjectName", "Existing Object Name");
+                    return false;
+                }
+            }
+            UWidget* RenamedTemplateWidget = TemplateWidget;
+            // Dummy rename with flag REN_Test returns if rename is possible
+            if (!RenamedTemplateWidget->Rename(*NewNameSlug.ToString(), nullptr, REN_Test))
+            {
+                OutErrorMessage = NSLOCTEXT("UMG", "ExistingObjectName", "Existing Object Name");
+                return false;
+            }
+        }
+
+        FObjectPropertyBase* Property = CastField<FObjectPropertyBase>(WidgetBlueprint->ParentClass->FindPropertyByName(NewNameSlug));
+        if (Property && FWidgetBlueprintEditorUtils::IsBindWidgetProperty(Property))
+        {
+            if (!TemplateWidget->IsA(Property->PropertyClass))
+            {
+                OutErrorMessage = FText::Format(NSLOCTEXT("UMG", "WidgetBindingOfWrongType", "Widget Binding is not type {0}"), Property->PropertyClass->GetDisplayNameText());
+                return false;
+            }
+            return true;
+        }
+
+        FKismetNameValidator Validator(WidgetBlueprint);
+
+        // For variable comparison, use the slug
+        EValidatorResult ValidatorResult = Validator.IsValid(NewNameSlug);
+
+        if (ValidatorResult != EValidatorResult::Ok)
+        {
+            if (bIsSameWidget && (ValidatorResult == EValidatorResult::AlreadyInUse || ValidatorResult == EValidatorResult::ExistingName))
+            {
+                // Continue successfully
+            }
+            else
+            {
+                OutErrorMessage = INameValidatorInterface::GetErrorText(NewNameString, ValidatorResult);
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    // FWidgetBlueprintOperationUtils::RenameWidget (5.8). Two calls of it have no 5.7 form and are written out:
+    // FUIComponentUtils::OnWidgetRenamed takes a TSharedRef to an open editor in 5.7, so its 5.8 body (the
+    // Blueprint's UI Components extension, then the open preview's) is inlined; and
+    // FUIComponentUtils::ReplaceComponentVariableReferences does not exist in 5.7 (nor does 5.7's own Designer
+    // rename call anything like it), so it is left out.
+    bool RenameWidget_Widget(UWidgetBlueprint* WidgetBlueprint, UWidget* Widget, const FString& NewDisplayName)
+    {
+        if (!WidgetBlueprint || !Widget)
+        {
+            return false;
+        }
+
+        const FName OldObjectName = Widget->GetFName();
+
+        UClass* ParentClass = WidgetBlueprint->ParentClass;
+        check(ParentClass);
+
+        bool bRenamed = false;
+
+        TSharedPtr<INameValidatorInterface> NameValidator = MakeShareable(new FKismetNameValidator(WidgetBlueprint, OldObjectName));
+
+        const FName NewFName = SanitizeWidgetName_Widget(NewDisplayName, Widget->GetFName());
+
+        FObjectPropertyBase* ExistingProperty = CastField<FObjectPropertyBase>(ParentClass->FindPropertyByName(NewFName));
+        const bool bBindWidget = ExistingProperty && FWidgetBlueprintEditorUtils::IsBindWidgetProperty(ExistingProperty) && Widget->IsA(ExistingProperty->PropertyClass);
+
+        // NewName should be already validated. But one must make sure that NewTemplateName is also unique.
+        const bool bUniqueNameForTemplate = (EValidatorResult::Ok == NameValidator->IsValid(NewFName) || bBindWidget);
+        if (bUniqueNameForTemplate)
+        {
+            // Stringify the FNames
+            const FString NewNameStr = NewFName.ToString();
+            const FString OldNameStr = OldObjectName.ToString();
+
+            const FScopedTransaction Transaction(NSLOCTEXT("UMG", "RenameWidget", "Rename Widget"));
+
+            // Rename Template
+            WidgetBlueprint->Modify();
+            Widget->Modify();
+
+            WidgetBlueprint->OnVariableRenamed(OldObjectName, NewFName);
+
+            FWidgetBlueprintEditor* BlueprintEditor = GetWidgetBlueprintEditorIfOpen_Widget(WidgetBlueprint);
+
+            if (BlueprintEditor)
+            {
+                // Rename Preview before renaming the template widget so the preview widget can be found
+                UWidget* WidgetPreview = BlueprintEditor->GetReferenceFromTemplate(Widget).GetPreview();
+                if (WidgetPreview)
+                {
+                    WidgetPreview->SetDisplayLabel(NewDisplayName);
+                    WidgetPreview->Rename(*NewNameStr);
+                }
+
+                if (!WidgetPreview || WidgetPreview != Widget)
+                {
+                    // Find and update all variable references in the graph
+                    Widget->SetDisplayLabel(NewDisplayName);
+                    Widget->Rename(*NewNameStr);
+                }
+            }
+            else
+            {
+                Widget->SetDisplayLabel(NewDisplayName);
+                Widget->Rename(*NewNameStr);
+            }
+#if UE_HAS_WIDGET_GENERATED_BY_CLASS
+            // When a widget gets renamed we need to check any existing blueprint getters that may be placed
+            // in the graphs to fix up their state
+            if (Widget->bIsVariable)
+            {
+                TArray<UEdGraph*> AllGraphs;
+                WidgetBlueprint->GetAllGraphs(AllGraphs);
+
+                for (const UEdGraph* CurrentGraph : AllGraphs)
+                {
+                    TArray<UK2Node_Variable*> GraphNodes;
+                    CurrentGraph->GetNodesOfClass(GraphNodes);
+
+                    for (UK2Node_Variable* CurrentNode : GraphNodes)
+                    {
+                        UClass* SelfClass = WidgetBlueprint->GeneratedClass;
+                        UClass* VariableParent = CurrentNode->VariableReference.GetMemberParentClass(SelfClass);
+
+                        if (SelfClass == VariableParent)
+                        {
+                            // Reconstruct this node in order to give it orphan pins and invalidate any
+                            // connections that will no longer be valid
+                            if (NewFName == CurrentNode->GetVarName())
+                            {
+                                UEdGraphPin* ValuePin = CurrentNode->GetValuePin();
+                                ValuePin->Modify();
+                                CurrentNode->Modify();
+
+                                // Make the old pin an orphan and add a new pin of the proper type
+                                CurrentNode->CreatePin(
+                                    ValuePin->Direction,
+                                    ValuePin->PinType.PinCategory,
+                                    ValuePin->PinType.PinSubCategory,
+                                    Widget->WidgetGeneratedByClass.Get(), // This generated object is what needs to patched up
+                                    NewFName
+                                );
+
+                                ValuePin->bOrphanedPin = true;
+                            }
+                        }
+                    }
+                }
+            }
+#endif
+
+            // Replace the Desired focus Widget name if it match the renamed widget
+            FWidgetBlueprintEditorUtils::ReplaceDesiredFocus(WidgetBlueprint, OldObjectName, NewFName);
+
+            // Find and update all binding references in the widget blueprint
+            for (FDelegateEditorBinding& Binding : WidgetBlueprint->Bindings)
+            {
+                if (Binding.ObjectName == OldNameStr)
+                {
+                    Binding.ObjectName = NewNameStr;
+                }
+            }
+
+            // Update widget blueprint names
+            for (UWidgetAnimation* WidgetAnimation : WidgetBlueprint->Animations)
+            {
+                for (FWidgetAnimationBinding& AnimBinding : WidgetAnimation->AnimationBindings)
+                {
+                    if (AnimBinding.WidgetName == OldObjectName)
+                    {
+                        AnimBinding.WidgetName = NewFName;
+
+                        WidgetAnimation->MovieScene->Modify();
+
+                        if (AnimBinding.SlotWidgetName == NAME_None)
+                        {
+                            FMovieScenePossessable* Possessable = WidgetAnimation->MovieScene->FindPossessable(AnimBinding.AnimationGuid);
+                            if (Possessable)
+                            {
+                                Possessable->SetName(NewFName.ToString());
+                            }
+                        }
+                        else
+                        {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Update any explicit widget bindings.
+            WidgetBlueprint->WidgetTree->ForEachWidget([OldObjectName, NewFName](UWidget* TreeWidget) {
+                if (TreeWidget->Navigation)
+                {
+                    TreeWidget->Navigation->SetFlags(RF_Transactional);
+                    TreeWidget->Navigation->Modify();
+                    TreeWidget->Navigation->TryToRenameBinding(OldObjectName, NewFName);
+                }
+                });
+
+            // If we use Components, make sure to rename the target (5.8's FUIComponentUtils::OnWidgetRenamed).
+            if (UUIComponentWidgetBlueprintExtension* Extension = UWidgetBlueprintExtension::GetExtension<UUIComponentWidgetBlueprintExtension>(WidgetBlueprint))
+            {
+                Extension->RenameWidget(OldObjectName, NewFName);
+            }
+            if (BlueprintEditor)
+            {
+                if (const UUserWidget* PreviewWidget = BlueprintEditor->GetPreview())
+                {
+                    if (UUIComponentUserWidgetExtension* UserWidgetExtension = PreviewWidget->GetExtension<UUIComponentUserWidgetExtension>())
+                    {
+                        UserWidgetExtension->RenameWidget(OldObjectName, NewFName);
+                    }
+                }
+            }
+
+            // Validate child blueprints and adjust variable names to avoid a potential name collision
+            FBlueprintEditorUtils::ValidateBlueprintChildVariables(WidgetBlueprint, NewFName);
+
+            // Refresh references and flush editors
+            FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WidgetBlueprint);
+
+            // Update Variable References and
+            // Update Event References to member variables
+            FBlueprintEditorUtils::ReplaceVariableReferences(WidgetBlueprint, OldObjectName, NewFName);
+
+            bRenamed = true;
+        }
+
+        return bRenamed;
+    }
+
+    // FWidgetBlueprintOperationUtils::CanAddToParent (5.8).
+    bool CanAddToParent_Widget(UWidgetBlueprint* WidgetBlueprint, UWidget* ParentWidget, FText& OutErrorMessage)
+    {
+        FWidgetBlueprintEditor* BlueprintEditor = GetWidgetBlueprintEditorIfOpen_Widget(WidgetBlueprint);
+        UWidget* ParentPreviewWidget = GetPreviewWidgetFromTemplate_Widget(BlueprintEditor, ParentWidget);
+
+        if (ParentPreviewWidget && ParentPreviewWidget->IsLockedInDesigner())
+        {
+            OutErrorMessage = NSLOCTEXT("UMG", "LockedWidget", "Widget is locked.");
+            return false;
+        }
+
+        if (ParentWidget)
+        {
+            UPanelWidget* NewParent = Cast<UPanelWidget>(ParentWidget);
+            if (!NewParent)
+            {
+                OutErrorMessage = NSLOCTEXT("UMG", "CantHaveChildren", "Widget can't have children.");
+                return false;
+            }
+
+            if (!NewParent->CanAddMoreChildren())
+            {
+                OutErrorMessage = NSLOCTEXT("UMG", "NoAdditionalChildren", "Widget can't accept additional children.");
+                return false;
+            }
+        }
+        else if (WidgetBlueprint->WidgetTree->RootWidget != nullptr)
+        {
+            OutErrorMessage = NSLOCTEXT("UMG", "CantHaveChildren", "Widget can't have children.");
+            return false;
+        }
+
+        return true;
+    }
+
+    // FWidgetBlueprintOperationUtils::IsParentChildCycleFree (5.8).
+    bool IsParentChildCycleFree_Widget(UWidgetBlueprint* WidgetBlueprint, UWidget* ChildWidget, UWidget* ParentWidget)
+    {
+        if (!WidgetBlueprint || !ChildWidget || !ParentWidget)
+        {
+            return true;
+        }
+
+        bool bFoundParentInChildSet = false;
+        WidgetBlueprint->WidgetTree->ForWidgetAndChildren(ChildWidget, [&](UWidget* TreeWidget) {
+            if (ParentWidget == TreeWidget)
+            {
+                bFoundParentInChildSet = true;
+            }
+            });
+
+        return !bFoundParentInChildSet;
+    }
+
+    // FWidgetBlueprintOperationUtils::MoveWidget (5.8).
+    bool MoveWidget_Widget(UWidgetBlueprint* WidgetBlueprint, UWidget* Widget, UPanelWidget* NewParent, int32 ChildIndex, FText& OutErrorMessage)
+    {
+        if (!WidgetBlueprint || !Widget || !NewParent)
+        {
+            OutErrorMessage = NSLOCTEXT("UMG", "CantMoveWidgetWithoutValidParameters", "A valid widget instance, parent instance, and widget blueprint is required to move a widget.");
+            return false;
+        }
+
+        if (!CanAddToParent_Widget(WidgetBlueprint, NewParent, OutErrorMessage))
+        {
+            return false;
+        }
+
+        if (!IsParentChildCycleFree_Widget(WidgetBlueprint, Widget, NewParent))
+        {
+            OutErrorMessage = NSLOCTEXT("UMG", "CantMakeWidgetChildOfItsChildren", "Can't make widget a child of its children.");
+            return false;
+        }
+
+        NewParent->SetFlags(RF_Transactional);
+        NewParent->Modify();
+
+        Widget->SetFlags(RF_Transactional);
+        Widget->Modify();
+        if (ChildIndex > -1)
+        {
+            // If we're inserting at an index, and the widget we're moving is already
+            // in the hierarchy before the point we're moving it to, we need to reduce the index
+            // count by one, because the whole set is about to be shifted when it's removed.
+            const bool bInsertInSameParent = Widget->GetParent() == NewParent;
+            const bool bNeedToDropIndex = NewParent->GetChildIndex(Widget) < ChildIndex;
+
+            if (bInsertInSameParent && bNeedToDropIndex)
+            {
+                ChildIndex = ChildIndex - 1;
+            }
+        }
+
+        // We don't know if this widget is being removed from a named slot and RemoveFromParent is not enough to take care of this
+        UWidget* NamedSlotHostWidget = FWidgetBlueprintEditorUtils::FindNamedSlotHostWidgetForContent(Widget, WidgetBlueprint->WidgetTree);
+        if (NamedSlotHostWidget != nullptr)
+        {
+            if (TScriptInterface<INamedSlotInterface> NamedSlotHost = TScriptInterface<INamedSlotInterface>(NamedSlotHostWidget))
+            {
+                NamedSlotHostWidget->SetFlags(RF_Transactional);
+                NamedSlotHostWidget->Modify();
+                FWidgetBlueprintEditorUtils::RemoveNamedSlotHostContent(Widget, NamedSlotHost);
+            }
+        }
+
+        // If this widget inherits from another one, we can't access the inherited named slots by traversing the widget tree from its root.
+        // So we have to look at the NamedSlotBindings to find a named slot for the moved content.
+        else if (WidgetBlueprint->ParentClass && WidgetBlueprint->ParentClass != UUserWidget::StaticClass())
+        {
+            TArray<FName> SlotNames;
+            WidgetBlueprint->WidgetTree->GetSlotNames(SlotNames);
+            for (FName SlotName : SlotNames)
+            {
+                if (UWidget* SlotContent = WidgetBlueprint->WidgetTree->GetContentForSlot(SlotName))
+                {
+                    if (SlotContent == Widget)
+                    {
+                        WidgetBlueprint->WidgetTree->SetContentForSlot(SlotName, nullptr);
+                    }
+                }
+            }
+        }
+
+        const FName OriginalWidgetName = Widget->GetFName();
+        UPanelWidget* OriginalParent = Widget->GetParent();
+        UWidgetBlueprint* OriginalBP = nullptr;
+
+        // The widget's parent is changing
+        if (OriginalParent != NewParent)
+        {
+            NewParent->SetFlags(RF_Transactional);
+            NewParent->Modify();
+
+            WidgetBlueprint->WidgetTree->SetFlags(RF_Transactional);
+            WidgetBlueprint->WidgetTree->Modify();
+
+            UWidgetTree* OriginalWidgetTree = Cast<UWidgetTree>(Widget->GetOuter());
+
+            if (OriginalWidgetTree != nullptr && UWidgetTree::TryMoveWidgetToNewTree(Widget, WidgetBlueprint->WidgetTree))
+            {
+                OriginalWidgetTree->SetFlags(RF_Transactional);
+                OriginalWidgetTree->Modify();
+
+                OriginalBP = OriginalWidgetTree->GetTypedOuter<UWidgetBlueprint>();
+            }
+        }
+
+        TMap<FName, FString> ExportedSlotProperties;
+        FWidgetBlueprintEditorUtils::ExportPropertiesToText(Widget->Slot, ExportedSlotProperties);
+
+        Widget->RemoveFromParent();
+
+        if (OriginalBP != nullptr && OriginalBP != WidgetBlueprint)
+        {
+            OriginalBP->OnVariableRemoved(OriginalWidgetName);
+            FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(OriginalBP);
+        }
+
+        UPanelSlot* NewSlot = nullptr;
+        if (ChildIndex > -1)
+        {
+            NewSlot = NewParent->InsertChildAt(ChildIndex, Widget);
+            ChildIndex = ChildIndex + 1;
+        }
+        else
+        {
+            NewSlot = NewParent->AddChild(Widget);
+        }
+        check(NewSlot);
+
+        if (OriginalBP != nullptr && OriginalBP != WidgetBlueprint)
+        {
+            WidgetBlueprint->OnVariableAdded(Widget->GetFName());
+        }
+
+        // Import the old slot properties
+        FWidgetBlueprintEditorUtils::ImportPropertiesFromText(NewSlot, ExportedSlotProperties);
+
+        FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WidgetBlueprint);
+
+        return true;
+    }
+}
+#endif
+
 // ---------------------------------------------------------------------------
 // rename_widget
 // ---------------------------------------------------------------------------
@@ -3441,13 +3988,21 @@ TSharedPtr<FJsonObject> HandleRenameWidget(const TSharedPtr<FJsonObject>& Params
     }
 
     FText VerifyError;
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    if (!VerifyWidgetRename_Widget(WidgetBP, Widget, FText::FromString(NewName), VerifyError))
+#else
     if (!FWidgetBlueprintOperationUtils::VerifyWidgetRename(WidgetBP, Widget, FText::FromString(NewName), VerifyError))
+#endif
     {
         return mcp_common::MakeErrorReply(
             FString::Printf(TEXT("Cannot rename '%s' to '%s': %s"), *OldName, *NewName, *VerifyError.ToString()));
     }
 
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    const bool bRenamed = RenameWidget_Widget(WidgetBP, Widget, NewName);
+#else
     const bool bRenamed = FWidgetBlueprintOperationUtils::RenameWidget(WidgetBP, Widget, NewName);
+#endif
     if (!bRenamed)
     {
         return mcp_common::MakeErrorReply(
@@ -3540,7 +4095,11 @@ TSharedPtr<FJsonObject> HandleReparentWidget(const TSharedPtr<FJsonObject>& Para
     }
 
     FText MoveError;
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    const bool bMoved = MoveWidget_Widget(WidgetBP, Widget, NewParent, TargetIndex, MoveError);
+#else
     const bool bMoved = FWidgetBlueprintOperationUtils::MoveWidget(WidgetBP, Widget, NewParent, TargetIndex, MoveError);
+#endif
     if (!bMoved)
     {
         return mcp_common::MakeErrorReply(FString::Printf(
@@ -3786,7 +4345,11 @@ TSharedPtr<FJsonObject> HandleDuplicateWidget(const TSharedPtr<FJsonObject>& Par
     }
 
     FText VerifyError;
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    if (!VerifyWidgetRename_Widget(WidgetBP, NewWidget, FText::FromString(NewName), VerifyError))
+#else
     if (!FWidgetBlueprintOperationUtils::VerifyWidgetRename(WidgetBP, NewWidget, FText::FromString(NewName), VerifyError))
+#endif
     {
         // The duplicate was constructed but never attached to the tree -- a plain rename-to-transient
         // is enough to discard it cleanly (nothing else references it yet).
@@ -3794,7 +4357,11 @@ TSharedPtr<FJsonObject> HandleDuplicateWidget(const TSharedPtr<FJsonObject>& Par
         return mcp_common::MakeErrorReply(FString::Printf(
             TEXT("duplicate_widget: cannot name the duplicate '%s': %s"), *NewName, *VerifyError.ToString()));
     }
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    RenameWidget_Widget(WidgetBP, NewWidget, NewName);
+#else
     FWidgetBlueprintOperationUtils::RenameWidget(WidgetBP, NewWidget, NewName);
+#endif
 
     UPanelSlot* NewSlot = TargetParent->AddChild(NewWidget);
     if (!NewSlot)

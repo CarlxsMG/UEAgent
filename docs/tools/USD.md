@@ -555,7 +555,7 @@ Author one attribute value on a prim of a registered USD stage, at the current e
 | `prim_path` | string | yes | Absolute SdfPath of an existing prim on that stage, e.g. "/World/Cube". |
 | `attr_name` | string | yes | Attribute name to set, e.g. "size" |
 | `type_name` | string | no | USD type name of the attribute to create when it does not exist yet, e.g. "float" or "token"; required in that case, and ignored (with a note when it differs) for an existing attribute, whose declared type decides. |
-| `value` | any | no | The value: a JSON scalar, e.g. 2.5, "inherited" or true, a JSON array, e.g. [1, 0.5, 0] for a color3f or [[0, 0, 1]] for a float3[], or an object {"value": &lt;value>} whose "type" key, if any, is not used; it is converted to the declared type of the attribute. |
+| `value` | any | no | The value: a JSON scalar, e.g. 2.5, "inherited" or true, a JSON array, e.g. [1, 0.5, 0] for a color3f or [[0, 0, 1]] for a float3[], or an object {"value": &lt;value>} whose "type" key, if any, is not used; it is converted to the declared type of the attribute. On UE 5.7 a pathExpression value cannot be written (needs UE 5.8); reading one works. |
 | `time` | number | no | Optional USD time code to author a time sample at, e.g. 24; when omitted the default value is authored |
 
 **Returns:** `{ prim_path: string, attr_name: string, set: bool, type_name: string, type: string, created: bool, time?: number, note?: string }`
@@ -584,7 +584,7 @@ Author one metadata field (e.g. "comment", "kind", "customData", "apiSchemas", o
 | `prim_path` | string | yes | Absolute SdfPath of an existing prim, e.g. "/World/Cube". |
 | `key` | string | yes | Registered USD prim metadata field, e.g. "comment", "kind", "customData" or "apiSchemas"; a key USD does not register as prim metadata fails with success false and set=false. |
 | `stage_name` | string | no | Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier. |
-| `value` | any | no | The value itself (a scalar, an array, or an object of dictionary entries) or {type?, value}. It is converted to the field's type when that is known, and type is then not used; else type, or the JSON type, decides (bool, number as double, string, object as dictionary). A list op is {"explicit": [...]} or {"prepended": [...], "appended", "deleted", "ordered", "added"}, a reference item "@a.usda@&lt;/Prim>", an integer list op item a whole number. |
+| `value` | any | no | The value itself (a scalar, an array, or an object of dictionary entries) or {type?, value}. It is converted to the field's type when that is known, and type is then not used; else type, or the JSON type, decides (bool, number as double, string, object as dictionary). A list op is {"explicit": [...]} or {"prepended": [...], "appended", "deleted", "ordered", "added"}, a reference item "@a.usda@&lt;/Prim>", an integer list op item a whole number. On UE 5.7 an integer list op (int, uint, int64 or uint64) cannot be written (needs UE 5.8); reading one works. |
 
 **Returns:** `{ set: bool, prim_path: string, key: string, value: object, declared_type?: string, errors?: [string] }`
 

@@ -8,7 +8,7 @@ after.
 
 ## Get started
 
-1. Download `UEAgent-<version>-UE5.8-Win64.zip` from the
+1. Download `UEAgent-<version>-UE5.8-Win64.zip` (or `-UE5.7-`, for Unreal Engine 5.7) from the
    [latest release](https://github.com/CarlxsMG/UEAgent/releases/latest) and unzip it into
    `<YourProject>/Plugins/`. It is precompiled: no compiler is needed, even in a Blueprint-only
    project.

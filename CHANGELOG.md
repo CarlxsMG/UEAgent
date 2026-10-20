@@ -4,6 +4,30 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 ## Unreleased
 
+## 2.1.0 - 2026-10-20
+
+UEAgent runs on Unreal Engine 5.7 as well as 5.8: one source tree, and a precompiled zip for each engine.
+
+### Added
+
+- **Unreal Engine 5.7 support.** Where 5.8 added or renamed an API, the 5.7 build uses the 5.7 equivalent, so the
+  tools behave the same on both engines. Each release ships `UEAgent-<version>-UE5.7-Win64.zip` next to the 5.8 zip.
+  Both are built and tested separately: 2528 checks on 5.8, and 2490 on 5.7.
+- A few things need 5.8, because 5.7 has no API for them. On 5.7 they answer an error that says so and change nothing:
+  - `apply_adaptive_remesh`;
+  - `add_field_node` with `node_type` RotatedRadialVector;
+  - `add_chooser_column` with `column_type` Name or OutputName;
+  - `set_modulation_parameter_settings` with `clamp_to_normalized_range`;
+  - `set_audio_section_properties` with `play_until_finished`;
+  - on USD stages, writing a path expression (`set_usd_attribute_value`) or an integer list op
+    (`set_usd_prim_metadata`). On 5.7, whose USD is 25.08, writing such a value closes the editor; reading one
+    works.
+
+### Fixed
+
+- On 5.7, `set_usd_prim_metadata` replacing a held dictionary (such as `customData`) closed the editor. The write now
+  runs in USD's allocator scope.
+
 ## 2.0.2 - 2026-10-20
 
 Tools that do the same kind of job now say which one to pick, and about forty tools stop reporting success for

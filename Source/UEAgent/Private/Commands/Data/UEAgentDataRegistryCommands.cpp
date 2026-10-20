@@ -1,5 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Commands/Data/DataAuthoringUtils.h"       // OtherClassAtPathReply
 
 // DataRegistry plugin (DataRegistry module — Build.cs dep; plugin must be enabled)
@@ -827,7 +828,13 @@ TSharedPtr<FJsonObject> HandleRemoveDataRegistrySource(const TSharedPtr<FJsonObj
         {
             TargetIndex = RequestedIndex;
             // Report the SourceTable of the slot being removed, if it is a DataTable source.
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+            // 5.7 has no UDataRegistry::GetDataSources(); read the same protected DataSources[] by reflection.
+            TArray<UDataRegistrySource*> Sources;
+            ReadDataSourcesReflective(Registry, Sources);
+#else
             const TArray<TObjectPtr<UDataRegistrySource>>& Sources = Registry->GetDataSources();
+#endif
             if (Sources.IsValidIndex(TargetIndex))
             {
                 if (const UDataRegistrySource_DataTable* DTSrc =
@@ -848,7 +855,13 @@ TSharedPtr<FJsonObject> HandleRemoveDataRegistrySource(const TSharedPtr<FJsonObj
             WantPath = WantTable->GetPathName();
         }
 
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+        // 5.7 has no UDataRegistry::GetDataSources(); read the same protected DataSources[] by reflection.
+        TArray<UDataRegistrySource*> Sources;
+        ReadDataSourcesReflective(Registry, Sources);
+#else
         const TArray<TObjectPtr<UDataRegistrySource>>& Sources = Registry->GetDataSources();
+#endif
         int32 MatchCount = 0;
         for (int32 i = 0; i < Sources.Num(); ++i)
         {

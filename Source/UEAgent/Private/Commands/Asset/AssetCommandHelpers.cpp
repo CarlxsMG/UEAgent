@@ -1,5 +1,6 @@
 #include "Commands/Asset/AssetCommandHelpers.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Misc/EngineVersionComparison.h" // UE_VERSION_OLDER_THAN: the UE 5.7 paths
 #include "AssetRegistry/ARFilter.h"
 #include "AssetRegistry/IAssetRegistry.h"
 #include "Components/ActorComponent.h"
@@ -179,7 +180,11 @@ namespace AssetCommandHelpers
         }
         const FString AssetPath = Asset->GetPathName();
         TArray<UObject*> Inner;
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+        GetObjectsWithOuter(Asset, Inner, /*bIncludeNestedObjects*/ true, RF_NoFlags, EInternalObjectFlags::Garbage); // UE 5.7: a bool, no EGetObjectsFlags
+#else
         GetObjectsWithOuter(Asset, Inner, EGetObjectsFlags::IncludeNestedObjects, RF_NoFlags, EInternalObjectFlags::Garbage);
+#endif
         int32 Deepest = 0;
         for (const UObject* Object : Inner)
         {

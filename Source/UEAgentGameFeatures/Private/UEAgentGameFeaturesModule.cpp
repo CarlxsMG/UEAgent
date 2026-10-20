@@ -1,7 +1,11 @@
 #include "Commands/GameFeatures/UEAgentGameFeaturesBackend.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Misc/EngineVersionComparison.h" // UE_VERSION_OLDER_THAN: the UE 5.7 paths
 #include "GameFeaturesSubsystem.h"
 #include "GameFeatureTypesFwd.h"
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+#include "GameFeatureTypes.h" // the EGameFeaturePluginState enumerators, for IsErrorPluginState
+#endif
 #include "GameFeaturePluginOperationResult.h"
 #include "Engine/Engine.h"
 #include "Modules/ModuleManager.h"
@@ -65,6 +69,33 @@ namespace
         Obj->SetBoolField(TEXT("is_loaded"), GFS.IsGameFeaturePluginLoaded(URL));
         Obj->SetBoolField(TEXT("is_registered"), GFS.IsGameFeaturePluginRegistered(URL));
     }
+
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    // UE 5.7 has no UGameFeaturesSubsystem::IsGameFeaturePluginInErrorState (added in 5.8), which answers whether
+    // the plugin's state machine sits in a state of type Error. Those are exactly the eleven Error* states of
+    // GAME_FEATURE_PLUGIN_STATE_LIST (each one an FErrorGameFeaturePluginState); a plugin without a state machine
+    // reads UnknownStatus, not an error, as 5.8 answers false for it.
+    bool IsErrorPluginState(EGameFeaturePluginState State)
+    {
+        switch (State)
+        {
+        case EGameFeaturePluginState::ErrorUninstalling:
+        case EGameFeaturePluginState::ErrorCheckingStatus:
+        case EGameFeaturePluginState::ErrorUnavailable:
+        case EGameFeaturePluginState::ErrorManagingData:
+        case EGameFeaturePluginState::ErrorMounting:
+        case EGameFeaturePluginState::ErrorWaitingForDependencies:
+        case EGameFeaturePluginState::ErrorRegistering:
+        case EGameFeaturePluginState::ErrorAssetDependencyStreaming:
+        case EGameFeaturePluginState::ErrorLoading:
+        case EGameFeaturePluginState::ErrorActivatingDependencies:
+        case EGameFeaturePluginState::ErrorDeactivatingDependencies:
+            return true;
+        default:
+            return false;
+        }
+    }
+#endif
 
     // Logs the eventual result of an async transition; the command has already replied.
     void LogResult(const TCHAR* Command, const FString& URL, const UE::GameFeatures::FResult& Result)
@@ -211,7 +242,11 @@ namespace
             ResultObj->SetStringField(TEXT("url"), URL);
             AddStateFields(*GFS, URL, ResultObj);
             ResultObj->SetBoolField(TEXT("is_installed"), GFS->IsGameFeaturePluginInstalled(URL));
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+            ResultObj->SetBoolField(TEXT("is_in_error_state"), IsErrorPluginState(GFS->GetPluginState(URL)));
+#else
             ResultObj->SetBoolField(TEXT("is_in_error_state"), GFS->IsGameFeaturePluginInErrorState(URL));
+#endif
             return mcp_common::MakeOkReply(ResultObj);
         }
 

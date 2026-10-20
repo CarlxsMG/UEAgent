@@ -1,5 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Editor.h"
 #include "Editor/EditorEngine.h"
 #include "EditorViewportClient.h"
@@ -158,18 +159,23 @@ namespace
         { VMI_Clay,                             TEXT("Clay"),                          nullptr,                       nullptr },
         { VMI_FrontBackFace,                    TEXT("FrontBackFace"),                 nullptr,                       nullptr },
         { VMI_RandomColor,                      TEXT("Random"),                        TEXT("RandomColor"),           nullptr },
+#if !UE_VERSION_OLDER_THAN(5, 8, 0)
+        // The four streaming modes and MegaLights Visualization are values 5.7's EViewModeIndex does not have.
         { VMI_StreamingTextureDeficit,          TEXT("StreamingTextureDeficit"),       nullptr,                       nullptr },
         { VMI_StreamingTextureResidency,        TEXT("StreamingTextureResidency"),     nullptr,                       nullptr },
         { VMI_StreamingMeshLODDeficit,          TEXT("StreamingMeshLODDeficit"),       nullptr,                       nullptr },
         { VMI_StreamingMeshLODResidency,        TEXT("StreamingMeshLODResidency"),     nullptr,                       nullptr },
+#endif
         { VMI_VisualizeBuffer,                  TEXT("BufferVisualization"),           nullptr,
             TEXT("it shows one buffer, picked in the editor's Buffer Visualization menu") },
         { VMI_VisualizeNanite,                  TEXT("NaniteVisualization"),           nullptr,
             TEXT("it shows one Nanite visualization, picked in the editor's Nanite Visualization menu") },
         { VMI_VisualizeLumen,                   TEXT("LumenVisualization"),            nullptr,
             TEXT("it shows one Lumen visualization, picked in the editor's Lumen menu") },
+#if !UE_VERSION_OLDER_THAN(5, 8, 0)
         { VMI_VisualizeMegaLights,              TEXT("MegaLightsVisualization"),       nullptr,
             TEXT("it shows one MegaLights visualization, picked in the editor's MegaLights menu") },
+#endif
         { VMI_VisualizeSubstrate,               TEXT("SubstrateVisualization"),        nullptr,
             TEXT("it shows one Substrate visualization, picked in the editor's Substrate menu") },
         { VMI_VisualizeGroom,                   TEXT("GroomVisualization"),            nullptr,

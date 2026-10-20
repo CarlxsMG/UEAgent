@@ -39,7 +39,7 @@ Merge another UDynamicMesh into the live dynamic mesh of a DynamicMeshActor via 
 
 *Destructive.*
 
-Adaptive-remesh the live dynamic mesh of a DynamicMeshActor in the editor world, found by label or name, toward max_edge_length, with the edge length scaled per vertex by a weight map and relative_density, as one undo step that restores the mesh; nothing is saved. The engine needs that weight map: without weight_map_name, or with a name the mesh has no weight layer for, it reports an error, remeshed is false and the call fails with the mesh unchanged (weight_map_resolved says whether the name was found). A missing or non-positive max_edge_length or an unknown actor is an error. remeshed is true when the triangle or vertex count changed. For uniform density use apply_uniform_remesh; to only reduce triangles, simplify_mesh.
+Adaptive-remesh the live dynamic mesh of a DynamicMeshActor in the editor world, found by label or name, toward max_edge_length, with the edge length scaled per vertex by a weight map and relative_density, as one undo step that restores the mesh; nothing is saved. The engine needs that weight map: without weight_map_name, or with a name the mesh has no weight layer for, it reports an error, remeshed is false and the call fails with the mesh unchanged (weight_map_resolved says whether the name was found). A missing or non-positive max_edge_length or an unknown actor is an error. remeshed is true when the triangle or vertex count changed. For uniform density use apply_uniform_remesh; to only reduce triangles, simplify_mesh. Needs Unreal Engine 5.8 or later.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

@@ -2,8 +2,17 @@
 
 ## Which Unreal Engine versions does it support?
 
-Unreal Engine 5.8. The release is built for 5.8, and the code uses 5.8's APIs; other versions are not
-tested.
+Unreal Engine 5.7 and 5.8. Each release has a precompiled zip for each engine, built and tested
+separately; other versions are not tested.
+
+A few things need 5.8, because 5.7 has no API for them. On 5.7 they answer an error that says so, and
+nothing is changed:
+
+- `apply_adaptive_remesh` (Geometry Script's adaptive remesh is new in 5.8);
+- `add_field_node` with `node_type` RotatedRadialVector;
+- `add_chooser_column` with `column_type` Name or OutputName;
+- `set_modulation_parameter_settings` with `clamp_to_normalized_range`;
+- `set_audio_section_properties` with `play_until_finished`.
 
 ## Which platforms?
 

@@ -1,5 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Misc/EngineVersionComparison.h" // UE_VERSION_OLDER_THAN: the UE 5.7 paths
 #include "Commands/UI/UMGWidgetUtils.h"
 #include "EngineUtils.h"        // TActorIterator (set_viewmodel_field world walks)
 
@@ -1986,7 +1987,15 @@ TSharedPtr<FJsonObject> HandleSetPieListViewItems(const TSharedPtr<FJsonObject>&
 
     if (bAppend)
     {
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+        // UE 5.7's UListView has no AddItems (added in 5.8). The same list: the current items followed by the new
+        // ones, set at once (SetListItems, like AddItems, drops null entries and keeps duplicates).
+        TArray<UObject*> CombinedItems(ListView->GetListItems());
+        CombinedItems.Append(ResolvedItems);
+        ListView->SetListItems(CombinedItems);
+#else
         ListView->AddItems(ResolvedItems);
+#endif
     }
     else
     {

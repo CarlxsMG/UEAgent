@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img alt="Unreal Engine 5.8" src="https://img.shields.io/badge/Unreal%20Engine-5.8-0E1128?logo=unrealengine&logoColor=white">
+  <img alt="Unreal Engine 5.7 | 5.8" src="https://img.shields.io/badge/Unreal%20Engine-5.7%20%7C%205.8-0E1128?logo=unrealengine&logoColor=white">
   <img alt="MCP: Streamable HTTP" src="https://img.shields.io/badge/MCP-Streamable%20HTTP-6E56CF">
   <img alt="1,700+ tools" src="https://img.shields.io/badge/tools-1%2C700%2B-2EA44F">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
@@ -24,7 +24,7 @@
 
 ---
 
-UEAgent is an Unreal Engine 5.8 editor plugin that lets AI agents operate the editor through the
+UEAgent is an Unreal Engine 5.7 and 5.8 editor plugin that lets AI agents operate the editor through the
 [Model Context Protocol](https://modelcontextprotocol.io). The plugin **is** the server: it serves
 Streamable HTTP from inside the editor, with no Python or Node process in between.
 
@@ -58,7 +58,7 @@ flowchart LR
 
 ## Quick start
 
-1. **Install.** Download the latest `UEAgent-*-UE5.8-Win64.zip` from
+1. **Install.** Download the latest `UEAgent-*-UE5.8-Win64.zip` (or `-UE5.7-`, for your engine) from
    [Releases](https://github.com/CarlxsMG/UEAgent/releases) and unzip it into
    `<YourProject>/Plugins/`, or [build it from source](#build-from-source).
 2. **Open the project.** The status bar shows **MCP · 55561** with a green dot once the server is up
@@ -135,7 +135,8 @@ Also on the web, with search: [carlxsmg.github.io/UEAgent](https://carlxsmg.gith
 
 ## Requirements
 
-- Unreal Engine 5.8 on Windows (Win64), the only platform the plugin declares.
+- Unreal Engine 5.7 or 5.8 on Windows (Win64), the only platform the plugin declares. Each release has a
+  zip for each engine; a few tools need 5.8 (see the [FAQ](docs/faq.md)).
 - To build from source: Visual Studio 2022 with the C++ toolchain.
 - The plugin enables the engine plugins its tools use (see `UEAgent.uplugin`): among them
   PythonScriptPlugin, EditorScriptingUtilities, Niagara, PCG, StateTree, ControlRig, IKRig,

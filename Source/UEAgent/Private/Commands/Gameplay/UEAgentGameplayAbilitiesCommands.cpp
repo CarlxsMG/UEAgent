@@ -1,5 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Misc/EngineVersionComparison.h" // UE_VERSION_OLDER_THAN: the UE 5.7 paths
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/Actor.h"
@@ -8,6 +9,9 @@
 // Gameplay Ability System (GameplayAbilities plugin, Runtime). The ability classes sit in
 // the plugin's Abilities/ include folder, the component and effect types at its root.
 #include "AbilitySystemComponent.h"
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+#include "AbilitySystemBlueprintLibrary.h" // SendGameplayEventToActor -- 5.8's AbilitySystemComponent.h includes it, 5.7's does not
+#endif
 #include "AbilitySystemInterface.h"
 #include "Abilities/GameplayAbility.h"
 #include "Abilities/Tasks/AbilityTask.h"

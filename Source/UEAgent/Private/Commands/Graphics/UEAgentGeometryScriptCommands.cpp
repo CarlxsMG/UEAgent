@@ -1,5 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Misc/EngineVersionComparison.h"
 
 #include "Editor.h"
 #include "Engine/World.h"
@@ -1665,7 +1666,7 @@ TSharedPtr<FJsonObject> HandleApplyUniformRemesh(const TSharedPtr<FJsonObject>& 
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:apply_adaptive_remesh - Adaptive-remesh the live dynamic mesh of a DynamicMeshActor in the editor world, found by label or name, toward max_edge_length, with the edge length scaled per vertex by a weight map and relative_density, as one undo step that restores the mesh; nothing is saved. The engine needs that weight map: without weight_map_name, or with a name the mesh has no weight layer for, it reports an error, remeshed is false and the call fails with the mesh unchanged (weight_map_resolved says whether the name was found). A missing or non-positive max_edge_length or an unknown actor is an error. remeshed is true when the triangle or vertex count changed. For uniform density use apply_uniform_remesh; to only reduce triangles, simplify_mesh.
+// MCP:apply_adaptive_remesh - Adaptive-remesh the live dynamic mesh of a DynamicMeshActor in the editor world, found by label or name, toward max_edge_length, with the edge length scaled per vertex by a weight map and relative_density, as one undo step that restores the mesh; nothing is saved. The engine needs that weight map: without weight_map_name, or with a name the mesh has no weight layer for, it reports an error, remeshed is false and the call fails with the mesh unchanged (weight_map_resolved says whether the name was found). A missing or non-positive max_edge_length or an unknown actor is an error. remeshed is true when the triangle or vertex count changed. For uniform density use apply_uniform_remesh; to only reduce triangles, simplify_mesh. Needs Unreal Engine 5.8 or later.
 //   @param actor_name [!] - Label or name of the target DynamicMeshActor
 //   @param min_edge_length [float] - Soft floor for adaptive edge length (default 1.0). NOTE: FGeometryScriptAdaptiveRemeshOptions has no explicit min field — this is echoed back in the result for traceability but is NOT consulted by the engine call.
 //   @param max_edge_length [float!] - Target edge length for adaptive remesh (sets TargetType=TargetEdgeLength + TargetEdgeLength). Required.
@@ -1674,6 +1675,11 @@ TSharedPtr<FJsonObject> HandleApplyUniformRemesh(const TSharedPtr<FJsonObject>& 
 //   @returns { actor_name: string, min_edge_length: number, max_edge_length: number, relative_density: number, weight_map_name: string, weight_map_resolved: bool, target_type: string, triangle_count: int, triangle_count_before: int, vertex_count: int, remeshed: bool }
 TSharedPtr<FJsonObject> HandleApplyAdaptiveRemesh(const TSharedPtr<FJsonObject>& Params)
 {
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    return mcp_common::MakeRequiresEngineReply(TEXT("apply_adaptive_remesh"), TEXT("5.8"),
+        TEXT("UGeometryScriptLibrary_RemeshingFunctions::ApplyAdaptiveRemesh, FGeometryScriptAdaptiveRemeshOptions and "
+             "FGeometryScriptWeightMapHandle do not exist in 5.7"));
+#else
     FGeometryScriptMeshActor Target;
     if (TSharedPtr<FJsonObject> Failure = GeometryScript_ResolveMeshActor(Params, Target))
     {
@@ -1779,6 +1785,7 @@ TSharedPtr<FJsonObject> HandleApplyAdaptiveRemesh(const TSharedPtr<FJsonObject>&
         return GeometryScript_OutcomeReply(Result, false, TEXT("apply_adaptive_remesh"), TEXT("remeshed"), RemeshError);
     }
     return mcp_common::MakeOkReply(Result);
+#endif
 }
 
 // ===========================================================================

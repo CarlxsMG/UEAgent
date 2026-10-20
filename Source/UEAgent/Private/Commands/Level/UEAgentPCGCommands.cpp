@@ -1,5 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Misc/EngineVersionComparison.h"
 
 // PCG runtime (module: PCG)
 #include "PCGGraph.h"          // UPCGGraph: AddNodeOfType / GetNodes / GetInputNode / GetOutputNode / AddEdge / RemoveEdge / GetAllEdges
@@ -231,6 +232,28 @@ namespace
         return true;
     }
 
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    // 5.7 has no UPCGGraph::GetAllEdges(). The same walk as 5.8's: every edge once, from its downstream (input) pin,
+    // over the output node and the other nodes (the input node has no inbound edge).
+    TArray<UPCGEdge*> PCG_GetAllEdges(const UPCGGraph* Graph)
+    {
+        TArray<UPCGEdge*> AllEdges;
+        auto GatherInputEdgesFromNode = [&AllEdges](const UPCGNode* Node)
+        {
+            for (const UPCGPin* InPin : Node->GetInputPins())
+            {
+                AllEdges.Append(InPin->Edges);
+            }
+        };
+        GatherInputEdgesFromNode(Graph->GetOutputNode());
+        for (const UPCGNode* Node : Graph->GetNodes())
+        {
+            GatherInputEdgesFromNode(Node);
+        }
+        return AllEdges;
+    }
+#endif
+
     // True if a directed edge From.FromLabel (output) -> To.ToLabel (input) already
     // exists. UPCGEdge names its ends from the data-flow side: GetInputNode()/
     // GetInputPinLabel() are the upstream (From) side; GetOutputNode()/
@@ -242,6 +265,24 @@ namespace
         {
             return false;
         }
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+        // 5.7 has no UPCGEdge::GetInputNode() family: they read a valid edge's InputPin (upstream, From) and
+        // OutputPin (downstream, To), so read those.
+        for (const UPCGEdge* Edge : PCG_GetAllEdges(Graph))
+        {
+            if (!Edge || !Edge->IsValid())
+            {
+                continue;
+            }
+            const UPCGNode* EdgeFrom = Edge->InputPin->Node;
+            const UPCGNode* EdgeTo = Edge->OutputPin->Node;
+            if (EdgeFrom == From && EdgeTo == To &&
+                Edge->InputPin->Properties.Label == FromLabel && Edge->OutputPin->Properties.Label == ToLabel)
+            {
+                return true;
+            }
+        }
+#else
         for (const UPCGEdge* Edge : Graph->GetAllEdges())
         {
             if (!Edge || !Edge->IsValid())
@@ -254,6 +295,7 @@ namespace
                 return true;
             }
         }
+#endif
         return false;
     }
 
@@ -693,6 +735,25 @@ TSharedPtr<FJsonObject> HandleGetPCGGraphInfo(const TSharedPtr<FJsonObject>& Par
     // wired. UPCGEdge names its ends from the data-flow side: GetInputNode() is
     // the upstream (from) node, GetOutputNode() the downstream (to) node.
     TArray<TSharedPtr<FJsonValue>> EdgeArray;
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    // 5.7 has no UPCGEdge::GetInputNode() family: they read a valid edge's InputPin (upstream) and OutputPin
+    // (downstream), so read those.
+    for (const UPCGEdge* Edge : PCG_GetAllEdges(Graph))
+    {
+        if (!Edge || !Edge->IsValid())
+        {
+            continue;
+        }
+        const UPCGNode* EdgeFrom = Edge->InputPin->Node;
+        const UPCGNode* EdgeTo = Edge->OutputPin->Node;
+        TSharedPtr<FJsonObject> E = MakeShared<FJsonObject>();
+        E->SetStringField(TEXT("from_node"), EdgeFrom ? EdgeFrom->GetName() : FString());
+        E->SetStringField(TEXT("from_pin"), Edge->InputPin->Properties.Label.ToString());
+        E->SetStringField(TEXT("to_node"), EdgeTo ? EdgeTo->GetName() : FString());
+        E->SetStringField(TEXT("to_pin"), Edge->OutputPin->Properties.Label.ToString());
+        EdgeArray.Add(MakeShared<FJsonValueObject>(E));
+    }
+#else
     for (const UPCGEdge* Edge : Graph->GetAllEdges())
     {
         if (!Edge || !Edge->IsValid())
@@ -708,6 +769,7 @@ TSharedPtr<FJsonObject> HandleGetPCGGraphInfo(const TSharedPtr<FJsonObject>& Par
         E->SetStringField(TEXT("to_pin"), Edge->GetOutputPinLabel().ToString());
         EdgeArray.Add(MakeShared<FJsonValueObject>(E));
     }
+#endif
 
     TSharedPtr<FJsonObject> Data = PCG_NewGraphData(Graph);
     Data->SetNumberField(TEXT("node_count"), Nodes.Num());
@@ -1488,7 +1550,11 @@ TSharedPtr<FJsonObject> HandleConnectPCGNodes(const TSharedPtr<FJsonObject>& Par
     Data->SetStringField(TEXT("to_pin"), ToLabel.ToString());
     Data->SetBoolField(TEXT("already_connected"), bAlready);
     Data->SetBoolField(TEXT("connected"), true);
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    Data->SetNumberField(TEXT("edge_count"), PCG_GetAllEdges(Graph).Num());
+#else
     Data->SetNumberField(TEXT("edge_count"), Graph->GetAllEdges().Num());
+#endif
     Data->SetBoolField(TEXT("saved"), bSaved);
     if (!bAlready && !bSaved && !SaveError.IsEmpty())
     {
@@ -1546,7 +1612,11 @@ TSharedPtr<FJsonObject> HandleDisconnectPCGNodes(const TSharedPtr<FJsonObject>& 
     Data->SetBoolField(TEXT("already_disconnected"), !bExisted);
     Data->SetBoolField(TEXT("removed"), bRemoved);
     Data->SetBoolField(TEXT("disconnected"), bDisconnected);
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    Data->SetNumberField(TEXT("edge_count"), PCG_GetAllEdges(Graph).Num());
+#else
     Data->SetNumberField(TEXT("edge_count"), Graph->GetAllEdges().Num());
+#endif
     Data->SetBoolField(TEXT("saved"), bSaved);
     if (bExisted && !bSaved && !SaveError.IsEmpty())
     {

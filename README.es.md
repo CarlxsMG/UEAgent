@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img alt="Unreal Engine 5.8" src="https://img.shields.io/badge/Unreal%20Engine-5.8-0E1128?logo=unrealengine&logoColor=white">
+  <img alt="Unreal Engine 5.7 | 5.8" src="https://img.shields.io/badge/Unreal%20Engine-5.7%20%7C%205.8-0E1128?logo=unrealengine&logoColor=white">
   <img alt="MCP: Streamable HTTP" src="https://img.shields.io/badge/MCP-Streamable%20HTTP-6E56CF">
   <img alt="Más de 1.700 herramientas" src="https://img.shields.io/badge/tools-1%2C700%2B-2EA44F">
   <a href="LICENSE"><img alt="Licencia: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
@@ -24,7 +24,7 @@
 
 ---
 
-UEAgent es un plugin de editor para Unreal Engine 5.8 que permite a agentes de IA manejar el editor
+UEAgent es un plugin de editor para Unreal Engine 5.7 y 5.8 que permite a agentes de IA manejar el editor
 mediante el [Model Context Protocol](https://modelcontextprotocol.io). El plugin **es** el servidor:
 sirve Streamable HTTP desde dentro del editor, sin ningún proceso de Python o Node por medio.
 
@@ -62,7 +62,7 @@ flowchart LR
 
 ## Primeros pasos
 
-1. **Instala.** Descarga el último `UEAgent-*-UE5.8-Win64.zip` de
+1. **Instala.** Descarga el último `UEAgent-*-UE5.8-Win64.zip` (o `-UE5.7-`, según tu motor) de
    [Releases](https://github.com/CarlxsMG/UEAgent/releases) y descomprímelo en
    `<TuProyecto>/Plugins/`, o [compílalo desde el código](#compilar-desde-el-código).
 2. **Abre el proyecto.** La barra de estado muestra **MCP · 55561** con un punto verde cuando el
@@ -140,7 +140,8 @@ También en la web, con buscador: [carlxsmg.github.io/UEAgent](https://carlxsmg.
 
 ## Requisitos
 
-- Unreal Engine 5.8 en Windows (Win64), la única plataforma que declara el plugin.
+- Unreal Engine 5.7 o 5.8 en Windows (Win64), la única plataforma que declara el plugin. Cada release
+  trae un zip para cada motor; unas pocas herramientas necesitan la 5.8 (ver la [FAQ](docs/faq.md)).
 - Para compilar desde el código: Visual Studio 2022 con el toolchain de C++.
 - El plugin activa los plugins del motor que usan sus herramientas (ver `UEAgent.uplugin`), entre
   ellos PythonScriptPlugin, EditorScriptingUtilities, Niagara, PCG, StateTree, ControlRig, IKRig,

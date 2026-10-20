@@ -1,6 +1,7 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
 #include "Commands/Media/LevelSequenceUtils.h"
+#include "Misc/EngineVersionComparison.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Editor.h"
@@ -6057,7 +6058,7 @@ TSharedPtr<FJsonObject> HandleSetSubSectionParameters(const TSharedPtr<FJsonObje
 //   @param section_index - Index of the section on the resolved root audio track (default 0).
 //   @param sound_path - Optional content path of a USoundBase to set as the section's sound.
 //   @param looping [bool] - Section repeating/looping (maps to SetRepeating, the engine's loop knob; omit to leave unchanged).
-//   @param play_until_finished [bool] - SetPlayUntilFinished (omit to leave unchanged).
+//   @param play_until_finished [bool] - SetPlayUntilFinished (omit to leave unchanged). Needs UE 5.8.
 //   @param suppress_subtitles [bool] - SetSuppressSubtitles (omit to leave unchanged).
 //   @param override_attenuation [bool] - SetOverrideAttenuation; must be true for attenuation_path to take effect (omit to leave unchanged).
 //   @param attenuation_path - Optional content path of a USoundAttenuation to set (only effective when override_attenuation is true).
@@ -6066,7 +6067,7 @@ TSharedPtr<FJsonObject> HandleSetSubSectionParameters(const TSharedPtr<FJsonObje
 //   @param time_seconds - Optional time in seconds for the volume/pitch keys; omit to set them as constants.
 //   @param start_offset_frames - Optional start offset in tick-resolution frames (the unit get_audio_section_properties reports), written as-is with fractions truncated; wins over start_offset_seconds.
 //   @param start_offset_seconds - Optional start offset in seconds, converted to tick-resolution frames and rounded; ignored when start_offset_frames is given.
-//   @returns { sequence_path: string, section_class: string, audio_track_index: int, section_index: int, sound: string, sound_set: bool, looping: bool, play_until_finished: bool, suppress_subtitles: bool, override_attenuation: bool, attenuation: string, attenuation_set: bool, volume?: number, volume_key_count?: int, volume_keys_written?: int, pitch?: number, pitch_key_count?: int, pitch_keys_written?: int, old_start_offset_frames?: int, new_start_offset_frames?: int, new_start_offset_seconds?: number, set: bool, changed: bool, saved: bool, save_error?: string, note?: string } -- the volume/pitch fields only when that value was passed (keys_written 0: the channel already held that constant), the start offset fields only when an offset was passed.
+//   @returns { sequence_path: string, section_class: string, audio_track_index: int, section_index: int, sound: string, sound_set: bool, looping: bool, play_until_finished?: bool (needs UE 5.8), suppress_subtitles: bool, override_attenuation: bool, attenuation: string, attenuation_set: bool, volume?: number, volume_key_count?: int, volume_keys_written?: int, pitch?: number, pitch_key_count?: int, pitch_keys_written?: int, old_start_offset_frames?: int, new_start_offset_frames?: int, new_start_offset_seconds?: number, set: bool, changed: bool, saved: bool, save_error?: string, note?: string } -- the volume/pitch fields only when that value was passed (keys_written 0: the channel already held that constant), the start offset fields only when an offset was passed.
 TSharedPtr<FJsonObject> HandleSetAudioSectionProperties(const TSharedPtr<FJsonObject>& Params)
 {
     FString SequencePath;
@@ -6086,6 +6087,12 @@ TSharedPtr<FJsonObject> HandleSetAudioSectionProperties(const TSharedPtr<FJsonOb
     {
         return mcp_common::MakeErrorReply(TEXT("time_seconds must be a number of seconds; nothing was changed."));
     }
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    if (Params->HasField(TEXT("play_until_finished")))
+    {
+        return mcp_common::MakeErrorReply(TEXT("play_until_finished needs Unreal Engine 5.8 or later: the 5.7 audio section has no Play Until Finished setting. Nothing was changed."));
+    }
+#endif
     double OffsetFramesD = 0.0, OffsetSecondsD = 0.0;
     const bool bOffsetFrames = Params->TryGetNumberField(TEXT("start_offset_frames"), OffsetFramesD);
     const bool bOffsetSeconds = Params->TryGetNumberField(TEXT("start_offset_seconds"), OffsetSecondsD);
@@ -6158,8 +6165,13 @@ TSharedPtr<FJsonObject> HandleSetAudioSectionProperties(const TSharedPtr<FJsonOb
     if (bWantSound) { Audio->SetSound(NewSound); bSoundSet = true; }
 
     bool bFlag = false;
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    // 5.7's only loop knob is bLooping (5.8 added bRepeating behind Sequencer.Audio.UseRepeating, read by IsRepeating()).
+    if (Params->TryGetBoolField(TEXT("looping"), bFlag))             { Audio->SetLooping(bFlag); }
+#else
     if (Params->TryGetBoolField(TEXT("looping"), bFlag))             { Audio->SetRepeating(bFlag); }
     if (Params->TryGetBoolField(TEXT("play_until_finished"), bFlag)) { Audio->SetPlayUntilFinished(bFlag); }
+#endif
     if (Params->TryGetBoolField(TEXT("suppress_subtitles"), bFlag))  { Audio->SetSuppressSubtitles(bFlag); }
 
     // Override flag BEFORE the attenuation asset -- SetAttenuationSettings is gated by
@@ -6201,10 +6213,15 @@ TSharedPtr<FJsonObject> HandleSetAudioSectionProperties(const TSharedPtr<FJsonOb
     Response->SetNumberField(TEXT("section_index"), SectionIndex);
     Response->SetStringField(TEXT("sound"), Audio->GetSound() ? Audio->GetSound()->GetPathName() : TEXT(""));
     Response->SetBoolField(TEXT("sound_set"), bSoundSet);
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    // 5.7: GetLooping() is the whole loop state, and there is no play_until_finished to report.
+    Response->SetBoolField(TEXT("looping"), Audio->GetLooping());
+#else
     // IsRepeating() is the engine's own "is this section looping" query; it reads
     // bRepeating when the Sequencer.Audio.UseRepeating CVar is on, else bLooping.
     Response->SetBoolField(TEXT("looping"), Audio->IsRepeating());
     Response->SetBoolField(TEXT("play_until_finished"), Audio->GetPlayUntilFinished());
+#endif
     Response->SetBoolField(TEXT("suppress_subtitles"), Audio->GetSuppressSubtitles());
     Response->SetBoolField(TEXT("override_attenuation"), Audio->GetOverrideAttenuation());
     Response->SetStringField(TEXT("attenuation"), Audio->GetAttenuationSettings() ? Audio->GetAttenuationSettings()->GetPathName() : TEXT(""));
@@ -6242,7 +6259,7 @@ TSharedPtr<FJsonObject> HandleSetAudioSectionProperties(const TSharedPtr<FJsonOb
 //   @param sequence_path - Full /Game path OR bare asset name of the Level Sequence that owns the (root) audio track.
 //   @param sequence_name - Alias for sequence_path.
 //   @param section_index - Index of the section on the resolved root audio track (default 0).
-//   @returns { sequence_path: string, section_class: string, section_index: int, sound_path: string, start_offset: int, volume: number, pitch: number, volume_key_count: int, pitch_key_count: int, looping: bool, play_until_finished: bool, suppress_subtitles: bool, override_attenuation: bool, attenuation_path: string }
+//   @returns { sequence_path: string, section_class: string, section_index: int, sound_path: string, start_offset: int, volume: number, pitch: number, volume_key_count: int, pitch_key_count: int, looping: bool, play_until_finished?: bool (needs UE 5.8), suppress_subtitles: bool, override_attenuation: bool, attenuation_path: string }
 TSharedPtr<FJsonObject> HandleGetAudioSectionProperties(const TSharedPtr<FJsonObject>& Params)
 {
     ULevelSequence* Sequence = nullptr;
@@ -6269,9 +6286,14 @@ TSharedPtr<FJsonObject> HandleGetAudioSectionProperties(const TSharedPtr<FJsonOb
     Response->SetNumberField(TEXT("pitch"), Audio->GetPitchMultiplier(FFrameTime(0)));
     Response->SetNumberField(TEXT("volume_key_count"), Audio->GetSoundVolumeChannel().GetData().GetTimes().Num());
     Response->SetNumberField(TEXT("pitch_key_count"), Audio->GetPitchMultiplierChannel().GetData().GetTimes().Num());
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    // 5.7: GetLooping() is the whole loop state, and there is no play_until_finished to report.
+    Response->SetBoolField(TEXT("looping"), Audio->GetLooping());
+#else
     // IsRepeating() is the engine's own "is this section looping" query.
     Response->SetBoolField(TEXT("looping"), Audio->IsRepeating());
     Response->SetBoolField(TEXT("play_until_finished"), Audio->GetPlayUntilFinished());
+#endif
     Response->SetBoolField(TEXT("suppress_subtitles"), Audio->GetSuppressSubtitles());
     Response->SetBoolField(TEXT("override_attenuation"), Audio->GetOverrideAttenuation());
     Response->SetStringField(TEXT("attenuation_path"), Audio->GetAttenuationSettings() ? Audio->GetAttenuationSettings()->GetPathName() : TEXT(""));

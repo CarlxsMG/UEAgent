@@ -13455,7 +13455,7 @@
               "name": "clamp_to_normalized_range",
               "jsonType": "boolean",
               "required": false,
-              "description": "Optional bool; sets Settings.bClampToNormalizedRange"
+              "description": "Optional bool; sets Settings.bClampToNormalizedRange. Needs UE 5.8."
             },
             {
               "name": "value_unit",
@@ -19918,7 +19918,7 @@
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Column struct to add: \"FloatRange\", \"Bool\", \"Enum\", \"Object\", or \"OutputObject\"."
+              "description": "Column struct to add: \"FloatRange\", \"Bool\", \"Enum\", \"Object\", or \"OutputObject\". Name and OutputName need UE 5.8."
             },
             {
               "name": "column_name",
@@ -31740,7 +31740,7 @@
         },
         {
           "name": "apply_adaptive_remesh",
-          "description": "Adaptive-remesh the live dynamic mesh of a DynamicMeshActor in the editor world, found by label or name, toward max_edge_length, with the edge length scaled per vertex by a weight map and relative_density, as one undo step that restores the mesh; nothing is saved. The engine needs that weight map: without weight_map_name, or with a name the mesh has no weight layer for, it reports an error, remeshed is false and the call fails with the mesh unchanged (weight_map_resolved says whether the name was found). A missing or non-positive max_edge_length or an unknown actor is an error. remeshed is true when the triangle or vertex count changed. For uniform density use apply_uniform_remesh; to only reduce triangles, simplify_mesh.",
+          "description": "Adaptive-remesh the live dynamic mesh of a DynamicMeshActor in the editor world, found by label or name, toward max_edge_length, with the edge length scaled per vertex by a weight map and relative_density, as one undo step that restores the mesh; nothing is saved. The engine needs that weight map: without weight_map_name, or with a name the mesh has no weight layer for, it reports an error, remeshed is false and the call fails with the mesh unchanged (weight_map_resolved says whether the name was found). A missing or non-positive max_edge_length or an unknown actor is an error. remeshed is true when the triangle or vertex count changed. For uniform density use apply_uniform_remesh; to only reduce triangles, simplify_mesh. Needs Unreal Engine 5.8 or later.",
           "params": [
             {
               "name": "actor_name",
@@ -46213,7 +46213,7 @@
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "One of \"RadialFalloff\", \"PlaneFalloff\", \"BoxFalloff\", \"WaveScalar\", \"UniformScalar\", \"NoiseField\", \"UniformInteger\", \"RadialIntMask\", \"UniformVector\", \"RadialVector\", \"RotatedRadialVector\", \"RandomVector\""
+              "description": "One of \"RadialFalloff\", \"PlaneFalloff\", \"BoxFalloff\", \"WaveScalar\", \"UniformScalar\", \"NoiseField\", \"UniformInteger\", \"RadialIntMask\", \"UniformVector\", \"RadialVector\", \"RotatedRadialVector\", \"RandomVector\". RotatedRadialVector needs UE 5.8."
             },
             {
               "name": "target",
@@ -46327,7 +46327,7 @@
               "name": "angle",
               "jsonType": "number",
               "required": false,
-              "description": "Optional RotatedRadialVector rotation angle in degrees; defaults to 0.0"
+              "description": "Optional RotatedRadialVector rotation angle in degrees; defaults to 0.0. Needs UE 5.8."
             }
           ],
           "returns": "{ field_system_path: string, node_type: string, target: string, physics_type_name: string, command_count: int, success: bool, saved: bool, save_error?: string }",
@@ -54831,7 +54831,7 @@
               "description": "Index of the section on the resolved root audio track (default 0)."
             }
           ],
-          "returns": "{ sequence_path: string, section_class: string, section_index: int, sound_path: string, start_offset: int, volume: number, pitch: number, volume_key_count: int, pitch_key_count: int, looping: bool, play_until_finished: bool, suppress_subtitles: bool, override_attenuation: bool, attenuation_path: string }",
+          "returns": "{ sequence_path: string, section_class: string, section_index: int, sound_path: string, start_offset: int, volume: number, pitch: number, volume_key_count: int, pitch_key_count: int, looping: bool, play_until_finished?: bool (needs UE 5.8), suppress_subtitles: bool, override_attenuation: bool, attenuation_path: string }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -55920,7 +55920,7 @@
               "name": "play_until_finished",
               "jsonType": "boolean",
               "required": false,
-              "description": "SetPlayUntilFinished (omit to leave unchanged)."
+              "description": "SetPlayUntilFinished (omit to leave unchanged). Needs UE 5.8."
             },
             {
               "name": "suppress_subtitles",
@@ -55972,7 +55972,7 @@
               "description": "Optional start offset in seconds, converted to tick-resolution frames and rounded; ignored when start_offset_frames is given."
             }
           ],
-          "returns": "{ sequence_path: string, section_class: string, audio_track_index: int, section_index: int, sound: string, sound_set: bool, looping: bool, play_until_finished: bool, suppress_subtitles: bool, override_attenuation: bool, attenuation: string, attenuation_set: bool, volume?: number, volume_key_count?: int, volume_keys_written?: int, pitch?: number, pitch_key_count?: int, pitch_keys_written?: int, old_start_offset_frames?: int, new_start_offset_frames?: int, new_start_offset_seconds?: number, set: bool, changed: bool, saved: bool, save_error?: string, note?: string } -- the volume/pitch fields only when that value was passed (keys_written 0: the channel already held that constant), the start offset fields only when an offset was passed.",
+          "returns": "{ sequence_path: string, section_class: string, audio_track_index: int, section_index: int, sound: string, sound_set: bool, looping: bool, play_until_finished?: bool (needs UE 5.8), suppress_subtitles: bool, override_attenuation: bool, attenuation: string, attenuation_set: bool, volume?: number, volume_key_count?: int, volume_keys_written?: int, pitch?: number, pitch_key_count?: int, pitch_keys_written?: int, old_start_offset_frames?: int, new_start_offset_frames?: int, new_start_offset_seconds?: number, set: bool, changed: bool, saved: bool, save_error?: string, note?: string } -- the volume/pitch fields only when that value was passed (keys_written 0: the channel already held that constant), the start offset fields only when an offset was passed.",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -61334,7 +61334,7 @@
               "name": "value",
               "jsonType": "any",
               "required": false,
-              "description": "The value: a JSON scalar, e.g. 2.5, \"inherited\" or true, a JSON array, e.g. [1, 0.5, 0] for a color3f or [[0, 0, 1]] for a float3[], or an object {\"value\": <value>} whose \"type\" key, if any, is not used; it is converted to the declared type of the attribute."
+              "description": "The value: a JSON scalar, e.g. 2.5, \"inherited\" or true, a JSON array, e.g. [1, 0.5, 0] for a color3f or [[0, 0, 1]] for a float3[], or an object {\"value\": <value>} whose \"type\" key, if any, is not used; it is converted to the declared type of the attribute. On UE 5.7 a pathExpression value cannot be written (needs UE 5.8); reading one works."
             },
             {
               "name": "time",
@@ -61406,7 +61406,7 @@
               "name": "value",
               "jsonType": "any",
               "required": false,
-              "description": "The value itself (a scalar, an array, or an object of dictionary entries) or {type?, value}. It is converted to the field's type when that is known, and type is then not used; else type, or the JSON type, decides (bool, number as double, string, object as dictionary). A list op is {\"explicit\": [...]} or {\"prepended\": [...], \"appended\", \"deleted\", \"ordered\", \"added\"}, a reference item \"@a.usda@</Prim>\", an integer list op item a whole number."
+              "description": "The value itself (a scalar, an array, or an object of dictionary entries) or {type?, value}. It is converted to the field's type when that is known, and type is then not used; else type, or the JSON type, decides (bool, number as double, string, object as dictionary). A list op is {\"explicit\": [...]} or {\"prepended\": [...], \"appended\", \"deleted\", \"ordered\", \"added\"}, a reference item \"@a.usda@</Prim>\", an integer list op item a whole number. On UE 5.7 an integer list op (int, uint, int64 or uint64) cannot be written (needs UE 5.8); reading one works."
             }
           ],
           "returns": "{ set: bool, prim_path: string, key: string, value: object, declared_type?: string, errors?: [string] }",

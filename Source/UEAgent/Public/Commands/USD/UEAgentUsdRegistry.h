@@ -11,6 +11,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Math/Vector2DHalf.h"
@@ -115,6 +116,23 @@ namespace UEAgent::UsdCommon
 		return Result;
 	}
 
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+	/**
+	 * 5.7 has no UE::FSdfPath::IsValidPathString. A string is a valid path exactly when the FSdfPath built from it is
+	 * not empty (the contract USD states for SdfPath::IsValidPathString), so that is the test. 5.7 cannot return USD's
+	 * parse error (USD raises it as a Tf error, which the engine logs), so OutErrorMessage gets a generic reason.
+	 */
+	inline bool IsValidSdfPathString(const TCHAR* PathString, FString* OutErrorMessage = nullptr)
+	{
+		const bool bIsValid = !UE::FSdfPath(PathString).IsEmpty();
+		if (OutErrorMessage)
+		{
+			*OutErrorMessage = bIsValid ? FString() : FString(TEXT("not a well-formed path (Unreal Engine 5.7 does not return USD's parse error)"));
+		}
+		return bIsValid;
+	}
+#endif
+
 	/** Whether InPath can name a prim: false, with OutError, when it is empty or not a valid SdfPath string. */
 	inline bool IsValidPrimPath(const FString& InPath, FString& OutError)
 	{
@@ -124,7 +142,11 @@ namespace UEAgent::UsdCommon
 			return false;
 		}
 		FString SdfError;
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+		if (!IsValidSdfPathString(*InPath, &SdfError))
+#else
 		if (!UE::FSdfPath::IsValidPathString(*InPath, &SdfError))
+#endif
 		{
 			OutError = FString::Printf(TEXT("invalid SdfPath '%s': %s"), *InPath, *SdfError);
 			return false;
@@ -616,6 +638,10 @@ namespace UEAgent::UsdCommon
 		if (Type == TEXT("pathexpression"))
 		{
 			if (RawVal->Type != EJson::String) { return Mismatch(TEXT("a string, the text of a path expression")); }
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+			OutError = TEXT("authoring a path expression needs Unreal Engine 5.8 or later: on Unreal Engine 5.7 (USD 25.08) writing a value built outside the engine's USD wrapper closes the editor, so it is refused; reading one works");
+			return false;
+#else
 			FString ParseError;
 			if (!UEAgent::UsdSdk::MakePathExpression(RawVal->AsString(), Out, ParseError))
 			{
@@ -623,6 +649,7 @@ namespace UEAgent::UsdCommon
 				return false;
 			}
 			return true;
+#endif
 		}
 		if (Type == TEXT("pathexpression[]"))
 		{
@@ -640,7 +667,12 @@ namespace UEAgent::UsdCommon
 				}
 				Texts.Add(Items[Index]->AsString());
 			}
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+			OutError = TEXT("authoring path expressions needs Unreal Engine 5.8 or later: on Unreal Engine 5.7 (USD 25.08) writing a value built outside the engine's USD wrapper closes the editor, so it is refused; reading one works");
+			return false;
+#else
 			return UEAgent::UsdSdk::MakePathExpressionArray(Texts, Out, OutError);
+#endif
 		}
 		// A whole JSON number in [Min, MaxExclusive): the range of the integer type it is stored as.
 		const auto ReadWhole = [&RawVal, &DeclaredType, &OutError, Holder](double Min, double MaxExclusive, double& OutNumber)
@@ -1141,7 +1173,11 @@ namespace UEAgent::UsdCommon
 			PrimPath = Rest.Mid(1, Close - 1);
 			Rest = Rest.Mid(Close + 1).TrimStart();
 			FString PathError;
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+			if (!PrimPath.IsEmpty() && !IsValidSdfPathString(*PrimPath, &PathError))
+#else
 			if (!PrimPath.IsEmpty() && !UE::FSdfPath::IsValidPathString(*PrimPath, &PathError))
+#endif
 			{
 				OutError = FString::Printf(TEXT("<%s> is not a valid prim path: %s"), *PrimPath, *PathError);
 				return false;
@@ -1193,7 +1229,11 @@ namespace UEAgent::UsdCommon
 			return UsdArcFromText(Text, OutEngineText, OutError);
 		}
 		FString PathError;
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+		if (Items == EUsdListOpItems::Path && !IsValidSdfPathString(*Text, &PathError))
+#else
 		if (Items == EUsdListOpItems::Path && !UE::FSdfPath::IsValidPathString(*Text, &PathError))
+#endif
 		{
 			OutError = FString::Printf(TEXT("not a valid path: %s"), *PathError);
 			return false;
@@ -1369,6 +1409,11 @@ namespace UEAgent::UsdCommon
 				return false;
 			}
 			IntListOp.bExplicit = bExplicitGiven;
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+			OutError = FString::Printf(TEXT("authoring a list op of type %s needs Unreal Engine 5.8 or later: %s"), *TypeName,
+				TEXT("on Unreal Engine 5.7 (USD 25.08) writing a value built outside the engine's USD wrapper closes the editor, so it is refused; reading one works"));
+			return false;
+#else
 			FString SdkError;
 			if (!UEAgent::UsdSdk::MakeIntListOp(IntListOp, Out, SdkError))
 			{
@@ -1376,6 +1421,7 @@ namespace UEAgent::UsdCommon
 				return false;
 			}
 			return true;
+#endif
 		}
 		if (ItemCount == 0)
 		{

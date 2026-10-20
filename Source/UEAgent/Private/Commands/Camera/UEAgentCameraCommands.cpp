@@ -1,5 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Misc/EngineVersionComparison.h" // UE_VERSION_OLDER_THAN: the UE 5.7 paths
 #include "Editor.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -30,7 +31,11 @@
 #include "GameFramework/GameplayCameraComponent.h"
 #include "Build/CameraBuildStatus.h"
 #include "Build/CameraBuildLog.h"      // FCameraBuildLog: the messages of build_camera_rig
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+// UE 5.7 has no FCameraBuildContext: its UCameraRigAsset::BuildCameraRig takes the FCameraBuildLog itself.
+#else
 #include "Build/CameraBuildContext.h"  // FCameraBuildContext: UCameraRigAsset::BuildCameraRig with our own log
+#endif
 #include "Core/CameraNode.h"         // UCameraNode (rig RootNode + node-authoring)
 #include "Nodes/Common/ArrayCameraNode.h"  // composite rig node whose Children we populate
 #include "UObject/Package.h"
@@ -222,8 +227,12 @@ TSharedPtr<FJsonObject> HandleBuildCameraRig(const TSharedPtr<FJsonObject>& Para
     // the build status from this log: WithErrors when it holds an error.
     UE::Cameras::FCameraBuildLog BuildLog;
     BuildLog.SetForwardMessagesToLogging(true);
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    Rig->BuildCameraRig(BuildLog); // UE 5.7: the builder takes the log, there is no build context
+#else
     UE::Cameras::FCameraBuildContext BuildContext(BuildLog);
     Rig->BuildCameraRig(BuildContext);
+#endif
 
     const ECameraBuildStatus Status = Rig->GetBuildStatus();
     const bool bBuilt = !BuildLog.HasErrors()

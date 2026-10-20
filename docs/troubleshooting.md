@@ -47,8 +47,9 @@ version: reconnect it so it lists the tools again. The error names the closest t
 
 ## The precompiled plugin asks to be rebuilt
 
-The release is built for Unreal Engine 5.8 on Windows. With another engine version, build the plugin
-from source (Visual Studio 2022 with the C++ toolchain).
+Each release has a zip for Unreal Engine 5.7 and one for 5.8, on Windows: use the one whose name matches
+your engine. With another engine version, build the plugin from source (Visual Studio 2022 with the C++
+toolchain).
 
 ## Still stuck
 

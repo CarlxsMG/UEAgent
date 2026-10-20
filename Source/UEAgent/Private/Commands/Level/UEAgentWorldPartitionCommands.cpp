@@ -1,5 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Commands/Asset/AssetCommandHelpers.h"            // MapPathTooLongForExternalPackages (create_world_partition_map)
 #include "Commands/Common/UEAgentGraphUtils.h"             // FUEAgentGraphUtils::ResolveClass (filter_class resolution)
 #include "Commands/Data/DataAuthoringUtils.h"
@@ -84,7 +85,13 @@ namespace
         {
             return Obj;
         }
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+        // 5.7's UDataLayerInstance hides GetFName as private (GetDataLayerFName is virtual and not always the object
+        // name), so the object name is read through UObject.
+        Obj->SetStringField(TEXT("instance_name"), static_cast<const UObject*>(Instance)->GetFName().ToString());
+#else
         Obj->SetStringField(TEXT("instance_name"), Instance->GetFName().ToString());
+#endif
         Obj->SetStringField(TEXT("short_name"), Instance->GetDataLayerShortName());
         Obj->SetStringField(TEXT("full_name"), Instance->GetDataLayerFullName());
         Obj->SetStringField(TEXT("data_layer_type"), DataAuthoringUtils::DataLayerTypeToString(Instance->GetType()));
@@ -166,7 +173,12 @@ namespace UEAgentWorldPartitionCommandsImpl
         TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
         Reply->SetStringField(TEXT("actor_name"), Actor->GetActorLabel());
         Reply->SetStringField(TEXT("data_layer_asset_path"), AssetPath);
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+        // 5.7: GetFName is private on UDataLayerInstance; read the object name through UObject.
+        Reply->SetStringField(TEXT("instance_name"), static_cast<const UObject*>(Instance)->GetFName().ToString());
+#else
         Reply->SetStringField(TEXT("instance_name"), Instance->GetFName().ToString());
+#endif
         Reply->SetStringField(TEXT("short_name"), Instance->GetDataLayerShortName());
         return Reply;
     }
@@ -559,7 +571,12 @@ TSharedPtr<FJsonObject> HandleRemoveDataLayerInstance(const TSharedPtr<FJsonObje
         return mcp_common::MakeOkReply(AbsentObj);
     }
 
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    // 5.7: GetFName is private on UDataLayerInstance; read the object name through UObject.
+    const FString InstanceName = static_cast<const UObject*>(Instance)->GetFName().ToString();
+#else
     const FString InstanceName = Instance->GetFName().ToString();
+#endif
 
     const FScopedTransaction Transaction(FText::FromString(TEXT("MCP: Remove Data Layer Instance")));
     // DeleteDataLayer returns void, so success is VERIFIED by read-back below. It also
@@ -659,8 +676,14 @@ TSharedPtr<FJsonObject> HandleSetDataLayerParent(const TSharedPtr<FJsonObject>& 
         TSharedPtr<FJsonObject> ExistObj = MakeShared<FJsonObject>();
         ExistObj->SetStringField(TEXT("data_layer_asset_path"), AssetPath);
         ExistObj->SetStringField(TEXT("parent_data_layer_asset_path"), ParentAssetPath);
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+        // 5.7: GetFName is private on UDataLayerInstance; read the object names through UObject.
+        ExistObj->SetStringField(TEXT("instance_name"), static_cast<const UObject*>(Instance)->GetFName().ToString());
+        ExistObj->SetStringField(TEXT("parent_instance_name"), ParentInstance ? static_cast<const UObject*>(ParentInstance)->GetFName().ToString() : FString());
+#else
         ExistObj->SetStringField(TEXT("instance_name"), Instance->GetFName().ToString());
         ExistObj->SetStringField(TEXT("parent_instance_name"), ParentInstance ? ParentInstance->GetFName().ToString() : FString());
+#endif
         ExistObj->SetBoolField(TEXT("parented"), true);
         ExistObj->SetBoolField(TEXT("already_parented"), true);
         return mcp_common::MakeOkReply(ExistObj);
@@ -677,8 +700,14 @@ TSharedPtr<FJsonObject> HandleSetDataLayerParent(const TSharedPtr<FJsonObject>& 
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
     ResultObj->SetStringField(TEXT("data_layer_asset_path"), AssetPath);
     ResultObj->SetStringField(TEXT("parent_data_layer_asset_path"), ParentAssetPath);
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    // 5.7: GetFName is private on UDataLayerInstance; read the object names through UObject.
+    ResultObj->SetStringField(TEXT("instance_name"), static_cast<const UObject*>(Instance)->GetFName().ToString());
+    ResultObj->SetStringField(TEXT("parent_instance_name"), ParentInstance ? static_cast<const UObject*>(ParentInstance)->GetFName().ToString() : FString());
+#else
     ResultObj->SetStringField(TEXT("instance_name"), Instance->GetFName().ToString());
     ResultObj->SetStringField(TEXT("parent_instance_name"), ParentInstance ? ParentInstance->GetFName().ToString() : FString());
+#endif
     ResultObj->SetBoolField(TEXT("parented"), bParented);
     ResultObj->SetBoolField(TEXT("already_parented"), false);
     if (!bParented)

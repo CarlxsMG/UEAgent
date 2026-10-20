@@ -1,5 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Misc/EngineVersionComparison.h"
 
 #include "Editor.h"
 #include "Engine/World.h"
@@ -366,7 +367,11 @@ static TSharedPtr<FJsonObject> SpawnWaterBodyAndLink(
 
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+	SpawnParams.CustomPreSpawnInitalization = [bAffectsLandscape](AActor* NewActor)  // the 5.7 spelling of the same hook
+#else
 	SpawnParams.CustomPreSpawnInitialization = [bAffectsLandscape](AActor* NewActor)
+#endif
 	{
 		if (AWaterBody* NewBody = Cast<AWaterBody>(NewActor))
 		{

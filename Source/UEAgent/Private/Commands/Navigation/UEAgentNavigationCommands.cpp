@@ -1,5 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Misc/EngineVersionComparison.h"
 
 #include "Editor.h"
 #include "Engine/World.h"
@@ -1892,7 +1893,25 @@ TSharedPtr<FJsonObject> HandleDiagnoseNavmesh(const TSharedPtr<FJsonObject>& Par
     if (Recast)
     {
         MaxTiles = Recast->GetNavMeshTilesCount();
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+        // 5.7 has no GetNumActiveTiles(). 5.8 returns its generator's count of the tiles that hold data (0 without a
+        // generator); count the same tiles, those with a header, through the public tile refs.
+        if (Recast->GetGenerator())
+        {
+            TArray<FNavTileRef> TileRefs;
+            Recast->GetAllNavMeshTiles(TileRefs);
+            for (const FNavTileRef& TileRef : TileRefs)
+            {
+                int32 TileX = 0, TileY = 0, TileLayer = 0;
+                if (Recast->GetNavMeshTileXY(TileRef, TileX, TileY, TileLayer))
+                {
+                    ++ActiveTiles;
+                }
+            }
+        }
+#else
         ActiveTiles = Recast->GetNumActiveTiles();
+#endif
 
         TSharedPtr<FJsonObject> R = MakeShared<FJsonObject>();
         R->SetStringField(TEXT("name"), Recast->GetName());

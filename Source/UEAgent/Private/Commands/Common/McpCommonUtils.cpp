@@ -18,6 +18,7 @@
 #include "UObject/TextProperty.h"          // FTextProperty -- attributes the FText localization-only diff
 #include "UObject/PropertyPortFlags.h"     // PPF_DeepComparison / PPF_None
 #include "Misc/StringOutputDevice.h"       // ImportPropertyTextStrict: the parser's own error text
+#include "Misc/EngineVersionComparison.h" // ENGINE_MAJOR/MINOR_VERSION for MakeRequiresEngineReply
 #include "UObject/Field.h"
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
@@ -1631,6 +1632,13 @@ namespace mcp_common
             }
         }
         return true;
+    }
+
+    TSharedPtr<FJsonObject> MakeRequiresEngineReply(const TCHAR* Tool, const TCHAR* MinVersion, const TCHAR* Why)
+    {
+        return MakeErrorReply(FString::Printf(
+            TEXT("%s needs Unreal Engine %s or later (%s); this editor runs Unreal Engine %d.%d. Nothing was changed."),
+            Tool, MinVersion, Why, ENGINE_MAJOR_VERSION, ENGINE_MINOR_VERSION));
     }
 
     bool ImportPropertyTextStrict(const FProperty* Property, const FString& Text, void* ValuePtr, UObject* Owner,

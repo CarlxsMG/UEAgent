@@ -576,6 +576,15 @@ namespace mcp_common
         UClass* TargetClass = nullptr, const FString& Scope = TEXT("auto"), FString* OutError = nullptr);
 
     /**
+     * The refusal of a tool whose engine API does not exist in the running engine, e.g. on UE 5.7 a tool built on an
+     * API added in 5.8. Tool names the tool, MinVersion the first engine version that has the API ("5.8"), and Why
+     * what is missing. The reply says which engine is running and that nothing was changed. Use it in the
+     * `#if UE_VERSION_OLDER_THAN(...)` branch of the handler, so the tool stays listed on every engine and answers
+     * instead of failing to compile.
+     */
+    UEAGENT_API TSharedPtr<FJsonObject> MakeRequiresEngineReply(const TCHAR* Tool, const TCHAR* MinVersion, const TCHAR* Why);
+
+    /**
      * Import Text into the value at ValuePtr with Property's own text parser, and only when the parser reads ALL of it
      * (surrounding whitespace aside). FProperty::ImportText_Direct alone answers success for text it did not read:
      * a float or integer takes "abc" as 0 and "1e5" as 1. The text is parsed into a scratch copy, so ValuePtr is left
