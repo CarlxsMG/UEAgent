@@ -4,6 +4,73 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 ## Unreleased
 
+## 2.0.2 - 2026-10-20
+
+Tools that do the same kind of job now say which one to pick, and about forty tools stop reporting success for
+work they skipped or only half did.
+
+### Changed
+
+- 113 descriptions say when to use the tool instead of its generic sibling, and when the generic one is the better
+  pick. This covers the generic property tools (`get_properties`, `inspect_object`, `get_actor_properties_by_class`,
+  `get_component_properties`, `set_properties`, `set_component_property`), `spawn_actor`, `spawn_blueprint_actor`,
+  `add_component_to_actor`, `add_component_to_blueprint`, and the typed `get_/set_<type>_properties`, `spawn_*` and
+  `add_*_component` tools.
+- The `initialize` instructions add a short guide to choosing among similar tools.
+- `spawn_niagara_component` places a real `ANiagaraActor`, the actor the editor places when a Niagara System is
+  dragged into the level, with one undo step; `save_level` keeps it. It used to create a transient component
+  owned by the level's WorldSettings: nothing was saved, and `actor_label` renamed the WorldSettings.
+- `get_audio_component_properties` searches every audio component, not only each actor's first one, and takes an
+  optional `actor_name` for a component name that several actors share.
+- `get_light_properties` reads `light_intensity_units` (a unit name, on point, spot and rect lights) and
+  `light_lighting_channel_mask` off the light; both were fixed values. `light_min_roughness` is gone (the engine
+  property is deprecated), and the falloff keys appear only on point and spot lights.
+
+### Fixed
+
+- **Partial writes.** These tools validate every input before the first write; a refused call leaves the asset or
+  actor unchanged: `set_foliage_type_properties`, `set_landscape_grass_type_properties`,
+  `set_reflection_capture_properties`, `set_scene_capture_2d_properties`, `set_sound_attenuation_properties`,
+  `set_sound_concurrency_properties`, `set_sound_wave_properties`, `set_pose_search_schema_properties` and
+  `set_pcg_node_properties`.
+- **Input that was skipped without an error is refused:**
+  - an array of the wrong length in `set_exponential_height_fog_properties`, `set_sky_atmosphere_properties`,
+    `set_volumetric_cloud_properties`, `set_sky_light_properties`, `set_widget_slot_properties`,
+    `set_box_slot_properties`, `set_grid_slot_properties`, `add_spline_component` and `set_spline_points`;
+  - a path that does not load in `set_static_mesh_properties`, `spawn_decal_actor` and
+    `add_instanced_static_mesh_component`;
+  - a key that names no field in the sound, pose search and PCG setters, whose `applied_keys` listed it as applied;
+  - a `count` that `spawn_mass_entities` would ignore.
+- **Text read only in part.** A value given as text is refused when the property's parser cannot read all of it. The
+  number parser took "abc" as 0 and "12abc" as 12, and the call answered success. This covers `set_properties`,
+  `set_component_property` and the other tools that share the JSON importer, plus `set_mass_trait_property`,
+  `set_data_asset_property`, `set_anim_graph_node_property`, `set_project_settings_value`,
+  `set_niagara_data_interface_default`, `set_material_expression_property` and the arguments of `call_function`.
+  A refused value leaves the property as it was. The JSON importer behind `set_properties`, `set_component_property` and
+  `set_blueprint_component_properties` also refuses a JSON string that is not a whole number, a decimal number or a
+  bool where one is expected, at any depth of a struct, array or map, instead of writing 0 or false. A tag container
+  given as an array refuses an unregistered tag instead of leaving it out.
+- The sky light, sky atmosphere and volumetric cloud setters refuse a Static component, whose engine setters change
+  nothing; they used to count the fields as applied.
+- The StateTree setters (`set_task_property`, `set_condition_property`, `set_consideration_property`,
+  `set_evaluator_property`, `set_state_tree_global_task_property`) answer `success: false` with `save_error` when the
+  save fails; they answered success with `saved: false`.
+- `set_mass_trait_property` is one undo step and sends the change notification.
+- `set_physical_material_properties` refreshes the material in the running session, reports `changed` as measured
+  (`updated` was always true), refuses a call with no field, and returns its values when the save fails.
+- `set_pose_search_schema_properties` measures `changed` (it was true whenever a key was sent).
+- `set_sound_wave_properties` sends the change notification, so compression settings rebuild the audio as a
+  Details-panel edit does.
+- `set_data_asset_property` writes a JSON object or array through the JSON importer; it used to write it as empty
+  text.
+- `create_procedural_mesh_component` makes the mesh component the root, so `location` applies; it used to leave the
+  mesh at the origin.
+- `add_motion_warping_component` and `add_gameplay_camera_component` add an instance component that `save_level`
+  keeps, attached to the root, with one undo step. A second `UMotionWarpingComponent` name no longer collides with an
+  existing object, which could close the editor.
+- `set_properties` no longer says it skips gameplay-tag validation: it refuses an unregistered tag, like
+  `set_component_property`.
+
 ## 2.0.1 - 2026-10-20
 
 A patch release: an Interchange registration that closed the editor is refused, and three other Interchange tools
