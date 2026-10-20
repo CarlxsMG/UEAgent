@@ -68,7 +68,8 @@ flowchart LR
 2. **Abre el proyecto.** La barra de estado muestra **MCP · 55561** con un punto verde cuando el
    servidor está listo (si no, consulta [Troubleshooting](docs/troubleshooting.md)).
 3. **Conecta un agente.** Desde el menú de esa barra de estado, **Connect Claude Code to this project**
-   escribe la entrada `unreal` en el `.mcp.json` de tu proyecto. O, solo para ti:
+   escribe la entrada `unreal` en el `.mcp.json` de tu proyecto, y **Connect another client** hace lo
+   mismo para Cursor, VS Code y Antigravity CLI (y copia el comando de Codex). O, solo para ti:
 
    ```
    claude mcp add --transport http unreal http://127.0.0.1:55561/mcp
@@ -107,22 +108,22 @@ UEAgent está en [Glama](https://glama.ai/mcp/servers/CarlxsMG/UEAgent), el dire
 
 <a href="https://glama.ai/mcp/servers/CarlxsMG/UEAgent"><img width="380" height="200" src="https://glama.ai/mcp/servers/CarlxsMG/UEAgent/badges/card.svg" alt="UEAgent en Glama"></a>
 
-## Skills de Claude Code
+## Skills
 
-Este repositorio también es un marketplace de plugins de Claude Code. Instala su plugin en Claude Code:
-
-```
-/plugin install ueagent --marketplace CarlxsMG/UEAgent
-```
+UEAgent trae skills en el formato abierto Agent Skills, para Claude Code, Codex, Cursor, VS Code,
+Antigravity CLI y Gemini CLI. Se instalan en el proyecto desde la barra de estado del editor:
+**MCP · 55561 > Skills**. Vienen con el plugin, así que siempre casan con sus herramientas.
 
 | Skill | |
 |---|---|
-| `/ueagent:skill-builder` | Convierte un flujo que quieres repetir en una skill nueva: busca las herramientas, ensaya la tarea en el editor, comprueba el resultado y escribe el `SKILL.md` |
-| `/ueagent:blueprint-actor` | Un actor Blueprint a partir de una descripción: componentes, grafo, compilación limpia y una instancia en el nivel |
-| `/ueagent:project-audit` | Qué está roto y qué sobra, de lo más grave a lo menos |
-| `/ueagent:level-lighting` | Iluminación exterior (sol, cielo, sky light, niebla) y una captura |
+| `ueagent-skill-builder` | Convierte un flujo que quieres repetir en una skill nueva: busca las herramientas, ensaya la tarea en el editor, comprueba el resultado y escribe el `SKILL.md` |
+| `ueagent-blueprint-actor` | Un actor Blueprint a partir de una descripción: componentes, grafo, compilación limpia y una instancia en el nivel |
+| `ueagent-project-audit` | Qué está roto y qué sobra, de lo más grave a lo menos |
+| `ueagent-level-lighting` | Iluminación exterior (sol, cielo, sky light, niebla) y una captura |
+| `ueagent-report-issue` | Reporta un fallo o pide una herramienta como issue de GitHub, con las versiones, la llamada y el log |
+| `ueagent-contribute-fix` | Convierte un cambio en el código del plugin en un pull request, con las reglas del repositorio |
 
-Claude también las carga solo cuando una petición encaja. Más en [Skills](docs/skills.md).
+El cliente las carga solo cuando una petición encaja. Más en [Skills](docs/skills.md).
 
 ## Documentación
 
@@ -181,6 +182,8 @@ lo compile, o compila el target del editor desde tu IDE. Al arrancar el editor, 
 |---|---|
 | `mcp.http.status` / `mcp.http.restart` | estado del servidor; reiniciarlo (también recarga el catálogo de herramientas) |
 | `mcp.claude.status [ruta]` / `mcp.claude.connect [ruta]` | inspeccionar / escribir la entrada de `.mcp.json` |
+| `mcp.clients.status` / `mcp.clients.connect cursor\|vscode\|antigravity [ruta]` | lo mismo para los ficheros de los otros clientes |
+| `mcp.skills.status` / `mcp.skills.install` / `mcp.skills.remove` `[claude\|agents\|all]` | las skills de UEAgent en el proyecto (ver [Skills](docs/skills.md)) |
 | `mcp.contract.selftest <vectors.json> [quit]` | ejecutar los vectores del contrato (ver `Resources/ContractTests`) |
 | `mcp.ReadOnlyRootEnforcement 0\|1` | 0 = solo avisar de los guardados bajo una raíz de solo lectura, en vez de rechazarlos |
 | `mcp.UndoStepPerCall 0\|1` | 0 = dejar el historial de deshacer a cada herramienta, en vez de un paso por llamada |

@@ -2,6 +2,47 @@
 
 Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](https://semver.org).
 
+## 2.2.0 - 2026-10-20
+
+UEAgent's skills come with the plugin and work in every client that reads the Agent Skills format,
+and the editor connects more clients than Claude Code.
+
+### Added
+
+- **Skills for every client, installed from the editor.** **MCP > Skills** copies UEAgent's skills into
+  the project: `.claude/skills` for Claude Code, `.agents/skills` for Codex, Cursor, VS Code,
+  Antigravity CLI and Gemini CLI. They ship inside the plugin, so they always name the tools of the
+  version installed. Each copy is stamped with that version: the menu offers **Update** after the
+  plugin changes, replaces only the folders it installed, and never touches a skill of your own.
+  Console: `mcp.skills.status`, `mcp.skills.install`, `mcp.skills.remove`.
+- **Two skills to contribute.** `ueagent-report-issue` turns a bug or a missing tool into a GitHub issue,
+  with the versions, the call and the editor log, and shows it before opening it. `ueagent-contribute-fix`
+  turns a change to the plugin's code into a pull request, following the repository's rules.
+- **Connect another client.** The same menu writes the `unreal` entry for Cursor (`.cursor/mcp.json`),
+  VS Code (`.vscode/mcp.json`) and Antigravity CLI (`.agents/mcp_config.json`), with the compact tool
+  list, and copies the `codex mcp add` command for Codex. As with Claude Code, only that entry is
+  written and the rest of the file keeps its layout; with an auth token, Cursor reads it from
+  `UEAGENT_TOKEN` and VS Code asks for it once. Console: `mcp.clients.status`, `mcp.clients.connect`.
+
+### Changed
+
+- The skills were renamed with a `ueagent-` prefix (`ueagent-skill-builder`, `ueagent-blueprint-actor`,
+  `ueagent-project-audit`, `ueagent-level-lighting`) and no longer use anything only Claude Code
+  understands.
+- The startup hint appears only when no client of the project is connected.
+
+### Removed
+
+- **The Claude Code plugin marketplace** (`/plugin install ueagent --marketplace CarlxsMG/UEAgent`). It
+  always followed the latest code, so its skills could name tools the installed plugin did not have.
+  Remove it with `/plugin uninstall ueagent@ueagent` and `/plugin marketplace remove ueagent`, then
+  install the skills from the editor's menu.
+
+### Fixed
+
+- `run_automation_test` did not find a test by the name `list_automation_tests` shows first
+  (`full_test_path`, such as `UEAgent.ClaudeCode`); it accepts that name as well as `test_name`.
+
 ## 2.1.1 - 2026-10-20
 
 A closer review of the 5.7 build, with new tests on both engines. Most of what it found was on 5.8 as well.

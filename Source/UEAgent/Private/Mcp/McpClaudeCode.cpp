@@ -1,4 +1,5 @@
 #include "Mcp/McpClaudeCode.h"
+#include "Mcp/McpJsonFile.h"
 
 #include "UEAgentBridge.h"
 #include "UEAgentSettings.h"
@@ -19,6 +20,8 @@ const TCHAR* const McpClaudeCode::TokenEnvVar = TEXT("UEAGENT_TOKEN");
 // Namespace name unique per file: the module builds as unity (see Build.cs).
 namespace McpClaudeCodePrivate
 {
+	using namespace McpJsonFile;
+
 	// The two "type" values with which Claude Code speaks Streamable HTTP. "streamable-http" is a
 	// documented alias of "http" and it works: an entry like that is NOT "fixed".
 	static bool IsHttpType(const FString& Type)
@@ -26,66 +29,9 @@ namespace McpClaudeCodePrivate
 		return Type.Equals(TEXT("http"), ESearchCase::IgnoreCase) || Type.Equals(TEXT("streamable-http"), ESearchCase::IgnoreCase);
 	}
 
-	static FString NormalizeUrl(FString Url)
-	{
-		Url.TrimStartAndEndInline();
-		Url.ToLowerInline();
-		// The query only picks the tool list (?tools=compact): the server is the same one.
-		int32 Query = INDEX_NONE;
-		if (Url.FindChar(TEXT('?'), Query))
-		{
-			Url.LeftInline(Query);
-		}
-		while (Url.EndsWith(TEXT("/")))
-		{
-			Url.LeftChopInline(1);
-		}
-		return Url;
-	}
-
-	static bool SameUrl(const FString& A, const FString& B)
-	{
-		return !A.IsEmpty() && NormalizeUrl(A) == NormalizeUrl(B);
-	}
-
 	static FString AuthHeaderValue()
 	{
 		return FString::Printf(TEXT("Bearer ${%s}"), McpClaudeCode::TokenEnvVar);
-	}
-
-	static TSharedPtr<FJsonObject> ObjectField(const TSharedPtr<FJsonObject>& Object, const TCHAR* Field)
-	{
-		const TSharedPtr<FJsonObject>* Found = nullptr;
-		return Object.IsValid() && Object->TryGetObjectField(Field, Found) && Found ? *Found : nullptr;
-	}
-
-	static FString StringField(const TSharedPtr<FJsonObject>& Object, const TCHAR* Field)
-	{
-		FString Value;
-		if (Object.IsValid())
-		{
-			Object->TryGetStringField(Field, Value);
-		}
-		return Value;
-	}
-
-	static bool HasAuthHeader(const TSharedPtr<FJsonObject>& Entry)
-	{
-		const TSharedPtr<FJsonObject> Headers = ObjectField(Entry, TEXT("headers"));
-		if (!Headers.IsValid())
-		{
-			return false;
-		}
-		for (const auto& Pair : Headers->Values)
-		{
-			FString Value;
-			if (FString(*Pair.Key).Equals(TEXT("Authorization"), ESearchCase::IgnoreCase)
-				&& Pair.Value.IsValid() && Pair.Value->TryGetString(Value) && !Value.TrimStartAndEnd().IsEmpty())
-			{
-				return true;
-			}
-		}
-		return false;
 	}
 
 	static bool PointsHere(const TSharedPtr<FJsonObject>& Entry, const FString& Url)
@@ -108,195 +54,6 @@ namespace McpClaudeCodePrivate
 			return TEXT("nowhere (it has no url)");
 		}
 		return Type.IsEmpty() ? FString::Printf(TEXT("%s (no type)"), *Url) : FString::Printf(TEXT("%s (type %s)"), *Url, *Type);
-	}
-
-	static bool Load(const FString& Path, FString& OutText, TSharedPtr<FJsonObject>& OutRoot, FString& OutError)
-	{
-		if (!FFileHelper::LoadFileToString(OutText, *Path))
-		{
-			OutError = TEXT("could not be read");
-			return false;
-		}
-		// Numbers keep their original text: when rewriting, whatever is not touched comes out identical.
-		if (!FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(OutText), OutRoot, FJsonSerializer::EFlags::StoreNumbersAsStrings)
-			|| !OutRoot.IsValid())
-		{
-			OutError = TEXT("is not valid JSON");
-			return false;
-		}
-		return true;
-	}
-
-	// --- Writing ---------------------------------------------------------------------------------
-	// By hand rather than with TJsonWriter: Unreal's writer indents with tabs and reformats numbers,
-	// and this file was usually written by Claude Code (two spaces) or by a person. It is rewritten
-	// with the indentation and line endings it already had, so the diff is only the changed entry.
-	struct FJsonLayout
-	{
-		FString Indent = TEXT("  "); // the one `claude mcp add --scope project` writes
-		FString Eol = TEXT("\n");
-		bool bTrailingEol = true;
-	};
-
-	static FJsonLayout DetectFormat(const FString& Text)
-	{
-		FJsonLayout Format;
-		Format.Eol = Text.Contains(TEXT("\r\n")) ? TEXT("\r\n") : TEXT("\n");
-		Format.bTrailingEol = Text.EndsWith(TEXT("\n"));
-		// The first indented line is at depth 1: its indentation is exactly one unit.
-		int32 LineStart = Text.Find(TEXT("\n"));
-		while (LineStart != INDEX_NONE)
-		{
-			int32 i = LineStart + 1;
-			FString Lead;
-			while (i < Text.Len() && (Text[i] == TEXT(' ') || Text[i] == TEXT('\t')))
-			{
-				Lead.AppendChar(Text[i++]);
-			}
-			if (!Lead.IsEmpty())
-			{
-				Format.Indent = Lead[0] == TEXT('\t') ? FString(TEXT("\t")) : Lead;
-				break;
-			}
-			LineStart = Text.Find(TEXT("\n"), ESearchCase::CaseSensitive, ESearchDir::FromStart, LineStart + 1);
-		}
-		return Format;
-	}
-
-	static void AppendIndent(FString& Out, const FJsonLayout& Format, int32 Depth)
-	{
-		for (int32 i = 0; i < Depth; ++i)
-		{
-			Out += Format.Indent;
-		}
-	}
-
-	// JSON.stringify escapes: quotes, backslash and control characters; everything else (UTF-8) as is.
-	static void AppendQuoted(FString& Out, const FString& Text)
-	{
-		Out.AppendChar(TEXT('"'));
-		for (const TCHAR C : Text)
-		{
-			switch (C)
-			{
-			case TEXT('"'):  Out += TEXT("\\\""); break;
-			case TEXT('\\'): Out += TEXT("\\\\"); break;
-			case TEXT('\n'): Out += TEXT("\\n"); break;
-			case TEXT('\r'): Out += TEXT("\\r"); break;
-			case TEXT('\t'): Out += TEXT("\\t"); break;
-			case TEXT('\b'): Out += TEXT("\\b"); break;
-			case TEXT('\f'): Out += TEXT("\\f"); break;
-			default:
-				if (C < 0x20)
-				{
-					Out += FString::Printf(TEXT("\\u%04x"), static_cast<uint32>(C));
-				}
-				else
-				{
-					Out.AppendChar(C);
-				}
-			}
-		}
-		Out.AppendChar(TEXT('"'));
-	}
-
-	static void WriteObject(FString& Out, const TSharedPtr<FJsonObject>& Object, const FJsonLayout& Format, int32 Depth);
-
-	static void WriteValue(FString& Out, const TSharedPtr<FJsonValue>& Value, const FJsonLayout& Format, int32 Depth)
-	{
-		if (!Value.IsValid())
-		{
-			Out += TEXT("null");
-			return;
-		}
-		switch (Value->Type)
-		{
-		case EJson::Boolean:
-			Out += Value->AsBool() ? TEXT("true") : TEXT("false");
-			return;
-		case EJson::Number:
-		{
-			// With StoreNumbersAsStrings the number carries its original text.
-			FString Text;
-			if (!Value->TryGetString(Text) || Text.IsEmpty())
-			{
-				Text = FString::SanitizeFloat(Value->AsNumber(), 0);
-			}
-			Out += Text;
-			return;
-		}
-		case EJson::String:
-			AppendQuoted(Out, Value->AsString());
-			return;
-		case EJson::Array:
-		{
-			const TArray<TSharedPtr<FJsonValue>>& Items = Value->AsArray();
-			if (Items.Num() == 0)
-			{
-				Out += TEXT("[]");
-				return;
-			}
-			Out += TEXT("[");
-			Out += Format.Eol;
-			for (int32 i = 0; i < Items.Num(); ++i)
-			{
-				AppendIndent(Out, Format, Depth + 1);
-				WriteValue(Out, Items[i], Format, Depth + 1);
-				if (i + 1 < Items.Num())
-				{
-					Out += TEXT(",");
-				}
-				Out += Format.Eol;
-			}
-			AppendIndent(Out, Format, Depth);
-			Out += TEXT("]");
-			return;
-		}
-		case EJson::Object:
-			WriteObject(Out, Value->AsObject(), Format, Depth);
-			return;
-		default:
-			Out += TEXT("null");
-			return;
-		}
-	}
-
-	static void WriteObject(FString& Out, const TSharedPtr<FJsonObject>& Object, const FJsonLayout& Format, int32 Depth)
-	{
-		if (!Object.IsValid() || Object->Values.Num() == 0)
-		{
-			Out += TEXT("{}");
-			return;
-		}
-		Out += TEXT("{");
-		Out += Format.Eol;
-		int32 Index = 0;
-		const int32 Count = Object->Values.Num();
-		for (const auto& Pair : Object->Values)
-		{
-			AppendIndent(Out, Format, Depth + 1);
-			AppendQuoted(Out, FString(*Pair.Key));
-			Out += TEXT(": ");
-			WriteValue(Out, Pair.Value, Format, Depth + 1);
-			if (++Index < Count)
-			{
-				Out += TEXT(",");
-			}
-			Out += Format.Eol;
-		}
-		AppendIndent(Out, Format, Depth);
-		Out += TEXT("}");
-	}
-
-	static FString Serialize(const TSharedPtr<FJsonObject>& Root, const FJsonLayout& Format)
-	{
-		FString Out;
-		WriteObject(Out, Root, Format, 0);
-		if (Format.bTrailingEol)
-		{
-			Out += Format.Eol;
-		}
-		return Out;
 	}
 
 	// What did Claude Code decide about the entry? Only the project settings (next to the
@@ -477,7 +234,7 @@ McpClaudeCode::FStatus McpClaudeCode::Inspect(const FString& Path, uint16 Port, 
 		Status.Detail = FString::Printf(TEXT("The \"%s\" entry points to %s, not to %s.%s"), *Status.EntryName, *DescribeTarget(Entry), *Url, *RejectedNote);
 		return Status;
 	}
-	if (bRequiresToken && !HasAuthHeader(Entry))
+	if (bRequiresToken && !HasAuthorizationHeader(Entry))
 	{
 		Status.State = EState::MissingAuth;
 		Status.Detail = FString::Printf(TEXT("The \"%s\" entry sends no Authorization header, and this server requires a token.%s"), *Status.EntryName, *RejectedNote);
@@ -517,7 +274,7 @@ bool McpClaudeCode::Connect(const FString& Path, uint16 Port, bool bRequiresToke
 		return false;
 	}
 
-	FJsonLayout Format;
+	FLayout Format;
 	TSharedPtr<FJsonObject> Root;
 	if (Before.State == EState::MissingFile)
 	{
@@ -531,7 +288,7 @@ bool McpClaudeCode::Connect(const FString& Path, uint16 Port, bool bRequiresToke
 			OutMessage = FString::Printf(TEXT("Leaving %s untouched: it %s."), *Path, *Error); // it changed in the meantime
 			return false;
 		}
-		Format = DetectFormat(Text);
+		Format = DetectLayout(Text);
 	}
 
 	TSharedPtr<FJsonObject> Servers = ObjectField(Root, TEXT("mcpServers"));
@@ -583,7 +340,7 @@ bool McpClaudeCode::Connect(const FString& Path, uint16 Port, bool bRequiresToke
 		Entry->SetStringField(TEXT("url"), Url);
 		Changes.Add(OldUrl.IsEmpty() ? FString::Printf(TEXT("url %s"), *Url) : FString::Printf(TEXT("url %s -> %s"), *OldUrl, *Url));
 	}
-	if (bRequiresToken && !HasAuthHeader(Entry))
+	if (bRequiresToken && !HasAuthorizationHeader(Entry))
 	{
 		TSharedPtr<FJsonObject> Headers = ObjectField(Entry, TEXT("headers"));
 		if (!Headers.IsValid())
@@ -597,16 +354,8 @@ bool McpClaudeCode::Connect(const FString& Path, uint16 Port, bool bRequiresToke
 	}
 
 	// Through a temporary file: a failure halfway through cannot leave the team's .mcp.json half-written.
-	const FString TempPath = Path + TEXT(".tmp");
-	if (!FFileHelper::SaveStringToFile(Serialize(Root, Format), *TempPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+	if (!WriteAtomically(Path, Serialize(Root, Format), OutMessage))
 	{
-		OutMessage = FString::Printf(TEXT("Could not write %s."), *TempPath);
-		return false;
-	}
-	if (!IFileManager::Get().Move(*Path, *TempPath, /*Replace*/ true, /*EvenIfReadOnly*/ false))
-	{
-		IFileManager::Get().Delete(*TempPath);
-		OutMessage = FString::Printf(TEXT("Could not replace %s: is it read-only, or locked by source control?"), *Path);
 		return false;
 	}
 

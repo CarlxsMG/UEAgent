@@ -24678,7 +24678,7 @@
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "The exact registered test name (the \"test_name\" field from list_automation_tests)"
+              "description": "The test's test_name or its full_test_path, exactly as list_automation_tests gives them (e.g. \"UEAgent.ClaudeCode\")"
             }
           ],
           "returns": "{ test_name, started, completed, passed, verdict, duration_s, errors, warnings, entries:[{type,message,context,filename,line}], entry_count, note }",

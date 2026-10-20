@@ -1,15 +1,17 @@
 ---
-name: level-lighting
-description: Light the current Unreal level as an outdoor scene (a sun, a sky atmosphere, a sky light and height fog) with UEAgent's tools, then show the result in a screenshot. Use when the user asks to light a level, set up daylight or a sunset, or add a sky.
-argument-hint: [noon | sunset | overcast]
+name: ueagent-level-lighting
+description: Light the current Unreal level as an outdoor scene (a sun, a sky atmosphere, a sky light and height fog) with UEAgent's MCP tools, then show the result in a screenshot. Use when the user asks to light a level, set up daylight or a sunset, or add a sky.
 ---
 
 # Level lighting
 
 Sets up outdoor lighting in the level open in the editor: a directional sun, a sky atmosphere, a sky
-light and exponential height fog, tuned to the time of day asked for, and a screenshot to show it.
+light and exponential height fog, tuned to the look the user asked for (noon, sunset or overcast;
+noon if they named none), and a screenshot to show it.
 
-The look to aim for (noon if none is given): $ARGUMENTS
+UEAgent's tools are the MCP tools of the Unreal Editor's server (named `unreal` when it was connected
+from the editor's **MCP** menu). Your client may show them with a prefix, such as
+`mcp__unreal__spawn_actor`. With the compact tool list, run them through `call_tool`.
 
 ## Steps
 

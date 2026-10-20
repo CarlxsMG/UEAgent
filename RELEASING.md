@@ -8,8 +8,6 @@ changing the catalog's shape.
 
 - In `UEAgent.uplugin`, raise `Version` (an integer, one more per release) and set `VersionName`
   (`x.y.z`).
-- In `claude-code/.claude-plugin/plugin.json`, set `version` to the same `x.y.z`: users of the
-  Claude Code plugin get its skills at that version.
 - In `CHANGELOG.md`, rename `## Unreleased` to `## x.y.z - YYYY-MM-DD`, and start a new, empty
   `## Unreleased` above it.
 - Commit, push, and wait for the CI to pass.

@@ -1,16 +1,14 @@
 ---
-name: skill-builder
+name: ueagent-skill-builder
 description: Turn an Unreal Editor workflow into a reusable skill built on UEAgent's MCP tools. It finds the tools the task needs, rehearses the task once in the editor, checks the result, and writes a SKILL.md with the tool sequence and the pitfalls it met. Use when the user asks to make, capture or automate an Unreal workflow as a skill, or to repeat a task they just did with the tools.
-argument-hint: [the workflow to turn into a skill]
 ---
 
 # Skill builder
 
-Turns a task the user wants to repeat in the Unreal Editor into a skill: a `SKILL.md` that tells
-Claude which UEAgent tools to call, in what order, how to check the result and what goes wrong. The
+Turns a task the user wants to repeat in the Unreal Editor into a skill: a `SKILL.md` that tells an
+agent which UEAgent tools to call, in what order, how to check the result and what goes wrong. The
 skill is built from a real run, not from guesses: every step in it has worked once in this editor.
-
-The workflow to capture: $ARGUMENTS
+The workflow to capture is the one the user described.
 
 ## 1. Pin down the task
 
@@ -26,12 +24,14 @@ One skill does one task. If the request is really two, build two skills.
 
 ## 2. Find the tools
 
-UEAgent's tools are this session's MCP tools, named `mcp__<server>__<tool>`
-(`mcp__unreal__spawn_actor` when the project was connected with the editor's **Connect** button).
+UEAgent's tools are the MCP tools of the Unreal Editor's server (named `unreal` when it was connected
+from the editor's **MCP** menu). Each client names them its own way: `mcp__unreal__spawn_actor` in
+Claude Code, for example. In the skill, write the plain tool name (`spawn_actor`): every client finds
+it.
 
-- If the tools are deferred, load them with ToolSearch: by name (`select:mcp__unreal__spawn_actor`) or
-  by keywords (`unreal spawn actor`).
-- With the compact tool list, search with `find_tools` and read a schema with `describe_tool`.
+- If your client loads tools on demand, search for them by name or by keywords (`unreal spawn actor`).
+- With the compact tool list, search with `find_tools`, read a schema with `describe_tool` and run a
+  tool with `call_tool`.
 - The tool reference, with search, is at <https://carlxsmg.github.io/UEAgent/tools/>.
 
 Read the whole description of every tool you pick: it names the traps (parameter forms, what it
@@ -53,17 +53,23 @@ can be rolled back and tried again. Confirm the end state with a read tool (`get
 
 ## 4. Write the skill
 
-Ask where to save it:
+Save it next to UEAgent's own skills, in the folder the user's client reads:
 
-- this project: `.claude/skills/<name>/SKILL.md`
-- every project on this machine: `~/.claude/skills/<name>/SKILL.md`
+- Claude Code: `.claude/skills/<name>/SKILL.md` in the project (or `~/.claude/skills/` for every
+  project on this machine);
+- Codex, Cursor, VS Code, Antigravity CLI and Gemini CLI: `.agents/skills/<name>/SKILL.md` in the
+  project.
 
-Fill in [template.md](template.md). Rules:
+Ask which client they use if you do not know it. Fill in [template.md](template.md). Rules (the Agent
+Skills format, which every one of those clients reads):
 
-- `name` in kebab-case; a `description` that says what the skill does and lists the requests that
-  should trigger it.
+- `name`: lowercase letters, digits and hyphens, at most 64 characters, the same as its folder. Do not
+  start it with `ueagent-`: that prefix is UEAgent's own.
+- `description`: at most 1024 characters; what the skill does and the requests that should trigger it.
+- Only the standard frontmatter fields (`name`, `description`, and optionally `license`,
+  `compatibility`, `metadata`), so every client reads it the same way.
 - Tool and parameter names exactly as the schemas spell them.
-- What varies between runs is an input (`arguments`, used as `$name` in the body), never a value
+- What varies between runs is an input the skill asks for or takes from the request, never a value
   hardcoded from the rehearsal. No absolute paths from this machine except as examples.
 - Each step: the tool, the arguments that matter, and what its answer must show.
 - A **Verify** section with the read that proves the result, and a **Pitfalls** section with the
@@ -72,6 +78,7 @@ Fill in [template.md](template.md). Rules:
 
 ## 5. Test the new skill
 
-Invoke it (`/<name>`) on a fresh target, not the one used in the rehearsal, and fix the skill
-wherever the run differed from what it says. Then tell the user where it was saved, how to invoke
-it, and which inputs it asks for.
+Run it on a fresh target, not the one used in the rehearsal: ask for it the way the user will (or
+invoke it by name, `/<name>` in Claude Code, `$<name>` in Codex), and fix the skill wherever the run
+differed from what it says. Then tell the user where it was saved, how to invoke it, and which inputs
+it asks for. A client that was already open may need a restart to see a new skill.

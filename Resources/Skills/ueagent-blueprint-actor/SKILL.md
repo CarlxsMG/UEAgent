@@ -1,15 +1,17 @@
 ---
-name: blueprint-actor
-description: Create a Blueprint actor in Unreal from a description (its components, its event-graph logic, a clean compile and an instance in the level) with UEAgent's tools. Use when the user asks for a new actor Blueprint, such as a door, a pickup, a trigger zone or a turret.
-argument-hint: [what the actor is and does]
+name: ueagent-blueprint-actor
+description: Create a Blueprint actor in Unreal from a description (its components, its event-graph logic, a clean compile and an instance in the level) with UEAgent's MCP tools. Use when the user asks for a new actor Blueprint, such as a door, a pickup, a trigger zone or a turret.
 ---
 
 # Blueprint actor
 
 Builds an actor Blueprint from a description: the asset, its components, the event graph, a compile
-with no errors, and one instance placed in the level.
+with no errors, and one instance placed in the level. The actor to build is the one the user
+described; ask for what is missing before step 2.
 
-The actor to build: $ARGUMENTS
+UEAgent's tools are the MCP tools of the Unreal Editor's server (named `unreal` when it was connected
+from the editor's **MCP** menu). Your client may show them with a prefix, such as
+`mcp__unreal__create_blueprint`. With the compact tool list, run them through `call_tool`.
 
 ## Steps
 

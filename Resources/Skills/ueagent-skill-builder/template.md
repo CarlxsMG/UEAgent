@@ -1,22 +1,26 @@
 ---
 name: <kebab-case-name>
 description: <What it does, in one sentence>. Use when <the requests that should trigger it>.
-argument-hint: [<input> <input>]
-arguments: [<input>, <input>]
 ---
 
 # <Title>
 
 <One paragraph: what this skill makes in the editor, and the result to expect.>
 
+UEAgent's tools are the MCP tools of the Unreal Editor's server (named `unreal` when it was connected
+from the editor's **MCP** menu). Your client may show them with a prefix. With the compact tool list,
+run them through `call_tool`.
+
 ## Inputs
 
-- `$<input>`: <what it is, with an example>
-- `$<input>`: <...>
+Take them from the user's request; ask for the ones it does not give.
+
+- **<input>**: <what it is, with an example>
+- **<input>**: <...>
 
 ## Steps
 
-1. **<What this step does>**: `<tool_name>` with `<param>: <value>`, `<param>: $<input>`.
+1. **<What this step does>**: `<tool_name>` with `<param>: <value>` and `<param>`: the <input>.
    Check: <what the answer must show>.
 2. **<...>**: `<tool_name>` ...
 

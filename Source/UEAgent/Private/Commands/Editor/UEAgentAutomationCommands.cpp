@@ -411,7 +411,7 @@ namespace
         FAutomationTestExecutionInfo* LastTestExecutionInfo = nullptr;
         bool* bHasLastResult = nullptr;
     };
-    TSharedPtr<FJsonObject> RunAutomationTestCommon(const FString& TestName, TSharedPtr<FJsonObject>& OutError, FAutomationRunCache* OutCache = nullptr)
+    TSharedPtr<FJsonObject> RunAutomationTestCommon(const FString& InTestName, TSharedPtr<FJsonObject>& OutError, FAutomationRunCache* OutCache = nullptr)
     {
         OutError.Reset();
 
@@ -422,6 +422,21 @@ namespace
         EnsureAutomationFilterMask();
 
         Framework.LoadTestModules();
+
+        // The framework keys tests by their test_name (the class name for a simple test), but
+        // list_automation_tests leads with full_test_path ("UEAgent.ClaudeCode"), the name the Session
+        // Frontend and `Automation RunTests` use: that one is accepted too, and resolved to its test_name.
+        FString TestName = InTestName;
+        if (!Framework.ContainsTest(TestName))
+        {
+            TArray<FAutomationTestInfo> TestInfos;
+            Framework.GetValidTestNames(TestInfos);
+            if (const FAutomationTestInfo* ByPath = TestInfos.FindByPredicate(
+                [&InTestName](const FAutomationTestInfo& Info) { return Info.GetFullTestPath() == InTestName; }))
+            {
+                TestName = ByPath->GetTestName();
+            }
+        }
 
         if (!Framework.ContainsTest(TestName))
         {
@@ -752,7 +767,7 @@ TSharedPtr<FJsonObject> HandleListAutomationTests(const TSharedPtr<FJsonObject>&
 }
 
 // MCP:run_automation_test - Run a single automation test by name and return its result (synchronous tests only)
-//   @param test_name - The exact registered test name (the "test_name" field from list_automation_tests)
+//   @param test_name - The test's test_name or its full_test_path, exactly as list_automation_tests gives them (e.g. "UEAgent.ClaudeCode")
 //   @returns { test_name, started, completed, passed, verdict, duration_s, errors, warnings, entries:[{type,message,context,filename,line}], entry_count, note }
 TSharedPtr<FJsonObject> HandleRunAutomationTest(const TSharedPtr<FJsonObject>& Params)
 {

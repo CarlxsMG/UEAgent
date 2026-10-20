@@ -7,6 +7,13 @@ Streamable HTTP can connect.
 Every client here except Claude Code loads all the tools up front, so the examples ask for the
 [compact tool list](#compact-tool-list) with `?tools=compact`. Remove it to give a client every tool.
 
+The editor writes the connection for the clients that read it from a file in the project: in the
+status bar, **MCP · 55561 > Connect Claude Code to this project**, or **Connect another client** for
+Cursor, VS Code and Antigravity CLI. Only the `unreal` entry is written; the rest of the file, and its
+layout, stay as they were. For Codex, the same menu copies its command.
+
+Then install the [skills](skills.md) for your client, from the same menu.
+
 ## Your client
 
 <!-- tabs -->
@@ -23,7 +30,8 @@ Claude Code loads tools on demand, so it takes the full list.
 
 ### Cursor
 
-`.cursor/mcp.json` in the project, or `~/.cursor/mcp.json` for every project:
+**MCP · 55561 > Connect another client > Connect Cursor** writes `.cursor/mcp.json` in the project.
+By hand, there or in `~/.cursor/mcp.json` for every project:
 
 ```json
 {
@@ -37,7 +45,8 @@ Claude Code loads tools on demand, so it takes the full list.
 
 ### VS Code
 
-GitHub Copilot, in agent mode: `.vscode/mcp.json` (the root key is `servers`, not `mcpServers`):
+GitHub Copilot, in agent mode. **MCP · 55561 > Connect another client > Connect VS Code** writes
+`.vscode/mcp.json` in the project; by hand (the root key is `servers`, not `mcpServers`):
 
 ```json
 {
@@ -83,7 +92,24 @@ Edit Config**):
 
 Quit Claude Desktop completely and open it again to load the change.
 
+### Antigravity CLI
+
+**MCP · 55561 > Connect another client > Connect Antigravity CLI** writes `.agents/mcp_config.json` in
+the project (the key is `serverUrl`); by hand, there or in `~/.gemini/config/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "unreal": {
+      "serverUrl": "http://127.0.0.1:55561/mcp?tools=compact"
+    }
+  }
+}
+```
+
 ### Gemini CLI
+
+Google replaced Gemini CLI with Antigravity CLI in June 2026; for an install that still runs it:
 
 ```bash
 gemini mcp add -t http unreal "http://127.0.0.1:55561/mcp?tools=compact"
@@ -102,6 +128,9 @@ Or in `.gemini/settings.json`, with `httpUrl` (in Gemini CLI, `url` means the ol
 ```
 
 ### Codex
+
+**MCP · 55561 > Connect another client > Copy the "codex mcp add" command**, then paste it into a
+terminal: Codex keeps its servers in `~/.codex/config.toml`, for every project.
 
 ```bash
 codex mcp add unreal --url "http://127.0.0.1:55561/mcp?tools=compact"
@@ -137,9 +166,15 @@ commit:
 
 - Claude Code: the entry that **Connect Claude Code** writes already sends
   `Bearer ${UEAGENT_TOKEN}`.
-- Codex: `bearer_token_env_var = "UEAGENT_TOKEN"` in the server's table.
+- Cursor: the entry that **Connect Cursor** writes sends `Bearer ${env:UEAGENT_TOKEN}`.
+- VS Code: the entry that **Connect VS Code** writes asks for the token once (the `ueagent-token`
+  input) and keeps it in VS Code's secret storage.
+- Codex: the copied command adds `--bearer-token-env-var UEAGENT_TOKEN`
+  (`bearer_token_env_var = "UEAGENT_TOKEN"` in the server's table).
 - Claude Desktop: mcp-remote's `--header` option.
-- Cursor, VS Code, Windsurf and Gemini CLI: the entry's `headers` field.
+- Windsurf and Gemini CLI: the entry's `headers` field.
+- Antigravity CLI documents no headers for a remote server, so **Connect** does not offer it while a
+  token is set.
 
 ## Several clients at once
 

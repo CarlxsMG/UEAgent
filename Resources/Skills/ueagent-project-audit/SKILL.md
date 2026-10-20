@@ -1,15 +1,17 @@
 ---
-name: project-audit
-description: Audit an Unreal project, or one content folder, with UEAgent's tools - Blueprints that do not compile, graph bugs that compile clean, unused assets, broken references, leftover redirectors and Map Check messages - and report what to fix, most serious first. Use when the user asks to check the health of the project, find what is broken, or clean it up.
-argument-hint: [content folder, /Game by default]
+name: ueagent-project-audit
+description: Audit an Unreal project, or one content folder, with UEAgent's MCP tools - Blueprints that do not compile, graph bugs that compile clean, unused assets, broken references, leftover redirectors and Map Check messages - and report what to fix, most serious first. Use when the user asks to check the health of the project, find what is broken, or clean it up.
 ---
 
 # Project audit
 
 Reads the project and reports what is broken and what can go, most serious first. It changes
-nothing: fixes are proposed, and run only once the user agrees.
+nothing: fixes are proposed, and run only once the user agrees. It audits the folder the user named,
+or `/Game` if they named none.
 
-The folder to audit (`/Game` if none is given): $ARGUMENTS
+UEAgent's tools are the MCP tools of the Unreal Editor's server (named `unreal` when it was connected
+from the editor's **MCP** menu). Your client may show them with a prefix, such as
+`mcp__unreal__run_map_check`. With the compact tool list, run them through `call_tool`.
 
 ## Steps
 

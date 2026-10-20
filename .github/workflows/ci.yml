@@ -41,6 +41,8 @@ jobs:
           python-version: "3.12"
       - name: Relative links and anchors
         run: python Tools/check_doc_links.py
+      - name: Skills follow the Agent Skills format and the catalog
+        run: python Tools/check_skills.py
 
   lint:
     name: Python tools lint
