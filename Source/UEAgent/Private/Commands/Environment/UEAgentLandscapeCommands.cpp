@@ -236,6 +236,47 @@ namespace
         return false;
     }
 
+    // Why the {"min", "max"} object param Key is malformed, or empty when it is absent, null or well formed. The
+    // readers above take whatever bounds they find, so a value that is not an object holding a number in min and/or
+    // max and no other key would otherwise be skipped silently; the set_* tools check it before writing anything.
+    FString Landscape_IntervalParamError(const TSharedPtr<FJsonObject>& Params, const TCHAR* Key)
+    {
+        const TSharedPtr<FJsonValue> Value = Params->TryGetField(Key);
+        if (!Value.IsValid() || Value->IsNull())
+        {
+            return FString();
+        }
+        const TSharedPtr<FJsonObject>* Obj = nullptr;
+        if (!Value->TryGetObject(Obj) || !Obj || !Obj->IsValid())
+        {
+            return FString::Printf(TEXT("%s must be an object {\"min\": number, \"max\": number}"), Key);
+        }
+        int32 Bounds = 0;
+        for (const TCHAR* Bound : { TEXT("min"), TEXT("max") })
+        {
+            const TSharedPtr<FJsonValue> BoundValue = (*Obj)->TryGetField(Bound);
+            if (!BoundValue.IsValid())
+            {
+                continue;
+            }
+            double Unused = 0.0;
+            if (!BoundValue->TryGetNumber(Unused))
+            {
+                return FString::Printf(TEXT("%s.%s must be a number"), Key, Bound);
+            }
+            ++Bounds;
+        }
+        if (Bounds == 0)
+        {
+            return FString::Printf(TEXT("%s has neither \"min\" nor \"max\""), Key);
+        }
+        if ((*Obj)->Values.Num() != Bounds)
+        {
+            return FString::Printf(TEXT("%s takes only the keys \"min\" and \"max\""), Key);
+        }
+        return FString();
+    }
+
     // Base (first) edit-layer GUID for edit-layer-aware writes (UE 5.8). Shared by
     // both the weightmap writer (HandlePaintLandscapeLayer, which precedes the
     // definition below) and the heightmap sculpt writers. Callers scope their accessor block
@@ -641,17 +682,17 @@ static void MakeFoliageTypePropsJson(UFoliageType* FT, TSharedPtr<FJsonObject>& 
     Data->SetBoolField(TEXT("affect_dynamic_indirect_lighting"), FT->bAffectDynamicIndirectLighting != 0);
 }
 
-// MCP:set_foliage_type_properties - Set tunables of a FoliageType_InstancedStaticMesh asset in one call, only the fields you pass, then save it. Returns the read-back values with applied_count and saved; an invalid mobility fails the call. Edits the asset only: instances already placed keep their transforms. Read it with get_foliage_type_properties.
+// MCP:set_foliage_type_properties - Set tunables of a FoliageType_InstancedStaticMesh asset in one call, only the fields you pass, then save it. Over set_properties it takes the scale, z-offset and cull ranges as {"min","max"} objects and saves in the same call, but records no undo step. Returns the read-back values with applied_count and saved. An invalid mobility, or a range that is not such an object with a number bound, fails the call before anything is written. Edits the asset only: instances already placed keep their transforms. Read: get_foliage_type_properties.
 //   @param foliage_path - Asset path of a UFoliageType_InstancedStaticMesh, e.g. "/Game/Foliage/FT_Example"; actor foliage types are not found.
 //   @param density - Instances per 1000 x 1000 uu area (10 m by 10 m) when painting.
 //   @param density_adjustment_factor - Density multiplier used when reapplying: above 1 adds instances, below 1 removes them.
 //   @param radius - Minimum distance in cm between foliage instances.
-//   @param scale_x [object] - X scale range as a JSON object {"min":0.8,"max":1.2}, either bound optional.
-//   @param scale_y [object] - Y scale range as a JSON object {"min":0.8,"max":1.2}, either bound optional.
-//   @param scale_z [object] - Z scale range as a JSON object {"min":0.8,"max":1.2}, either bound optional.
-//   @param z_offset [object] - Z location offset range in cm as a JSON object {"min":-5,"max":0}; either bound may be left out.
-//   @param cull_distance - Integer interval {"min":start,"max":end} in cm: instances fade from min (only with a PerInstanceFadeAmount material node) and clusters cull beyond max; 0 disables.
-//   @param mobility - Component mobility: Static, Stationary or Movable, case-insensitive; any other value fails the call.
+//   @param scale_x [object] - X scale range as a JSON object {"min":0.8,"max":1.2}, either bound optional; anything else (not an object, no number bound, another key) fails the call and nothing is changed.
+//   @param scale_y [object] - Y scale range as a JSON object {"min":0.8,"max":1.2}, either bound optional; anything else fails the call and nothing is changed.
+//   @param scale_z [object] - Z scale range as a JSON object {"min":0.8,"max":1.2}, either bound optional; anything else fails the call and nothing is changed.
+//   @param z_offset [object] - Z location offset range in cm as a JSON object {"min":-5,"max":0}; either bound may be left out; anything else fails the call and nothing is changed.
+//   @param cull_distance - Integer interval {"min":start,"max":end} in cm: instances fade from min (only with a PerInstanceFadeAmount material node) and clusters cull beyond max; 0 disables. Anything but such an object fails the call and nothing is changed.
+//   @param mobility - Component mobility: Static, Stationary or Movable, case-insensitive; any other value fails the call and nothing is changed.
 //   @param align_to_normal - Tilt instances to the normal of the surface they are placed on.
 //   @param random_yaw - Give each instance a random yaw around its vertical axis.
 //   @param collision_with_world - Test for overlap with world geometry before placing each instance.
@@ -669,6 +710,29 @@ TSharedPtr<FJsonObject> HandleSetFoliageTypeProperties(const TSharedPtr<FJsonObj
     {
         return mcp_common::MakeErrorReply(
             FString::Printf(TEXT("FoliageType not found: %s"), *FoliagePath));
+    }
+
+    // Every input is checked before the first write, so a refused call leaves the asset exactly as it was.
+    for (const TCHAR* IntervalKey : { TEXT("scale_x"), TEXT("scale_y"), TEXT("scale_z"), TEXT("z_offset"), TEXT("cull_distance") })
+    {
+        const FString IntervalError = Landscape_IntervalParamError(Params, IntervalKey);
+        if (!IntervalError.IsEmpty())
+        {
+            return mcp_common::MakeErrorReply(IntervalError + TEXT("; nothing was changed"));
+        }
+    }
+
+    bool bSetMobility = false;
+    EComponentMobility::Type NewMobility = EComponentMobility::Static;
+    FString MobStr;
+    if (Params->TryGetStringField(TEXT("mobility"), MobStr) && !MobStr.IsEmpty())
+    {
+        if (MobStr.Equals(TEXT("Static"), ESearchCase::IgnoreCase)) { NewMobility = EComponentMobility::Static; }
+        else if (MobStr.Equals(TEXT("Stationary"), ESearchCase::IgnoreCase)) { NewMobility = EComponentMobility::Stationary; }
+        else if (MobStr.Equals(TEXT("Movable"), ESearchCase::IgnoreCase)) { NewMobility = EComponentMobility::Movable; }
+        else { return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("Invalid mobility '%s' (expected Static/Stationary/Movable); nothing was changed"), *MobStr)); }
+        bSetMobility = true;
     }
 
     FT->Modify();
@@ -695,15 +759,7 @@ TSharedPtr<FJsonObject> HandleSetFoliageTypeProperties(const TSharedPtr<FJsonObj
         }
     }
 
-    FString MobStr;
-    if (Params->TryGetStringField(TEXT("mobility"), MobStr) && !MobStr.IsEmpty())
-    {
-        if (MobStr.Equals(TEXT("Static"), ESearchCase::IgnoreCase)) { FT->Mobility = EComponentMobility::Static; ++Applied; }
-        else if (MobStr.Equals(TEXT("Stationary"), ESearchCase::IgnoreCase)) { FT->Mobility = EComponentMobility::Stationary; ++Applied; }
-        else if (MobStr.Equals(TEXT("Movable"), ESearchCase::IgnoreCase)) { FT->Mobility = EComponentMobility::Movable; ++Applied; }
-        else { return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Invalid mobility '%s' (expected Static/Stationary/Movable)"), *MobStr)); }
-    }
+    if (bSetMobility) { FT->Mobility = NewMobility; ++Applied; }
 
     bool b = false;
     if (Params->TryGetBoolField(TEXT("align_to_normal"), b)) { FT->AlignToNormal = b ? 1 : 0; ++Applied; }
@@ -723,7 +779,7 @@ TSharedPtr<FJsonObject> HandleSetFoliageTypeProperties(const TSharedPtr<FJsonObj
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_foliage_type_properties"), SaveError);
 }
 
-// MCP:get_foliage_type_properties - Read a FoliageType asset's authored tunables in one call -- density, radius, scale and z-offset ranges, cull distances, mobility, align-to-normal, random yaw, world collision, shadow and indirect-lighting flags. The read-back oracle for set_foliage_type_properties, and cheaper than reflection-walking the asset from Python. Describes the ASSET, not what is placed in the level: for that use get_foliage_instance_count / get_foliage_in_radius.
+// MCP:get_foliage_type_properties - Read a FoliageType_InstancedStaticMesh asset's authored tunables in one call -- density, radius, scale and z-offset ranges, cull distances, mobility, align-to-normal, random yaw, world collision, shadow and indirect-lighting flags -- under the names set_foliage_type_properties takes. A curated view with nothing computed; get_properties reads any other UPROPERTY on the asset. Actor foliage types are not found. Describes the ASSET, not what is placed in the level: for that use get_foliage_instance_count / get_foliage_in_radius.
 //   @param foliage_path - Asset path of the UFoliageType
 //   @returns { asset_path, foliage_class, density, density_adjustment_factor, radius, scale_x:{min,max}, scale_y, scale_z, z_offset, cull_distance:{min,max}, mobility, align_to_normal, random_yaw, collision_with_world, cast_shadow, affect_dynamic_indirect_lighting }
 TSharedPtr<FJsonObject> HandleGetFoliageTypeProperties(const TSharedPtr<FJsonObject>& Params)
@@ -3156,11 +3212,21 @@ namespace
     }
 
     // Apply the provided fields from Params onto a FGrassVariety, returning the
-    // number applied. Shared by create (initial variety) + set props. Returns -1 +
-    // OutError on an invalid scaling value or unresolved mesh.
+    // number applied. Returns -1 + OutError on an unresolved mesh, an invalid scaling
+    // value or a malformed scale interval, possibly after earlier fields were written:
+    // set_landscape_grass_type_properties runs it on a copy, so that leaves the asset untouched.
     int32 ApplyGrassVarietyFromParams(const TSharedPtr<FJsonObject>& Params, FGrassVariety& V, FString& OutError)
     {
         int32 Applied = 0;
+
+        for (const TCHAR* IntervalKey : { TEXT("scale_x"), TEXT("scale_y"), TEXT("scale_z") })
+        {
+            OutError = Landscape_IntervalParamError(Params, IntervalKey);
+            if (!OutError.IsEmpty())
+            {
+                return -1;
+            }
+        }
 
         FString MeshPath;
         if (Params->TryGetStringField(TEXT("grass_mesh"), MeshPath) && !MeshPath.IsEmpty())
@@ -3299,19 +3365,19 @@ TSharedPtr<FJsonObject> HandleCreateLandscapeGrassType(const TSharedPtr<FJsonObj
     return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("create_landscape_grass_type"), SaveError);
 }
 
-// MCP:set_landscape_grass_type_properties - Set fields of one grass variety of a LandscapeGrassType asset, only those you pass, and save it; an empty variety list gets one appended for index 0, and density and cull distances change only their per-platform Default value. Returns the read-back variety with applied_count and saved; read it with get_landscape_grass_type_properties.
+// MCP:set_landscape_grass_type_properties - Set fields of one grass variety (variety_index) of a LandscapeGrassType asset, only those you pass, and save it. set_properties cannot address one FGrassVariety element of the asset's array; this also writes only the per-platform Default of density and cull distances, refreshes the state hash, and appends a variety for index 0 when the list is empty. No undo step. A grass_mesh that does not load, an invalid scaling or a scale range that is not a {"min","max"} object fails the call with nothing changed, not even the appended variety. Read: get_landscape_grass_type_properties.
 //   @param grass_path - Asset path of the LandscapeGrassType, e.g. "/Game/Foliage/GT_Field".
 //   @param variety_index [integer] - Index of the FGrassVariety to edit, default 0 (appends if the array is empty)
-//   @param grass_mesh - Path of the StaticMesh for this variety, e.g. "/Game/Foliage/SM_Grass"; an unknown path fails the call.
+//   @param grass_mesh - Path of the StaticMesh for this variety, e.g. "/Game/Foliage/SM_Grass"; a path that does not load as a StaticMesh fails the call and nothing is changed.
 //   @param grass_density - Instances per 10 square metres (25 means 2.5 per m2), so a wrong guess is a 10x error in the instance budget.
 //   @param placement_jitter - Jitter of the grid placement from 0 to 1; only used when use_grid is true.
 //   @param start_cull_distance - Distance in cm where instances start to fade, an integer; it does nothing unless the grass material uses a PerInstanceFadeAmount node, and 0 disables it.
 //   @param end_cull_distance - Distance in cm beyond which a whole grass cluster is culled, an integer.
 //   @param min_lod - Smallest mesh LOD to render, from -1 to 8; -1 uses the MinLOD of the static mesh asset.
-//   @param scaling - Scale mode: Uniform, Free or LockXY, case-insensitive; any other value fails the call.
-//   @param scale_x [object] - X scale range as a JSON object {"min":0.8,"max":1.2}, also used for every axis with Uniform scaling.
-//   @param scale_y [object] - Y scale range as a JSON object {"min":0.8,"max":1.2}, used only with Free scaling.
-//   @param scale_z [object] - Z scale range as a JSON object {"min":0.8,"max":1.2}, used with Free or LockXY scaling.
+//   @param scaling - Scale mode: Uniform, Free or LockXY, case-insensitive; any other value fails the call and nothing is changed.
+//   @param scale_x [object] - X scale range as a JSON object {"min":0.8,"max":1.2}, also used for every axis with Uniform scaling; anything else (not an object, no number bound, another key) fails the call and nothing is changed.
+//   @param scale_y [object] - Y scale range as a JSON object {"min":0.8,"max":1.2}, used only with Free scaling; anything else fails the call and nothing is changed.
+//   @param scale_z [object] - Z scale range as a JSON object {"min":0.8,"max":1.2}, used with Free or LockXY scaling; anything else fails the call and nothing is changed.
 //   @param random_rotation - Give each instance a random rotation instead of a shared one.
 //   @param align_to_surface - Tilt instances to the landscape normal instead of keeping them vertical.
 //   @param use_grid - Place instances on a jittered grid instead of a Halton sequence.
@@ -3339,28 +3405,35 @@ TSharedPtr<FJsonObject> HandleSetLandscapeGrassTypeProperties(const TSharedPtr<F
             FString::Printf(TEXT("Invalid variety_index %d (must be >= 0)"), VarietyIndex));
     }
 
-    GrassType->Modify();
-
     // Address the variety by index. If the array is empty (fresh grass type with no
-    // mesh), append one so the props have somewhere to land. An out-of-range index
+    // mesh), one is appended so the props have somewhere to land. An out-of-range index
     // on a non-empty array is an honest error.
-    if (GrassType->GrassVarieties.Num() == 0 && VarietyIndex == 0)
-    {
-        GrassType->GrassVarieties.Add(FGrassVariety());
-    }
-    if (!GrassType->GrassVarieties.IsValidIndex(VarietyIndex))
+    const bool bAppendVariety = GrassType->GrassVarieties.Num() == 0 && VarietyIndex == 0;
+    if (!bAppendVariety && !GrassType->GrassVarieties.IsValidIndex(VarietyIndex))
     {
         return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Invalid variety_index %d (count=%d)"), VarietyIndex, GrassType->GrassVarieties.Num()));
+            FString::Printf(TEXT("Invalid variety_index %d (count=%d); nothing was changed"), VarietyIndex, GrassType->GrassVarieties.Num()));
     }
 
-    FGrassVariety& Variety = GrassType->GrassVarieties[VarietyIndex];
+    // The fields land on a copy first: a grass_mesh that does not load, an invalid scaling or a
+    // malformed interval refuses the call with the asset untouched (no field, no appended variety).
+    FGrassVariety Variety = bAppendVariety ? FGrassVariety() : GrassType->GrassVarieties[VarietyIndex];
 
     FString ApplyError;
     const int32 Applied = ApplyGrassVarietyFromParams(Params, Variety, ApplyError);
     if (Applied < 0)
     {
-        return mcp_common::MakeErrorReply(ApplyError);
+        return mcp_common::MakeErrorReply(ApplyError + TEXT("; nothing was changed"));
+    }
+
+    GrassType->Modify();
+    if (bAppendVariety)
+    {
+        GrassType->GrassVarieties.Add(MoveTemp(Variety));
+    }
+    else
+    {
+        GrassType->GrassVarieties[VarietyIndex] = MoveTemp(Variety);
     }
 
     GrassType->PostEditChange();   // refresh StateHash
@@ -3373,7 +3446,7 @@ TSharedPtr<FJsonObject> HandleSetLandscapeGrassTypeProperties(const TSharedPtr<F
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_landscape_grass_type_properties"), SaveError);
 }
 
-// MCP:get_landscape_grass_type_properties - Read one grass variety of a LandscapeGrassType asset: mesh, density, placement jitter, start/end cull distance, min LOD, scaling mode and scale ranges, rotation/alignment and shadow flags. The read-back oracle for set_landscape_grass_type_properties. Two units that mislead: grass_density is instances per TEN square metres (25 means 2.5/m2), and start_cull_distance only fades if the mesh's material uses a PerInstanceFadeAmount node -- otherwise clusters pop at end_cull_distance and the start value does nothing.
+// MCP:get_landscape_grass_type_properties - Read one grass variety (variety_index, default 0) of a LandscapeGrassType asset: mesh, density, placement jitter, start/end cull distance, min LOD, scaling mode and scale ranges, rotation/alignment and shadow flags, under the names set_landscape_grass_type_properties takes. Use it instead of get_properties, which can only return the whole GrassVarieties array, not one element; per-platform values report their Default only. Two units that mislead: grass_density is instances per TEN square metres (25 means 2.5/m2), and start_cull_distance only fades if the mesh's material uses a PerInstanceFadeAmount node -- otherwise clusters pop at end_cull_distance and the start value does nothing.
 //   @param grass_path - Asset path of the ULandscapeGrassType
 //   @param variety_index [integer] - Optional index of the FGrassVariety to read, default 0 when omitted; an index outside the grass type's varieties is an error
 //   @returns { asset_path, grass_class, variety_index, variety_count, grass_mesh, grass_density, placement_jitter, start_cull_distance, end_cull_distance, min_lod, scaling, scale_x:{min,max}, scale_y, scale_z, random_rotation, align_to_surface, use_grid, cast_dynamic_shadow, receives_decals, keep_instance_buffer_cpu_copy }

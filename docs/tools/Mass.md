@@ -135,7 +135,7 @@ Read an AMassSpawner actor of the editor world, found by actor label (first matc
 
 *Read-only.*
 
-Read a property (name or dotted path) of a trait in a Mass config via reflection (ExportText).
+Read a property (name or dotted path) of a trait on a Mass entity config, picked by trait_class, as ExportText plus its C++ type. Use it because a trait is an instanced object inside the config that get_properties cannot address by class. Write: set_mass_trait_property.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -263,7 +263,7 @@ Link Mass entity configs to a spawner's EntityTypes (written by reflection: the 
 
 *Destructive, idempotent.*
 
-Set a property (name or dotted path) on a trait in a Mass config via reflection (ImportText).
+Set one property (name or dotted struct path) of a trait on a Mass entity config asset from import text, as one undo step, and save it. set_properties needs the trait's object path; this finds it by trait_class (add it: add_mass_trait). The trait gets PostEditChange as after a Details-panel edit; there is no edit gate, and a value that does not import is refused with nothing changed. A failed save makes success false, with saved=false and save_error. Read: get_mass_trait_property.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -272,17 +272,17 @@ Set a property (name or dotted path) on a trait in a Mass config via reflection 
 | `property_name` | string | yes | Property name or dotted path (e.g. MaxSpeed, or Movement.HighResSpeed) |
 | `value` | string | yes | String value parsed by FProperty::ImportText_Direct |
 
-**Returns:** `{ config_path, trait_class, property_name, value, set, saved }`
+**Returns:** `{ config_path, trait_class, property_name, value, set, saved, save_error? }`
 
 ## `spawn_mass_entities`
 
 *Additive.*
 
-Trigger entity spawning on a AMassSpawner (DoSpawning from the FTSTicker path, outside Mass processing); reports the global Mass entity-count delta.
+Run DoSpawning on an editor-world AMassSpawner found by actor_label and report the global Mass entity-count delta -- it spawns entities, not an actor (create_mass_spawner_actor places the spawner). All configured types spawn at the spawner's own count (set_mass_spawner_count); a count that differs from it is an error and nothing is spawned. spawned can be 0. Inverse: despawn_mass_entities.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_label` | string | yes | Editor label of the AMassSpawner actor |
-| `count` | number | no | Informational only; accepted but does not bound the spawn (default 0) |
+| `count` | number | no | Optional; must equal the spawner's own count (set_mass_spawner_count), which is what DoSpawning spawns. Any other value is an error and nothing is spawned. |
 
-**Returns:** `{ actor_label, entity_count_before, entity_count_after, spawned, note }`
+**Returns:** `{ actor_label, entity_count_before, entity_count_after, spawned, spawner_count, note }`

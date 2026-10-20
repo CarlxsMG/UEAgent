@@ -731,7 +731,7 @@ namespace
 // Dynamic-mesh actor commands: spawn an ADynamicMeshActor, then build and edit its live UDynamicMesh. Every
 // mutation here is verified by reading the triangle / vertex count back off the live mesh.
 
-// MCP:spawn_dynamic_mesh_actor - Spawn an empty ADynamicMeshActor into the editor world (not PIE) at an optional location and rotation, ignoring collisions, in an undoable transaction. Returns the label of the new actor as actor_name, its internal name and triangle_count (0). Remove it with remove_dynamic_mesh_actor.
+// MCP:spawn_dynamic_mesh_actor - Spawn an empty ADynamicMeshActor into the editor world (not PIE) at an optional location and rotation, ignoring collisions, in one undo step -- the editable-mesh actor the GeometryScript tools (append_mesh_primitive, apply_mesh_boolean...) work on; spawn_actor has no such type. Each call adds another actor. Returns its label as actor_name, its internal name and triangle_count (0). Keep a result with copy_dynamic_mesh_to_static_mesh; remove it with remove_dynamic_mesh_actor.
 //   @param location - World location [x, y, z] in cm (default the world origin).
 //   @param rotation - World rotation in degrees as [pitch, yaw, roll] (default no rotation).
 //   @returns { actor_name: string, actor_internal_name: string, actor_class: string, has_dynamic_mesh_component: bool, has_dynamic_mesh: bool, triangle_count: int, spawned: bool }

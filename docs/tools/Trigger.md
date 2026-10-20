@@ -135,7 +135,7 @@ Resize a TriggerSphere in the editor world by setting the unscaled radius of its
 
 *Additive.*
 
-USE THIS, NOT the plain actor spawners, for ANY AVolume-derived actor: it spawns the actor AND builds a real cube brush for it from a half-extent, so the volume actually encloses space. The generic spawners leave an EMPTY UModel brush -- zero bounds, which means 0 nav tiles and no overlap, an actor that looks spawned and does nothing. It then normalizes the residual scale some actor factories stamp on placement and RE-READS the resulting world bounds, so `success` means "the volume you got matches the volume you asked for", not "the call returned". Called with no class and no extent it gives a 200 cm BlockingVolume cube. One undo step; the level is not saved.
+Spawn ANY AVolume-derived actor (default BlockingVolume) in the editor world AND build a real cube brush for it from a half-extent, so the volume actually encloses space: spawn_actor has no volume types, and a volume spawned without a brush has zero bounds -- 0 nav tiles, no overlap. It then normalizes the residual scale some actor factories stamp on placement (PCGVolume: 25,25,10) and RE-READS the brush bounds, so `success` means the volume matches the extent you asked for, not that the call returned. Typed siblings add one step each: spawn_pcg_volume assigns a graph, spawn_nav_modifier_volume an area class, spawn_level_streaming_volume binds a sub-level. Called with no class and no extent it gives a 200 cm BlockingVolume cube. One undo step; refused during PIE; the level is not saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

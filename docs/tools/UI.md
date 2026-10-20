@@ -229,7 +229,7 @@ Duplicate a widget (DuplicateObject&lt;UWidget> outered to the WidgetTree) and a
 
 *Read-only.*
 
-Retrieve detailed properties and state information for a UUserWidget hosted on a UWidgetComponent in the current editor level, by name: class, validity, visibility, placement of the hosting component, parent, focus, and the direct children of its root panel (one level, each with name, class, depth, valid, enabled and visibility). list_level_widget_components gives the names.
+Read the live state of a UUserWidget hosted on a UWidgetComponent in the current editor level, found by the widget's object name (list_level_widget_components gives the names): class, validity, visibility, enabled and focus, the hosting component's draw size and relative transform, parent, and the direct children of its root panel (one level). Use it for this runtime state, which no UPROPERTY read gives; inspect_object reads the widget's raw properties. A running PIE session is never searched: use read_pie_widgets for live game UI.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -529,7 +529,7 @@ Build a styled menu screen: create or reuse the Widget Blueprint at package_path
 
 *Destructive, idempotent.*
 
-Configure a widget's box-family slot layout (alignment/padding/size).  Applies when the widget is parented under a HorizontalBox/VerticalBox/Overlay/Border/SizeBox/ScrollBox; dispatches by the concrete slot type. Size only applies to Horizontal/Vertical/ScrollBox slots -- on the others it is returned as an honest note. For a CanvasPanel child use set_widget_slot_properties; for a GridPanel child use set_grid_slot_properties.
+Configure a widget's box-family slot layout (alignment/padding/size) in a Widget Blueprint, found by the child widget's name, then compile and save the Widget Blueprint. Applies under a HorizontalBox/VerticalBox/Overlay/Border/SizeBox/ScrollBox, dispatching by slot type through the slot's own setters; set_properties would need the slot object's path and neither compiles nor saves. A padding that is not 1, 2 or 4 numbers, or an unknown alignment or size_rule, fails the call before anything is written. Size only applies to Horizontal/Vertical/ScrollBox slots -- on the others it comes back as a note. No undo step. CanvasPanel child: set_widget_slot_properties; GridPanel child: set_grid_slot_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -537,17 +537,17 @@ Configure a widget's box-family slot layout (alignment/padding/size).  Applies w
 | `widget_name` | string | yes | name of the child widget whose box slot to edit |
 | `horizontal_alignment` | string | no | Optional alignment: Fill \| Left \| Center \| Right |
 | `vertical_alignment` | string | no | Optional alignment: Fill \| Top \| Center \| Bottom |
-| `padding` | array | no | Optional [Left, Top, Right, Bottom] floats (also accepts [uniform] or [horizontal, vertical]). |
+| `padding` | array | no | Optional [Left, Top, Right, Bottom] floats (also accepts [uniform] or [horizontal, vertical]); any other shape, or an entry that is not a number, fails the call and nothing is changed. |
 | `size_rule` | string | no | Optional Fill \| Auto (Horizontal/Vertical/ScrollBox slots only). |
 | `size_value` | number | no | Optional float fill weight (used with size_rule = Fill; default 1.0). |
 
-**Returns:** `{ widget_bp_path: string, widget_name: string, slot_type: string, settings_applied: object, applied_count: int, notes: [string], saved: bool, save_error: string }`
+**Returns:** `{ widget_bp_path: string, widget_name: string, slot_type: string, settings_applied: object, applied_count: int, notes: [string], saved: bool, save_error?: string }`
 
 ## `set_grid_slot_properties`
 
 *Destructive, idempotent.*
 
-Configure a widget's UGridSlot layout (row/column/spans/alignment/padding/layer/nudge).  Applies when the widget is parented under a GridPanel (create one with add_widget_to_blueprint widget_type="GridPanel"). Setting the same values again is idempotent.
+Configure the UGridSlot of a widget under a GridPanel in a Widget Blueprint, found by the child widget's name: row, column, spans, alignment, padding, layer, nudge. Over set_properties it needs no slot object path, uses the slot's own setters, and compiles and saves the Widget Blueprint; no undo step. A padding that is not 1, 2 or 4 numbers, a nudge that is not exactly 2, or an unknown alignment fails the call before anything is written. Idempotent. GridPanel: add_widget_to_blueprint widget_type="GridPanel"; other panels: set_box_slot_properties, set_widget_slot_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -559,11 +559,11 @@ Configure a widget's UGridSlot layout (row/column/spans/alignment/padding/layer/
 | `column_span` | number | no | Optional int number of columns this slot spans |
 | `horizontal_alignment` | string | no | Optional alignment: Fill \| Left \| Center \| Right |
 | `vertical_alignment` | string | no | Optional alignment: Fill \| Top \| Center \| Bottom |
-| `padding` | array | no | Optional [Left, Top, Right, Bottom] floats. |
+| `padding` | array | no | Optional [Left, Top, Right, Bottom] floats (also accepts [uniform] or [horizontal, vertical]); any other shape, or an entry that is not a number, fails the call and nothing is changed. |
 | `layer` | number | no | Optional int draw/hit-test layer offset (positive draws on top). |
-| `nudge` | array | no | Optional [X, Y] content offset. |
+| `nudge` | array | no | Optional [X, Y] content offset; anything but an array of exactly 2 numbers fails the call and nothing is changed. |
 
-**Returns:** `{ widget_bp_path: string, widget_name: string, slot_type: string, settings_applied: object, applied_count: int, saved: bool, save_error: string }`
+**Returns:** `{ widget_bp_path: string, widget_name: string, slot_type: string, settings_applied: object, applied_count: int, saved: bool, save_error?: string }`
 
 ## `set_level_widget_visibility`
 
@@ -709,7 +709,7 @@ Author a widget's GAMEPAD/KEYBOARD navigation rules -- what gets focus when the 
 
 *Destructive, idempotent.*
 
-Set ONE or MANY reflected properties on a widget of a Widget Blueprint, addressing NESTED STYLE FIELDS by dotted path ("WidgetStyle.Normal.TintColor", "WidgetStyle.Hovered.OutlineSettings.CornerRadii") and reporting FIELD BY FIELD what actually landed.  Two calling shapes over one write path: property_name+value writes a single path; `properties` writes a whole map with ONE Modify + ONE compile + ONE save (a FButtonStyle is ~30 leaf fields -- one call, not 30 recompiles). WARNING: The oracle is `applied[]`/`ignored[]`/`errors[]`, NOT success: a JSON key that matches no reflected field lands in `ignored[]` and `all_applied` goes false instead of the silent no-op the engine's converter reports as success. Read the result back with get_widget_blueprint_tree(property_paths=[...]).
+Set ONE or MANY reflected properties on a widget of a Widget Blueprint, addressing NESTED STYLE FIELDS by dotted path ("WidgetStyle.Normal.TintColor", "Items[0].Label") and reporting FIELD BY FIELD what landed, then compile and save it (save=false defers). Use it instead of set_properties for widgets: it finds the widget by name in the tree, writes leaf fields inside structs, takes color/margin/brush shorthands and compiles; set_properties takes only top-level names and compiles nothing. Two calling shapes over one write path: property_name+value, or a properties map under ONE Modify + ONE compile + ONE save (a FButtonStyle is ~30 leaf fields -- one call, not 30 recompiles). WARNING: the oracle is applied[]/ignored[]/errors[], NOT success: a key matching no reflected field lands in ignored[] and all_applied goes false. Refused while PIE runs unless force=true. Read back with get_widget_blueprint_tree(property_paths=[...]); slot layout: set_slot_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -726,20 +726,20 @@ Set ONE or MANY reflected properties on a widget of a Widget Blueprint, addressi
 
 *Destructive, idempotent.*
 
-Set the CanvasPanelSlot layout of a widget inside a CanvasPanel of a Widget Blueprint asset -- anchors, offsets, position, size, z_order and auto_size, only those passed -- then compile and save the blueprint; the reply reads the whole slot back. position and size write the same fields as offsets (Left/Top and Right/Bottom) and are applied after it, so they win when both are given. A widget not under a CanvasPanel, or a call with none of the six fields, is an error. Refused while PIE runs unless force=true. For other slot types use set_box_slot_properties, set_grid_slot_properties or set_slot_properties.
+Set the CanvasPanelSlot layout of a widget inside a CanvasPanel of a Widget Blueprint asset -- anchors, offsets, position, size, z_order and auto_size, only those passed -- then compile and save the blueprint; the reply reads the whole slot back. Use it rather than set_slot_properties for canvas layout: it takes plain arrays ([MinX,MinY,MaxX,MaxY], [L,T,R,B], [X,Y]) instead of LayoutData.* paths. position and size write the same fields as offsets (Left/Top and Right/Bottom) and are applied after it, so they win when both are given. An anchors or offsets that is not exactly 4 numbers, or a position or size that is not exactly 2, fails the call before anything is written, compiled or saved. A widget not under a CanvasPanel, or a call with none of the six fields, is an error. Refused while PIE runs unless force=true. For other slot types use set_box_slot_properties, set_grid_slot_properties or set_slot_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `widget_bp_path` | string | yes | /Game path of the Widget Blueprint asset |
 | `widget_name` | string | yes | name of the widget whose canvas slot to edit |
-| `anchors` | array | no | Optional [MinX, MinY, MaxX, MaxY] anchor floats. |
-| `offsets` | array | no | Optional [Left, Top, Right, Bottom] offset floats. |
-| `position` | array | no | Optional [X, Y] position. |
-| `size` | array | no | Optional [X, Y] size. |
+| `anchors` | array | no | Optional [MinX, MinY, MaxX, MaxY] anchor floats; anything but an array of exactly 4 numbers fails the call and nothing is changed. |
+| `offsets` | array | no | Optional [Left, Top, Right, Bottom] offset floats; anything but an array of exactly 4 numbers fails the call and nothing is changed. |
+| `position` | array | no | Optional [X, Y] position; anything but an array of exactly 2 numbers fails the call and nothing is changed. |
+| `size` | array | no | Optional [X, Y] size; anything but an array of exactly 2 numbers fails the call and nothing is changed. |
 | `z_order` | number | no | Optional int draw/hit-test order (higher draws on top); use with reorder_widget_child's note for CanvasPanel stacking. |
 | `auto_size` | boolean | no | Optional bool: when true, the slot sizes itself to the widget's desired size instead of `size`. |
 
-**Returns:** `{ widget_bp_path: string, widget_name: string, anchors_set: bool, offsets_set: bool, position_set: bool, size_set: bool, z_order_set: bool, auto_size_set: bool, current_anchors: [float], current_offsets: [float], current_position: [float], current_size: [float], current_z_order: int, current_auto_size: bool, saved: bool, save_error: string }`
+**Returns:** `{ widget_bp_path: string, widget_name: string, anchors_set: bool, offsets_set: bool, position_set: bool, size_set: bool, z_order_set: bool, auto_size_set: bool, current_anchors: [float], current_offsets: [float], current_position: [float], current_size: [float], current_z_order: int, current_auto_size: bool, saved: bool, save_error?: string }`
 
 ## `stop_widget_animation`
 

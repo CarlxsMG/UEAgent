@@ -66,7 +66,7 @@ Read one project collision profile by name, read-only: object_type_name, collisi
 
 *Read-only.*
 
-Read every editable or Blueprint-visible property of one component, with its current value as text, plus whether it is active and registered, without changing anything: the read-back for set_component_property. Pass actor_name for a placed actor (world picks the editor instance or a live PIE world) or blueprint_name for a Blueprint component template.
+Read EVERY editable or Blueprint-visible property of one component, each value as text, plus whether the component is active and registered: the read-back for set_component_property. Pick it to see a whole component, on a placed actor (actor_name; world picks the editor instance or a live PIE world) or on a Blueprint's component template by its SCS variable or native subobject name (blueprint_name); get_properties reads only the named properties of a placed actor's component (object_path "Actor.Component"), typed instead of text, and get_blueprint_component_property reads a Blueprint template property's effective default, resolving components inherited from parent Blueprints. Read-only.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -149,7 +149,7 @@ Run AActor::RerunConstructionScripts() on a level actor: destroys every construc
 
 *Destructive, idempotent.*
 
-Set the value of any property on a level actor's component via the canonical JSON->property importer (mcp_common::SetObjectProperty). Handles every FProperty kind: object/soft-object/class/soft-class refs (by "/Game/..." path string), enums (by name), FGameplayTag/FGameplayTagContainer (registry-validated), nested structs, arrays, sets and maps -- not just scalars, FVector, FRotator and FLinearColor. WARNING: it writes the EDITOR world BY DEFAULT even while PIE is running, and that is deliberate, not a bug: it is the only MCP route to a property Python's set_editor_property refuses (CPF_DisableEditOnInstance), and because the edit lands in the editor instance the NEXT PIE session already starts with it. The flip side is that a value written mid-PIE does NOT reach the running actor -- so to hit the live one you must ask for it: world='server' | 'client' | 'pie:N'. The reply stamps world_name/world_package/world_type/net_mode/pie_instance, so success:true says WHICH world was written (world_package is the field carrying the UEDPIE_N prefix -- in a World Partition map the UWorld keeps the map's own name).
+Set ONE property on a component of a placed level actor, in the editor world by default or in a live PIE world (world='server' | 'client' | 'pie:N'). Pick it over set_properties when you need the running PIE actor, a property set_properties' edit gate refuses (no CPF_Edit gate here: BlueprintReadWrite-only and DisableEditOnInstance properties are reachable), or proof the value survives the construction script (verify_persistence=true); for a Blueprint's component template use set_blueprint_component_properties. It sends no PreEditChange/PostEditChange, so a component that reacts to Details-panel edits is better written with set_properties. actor_name is the OBJECT name, not the label. The reply returns old_value and final_value read back and stamps which world was written (world_package carries the UEDPIE_N prefix). WARNING: the default editor-world write does NOT reach an actor already running in PIE -- it lands in the next PIE session. Not saved: save_level keeps an editor-world change.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

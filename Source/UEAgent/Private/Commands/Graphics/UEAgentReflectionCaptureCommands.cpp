@@ -166,7 +166,7 @@ namespace
     }
 }
 
-// MCP:spawn_sphere_reflection_capture - Spawns a SphereReflectionCapture actor into the editor world.  Sets the sphere capture component's InfluenceRadius / Brightness if given (read back to verify), marks it dirty for recapture.
+// MCP:spawn_sphere_reflection_capture - Spawn a SphereReflectionCapture actor into the editor world at location in one undo step, optionally set its InfluenceRadius (cm) and Brightness (read back), and mark it dirty for recapture; spawn_actor has no reflection-capture type, and spawn_box_reflection_capture places a box probe. Each call adds another actor; not saved (save_level). Tune it with set_reflection_capture_properties.
 //   @param location - Optional [X, Y, Z] world location (defaults to origin)
 //   @param influence_radius - Optional InfluenceRadius (cm) for the sphere capture component
 //   @param brightness - Optional Brightness multiplier on the capture component
@@ -227,7 +227,7 @@ TSharedPtr<FJsonObject> HandleSpawnSphereReflectionCapture(const TSharedPtr<FJso
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:spawn_box_reflection_capture - Spawns a BoxReflectionCapture actor into the editor world.  Optionally sets the capture component's Brightness (read back), marks it dirty for recapture.
+// MCP:spawn_box_reflection_capture - Spawn a BoxReflectionCapture actor into the editor world at location in one undo step, optionally set its Brightness (read back), and mark it dirty for recapture. spawn_actor has no reflection-capture type; spawn_sphere_reflection_capture places a sphere probe. Each call adds an actor; not saved (save_level). Tune: set_reflection_capture_properties.
 //   @param location - Optional [X, Y, Z] world location (defaults to origin)
 //   @param brightness - Optional Brightness multiplier on the capture component
 //   @returns { actor_name: string, actor_internal_name: string, actor_class: string, has_component: bool, brightness_set: bool, brightness: number, spawned: bool }
@@ -265,7 +265,7 @@ TSharedPtr<FJsonObject> HandleSpawnBoxReflectionCapture(const TSharedPtr<FJsonOb
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:spawn_scene_capture_2d - Spawn a SceneCapture2D actor in the editor world (also while PIE runs, never into PIE) at location and rotation, in one undo step; the level is marked dirty but not saved. Each call spawns another actor (not idempotent) under the engine default label: actor_name is that label, actor_internal_name the object name to address it by later. A fresh capture has no render target, so has_render_target is false until one is assigned. Set its TextureTarget, capture source, projection and FOV with set_scene_capture_2d_properties (a target comes from create_render_target_2d), read them back with get_scene_capture_2d_properties. A reflection probe is spawn_sphere_reflection_capture or spawn_box_reflection_capture; any other actor class: spawn_actor.
+// MCP:spawn_scene_capture_2d - Spawn a SceneCapture2D actor in the editor world (also while PIE runs, never into PIE) at location and rotation, in one undo step; the level is marked dirty but not saved. spawn_actor has no scene-capture type. Each call spawns another actor (not idempotent) under the engine default label: actor_name is that label, actor_internal_name the object name to address it by later. A fresh capture has no render target, so has_render_target is false until one is assigned. Set its TextureTarget, capture source, projection and FOV with set_scene_capture_2d_properties (a target comes from create_render_target_2d), read them back with get_scene_capture_2d_properties. A reflection probe is spawn_sphere_reflection_capture or spawn_box_reflection_capture.
 //   @param location - Optional [X, Y, Z] world location; missing means the origin, and any other value is an error and nothing is spawned
 //   @param rotation - Optional world rotation in degrees, as [Pitch, Yaw, Roll] or {"pitch", "yaw", "roll"} by name (defaults to zero)
 //   @returns { actor_name: string, actor_internal_name: string, actor_class: string, has_component: bool, has_render_target: bool, spawned: bool }
@@ -420,13 +420,13 @@ TSharedPtr<FJsonObject> HandleSetLumenGIQuality(const TSharedPtr<FJsonObject>& P
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:set_reflection_capture_properties - Set properties on an existing reflection-capture actor (Sphere or Box). Dispatches by the actor's concrete capture-component class; a sphere-only param on a box (or vice versa) is a no-op and reports its <prop>_set=false. box_extent maps to the actor scale (the box capture has no extent UPROPERTY; its size derives from the transform scale). cubemap loads a UTextureCube by path and flips ReflectionSourceType to SpecifiedCubemap. Marks the capture dirty for recapture; reads every set property back.
+// MCP:set_reflection_capture_properties - Set influence radius (Sphere), transition distance and extent (Box), brightness or cubemap of a Sphere or Box reflection-capture actor found by label or name in the editor world, then mark it dirty for recapture and read each field back. Over set_properties: box_extent maps to the actor scale (the box capture has no extent property), brightness is clamped to [0.5, 4] and a cubemap also switches ReflectionSourceType to SpecifiedCubemap. A param for the other capture shape is a no-op reported as <prop>_set=false. A box_extent that is not exactly 3 numbers, or a cubemap path that does not load as a TextureCube, fails the call before anything is written. Nothing is saved (save_level).
 //   @param actor_name [!] - Label or internal name of the reflection-capture actor
 //   @param influence_radius [number] - Sphere capture InfluenceRadius in cm (Sphere only)
 //   @param box_transition_distance [number] - Box capture BoxTransitionDistance (Box only)
 //   @param brightness [number] - Capture Brightness multiplier (clamped to [0.5, 4])
-//   @param box_extent [array] - Box capture extent as actor scale [X, Y, Z] (Box only; SetActorScale3D)
-//   @param cubemap [string] - Path to a UTextureCube; assigning it sets ReflectionSourceType=SpecifiedCubemap
+//   @param box_extent [array] - Box capture extent as actor scale [X, Y, Z] (Box only; SetActorScale3D). Anything but an array of exactly 3 numbers fails the call and nothing is changed, on a Sphere capture too.
+//   @param cubemap [string] - Path to a UTextureCube; assigning it sets ReflectionSourceType=SpecifiedCubemap. A path that does not load as a TextureCube fails the call and nothing is changed.
 //   @returns { actor_name: string, actor_internal_name: string, capture_type: string, influence_radius_set: bool, influence_radius: number, box_transition_distance_set: bool, box_transition_distance: number, brightness_set: bool, brightness: number, box_extent_set: bool, box_extent: [number], cubemap_set: bool, cubemap: string, reflection_source_type: string, marked_dirty: bool }
 TSharedPtr<FJsonObject> HandleSetReflectionCaptureProperties(const TSharedPtr<FJsonObject>& Params)
 {
@@ -442,6 +442,41 @@ TSharedPtr<FJsonObject> HandleSetReflectionCaptureProperties(const TSharedPtr<FJ
     USphereReflectionCaptureComponent* SphereComp = Cast<USphereReflectionCaptureComponent>(CaptureComp);
     UBoxReflectionCaptureComponent* BoxComp = Cast<UBoxReflectionCaptureComponent>(CaptureComp);
     const FString CaptureType = SphereComp ? TEXT("Sphere") : (BoxComp ? TEXT("Box") : TEXT("Unknown"));
+
+    // box_extent and cubemap are parsed before the first write, so a refused call leaves the capture as it was.
+    bool bHasBoxExtent = false;
+    FVector RequestedExtent = FVector::OneVector;
+    // Read as an array, so the published schema says array; a value of another JSON type (null aside) is still refused.
+    const TArray<TSharedPtr<FJsonValue>>* ExtentArr = nullptr;
+    const bool bExtentIsArray = Params->TryGetArrayField(TEXT("box_extent"), ExtentArr) && ExtentArr;
+    const TSharedPtr<FJsonValue>* ExtentRaw = Params->Values.Find(TEXT("box_extent"));
+    if (bExtentIsArray || (ExtentRaw && ExtentRaw->IsValid() && !(*ExtentRaw)->IsNull()))
+    {
+        bool bValidExtent = bExtentIsArray && ExtentArr->Num() == 3;
+        for (int32 Axis = 0; bValidExtent && Axis < 3; ++Axis)
+        {
+            double AxisValue = 0.0;
+            bValidExtent = (*ExtentArr)[Axis].IsValid() && (*ExtentArr)[Axis]->TryGetNumber(AxisValue);
+            RequestedExtent[Axis] = AxisValue;
+        }
+        if (!bValidExtent)
+        {
+            return mcp_common::MakeErrorReply(TEXT("box_extent must be an array of exactly 3 numbers [X, Y, Z]; nothing was changed"));
+        }
+        bHasBoxExtent = true;
+    }
+
+    UTextureCube* RequestedCube = nullptr;
+    FString CubemapPath;
+    if (Params->TryGetStringField(TEXT("cubemap"), CubemapPath) && !CubemapPath.IsEmpty())
+    {
+        RequestedCube = LoadObject<UTextureCube>(nullptr, *CubemapPath);
+        if (!RequestedCube)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("Failed to load cubemap texture: %s (expected a TextureCube asset path); nothing was changed"), *CubemapPath));
+        }
+    }
 
     const FScopedTransaction Transaction(LOCTEXT("SetReflectionCaptureProperties", "MCP: Set Reflection Capture Properties"));
     CaptureActor->Modify();
@@ -492,14 +527,9 @@ TSharedPtr<FJsonObject> HandleSetReflectionCaptureProperties(const TSharedPtr<FJ
 
     // box_extent -> actor scale (Box only; no extent UPROPERTY on the box capture) ----
     bool bBoxExtentSet = false;
-    const TArray<TSharedPtr<FJsonValue>>* ExtentArr = nullptr;
-    if (Params->TryGetArrayField(TEXT("box_extent"), ExtentArr) && ExtentArr && ExtentArr->Num() == 3 && BoxComp)
+    if (bHasBoxExtent && BoxComp)
     {
-        const FVector NewScale(
-            (*ExtentArr)[0]->AsNumber(),
-            (*ExtentArr)[1]->AsNumber(),
-            (*ExtentArr)[2]->AsNumber());
-        CaptureActor->SetActorScale3D(NewScale);
+        CaptureActor->SetActorScale3D(RequestedExtent);
         bBoxExtentSet = true;
     }
     const FVector ReadScale = CaptureActor->GetActorScale3D(); // read back actual scale
@@ -509,13 +539,9 @@ TSharedPtr<FJsonObject> HandleSetReflectionCaptureProperties(const TSharedPtr<FJ
 
     // cubemap -> load UTextureCube + ReflectionSourceType = SpecifiedCubemap ----------
     bool bCubemapSet = false;
-    FString CubemapPath;
-    if (Params->TryGetStringField(TEXT("cubemap"), CubemapPath) && !CubemapPath.IsEmpty())
+    if (RequestedCube)
     {
-        UTextureCube* Cube = LoadObject<UTextureCube>(nullptr, *CubemapPath);
-        if (!Cube)
-            return mcp_common::MakeErrorReply(FString::Printf(TEXT("Failed to load cubemap texture: %s"), *CubemapPath));
-        CaptureComp->Cubemap = Cube;
+        CaptureComp->Cubemap = RequestedCube;
         CaptureComp->ReflectionSourceType = EReflectionSourceType::SpecifiedCubemap;
         bCubemapSet = true;
     }
@@ -531,7 +557,7 @@ TSharedPtr<FJsonObject> HandleSetReflectionCaptureProperties(const TSharedPtr<FJ
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:get_reflection_capture_properties - Read back every property of an existing reflection-capture actor (Sphere or Box): InfluenceRadius (Sphere), BoxTransitionDistance (Box), Brightness, the actor scale exposed as box_extent, the Cubemap path and ReflectionSourceType. Round-trip reader for set_reflection_capture_properties.
+// MCP:get_reflection_capture_properties - Read a Sphere or Box reflection-capture actor of the editor level, found by label or internal name: capture_type, InfluenceRadius (Sphere), BoxTransitionDistance (Box), Brightness, the actor scale reported as box_extent, the Cubemap path and ReflectionSourceType. A curated round-trip view for set_reflection_capture_properties, not every property; get_properties (internal names only) reads any other UPROPERTY. Pure reader, no recapture.
 //   @param actor_name [!] - Label or internal name of the reflection-capture actor
 //   @returns { actor_name: string, actor_internal_name: string, capture_type: string, influence_radius: number, box_transition_distance: number, brightness: number, box_extent: [number], cubemap: string, reflection_source_type: string }
 TSharedPtr<FJsonObject> HandleGetReflectionCaptureProperties(const TSharedPtr<FJsonObject>& Params)
@@ -562,12 +588,12 @@ TSharedPtr<FJsonObject> HandleGetReflectionCaptureProperties(const TSharedPtr<FJ
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:set_scene_capture_2d_properties - Sets the given CaptureSource, ProjectionType, FOVAngle, TextureTarget and bCaptureEveryFrame of the USceneCaptureComponent2D on a SceneCapture2D actor in the editor world, without capturing or saving; undoable. An invalid value fails the call, but fields applied before it stay set. Returns each field read back with a *_set flag.
+// MCP:set_scene_capture_2d_properties - Set CaptureSource, ProjectionType, FOVAngle, TextureTarget and bCaptureEveryFrame of a SceneCapture2D actor's capture component, found by label or name in the editor world, without capturing or saving. Beyond set_properties it adds only the label lookup and lenient enum names (SCS_ prefix optional, case-insensitive); write any other field with set_properties. An unknown capture_source or projection_type, or a texture_target that does not load as a TextureRenderTarget2D, fails the call before anything is written. Returns each field read back with a *_set flag; get_scene_capture_2d_properties reads them.
 //   @param actor_name [!] - Label or internal name of the SceneCapture2D actor
-//   @param capture_source [string] - ESceneCaptureSource (e.g. SceneColorHDR | FinalColorLDR | FinalColorHDR | SceneDepth); the SCS_ prefix is optional
-//   @param projection_type [string] - Projection mode, "Perspective" or "Orthographic" (case-insensitive); any other value fails the call; omit to keep the current one
+//   @param capture_source [string] - ESceneCaptureSource (e.g. SceneColorHDR | FinalColorLDR | FinalColorHDR | SceneDepth); the SCS_ prefix is optional; any other value fails the call and nothing is changed
+//   @param projection_type [string] - Projection mode, "Perspective" or "Orthographic" (case-insensitive); any other value fails the call and nothing is changed; omit to keep the current one
 //   @param fov_angle [number] - Field-of-view angle in degrees (FOVAngle field)
-//   @param texture_target [string] - Path to a UTextureRenderTarget2D to assign
+//   @param texture_target [string] - Path to a UTextureRenderTarget2D to assign; a path that does not load as one fails the call and nothing is changed
 //   @param capture_every_frame [boolean] - Whether the component captures every frame (bCaptureEveryFrame)
 //   @returns { actor_name: string, actor_internal_name: string, capture_source_set: bool, capture_source: string, projection_type_set: bool, projection_type: string, fov_angle_set: bool, fov_angle: number, texture_target_set: bool, texture_target: string, has_render_target: bool, capture_every_frame_set: bool, capture_every_frame: bool }
 TSharedPtr<FJsonObject> HandleSetSceneCapture2DProperties(const TSharedPtr<FJsonObject>& Params)
@@ -579,21 +605,16 @@ TSharedPtr<FJsonObject> HandleSetSceneCapture2DProperties(const TSharedPtr<FJson
         return Error;
     }
 
-    const FScopedTransaction Transaction(LOCTEXT("SetSceneCapture2DProperties", "MCP: Set Scene Capture 2D Properties"));
-    CaptureActor->Modify();
-    CaptureComp->Modify();
-
-    TSharedPtr<FJsonObject> Result = ReflectionCapture_StartReply(CaptureActor);
-
-    // capture_source (base USceneCaptureComponent::CaptureSource) ---------------------
+    // The three values that can be refused are parsed before the first write, so a refused call leaves the capture
+    // exactly as it was.
     bool bCaptureSourceSet = false;
+    ESceneCaptureSource NewSource = SCS_MAX;
     FString CaptureSourceStr;
     if (Params->TryGetStringField(TEXT("capture_source"), CaptureSourceStr) && !CaptureSourceStr.IsEmpty())
     {
         FString Key = CaptureSourceStr;
         if (Key.StartsWith(TEXT("SCS_"))) { Key = Key.RightChop(4); }
         Key = Key.ToLower();
-        ESceneCaptureSource NewSource = SCS_MAX;
         if      (Key == TEXT("scenecolorhdr"))        { NewSource = SCS_SceneColorHDR; }
         else if (Key == TEXT("scenecolorhdrnoalpha")) { NewSource = SCS_SceneColorHDRNoAlpha; }
         else if (Key == TEXT("finalcolorldr"))        { NewSource = SCS_FinalColorLDR; }
@@ -605,23 +626,54 @@ TSharedPtr<FJsonObject> HandleSetSceneCapture2DProperties(const TSharedPtr<FJson
         else if (Key == TEXT("finalcolorhdr"))        { NewSource = SCS_FinalColorHDR; }
         else if (Key == TEXT("finaltonecurvehdr"))    { NewSource = SCS_FinalToneCurveHDR; }
         else
-            return mcp_common::MakeErrorReply(FString::Printf(TEXT("Unknown capture_source '%s'"), *CaptureSourceStr));
-        CaptureComp->CaptureSource = NewSource;
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("Unknown capture_source '%s' (expected SceneColorHDR|SceneColorHDRNoAlpha|FinalColorLDR|SceneColorSceneDepth|SceneDepth|DeviceDepth|Normal|BaseColor|FinalColorHDR|FinalToneCurveHDR); nothing was changed"),
+                *CaptureSourceStr));
         bCaptureSourceSet = true;
+    }
+
+    bool bProjectionSet = false;
+    ECameraProjectionMode::Type NewProjection = ECameraProjectionMode::Perspective;
+    FString ProjectionStr;
+    if (Params->TryGetStringField(TEXT("projection_type"), ProjectionStr) && !ProjectionStr.IsEmpty())
+    {
+        const FString P = ProjectionStr.ToLower();
+        if      (P == TEXT("perspective"))  { NewProjection = ECameraProjectionMode::Perspective; }
+        else if (P == TEXT("orthographic")) { NewProjection = ECameraProjectionMode::Orthographic; }
+        else
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("Unknown projection_type '%s' (expected Perspective|Orthographic); nothing was changed"), *ProjectionStr));
+        bProjectionSet = true;
+    }
+
+    UTextureRenderTarget2D* NewTarget = nullptr;
+    FString TexturePath;
+    if (Params->TryGetStringField(TEXT("texture_target"), TexturePath) && !TexturePath.IsEmpty())
+    {
+        NewTarget = LoadObject<UTextureRenderTarget2D>(nullptr, *TexturePath);
+        if (!NewTarget)
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("Failed to load render target: %s (expected a TextureRenderTarget2D asset path); nothing was changed"), *TexturePath));
+    }
+
+    const FScopedTransaction Transaction(LOCTEXT("SetSceneCapture2DProperties", "MCP: Set Scene Capture 2D Properties"));
+    CaptureActor->Modify();
+    CaptureComp->Modify();
+
+    TSharedPtr<FJsonObject> Result = ReflectionCapture_StartReply(CaptureActor);
+
+    // capture_source (base USceneCaptureComponent::CaptureSource) ---------------------
+    if (bCaptureSourceSet)
+    {
+        CaptureComp->CaptureSource = NewSource;
     }
     Result->SetBoolField(TEXT("capture_source_set"), bCaptureSourceSet);
     Result->SetStringField(TEXT("capture_source"), ReflectionCapture_CaptureSourceName(CaptureComp->CaptureSource.GetValue()));
 
     // projection_type (USceneCaptureComponent2D::ProjectionType) ----------------------
-    bool bProjectionSet = false;
-    FString ProjectionStr;
-    if (Params->TryGetStringField(TEXT("projection_type"), ProjectionStr) && !ProjectionStr.IsEmpty())
+    if (bProjectionSet)
     {
-        const FString P = ProjectionStr.ToLower();
-        if      (P == TEXT("perspective"))  { CaptureComp->ProjectionType = ECameraProjectionMode::Perspective; bProjectionSet = true; }
-        else if (P == TEXT("orthographic")) { CaptureComp->ProjectionType = ECameraProjectionMode::Orthographic; bProjectionSet = true; }
-        else
-            return mcp_common::MakeErrorReply(FString::Printf(TEXT("Unknown projection_type '%s' (expected Perspective|Orthographic)"), *ProjectionStr));
+        CaptureComp->ProjectionType = NewProjection;
     }
     Result->SetBoolField(TEXT("projection_type_set"), bProjectionSet);
     Result->SetStringField(TEXT("projection_type"),
@@ -640,13 +692,9 @@ TSharedPtr<FJsonObject> HandleSetSceneCapture2DProperties(const TSharedPtr<FJson
 
     // texture_target (USceneCaptureComponent2D::TextureTarget) ------------------------
     bool bTextureSet = false;
-    FString TexturePath;
-    if (Params->TryGetStringField(TEXT("texture_target"), TexturePath) && !TexturePath.IsEmpty())
+    if (NewTarget)
     {
-        UTextureRenderTarget2D* RT = LoadObject<UTextureRenderTarget2D>(nullptr, *TexturePath);
-        if (!RT)
-            return mcp_common::MakeErrorReply(FString::Printf(TEXT("Failed to load render target: %s"), *TexturePath));
-        CaptureComp->TextureTarget = RT;
+        CaptureComp->TextureTarget = NewTarget;
         bTextureSet = true;
     }
     Result->SetBoolField(TEXT("texture_target_set"), bTextureSet);
@@ -667,7 +715,7 @@ TSharedPtr<FJsonObject> HandleSetSceneCapture2DProperties(const TSharedPtr<FJson
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:get_scene_capture_2d_properties - Read back every data property of an existing SceneCapture2D actor's USceneCaptureComponent2D: CaptureSource (base), TextureTarget path, FOVAngle, ProjectionType, OrthoWidth and the bCaptureEveryFrame / bCaptureOnMovement bitfields (base). Pure reader — no Modify, no capture, no save. Round-trip reader for set_scene_capture_2d_properties.
+// MCP:get_scene_capture_2d_properties - Read a SceneCapture2D actor's USceneCaptureComponent2D, found by label or internal name in the editor world: CaptureSource, TextureTarget path, FOVAngle, ProjectionType, OrthoWidth and the bCaptureEveryFrame / bCaptureOnMovement bitfields. A curated round-trip view for set_scene_capture_2d_properties, not every property; get_properties (internal names only) reads any other UPROPERTY on the component. Pure reader -- no Modify, no capture, no save.
 //   @param actor_name [!] - Label or internal name of the SceneCapture2D actor
 //   @returns { actor_name: string, component_name: string, texture_target: string, fov_angle: number, capture_source: string, capture_every_frame: bool, capture_on_movement: bool, projection_type: string, ortho_width: number }
 TSharedPtr<FJsonObject> HandleGetSceneCapture2DProperties(const TSharedPtr<FJsonObject>& Params)

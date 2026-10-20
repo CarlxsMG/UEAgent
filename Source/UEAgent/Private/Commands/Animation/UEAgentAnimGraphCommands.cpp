@@ -421,7 +421,7 @@ TSharedPtr<FJsonObject> HandleDisconnectAnimGraphPins(const TSharedPtr<FJsonObje
 // ===========================================================================
 // read — get_anim_graph_node_properties
 // ===========================================================================
-// MCP:get_anim_graph_node_properties - Read the internal FAnimNode struct of an AnimGraphNode as typed JSON (the runtime settings, not the K2 pin surface get_graph_nodes reports). Use it to mirror a reference ABP's settings when grafting nodes: Pose History PoseCount/CollectorName, Slot SlotName, blend params...
+// MCP:get_anim_graph_node_properties - Read the internal FAnimNode struct of one AnimGraphNode, found by NodeGuid (node_id) in the AnimGraph or a nested graph_name, as typed JSON: the runtime settings (Pose History PoseCount/CollectorName, Slot SlotName, blend params), not the pin surface get_graph_nodes reports. Use it instead of get_properties, which cannot address a graph node by GUID; a non-anim node returns its EditAnywhere properties. Read-only; write with set_anim_graph_node_property.
 //   @param anim_blueprint_path - Path/name of the UAnimBlueprint.
 //   @param node_id - NodeGuid of the target AnimGraphNode.
 //   @param graph_name - Target graph (optional, default the top-level AnimGraph).
@@ -481,7 +481,7 @@ TSharedPtr<FJsonObject> HandleGetAnimGraphNodeProperties(const TSharedPtr<FJsonO
 // ===========================================================================
 // write — set_anim_graph_node_property
 // ===========================================================================
-// MCP:set_anim_graph_node_property - Write a property of an AnimGraphNode's internal FAnimNode struct by (dotted) name. Saves the ABP but does NOT recompile it -- run compile_anim_blueprint after your edits for runtime effect.
+// MCP:set_anim_graph_node_property - Write one field of an AnimGraphNode's internal FAnimNode struct (runtime settings, not pins): node by NodeGuid, field by name or dotted path. set_properties cannot address a graph node by GUID; this also takes a dotted path, rebuilds the node's pins, is undoable and saves the ABP, but does NOT recompile -- run compile_anim_blueprint. Read: get_anim_graph_node_properties.
 //   @param anim_blueprint_path - Path/name of the UAnimBlueprint.
 //   @param node_id - NodeGuid of the target AnimGraphNode.
 //   @param property - Property path inside the FAnimNode (e.g. "PoseCount", "SlotName"). A leading "Node." is tolerated. Nested structs use dots ("A.B").
@@ -564,10 +564,10 @@ TSharedPtr<FJsonObject> HandleSetAnimGraphNodeProperty(const TSharedPtr<FJsonObj
     }
     else
     {
-        if (!LeafProp->ImportText_Direct(*ValueStr, LeafPtr, AnimNode, PPF_None))
+        FString ParseError;
+        if (!mcp_common::ImportPropertyTextStrict(LeafProp, ValueStr, LeafPtr, AnimNode, ParseError))
             return mcp_common::MakeErrorReply(FString::Printf(
-                TEXT("Could not parse value '%s' for property '%s' (type %s)"),
-                *ValueStr, *LeafName, *LeafProp->GetClass()->GetName()));
+                TEXT("Could not parse value for property '%s': %s"), *LeafName, *ParseError));
     }
 
     // Property changes can add/remove exposed pins (e.g. Pose History trajectory) -- reconstruct.

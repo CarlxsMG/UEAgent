@@ -35,7 +35,7 @@ Add one FGameplayAttributeData member variable to an AttributeSet Blueprint, wit
 
 *Additive, idempotent.*
 
-Add one empty UGameplayEffectComponent of a standard type to the GEComponents of a GameplayEffect Blueprint CDO and save without recompiling. Idempotent: an existing component of that type returns already_existed=true. Configure it with the set_gameplay_effect_component_* tools; get_gameplay_effect_components lists them. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
+Add one empty UGameplayEffectComponent of a standard type to the GEComponents array of a GameplayEffect Blueprint's CDO and save without recompiling. GE components are instanced subobjects of the effect, not actor components, so add_component_to_blueprint and add_component_to_actor cannot add them. Idempotent: an existing component of that type returns already_existed=true. Configure it with the set_gameplay_effect_component_* tools; get_gameplay_effect_components lists them. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -523,7 +523,7 @@ Author the DataTable&lt;FAttributeMetaData> that gives a UAttributeSet class its
 
 *Destructive, idempotent.*
 
-Write the GameplayCueTag (mirrored into GameplayCueName) and the lifetime, instancing and override properties you pass on the class default object of an AGameplayCueNotify_Actor Blueprint (Looping ones included), then save it without recompiling and without an undo entry. Properties left out keep their values, and every call writes and saves even when nothing differs; properties_set counts the ones given. Passing none, an unregistered tag, or a Blueprint of another class is an error and nothing is written. Looping and application effects (particles, sounds) are not authored, as the note on a Looping notify says. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. Static or Burst notifies: set_gameplay_cue_notify_static_properties; read back: get_gameplay_cue_notify_info.
+Write the GameplayCueTag (mirrored into GameplayCueName) and the lifetime, instancing and override properties you pass on the class default object of an AGameplayCueNotify_Actor Blueprint (Looping ones included), then save it without recompiling and without an undo entry. Prefer it to set_properties on the CDO: the tag is checked against the registry, GameplayCueName stays in sync, and the edit is saved, or undone if the save fails. Properties left out keep their values; every call writes and saves even when nothing differs. Passing none, an unregistered tag, or a Blueprint of another class is an error and nothing is written. Looping and application effects (particles, sounds) are not authored. A running PIE session, a read-only root or a read-only .uasset fails before any edit. Static or Burst notifies: set_gameplay_cue_notify_static_properties; read back: get_gameplay_cue_notify_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -545,7 +545,7 @@ Write the GameplayCueTag (mirrored into GameplayCueName) and the lifetime, insta
 
 *Destructive, idempotent.*
 
-Set GameplayCueTag (mirrored into GameplayCueName) and/or IsOverride on the CDO of a UGameplayCueNotify_Static Blueprint (UGameplayCueNotify_Burst ones included), then save it without recompiling. Needs at least one of the two; an unregistered tag fails before anything is written. Returns properties_set and the values read back; a Burst notify's burst effects (particles, sounds) are not authored, as its note says. Actor or Looping notifies: set_gameplay_cue_notify_actor_properties. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
+Set GameplayCueTag (mirrored into GameplayCueName) and/or IsOverride on the CDO of a UGameplayCueNotify_Static Blueprint (UGameplayCueNotify_Burst ones included), then save it without recompiling. Prefer it to set_properties on the CDO: the tag is checked against the registry, GameplayCueName stays in sync, and the edit is saved, or undone if the save fails. Needs at least one of the two; an unregistered tag fails before anything is written. Returns properties_set and the values read back; a Burst notify's burst effects (particles, sounds) are not authored, as its note says. A running PIE session, a read-only root or a read-only .uasset fails before any edit. Actor or Looping notifies: set_gameplay_cue_notify_actor_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

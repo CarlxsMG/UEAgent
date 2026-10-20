@@ -12,6 +12,7 @@
 #include "NiagaraUserRedirectionParameterStore.h"           // FNiagaraUserRedirectionParameterStore
 #include "NiagaraCommon.h"                                  // common Niagara types
 #include "NiagaraComponentPoolMethodEnum.h"                 // ENCPoolMethod::None
+#include "NiagaraActor.h"                                   // ANiagaraActor (spawn_niagara_component)
 
 // Niagara data-interface content authoring (curve keys + array values, via reflection)
 #include "Curves/RichCurve.h"                               // FRichCurve (curve DIs: Curve / Red|Green|Blue|AlphaCurve / X|Y|ZCurve)
@@ -21,6 +22,7 @@
 
 // Niagara editor
 #include "NiagaraSystemFactoryNew.h"                        // UNiagaraSystemFactoryNew::InitializeSystem
+#include "ActorFactoryNiagara.h"                            // UActorFactoryNiagara (the drag-a-system-into-the-level factory)
 
 // Niagara simulation advanced
 #include "NiagaraSimulationStageBase.h"                     // UNiagaraSimulationStageGeneric
@@ -58,6 +60,7 @@
 #include "Editor.h"                                         // GEditor
 #include "GameFramework/Actor.h"
 #include "EngineUtils.h"                                    // TActorIterator
+#include "ActorEditorUtils.h"                               // FActorEditorUtils::ValidateActorName
 #include "Misc/ScopedSlowTask.h"
 #include "ScopedTransaction.h"
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -811,18 +814,20 @@ namespace
 
 // ---------------------------------------------------------------------------
 // spawn_niagara_component
-// Spawns a UNiagaraComponent in the editor world and assigns the owner actor a
-// deterministic label so subsequent set_niagara_component_* calls can target it.
-// owner_actor_name is the owner's INTERNAL object name (AActor::GetName) so the
-// caller can delete it via delete_actor (which resolves by GetName); the label
-// is returned separately. Either identifier resolves the component later.
+// Places an ANiagaraActor in the editor level through the editor's Niagara actor factory, the
+// actor a drag of a Niagara System into the viewport makes: a saved, undoable actor whose root
+// UNiagaraComponent runs the system. UNiagaraFunctionLibrary::SpawnSystemAtLocation, used before,
+// makes no actor: it outers a TRANSIENT component to the level's WorldSettings, so nothing was
+// saved and a label meant for the "owner" renamed the WorldSettings.
+// The set_niagara_component_* tools find the component by the actor's internal name or label
+// (FindNiagaraComponentByOwner), so the label is refused when another actor already answers to it.
 // ---------------------------------------------------------------------------
-// MCP:spawn_niagara_component - Spawns a Niagara System as a persistent UNiagaraComponent in the editor world.  Spawns via UNiagaraFunctionLibrary::SpawnSystemAtLocation with bAutoDestroy disabled so the component persists for follow-up parameter calls. The owner actor can later be targeted by either its internal object name (``owner_actor_name``) or its editor label (``owner_actor_label``).
-//   @param system_path - Asset path of the Niagara System to spawn (e.g. /Game/MyGame/NS_Example)
-//   @param location [string!] - World location [X, Y, Z].
-//   @param rotation - Optional [pitch, yaw, roll]; defaults to identity
-//   @param actor_label - Optional desired editor label for the owner actor
-//   @returns { system_path: string, component_name: string, owner_actor_name: string, owner_actor_label: string, is_registered: bool, is_active: bool, location: [number, number, number] }
+// MCP:spawn_niagara_component - Place a Niagara System in the editor level as a new ANiagaraActor (the actor a drag of the system into the viewport makes, through the editor's Niagara actor factory) whose root UNiagaraComponent runs the system, at an optional location and rotation, for previews and set_niagara_component_* calls. For a Niagara component on an actor that already exists use add_component_to_actor (NiagaraComponent) and set its Asset with set_properties. actor_label labels the new actor (default: the system's name, made unique); a label that is "None" or blank, or that another editor-world actor already has as label or internal name, is an error and nothing is spawned, so set_niagara_component_* (actor_name = owner_actor_name or the label) reach this actor. A system the factory refuses (settings requiring an effect type) is an error too. One undo step; the level is marked dirty, not saved (save_level keeps it). Editor world only, PIE or not. location and rotation are read back.
+//   @param system_path - Asset path of the Niagara System to place (e.g. /Game/MyGame/NS_Example); one that does not load is an error and nothing is spawned.
+//   @param location - Optional world location [X, Y, Z]; the origin when omitted.
+//   @param rotation - Optional world rotation, the object {"pitch":..,"yaw":..,"roll":..} or the array [pitch, yaw, roll] (index 2 is ROLL); zero when omitted.
+//   @param actor_label - Optional editor label for the new actor; when omitted the factory labels it after the system, made unique. A label that is not a valid actor label ("None", blank), or that another actor of the editor world already has as its label or internal name, is an error and nothing is spawned.
+//   @returns { system_path: string, owner_actor_name: string, owner_actor_label: string, actor_class: string, actor_path: string, component_name: string, is_registered: bool, is_active: bool, location: [number, number, number], rotation: { roll: number, pitch: number, yaw: number } }
 
 TSharedPtr<FJsonObject> HandleSpawnNiagaraComponent(const TSharedPtr<FJsonObject>& Params)
 {
@@ -834,7 +839,13 @@ TSharedPtr<FJsonObject> HandleSpawnNiagaraComponent(const TSharedPtr<FJsonObject
 
     UWorld* World = nullptr;
     if (TSharedPtr<FJsonObject> NoWorld = mcp_common::RequireEditorWorld(World)) { return NoWorld; }
+    ULevel* Level = World->GetCurrentLevel();
+    if (!Level)
+    {
+        return mcp_common::MakeErrorReply(TEXT("The editor world has no current level to place the Niagara actor in; nothing was spawned."));
+    }
 
+    // The dispatch refuses a location or rotation of another shape before this runs (both are vector params).
     const FVector Location = mcp_common::ReadJsonVector(Params, TEXT("location"));
     FRotator Rotation = FRotator::ZeroRotator;
     if (Params->HasField(TEXT("rotation")))
@@ -842,36 +853,72 @@ TSharedPtr<FJsonObject> HandleSpawnNiagaraComponent(const TSharedPtr<FJsonObject
         Rotation = mcp_common::ReadJsonRotator(Params, TEXT("rotation"));
     }
 
-    // bAutoDestroy=false so the component/owner persist for follow-up parameter calls.
-    UNiagaraComponent* Component = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-        World, System, Location, Rotation,
-        FVector(1.0f), /*bAutoDestroy*/ false, /*bAutoActivate*/ true,
-        ENCPoolMethod::None, /*bPreCullCheck*/ true);
+    // The label is checked before anything exists: SetActorLabel only logs a label it rejects, and a label another
+    // actor answers to would send the set_niagara_component_* tools to that actor instead of this one.
+    FString DesiredLabel;
+    const bool bLabelled = Params->TryGetStringField(TEXT("actor_label"), DesiredLabel);
+    DesiredLabel.TrimStartAndEndInline();
+    if (bLabelled)
+    {
+        FText LabelError;
+        if (!FActorEditorUtils::ValidateActorName(FText::FromString(DesiredLabel), LabelError))
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("actor_label '%s' is not a valid actor label: %s; nothing was spawned."), *DesiredLabel, *LabelError.ToString()));
+        }
+        if (AActor* Holder = mcp_common::FindActorByName(World, DesiredLabel))
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("actor_label '%s' is already the label or name of actor %s (%s) in the editor world, which the set_niagara_component_* tools would reach instead; pick another label. Nothing was spawned."),
+                *DesiredLabel, *Holder->GetName(), *Holder->GetClass()->GetName()));
+        }
+    }
 
+    UActorFactory* Factory = GEditor ? GEditor->FindActorFactoryByClass(UActorFactoryNiagara::StaticClass()) : nullptr;
+    if (!Factory)
+    {
+        return mcp_common::MakeErrorReply(TEXT("The editor's Niagara actor factory (UActorFactoryNiagara) is not registered; nothing was spawned."));
+    }
+    // The factory's own gate, the one a drag into the viewport meets (the Niagara settings can require an effect type).
+    FText CannotPlace;
+    if (!Factory->CanCreateActorFrom(FAssetData(System), CannotPlace))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("%s cannot be placed as a Niagara actor: %s; nothing was spawned."), *System->GetPathName(), *CannotPlace.ToString()));
+    }
+
+    // One undo step: the spawn records the level, the label its Modify.
+    const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SpawnNiagaraActor", "Spawn Niagara Actor (MCP)"));
+
+    FActorSpawnParameters SpawnParams;
+    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    // CreateActor spawns the factory's ANiagaraActor, labels it after the system (unique) and runs PostSpawnActor,
+    // which sets the component's asset and registers it.
+    ANiagaraActor* NewActor = Cast<ANiagaraActor>(Factory->CreateActor(System, Level, FTransform(Rotation, Location), SpawnParams));
+    UNiagaraComponent* Component = NewActor ? NewActor->GetNiagaraComponent() : nullptr;
     if (!Component)
     {
-        return mcp_common::MakeErrorReply(
-            TEXT("SpawnSystemAtLocation returned null (system may have been culled or invalid in the editor world)"));
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("The Niagara actor factory placed no Niagara actor for %s; nothing was spawned."), *System->GetPathName()));
     }
-
-    AActor* Owner = Component->GetOwner();
-
-    // Assign a deterministic label so callers may target by label too. Optional.
-    FString DesiredLabel;
-    if (Params->TryGetStringField(TEXT("actor_label"), DesiredLabel) && !DesiredLabel.IsEmpty() && Owner)
+    if (bLabelled)
     {
-        Owner->SetActorLabel(DesiredLabel);
+        NewActor->SetActorLabel(DesiredLabel);
     }
 
-    TSharedPtr<FJsonObject> Data = Niagara_StartSystemReply(System);
-    Data->SetStringField(TEXT("component_name"), Component->GetName());
+    // Read back from the actor and its component, not echoed from the request.
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("system_path"), Component->GetAsset() ? Component->GetAsset()->GetPathName() : FString());
     // Internal object name first (delete_actor resolves by GetName).
-    Data->SetStringField(TEXT("owner_actor_name"), Owner ? Owner->GetName() : FString(TEXT("None")));
-    Data->SetStringField(TEXT("owner_actor_label"), Owner ? Owner->GetActorLabel() : FString(TEXT("None")));
+    Data->SetStringField(TEXT("owner_actor_name"), NewActor->GetName());
+    Data->SetStringField(TEXT("owner_actor_label"), NewActor->GetActorLabel());
+    Data->SetStringField(TEXT("actor_class"), NewActor->GetClass()->GetName());
+    Data->SetStringField(TEXT("actor_path"), NewActor->GetPathName());
+    Data->SetStringField(TEXT("component_name"), Component->GetName());
     Data->SetBoolField(TEXT("is_registered"), Component->IsRegistered());
     Data->SetBoolField(TEXT("is_active"), Component->IsActive());
-    Data->SetArrayField(TEXT("location"), mcp_common::VectorToJsonArray(Location));
-
+    Data->SetArrayField(TEXT("location"), mcp_common::VectorToJsonArray(NewActor->GetActorLocation()));
+    mcp_common::AddRotatorField(Data, TEXT("rotation"), NewActor->GetActorRotation());
     return mcp_common::MakeOkReply(Data);
 }
 
@@ -2479,7 +2526,7 @@ namespace
 // ---------------------------------------------------------------------------
 // set_niagara_simulation_stage_properties
 // ---------------------------------------------------------------------------
-// MCP:set_niagara_simulation_stage_properties - Set the enum, bool, name and FIntPoint properties of one generic simulation stage (UNiagaraSimulationStageGeneric) of a Niagara emitter, found by stage_index or stage_name, in one undo step, then request a system compile and save. Only the supplied fields are written, by reflection with ClampMin/ClampMax applied; enabled goes through SetEnabled and enum writes fire PostEditChangeProperty. Every field is converted before the first write, so a value that does not convert, an enabled that does not read as a bool or a stage_index that is not a JSON number is an error and nothing changes. Values the stage already holds are a success with changed=false and saved=false, nothing written. Binding fields (num_iterations, iteration_count, element_count_x|y|z, data_interface) are listed in not_supported, never written; the iteration count is set by add_niagara_simulation_stage. A failed save makes success false, with saved=false and save_error. List stages with get_niagara_simulation_stages.
+// MCP:set_niagara_simulation_stage_properties - Set the enum, bool, name and FIntPoint properties of one generic simulation stage (UNiagaraSimulationStageGeneric) of a Niagara emitter, found by stage_index or stage_name, in one undo step, then request a system compile and save. Use it over set_properties, which neither finds the stage nor applies ClampMin/ClampMax, compiles or saves. Only supplied fields are written; enabled goes through SetEnabled and enum writes fire PostEditChangeProperty. Every field is converted before the first write, so a value that does not convert, a non-bool enabled or a non-number stage_index is an error and nothing changes. Values already held: changed=false, saved=false. Binding fields (num_iterations, iteration_count, element_count_x|y|z, data_interface) go to not_supported, never written; add_niagara_simulation_stage sets the iteration count. A failed save makes success false with save_error. List: get_niagara_simulation_stages.
 //   @param system_path - Asset path of the Niagara System.
 //   @param emitter_name - Name of the emitter handle owning the stage.
 //   @param stage_index - Optional 0-based index into the emitter's simulation stages (use add_niagara_simulation_stage / get_niagara_emitter_runtime_summary); takes precedence over stage_name
@@ -4576,7 +4623,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraRendererMaterial(const TSharedPtr<FJsonO
 // ---------------------------------------------------------------------------
 // set_niagara_renderer_properties
 // ---------------------------------------------------------------------------
-// MCP:set_niagara_renderer_properties - Set properties of one renderer (Sprite, Mesh, Ribbon, Light or Decal) of a Niagara emitter by reflection, in one undo step, then request a system compile and save. Only the supplied fields are written, with ClampMin/ClampMax applied; enum fields (alignment, facing_mode, sort_mode, motion_vector_setting, decal_source_mode) also fire PostEditChangeProperty so derived state updates. Every field is converted before the first write, so a value that does not convert (an unknown enum name, an array for a struct field) is an error and nothing changes. Values the renderer already holds are a success with changed=false and saved=false, nothing written. A renderer_index that is not a JSON number is an error. Keys the renderer class lacks are listed in not_applicable. A failed save makes success false, with saved=false and save_error. Materials: set_niagara_renderer_material; read back with get_niagara_renderer_info.
+// MCP:set_niagara_renderer_properties - Set properties of one renderer (Sprite, Mesh, Ribbon, Light or Decal) of a Niagara emitter, found by emitter_name and renderer_index, in one undo step, then request a system compile and save. Use it over set_properties, which neither finds the renderer nor applies ClampMin/ClampMax, compiles or saves. Only supplied fields are written; enum fields (alignment, facing_mode, sort_mode, motion_vector_setting, decal_source_mode) also fire PostEditChangeProperty. Every field is converted before the first write, so a value that does not convert (an unknown enum name, an array for a struct field) or a non-number renderer_index is an error and nothing changes. Values already held: changed=false, saved=false. Keys the renderer class lacks are listed in not_applicable. A failed save makes success false with save_error. Materials: set_niagara_renderer_material; mesh: set_niagara_mesh_renderer_mesh; read back: get_niagara_renderer_info.
 //   @param system_path - Asset path of the Niagara System.
 //   @param emitter_name - Name of the emitter handle.
 //   @param renderer_index - 0-based index of the renderer (use get_niagara_emitter_renderers).
@@ -5373,11 +5420,11 @@ TSharedPtr<FJsonObject> HandleSetNiagaraDataInterfaceDefault(const TSharedPtr<FJ
     // does not parse must leave the DI untouched. FProperty has ImportText_Direct, not ImportText.
     void* Parsed = Prop->AllocateAndInitializeValue();
     Prop->CopySingleValue(Parsed, Addr);
-    if (!Prop->ImportText_Direct(*Value, Parsed, DI, PPF_None))
+    FString ParseError;
+    if (!mcp_common::ImportPropertyTextStrict(Prop, Value, Parsed, DI, ParseError))
     {
         Prop->DestroyAndFreeValue(Parsed);
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Failed to parse value '%s' as %s"), *Value, *Prop->GetClass()->GetName()));
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Failed to parse value: %s"), *ParseError));
     }
 
     // The DI is a subobject of the system: both are recorded so the edit can be undone, and the system's
@@ -7462,7 +7509,7 @@ namespace
     }
 }
 
-// MCP:set_niagara_system_properties - Set render and system flags of a Niagara System asset by reflection, without PostEditChangeProperty (so no compile or scalability update runs), in one undo step, then save it. Only the supplied fields are written; a render value (cast_shadow, receives_decals, render_custom_depth, custom_depth_stencil_value, translucency_sort_priority, translucency_sort_distance_offset) also sets its bOverride companion to true unless that override_ key is sent. fixed_bounds is parsed and every field located before the first write, so a corner that is not 3 numbers, a number field that is not a JSON number, or a property the engine lacks is an error and nothing changes. Values the system already holds are a success with changed=false and saved=false, nothing written. A failed save makes success false, with saved=false and save_error. Read them back with get_niagara_system_properties.
+// MCP:set_niagara_system_properties - Set the render and system flags of a Niagara System asset (cast shadow, decals, custom depth/stencil, translucency sort, large world coordinates, current-frame data, fixed bounds) and save it. Use it instead of set_properties for these fields: a render value also turns its bOverride companion on unless that override_ key is sent, the asset is saved, and PostEditChangeProperty is skipped (no scalability refresh); set_properties writes any other UPROPERTY and leaves it unsaved. Only supplied fields are written, in one undo step. Every field and fixed_bounds is checked before the first write: a corner that is not 3 numbers, a number field that is not a JSON number, or a property the engine lacks is an error and nothing changes. Values the system already holds are a success with changed=false and saved=false. A failed save makes success false with save_error. Read back with get_niagara_system_properties.
 //   @param system_path - Asset path of the Niagara System (e.g. "/Game/Niagara/NS_Example").
 //   @param cast_shadow - Optional bool: default CastShadow for spawned components (sets bCastShadow + bOverrideCastShadow).
 //   @param override_cast_shadow - Optional bool: explicitly set bOverrideCastShadow (auto-set when cast_shadow is given).
@@ -7674,7 +7721,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraSystemProperties(const TSharedPtr<FJsonO
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_niagara_system_properties"), SaveError);
 }
 
-// MCP:get_niagara_system_properties - Read the render/system flags + fixed bounds of a UNiagaraSystem asset via reflection (GetPropertyValue_InContainer + GetFixedBounds). Read-only; no recompile.
+// MCP:get_niagara_system_properties - Read the render flags (cast shadow, decals, custom depth/stencil, translucency sort, each with its bOverride companion), the large-world/current-frame flags and the fixed bounds of a Niagara System asset, under the names set_niagara_system_properties takes. A curated view; get_properties reads any other UPROPERTY on the system. Read-only, no recompile.
 //   @param system_path - Asset path of the Niagara System.
 //   @returns { system_path, cast_shadow, override_cast_shadow, receives_decals, override_receives_decals, render_custom_depth, override_render_custom_depth, custom_depth_stencil_value, override_custom_depth_stencil_value, translucency_sort_priority, override_translucency_sort_priority, translucency_sort_distance_offset, override_translucency_sort_distance_offset, support_large_world_coordinates, require_current_frame_data, b_fixed_bounds, fixed_bounds:{min,max}, fixed_bounds_valid }
 TSharedPtr<FJsonObject> HandleGetNiagaraSystemProperties(const TSharedPtr<FJsonObject>& Params)

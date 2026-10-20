@@ -41,21 +41,28 @@ namespace UEAgentSceneComponentCommands
 
 namespace
 {
-    // Read an [x,y,z] JSON array into an FVector. Returns false if not a 3-array.
-    bool SC_ReadVec3(const TSharedPtr<FJsonValue>& Value, FVector& Out)
+    // Every entry of a points array as [x, y, z]; the first entry that is not exactly 3 numbers makes it an error, so
+    // the spline tools refuse a malformed list before writing instead of building a spline from the entries that parsed.
+    bool SC_ReadSplinePoints(const TArray<TSharedPtr<FJsonValue>>& PointsArr, TArray<FVector>& Out, FString& OutError)
     {
-        if (!Value.IsValid())
+        for (int32 Index = 0; Index < PointsArr.Num(); ++Index)
         {
-            return false;
+            const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
+            FVector P;
+            bool bValid = PointsArr[Index].IsValid() && PointsArr[Index]->TryGetArray(Arr) && Arr && Arr->Num() == 3;
+            for (int32 Axis = 0; bValid && Axis < 3; ++Axis)
+            {
+                double AxisValue = 0.0;
+                bValid = (*Arr)[Axis].IsValid() && (*Arr)[Axis]->TryGetNumber(AxisValue);
+                P[Axis] = AxisValue;
+            }
+            if (!bValid)
+            {
+                OutError = FString::Printf(TEXT("points[%d] is not [x, y, z] (3 numbers); nothing was changed"), Index);
+                return false;
+            }
+            Out.Add(P);
         }
-        const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
-        if (!Value->TryGetArray(Arr) || !Arr || Arr->Num() < 3)
-        {
-            return false;
-        }
-        Out.X = (*Arr)[0]->AsNumber();
-        Out.Y = (*Arr)[1]->AsNumber();
-        Out.Z = (*Arr)[2]->AsNumber();
         return true;
     }
 
@@ -130,7 +137,7 @@ namespace
     }
 }
 
-// MCP:spawn_text_render_actor - Spawns a TextRenderActor into the active world (a running PIE/game world if one exists, otherwise the editor world) and configures its text. Sets the UTextRenderComponent's text / color / world size if given (world_size read back to verify). Runtime/cooked-build safe: resolves the world via GEngine's world contexts, not GEditor, so it also works in packaged builds.
+// MCP:spawn_text_render_actor - Spawn a TextRenderActor with its text, color (0..255, opaque) and world size set in the same call, into the ACTIVE world: the first PIE/game world when one runs (the actor then vanishes when play stops), otherwise the editor world. spawn_actor has no text-render type, and unlike it this has no world selector -- with several PIE instances it takes the first PIE context, not necessarily the server. world_size is read back. One undo step in the editor world; not saved (save_level).
 //   @param text - Optional text to assign to the text render component
 //   @param location - Optional [x, y, z] world location
 //   @param rotation - Optional [pitch, yaw, roll] world rotation
@@ -208,9 +215,9 @@ TSharedPtr<FJsonObject> HandleSpawnTextRenderActor(const TSharedPtr<FJsonObject>
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:add_spline_component - Adds a USplineComponent instance to a named editor-world actor.  NewObject + RegisterComponent + AddInstanceComponent + attach to root + CreationMethod=Instance. If points are given, clears the default points and adds each in local space.
+// MCP:add_spline_component - Add a USplineComponent to a named editor-world actor (name or label) as an undoable instance component on its root, optionally replacing its default points with your local-space points -- what add_component_to_actor cannot set in the same call. Not idempotent: each call adds a spline, while set_spline_points and get_spline_points act on the actor's FIRST one. An entry that is not [x, y, z] (3 numbers) is an error and nothing is added. Not saved (save_level).
 //   @param actor_name - Display label or internal name of the target editor-world actor
-//   @param points - Optional [[x, y, z], ...] spline points in local space
+//   @param points - Optional [[x, y, z], ...] spline points in local space; an entry that is not 3 numbers is an error and nothing is added
 //   @returns { actor_name: string, component_name: string, component_class: string, num_points: int, added: bool }
 
 TSharedPtr<FJsonObject> HandleAddSplineComponent(const TSharedPtr<FJsonObject>& Params)
@@ -220,6 +227,17 @@ TSharedPtr<FJsonObject> HandleAddSplineComponent(const TSharedPtr<FJsonObject>& 
     if (TSharedPtr<FJsonObject> Error = SC_ReadEditorActor(Params, Actor, ActorName))
     {
         return Error;
+    }
+
+    TArray<FVector> Points;
+    const TArray<TSharedPtr<FJsonValue>>* PointsArr = nullptr;
+    if (Params->TryGetArrayField(TEXT("points"), PointsArr) && PointsArr)
+    {
+        FString PointsError;
+        if (!SC_ReadSplinePoints(*PointsArr, Points, PointsError))
+        {
+            return mcp_common::MakeErrorReply(PointsError);
+        }
     }
 
     const FScopedTransaction Transaction(LOCTEXT("AddSplineComponent", "MCP: Add Spline Component"));
@@ -234,22 +252,16 @@ TSharedPtr<FJsonObject> HandleAddSplineComponent(const TSharedPtr<FJsonObject>& 
     PrimitiveComponentUtils::RegisterInstanceComponent(Actor, Spline);
 
     // Optional point list -> clear default + add each in local space.
-    int32 NumPoints = 0;
-    const TArray<TSharedPtr<FJsonValue>>* PointsArr = nullptr;
-    if (Params->TryGetArrayField(TEXT("points"), PointsArr) && PointsArr && PointsArr->Num() > 0)
+    if (Points.Num() > 0)
     {
         Spline->ClearSplinePoints(false);
-        for (const TSharedPtr<FJsonValue>& PV : *PointsArr)
+        for (const FVector& P : Points)
         {
-            FVector P;
-            if (SC_ReadVec3(PV, P))
-            {
-                Spline->AddSplinePoint(P, ESplineCoordinateSpace::Local, false);
-            }
+            Spline->AddSplinePoint(P, ESplineCoordinateSpace::Local, false);
         }
         Spline->UpdateSpline();
     }
-    NumPoints = Spline->GetNumberOfSplinePoints();
+    const int32 NumPoints = Spline->GetNumberOfSplinePoints();
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("actor_name"), Actor->GetActorLabel());
@@ -262,7 +274,7 @@ TSharedPtr<FJsonObject> HandleAddSplineComponent(const TSharedPtr<FJsonObject>& 
 
 // MCP:set_spline_points - Replaces the spline points on a named actor's USplineComponent.  ClearSplinePoints + AddSplinePoint each (local space) + optional SetClosedLoop + UpdateSpline.
 //   @param actor_name - Display label or internal name of the target editor-world actor
-//   @param points - [[x, y, z], ...] spline points in local space
+//   @param points - [[x, y, z], ...] spline points in local space; an entry that is not 3 numbers is an error and nothing is changed
 //   @param closed_loop - Optional bool; toggles closed-loop mode
 //   @returns { actor_name: string, component_name: string, num_points: int, closed_loop: bool, points_set: bool }
 
@@ -278,21 +290,21 @@ TSharedPtr<FJsonObject> HandleSetSplinePoints(const TSharedPtr<FJsonObject>& Par
     const TArray<TSharedPtr<FJsonValue>>* PointsArr = nullptr;
     if (!Params->TryGetArrayField(TEXT("points"), PointsArr) || !PointsArr)
         return mcp_common::MakeErrorReply(TEXT("Missing 'points' array"));
+    TArray<FVector> Points;
+    FString PointsError;
+    if (!SC_ReadSplinePoints(*PointsArr, Points, PointsError))
+    {
+        return mcp_common::MakeErrorReply(PointsError);
+    }
 
     const FScopedTransaction Transaction(LOCTEXT("SetSplinePoints", "MCP: Set Spline Points"));
     Actor->Modify();
     Spline->Modify();
 
     Spline->ClearSplinePoints(false);
-    int32 Added = 0;
-    for (const TSharedPtr<FJsonValue>& PV : *PointsArr)
+    for (const FVector& P : Points)
     {
-        FVector P;
-        if (SC_ReadVec3(PV, P))
-        {
-            Spline->AddSplinePoint(P, ESplineCoordinateSpace::Local, false);
-            ++Added;
-        }
+        Spline->AddSplinePoint(P, ESplineCoordinateSpace::Local, false);
     }
 
     bool bClosedLoop = false;
@@ -347,7 +359,7 @@ TSharedPtr<FJsonObject> HandleGetSplinePoints(const TSharedPtr<FJsonObject>& Par
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:add_spline_mesh_component - Adds a USplineMeshComponent instance to a named editor-world actor.  NewObject + SetStaticMesh + RegisterComponent + AddInstanceComponent + attach to root + CreationMethod=Instance, then SetStartAndEnd to deform the mesh straight from start to end (tangent = end - start).
+// MCP:add_spline_mesh_component - Add a USplineMeshComponent to a named editor-world actor (name or label) as an undoable instance component attached to its root, with a static mesh deformed straight from start to end in local space (SetStartAndEnd, tangent = end - start). Over add_component_to_actor it loads the mesh and sets the deformation in the same call; a mesh that does not load is an error and nothing is added. Not idempotent: each call adds another component. Nothing is saved (save_level).
 //   @param actor_name - Display label or internal name of the target editor-world actor
 //   @param static_mesh_path - /Game or /Engine path to the static mesh to deform
 //   @param start - Optional [x, y, z] start point; defaults to (0,0,0)

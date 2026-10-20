@@ -110,12 +110,12 @@ Drop the two nodes of a slope mask into a material graph: a SmoothStep preset wi
 
 *Destructive.*
 
-Adds a USplineComponent instance to a named editor-world actor.  NewObject + RegisterComponent + AddInstanceComponent + attach to root + CreationMethod=Instance. If points are given, clears the default points and adds each in local space.
+Add a USplineComponent to a named editor-world actor (name or label) as an undoable instance component on its root, optionally replacing its default points with your local-space points -- what add_component_to_actor cannot set in the same call. Not idempotent: each call adds a spline, while set_spline_points and get_spline_points act on the actor's FIRST one. An entry that is not [x, y, z] (3 numbers) is an error and nothing is added. Not saved (save_level).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Display label or internal name of the target editor-world actor |
-| `points` | array | no | Optional [[x, y, z], ...] spline points in local space |
+| `points` | array | no | Optional [[x, y, z], ...] spline points in local space; an entry that is not 3 numbers is an error and nothing is added |
 
 **Returns:** `{ actor_name: string, component_name: string, component_class: string, num_points: int, added: bool }`
 
@@ -123,7 +123,7 @@ Adds a USplineComponent instance to a named editor-world actor.  NewObject + Reg
 
 *Additive.*
 
-Adds a USplineMeshComponent instance to a named editor-world actor.  NewObject + SetStaticMesh + RegisterComponent + AddInstanceComponent + attach to root + CreationMethod=Instance, then SetStartAndEnd to deform the mesh straight from start to end (tangent = end - start).
+Add a USplineMeshComponent to a named editor-world actor (name or label) as an undoable instance component attached to its root, with a static mesh deformed straight from start to end in local space (SetStartAndEnd, tangent = end - start). Over add_component_to_actor it loads the mesh and sets the deformation in the same call; a mesh that does not load is an error and nothing is added. Not idempotent: each call adds another component. Nothing is saved (save_level).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -593,7 +593,7 @@ Count how many instances of one FoliageType are placed across the level's Instan
 
 *Read-only.*
 
-Read a FoliageType asset's authored tunables in one call -- density, radius, scale and z-offset ranges, cull distances, mobility, align-to-normal, random yaw, world collision, shadow and indirect-lighting flags. The read-back oracle for set_foliage_type_properties, and cheaper than reflection-walking the asset from Python. Describes the ASSET, not what is placed in the level: for that use get_foliage_instance_count / get_foliage_in_radius.
+Read a FoliageType_InstancedStaticMesh asset's authored tunables in one call -- density, radius, scale and z-offset ranges, cull distances, mobility, align-to-normal, random yaw, world collision, shadow and indirect-lighting flags -- under the names set_foliage_type_properties takes. A curated view with nothing computed; get_properties reads any other UPROPERTY on the asset. Actor foliage types are not found. Describes the ASSET, not what is placed in the level: for that use get_foliage_instance_count / get_foliage_in_radius.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -615,7 +615,7 @@ No parameters.
 
 *Read-only.*
 
-Read one grass variety of a LandscapeGrassType asset: mesh, density, placement jitter, start/end cull distance, min LOD, scaling mode and scale ranges, rotation/alignment and shadow flags. The read-back oracle for set_landscape_grass_type_properties. Two units that mislead: grass_density is instances per TEN square metres (25 means 2.5/m2), and start_cull_distance only fades if the mesh's material uses a PerInstanceFadeAmount node -- otherwise clusters pop at end_cull_distance and the start value does nothing.
+Read one grass variety (variety_index, default 0) of a LandscapeGrassType asset: mesh, density, placement jitter, start/end cull distance, min LOD, scaling mode and scale ranges, rotation/alignment and shadow flags, under the names set_landscape_grass_type_properties takes. Use it instead of get_properties, which can only return the whole GrassVarieties array, not one element; per-platform values report their Default only. Two units that mislead: grass_density is instances per TEN square metres (25 means 2.5/m2), and start_cull_distance only fades if the mesh's material uses a PerInstanceFadeAmount node -- otherwise clusters pop at end_cull_distance and the start value does nothing.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1285,7 +1285,7 @@ Sets the EDataLayerType ("Editor" or "Runtime") of a UDataLayerAsset and saves i
 
 *Destructive, idempotent.*
 
-Set tunables of a FoliageType_InstancedStaticMesh asset in one call, only the fields you pass, then save it. Returns the read-back values with applied_count and saved; an invalid mobility fails the call. Edits the asset only: instances already placed keep their transforms. Read it with get_foliage_type_properties.
+Set tunables of a FoliageType_InstancedStaticMesh asset in one call, only the fields you pass, then save it. Over set_properties it takes the scale, z-offset and cull ranges as {"min","max"} objects and saves in the same call, but records no undo step. Returns the read-back values with applied_count and saved. An invalid mobility, or a range that is not such an object with a number bound, fails the call before anything is written. Edits the asset only: instances already placed keep their transforms. Read: get_foliage_type_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1293,12 +1293,12 @@ Set tunables of a FoliageType_InstancedStaticMesh asset in one call, only the fi
 | `density` | number | no | Instances per 1000 x 1000 uu area (10 m by 10 m) when painting. |
 | `density_adjustment_factor` | number | no | Density multiplier used when reapplying: above 1 adds instances, below 1 removes them. |
 | `radius` | number | no | Minimum distance in cm between foliage instances. |
-| `scale_x` | object | no | X scale range as a JSON object {"min":0.8,"max":1.2}, either bound optional. |
-| `scale_y` | object | no | Y scale range as a JSON object {"min":0.8,"max":1.2}, either bound optional. |
-| `scale_z` | object | no | Z scale range as a JSON object {"min":0.8,"max":1.2}, either bound optional. |
-| `z_offset` | object | no | Z location offset range in cm as a JSON object {"min":-5,"max":0}; either bound may be left out. |
-| `cull_distance` | object | no | Integer interval {"min":start,"max":end} in cm: instances fade from min (only with a PerInstanceFadeAmount material node) and clusters cull beyond max; 0 disables. |
-| `mobility` | string | no | Component mobility: Static, Stationary or Movable, case-insensitive; any other value fails the call. |
+| `scale_x` | object | no | X scale range as a JSON object {"min":0.8,"max":1.2}, either bound optional; anything else (not an object, no number bound, another key) fails the call and nothing is changed. |
+| `scale_y` | object | no | Y scale range as a JSON object {"min":0.8,"max":1.2}, either bound optional; anything else fails the call and nothing is changed. |
+| `scale_z` | object | no | Z scale range as a JSON object {"min":0.8,"max":1.2}, either bound optional; anything else fails the call and nothing is changed. |
+| `z_offset` | object | no | Z location offset range in cm as a JSON object {"min":-5,"max":0}; either bound may be left out; anything else fails the call and nothing is changed. |
+| `cull_distance` | object | no | Integer interval {"min":start,"max":end} in cm: instances fade from min (only with a PerInstanceFadeAmount material node) and clusters cull beyond max; 0 disables. Anything but such an object fails the call and nothing is changed. |
+| `mobility` | string | no | Component mobility: Static, Stationary or Movable, case-insensitive; any other value fails the call and nothing is changed. |
 | `align_to_normal` | boolean | no | Tilt instances to the normal of the surface they are placed on. |
 | `random_yaw` | boolean | no | Give each instance a random yaw around its vertical axis. |
 | `collision_with_world` | boolean | no | Test for overlap with world geometry before placing each instance. |
@@ -1324,22 +1324,22 @@ Set the KillZ death plane on the EDITOR world's WorldSettings: any actor falling
 
 *Destructive, idempotent.*
 
-Set fields of one grass variety of a LandscapeGrassType asset, only those you pass, and save it; an empty variety list gets one appended for index 0, and density and cull distances change only their per-platform Default value. Returns the read-back variety with applied_count and saved; read it with get_landscape_grass_type_properties.
+Set fields of one grass variety (variety_index) of a LandscapeGrassType asset, only those you pass, and save it. set_properties cannot address one FGrassVariety element of the asset's array; this also writes only the per-platform Default of density and cull distances, refreshes the state hash, and appends a variety for index 0 when the list is empty. No undo step. A grass_mesh that does not load, an invalid scaling or a scale range that is not a {"min","max"} object fails the call with nothing changed, not even the appended variety. Read: get_landscape_grass_type_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `grass_path` | string | yes | Asset path of the LandscapeGrassType, e.g. "/Game/Foliage/GT_Field". |
 | `variety_index` | integer | no | Index of the FGrassVariety to edit, default 0 (appends if the array is empty) |
-| `grass_mesh` | string | no | Path of the StaticMesh for this variety, e.g. "/Game/Foliage/SM_Grass"; an unknown path fails the call. |
+| `grass_mesh` | string | no | Path of the StaticMesh for this variety, e.g. "/Game/Foliage/SM_Grass"; a path that does not load as a StaticMesh fails the call and nothing is changed. |
 | `grass_density` | number | no | Instances per 10 square metres (25 means 2.5 per m2), so a wrong guess is a 10x error in the instance budget. |
 | `placement_jitter` | number | no | Jitter of the grid placement from 0 to 1; only used when use_grid is true. |
 | `start_cull_distance` | number | no | Distance in cm where instances start to fade, an integer; it does nothing unless the grass material uses a PerInstanceFadeAmount node, and 0 disables it. |
 | `end_cull_distance` | number | no | Distance in cm beyond which a whole grass cluster is culled, an integer. |
 | `min_lod` | number | no | Smallest mesh LOD to render, from -1 to 8; -1 uses the MinLOD of the static mesh asset. |
-| `scaling` | string | no | Scale mode: Uniform, Free or LockXY, case-insensitive; any other value fails the call. |
-| `scale_x` | object | no | X scale range as a JSON object {"min":0.8,"max":1.2}, also used for every axis with Uniform scaling. |
-| `scale_y` | object | no | Y scale range as a JSON object {"min":0.8,"max":1.2}, used only with Free scaling. |
-| `scale_z` | object | no | Z scale range as a JSON object {"min":0.8,"max":1.2}, used with Free or LockXY scaling. |
+| `scaling` | string | no | Scale mode: Uniform, Free or LockXY, case-insensitive; any other value fails the call and nothing is changed. |
+| `scale_x` | object | no | X scale range as a JSON object {"min":0.8,"max":1.2}, also used for every axis with Uniform scaling; anything else (not an object, no number bound, another key) fails the call and nothing is changed. |
+| `scale_y` | object | no | Y scale range as a JSON object {"min":0.8,"max":1.2}, used only with Free scaling; anything else fails the call and nothing is changed. |
+| `scale_z` | object | no | Z scale range as a JSON object {"min":0.8,"max":1.2}, used with Free or LockXY scaling; anything else fails the call and nothing is changed. |
 | `random_rotation` | boolean | no | Give each instance a random rotation instead of a shared one. |
 | `align_to_surface` | boolean | no | Tilt instances to the landscape normal instead of keeping them vertical. |
 | `use_grid` | boolean | no | Place instances on a jittered grid instead of a Halton sequence. |
@@ -1431,7 +1431,7 @@ Replaces the spline points on a named actor's USplineComponent.  ClearSplinePoin
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Display label or internal name of the target editor-world actor |
-| `points` | array | yes | [[x, y, z], ...] spline points in local space |
+| `points` | array | yes | [[x, y, z], ...] spline points in local space; an entry that is not 3 numbers is an error and nothing is changed |
 | `closed_loop` | boolean | no | Optional bool; toggles closed-loop mode |
 
 **Returns:** `{ actor_name: string, component_name: string, num_points: int, closed_loop: bool, points_set: bool }`
@@ -1509,9 +1509,9 @@ Soften terrain: run a 3x3 box blur over the heightmap inside a world-space box, 
 
 ## `spawn_level_streaming_volume`
 
-*Additive, idempotent.*
+*Additive.*
 
-Spawns an ALevelStreamingVolume with a box brush and binds it to an existing streaming sub-level.  Builds a default box brush (CubeBuilder via UActorFactory::CreateBrushForVolumeActor), applies the usage/previs/disabled flags, then appends the volume to the target ULevelStreaming::EditorStreamingVolumes array (idempotent: re-binding the same volume is a no-op). The actual load/unload trigger is runtime/PIE-only and is not exercised headless.
+Spawn an ALevelStreamingVolume in the editor world with a real box brush (half-extent extent) and bind it to an existing streaming sub-level, setting its usage, editor_pre_vis_only and disabled flags, in one undo step. Over spawn_box_volume(volume_class='LevelStreamingVolume') it adds the binding: the volume is appended to the sub-level's EditorStreamingVolumes, which no other tool writes. Each call spawns a NEW volume; an extent axis of 0 or less becomes 100; an unknown usage or sub-level is an error before anything spawns. Not saved (save_level). The load/unload itself happens only at PIE/runtime, when a viewpoint enters the volume.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1529,7 +1529,7 @@ Spawns an ALevelStreamingVolume with a box brush and binds it to an existing str
 
 *Additive.*
 
-Spawns a navigation mesh bounds volume at a specified location with optional extent, and builds a REAL cube brush so the volume has non-empty nav bounds (an empty brush yields 0 navmesh tiles). No hand placement in the editor UI required. The brush is RE-READ off the spawned actor after building (poly count from its UModel, bounds from the actor), so nothing in the payload is a hand-written claim.
+Spawn a NavMeshBoundsVolume in the editor world at location with a REAL cube brush of half-extent extent (default 1000,1000,500) -- an empty brush yields 0 navmesh tiles -- and report brush and bounds RE-READ off the actor in diagnose_navmesh's terms (brush_empty, brush_poly_count, bounds_valid). spawn_box_volume(volume_class='NavMeshBoundsVolume') builds the same brush plus a label, spatial-loading flag and scale normalization; this one differs by its larger default and report fields. One undo step; not saved (save_level); navigation is not rebuilt here.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1542,7 +1542,7 @@ Spawns a navigation mesh bounds volume at a specified location with optional ext
 
 *Additive.*
 
-Spawns a TextRenderActor into the active world (a running PIE/game world if one exists, otherwise the editor world) and configures its text. Sets the UTextRenderComponent's text / color / world size if given (world_size read back to verify). Runtime/cooked-build safe: resolves the world via GEngine's world contexts, not GEditor, so it also works in packaged builds.
+Spawn a TextRenderActor with its text, color (0..255, opaque) and world size set in the same call, into the ACTIVE world: the first PIE/game world when one runs (the actor then vanishes when play stops), otherwise the editor world. spawn_actor has no text-render type, and unlike it this has no world selector -- with several PIE instances it takes the first PIE context, not necessarily the server. world_size is read back. One undo step in the editor world; not saved (save_level).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

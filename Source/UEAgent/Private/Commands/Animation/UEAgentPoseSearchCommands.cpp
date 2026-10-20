@@ -7,6 +7,8 @@
 #include "UObject/Package.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/UnrealType.h"   // FArrayProperty / FScriptArrayHelper / FObjectPropertyBase — reflection resize of the private Channels TArray in remove_pose_search_channel_from_schema
+#include "JsonObjectConverter.h"  // FJsonObjectConverter::JsonValueToUProperty (set_pose_search_schema_properties stages its keys)
+#include "UObject/EnumProperty.h" // FEnumProperty (the JSON kind a staged key of an enum must hold)
 
 // PoseSearch runtime + editor (POSESEARCH_API / POSESEARCHEDITOR_API).
 // All asset types derive from UDataAsset; their channels/index APIs are
@@ -979,8 +981,8 @@ TSharedPtr<FJsonObject> HandleSetPoseSearchDatabaseSchema(const TSharedPtr<FJson
 }
 // ---------------------------------------------------------------------------
 // One reflective setter over the scalar UPROPERTY fields of UPoseSearchSchema:
-// each is a flat UPROPERTY that JsonToStruct writes by reflection, so one
-// partial-merge handler (model: HandleSetSoundWaveProperties) covers them all.
+// each is a flat UPROPERTY that FJsonObjectConverter converts by reflection, so
+// one staged-write handler (model: HandleSetSoundWaveProperties) covers them all.
 // The object-ref and keyed fields (skeleton / mirror_data_table / role) cannot
 // go through the flat merge and have dedicated handlers below.
 // ---------------------------------------------------------------------------
@@ -995,12 +997,177 @@ namespace
         if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("asset_path"), SchemaPath)) { return Missing; }
         return AnimAssetUtils::LoadOrError(SchemaPath, TEXT("UPoseSearchSchema"), OutSchema);
     }
+
+    // The values of one properties object staged for a write into an object: each converted into a copy of the current
+    // value of the property its key names. The copies are freed with it.
+    struct FPoseSearchStagedProperties
+    {
+        TArray<TPair<FProperty*, void*>> Values;
+
+        FPoseSearchStagedProperties() = default;
+        FPoseSearchStagedProperties(const FPoseSearchStagedProperties&) = delete;
+        FPoseSearchStagedProperties& operator=(const FPoseSearchStagedProperties&) = delete;
+        ~FPoseSearchStagedProperties()
+        {
+            for (const TPair<FProperty*, void*>& Value : Values)
+            {
+                Value.Key->DestroyAndFreeValue(Value.Value);
+            }
+        }
+    };
+
+    // Value, a value of Property, clamped to Property's ClampMin/ClampMax meta, which FJsonObjectConverter ignores:
+    // what mcp_common::ClampNumericByMeta does to each property of a container.
+    void PoseSearch_ClampToMeta(const FProperty& Property, void* Value)
+    {
+        const FNumericProperty* Numeric = CastField<FNumericProperty>(&Property);
+        const bool bHasMin = Property.HasMetaData(TEXT("ClampMin"));
+        const bool bHasMax = Property.HasMetaData(TEXT("ClampMax"));
+        if (!Numeric || (!bHasMin && !bHasMax))
+        {
+            return;
+        }
+        if (Numeric->IsFloatingPoint())
+        {
+            double Number = Numeric->GetFloatingPointPropertyValue(Value);
+            if (bHasMin) { Number = FMath::Max(Number, FCString::Atod(*Property.GetMetaData(TEXT("ClampMin")))); }
+            if (bHasMax) { Number = FMath::Min(Number, FCString::Atod(*Property.GetMetaData(TEXT("ClampMax")))); }
+            Numeric->SetFloatingPointPropertyValue(Value, Number);
+        }
+        else if (Numeric->IsInteger())
+        {
+            int64 Number = Numeric->GetSignedIntPropertyValue(Value);
+            if (bHasMin) { Number = FMath::Max<int64>(Number, FCString::Atoi64(*Property.GetMetaData(TEXT("ClampMin")))); }
+            if (bHasMax) { Number = FMath::Min<int64>(Number, FCString::Atoi64(*Property.GetMetaData(TEXT("ClampMax")))); }
+            Numeric->SetIntPropertyValue(Value, Number);
+        }
+    }
+
+    // What Value must be for Property when it is not that, else empty. FJsonObjectConverter reads a number or a bool
+    // out of any JSON value without an error -- a string that is not a number becomes 0, any string a bool -- so
+    // those kinds are checked here; the converter refuses a wrong kind for the others itself.
+    FString PoseSearch_ExpectedJsonKind(const FProperty& Property, const FJsonValue& Value)
+    {
+        if (Property.ArrayDim != 1)
+        {
+            return FString();
+        }
+        const FNumericProperty* Numeric = CastField<FNumericProperty>(&Property);
+        if (CastField<FEnumProperty>(&Property) || (Numeric && Numeric->IsEnum()))
+        {
+            return Value.Type == EJson::String || Value.Type == EJson::Number ? FString() : FString(TEXT("an enum name"));
+        }
+        if (Numeric)
+        {
+            const bool bNumber = Value.Type == EJson::Number || (Value.Type == EJson::String && Value.AsString().IsNumeric());
+            return bNumber ? FString() : FString(TEXT("a number"));
+        }
+        if (CastField<FBoolProperty>(&Property))
+        {
+            return Value.Type == EJson::Boolean ? FString() : FString(TEXT("true or false"));
+        }
+        return FString();
+    }
+
+    // Stages every key of Json for a write into Object, before anything is written (Param names the param in the
+    // errors). Null when each key names a property of Object's class -- matched case-insensitively, as
+    // FJsonObjectConverter matches them -- that is neither deprecated nor holds instanced subobjects (the staging
+    // conversion would create those outside Object), holds a value of its kind (PoseSearch_ExpectedJsonKind), and the
+    // value converts; it is then clamped (PoseSearch_ClampToMeta). Else the error reply naming the key, with nothing
+    // changed: merging into Object directly would skip a key that names no property without a word, and stop at
+    // the first value that does not convert with the keys before it already written.
+    TSharedPtr<FJsonObject> PoseSearch_StageProperties(const FJsonObject& Json, UObject& Object, const TCHAR* Param,
+        FPoseSearchStagedProperties& OutStaged)
+    {
+        const UClass* Class = Object.GetClass();
+        auto IsWritable = [](const FProperty& Property)
+        {
+            return !Property.HasAnyPropertyFlags(
+                CPF_Deprecated | CPF_InstancedReference | CPF_ContainsInstancedReference | CPF_PersistentInstance);
+        };
+        for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Json.Values)
+        {
+            FProperty* Property = nullptr;
+            for (TFieldIterator<FProperty> It(Class); It && !Property; ++It)
+            {
+                if (Class->GetAuthoredNameForField(*It).Equals(Pair.Key, ESearchCase::IgnoreCase))
+                {
+                    Property = *It;
+                }
+            }
+            if (!Property || !IsWritable(*Property))
+            {
+                TArray<FString> Names;
+                for (TFieldIterator<FProperty> It(Class); It; ++It)
+                {
+                    if (IsWritable(**It))
+                    {
+                        Names.Add(Class->GetAuthoredNameForField(*It));
+                    }
+                }
+                const FString Problem = Property
+                    ? FString::Printf(TEXT("names %s, which is deprecated or holds instanced subobjects and is not written here"), *Property->GetName())
+                    : FString::Printf(TEXT("names no property of %s"), *Class->GetName());
+                return mcp_common::MakeErrorReply(FString::Printf(
+                    TEXT("%s key '%s' %s; nothing was changed. Writable properties (keys match them case-insensitively): %s"),
+                    Param, *Pair.Key, *Problem, *FString::Join(Names, TEXT(", "))));
+            }
+            if (!Pair.Value.IsValid() || Pair.Value->IsNull())
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(
+                    TEXT("%s.%s is null: give it a value or leave the key out; nothing was changed."), Param, *Pair.Key));
+            }
+            const FString Expected = PoseSearch_ExpectedJsonKind(*Property, *Pair.Value);
+            if (!Expected.IsEmpty())
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(TEXT("%s.%s must be %s for %s (%s); nothing was changed."),
+                    Param, *Pair.Key, *Expected, *Property->GetName(), *Property->GetCPPType()));
+            }
+            void* Value = Property->AllocateAndInitializeValue();
+            OutStaged.Values.Emplace(Property, Value);
+            Property->CopyCompleteValue(Value, Property->ContainerPtrToValuePtr<void>(&Object));
+            FText Reason;
+            if (!FJsonObjectConverter::JsonValueToUProperty(Pair.Value, Property, Value, 0, 0, false, &Reason))
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(
+                    TEXT("%s.%s does not convert to %s (%s): %s; nothing was changed."), Param, *Pair.Key,
+                    *Property->GetName(), *Property->GetCPPType(), *Reason.ToString().Replace(TEXT("\n"), TEXT(" "))));
+            }
+            PoseSearch_ClampToMeta(*Property, Value);
+        }
+        return nullptr;
+    }
+
+    // Whether Object holds Value, a value of Property, in every element of it.
+    bool PoseSearch_HoldsValue(const FProperty& Property, const UObject& Object, const void* Value)
+    {
+        for (int32 Index = 0; Index < Property.ArrayDim; ++Index)
+        {
+            if (!Property.Identical(Property.ContainerPtrToValuePtr<void>(&Object, Index),
+                    static_cast<const uint8*>(Value) + Index * Property.GetElementSize(), PPF_None))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // Exchanges the value of Property that Object holds with Value, a value of Property.
+    void PoseSearch_SwapValue(const FProperty& Property, UObject& Object, void* Value)
+    {
+        void* Held = Property.ContainerPtrToValuePtr<void>(&Object);
+        void* Previous = Property.AllocateAndInitializeValue();
+        Property.CopyCompleteValue(Previous, Held);
+        Property.CopyCompleteValue(Held, Value);
+        Property.CopyCompleteValue(Value, Previous);
+        Property.DestroyAndFreeValue(Previous);
+    }
 }
 
-// MCP:set_pose_search_schema_properties - Author UPoseSearchSchema scalar tunables via reflection (partial merge + clamp). Replaces the 8 former per-field set_pose_search_schema_* setters.
+// MCP:set_pose_search_schema_properties - Write scalar UPROPERTYs of a PoseSearchSchema asset (SampleRate, permutations, padding, DataPreprocessor...), clamp them to ClampMin/ClampMax, re-finalize the schema and save; set_properties neither clamps nor saves. changed says whether any written value differs from what the schema held. Keys match property names case-insensitively; an empty object, a key that names no property (the error lists them), Channels or another instanced or deprecated property, a null value, or a value of the wrong kind or that does not convert is an error and nothing changes. Skeleton, mirror table, role: set_pose_search_schema_* tools.
 //   @param asset_path - Asset path of the target UPoseSearchSchema (required).
-//   @param properties - Object of UPoseSearchSchema UPROPERTY fields to merge; keys are the C++ property NAMES (case-insensitive), absent keys untouched. Covers: SampleRate(int, ClampMin=1 ClampMax=240), bAddDataPadding(bool), bInjectAdditionalDebugChannels(bool), bDrawInjectAdditionalDebugChannels(bool), NumberOfPermutations(int, ClampMin=1), PermutationsSampleRate(int, ClampMin=1 ClampMax=240), PermutationsTimeOffset(float), DataPreprocessor(enum name: None/Normalize/NormalizeOnlyByDeviation/NormalizeWithCommonSchema). Object-refs (skeleton, mirror_data_table) and the role tag are set via their dedicated commands, not here.
-//   @returns { asset_path, asset_class, settings, applied_keys, changed, saved }
+//   @param properties - Object of UPoseSearchSchema UPROPERTY fields to merge; keys are the C++ property NAMES (case-insensitive), absent keys untouched. Covers: SampleRate(int, ClampMin=1 ClampMax=240), bAddDataPadding(bool), bInjectAdditionalDebugChannels(bool), bDrawInjectAdditionalDebugChannels(bool), NumberOfPermutations(int, ClampMin=1), PermutationsSampleRate(int, ClampMin=1 ClampMax=240), PermutationsTimeOffset(float), DataPreprocessor(enum name: None/Normalize/NormalizeOnlyByDeviation/NormalizeWithCommonSchema). Object-refs (skeleton, mirror_data_table) and the role tag are set via their dedicated commands, not here. An empty object, a key that names no property (or a deprecated one, or one holding instanced subobjects such as Channels), a null value or a value that does not convert is an error and nothing is changed.
+//   @returns { asset_path, asset_class, settings, applied_keys, changed, saved, save_error? }
 TSharedPtr<FJsonObject> HandleSetPoseSearchSchemaProperties(const TSharedPtr<FJsonObject>& Params)
 {
     UPoseSearchSchema* Schema = nullptr;
@@ -1012,33 +1179,38 @@ TSharedPtr<FJsonObject> HandleSetPoseSearchSchemaProperties(const TSharedPtr<FJs
         return mcp_common::MakeErrorReply(TEXT("Missing required parameter: properties (object)"));
     }
     const TSharedPtr<FJsonObject>& PropertiesJson = *PropertiesJsonPtr;
-
-    Schema->Modify();
-
-    // Partial merge directly into the UPoseSearchSchema object: only the keys
-    // present in PropertiesJson are written; every other property is untouched.
-    // The 8 covered fields are all plain scalar/bool/enum UPROPERTYs (NOT
-    // uint8:1 bitfields), so they round-trip through JsonToStruct cleanly, and
-    // the DataPreprocessor enum decodes by name. Keys match the C++ property
-    // names case-insensitively (FJsonObjectConverter::GetAuthoredNameForField).
-    FString JsonErr;
-    if (!mcp_common::JsonToStruct(
-            PropertiesJson,
-            UPoseSearchSchema::StaticClass(),
-            Schema, JsonErr, 0, 0))
+    if (PropertiesJson->Values.Num() == 0)
     {
-        return mcp_common::MakeErrorReply(JsonErr);
+        return mcp_common::MakeErrorReply(TEXT("properties is empty: give at least one property to set; nothing was changed."));
     }
 
-    // JsonToStruct ignores ClampMin/ClampMax meta, so re-apply it generically:
-    // clamp SampleRate(1..240), NumberOfPermutations(>=1), PermutationsSampleRate(1..240).
-    mcp_common::ClampNumericByMeta(UPoseSearchSchema::StaticClass(), Schema);
+    // Every key is staged before the first write, so a call that fails changes nothing. The 8 covered fields are all
+    // plain scalar/bool/enum UPROPERTYs (NOT uint8:1 bitfields), and the DataPreprocessor enum decodes by name.
+    FPoseSearchStagedProperties Staged;
+    if (TSharedPtr<FJsonObject> Refused = PoseSearch_StageProperties(*PropertiesJson, *Schema, TEXT("properties"), Staged))
+    {
+        return Refused;
+    }
+
+    // The staged values go into the schema and the values it held into the staging buffers, so changed below
+    // compares the schema after the write (and its Finalize) with what it held before.
+    Schema->Modify();
+    for (const TPair<FProperty*, void*>& Value : Staged.Values)
+    {
+        PoseSearch_SwapValue(*Value.Key, *Schema, Value.Value);
+    }
 
     // PostEditChange runs the schema's WITH_EDITOR PostEditChangeProperty
     // override (PoseSearchSchema.cpp), which calls the private Finalize().
     // Required after changing bAddDataPadding / DataPreprocessor / permutations
     // (the same external-Finalize path the create/add-channel handlers use).
     Schema->PostEditChange();
+
+    bool bChanged = false;
+    for (const TPair<FProperty*, void*>& Value : Staged.Values)
+    {
+        bChanged = bChanged || !PoseSearch_HoldsValue(*Value.Key, *Schema, Value.Value);
+    }
 
     FString SaveError;
     const bool bSaved = mcp_common::SaveAssetPackage(Schema->GetPackage(), Schema, SaveError);
@@ -1058,7 +1230,7 @@ TSharedPtr<FJsonObject> HandleSetPoseSearchSchemaProperties(const TSharedPtr<FJs
     Obj->SetStringField(TEXT("asset_class"), Schema->GetClass()->GetName());
     Obj->SetObjectField(TEXT("settings"), SettingsOut);
     Obj->SetArrayField(TEXT("applied_keys"), AppliedKeys);
-    Obj->SetBoolField(TEXT("changed"), AppliedKeys.Num() > 0);
+    Obj->SetBoolField(TEXT("changed"), bChanged);
     return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_pose_search_schema_properties"), SaveError);
 }
 

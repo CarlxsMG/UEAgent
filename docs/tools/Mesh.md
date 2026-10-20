@@ -56,14 +56,14 @@ Build a flat welded grid of num_x by num_y vertices spaced grid_spacing apart, c
 
 *Additive, idempotent.*
 
-Spawn a bare AActor in the editor world and attach a fresh UProceduralMeshComponent as its root. Idempotent: reuses the actor's existing PMC if found.
+Spawn a bare AActor labelled actor_label in the editor world with a new UProceduralMeshComponent as its root, the target the procedural-mesh tools find by label; spawn_actor has no bare actor, and add_component_to_actor adds a PMC to an existing one. The new actor stands at location (the origin when omitted; a location that is not 3 numbers is refused) and the PMC is an instance component, so save_level keeps both; one undo step, the level marked dirty, not saved. Idempotent: an actor already labelled actor_label that has a PMC is returned with reused:true and is not moved (location in the reply is where it stands). A label held by an actor WITHOUT a PMC is an error, since the procedural-mesh tools would find that actor first, and so is a label that is "None" or blank; nothing is spawned then.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_label` | string | yes | Editor label for the new actor |
-| `location` | array | no | Optional [x, y, z] world location; defaults to (0,0,0) |
+| `actor_label` | string | yes | Editor label for the new actor; the procedural-mesh tools find the actor by it. An actor that already carries it is reused when it has a PMC and refused when it has none (those tools would find it first); a label that is not a valid actor label ("None", blank) is refused. Nothing is spawned on a refusal. |
+| `location` | array | no | Optional [x, y, z] world location of a new actor; defaults to (0,0,0). A reused actor is not moved. |
 
-**Returns:** `{ actor_label: string, actor_name: string, component_index: int, section_count: int, reused: bool }`
+**Returns:** `{ actor_label: string, actor_name: string, component_name: string, component_index: int, section_count: int, reused: bool, location: [number, number, number] }`
 
 ## `get_procedural_mesh_info`
 

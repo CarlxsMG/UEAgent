@@ -154,13 +154,11 @@ namespace
         }
         else
         {
-            FStringOutputDevice ImportErrors;
-            bParsed = Property->ImportText_Direct(*Text, Scratch, Expression, PPF_None, &ImportErrors) != nullptr;
+            FString ParseError;
+            bParsed = mcp_common::ImportPropertyTextStrict(Property, Text, Scratch, Expression, ParseError);
             if (!bParsed)
             {
-                OutError = ImportErrors.IsEmpty()
-                    ? FString::Printf(TEXT("'%s' is not a valid value for property %s (%s)"), *Text, *Property->GetName(), *Property->GetCPPType())
-                    : FString::Printf(TEXT("'%s' rejected by property %s (%s): %s"), *Text, *Property->GetName(), *Property->GetCPPType(), *ImportErrors);
+                OutError = FString::Printf(TEXT("property %s: %s"), *Property->GetName(), *ParseError);
             }
         }
 
@@ -270,7 +268,7 @@ TSharedPtr<FJsonObject> HandleDisconnectToMaterialOutput(const TSharedPtr<FJsonO
     return Result;
 }
 
-// MCP:set_material_expression_property - Write one property of an expression node of a UMaterial asset (not an instance), found by its object name node_id. param_name names the property on every node type (R on Constant, DefaultValue or SliderMax on ScalarParameter, Constant on Constant3Vector and Constant4Vector, DefaultValue on VectorParameter...); ParameterName renames a node that has a parameter name. A value that does not parse for the property is refused and nothing is written. No undo, no save: it runs PostEditChange and marks the material dirty (persist with save_asset). value_after is the property read back. Instances: set_material_instance_parameter.
+// MCP:set_material_expression_property - Write one property of an expression node of a UMaterial asset (not an instance), found by its object name node_id. param_name names the property on every node type (R on Constant, DefaultValue or SliderMax on ScalarParameter, Constant on Constant3Vector and Constant4Vector, DefaultValue on VectorParameter...); ParameterName renames a parameter node through its own SetParameterName. Over set_properties on the node it also runs PostEditChange on the material and accepts "[r,g,b,a]" or "r,g,b" for a linear color. A value that does not parse for the property is refused and nothing is written. No undo, no save: it marks the material dirty (persist with save_asset). value_after is the property read back. Instances: set_material_instance_parameter.
 //   @param material_path - Material asset path
 //   @param node_id - Id of the target expression in the material
 //   @param param_name - Name of the property to set (e.g. "ParameterName", "R", "DefaultValue")

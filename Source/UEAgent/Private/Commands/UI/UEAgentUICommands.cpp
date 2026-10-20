@@ -353,7 +353,7 @@ namespace UEAgentUICommandsImpl
 
 // Widgets placed in the level
 
-// MCP:get_level_widget_properties - Retrieve detailed properties and state information for a UUserWidget hosted on a UWidgetComponent in the current editor level, by name: class, validity, visibility, placement of the hosting component, parent, focus, and the direct children of its root panel (one level, each with name, class, depth, valid, enabled and visibility). list_level_widget_components gives the names.
+// MCP:get_level_widget_properties - Read the live state of a UUserWidget hosted on a UWidgetComponent in the current editor level, found by the widget's object name (list_level_widget_components gives the names): class, validity, visibility, enabled and focus, the hosting component's draw size and relative transform, parent, and the direct children of its root panel (one level). Use it for this runtime state, which no UPROPERTY read gives; inspect_object reads the widget's raw properties. A running PIE session is never searched: use read_pie_widgets for live game UI.
 //   @param widget_name - Name of the widget to query
 //   @returns { widget_name: string, widget_class: string, widget_valid: bool, widget_visible: bool, visibility: string, size?: { width: number, height: number }, position?: { x: number, y: number, z: number }, rotation?: { pitch: number, yaw: number, roll: number }, scale?: { x: number, y: number, z: number }, parent_widget?: string, parent_class?: string, child_count: number, children: [{ name: string, class: string, depth: number (1), valid: bool, enabled: bool, visibility: string }], is_enabled: bool, has_focus: bool }
 

@@ -608,15 +608,15 @@ Set the editor's active culture/locale (FInternationalization::SetCurrentCulture
 
 *Destructive, idempotent.*
 
-Write ONE reflected property on a DataAsset from a text value and verify it by reading back, returning old_value and new_value so the reply proves the change instead of merely claiming it. Values use UE text form: structs as "(X=1,Y=2,Z=3)", object references as a full asset path, GameplayTags as (TagName="A.B"). One property per call, so loop for several; get_data_asset_info dumps them all.
+Write ONE reflected property on a DataAsset, save the asset, and return old_value and new_value read back. Pick it over set_properties when you want the save in the same call or the before/after proof; set_properties writes several properties at once, undoably, without saving. It runs PreEditChange/PostEditChangeProperty but records no undo step and does not check that the property is editable. A text value uses UE text form: structs as "(X=1,Y=2,Z=3)", object references as a full asset path, GameplayTags as (TagName="A.B"); a JSON object or array goes through the JSON importer instead (a struct as an object, an array as an array). A value that does not import is refused. get_data_asset_info dumps them all.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `data_asset_path` | string | yes | Full asset path of the DataAsset. |
 | `property_name` | string | yes | Name of the UPROPERTY to set (class property name). |
-| `value` | any | yes | New value as a string (numbers/bools accepted); structs use UE text form e.g. "(X=1,Y=2,Z=3)"; object refs use a full asset path. |
+| `value` | any | yes | New value: a string in UE text form (structs "(X=1,Y=2,Z=3)", object refs as a full asset path), a number or a bool; or a JSON object/array, written through the JSON importer (a struct as an object, an array or set as an array, a map as an object). null is refused. |
 
-**Returns:** `{ data_asset_path: string, property_name: string, property_type: string, old_value: string, new_value: string, applied: bool, saved: bool }`
+**Returns:** `{ data_asset_path: string, property_name: string, property_type: string, old_value: string, new_value: string, applied: bool, saved: bool, save_error?: string }`
 
 ## `set_data_table_cell`
 

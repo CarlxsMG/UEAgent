@@ -70,14 +70,14 @@ namespace
 	/**
 	 * Import a text value onto the CDO's property.
 	 *
-	 * ImportText_Direct returns the parse cursor (nullptr on failure), so a value the
-	 * property cannot parse is reported as a failure, never as success.
+	 * Through the strict importer, so a value the property cannot read whole ("abc" for a number, which
+	 * ImportText_Direct alone takes as 0) is reported as a failure and leaves the property as it was.
 	 */
 	bool WritePropertyByImport(UObject* CDO, FProperty* Prop, const FString& Value)
 	{
 		if (!CDO || !Prop) { return false; }
-		void* ValuePtr = Prop->ContainerPtrToValuePtr<void>(CDO);
-		return Prop->ImportText_Direct(*Value, ValuePtr, CDO, PPF_None) != nullptr;
+		FString Unused;
+		return mcp_common::ImportPropertyTextStrict(Prop, Value, Prop->ContainerPtrToValuePtr<void>(CDO), CDO, Unused);
 	}
 
 	bool ReadPropertyAsString(UObject* CDO, FProperty* Prop, FString& Out)

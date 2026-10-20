@@ -17,6 +17,7 @@
 #include "MassRequirements.h"      // EMassFragmentPresence / EMassFragmentAccess
 #include "MassSignalSubsystem.h"   // UMassSignalSubsystem (world subsystem, signal dispatch)
 #include "Misc/PackageName.h"
+#include "ScopedTransaction.h"
 #include "UObject/Package.h"
 #include "UObject/SavePackage.h"
 #include "UObject/UObjectGlobals.h"
@@ -524,10 +525,10 @@ TSharedPtr<FJsonObject> HandleCreateMassSpawnerActor(
 //   spawn-data-generator for locations and may complete asynchronously, so 'spawned'
 //   can be 0 even when entity types are configured.
 // ---------------------------------------------------------------------------
-// MCP:spawn_mass_entities - Trigger entity spawning on a AMassSpawner (DoSpawning from the FTSTicker path, outside Mass processing); reports the global Mass entity-count delta.
+// MCP:spawn_mass_entities - Run DoSpawning on an editor-world AMassSpawner found by actor_label and report the global Mass entity-count delta -- it spawns entities, not an actor (create_mass_spawner_actor places the spawner). All configured types spawn at the spawner's own count (set_mass_spawner_count); a count that differs from it is an error and nothing is spawned. spawned can be 0. Inverse: despawn_mass_entities.
 //   @param actor_label - Editor label of the AMassSpawner actor
-//   @param count - Informational only; accepted but does not bound the spawn (default 0)
-//   @returns { actor_label, entity_count_before, entity_count_after, spawned, note }
+//   @param count - Optional; must equal the spawner's own count (set_mass_spawner_count), which is what DoSpawning spawns. Any other value is an error and nothing is spawned.
+//   @returns { actor_label, entity_count_before, entity_count_after, spawned, spawner_count, note }
 TSharedPtr<FJsonObject> HandleSpawnMassEntities(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -539,12 +540,15 @@ TSharedPtr<FJsonObject> HandleSpawnMassEntities(
 	{
 		return Error;
 	}
-	// AMassSpawner::DoSpawning() spawns ALL configured entity types; there
-	// is no "spawn N" overload on the public API. The `count` param is
-	// informational only and is accepted but not used to bound the spawn.
+	// AMassSpawner::DoSpawning() spawns ALL configured entity types at the spawner's own Count; there is no "spawn N"
+	// overload on the public API. A `count` other than that one would be ignored, so it is refused instead.
 	int32 Count = 0;
-	Params->TryGetNumberField(TEXT("count"), Count);
-	(void)Count;
+	if (Params->TryGetNumberField(TEXT("count"), Count) && Count != Spawner->GetCount())
+	{
+		return mcp_common::MakeErrorReply(FString::Printf(
+			TEXT("count %d is not the spawner's own count (%d), and DoSpawning always spawns the spawner's count. ")
+			TEXT("Set it with set_mass_spawner_count first, or leave count out; nothing was spawned."), Count, Spawner->GetCount()));
+	}
 
 	// Count via the global Mass entity manager before/after. DoSpawning() runs here on
 	// the bridge's FTSTicker (top-level tick, outside Mass) — outside Mass processing, which is the safe path.
@@ -558,6 +562,7 @@ TSharedPtr<FJsonObject> HandleSpawnMassEntities(
 	Data->SetNumberField(TEXT("entity_count_before"), CountBefore);
 	Data->SetNumberField(TEXT("entity_count_after"), CountAfter);
 	Data->SetNumberField(TEXT("spawned"), CountAfter - CountBefore);
+	Data->SetNumberField(TEXT("spawner_count"), Spawner->GetCount());
 	Data->SetStringField(TEXT("note"),
 		TEXT("DoSpawning() runs from the bridge FTSTicker (top-level tick, outside Mass processing, not AsyncTask). ")
 		TEXT("entity_count is the global Mass entity-manager delta; actual spawning needs a spawn-data-generator for ")
@@ -684,12 +689,12 @@ TSharedPtr<FJsonObject> HandleSetMassConfigParent(
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_mass_config_parent"));
 }
 
-// MCP:set_mass_trait_property - Set a property (name or dotted path) on a trait in a Mass config via reflection (ImportText).
+// MCP:set_mass_trait_property - Set one property (name or dotted struct path) of a trait on a Mass entity config asset from import text, as one undo step, and save it. set_properties needs the trait's object path; this finds it by trait_class (add it: add_mass_trait). The trait gets PostEditChange as after a Details-panel edit; there is no edit gate, and a value that does not import is refused with nothing changed. A failed save makes success false, with saved=false and save_error. Read: get_mass_trait_property.
 //   @param config_path - Asset path to the UMassEntityConfigAsset
 //   @param trait_class - Trait class name; the trait must already be on the config (e.g. MassVelocityRandomizerTrait)
 //   @param property_name - Property name or dotted path (e.g. MaxSpeed, or Movement.HighResSpeed)
 //   @param value - String value parsed by FProperty::ImportText_Direct
-//   @returns { config_path, trait_class, property_name, value, set, saved }
+//   @returns { config_path, trait_class, property_name, value, set, saved, save_error? }
 TSharedPtr<FJsonObject> HandleSetMassTraitProperty(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -704,13 +709,26 @@ TSharedPtr<FJsonObject> HandleSetMassTraitProperty(
 	{
 		return Error;
 	}
-	if (!Target.Prop->ImportText_Direct(*Value, Target.ValuePtr, Target.Trait, PPF_None))
+	// One undo step: the config and its trait are snapshotted before the write, and the trait is told about the
+	// change afterwards, as a Details-panel edit would.
+	// The value is parsed before anything is recorded: a text the property cannot read whole is refused unchanged.
+	void* Parsed = Target.Prop->AllocateAndInitializeValue();
+	Target.Prop->CopyCompleteValue(Parsed, Target.ValuePtr);
+	FString ImportError;
+	if (!mcp_common::ImportPropertyTextStrict(Target.Prop, Value, Parsed, Target.Trait, ImportError))
 	{
-		return mcp_common::MakeErrorReply(FString::Printf(TEXT("Failed to import value '%s' into %s.%s"),
-			*Value, *Target.TraitClass->GetName(), *PropName));
+		Target.Prop->DestroyAndFreeValue(Parsed);
+		return mcp_common::MakeErrorReply(FString::Printf(TEXT("Failed to import value '%s' into %s.%s: %s; nothing was changed"),
+			*Value, *Target.TraitClass->GetName(), *PropName, *ImportError));
 	}
-	Target.Config->MarkPackageDirty();
-	const bool bSaved = mcp_common::SaveAssetPackage(Target.Config->GetPackage(), Target.Config);
+	const FScopedTransaction Transaction(NSLOCTEXT("UEAgentMass", "SetMassTraitProperty", "Set Mass Trait Property"));
+	Target.Config->Modify();
+	Target.Trait->Modify();
+	Target.Prop->CopyCompleteValue(Target.ValuePtr, Parsed);
+	Target.Prop->DestroyAndFreeValue(Parsed);
+	Target.Trait->PostEditChange();
+	FString SaveError;
+	const bool bSaved = mcp_common::SaveAssetPackage(Target.Config->GetPackage(), Target.Config, SaveError);
 
 	FString ReadBack;
 	Target.Prop->ExportTextItem_Direct(ReadBack, Target.ValuePtr, nullptr, nullptr, PPF_None);
@@ -721,10 +739,10 @@ TSharedPtr<FJsonObject> HandleSetMassTraitProperty(
 	Data->SetStringField(TEXT("property_name"), PropName);
 	Data->SetStringField(TEXT("value"), ReadBack);
 	Data->SetBoolField(TEXT("set"), true);
-	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_mass_trait_property"));
+	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_mass_trait_property"), SaveError);
 }
 
-// MCP:get_mass_trait_property - Read a property (name or dotted path) of a trait in a Mass config via reflection (ExportText).
+// MCP:get_mass_trait_property - Read a property (name or dotted path) of a trait on a Mass entity config, picked by trait_class, as ExportText plus its C++ type. Use it because a trait is an instanced object inside the config that get_properties cannot address by class. Write: set_mass_trait_property.
 //   @param config_path - Asset path to the UMassEntityConfigAsset
 //   @param trait_class - Trait class name; the trait must be on the config
 //   @param property_name - Property name or dotted path

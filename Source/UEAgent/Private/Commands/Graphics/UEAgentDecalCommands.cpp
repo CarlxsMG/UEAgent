@@ -80,12 +80,12 @@ namespace
 //   Idempotent: if a decal actor with this label already exists, returns it
 //   (after optionally re-applying decal_size/material).
 // ---------------------------------------------------------------------------
-// MCP:spawn_decal_actor - Spawns a DecalActor into the editor world.  If material_path loads as a UMaterialInterface it is assigned to the UDecalComponent (SetDecalMaterial). Size may be a uniform number or an [x, y, z] half-extent applied to DecalSize (read back).
+// MCP:spawn_decal_actor - Spawn a DecalActor labelled actor_label in the editor world with its DecalSize half-extent and optional material in one call; spawn_actor has no decal type. Idempotent by label: an existing one is REUSED, moved to location/rotation (origin/zero when omitted) and DecalSize reset (default 128,256,256). decal_size must be [x, y, z]; a material_path that does not load is an error and nothing is spawned or moved. No undo; not saved (save_level).
 //   @param actor_label - Label for the spawned (or re-used) ADecalActor.
 //   @param location - Optional [x, y, z] world location (default 0,0,0).
 //   @param rotation - Optional [pitch, yaw, roll] world rotation.
 //   @param decal_size - Optional [x, y, z] half-extent for DecalSize (default 128,256,256).
-//   @param material_path - Optional content path of a UMaterialInterface to assign to the decal.
+//   @param material_path - Optional content path of a UMaterialInterface to assign to the decal; a path that does not load is an error and nothing is spawned or changed.
 //   @returns { actor_label: string, actor_name: string, reused: bool, decal_size_x: float, decal_size_y: float, decal_size_z: float, decal_material: string }
 TSharedPtr<FJsonObject> HandleSpawnDecalActor(
     const TSharedPtr<FJsonObject>& Params)
@@ -110,6 +110,20 @@ TSharedPtr<FJsonObject> HandleSpawnDecalActor(
 	}
 	FVector DecalSize(128.f, 256.f, 256.f);
 	ReadVector(Params, TEXT("decal_size"), DecalSize);
+
+	// The material is loaded before anything is spawned or moved, so a path that does not load refuses the call
+	// instead of leaving a decal without the material it was asked for.
+	UMaterialInterface* Material = nullptr;
+	FString MaterialPath;
+	if (Params->TryGetStringField(TEXT("material_path"), MaterialPath) && !MaterialPath.IsEmpty())
+	{
+		Material = LoadObject<UMaterialInterface>(nullptr, *MaterialPath);
+		if (!Material)
+		{
+			return mcp_common::MakeErrorReply(FString::Printf(
+				TEXT("material_path '%s' does not load as a UMaterialInterface; nothing was spawned or changed"), *MaterialPath));
+		}
+	}
 
 	bool bReused = false;
 	ADecalActor* Decal = FindDecalByLabel(World, ActorLabel);
@@ -145,20 +159,9 @@ TSharedPtr<FJsonObject> HandleSpawnDecalActor(
 			Comp->Modify();
 		}
 		Comp->DecalSize = DecalSize;
-		FString MaterialPath;
-		if (Params->TryGetStringField(TEXT("material_path"), MaterialPath) && !MaterialPath.IsEmpty())
+		if (Material)
 		{
-			if (UMaterialInterface* Mat = LoadObject<UMaterialInterface>(nullptr, *MaterialPath))
-			{
-				Comp->SetDecalMaterial(Mat);
-			}
-			else
-			{
-				// Don't fail the spawn — just note the material wasn't applied.
-				UE_LOG(LogTemp, Warning,
-					TEXT("[Decal] spawn_decal_actor: material_path %s did not resolve; decal spawned without it"),
-					*MaterialPath);
-			}
+			Comp->SetDecalMaterial(Material);
 		}
 		Comp->MarkRenderStateDirty();
 	}

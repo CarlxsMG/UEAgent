@@ -29,9 +29,9 @@ DOMAINS = {
         "descriptors": ["sky_atmosphere", "exponential_height_fog", "volumetric_cloud", "sky_light"],
         "comment": [
             "Each set handler applies the supplied params through the component's ENGINE_API setters, which update",
-            "its render state. All but the fog's change nothing on a Static component (AreDynamicDataChangesAllowed());",
-            "the components default to Movable (SkyLight: Stationary), so the setters apply headless too. The readers",
-            "read back the public fields the setters write.",
+            "its render state. All but the fog's change nothing on a Static component (AreDynamicDataChangesAllowed()),",
+            "so those set handlers refuse one before writing; the components default to Movable (SkyLight: Stationary).",
+            "Every param is checked before the first write. The readers read back the public fields the setters write.",
         ],
     },
     "audio": {

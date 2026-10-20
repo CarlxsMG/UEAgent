@@ -8,7 +8,7 @@
 
 *Additive, idempotent.*
 
-Attach a new component of a given class to an actor ALREADY PLACED in the level (an instance-level component, not a change to its Blueprint -- for that use add_component_to_blueprint, which affects every instance). Returns object_path, the full reflection path to feed straight into set_properties / call_function to configure it, so no dedicated add_* wrapper is needed. Pass idempotent=true to make re-running safe. Editor world only; the change dirties the actor's package, so save_level to keep it.
+Attach a new component of ANY class to ONE actor already placed in the level: an instance-level component, not a change to its Blueprint. Pick it for a single placed actor; add_component_to_blueprint adds it to the Blueprint so every instance gets it, and a typed add_*_component tool (add_spline_component, add_camera_component...) when you want that class's own fields set in the same call. Returns object_path, the full reflection path to feed straight into set_properties / call_function to configure it. Pass idempotent=true to make re-running safe. Editor world only; the change dirties the actor's package, so save_level to keep it.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1406,7 +1406,7 @@ Drop ONE editor-world actor straight down until its bounds bottom rests on whate
 
 *Additive.*
 
-Place a BUILT-IN engine actor (StaticMeshActor, PointLight, SpotLight, DirectionalLight, RectLight, SkyLight, CameraActor, Character) into the editor level or a live PIE world, at an optional location/rotation/scale, optionally seeding a light's intensity and color, and return the created actor's JSON. Only these types: for a Blueprint class use spawn_blueprint_actor. Refuses when an actor of that name already exists (omit name to let the engine pick a unique one), and the spawn is undoable. It creates the actor in MEMORY only -- save_level (with the .umap writable) is what puts it on disk. WARNING: with 2+ PIE clients world='pie' can land in the CLIENT world, producing an actor the authority never sees -- ask for world='server' instead, and check the reply's world_package/net_mode to see where the actor actually went.
+Place a BUILT-IN engine actor -- StaticMeshActor, PointLight, SpotLight, DirectionalLight, RectLight, SkyLight, CameraActor or Character -- into the editor level or a live PIE world, at an optional location/rotation/scale, optionally seeding a light's intensity and color, and return the created actor's JSON. Only these types: spawn_blueprint_actor places a Blueprint class, and the typed spawn_* tools (spawn_post_process_volume, spawn_decal_actor, spawn_sky_atmosphere...) place their class and set its own fields in the same call. Refuses a name an actor already has (omit name to let the engine pick a unique one); the spawn is undoable. It creates the actor in MEMORY only -- save_level (with the .umap writable) puts it on disk. WARNING: with 2+ PIE clients world='pie' can land in the CLIENT world, producing an actor the authority never sees -- ask for world='server' instead, and check the reply's world_package/net_mode to see where the actor went.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

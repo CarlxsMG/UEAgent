@@ -428,7 +428,7 @@ Copy the value of one existing key to another time on a property track of a Leve
 
 *Read-only.*
 
-Read the playback properties of an audio section (UMovieSceneAudioSection), resolved like set_audio_section_properties (root audio track + section_index).  Pure reader (no transaction/save).  looping reads IsRepeating() (the engine's loop query); volume/pitch are sampled at frame 0; volume_key_count/pitch_key_count report the animated-channel key counts.
+Read the playback settings of one audio section of a Level Sequence (path or bare name): the first root audio track, section by section_index. Use it instead of get_properties because it evaluates what no UPROPERTY holds directly: volume and pitch sampled at frame 0, the key counts of the animated volume/pitch channels, and looping via IsRepeating(); it also reports sound, start offset and attenuation override. Pure reader (no transaction, no save); write with set_audio_section_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -783,7 +783,7 @@ Set the attach and detach transform rules of one 3D-attach section on an object-
 
 *Destructive, idempotent.*
 
-Set playback properties of one section on a root audio track of a Level Sequence, in one undo step, then save the sequence: its sound, looping (SetRepeating), play until finished, subtitle suppression, attenuation override and attenuation asset, its volume and pitch (SoundVolume / PitchMultiplier channels) and its start offset (how far into the clip playback begins). Only the fields you pass change; a sound or attenuation path that does not load, or an offset outside the frame range, is an error before anything changes. Setting a sound also re-derives the looping flag from it, as the engine does. volume and pitch without time_seconds make their channel one linear key at frame 0 holding that value (a constant); with time_seconds a linear key is ADDED at that time, rounded to a tick frame, even where a key already is. Each field is read back. Whether the call changed anything is measured on the section: when it did not, nothing is saved and the call leaves no undo step (changed false, saved false). Read back with get_audio_section_properties; add the section with add_audio_section.
+Set playback properties of one section (section_index) on a root audio track (audio_track_index) of a Level Sequence, in one undo step, then save the sequence: sound, looping (SetRepeating), play until finished, subtitle suppression, attenuation override and asset, volume, pitch and start offset. Use it rather than set_properties: volume and pitch are keyed channels, not plain properties, the start offset is converted to tick-resolution frames, and the section's own setters run (setting a sound re-derives looping). Only fields you pass change; a sound or attenuation path that does not load, or an offset outside the frame range, is an error before anything changes. volume/pitch without time_seconds become one constant key at frame 0; with time_seconds a linear key is ADDED at that time, rounded to a tick, even over an existing key. When nothing changes, nothing is saved and no undo step is left (changed false). Read: get_audio_section_properties; add: add_audio_section.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

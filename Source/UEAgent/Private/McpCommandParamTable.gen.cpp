@@ -2025,7 +2025,7 @@ static const TCHAR* const GFlatCommandParams[] =
         TEXT("bus_path"),
     nullptr,
     TEXT("get_audio_component_properties"),
-        TEXT("audio_component_name"),
+        TEXT("actor_name"), TEXT("audio_component_name"),
     nullptr,
     TEXT("get_audio_section_properties"),
         TEXT("section_index"), TEXT("sequence_name"), TEXT("sequence_path"),
@@ -5804,7 +5804,7 @@ static const TCHAR* const GFlatCommandParams[] =
 };
 
 static constexpr int32 GNumCommands = 1742;
-static constexpr int32 GNumParamNames = 5795;
+static constexpr int32 GNumParamNames = 5796;
 
 // Built ONCE, on first use (function-local static => thread-safe init). The
 // dispatcher is game-thread only, so there is no contention after that.

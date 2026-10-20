@@ -792,10 +792,10 @@ TSharedPtr<FJsonObject> HandleAddImpulseToActor(const TSharedPtr<FJsonObject>& P
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:add_instanced_static_mesh_component - Attach an InstancedStaticMeshComponent (ISM) to a placed editor-world actor so you can then scatter many copies of one static mesh through it with add_instanced_static_mesh_instance. Idempotent: if the actor already has an ISM it returns that one with already_existed=true instead of adding a second. This is the working alternative to the foliage scatter tools, which crash the editor in this build.
+// MCP:add_instanced_static_mesh_component - Attach an InstancedStaticMeshComponent (ISM) with an optional static mesh to a placed editor-world actor (name or label), in one undo step, to scatter copies of one mesh through it with add_instanced_static_mesh_instance. Over add_component_to_actor it only saves the separate mesh write, and it is idempotent: an existing ISM (a HISM counts) is returned with already_existed=true and its mesh left as it is (static_mesh in the reply says which). Without static_mesh_path the new ISM has no mesh; a path that does not load is an error and nothing is added. Not saved (save_level). The working alternative to the foliage scatter tools, which crash the editor in this build.
 //   @param actor_name - Display label or internal name of the target editor-world actor (required)
-//   @param static_mesh_path - Optional /Game/... path to a UStaticMesh asset (defaults to engine cube if absent)
-//   @returns { actor_name: string, component_name: string, component_class: string, num_instances: int, already_existed: bool }
+//   @param static_mesh_path - Optional /Game/... path to a UStaticMesh asset; without it the ISM has no mesh. A path that does not load is an error and nothing is added; on an existing ISM it is not applied.
+//   @returns { actor_name: string, component_name: string, component_class: string, num_instances: int, static_mesh: string (the ISM's mesh path, empty when none), already_existed: bool }
 TSharedPtr<FJsonObject> HandleAddInstancedStaticMeshComponent(const TSharedPtr<FJsonObject>& Params)
 {
     FString ActorName;
@@ -809,8 +809,25 @@ TSharedPtr<FJsonObject> HandleAddInstancedStaticMeshComponent(const TSharedPtr<F
 
     FString StaticMeshPath;
     Params->TryGetStringField(TEXT("static_mesh_path"), StaticMeshPath);
+    // A mesh path that does not load is refused before anything is created, instead of leaving a meshless ISM.
+    UStaticMesh* Mesh = nullptr;
+    if (!StaticMeshPath.IsEmpty())
+    {
+        Mesh = LoadObject<UStaticMesh>(nullptr, *StaticMeshPath);
+        if (!Mesh)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("static_mesh_path '%s' does not load as a UStaticMesh; nothing was added"), *StaticMeshPath));
+        }
+    }
+    const auto MeshPathOf = [](const UInstancedStaticMeshComponent* Component)
+    {
+        const UStaticMesh* Current = Component->GetStaticMesh();
+        return Current ? Current->GetPathName() : FString();
+    };
 
-    // Idempotency: re-use an existing ISM component on the actor if one exists.
+    // Idempotency: re-use an existing ISM component on the actor if one exists. Its mesh is left as it is; the
+    // reply's static_mesh says which one it has.
     UInstancedStaticMeshComponent* Existing = Actor->FindComponentByClass<UInstancedStaticMeshComponent>();
     if (Existing)
     {
@@ -819,6 +836,7 @@ TSharedPtr<FJsonObject> HandleAddInstancedStaticMeshComponent(const TSharedPtr<F
         Result->SetStringField(TEXT("component_name"), Existing->GetName());
         Result->SetStringField(TEXT("component_class"), Existing->GetClass()->GetName());
         Result->SetNumberField(TEXT("num_instances"), Existing->GetInstanceCount());
+        Result->SetStringField(TEXT("static_mesh"), MeshPathOf(Existing));
         Result->SetBoolField(TEXT("already_existed"), true);
         return mcp_common::MakeOkReply(Result);
     }
@@ -832,12 +850,9 @@ TSharedPtr<FJsonObject> HandleAddInstancedStaticMeshComponent(const TSharedPtr<F
 
     ISM->CreationMethod = EComponentCreationMethod::Instance;
 
-    if (!StaticMeshPath.IsEmpty())
+    if (Mesh)
     {
-        if (UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, *StaticMeshPath))
-        {
-            ISM->SetStaticMesh(Mesh);
-        }
+        ISM->SetStaticMesh(Mesh);
     }
 
     PrimitiveComponentUtils::RegisterInstanceComponent(Actor, ISM);
@@ -847,6 +862,7 @@ TSharedPtr<FJsonObject> HandleAddInstancedStaticMeshComponent(const TSharedPtr<F
     Result->SetStringField(TEXT("component_name"), ISM->GetName());
     Result->SetStringField(TEXT("component_class"), ISM->GetClass()->GetName());
     Result->SetNumberField(TEXT("num_instances"), ISM->GetInstanceCount());
+    Result->SetStringField(TEXT("static_mesh"), MeshPathOf(ISM));
     Result->SetBoolField(TEXT("already_existed"), false);
     return mcp_common::MakeOkReply(Result);
 }

@@ -536,13 +536,14 @@ Read the channel layout of a UAudioBus asset: channels (Mono, Stereo, Quad, Five
 
 *Read-only.*
 
-Retrieves comprehensive properties of an audio component including volume, pitch, position, rotation, scale, and sound details.
+Read an editor-level audio component by object name: volume, pitch, active state, transform, sound and its duration, and the attenuation really applied (override, else asset, else sound). Use it for these derived values; get_component_properties reads raw UPROPERTYs. Every audio component of every actor is searched, the name compared without case. Component names are unique only per actor (every AmbientSound's is AudioComponent0), so a name that several actors carry is an error listing the owners unless actor_name (object name, not label) picks one; an actor_name that names no actor, or whose actor has no component of that name, is an error too. Read-only.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `audio_component_name` | string | yes | Name of the audio component to query |
+| `audio_component_name` | string | yes | Object name of the audio component to query (e.g. "AudioComponent0"), compared without case against EVERY audio component of every actor in the editor world. |
+| `actor_name` | string | no | Optional object name (not label) of the actor that owns the component, compared without case. Needed when several actors own an audio component of that name (every AmbientSound's is AudioComponent0): without it that is an error listing the owners. An actor_name that names no actor, or whose actor has no such component, is an error. |
 
-**Returns:** `{ audio_component_name: string, audio_component_found: bool, audio_component_message: string, component_class: string, component_type: string, audio_volume: number, audio_pitch: number, audio_position: { x, y, z }, audio_rotation: { pitch, yaw, roll }, audio_scale: { x, y, z }, audio_enabled: bool, audio_auto_activate: bool, audio_sound_name: string, audio_sound_class: string, audio_sound_path: string, audio_sound_duration: number, audio_3d_enabled: bool, audio_3d_attenuation_radius: number, audio_mobility: string, audio_owner_name: string, audio_level: string, audio_world: string }`
+**Returns:** `{ audio_component_name: string, audio_component_found: bool, audio_component_message: string, component_class: string, component_type: string, audio_volume: number, audio_pitch: number, audio_enabled: bool (IsActive), audio_auto_activate: bool, audio_mobility: string, audio_position: { x, y, z }, audio_rotation: { pitch, yaw, roll }, audio_scale: { x, y, z } (component world transform), audio_sound_name: string, audio_sound_class: string, audio_sound_duration: number, audio_sound_path: string ("None" with no sound), audio_sound_is_sound_wave: bool, audio_sound_is_sound_cue: bool, audio_3d_enabled: bool (bAllowSpatialization), audio_3d_attenuation_radius: number (shape extent X), audio_3d_attenuation_falloff: number (both 0 with no attenuation applied), audio_3d_attenuation_cone_angle: number, audio_3d_attenuation_cone_feather: number (cone shape only, else 0), audio_owner_name: string, audio_owner_class: string, audio_owner_path: string, audio_owner_position: { x, y, z }, audio_owner_rotation: { pitch, yaw, roll }, audio_level: string, audio_world: string }`
 
 ## `get_audio_settings`
 
@@ -609,7 +610,7 @@ Read one node of the default graph of a MetaSound Source by GUID: its name, clas
 
 *Read-only.*
 
-Read one field of the Configuration struct of a MetaSound Source node by property name, returning its C++ type, has_value and value as JSON. Fails when the node has no Configuration struct or the struct has no such property. Read-only; write it with set_metasound_node_property.
+Read one field of the Configuration struct of a MetaSound Source node, found by its node GUID (from list_metasound_nodes), returning its C++ type, has_value and value as JSON. Use it because MetaSound nodes are document structs, not UObjects, so get_properties cannot reach them; input defaults are set_metasound_node_input_default. Fails when the node has no Configuration struct or no such property; Patches are refused. Read-only; write with set_metasound_node_property.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -647,7 +648,7 @@ Reads a USoundModulationParameter asset without changing it. Returns parameter_p
 
 *Read-only.*
 
-Read every FSoundAttenuationSettings field (shape, falloff, spatialization, LPF, occlusion, reverb send) of a USoundAttenuation asset as one settings object, with the keys set_sound_attenuation_properties takes, plus asset_class. Read-only.
+Read the whole FSoundAttenuationSettings struct (shape, falloff, spatialization, LPF, occlusion, reverb send) of a USoundAttenuation asset as one settings object, with the keys set_sound_attenuation_properties takes, plus asset_class. A convenience over get_properties on its Attenuation property, shaped for that write tool; it reads the asset, not what an audio component applies (get_audio_component_properties). Read-only.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -659,7 +660,7 @@ Read every FSoundAttenuationSettings field (shape, falloff, spatialization, LPF,
 
 *Read-only.*
 
-Read a USoundClass asset: every FSoundClassProperties field that set_sound_class_properties writes (volume, pitch, filters, reverb and routing flags, output_target, loading_behavior) plus its name and its direct parent and direct children by name and path; parent_class is "None" for a root class, and child_count is the number of children listed (null references are skipped). One level only: walk further by calling it again on a parent or child. Read-only; it loads the asset by object or package path, and one that does not load as a USoundClass is an error.
+Read a USoundClass asset: every FSoundClassProperties field that set_sound_class_properties writes (volume, pitch, filters, reverb and routing flags, output_target, loading_behavior) plus its name and its direct parent and direct children by name and path. A flattened view under the snake_case keys that tool takes; get_properties reads the raw Properties struct or any other UPROPERTY. parent_class is "None" for a root class, and child_count is the number of children listed (null references are skipped). One level only: walk further by calling it again on a parent or child. Read-only; it loads the asset by object or package path, and one that does not load as a USoundClass is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -671,7 +672,7 @@ Read a USoundClass asset: every FSoundClassProperties field that set_sound_class
 
 *Read-only.*
 
-Read every FSoundConcurrencySettings field (maxCount, bLimitToOwner, resolutionRule, retriggerTime, volume scaling, voice stealing) of a USoundConcurrency asset as one settings object, with the keys set_sound_concurrency_properties takes, plus asset_class. Read-only.
+Read the whole FSoundConcurrencySettings struct (maxCount, bLimitToOwner, resolutionRule, retriggerTime, volume scaling, voice stealing) of a USoundConcurrency asset as one settings object, with the keys set_sound_concurrency_properties takes, plus asset_class. A convenience over get_properties on its Concurrency property, shaped for that write tool. Read-only.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -719,7 +720,7 @@ Read the routing fields of a USoundSourceBus asset: source_bus_channels (Mono or
 
 *Read-only.*
 
-Read every reflected property of a USoundWave asset, its USoundBase fields included (CompressionQuality, SampleRateQuality, SoundGroup, Volume, Pitch, Priority, SoundClassObject, AttenuationSettings and the rest), as the settings object FJsonObjectConverter exports, so keys start lower-case (compressionQuality); settings also carries bLooping, echoed as looping. Read-only: it loads the asset if needed and changes nothing. A path that does not load as a USoundWave is an error. Write the same fields back with set_sound_wave_properties (bLooping through its looping param); a sound class is read with get_sound_class_properties and a level's audio component with get_audio_component_properties.
+Read every reflected property of a USoundWave asset, its USoundBase fields included (CompressionQuality, SampleRateQuality, SoundGroup, Volume, Pitch, Priority, SoundClassObject, AttenuationSettings and the rest), as the settings object FJsonObjectConverter exports, so keys start lower-case (compressionQuality); settings also carries bLooping, echoed as looping. Like inspect_object on the asset, but keyed as set_sound_wave_properties accepts it; get_properties reads a few named fields. Read-only: it loads the asset if needed and changes nothing. A path that does not load as a USoundWave is an error. Write the same fields back with set_sound_wave_properties (bLooping through its looping param); a sound class is read with get_sound_class_properties and a level's audio component with get_audio_component_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1018,7 +1019,7 @@ Set the default literal of a named input pin on a concrete node of a MetaSound S
 
 *Destructive, idempotent.*
 
-Write one field of a MetaSound Source node's Configuration struct by reflection, directly in the document (not through the MetaSound builder), then save the asset. Re-applying a value returns value_changed false but still saves. Succeeds only when the asset reaches disk; a failed save leaves the value in memory only (saved false, save_error).
+Write one field of a MetaSound Source node's Configuration struct, node found by GUID, by reflection directly in the frontend document (not through the MetaSound builder), then save the asset. set_properties cannot reach it: frontend nodes are document data, not UObjects. No undo step. Re-applying a value returns value_changed false but still saves. Succeeds only when the asset reaches disk; a failed save leaves the value in memory only (saved false, save_error). Read: get_metasound_node_property; GUIDs: list_metasound_nodes.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1095,12 +1096,12 @@ Sets the output USoundModulationParameter of a USoundModulationPatch asset, or c
 
 *Destructive, idempotent.*
 
-Author FSoundAttenuationSettings on a USoundAttenuation via reflection (partial merge + clamp).
+Merge fields into a SoundAttenuation asset's Attenuation settings (absent keys kept), clamp to ClampMin/ClampMax and save; set_properties neither clamps nor saves. Keys match field names case-insensitively. An empty settings object, a key that names no field (the error lists them), a null value, or a value that is not of the field's kind or does not convert is an error and nothing changes. Plugin sub-objects are not reached. A failed save makes success false.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `attenuation_path` | string | yes | Full content path of the target USoundAttenuation. |
-| `settings` | object | yes | Object of FSoundAttenuationSettings/FBaseAttenuationSettings fields to merge; absent keys untouched. e.g. bAttenuate, bSpatialize, attenuationShape(Sphere/Capsule/Box/Cone), distanceAlgorithm, falloffDistance, dBAttenuationAtMax(-60..0), attenuationShapeExtents{x,y,z}, bAttenuateWithLPF, lPFFrequencyAtMin/Max, bEnableOcclusion, occlusionVolumeAttenuation, bEnableReverbSend, reverbWetLevelMin/Max. Nested plugin sub-objects (pluginSettings, audioLinkSettingsOverride) are NOT authored here. |
+| `settings` | object | yes | Object of FSoundAttenuationSettings/FBaseAttenuationSettings fields to merge; absent keys untouched. e.g. bAttenuate, bSpatialize, attenuationShape(Sphere/Capsule/Box/Cone), distanceAlgorithm, falloffDistance, dBAttenuationAtMax(-60..0), attenuationShapeExtents{x,y,z}, bAttenuateWithLPF, lPFFrequencyAtMin/Max, bEnableOcclusion, occlusionVolumeAttenuation, bEnableReverbSend, reverbWetLevelMin/Max. Nested plugin sub-objects (pluginSettings, audioLinkSettingsOverride) are NOT authored here. Keys match the field names case-insensitively; an empty object, a key that names no field, a null value or a value that does not convert is an error and nothing is changed. |
 
 **Returns:** `{ attenuation_path: string, asset_class: string, settings: object, applied_keys: [string], saved: bool }`
 
@@ -1121,7 +1122,7 @@ Make one USoundClass the child of another, wiring ParentClass and ChildClasses, 
 
 *Destructive, idempotent.*
 
-Write the given FSoundClassProperties fields of a USoundClass asset (volume, pitch, filters, routing and loading flags) in one undoable transaction, then save it. Only fields you pass change; values are not range-checked and unknown enum names are skipped. Returns every current value plus applied_&lt;field> flags and saved.
+Write the given FSoundClassProperties fields of a SoundClass asset (volume, pitch, filters, routing and loading flags) as flat named params, then save it. Use it over set_properties, which would need the nested Properties struct and leaves it unsaved; the parent link is set_sound_class_parent. Only fields you pass change; values are not range-checked and an unknown output_target or loading_behavior name is skipped (applied_&lt;field> false). Returns every current value plus saved; get_sound_class_properties reads them.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1151,12 +1152,12 @@ Write the given FSoundClassProperties fields of a USoundClass asset (volume, pit
 
 *Destructive, idempotent.*
 
-Author FSoundConcurrencySettings on a USoundConcurrency via reflection (partial merge + clamp).
+Merge fields into a SoundConcurrency asset's Concurrency settings (maxCount, resolutionRule, volume scaling...; absent keys kept), clamp to ClampMin/ClampMax and save; set_properties neither clamps nor saves. Keys match field names case-insensitively. An empty settings object, a key that names no field (the error lists them), a null value, or a value that is not of the field's kind or does not convert is an error and nothing changes. A failed save makes success false.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `concurrency_path` | string | yes | Full content path of the target USoundConcurrency. |
-| `settings` | object | yes | Object of FSoundConcurrencySettings fields to merge (maxCount(int>=1), bLimitToOwner(bool), resolutionRule(enum name), retriggerTime, volumeScale(0..1), volumeScaleMode(enum), bVolumeScaleCanRelease, volumeScaleAttackTime, volumeScaleReleaseTime, voiceStealReleaseTime); absent keys untouched. |
+| `settings` | object | yes | Object of FSoundConcurrencySettings fields to merge (maxCount(int>=1), bLimitToOwner(bool), resolutionRule(enum name), retriggerTime, volumeScale(0..1), volumeScaleMode(enum), bVolumeScaleCanRelease, volumeScaleAttackTime, volumeScaleReleaseTime, voiceStealReleaseTime); absent keys untouched. Keys match the field names case-insensitively; an empty object, a key that names no field, a null value or a value that does not convert is an error and nothing is changed. |
 
 **Returns:** `{ concurrency_path: string, asset_class: string, settings: object, applied_keys: [string], saved: bool }`
 
@@ -1177,7 +1178,7 @@ Make the node at node_id the root (FirstNode, the output) of a USoundCue graph, 
 
 *Destructive, idempotent.*
 
-Set the EditAnywhere properties of a Sound Cue node (located by node_id) via reflection.  The writer twin of get_sound_cue_graph, which reads them. Partial update (idempotent): only keys present in ``properties`` are written, and only editable (CPF_Edit) props are touched (ChildNodes/graph wiring are unreachable here — use connect_sound_cue_nodes). Keys are the camelCase UPROPERTY names, the same ones get_sound_cue_graph reports under each node's ``properties`` (e.g. a Modulator: pitchMin/pitchMax/volumeMin/volumeMax; a Delay: delayMin/delayMax).
+Set EditAnywhere properties of one Sound Cue node, located by node_id, then refresh the cue's aggregate values and save it -- the writer twin of get_sound_cue_graph. Use it instead of set_properties, which needs the node's object path rather than the node_id that get_sound_cue_graph and add_sound_cue_node report. Partial update (idempotent): only keys present in properties are written, only CPF_Edit props are touched, and applied_keys lists the editable fields matched (ChildNodes/graph wiring are unreachable here -- use connect_sound_cue_nodes). Keys are the camelCase UPROPERTY names get_sound_cue_graph reports under each node's properties (e.g. a Modulator: pitchMin/pitchMax/volumeMin/volumeMax; a Delay: delayMin/delayMax).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1248,15 +1249,15 @@ Merge a FRuntimeFloatCurve JSON into BusSends[send_index].CustomSendLevelCurve o
 
 *Destructive, idempotent.*
 
-Author USoundWave tunables on an imported sound wave via reflection (partial merge + clamp).
+Merge USoundWave/USoundBase fields into a SoundWave asset (absent keys kept), set bLooping via looping, clamp to ClampMin/ClampMax and save; set_properties neither clamps nor saves. Each property whose value changes runs PostEditChangeProperty, as a details-panel edit does: compression settings rebuild the audio and MaxDistance follows AttenuationSettings. Keys match property names case-insensitively. A key that names no property (the error lists them), a deprecated or instanced-subobject one, a null value, a value of the wrong kind or that does not convert, bLooping inside settings, or a looping that is not true or false is an error and nothing changes. A failed save makes success false.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sound_wave_path` | string | yes | Full content path of the target USoundWave (e.g. /Game/Audio/MySound). |
-| `settings` | object | no | Object of USoundWave/USoundBase UPROPERTY fields to merge; absent keys untouched. e.g. CompressionQuality(1..100), SampleRateQuality(Max/High/Medium/Low/Min), SoundGroup(SOUNDGROUP_Default/SOUNDGROUP_Effects/SOUNDGROUP_UI/SOUNDGROUP_Music/SOUNDGROUP_Voice), SoundAssetCompressionType(BinkAudio/ADPCM/PCM/Opus/PlatformSpecific/ProjectDefined), Volume(>=0), Pitch(0.125..4.0), Priority(0..100), VirtualizationMode(Disabled/PlayWhenSilent/Restart/SeekRestart), SoundClassObject(asset path), AttenuationSettings(asset path). Do NOT put `bLooping` here — use the `looping` param. |
-| `looping` | boolean | no | Optional bool; sets the bLooping bitfield directly (when this sound is played directly, not via a cue). |
+| `settings` | object | no | Object of USoundWave/USoundBase UPROPERTY fields to merge, keyed by property name (matched case-insensitively); absent keys untouched. e.g. CompressionQuality(1..100), SampleRateQuality(Max/High/Medium/Low/Min), SoundGroup(SOUNDGROUP_Default/SOUNDGROUP_Effects/SOUNDGROUP_UI/SOUNDGROUP_Music/SOUNDGROUP_Voice), SoundAssetCompressionType(BinkAudio/ADPCM/PCM/Opus/PlatformSpecific/ProjectDefined), Volume(>=0), Pitch(0.125..4.0), Priority(0..100), VirtualizationMode(Disabled/PlayWhenSilent/Restart/SeekRestart), SoundClassObject(asset path), AttenuationSettings(asset path). A key that names no property, a deprecated one or one holding instanced subobjects, a null value, a value that does not convert, a settings value that is not an object, or `bLooping` (use the `looping` param) is an error and nothing is changed. |
+| `looping` | boolean | no | Optional bool; sets the bLooping bitfield directly (when this sound is played directly, not via a cue). A value that is not true or false is an error and nothing is changed. |
 
-**Returns:** `{ sound_wave_path: string, asset_class: string, settings: object, applied_keys: [string], applied_looping: bool, looping: bool, saved: bool }`
+**Returns:** `{ sound_wave_path: string, asset_class: string, settings: object, applied_keys: [string], applied_looping: bool, looping: bool, saved: bool, save_error?: string }`
 
 ## `set_submix_effect_settings`
 

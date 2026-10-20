@@ -597,7 +597,7 @@ UClass* ResolveComponentClass(FString& InOutType)
 }
 }
 
-// MCP:add_component_to_blueprint - Add a component to a Blueprint's SCS (engine class or a Blueprint AC_* class) with an optional relative transform and parent, then compile. TRAP 1: on a CHILD Blueprint whose scene root is INHERITED, a SCENE component can end up written into the PARENT's SCS (source:"inherited", owner_class = the parent) -- which silently edits a vendor/library asset; non-scene ActorComponents land correctly on the child. TRAP 2: a scene component of a BLUEPRINT class, or one given a location, can report success without persisting and then materialize LATER as a duplicate. Both have the same oracle: get_blueprint_components right after, checking owner_class and source of the new node -- never the return value.
+// MCP:add_component_to_blueprint - Add a component of any class (engine class or a Blueprint AC_* class) to a Blueprint's SCS, with an optional relative transform and parent, then compile. Pick it to change the Blueprint so every instance gets the component; add_component_to_actor adds one to a single placed actor only, and attach_blueprint_component re-parents a component that already exists. TRAP 1: on a CHILD Blueprint whose scene root is INHERITED, a SCENE component can end up written into the PARENT's SCS (source:"inherited", owner_class = the parent) -- which silently edits a vendor/library asset; non-scene ActorComponents land correctly on the child. TRAP 2: a scene component of a BLUEPRINT class, or one given a location, can report success without persisting and then materialize LATER as a duplicate. Both have the same oracle: get_blueprint_components right after, checking owner_class and source of the new node -- never the return value.
 //   @param blueprint_name - Name of the blueprint
 //   @param component_type - Component class: a native short name ('StaticMesh', 'Box', 'Sphere'), a /Script path ('/Script/Engine.StaticMeshComponent'), OR a Blueprint component class given as its object path ('/Game/.../AC_Foo.AC_Foo_C'), a bare package path ('/Game/.../AC_Foo'), or a bare '<Name>_C' ('AC_Foo_C').
 //   @param component_name - Name for the new component instance
@@ -953,7 +953,7 @@ TSharedPtr<FJsonObject> HandleCompileBlueprint(const TSharedPtr<FJsonObject>& Pa
     return Report;
 }
 
-// MCP:spawn_blueprint_actor - Spawn an instance of a Blueprint class as an actor and report WHICH world took it and whether the actor has AUTHORITY. The default (world absent or 'editor') places it in the EDITOR level, not in play. For anything that must exist for every player during PIE use world='server'; world='pie' is ambiguous and can land on the CLIENT, where the actor has no authority, no AI controller and no server-side existence while looking identical in the payload. The actor is NOT saved into the map: save_level afterwards for an editor-world spawn.
+// MCP:spawn_blueprint_actor - Spawn an instance of a Blueprint class as an actor and report WHICH world took it and whether the actor has AUTHORITY. Pick it for any Blueprint class; spawn_actor places the built-in engine types (StaticMeshActor, lights, CameraActor, Character), and the typed spawn_* tools place an engine class with its own fields. The default (world absent or 'editor') places it in the EDITOR level, not in play. For anything that must exist for every player during PIE use world='server'; world='pie' is ambiguous and can land on the CLIENT, where the actor has no authority, no AI controller and no server-side existence while looking identical in the payload. The actor is NOT saved into the map: save_level afterwards for an editor-world spawn.
 //   @param blueprint_name - Name of the blueprint
 //   @param actor_name - Label applied to the spawned actor (SetActorLabel); it is not the object name and is not made unique
 //   @param location - Optional [x, y, z] world location
@@ -1084,12 +1084,12 @@ TSharedPtr<FJsonObject> HandleSpawnBlueprintActor(const TSharedPtr<FJsonObject>&
     return Result;
 }
 
-// MCP:set_static_mesh_properties - Assign a static mesh asset and/or a slot-0 material to a mesh component TEMPLATE of a Blueprint (an OWN SCS node, not a placed actor), in one call. Does NOT compile and does NOT save. Use apply_material_to_blueprint when only a material is changing or the slot is not 0, and get_blueprint_material_info to read the resulting slots back.
+// MCP:set_static_mesh_properties - Assign a static mesh asset and/or a slot-0 material to a mesh component TEMPLATE of a Blueprint (an OWN SCS node, not a placed actor) through the component's SetStaticMesh/SetMaterial. Does NOT compile and does NOT save; the reply reads the template back (static_mesh, material and a *_set flag for each). A path that does not load as a mesh or material, or a call with neither, fails with nothing changed. Use apply_material_to_blueprint when only a material is changing or the slot is not 0, and set_blueprint_component_properties for any other template property or an inherited component.
 //   @param blueprint_name - Name of the blueprint
 //   @param component_name - Name of an OWN SCS mesh component
-//   @param static_mesh - Optional asset path of the UStaticMesh to assign
-//   @param material - Optional asset path of the UMaterialInterface for slot 0
-//   @returns { component: string } -- name only, no verification: read the result with get_blueprint_material_info / get_blueprint_component_property.
+//   @param static_mesh - Optional asset path of the UStaticMesh to assign; a path that does not load as a StaticMesh fails the call and nothing is changed
+//   @param material - Optional asset path of the UMaterialInterface for slot 0; a path that does not load as a material fails the call and nothing is changed. At least one of static_mesh and material is required.
+//   @returns { component: string, static_mesh: string, material: string, static_mesh_set: bool, material_set: bool } -- read back from the template: static_mesh is the mesh it holds and material its slot-0 material (the override, else the mesh's own), each an object path or "None"; <field>_set is true when that field was passed and the template now holds it. Nothing is compiled or saved.
 
 TSharedPtr<FJsonObject> HandleSetStaticMeshProperties(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1102,28 +1102,73 @@ TSharedPtr<FJsonObject> HandleSetStaticMeshProperties(const TSharedPtr<FJsonObje
         return Error;
     }
 
-    // Both assignments are optional; a path that does not load as the right type is skipped quietly.
-    if (Params->HasField(TEXT("static_mesh")))
+    // Both assignments are optional, but one that is passed must load as the right type. Both are resolved
+    // before the first write, so a refused call leaves the template exactly as it was.
+    const auto LoadParamAsset = [&Params](const TCHAR* Key, UClass* WantedClass, UObject*& OutAsset, FString& OutError) -> bool
     {
-        const FString MeshAssetPath = Params->GetStringField(TEXT("static_mesh"));
-        if (UStaticMesh* NewMesh = Cast<UStaticMesh>(UEditorAssetLibrary::LoadAsset(MeshAssetPath)))
+        OutAsset = nullptr;
+        const TSharedPtr<FJsonValue> Value = Params->TryGetField(Key);
+        if (!Value.IsValid() || Value->IsNull())
         {
-            MeshTemplate->SetStaticMesh(NewMesh);
+            return true;
         }
+        FString AssetPath;
+        Value->TryGetString(AssetPath);
+        UObject* Loaded = AssetPath.IsEmpty() ? nullptr : UEditorAssetLibrary::LoadAsset(AssetPath);
+        if (!Loaded || !Loaded->IsA(WantedClass))
+        {
+            const FString Found = Loaded ? FString::Printf(TEXT(" (it is a %s)"), *Loaded->GetClass()->GetName()) : FString();
+            OutError = FString::Printf(TEXT("%s '%s' does not load as a %s%s; nothing was changed"),
+                Key, *AssetPath, *WantedClass->GetName(), *Found);
+            return false;
+        }
+        OutAsset = Loaded;
+        return true;
+    };
+    UObject* MeshAsset = nullptr;
+    UObject* MaterialAsset = nullptr;
+    FString LoadError;
+    if (!LoadParamAsset(TEXT("static_mesh"), UStaticMesh::StaticClass(), MeshAsset, LoadError)
+        || !LoadParamAsset(TEXT("material"), UMaterialInterface::StaticClass(), MaterialAsset, LoadError))
+    {
+        return mcp_common::MakeErrorReply(LoadError);
     }
-    if (Params->HasField(TEXT("material")))
+    UStaticMesh* NewMesh = Cast<UStaticMesh>(MeshAsset);
+    UMaterialInterface* SlotZeroMaterial = Cast<UMaterialInterface>(MaterialAsset);
+    if (!NewMesh && !SlotZeroMaterial)
     {
-        const FString MaterialAssetPath = Params->GetStringField(TEXT("material"));
-        if (UMaterialInterface* SlotZeroMaterial = Cast<UMaterialInterface>(UEditorAssetLibrary::LoadAsset(MaterialAssetPath)))
-        {
-            MeshTemplate->SetMaterial(0, SlotZeroMaterial);
-        }
+        return mcp_common::MakeErrorReply(TEXT("Pass static_mesh and/or material; nothing was changed"));
+    }
+
+    if (NewMesh)
+    {
+        MeshTemplate->SetStaticMesh(NewMesh);
+    }
+    if (SlotZeroMaterial)
+    {
+        MeshTemplate->SetMaterial(0, SlotZeroMaterial);
     }
 
     FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
 
+    // Read back from the template: the reply says what it now holds, not what was asked for. The editor
+    // material is the one shown in the details panel, without a Nanite override standing in for it.
+    const UStaticMesh* HeldMesh = MeshTemplate->GetStaticMesh();
+    const UMaterialInterface* HeldMaterial = MeshTemplate->GetEditorMaterial(0);
+    const bool bMeshSet = NewMesh && HeldMesh == NewMesh;
+    const bool bMaterialSet = SlotZeroMaterial && HeldMaterial == SlotZeroMaterial;
+
     TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
     Reply->SetStringField(TEXT("component"), ComponentName);
+    Reply->SetStringField(TEXT("static_mesh"), HeldMesh ? HeldMesh->GetPathName() : FString(TEXT("None")));
+    Reply->SetStringField(TEXT("material"), HeldMaterial ? HeldMaterial->GetPathName() : FString(TEXT("None")));
+    Reply->SetBoolField(TEXT("static_mesh_set"), bMeshSet);
+    Reply->SetBoolField(TEXT("material_set"), bMaterialSet);
+    if ((NewMesh && !bMeshSet) || (SlotZeroMaterial && !bMaterialSet))
+    {
+        return mcp_common::MakeOutcomeReply(Reply, false,
+            TEXT("The component template did not take every value passed; static_mesh and material say what it holds"));
+    }
     return Reply;
 }
 
@@ -4056,7 +4101,7 @@ TSharedPtr<FJsonObject> HandleGetBlueprintComponentObjectPath(const TSharedPtr<F
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_blueprint_component_property - Read the EFFECTIVE default of a property on a Blueprint component TEMPLATE, resolving components INHERITED from a parent/grandparent Blueprint. Read-only twin of set_blueprint_component_properties: it NEVER mints an ICH override. Resolution order: own SCS template -> existing child InheritableComponentHandler override -> ancestor's declaring SCS template -> native CDO subobject. Omit property_name to dump ALL properties of the resolved template.
+// MCP:get_blueprint_component_property - Read the EFFECTIVE default of a property (or, without property_name, ALL properties) on a Blueprint component TEMPLATE as typed JSON, resolving components INHERITED from a parent/grandparent Blueprint. Use it instead of get_component_properties with blueprint_name, which sees only own SCS nodes and native subobjects, not inherited SCS components or their ICH overrides. Order: own SCS template -> nearest existing ICH override -> ancestor's declaring SCS template -> native CDO subobject; source says which. NEVER mints an ICH override. group_by_field flags duplicate keys in an array of structs. Write: set_blueprint_component_properties.
 //   @param blueprint_name - Blueprint asset path or short name
 //   @param component_name - Component variable name (own or inherited)
 //   @param property_name - Property to read; omit to return ALL properties of the resolved template
@@ -4327,7 +4372,7 @@ TSharedPtr<FJsonObject> HandleSetBlueprintComponentCollision(const TSharedPtr<FJ
 // the transient package -- so any hack evaporates on the next load. Neither tool below
 // attempts it; both only ever write VALUES onto an existing template.
 
-// MCP:set_blueprint_component_properties - Set the DEFAULT of one or N properties on Blueprint component TEMPLATES -- own SCS components, components INHERITED from an ancestor Blueprint (routed through this class' InheritableComponentHandler) and native inherited subobjects -- with a SINGLE compile and a SINGLE save, then verify each value against the POST-COMPILE template (what a fresh instance actually reads). One write takes component_name + property_name + property_value; several go in overrides[]. Built for post-reparent re-authoring too, where one call per override means N compiles and N chances for an ICH record not to survive. THREE TRAPS with the same shape (a green return over a different reality): (1) it can drop an entire OTHER component from the Blueprint IN MEMORY while disk and git stay clean -- count get_blueprint_components before and after, and reload_asset_package(on_dirty="discard") is the cure; (2) on an OBJECT-REFERENCE property a write can land None and still report override_persisted:true, wiping the inherited default -- check with get_blueprint_component_overrides; (3) actors ALREADY PLACED in a level keep their serialized value, so only fresh instances change. Collision belongs to set_blueprint_component_collision; read the effective value with get_blueprint_component_property, which never mints an override.
+// MCP:set_blueprint_component_properties - Set the DEFAULT of one or several properties on Blueprint component TEMPLATES -- own SCS components, ones INHERITED from a parent Blueprint (written as an InheritableComponentHandler override) and native subobjects -- with ONE compile and ONE save, then verify each value on the post-compile template. Use it for component templates: set_properties neither creates an inherited override nor compiles or saves; set_component_property edits placed actors. One write: component_name + property_name + property_value; several: overrides[]. TRAPS behind a green reply: (1) it can drop another component IN MEMORY -- count get_blueprint_components before and after, cure with reload_asset_package(on_dirty="discard"); (2) an object-reference write can land None and still report override_persisted:true -- check get_blueprint_component_overrides; (3) actors already placed keep their serialized value. Collision: set_blueprint_component_collision; override-free read: get_blueprint_component_property.
 //   @param blueprint_name - Blueprint asset path or short name
 //   @param overrides - Optional array of { component_name, property_name, property_value } objects, applied in the given order. Required unless the single-write form (component_name + property_name + property_value) is given; both together apply overrides[] first, then the single write.
 //   @param component_name - Optional single-write form: component variable name (own or inherited). Needs property_name and property_value too.

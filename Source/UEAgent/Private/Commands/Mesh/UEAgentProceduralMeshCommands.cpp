@@ -1,12 +1,14 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
 
+#include "ActorEditorUtils.h"
 #include "Editor.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/Actor.h"
 #include "KismetProceduralMeshLibrary.h"
 #include "ProceduralMeshComponent.h"
+#include "ScopedTransaction.h"
 
 /**
  * Procedural Mesh Component commands.
@@ -182,76 +184,93 @@ namespace
 
 // ---------------------------------------------------------------------------
 // create_procedural_mesh_component {actor_label, location?=[x,y,z]}
-//   Spawns a bare AActor in the editor world and attaches a fresh
-//   UProceduralMeshComponent as its root. Returns the component index
-//   (0) — useful so the caller can address it from the next commands.
+//   Spawns a bare AActor in the editor world with a fresh UProceduralMeshComponent as its root
+//   (a bare AActor has no root, and an actor without one drops its spawn location), as an instance
+//   component in one undo step. Returns the component index (0) the next commands address.
 // ---------------------------------------------------------------------------
-// MCP:create_procedural_mesh_component - Spawn a bare AActor in the editor world and attach a fresh UProceduralMeshComponent as its root. Idempotent: reuses the actor's existing PMC if found.
-//   @param actor_label - Editor label for the new actor
-//   @param location - Optional [x, y, z] world location; defaults to (0,0,0)
-//   @returns { actor_label: string, actor_name: string, component_index: int, section_count: int, reused: bool }
+// MCP:create_procedural_mesh_component - Spawn a bare AActor labelled actor_label in the editor world with a new UProceduralMeshComponent as its root, the target the procedural-mesh tools find by label; spawn_actor has no bare actor, and add_component_to_actor adds a PMC to an existing one. The new actor stands at location (the origin when omitted; a location that is not 3 numbers is refused) and the PMC is an instance component, so save_level keeps both; one undo step, the level marked dirty, not saved. Idempotent: an actor already labelled actor_label that has a PMC is returned with reused:true and is not moved (location in the reply is where it stands). A label held by an actor WITHOUT a PMC is an error, since the procedural-mesh tools would find that actor first, and so is a label that is "None" or blank; nothing is spawned then.
+//   @param actor_label - Editor label for the new actor; the procedural-mesh tools find the actor by it. An actor that already carries it is reused when it has a PMC and refused when it has none (those tools would find it first); a label that is not a valid actor label ("None", blank) is refused. Nothing is spawned on a refusal.
+//   @param location - Optional [x, y, z] world location of a new actor; defaults to (0,0,0). A reused actor is not moved.
+//   @returns { actor_label: string, actor_name: string, component_name: string, component_index: int, section_count: int, reused: bool, location: [number, number, number] }
 
 TSharedPtr<FJsonObject> HandleCreateProceduralMeshComponent(
 	const TSharedPtr<FJsonObject>& Params)
 {
 	FString ActorLabel;
 	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("actor_label"), ActorLabel)) { return Missing; }
+	// SetActorLabel trims, so the label is looked up as it will be stored.
+	ActorLabel.TrimStartAndEndInline();
 	UWorld* World = nullptr;
 	if (TSharedPtr<FJsonObject> NoWorld = mcp_common::RequireEditorWorld(World)) { return NoWorld; }
+	// The dispatch refuses a location of another shape before this runs (it is a vector param).
+	const FVector Location = mcp_common::ReadJsonVector(Params, TEXT("location"));
 
-	// Idempotency: if an actor with this label already exists AND has a PMC,
-	// return it instead of failing. This avoids "actor name already exists"
-	// on re-runs.
+	// What the reply reports, read back from the actor.
+	auto MakeReply = [](AActor* Host, UProceduralMeshComponent* Mesh, bool bReused)
+	{
+		TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+		Data->SetStringField(TEXT("actor_label"), Host->GetActorLabel());
+		Data->SetStringField(TEXT("actor_name"), Host->GetName());
+		Data->SetStringField(TEXT("component_name"), Mesh->GetName());
+		Data->SetNumberField(TEXT("component_index"), 0);
+		Data->SetNumberField(TEXT("section_count"), Mesh->GetNumSections());
+		Data->SetBoolField(TEXT("reused"), bReused);
+		Data->SetArrayField(TEXT("location"), mcp_common::VectorToJsonArray(Host->GetActorLocation()));
+		return mcp_common::MakeOkReply(Data);
+	};
+
+	// Idempotency: an actor with this label that already has a PMC is returned as it is, not moved. One WITHOUT a
+	// PMC is refused: the procedural-mesh tools take the first actor with the label, so a second one would be
+	// unreachable.
 	if (AActor* Existing = mcp_common::FindActorByLabel(World, ActorLabel))
 	{
 		TArray<UProceduralMeshComponent*> ExistingPMCs;
 		Existing->GetComponents<UProceduralMeshComponent>(ExistingPMCs);
-		if (ExistingPMCs.Num() > 0)
+		if (ExistingPMCs.Num() == 0)
 		{
-			TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-			Data->SetStringField(TEXT("actor_label"), Existing->GetActorLabel());
-			Data->SetStringField(TEXT("actor_name"), Existing->GetName());
-			Data->SetNumberField(TEXT("component_index"), 0);
-			Data->SetNumberField(TEXT("section_count"), ExistingPMCs[0]->GetNumSections());
-			Data->SetBoolField(TEXT("reused"), true);
-			return mcp_common::MakeOkReply(Data);
+			return mcp_common::MakeErrorReply(FString::Printf(
+				TEXT("actor_label '%s' is already the label of actor %s (%s), which has no procedural mesh component; the procedural-mesh tools find the first actor with a label, so pick another label. Nothing was spawned."),
+				*ActorLabel, *Existing->GetName(), *Existing->GetClass()->GetName()));
 		}
+		return MakeReply(Existing, ExistingPMCs[0], true);
 	}
+	// SetActorLabel only logs a label it rejects, which would leave an actor no procedural-mesh tool can find.
+	FText LabelError;
+	if (!FActorEditorUtils::ValidateActorName(FText::FromString(ActorLabel), LabelError))
+	{
+		return mcp_common::MakeErrorReply(FString::Printf(
+			TEXT("actor_label '%s' is not a valid actor label: %s; nothing was spawned."), *ActorLabel, *LabelError.ToString()));
+	}
+
+	// One undo step: the spawn records the level, and Modify the actor before the component joins it.
+	const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "CreateProceduralMeshComponent", "Create Procedural Mesh Component (MCP)"));
 
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	FVector Location = FVector::ZeroVector;
-	const TArray<TSharedPtr<FJsonValue>>* LocArr = nullptr;
-	if (Params->TryGetArrayField(TEXT("location"), LocArr) && LocArr && LocArr->Num() == 3)
-	{
-		Location.X = (*LocArr)[0]->AsNumber();
-		Location.Y = (*LocArr)[1]->AsNumber();
-		Location.Z = (*LocArr)[2]->AsNumber();
-	}
-
 	AActor* Actor = World->SpawnActor<AActor>(AActor::StaticClass(), Location, FRotator::ZeroRotator, SpawnParams);
 	if (!Actor)
 	{
 		return mcp_common::MakeErrorReply(TEXT("Failed to spawn actor"));
 	}
+	Actor->Modify();
 	Actor->SetActorLabel(ActorLabel);
 
+	// The actor is new and bare, so the name is free.
 	UProceduralMeshComponent* PMC = NewObject<UProceduralMeshComponent>(Actor, UProceduralMeshComponent::StaticClass(),
 		TEXT("ProceduralMesh"), RF_Transactional);
 	if (!PMC)
 	{
 		return mcp_common::MakeErrorReply(TEXT("Failed to create UProceduralMeshComponent"));
 	}
-	PMC->SetupAttachment(Actor->GetRootComponent());
+	// The root carries the actor's transform: the location SpawnActor could not place on a rootless actor goes on it.
+	// An instance component, as the editor's Add Component makes one, so the level saves it with the actor.
+	PMC->CreationMethod = EComponentCreationMethod::Instance;
+	Actor->SetRootComponent(PMC);
+	PMC->SetRelativeLocation(Location);
+	Actor->AddInstanceComponent(PMC);
 	PMC->RegisterComponent();
 
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetStringField(TEXT("actor_label"), Actor->GetActorLabel());
-	Data->SetStringField(TEXT("actor_name"), Actor->GetName());
-	Data->SetNumberField(TEXT("component_index"), 0);
-	Data->SetNumberField(TEXT("section_count"), PMC->GetNumSections());
-	Data->SetBoolField(TEXT("reused"), false);
-	return mcp_common::MakeOkReply(Data);
+	return MakeReply(Actor, PMC, false);
 }
 
 // ---------------------------------------------------------------------------

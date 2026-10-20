@@ -1861,17 +1861,17 @@
         },
         {
           "name": "add_motion_warping_component",
-          "description": "Attach a UMotionWarpingComponent to an actor in the editor world. Idempotent: if the actor already has one, returns the existing instance with already_existed:true instead of creating a duplicate. The component is NewObject<UMotionWarpingComponent>(Actor, FName(\"MotionWarping\")) followed by RegisterComponent() so it shows up in GetComponents() immediately. The owning world's level is marked dirty so the editor persists the change on save; no explicit SavePackage call (avoids the noise of saving a transient actor out of an editor world).",
+          "description": "Attach a UMotionWarpingComponent named MotionWarping to an editor-world actor given by full object path, internal name or label. add_component_to_actor (component_type MotionWarpingComponent, idempotent=true) does the same for an actor's internal name only; this tool adds the path/label lookup. Idempotent: if the actor already has one, it is returned with already_existed:true and nothing is written. A new one is an instance component (save_level keeps it, and construction-script reruns do not drop it) added in one undo step; the actor's package is marked dirty, not saved. When another object of the actor already holds the name MotionWarping, the new component gets a unique variant, returned in component_name. Add targets with add_motion_warping_target, read them with inspect_motion_warping_component.",
           "params": [
             {
               "name": "actor_path",
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Full editor path (e.g. \"/Game/Maps/Test.Test:PersistentLevel.ActorName\") or short name of the actor."
+              "description": "Full editor path (e.g. \"/Game/Maps/Test.Test:PersistentLevel.ActorName\"), internal name or label of the actor."
             }
           ],
-          "returns": "{ actor_path: string, component_path: string, already_existed: bool }",
+          "returns": "{ actor_path: string, component_name: string, component_path: string, already_existed: bool }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
@@ -3835,7 +3835,7 @@
         },
         {
           "name": "get_anim_graph_node_properties",
-          "description": "Read the internal FAnimNode struct of an AnimGraphNode as typed JSON (the runtime settings, not the K2 pin surface get_graph_nodes reports). Use it to mirror a reference ABP's settings when grafting nodes: Pose History PoseCount/CollectorName, Slot SlotName, blend params...",
+          "description": "Read the internal FAnimNode struct of one AnimGraphNode, found by NodeGuid (node_id) in the AnimGraph or a nested graph_name, as typed JSON: the runtime settings (Pose History PoseCount/CollectorName, Slot SlotName, blend params), not the pin surface get_graph_nodes reports. Use it instead of get_properties, which cannot address a graph node by GUID; a non-anim node returns its EditAnywhere properties. Read-only; write with set_anim_graph_node_property.",
           "params": [
             {
               "name": "anim_blueprint_path",
@@ -6502,7 +6502,7 @@
         },
         {
           "name": "set_anim_graph_node_property",
-          "description": "Write a property of an AnimGraphNode's internal FAnimNode struct by (dotted) name. Saves the ABP but does NOT recompile it -- run compile_anim_blueprint after your edits for runtime effect.",
+          "description": "Write one field of an AnimGraphNode's internal FAnimNode struct (runtime settings, not pins): node by NodeGuid, field by name or dotted path. set_properties cannot address a graph node by GUID; this also takes a dotted path, rebuilds the node's pins, is undoable and saves the ABP, but does NOT recompile -- run compile_anim_blueprint. Read: get_anim_graph_node_properties.",
           "params": [
             {
               "name": "anim_blueprint_path",
@@ -7021,7 +7021,7 @@
         },
         {
           "name": "set_blend_space_properties",
-          "description": "Configure an existing blend space's X and (for 2D) Y axis: name, min, max, grid divisions.  create_blend_space only sets X; this sets the Y axis too (and can change X after creation). On a 1D blend space the y_axis_* params are reported as an honest note and ignored. Only the supplied fields change, in one undo transaction, then the blend space is saved; values the axes already have are a success with changed=false, applied_count 0, saved=false and a note, and nothing is modified or saved. A failed save makes success false, with saved=false and save_error.",
+          "description": "Configure an existing blend space's X and (2D only) Y axis: name, min, max, grid divisions. Over set_properties it addresses each axis field by name, clamps grid to >= 1, rebuilds the runtime sample data (ValidateSampleData/ResampleData) and saves. On a 1D blend space the y_axis_* params are ignored with a note. Only the supplied fields change, in one undo step; min below max is not checked. Values the axes already have are a success with changed=false, applied_count 0, saved=false and a note, and nothing is modified or saved. A failed save makes success false, with saved=false and save_error. New blend space: create_blend_space.",
           "params": [
             {
               "name": "blend_space_path",
@@ -7408,7 +7408,7 @@
         },
         {
           "name": "set_montage_properties",
-          "description": "Set only the supplied blend-in/blend-out times, global rate scale, blend modes, auto blend out, trigger time, sync group/slot and deprecated root motion fields of a UAnimMontage in one undo step and save it; bad enum names, or no field, are refused before any change, and supplied values the montage already has are a success with changed=false, applied_count 0 and saved=false, with nothing modified or saved. A failed save makes success false, with saved=false and save_error.",
+          "description": "Set only the supplied blend-in/blend-out times, global rate scale, blend modes, auto blend out, trigger time, sync group/slot and deprecated root motion fields of a UAnimMontage in one undo step and save it. Over set_properties it sets the blend times through FAlphaBlend::SetBlendTime (clamped to >= 0), validates enum names before any write and saves in the same call; other montage properties: set_properties. Bad enum names, or no field, are refused before any change; values the montage already has give changed=false, applied_count 0 and saved=false, nothing modified or saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "montage_path",
@@ -7905,7 +7905,7 @@
         },
         {
           "name": "set_pose_search_schema_properties",
-          "description": "Author UPoseSearchSchema scalar tunables via reflection (partial merge + clamp). Replaces the 8 former per-field set_pose_search_schema_* setters.",
+          "description": "Write scalar UPROPERTYs of a PoseSearchSchema asset (SampleRate, permutations, padding, DataPreprocessor...), clamp them to ClampMin/ClampMax, re-finalize the schema and save; set_properties neither clamps nor saves. changed says whether any written value differs from what the schema held. Keys match property names case-insensitively; an empty object, a key that names no property (the error lists them), Channels or another instanced or deprecated property, a null value, or a value of the wrong kind or that does not convert is an error and nothing changes. Skeleton, mirror table, role: set_pose_search_schema_* tools.",
           "params": [
             {
               "name": "asset_path",
@@ -7918,10 +7918,10 @@
               "name": "properties",
               "jsonType": "object",
               "required": true,
-              "description": "Object of UPoseSearchSchema UPROPERTY fields to merge; keys are the C++ property NAMES (case-insensitive), absent keys untouched. Covers: SampleRate(int, ClampMin=1 ClampMax=240), bAddDataPadding(bool), bInjectAdditionalDebugChannels(bool), bDrawInjectAdditionalDebugChannels(bool), NumberOfPermutations(int, ClampMin=1), PermutationsSampleRate(int, ClampMin=1 ClampMax=240), PermutationsTimeOffset(float), DataPreprocessor(enum name: None/Normalize/NormalizeOnlyByDeviation/NormalizeWithCommonSchema). Object-refs (skeleton, mirror_data_table) and the role tag are set via their dedicated commands, not here."
+              "description": "Object of UPoseSearchSchema UPROPERTY fields to merge; keys are the C++ property NAMES (case-insensitive), absent keys untouched. Covers: SampleRate(int, ClampMin=1 ClampMax=240), bAddDataPadding(bool), bInjectAdditionalDebugChannels(bool), bDrawInjectAdditionalDebugChannels(bool), NumberOfPermutations(int, ClampMin=1), PermutationsSampleRate(int, ClampMin=1 ClampMax=240), PermutationsTimeOffset(float), DataPreprocessor(enum name: None/Normalize/NormalizeOnlyByDeviation/NormalizeWithCommonSchema). Object-refs (skeleton, mirror_data_table) and the role tag are set via their dedicated commands, not here. An empty object, a key that names no property (or a deprecated one, or one holding instanced subobjects such as Channels), a null value or a value that does not convert is an error and nothing is changed."
             }
           ],
-          "returns": "{ asset_path, asset_class, settings, applied_keys, changed, saved }",
+          "returns": "{ asset_path, asset_class, settings, applied_keys, changed, saved, save_error? }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -12311,17 +12311,24 @@
         },
         {
           "name": "get_audio_component_properties",
-          "description": "Retrieves comprehensive properties of an audio component including volume, pitch, position, rotation, scale, and sound details.",
+          "description": "Read an editor-level audio component by object name: volume, pitch, active state, transform, sound and its duration, and the attenuation really applied (override, else asset, else sound). Use it for these derived values; get_component_properties reads raw UPROPERTYs. Every audio component of every actor is searched, the name compared without case. Component names are unique only per actor (every AmbientSound's is AudioComponent0), so a name that several actors carry is an error listing the owners unless actor_name (object name, not label) picks one; an actor_name that names no actor, or whose actor has no component of that name, is an error too. Read-only.",
           "params": [
             {
               "name": "audio_component_name",
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Name of the audio component to query"
+              "description": "Object name of the audio component to query (e.g. \"AudioComponent0\"), compared without case against EVERY audio component of every actor in the editor world."
+            },
+            {
+              "name": "actor_name",
+              "jsonType": "string",
+              "required": false,
+              "nameLike": true,
+              "description": "Optional object name (not label) of the actor that owns the component, compared without case. Needed when several actors own an audio component of that name (every AmbientSound's is AudioComponent0): without it that is an error listing the owners. An actor_name that names no actor, or whose actor has no such component, is an error."
             }
           ],
-          "returns": "{ audio_component_name: string, audio_component_found: bool, audio_component_message: string, component_class: string, component_type: string, audio_volume: number, audio_pitch: number, audio_position: { x, y, z }, audio_rotation: { pitch, yaw, roll }, audio_scale: { x, y, z }, audio_enabled: bool, audio_auto_activate: bool, audio_sound_name: string, audio_sound_class: string, audio_sound_path: string, audio_sound_duration: number, audio_3d_enabled: bool, audio_3d_attenuation_radius: number, audio_mobility: string, audio_owner_name: string, audio_level: string, audio_world: string }",
+          "returns": "{ audio_component_name: string, audio_component_found: bool, audio_component_message: string, component_class: string, component_type: string, audio_volume: number, audio_pitch: number, audio_enabled: bool (IsActive), audio_auto_activate: bool, audio_mobility: string, audio_position: { x, y, z }, audio_rotation: { pitch, yaw, roll }, audio_scale: { x, y, z } (component world transform), audio_sound_name: string, audio_sound_class: string, audio_sound_duration: number, audio_sound_path: string (\"None\" with no sound), audio_sound_is_sound_wave: bool, audio_sound_is_sound_cue: bool, audio_3d_enabled: bool (bAllowSpatialization), audio_3d_attenuation_radius: number (shape extent X), audio_3d_attenuation_falloff: number (both 0 with no attenuation applied), audio_3d_attenuation_cone_angle: number, audio_3d_attenuation_cone_feather: number (cone shape only, else 0), audio_owner_name: string, audio_owner_class: string, audio_owner_path: string, audio_owner_position: { x, y, z }, audio_owner_rotation: { pitch, yaw, roll }, audio_level: string, audio_world: string }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -12443,7 +12450,7 @@
         },
         {
           "name": "get_metasound_node_property",
-          "description": "Read one field of the Configuration struct of a MetaSound Source node by property name, returning its C++ type, has_value and value as JSON. Fails when the node has no Configuration struct or the struct has no such property. Read-only; write it with set_metasound_node_property.",
+          "description": "Read one field of the Configuration struct of a MetaSound Source node, found by its node GUID (from list_metasound_nodes), returning its C++ type, has_value and value as JSON. Use it because MetaSound nodes are document structs, not UObjects, so get_properties cannot reach them; input defaults are set_metasound_node_input_default. Fails when the node has no Configuration struct or no such property; Patches are refused. Read-only; write with set_metasound_node_property.",
           "params": [
             {
               "name": "metasound_path",
@@ -12517,7 +12524,7 @@
         },
         {
           "name": "get_sound_attenuation_properties",
-          "description": "Read every FSoundAttenuationSettings field (shape, falloff, spatialization, LPF, occlusion, reverb send) of a USoundAttenuation asset as one settings object, with the keys set_sound_attenuation_properties takes, plus asset_class. Read-only.",
+          "description": "Read the whole FSoundAttenuationSettings struct (shape, falloff, spatialization, LPF, occlusion, reverb send) of a USoundAttenuation asset as one settings object, with the keys set_sound_attenuation_properties takes, plus asset_class. A convenience over get_properties on its Attenuation property, shaped for that write tool; it reads the asset, not what an audio component applies (get_audio_component_properties). Read-only.",
           "params": [
             {
               "name": "attenuation_path",
@@ -12537,7 +12544,7 @@
         },
         {
           "name": "get_sound_class_properties",
-          "description": "Read a USoundClass asset: every FSoundClassProperties field that set_sound_class_properties writes (volume, pitch, filters, reverb and routing flags, output_target, loading_behavior) plus its name and its direct parent and direct children by name and path; parent_class is \"None\" for a root class, and child_count is the number of children listed (null references are skipped). One level only: walk further by calling it again on a parent or child. Read-only; it loads the asset by object or package path, and one that does not load as a USoundClass is an error.",
+          "description": "Read a USoundClass asset: every FSoundClassProperties field that set_sound_class_properties writes (volume, pitch, filters, reverb and routing flags, output_target, loading_behavior) plus its name and its direct parent and direct children by name and path. A flattened view under the snake_case keys that tool takes; get_properties reads the raw Properties struct or any other UPROPERTY. parent_class is \"None\" for a root class, and child_count is the number of children listed (null references are skipped). One level only: walk further by calling it again on a parent or child. Read-only; it loads the asset by object or package path, and one that does not load as a USoundClass is an error.",
           "params": [
             {
               "name": "sound_class_path",
@@ -12557,7 +12564,7 @@
         },
         {
           "name": "get_sound_concurrency_properties",
-          "description": "Read every FSoundConcurrencySettings field (maxCount, bLimitToOwner, resolutionRule, retriggerTime, volume scaling, voice stealing) of a USoundConcurrency asset as one settings object, with the keys set_sound_concurrency_properties takes, plus asset_class. Read-only.",
+          "description": "Read the whole FSoundConcurrencySettings struct (maxCount, bLimitToOwner, resolutionRule, retriggerTime, volume scaling, voice stealing) of a USoundConcurrency asset as one settings object, with the keys set_sound_concurrency_properties takes, plus asset_class. A convenience over get_properties on its Concurrency property, shaped for that write tool. Read-only.",
           "params": [
             {
               "name": "concurrency_path",
@@ -12637,7 +12644,7 @@
         },
         {
           "name": "get_sound_wave_properties",
-          "description": "Read every reflected property of a USoundWave asset, its USoundBase fields included (CompressionQuality, SampleRateQuality, SoundGroup, Volume, Pitch, Priority, SoundClassObject, AttenuationSettings and the rest), as the settings object FJsonObjectConverter exports, so keys start lower-case (compressionQuality); settings also carries bLooping, echoed as looping. Read-only: it loads the asset if needed and changes nothing. A path that does not load as a USoundWave is an error. Write the same fields back with set_sound_wave_properties (bLooping through its looping param); a sound class is read with get_sound_class_properties and a level's audio component with get_audio_component_properties.",
+          "description": "Read every reflected property of a USoundWave asset, its USoundBase fields included (CompressionQuality, SampleRateQuality, SoundGroup, Volume, Pitch, Priority, SoundClassObject, AttenuationSettings and the rest), as the settings object FJsonObjectConverter exports, so keys start lower-case (compressionQuality); settings also carries bLooping, echoed as looping. Like inspect_object on the asset, but keyed as set_sound_wave_properties accepts it; get_properties reads a few named fields. Read-only: it loads the asset if needed and changes nothing. A path that does not load as a USoundWave is an error. Write the same fields back with set_sound_wave_properties (bLooping through its looping param); a sound class is read with get_sound_class_properties and a level's audio component with get_audio_component_properties.",
           "params": [
             {
               "name": "sound_wave_path",
@@ -13314,7 +13321,7 @@
         },
         {
           "name": "set_metasound_node_property",
-          "description": "Write one field of a MetaSound Source node's Configuration struct by reflection, directly in the document (not through the MetaSound builder), then save the asset. Re-applying a value returns value_changed false but still saves. Succeeds only when the asset reaches disk; a failed save leaves the value in memory only (saved false, save_error).",
+          "description": "Write one field of a MetaSound Source node's Configuration struct, node found by GUID, by reflection directly in the frontend document (not through the MetaSound builder), then save the asset. set_properties cannot reach it: frontend nodes are document data, not UObjects. No undo step. Re-applying a value returns value_changed false but still saves. Succeeds only when the asset reaches disk; a failed save leaves the value in memory only (saved false, save_error). Read: get_metasound_node_property; GUIDs: list_metasound_nodes.",
           "params": [
             {
               "name": "metasound_path",
@@ -13520,7 +13527,7 @@
         },
         {
           "name": "set_sound_attenuation_properties",
-          "description": "Author FSoundAttenuationSettings on a USoundAttenuation via reflection (partial merge + clamp).",
+          "description": "Merge fields into a SoundAttenuation asset's Attenuation settings (absent keys kept), clamp to ClampMin/ClampMax and save; set_properties neither clamps nor saves. Keys match field names case-insensitively. An empty settings object, a key that names no field (the error lists them), a null value, or a value that is not of the field's kind or does not convert is an error and nothing changes. Plugin sub-objects are not reached. A failed save makes success false.",
           "params": [
             {
               "name": "attenuation_path",
@@ -13533,7 +13540,7 @@
               "name": "settings",
               "jsonType": "object",
               "required": true,
-              "description": "Object of FSoundAttenuationSettings/FBaseAttenuationSettings fields to merge; absent keys untouched. e.g. bAttenuate, bSpatialize, attenuationShape(Sphere/Capsule/Box/Cone), distanceAlgorithm, falloffDistance, dBAttenuationAtMax(-60..0), attenuationShapeExtents{x,y,z}, bAttenuateWithLPF, lPFFrequencyAtMin/Max, bEnableOcclusion, occlusionVolumeAttenuation, bEnableReverbSend, reverbWetLevelMin/Max. Nested plugin sub-objects (pluginSettings, audioLinkSettingsOverride) are NOT authored here."
+              "description": "Object of FSoundAttenuationSettings/FBaseAttenuationSettings fields to merge; absent keys untouched. e.g. bAttenuate, bSpatialize, attenuationShape(Sphere/Capsule/Box/Cone), distanceAlgorithm, falloffDistance, dBAttenuationAtMax(-60..0), attenuationShapeExtents{x,y,z}, bAttenuateWithLPF, lPFFrequencyAtMin/Max, bEnableOcclusion, occlusionVolumeAttenuation, bEnableReverbSend, reverbWetLevelMin/Max. Nested plugin sub-objects (pluginSettings, audioLinkSettingsOverride) are NOT authored here. Keys match the field names case-insensitively; an empty object, a key that names no field, a null value or a value that does not convert is an error and nothing is changed."
             }
           ],
           "returns": "{ attenuation_path: string, asset_class: string, settings: object, applied_keys: [string], saved: bool }",
@@ -13573,7 +13580,7 @@
         },
         {
           "name": "set_sound_class_properties",
-          "description": "Write the given FSoundClassProperties fields of a USoundClass asset (volume, pitch, filters, routing and loading flags) in one undoable transaction, then save it. Only fields you pass change; values are not range-checked and unknown enum names are skipped. Returns every current value plus applied_<field> flags and saved.",
+          "description": "Write the given FSoundClassProperties fields of a SoundClass asset (volume, pitch, filters, routing and loading flags) as flat named params, then save it. Use it over set_properties, which would need the nested Properties struct and leaves it unsaved; the parent link is set_sound_class_parent. Only fields you pass change; values are not range-checked and an unknown output_target or loading_behavior name is skipped (applied_<field> false). Returns every current value plus saved; get_sound_class_properties reads them.",
           "params": [
             {
               "name": "sound_class_path",
@@ -13701,7 +13708,7 @@
         },
         {
           "name": "set_sound_concurrency_properties",
-          "description": "Author FSoundConcurrencySettings on a USoundConcurrency via reflection (partial merge + clamp).",
+          "description": "Merge fields into a SoundConcurrency asset's Concurrency settings (maxCount, resolutionRule, volume scaling...; absent keys kept), clamp to ClampMin/ClampMax and save; set_properties neither clamps nor saves. Keys match field names case-insensitively. An empty settings object, a key that names no field (the error lists them), a null value, or a value that is not of the field's kind or does not convert is an error and nothing changes. A failed save makes success false.",
           "params": [
             {
               "name": "concurrency_path",
@@ -13714,7 +13721,7 @@
               "name": "settings",
               "jsonType": "object",
               "required": true,
-              "description": "Object of FSoundConcurrencySettings fields to merge (maxCount(int>=1), bLimitToOwner(bool), resolutionRule(enum name), retriggerTime, volumeScale(0..1), volumeScaleMode(enum), bVolumeScaleCanRelease, volumeScaleAttackTime, volumeScaleReleaseTime, voiceStealReleaseTime); absent keys untouched."
+              "description": "Object of FSoundConcurrencySettings fields to merge (maxCount(int>=1), bLimitToOwner(bool), resolutionRule(enum name), retriggerTime, volumeScale(0..1), volumeScaleMode(enum), bVolumeScaleCanRelease, volumeScaleAttackTime, volumeScaleReleaseTime, voiceStealReleaseTime); absent keys untouched. Keys match the field names case-insensitively; an empty object, a key that names no field, a null value or a value that does not convert is an error and nothing is changed."
             }
           ],
           "returns": "{ concurrency_path: string, asset_class: string, settings: object, applied_keys: [string], saved: bool }",
@@ -13753,7 +13760,7 @@
         },
         {
           "name": "set_sound_cue_node_properties",
-          "description": "Set the EditAnywhere properties of a Sound Cue node (located by node_id) via reflection.  The writer twin of get_sound_cue_graph, which reads them. Partial update (idempotent): only keys present in ``properties`` are written, and only editable (CPF_Edit) props are touched (ChildNodes/graph wiring are unreachable here — use connect_sound_cue_nodes). Keys are the camelCase UPROPERTY names, the same ones get_sound_cue_graph reports under each node's ``properties`` (e.g. a Modulator: pitchMin/pitchMax/volumeMin/volumeMax; a Delay: delayMin/delayMax).",
+          "description": "Set EditAnywhere properties of one Sound Cue node, located by node_id, then refresh the cue's aggregate values and save it -- the writer twin of get_sound_cue_graph. Use it instead of set_properties, which needs the node's object path rather than the node_id that get_sound_cue_graph and add_sound_cue_node report. Partial update (idempotent): only keys present in properties are written, only CPF_Edit props are touched, and applied_keys lists the editable fields matched (ChildNodes/graph wiring are unreachable here -- use connect_sound_cue_nodes). Keys are the camelCase UPROPERTY names get_sound_cue_graph reports under each node's properties (e.g. a Modulator: pitchMin/pitchMax/volumeMin/volumeMax; a Delay: delayMin/delayMax).",
           "params": [
             {
               "name": "cue_path",
@@ -13929,7 +13936,7 @@
         },
         {
           "name": "set_sound_wave_properties",
-          "description": "Author USoundWave tunables on an imported sound wave via reflection (partial merge + clamp).",
+          "description": "Merge USoundWave/USoundBase fields into a SoundWave asset (absent keys kept), set bLooping via looping, clamp to ClampMin/ClampMax and save; set_properties neither clamps nor saves. Each property whose value changes runs PostEditChangeProperty, as a details-panel edit does: compression settings rebuild the audio and MaxDistance follows AttenuationSettings. Keys match property names case-insensitively. A key that names no property (the error lists them), a deprecated or instanced-subobject one, a null value, a value of the wrong kind or that does not convert, bLooping inside settings, or a looping that is not true or false is an error and nothing changes. A failed save makes success false.",
           "params": [
             {
               "name": "sound_wave_path",
@@ -13942,16 +13949,16 @@
               "name": "settings",
               "jsonType": "object",
               "required": false,
-              "description": "Object of USoundWave/USoundBase UPROPERTY fields to merge; absent keys untouched. e.g. CompressionQuality(1..100), SampleRateQuality(Max/High/Medium/Low/Min), SoundGroup(SOUNDGROUP_Default/SOUNDGROUP_Effects/SOUNDGROUP_UI/SOUNDGROUP_Music/SOUNDGROUP_Voice), SoundAssetCompressionType(BinkAudio/ADPCM/PCM/Opus/PlatformSpecific/ProjectDefined), Volume(>=0), Pitch(0.125..4.0), Priority(0..100), VirtualizationMode(Disabled/PlayWhenSilent/Restart/SeekRestart), SoundClassObject(asset path), AttenuationSettings(asset path). Do NOT put `bLooping` here — use the `looping` param."
+              "description": "Object of USoundWave/USoundBase UPROPERTY fields to merge, keyed by property name (matched case-insensitively); absent keys untouched. e.g. CompressionQuality(1..100), SampleRateQuality(Max/High/Medium/Low/Min), SoundGroup(SOUNDGROUP_Default/SOUNDGROUP_Effects/SOUNDGROUP_UI/SOUNDGROUP_Music/SOUNDGROUP_Voice), SoundAssetCompressionType(BinkAudio/ADPCM/PCM/Opus/PlatformSpecific/ProjectDefined), Volume(>=0), Pitch(0.125..4.0), Priority(0..100), VirtualizationMode(Disabled/PlayWhenSilent/Restart/SeekRestart), SoundClassObject(asset path), AttenuationSettings(asset path). A key that names no property, a deprecated one or one holding instanced subobjects, a null value, a value that does not convert, a settings value that is not an object, or `bLooping` (use the `looping` param) is an error and nothing is changed."
             },
             {
               "name": "looping",
               "jsonType": "boolean",
               "required": false,
-              "description": "Optional bool; sets the bLooping bitfield directly (when this sound is played directly, not via a cue)."
+              "description": "Optional bool; sets the bLooping bitfield directly (when this sound is played directly, not via a cue). A value that is not true or false is an error and nothing is changed."
             }
           ],
-          "returns": "{ sound_wave_path: string, asset_class: string, settings: object, applied_keys: [string], applied_looping: bool, looping: bool, saved: bool }",
+          "returns": "{ sound_wave_path: string, asset_class: string, settings: object, applied_keys: [string], applied_looping: bool, looping: bool, saved: bool, save_error?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -15465,7 +15472,7 @@
         },
         {
           "name": "add_component_to_blueprint",
-          "description": "Add a component to a Blueprint's SCS (engine class or a Blueprint AC_* class) with an optional relative transform and parent, then compile. TRAP 1: on a CHILD Blueprint whose scene root is INHERITED, a SCENE component can end up written into the PARENT's SCS (source:\"inherited\", owner_class = the parent) -- which silently edits a vendor/library asset; non-scene ActorComponents land correctly on the child. TRAP 2: a scene component of a BLUEPRINT class, or one given a location, can report success without persisting and then materialize LATER as a duplicate. Both have the same oracle: get_blueprint_components right after, checking owner_class and source of the new node -- never the return value.",
+          "description": "Add a component of any class (engine class or a Blueprint AC_* class) to a Blueprint's SCS, with an optional relative transform and parent, then compile. Pick it to change the Blueprint so every instance gets the component; add_component_to_actor adds one to a single placed actor only, and attach_blueprint_component re-parents a component that already exists. TRAP 1: on a CHILD Blueprint whose scene root is INHERITED, a SCENE component can end up written into the PARENT's SCS (source:\"inherited\", owner_class = the parent) -- which silently edits a vendor/library asset; non-scene ActorComponents land correctly on the child. TRAP 2: a scene component of a BLUEPRINT class, or one given a location, can report success without persisting and then materialize LATER as a duplicate. Both have the same oracle: get_blueprint_components right after, checking owner_class and source of the new node -- never the return value.",
           "params": [
             {
               "name": "blueprint_name",
@@ -16889,7 +16896,7 @@
         },
         {
           "name": "get_blueprint_component_property",
-          "description": "Read the EFFECTIVE default of a property on a Blueprint component TEMPLATE, resolving components INHERITED from a parent/grandparent Blueprint. Read-only twin of set_blueprint_component_properties: it NEVER mints an ICH override. Resolution order: own SCS template -> existing child InheritableComponentHandler override -> ancestor's declaring SCS template -> native CDO subobject. Omit property_name to dump ALL properties of the resolved template.",
+          "description": "Read the EFFECTIVE default of a property (or, without property_name, ALL properties) on a Blueprint component TEMPLATE as typed JSON, resolving components INHERITED from a parent/grandparent Blueprint. Use it instead of get_component_properties with blueprint_name, which sees only own SCS nodes and native subobjects, not inherited SCS components or their ICH overrides. Order: own SCS template -> nearest existing ICH override -> ancestor's declaring SCS template -> native CDO subobject; source says which. NEVER mints an ICH override. group_by_field flags duplicate keys in an array of structs. Write: set_blueprint_component_properties.",
           "params": [
             {
               "name": "blueprint_name",
@@ -18047,7 +18054,7 @@
         },
         {
           "name": "set_blueprint_component_properties",
-          "description": "Set the DEFAULT of one or N properties on Blueprint component TEMPLATES -- own SCS components, components INHERITED from an ancestor Blueprint (routed through this class' InheritableComponentHandler) and native inherited subobjects -- with a SINGLE compile and a SINGLE save, then verify each value against the POST-COMPILE template (what a fresh instance actually reads). One write takes component_name + property_name + property_value; several go in overrides[]. Built for post-reparent re-authoring too, where one call per override means N compiles and N chances for an ICH record not to survive. THREE TRAPS with the same shape (a green return over a different reality): (1) it can drop an entire OTHER component from the Blueprint IN MEMORY while disk and git stay clean -- count get_blueprint_components before and after, and reload_asset_package(on_dirty=\"discard\") is the cure; (2) on an OBJECT-REFERENCE property a write can land None and still report override_persisted:true, wiping the inherited default -- check with get_blueprint_component_overrides; (3) actors ALREADY PLACED in a level keep their serialized value, so only fresh instances change. Collision belongs to set_blueprint_component_collision; read the effective value with get_blueprint_component_property, which never mints an override.",
+          "description": "Set the DEFAULT of one or several properties on Blueprint component TEMPLATES -- own SCS components, ones INHERITED from a parent Blueprint (written as an InheritableComponentHandler override) and native subobjects -- with ONE compile and ONE save, then verify each value on the post-compile template. Use it for component templates: set_properties neither creates an inherited override nor compiles or saves; set_component_property edits placed actors. One write: component_name + property_name + property_value; several: overrides[]. TRAPS behind a green reply: (1) it can drop another component IN MEMORY -- count get_blueprint_components before and after, cure with reload_asset_package(on_dirty=\"discard\"); (2) an object-reference write can land None and still report override_persisted:true -- check get_blueprint_component_overrides; (3) actors already placed keep their serialized value. Collision: set_blueprint_component_collision; override-free read: get_blueprint_component_property.",
           "params": [
             {
               "name": "blueprint_name",
@@ -18610,7 +18617,7 @@
         },
         {
           "name": "set_static_mesh_properties",
-          "description": "Assign a static mesh asset and/or a slot-0 material to a mesh component TEMPLATE of a Blueprint (an OWN SCS node, not a placed actor), in one call. Does NOT compile and does NOT save. Use apply_material_to_blueprint when only a material is changing or the slot is not 0, and get_blueprint_material_info to read the resulting slots back.",
+          "description": "Assign a static mesh asset and/or a slot-0 material to a mesh component TEMPLATE of a Blueprint (an OWN SCS node, not a placed actor) through the component's SetStaticMesh/SetMaterial. Does NOT compile and does NOT save; the reply reads the template back (static_mesh, material and a *_set flag for each). A path that does not load as a mesh or material, or a call with neither, fails with nothing changed. Use apply_material_to_blueprint when only a material is changing or the slot is not 0, and set_blueprint_component_properties for any other template property or an inherited component.",
           "params": [
             {
               "name": "blueprint_name",
@@ -18631,17 +18638,17 @@
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "description": "Optional asset path of the UStaticMesh to assign"
+              "description": "Optional asset path of the UStaticMesh to assign; a path that does not load as a StaticMesh fails the call and nothing is changed"
             },
             {
               "name": "material",
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "description": "Optional asset path of the UMaterialInterface for slot 0"
+              "description": "Optional asset path of the UMaterialInterface for slot 0; a path that does not load as a material fails the call and nothing is changed. At least one of static_mesh and material is required."
             }
           ],
-          "returns": "{ component: string } -- name only, no verification: read the result with get_blueprint_material_info / get_blueprint_component_property.",
+          "returns": "{ component: string, static_mesh: string, material: string, static_mesh_set: bool, material_set: bool } -- read back from the template: static_mesh is the mesh it holds and material its slot-0 material (the override, else the mesh's own), each an object path or \"None\"; <field>_set is true when that field was passed and the template now holds it. Nothing is compiled or saved.",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -18651,7 +18658,7 @@
         },
         {
           "name": "spawn_blueprint_actor",
-          "description": "Spawn an instance of a Blueprint class as an actor and report WHICH world took it and whether the actor has AUTHORITY. The default (world absent or 'editor') places it in the EDITOR level, not in play. For anything that must exist for every player during PIE use world='server'; world='pie' is ambiguous and can land on the CLIENT, where the actor has no authority, no AI controller and no server-side existence while looking identical in the payload. The actor is NOT saved into the map: save_level afterwards for an editor-world spawn.",
+          "description": "Spawn an instance of a Blueprint class as an actor and report WHICH world took it and whether the actor has AUTHORITY. Pick it for any Blueprint class; spawn_actor places the built-in engine types (StaticMeshActor, lights, CameraActor, Character), and the typed spawn_* tools place an engine class with its own fields. The default (world absent or 'editor') places it in the EDITOR level, not in play. For anything that must exist for every player during PIE use world='server'; world='pie' is ambiguous and can land on the CLIENT, where the actor has no authority, no AI controller and no server-side existence while looking identical in the payload. The actor is NOT saved into the map: save_level afterwards for an editor-world spawn.",
           "params": [
             {
               "name": "blueprint_name",
@@ -18800,7 +18807,7 @@
       "commands": [
         {
           "name": "add_camera_component",
-          "description": "Add a UCameraComponent to an actor placed in the editor world, found by name or label, optionally attaching it to a SpringArm (or any other USceneComponent) on the same actor; if the actor already has a camera component, that first one is configured instead, whatever its name, overwriting only the fields you pass. One undo step; the level is marked dirty, not saved. post_process_settings takes FPostProcessSettings property names, and each value it sets also turns on its bOverride_ flag so that it takes effect. An invalid projection_mode or a rejected post_process_settings (a key that names no property included) is an error and nothing is created or written.",
+          "description": "Add a UCameraComponent to an actor placed in the editor world, found by name or label, attached to its root or to parent_component (e.g. a boom from add_spring_arm), and set FOV, projection, aspect, transform, rotation flags and post-process in one undo step. Pick it over add_component_to_actor for a non-root parent or for post_process_settings: each value it sets also turns on its bOverride_ flag, which a plain property write does not, so it takes effect; for a Blueprint's camera use add_component_to_blueprint. If the actor already has a camera component, that first one is configured instead, whatever its name, overwriting only the fields you pass. The level is marked dirty, not saved. An invalid projection_mode or a post_process_settings key that names no property is an error and nothing is created or written.",
           "params": [
             {
               "name": "actor_name",
@@ -18940,7 +18947,7 @@
         },
         {
           "name": "add_gameplay_camera_component",
-          "description": "Adds a UGameplayCameraComponent to an actor and points it at a UCameraAsset. Idempotent. Note: activation needs a running game/PIE and is out of scope here.",
+          "description": "Add a UGameplayCameraComponent to an editor-world actor (name or label) and point it at a UCameraAsset via SetCameraAsset, which also rebuilds its parameter overrides; add_component_to_actor does neither. A new one is an instance component attached to the actor's root (an actor without a root takes it as its root), in one undo step; parent_component and is_root say where it went. Idempotent: an actor that already has one has that first one re-pointed, its attachment kept, and when it already points at the asset nothing is written (changed false). A camera asset that does not load is an error and nothing changes. The level is marked dirty, not saved (save_level). Activation needs a running game or PIE.",
           "params": [
             {
               "name": "actor_name",
@@ -18957,7 +18964,7 @@
               "description": "/Game/... path to the UCameraAsset to reference (required)"
             }
           ],
-          "returns": "{ actor_name, component_name, already_existed, camera_asset_path, camera_set }",
+          "returns": "{ actor_name, component_name, already_existed, camera_asset_path, camera_set, changed: bool (false when the component already pointed at the asset: nothing written), parent_component: string (what the component is attached to; empty when it is the root or unattached), is_root: bool }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
@@ -20480,7 +20487,7 @@
         },
         {
           "name": "get_component_properties",
-          "description": "Read every editable or Blueprint-visible property of one component, with its current value as text, plus whether it is active and registered, without changing anything: the read-back for set_component_property. Pass actor_name for a placed actor (world picks the editor instance or a live PIE world) or blueprint_name for a Blueprint component template.",
+          "description": "Read EVERY editable or Blueprint-visible property of one component, each value as text, plus whether the component is active and registered: the read-back for set_component_property. Pick it to see a whole component, on a placed actor (actor_name; world picks the editor instance or a live PIE world) or on a Blueprint's component template by its SCS variable or native subobject name (blueprint_name); get_properties reads only the named properties of a placed actor's component (object_path \"Actor.Component\"), typed instead of text, and get_blueprint_component_property reads a Blueprint template property's effective default, resolving components inherited from parent Blueprints. Read-only.",
           "params": [
             {
               "name": "component_name",
@@ -20630,7 +20637,7 @@
         },
         {
           "name": "set_component_property",
-          "description": "Set the value of any property on a level actor's component via the canonical JSON->property importer (mcp_common::SetObjectProperty). Handles every FProperty kind: object/soft-object/class/soft-class refs (by \"/Game/...\" path string), enums (by name), FGameplayTag/FGameplayTagContainer (registry-validated), nested structs, arrays, sets and maps -- not just scalars, FVector, FRotator and FLinearColor. WARNING: it writes the EDITOR world BY DEFAULT even while PIE is running, and that is deliberate, not a bug: it is the only MCP route to a property Python's set_editor_property refuses (CPF_DisableEditOnInstance), and because the edit lands in the editor instance the NEXT PIE session already starts with it. The flip side is that a value written mid-PIE does NOT reach the running actor -- so to hit the live one you must ask for it: world='server' | 'client' | 'pie:N'. The reply stamps world_name/world_package/world_type/net_mode/pie_instance, so success:true says WHICH world was written (world_package is the field carrying the UEDPIE_N prefix -- in a World Partition map the UWorld keeps the map's own name).",
+          "description": "Set ONE property on a component of a placed level actor, in the editor world by default or in a live PIE world (world='server' | 'client' | 'pie:N'). Pick it over set_properties when you need the running PIE actor, a property set_properties' edit gate refuses (no CPF_Edit gate here: BlueprintReadWrite-only and DisableEditOnInstance properties are reachable), or proof the value survives the construction script (verify_persistence=true); for a Blueprint's component template use set_blueprint_component_properties. It sends no PreEditChange/PostEditChange, so a component that reacts to Details-panel edits is better written with set_properties. actor_name is the OBJECT name, not the label. The reply returns old_value and final_value read back and stamps which world was written (world_package carries the UEDPIE_N prefix). WARNING: the default editor-world write does NOT reach an actor already running in PIE -- it lands in the next PIE session. Not saved: save_level keeps an editor-world change.",
           "params": [
             {
               "name": "actor_name",
@@ -22139,7 +22146,7 @@
         },
         {
           "name": "set_data_asset_property",
-          "description": "Write ONE reflected property on a DataAsset from a text value and verify it by reading back, returning old_value and new_value so the reply proves the change instead of merely claiming it. Values use UE text form: structs as \"(X=1,Y=2,Z=3)\", object references as a full asset path, GameplayTags as (TagName=\"A.B\"). One property per call, so loop for several; get_data_asset_info dumps them all.",
+          "description": "Write ONE reflected property on a DataAsset, save the asset, and return old_value and new_value read back. Pick it over set_properties when you want the save in the same call or the before/after proof; set_properties writes several properties at once, undoably, without saving. It runs PreEditChange/PostEditChangeProperty but records no undo step and does not check that the property is editable. A text value uses UE text form: structs as \"(X=1,Y=2,Z=3)\", object references as a full asset path, GameplayTags as (TagName=\"A.B\"); a JSON object or array goes through the JSON importer instead (a struct as an object, an array as an array). A value that does not import is refused. get_data_asset_info dumps them all.",
           "params": [
             {
               "name": "data_asset_path",
@@ -22159,10 +22166,10 @@
               "name": "value",
               "jsonType": "any",
               "required": true,
-              "description": "New value as a string (numbers/bools accepted); structs use UE text form e.g. \"(X=1,Y=2,Z=3)\"; object refs use a full asset path."
+              "description": "New value: a string in UE text form (structs \"(X=1,Y=2,Z=3)\", object refs as a full asset path), a number or a bool; or a JSON object/array, written through the JSON importer (a struct as an object, an array or set as an array, a map as an object). null is refused."
             }
           ],
-          "returns": "{ data_asset_path: string, property_name: string, property_type: string, old_value: string, new_value: string, applied: bool, saved: bool }",
+          "returns": "{ data_asset_path: string, property_name: string, property_type: string, old_value: string, new_value: string, applied: bool, saved: bool, save_error?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -22523,7 +22530,7 @@
       "commands": [
         {
           "name": "add_component_to_actor",
-          "description": "Attach a new component of a given class to an actor ALREADY PLACED in the level (an instance-level component, not a change to its Blueprint -- for that use add_component_to_blueprint, which affects every instance). Returns object_path, the full reflection path to feed straight into set_properties / call_function to configure it, so no dedicated add_* wrapper is needed. Pass idempotent=true to make re-running safe. Editor world only; the change dirties the actor's package, so save_level to keep it.",
+          "description": "Attach a new component of ANY class to ONE actor already placed in the level: an instance-level component, not a change to its Blueprint. Pick it for a single placed actor; add_component_to_blueprint adds it to the Blueprint so every instance gets it, and a typed add_*_component tool (add_spline_component, add_camera_component...) when you want that class's own fields set in the same call. Returns object_path, the full reflection path to feed straight into set_properties / call_function to configure it. Pass idempotent=true to make re-running safe. Editor world only; the change dirties the actor's package, so save_level to keep it.",
           "params": [
             {
               "name": "actor_name",
@@ -25430,7 +25437,7 @@
         },
         {
           "name": "spawn_actor",
-          "description": "Place a BUILT-IN engine actor (StaticMeshActor, PointLight, SpotLight, DirectionalLight, RectLight, SkyLight, CameraActor, Character) into the editor level or a live PIE world, at an optional location/rotation/scale, optionally seeding a light's intensity and color, and return the created actor's JSON. Only these types: for a Blueprint class use spawn_blueprint_actor. Refuses when an actor of that name already exists (omit name to let the engine pick a unique one), and the spawn is undoable. It creates the actor in MEMORY only -- save_level (with the .umap writable) is what puts it on disk. WARNING: with 2+ PIE clients world='pie' can land in the CLIENT world, producing an actor the authority never sees -- ask for world='server' instead, and check the reply's world_package/net_mode to see where the actor actually went.",
+          "description": "Place a BUILT-IN engine actor -- StaticMeshActor, PointLight, SpotLight, DirectionalLight, RectLight, SkyLight, CameraActor or Character -- into the editor level or a live PIE world, at an optional location/rotation/scale, optionally seeding a light's intensity and color, and return the created actor's JSON. Only these types: spawn_blueprint_actor places a Blueprint class, and the typed spawn_* tools (spawn_post_process_volume, spawn_decal_actor, spawn_sky_atmosphere...) place their class and set its own fields in the same call. Refuses a name an actor already has (omit name to let the engine pick a unique one); the spawn is undoable. It creates the actor in MEMORY only -- save_level (with the .umap writable) puts it on disk. WARNING: with 2+ PIE clients world='pie' can land in the CLIENT world, producing an actor the authority never sees -- ask for world='server' instead, and check the reply's world_package/net_mode to see where the actor went.",
           "params": [
             {
               "name": "type",
@@ -26334,7 +26341,7 @@
         },
         {
           "name": "get_niagara_system_properties",
-          "description": "Read the render/system flags + fixed bounds of a UNiagaraSystem asset via reflection (GetPropertyValue_InContainer + GetFixedBounds). Read-only; no recompile.",
+          "description": "Read the render flags (cast shadow, decals, custom depth/stencil, translucency sort, each with its bOverride companion), the large-world/current-frame flags and the fixed bounds of a Niagara System asset, under the names set_niagara_system_properties takes. A curated view; get_properties reads any other UPROPERTY on the system. Read-only, no recompile.",
           "params": [
             {
               "name": "system_path",
@@ -27909,7 +27916,7 @@
         },
         {
           "name": "set_niagara_renderer_properties",
-          "description": "Set properties of one renderer (Sprite, Mesh, Ribbon, Light or Decal) of a Niagara emitter by reflection, in one undo step, then request a system compile and save. Only the supplied fields are written, with ClampMin/ClampMax applied; enum fields (alignment, facing_mode, sort_mode, motion_vector_setting, decal_source_mode) also fire PostEditChangeProperty so derived state updates. Every field is converted before the first write, so a value that does not convert (an unknown enum name, an array for a struct field) is an error and nothing changes. Values the renderer already holds are a success with changed=false and saved=false, nothing written. A renderer_index that is not a JSON number is an error. Keys the renderer class lacks are listed in not_applicable. A failed save makes success false, with saved=false and save_error. Materials: set_niagara_renderer_material; read back with get_niagara_renderer_info.",
+          "description": "Set properties of one renderer (Sprite, Mesh, Ribbon, Light or Decal) of a Niagara emitter, found by emitter_name and renderer_index, in one undo step, then request a system compile and save. Use it over set_properties, which neither finds the renderer nor applies ClampMin/ClampMax, compiles or saves. Only supplied fields are written; enum fields (alignment, facing_mode, sort_mode, motion_vector_setting, decal_source_mode) also fire PostEditChangeProperty. Every field is converted before the first write, so a value that does not convert (an unknown enum name, an array for a struct field) or a non-number renderer_index is an error and nothing changes. Values already held: changed=false, saved=false. Keys the renderer class lacks are listed in not_applicable. A failed save makes success false with save_error. Materials: set_niagara_renderer_material; mesh: set_niagara_mesh_renderer_mesh; read back: get_niagara_renderer_info.",
           "params": [
             {
               "name": "system_path",
@@ -28124,7 +28131,7 @@
         },
         {
           "name": "set_niagara_simulation_stage_properties",
-          "description": "Set the enum, bool, name and FIntPoint properties of one generic simulation stage (UNiagaraSimulationStageGeneric) of a Niagara emitter, found by stage_index or stage_name, in one undo step, then request a system compile and save. Only the supplied fields are written, by reflection with ClampMin/ClampMax applied; enabled goes through SetEnabled and enum writes fire PostEditChangeProperty. Every field is converted before the first write, so a value that does not convert, an enabled that does not read as a bool or a stage_index that is not a JSON number is an error and nothing changes. Values the stage already holds are a success with changed=false and saved=false, nothing written. Binding fields (num_iterations, iteration_count, element_count_x|y|z, data_interface) are listed in not_supported, never written; the iteration count is set by add_niagara_simulation_stage. A failed save makes success false, with saved=false and save_error. List stages with get_niagara_simulation_stages.",
+          "description": "Set the enum, bool, name and FIntPoint properties of one generic simulation stage (UNiagaraSimulationStageGeneric) of a Niagara emitter, found by stage_index or stage_name, in one undo step, then request a system compile and save. Use it over set_properties, which neither finds the stage nor applies ClampMin/ClampMax, compiles or saves. Only supplied fields are written; enabled goes through SetEnabled and enum writes fire PostEditChangeProperty. Every field is converted before the first write, so a value that does not convert, a non-bool enabled or a non-number stage_index is an error and nothing changes. Values already held: changed=false, saved=false. Binding fields (num_iterations, iteration_count, element_count_x|y|z, data_interface) go to not_supported, never written; add_niagara_simulation_stage sets the iteration count. A failed save makes success false with save_error. List: get_niagara_simulation_stages.",
           "params": [
             {
               "name": "system_path",
@@ -28257,7 +28264,7 @@
         },
         {
           "name": "set_niagara_system_properties",
-          "description": "Set render and system flags of a Niagara System asset by reflection, without PostEditChangeProperty (so no compile or scalability update runs), in one undo step, then save it. Only the supplied fields are written; a render value (cast_shadow, receives_decals, render_custom_depth, custom_depth_stencil_value, translucency_sort_priority, translucency_sort_distance_offset) also sets its bOverride companion to true unless that override_ key is sent. fixed_bounds is parsed and every field located before the first write, so a corner that is not 3 numbers, a number field that is not a JSON number, or a property the engine lacks is an error and nothing changes. Values the system already holds are a success with changed=false and saved=false, nothing written. A failed save makes success false, with saved=false and save_error. Read them back with get_niagara_system_properties.",
+          "description": "Set the render and system flags of a Niagara System asset (cast shadow, decals, custom depth/stencil, translucency sort, large world coordinates, current-frame data, fixed bounds) and save it. Use it instead of set_properties for these fields: a render value also turns its bOverride companion on unless that override_ key is sent, the asset is saved, and PostEditChangeProperty is skipped (no scalability refresh); set_properties writes any other UPROPERTY and leaves it unsaved. Only supplied fields are written, in one undo step. Every field and fixed_bounds is checked before the first write: a corner that is not 3 numbers, a number field that is not a JSON number, or a property the engine lacks is an error and nothing changes. Values the system already holds are a success with changed=false and saved=false. A failed save makes success false with save_error. Read back with get_niagara_system_properties.",
           "params": [
             {
               "name": "system_path",
@@ -28509,38 +28516,38 @@
         },
         {
           "name": "spawn_niagara_component",
-          "description": "Spawns a Niagara System as a persistent UNiagaraComponent in the editor world.  Spawns via UNiagaraFunctionLibrary::SpawnSystemAtLocation with bAutoDestroy disabled so the component persists for follow-up parameter calls. The owner actor can later be targeted by either its internal object name (``owner_actor_name``) or its editor label (``owner_actor_label``).",
+          "description": "Place a Niagara System in the editor level as a new ANiagaraActor (the actor a drag of the system into the viewport makes, through the editor's Niagara actor factory) whose root UNiagaraComponent runs the system, at an optional location and rotation, for previews and set_niagara_component_* calls. For a Niagara component on an actor that already exists use add_component_to_actor (NiagaraComponent) and set its Asset with set_properties. actor_label labels the new actor (default: the system's name, made unique); a label that is \"None\" or blank, or that another editor-world actor already has as label or internal name, is an error and nothing is spawned, so set_niagara_component_* (actor_name = owner_actor_name or the label) reach this actor. A system the factory refuses (settings requiring an effect type) is an error too. One undo step; the level is marked dirty, not saved (save_level keeps it). Editor world only, PIE or not. location and rotation are read back.",
           "params": [
             {
               "name": "system_path",
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Asset path of the Niagara System to spawn (e.g. /Game/MyGame/NS_Example)"
+              "description": "Asset path of the Niagara System to place (e.g. /Game/MyGame/NS_Example); one that does not load is an error and nothing is spawned."
             },
             {
               "name": "location",
               "jsonType": "array",
               "required": false,
               "vectorShape": "vector",
-              "description": "World location [X, Y, Z]."
+              "description": "Optional world location [X, Y, Z]; the origin when omitted."
             },
             {
               "name": "rotation",
               "jsonType": "array",
               "required": false,
               "vectorShape": "rotator",
-              "description": "Optional [pitch, yaw, roll]; defaults to identity"
+              "description": "Optional world rotation, the object {\"pitch\":..,\"yaw\":..,\"roll\":..} or the array [pitch, yaw, roll] (index 2 is ROLL); zero when omitted."
             },
             {
               "name": "actor_label",
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "description": "Optional desired editor label for the owner actor"
+              "description": "Optional editor label for the new actor; when omitted the factory labels it after the system, made unique. A label that is not a valid actor label (\"None\", blank), or that another actor of the editor world already has as its label or internal name, is an error and nothing is spawned."
             }
           ],
-          "returns": "{ system_path: string, component_name: string, owner_actor_name: string, owner_actor_label: string, is_registered: bool, is_active: bool, location: [number, number, number] }",
+          "returns": "{ system_path: string, owner_actor_name: string, owner_actor_label: string, actor_class: string, actor_path: string, component_name: string, is_registered: bool, is_active: bool, location: [number, number, number], rotation: { roll: number, pitch: number, yaw: number } }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
@@ -29247,7 +29254,7 @@
         },
         {
           "name": "add_gameplay_effect_component",
-          "description": "Add one empty UGameplayEffectComponent of a standard type to the GEComponents of a GameplayEffect Blueprint CDO and save without recompiling. Idempotent: an existing component of that type returns already_existed=true. Configure it with the set_gameplay_effect_component_* tools; get_gameplay_effect_components lists them. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.",
+          "description": "Add one empty UGameplayEffectComponent of a standard type to the GEComponents array of a GameplayEffect Blueprint's CDO and save without recompiling. GE components are instanced subobjects of the effect, not actor components, so add_component_to_blueprint and add_component_to_actor cannot add them. Idempotent: an existing component of that type returns already_existed=true. Configure it with the set_gameplay_effect_component_* tools; get_gameplay_effect_components lists them. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.",
           "params": [
             {
               "name": "gameplay_effect_path",
@@ -30284,7 +30291,7 @@
         },
         {
           "name": "set_gameplay_cue_notify_actor_properties",
-          "description": "Write the GameplayCueTag (mirrored into GameplayCueName) and the lifetime, instancing and override properties you pass on the class default object of an AGameplayCueNotify_Actor Blueprint (Looping ones included), then save it without recompiling and without an undo entry. Properties left out keep their values, and every call writes and saves even when nothing differs; properties_set counts the ones given. Passing none, an unregistered tag, or a Blueprint of another class is an error and nothing is written. Looping and application effects (particles, sounds) are not authored, as the note on a Looping notify says. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. Static or Burst notifies: set_gameplay_cue_notify_static_properties; read back: get_gameplay_cue_notify_info.",
+          "description": "Write the GameplayCueTag (mirrored into GameplayCueName) and the lifetime, instancing and override properties you pass on the class default object of an AGameplayCueNotify_Actor Blueprint (Looping ones included), then save it without recompiling and without an undo entry. Prefer it to set_properties on the CDO: the tag is checked against the registry, GameplayCueName stays in sync, and the edit is saved, or undone if the save fails. Properties left out keep their values; every call writes and saves even when nothing differs. Passing none, an unregistered tag, or a Blueprint of another class is an error and nothing is written. Looping and application effects (particles, sounds) are not authored. A running PIE session, a read-only root or a read-only .uasset fails before any edit. Static or Burst notifies: set_gameplay_cue_notify_static_properties; read back: get_gameplay_cue_notify_info.",
           "params": [
             {
               "name": "cue_notify_path",
@@ -30365,7 +30372,7 @@
         },
         {
           "name": "set_gameplay_cue_notify_static_properties",
-          "description": "Set GameplayCueTag (mirrored into GameplayCueName) and/or IsOverride on the CDO of a UGameplayCueNotify_Static Blueprint (UGameplayCueNotify_Burst ones included), then save it without recompiling. Needs at least one of the two; an unregistered tag fails before anything is written. Returns properties_set and the values read back; a Burst notify's burst effects (particles, sounds) are not authored, as its note says. Actor or Looping notifies: set_gameplay_cue_notify_actor_properties. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.",
+          "description": "Set GameplayCueTag (mirrored into GameplayCueName) and/or IsOverride on the CDO of a UGameplayCueNotify_Static Blueprint (UGameplayCueNotify_Burst ones included), then save it without recompiling. Prefer it to set_properties on the CDO: the tag is checked against the registry, GameplayCueName stays in sync, and the edit is saved, or undone if the save fails. Needs at least one of the two; an unregistered tag fails before anything is written. Returns properties_set and the values read back; a Burst notify's burst effects (particles, sounds) are not authored, as its note says. A running PIE session, a read-only root or a read-only .uasset fails before any edit. Actor or Looping notifies: set_gameplay_cue_notify_actor_properties.",
           "params": [
             {
               "name": "cue_notify_path",
@@ -33319,7 +33326,7 @@
         },
         {
           "name": "spawn_dynamic_mesh_actor",
-          "description": "Spawn an empty ADynamicMeshActor into the editor world (not PIE) at an optional location and rotation, ignoring collisions, in an undoable transaction. Returns the label of the new actor as actor_name, its internal name and triangle_count (0). Remove it with remove_dynamic_mesh_actor.",
+          "description": "Spawn an empty ADynamicMeshActor into the editor world (not PIE) at an optional location and rotation, ignoring collisions, in one undo step -- the editable-mesh actor the GeometryScript tools (append_mesh_primitive, apply_mesh_boolean...) work on; spawn_actor has no such type. Each call adds another actor. Returns its label as actor_name, its internal name and triangle_count (0). Keep a result with copy_dynamic_mesh_to_static_mesh; remove it with remove_dynamic_mesh_actor.",
           "params": [
             {
               "name": "location",
@@ -33742,7 +33749,7 @@
         },
         {
           "name": "spawn_decal_actor",
-          "description": "Spawns a DecalActor into the editor world.  If material_path loads as a UMaterialInterface it is assigned to the UDecalComponent (SetDecalMaterial). Size may be a uniform number or an [x, y, z] half-extent applied to DecalSize (read back).",
+          "description": "Spawn a DecalActor labelled actor_label in the editor world with its DecalSize half-extent and optional material in one call; spawn_actor has no decal type. Idempotent by label: an existing one is REUSED, moved to location/rotation (origin/zero when omitted) and DecalSize reset (default 128,256,256). decal_size must be [x, y, z]; a material_path that does not load is an error and nothing is spawned or moved. No undo; not saved (save_level).",
           "params": [
             {
               "name": "actor_label",
@@ -33774,14 +33781,14 @@
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "description": "Optional content path of a UMaterialInterface to assign to the decal."
+              "description": "Optional content path of a UMaterialInterface to assign to the decal; a path that does not load is an error and nothing is spawned or changed."
             }
           ],
           "returns": "{ actor_label: string, actor_name: string, reused: bool, decal_size_x: float, decal_size_y: float, decal_size_z: float, decal_material: string }",
           "annotations": {
             "readOnlyHint": false,
-            "destructiveHint": false,
-            "idempotentHint": false,
+            "destructiveHint": true,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         }
@@ -35118,7 +35125,7 @@
         },
         {
           "name": "get_interchange_pipeline_properties",
-          "description": "Read the editable (EditAnywhere) properties of an Interchange pipeline asset by reflection, inherited ones included: each entry gives name, C++ type and, unless class_only is true, the current value as JSON (left out when it cannot be converted). The values are the in-memory ones, so edits made with set_interchange_pipeline_properties and not yet saved already show. Read-only: it writes nothing and needs no PIE. A path that does not load as a UInterchangePipelineBase is an error. Discover the names with class_only=true, write them with set_interchange_pipeline_properties and persist with save_interchange_pipeline; the pipelines an imported asset used: get_interchange_asset_import_data; a new pipeline asset: create_interchange_pipeline_asset.",
+          "description": "Read the editable (EditAnywhere) properties of an Interchange pipeline asset by reflection, inherited ones included: each entry gives name, C++ type and, unless class_only is true, the current value as JSON (left out when it cannot be converted). It narrows inspect_object to the EditAnywhere properties and adds a names-only discovery mode; get_properties reads any other UPROPERTY. The values are the in-memory ones, so edits made with set_interchange_pipeline_properties and not yet saved already show. Read-only: it writes nothing and needs no PIE. A path that does not load as a UInterchangePipelineBase is an error. Discover the names with class_only=true, write them with set_interchange_pipeline_properties and persist with save_interchange_pipeline; the pipelines an imported asset used: get_interchange_asset_import_data; a new pipeline asset: create_interchange_pipeline_asset.",
           "params": [
             {
               "name": "pipeline_path",
@@ -35348,7 +35355,7 @@
         },
         {
           "name": "set_interchange_pipeline_properties",
-          "description": "Write settings of an Interchange pipeline asset -- what a pipeline does at import, such as whether it imports materials or how it names the assets -- by reflection, from a {name: value} object in which a value is a scalar, an object for a struct or an array for a TArray. Each value overwrites the one in memory, records no undo step and is not saved: save_interchange_pipeline writes the asset to disk. Names are applied one by one; one that does not exist, is not editable in the editor or does not convert is skipped and listed with the reason in skipped, and the others are still written. An empty properties object is refused. Writing the same values again leaves the asset as it was (idempotent). The names, types and current values come from get_interchange_pipeline_properties; to choose which pipelines an imported asset uses, set_interchange_pipelines.",
+          "description": "Write settings of an Interchange pipeline asset -- what a pipeline does at import, such as whether it imports materials or how it names the assets -- by reflection, from a {name: value} object (a scalar, an object for a struct, an array for a TArray). It is close to set_properties on the same asset path (editable properties only, JSON values); the difference is that it records no undo step and runs one PostEditChange for the whole batch. Values change in memory only: save_interchange_pipeline writes the asset to disk. A name that does not exist, is not editable or does not convert is listed in skipped with the reason, and the others are still written. An empty properties object is refused. Idempotent. Names, types and current values: get_interchange_pipeline_properties; which pipelines an imported asset uses: set_interchange_pipelines.",
           "params": [
             {
               "name": "pipeline_path",
@@ -35684,7 +35691,7 @@
         },
         {
           "name": "add_spline_component",
-          "description": "Adds a USplineComponent instance to a named editor-world actor.  NewObject + RegisterComponent + AddInstanceComponent + attach to root + CreationMethod=Instance. If points are given, clears the default points and adds each in local space.",
+          "description": "Add a USplineComponent to a named editor-world actor (name or label) as an undoable instance component on its root, optionally replacing its default points with your local-space points -- what add_component_to_actor cannot set in the same call. Not idempotent: each call adds a spline, while set_spline_points and get_spline_points act on the actor's FIRST one. An entry that is not [x, y, z] (3 numbers) is an error and nothing is added. Not saved (save_level).",
           "params": [
             {
               "name": "actor_name",
@@ -35697,7 +35704,7 @@
               "name": "points",
               "jsonType": "array",
               "required": false,
-              "description": "Optional [[x, y, z], ...] spline points in local space"
+              "description": "Optional [[x, y, z], ...] spline points in local space; an entry that is not 3 numbers is an error and nothing is added"
             }
           ],
           "returns": "{ actor_name: string, component_name: string, component_class: string, num_points: int, added: bool }",
@@ -35710,7 +35717,7 @@
         },
         {
           "name": "add_spline_mesh_component",
-          "description": "Adds a USplineMeshComponent instance to a named editor-world actor.  NewObject + SetStaticMesh + RegisterComponent + AddInstanceComponent + attach to root + CreationMethod=Instance, then SetStartAndEnd to deform the mesh straight from start to end (tangent = end - start).",
+          "description": "Add a USplineMeshComponent to a named editor-world actor (name or label) as an undoable instance component attached to its root, with a static mesh deformed straight from start to end in local space (SetStartAndEnd, tangent = end - start). Over add_component_to_actor it loads the mesh and sets the deformation in the same call; a mesh that does not load is an error and nothing is added. Not idempotent: each call adds another component. Nothing is saved (save_level).",
           "params": [
             {
               "name": "actor_name",
@@ -36733,7 +36740,7 @@
         },
         {
           "name": "get_foliage_type_properties",
-          "description": "Read a FoliageType asset's authored tunables in one call -- density, radius, scale and z-offset ranges, cull distances, mobility, align-to-normal, random yaw, world collision, shadow and indirect-lighting flags. The read-back oracle for set_foliage_type_properties, and cheaper than reflection-walking the asset from Python. Describes the ASSET, not what is placed in the level: for that use get_foliage_instance_count / get_foliage_in_radius.",
+          "description": "Read a FoliageType_InstancedStaticMesh asset's authored tunables in one call -- density, radius, scale and z-offset ranges, cull distances, mobility, align-to-normal, random yaw, world collision, shadow and indirect-lighting flags -- under the names set_foliage_type_properties takes. A curated view with nothing computed; get_properties reads any other UPROPERTY on the asset. Actor foliage types are not found. Describes the ASSET, not what is placed in the level: for that use get_foliage_instance_count / get_foliage_in_radius.",
           "params": [
             {
               "name": "foliage_path",
@@ -36765,7 +36772,7 @@
         },
         {
           "name": "get_landscape_grass_type_properties",
-          "description": "Read one grass variety of a LandscapeGrassType asset: mesh, density, placement jitter, start/end cull distance, min LOD, scaling mode and scale ranges, rotation/alignment and shadow flags. The read-back oracle for set_landscape_grass_type_properties. Two units that mislead: grass_density is instances per TEN square metres (25 means 2.5/m2), and start_cull_distance only fades if the mesh's material uses a PerInstanceFadeAmount node -- otherwise clusters pop at end_cull_distance and the start value does nothing.",
+          "description": "Read one grass variety (variety_index, default 0) of a LandscapeGrassType asset: mesh, density, placement jitter, start/end cull distance, min LOD, scaling mode and scale ranges, rotation/alignment and shadow flags, under the names set_landscape_grass_type_properties takes. Use it instead of get_properties, which can only return the whole GrassVarieties array, not one element; per-platform values report their Default only. Two units that mislead: grass_density is instances per TEN square metres (25 means 2.5/m2), and start_cull_distance only fades if the mesh's material uses a PerInstanceFadeAmount node -- otherwise clusters pop at end_cull_distance and the start value does nothing.",
           "params": [
             {
               "name": "grass_path",
@@ -38239,7 +38246,7 @@
         },
         {
           "name": "set_foliage_type_properties",
-          "description": "Set tunables of a FoliageType_InstancedStaticMesh asset in one call, only the fields you pass, then save it. Returns the read-back values with applied_count and saved; an invalid mobility fails the call. Edits the asset only: instances already placed keep their transforms. Read it with get_foliage_type_properties.",
+          "description": "Set tunables of a FoliageType_InstancedStaticMesh asset in one call, only the fields you pass, then save it. Over set_properties it takes the scale, z-offset and cull ranges as {\"min\",\"max\"} objects and saves in the same call, but records no undo step. Returns the read-back values with applied_count and saved. An invalid mobility, or a range that is not such an object with a number bound, fails the call before anything is written. Edits the asset only: instances already placed keep their transforms. Read: get_foliage_type_properties.",
           "params": [
             {
               "name": "foliage_path",
@@ -38270,37 +38277,37 @@
               "name": "scale_x",
               "jsonType": "object",
               "required": false,
-              "description": "X scale range as a JSON object {\"min\":0.8,\"max\":1.2}, either bound optional."
+              "description": "X scale range as a JSON object {\"min\":0.8,\"max\":1.2}, either bound optional; anything else (not an object, no number bound, another key) fails the call and nothing is changed."
             },
             {
               "name": "scale_y",
               "jsonType": "object",
               "required": false,
-              "description": "Y scale range as a JSON object {\"min\":0.8,\"max\":1.2}, either bound optional."
+              "description": "Y scale range as a JSON object {\"min\":0.8,\"max\":1.2}, either bound optional; anything else fails the call and nothing is changed."
             },
             {
               "name": "scale_z",
               "jsonType": "object",
               "required": false,
-              "description": "Z scale range as a JSON object {\"min\":0.8,\"max\":1.2}, either bound optional."
+              "description": "Z scale range as a JSON object {\"min\":0.8,\"max\":1.2}, either bound optional; anything else fails the call and nothing is changed."
             },
             {
               "name": "z_offset",
               "jsonType": "object",
               "required": false,
-              "description": "Z location offset range in cm as a JSON object {\"min\":-5,\"max\":0}; either bound may be left out."
+              "description": "Z location offset range in cm as a JSON object {\"min\":-5,\"max\":0}; either bound may be left out; anything else fails the call and nothing is changed."
             },
             {
               "name": "cull_distance",
               "jsonType": "object",
               "required": false,
-              "description": "Integer interval {\"min\":start,\"max\":end} in cm: instances fade from min (only with a PerInstanceFadeAmount material node) and clusters cull beyond max; 0 disables."
+              "description": "Integer interval {\"min\":start,\"max\":end} in cm: instances fade from min (only with a PerInstanceFadeAmount material node) and clusters cull beyond max; 0 disables. Anything but such an object fails the call and nothing is changed."
             },
             {
               "name": "mobility",
               "jsonType": "string",
               "required": false,
-              "description": "Component mobility: Static, Stationary or Movable, case-insensitive; any other value fails the call."
+              "description": "Component mobility: Static, Stationary or Movable, case-insensitive; any other value fails the call and nothing is changed."
             },
             {
               "name": "align_to_normal",
@@ -38369,7 +38376,7 @@
         },
         {
           "name": "set_landscape_grass_type_properties",
-          "description": "Set fields of one grass variety of a LandscapeGrassType asset, only those you pass, and save it; an empty variety list gets one appended for index 0, and density and cull distances change only their per-platform Default value. Returns the read-back variety with applied_count and saved; read it with get_landscape_grass_type_properties.",
+          "description": "Set fields of one grass variety (variety_index) of a LandscapeGrassType asset, only those you pass, and save it. set_properties cannot address one FGrassVariety element of the asset's array; this also writes only the per-platform Default of density and cull distances, refreshes the state hash, and appends a variety for index 0 when the list is empty. No undo step. A grass_mesh that does not load, an invalid scaling or a scale range that is not a {\"min\",\"max\"} object fails the call with nothing changed, not even the appended variety. Read: get_landscape_grass_type_properties.",
           "params": [
             {
               "name": "grass_path",
@@ -38389,7 +38396,7 @@
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "description": "Path of the StaticMesh for this variety, e.g. \"/Game/Foliage/SM_Grass\"; an unknown path fails the call."
+              "description": "Path of the StaticMesh for this variety, e.g. \"/Game/Foliage/SM_Grass\"; a path that does not load as a StaticMesh fails the call and nothing is changed."
             },
             {
               "name": "grass_density",
@@ -38425,25 +38432,25 @@
               "name": "scaling",
               "jsonType": "string",
               "required": false,
-              "description": "Scale mode: Uniform, Free or LockXY, case-insensitive; any other value fails the call."
+              "description": "Scale mode: Uniform, Free or LockXY, case-insensitive; any other value fails the call and nothing is changed."
             },
             {
               "name": "scale_x",
               "jsonType": "object",
               "required": false,
-              "description": "X scale range as a JSON object {\"min\":0.8,\"max\":1.2}, also used for every axis with Uniform scaling."
+              "description": "X scale range as a JSON object {\"min\":0.8,\"max\":1.2}, also used for every axis with Uniform scaling; anything else (not an object, no number bound, another key) fails the call and nothing is changed."
             },
             {
               "name": "scale_y",
               "jsonType": "object",
               "required": false,
-              "description": "Y scale range as a JSON object {\"min\":0.8,\"max\":1.2}, used only with Free scaling."
+              "description": "Y scale range as a JSON object {\"min\":0.8,\"max\":1.2}, used only with Free scaling; anything else fails the call and nothing is changed."
             },
             {
               "name": "scale_z",
               "jsonType": "object",
               "required": false,
-              "description": "Z scale range as a JSON object {\"min\":0.8,\"max\":1.2}, used with Free or LockXY scaling."
+              "description": "Z scale range as a JSON object {\"min\":0.8,\"max\":1.2}, used with Free or LockXY scaling; anything else fails the call and nothing is changed."
             },
             {
               "name": "random_rotation",
@@ -38685,7 +38692,7 @@
               "name": "points",
               "jsonType": "array",
               "required": true,
-              "description": "[[x, y, z], ...] spline points in local space"
+              "description": "[[x, y, z], ...] spline points in local space; an entry that is not 3 numbers is an error and nothing is changed"
             },
             {
               "name": "closed_loop",
@@ -38869,7 +38876,7 @@
         },
         {
           "name": "spawn_level_streaming_volume",
-          "description": "Spawns an ALevelStreamingVolume with a box brush and binds it to an existing streaming sub-level.  Builds a default box brush (CubeBuilder via UActorFactory::CreateBrushForVolumeActor), applies the usage/previs/disabled flags, then appends the volume to the target ULevelStreaming::EditorStreamingVolumes array (idempotent: re-binding the same volume is a no-op). The actual load/unload trigger is runtime/PIE-only and is not exercised headless.",
+          "description": "Spawn an ALevelStreamingVolume in the editor world with a real box brush (half-extent extent) and bind it to an existing streaming sub-level, setting its usage, editor_pre_vis_only and disabled flags, in one undo step. Over spawn_box_volume(volume_class='LevelStreamingVolume') it adds the binding: the volume is appended to the sub-level's EditorStreamingVolumes, which no other tool writes. Each call spawns a NEW volume; an extent axis of 0 or less becomes 100; an unknown usage or sub-level is an error before anything spawns. Not saved (save_level). The load/unload itself happens only at PIE/runtime, when a viewpoint enters the volume.",
           "params": [
             {
               "name": "streaming_level_name",
@@ -38922,13 +38929,13 @@
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
-            "idempotentHint": true,
+            "idempotentHint": false,
             "openWorldHint": false
           }
         },
         {
           "name": "spawn_navmesh_bounds_volume",
-          "description": "Spawns a navigation mesh bounds volume at a specified location with optional extent, and builds a REAL cube brush so the volume has non-empty nav bounds (an empty brush yields 0 navmesh tiles). No hand placement in the editor UI required. The brush is RE-READ off the spawned actor after building (poly count from its UModel, bounds from the actor), so nothing in the payload is a hand-written claim.",
+          "description": "Spawn a NavMeshBoundsVolume in the editor world at location with a REAL cube brush of half-extent extent (default 1000,1000,500) -- an empty brush yields 0 navmesh tiles -- and report brush and bounds RE-READ off the actor in diagnose_navmesh's terms (brush_empty, brush_poly_count, bounds_valid). spawn_box_volume(volume_class='NavMeshBoundsVolume') builds the same brush plus a label, spatial-loading flag and scale normalization; this one differs by its larger default and report fields. One undo step; not saved (save_level); navigation is not rebuilt here.",
           "params": [
             {
               "name": "location",
@@ -38955,7 +38962,7 @@
         },
         {
           "name": "spawn_text_render_actor",
-          "description": "Spawns a TextRenderActor into the active world (a running PIE/game world if one exists, otherwise the editor world) and configures its text. Sets the UTextRenderComponent's text / color / world size if given (world_size read back to verify). Runtime/cooked-build safe: resolves the world via GEngine's world contexts, not GEditor, so it also works in packaged builds.",
+          "description": "Spawn a TextRenderActor with its text, color (0..255, opaque) and world size set in the same call, into the ACTIVE world: the first PIE/game world when one runs (the actor then vanishes when play stops), otherwise the editor world. spawn_actor has no text-render type, and unlike it this has no world selector -- with several PIE instances it takes the first PIE context, not necessarily the server. world_size is read back. One undo step in the editor world; not saved (save_level).",
           "params": [
             {
               "name": "text",
@@ -39152,7 +39159,7 @@
         },
         {
           "name": "get_exponential_height_fog_properties",
-          "description": "Read the properties of an ExponentialHeightFog actor's UExponentialHeightFogComponent, under the names set_exponential_height_fog_properties takes.",
+          "description": "Read the fog of an ExponentialHeightFog actor's component, found by label or name in the editor world, under the snake_case names set_exponential_height_fog_properties takes (density, falloff, inscattering, distances, volumetric fog, second layer). A curated view; get_properties (internal names only) reads any other UPROPERTY on the component.",
           "params": [
             {
               "name": "actor_name",
@@ -39172,7 +39179,7 @@
         },
         {
           "name": "get_light_properties",
-          "description": "Retrieve comprehensive properties of a light actor including intensity, color, position, rotation, scale, and type-specific settings. Reads back every field set_light_properties writes (including IES, light function, shadow bias, contact shadow, cast/volumetric shadow, inverse-squared falloff, and RectLight source size / barn doors / source texture).",
+          "description": "Read a light actor of the editor level, found by object name (not label), in one call: owner transform, intensity, color, mobility and every field set_light_properties writes, plus the type-specific ones (point/spot falloff and cones, RectLight source and barn doors, directional sun-light flags). A convenience view of the actor and its first light component; get_properties reads any other UPROPERTY. Every value is read off the component: light_intensity_units is the unit name (Unitless, Candelas, Lumens, EV or Nits) on point, spot and rect lights and is left out for a directional light, whose intensity is lux; the falloff keys appear only on point and spot lights; light_lighting_channel_mask packs LightingChannels (1 = channel 0, 2 = channel 1, 4 = channel 2). light_type is always 'Light Component'; the kind is light_subtype. An unknown name is an error. Read-only.",
           "params": [
             {
               "name": "light_name",
@@ -39182,7 +39189,7 @@
               "description": "Name of the light actor to query"
             }
           ],
-          "returns": "{ light_name, light_found, light_message, light_class, light_type, light_intensity, light_intensity_units, r, g, b, a, x, y, z, pitch, yaw, roll, light_enabled, light_cast_shadows, light_affect_world, light_use_inverse_squared_falloff, light_falloff_exponent, light_min_roughness, light_lighting_channel_mask, light_temperature, light_use_temperature, light_indirect_lighting_intensity, light_volumetric_scattering_intensity, light_affect_translucent_lighting, light_use_ies_brightness, light_ies_brightness_scale, light_ies_texture, light_function_scale, light_function_fade_distance, light_function_disabled_brightness, light_function_material, light_shadow_bias, light_cast_volumetric_shadow, light_contact_shadow_length, light_contact_shadow_length_in_ws, light_subtype, light_atmosphere_sun_light, light_atmosphere_sun_light_index, light_atmosphere_sun_disk_color_scale: { r, g, b, a }, light_attenuation_radius, light_source_radius, light_soft_source_radius, light_source_length, light_source_width, light_source_height, light_barn_door_angle, light_barn_door_length, light_source_texture, light_inner_cone_angle, light_outer_cone_angle, light_mobility, light_tags, light_level, light_world }",
+          "returns": "{ light_name, light_found, light_message, light_class (owner actor class), light_type (\"Light Component\" for every light; the kind is light_subtype), light_position: { x, y, z }, light_rotation: { pitch, yaw, roll }, light_scale: { x, y, z } (owner actor transform), light_intensity, light_intensity_units? (point/spot/rect only: Unitless, Candelas, Lumens, EV or Nits), light_color: { r, g, b, a }, light_enabled, light_cast_shadows, light_affect_world, light_mobility, light_use_inverse_squared_falloff? (point/spot only), light_falloff_exponent? (point/spot only), light_lighting_channel_mask (1 = channel 0, 2 = channel 1, 4 = channel 2), light_temperature, light_use_temperature, light_indirect_lighting_intensity, light_volumetric_scattering_intensity, light_affect_translucent_lighting, light_use_ies_brightness, light_ies_brightness_scale, light_ies_texture, light_function_scale: { x, y, z }, light_function_fade_distance, light_function_disabled_brightness, light_function_material, light_shadow_bias, light_cast_volumetric_shadow, light_contact_shadow_length, light_contact_shadow_length_in_ws, light_subtype (DirectionalLight, PointLight, SpotLight, RectLight or Unknown), light_atmosphere_sun_light? (directional: 1 or 0), light_atmosphere_sun_light_index? (directional), light_atmosphere_sun_disk_color_scale?: { r, g, b, a } (directional), light_attenuation_radius? (point/spot/rect), light_source_radius? (point/spot), light_soft_source_radius? (point/spot), light_source_length? (point/spot), light_inner_cone_angle? (spot), light_outer_cone_angle? (spot), light_source_width? (rect), light_source_height? (rect), light_barn_door_angle? (rect), light_barn_door_length? (rect), light_source_texture? (rect), light_tags: [string], light_level, light_world }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -39224,7 +39231,7 @@
         },
         {
           "name": "get_reflection_capture_properties",
-          "description": "Read back every property of an existing reflection-capture actor (Sphere or Box): InfluenceRadius (Sphere), BoxTransitionDistance (Box), Brightness, the actor scale exposed as box_extent, the Cubemap path and ReflectionSourceType. Round-trip reader for set_reflection_capture_properties.",
+          "description": "Read a Sphere or Box reflection-capture actor of the editor level, found by label or internal name: capture_type, InfluenceRadius (Sphere), BoxTransitionDistance (Box), Brightness, the actor scale reported as box_extent, the Cubemap path and ReflectionSourceType. A curated round-trip view for set_reflection_capture_properties, not every property; get_properties (internal names only) reads any other UPROPERTY. Pure reader, no recapture.",
           "params": [
             {
               "name": "actor_name",
@@ -39256,7 +39263,7 @@
         },
         {
           "name": "get_scene_capture_2d_properties",
-          "description": "Read back every data property of an existing SceneCapture2D actor's USceneCaptureComponent2D: CaptureSource (base), TextureTarget path, FOVAngle, ProjectionType, OrthoWidth and the bCaptureEveryFrame / bCaptureOnMovement bitfields (base). Pure reader — no Modify, no capture, no save. Round-trip reader for set_scene_capture_2d_properties.",
+          "description": "Read a SceneCapture2D actor's USceneCaptureComponent2D, found by label or internal name in the editor world: CaptureSource, TextureTarget path, FOVAngle, ProjectionType, OrthoWidth and the bCaptureEveryFrame / bCaptureOnMovement bitfields. A curated round-trip view for set_scene_capture_2d_properties, not every property; get_properties (internal names only) reads any other UPROPERTY on the component. Pure reader -- no Modify, no capture, no save.",
           "params": [
             {
               "name": "actor_name",
@@ -39288,7 +39295,7 @@
         },
         {
           "name": "get_sky_atmosphere_properties",
-          "description": "Read the atmosphere properties of a SkyAtmosphere actor's USkyAtmosphereComponent, under the names set_sky_atmosphere_properties takes.",
+          "description": "Read the atmosphere settings of a SkyAtmosphere actor's component, found by label or name in the editor world, under the snake_case names set_sky_atmosphere_properties takes (Rayleigh/Mie scattering, ground albedo, planet radius, height). A curated view; get_properties (internal names only) reads any other UPROPERTY on the component.",
           "params": [
             {
               "name": "actor_name",
@@ -39308,7 +39315,7 @@
         },
         {
           "name": "get_sky_light_properties",
-          "description": "Read the properties of a SkyLight actor's USkyLightComponent, under the names set_sky_light_properties takes.",
+          "description": "Read the intensity, color and occlusion settings of a SkyLight actor's component, found by label or name in the editor world, under the snake_case names set_sky_light_properties takes. A curated view; get_properties (internal names only) reads any other UPROPERTY on it.",
           "params": [
             {
               "name": "actor_name",
@@ -39328,7 +39335,7 @@
         },
         {
           "name": "get_volumetric_cloud_properties",
-          "description": "Read the properties of a VolumetricCloud actor's UVolumetricCloudComponent, under the names set_volumetric_cloud_properties takes.",
+          "description": "Read the layer and tracing settings of a VolumetricCloud actor's component, found by label or name in the editor world, under the snake_case names set_volumetric_cloud_properties takes. A curated view; get_properties (internal names only) reads any other UPROPERTY on the component.",
           "params": [
             {
               "name": "actor_name",
@@ -39410,7 +39417,7 @@
         },
         {
           "name": "set_exponential_height_fog_properties",
-          "description": "Set the properties of an ExponentialHeightFog actor's UExponentialHeightFogComponent: density and falloff, inscattering, distances, max opacity, volumetric fog, the second fog layer and directional inscattering. Only the supplied fields change (applied_count counts them) and the reply reads every property back. Colors are [R,G,B] or [R,G,B,A].",
+          "description": "Set an ExponentialHeightFog actor's fog component, actor found by label or name in the editor world: density, falloff, inscattering, distances, max opacity, volumetric fog, second fog layer, directional inscattering. Over set_properties it needs no component path and goes through the component's own setters; other fog properties: set_properties. Supplied fields only, one undo step, not saved (save_level); applied_count counts them and every property is read back. Colors are [R,G,B(,A)] floats, volumetric_fog_albedo [R,G,B(,A)] whole 0-255 bytes. Every field is checked before any write: a color that is not 3 or 4 numbers, a byte color with a fraction or a value past 255, a number given as a string or a non-boolean volumetric_fog is an error and nothing changes.",
           "params": [
             {
               "name": "actor_name",
@@ -39477,7 +39484,7 @@
               "name": "volumetric_fog_albedo",
               "jsonType": "array",
               "required": false,
-              "description": "Optional [R,G,B] volumetric albedo as 0-255 bytes (FColor)."
+              "description": "Optional [R,G,B] or [R,G,B,A] volumetric albedo, each a whole number from 0 to 255 (FColor; A defaults to 255)."
             },
             {
               "name": "volumetric_fog_emissive",
@@ -39590,7 +39597,7 @@
         },
         {
           "name": "set_light_properties",
-          "description": "Set component-level light properties: attenuation radius, source radius/length, cone angles, color temperature, indirect/volumetric intensity, translucent lighting, plus RectLight source size + barn doors + source texture, IES profile (texture/brightness scale/use-brightness), light-function (material/scale/fade distance/disabled brightness), shadow bias, cast/volumetric shadow, contact-shadow length (+ world-space flag), and inverse-squared falloff. Round-trips with get_light_properties. Partial update (idempotent): only fields present are written; a field that doesn't apply to the light's type returns an honest note instead of an error. The edit is one undo step that marks the level dirty, nothing is saved, and a call that changes nothing leaves neither and says changed false. On a Static-mobility light a field whose engine setter skips static lights (IES, light function, shadow bias, cast flags, falloff, RectLight source and barn doors) is an error and nothing is written. Verify by read-back via get_light_properties (light_* keys).",
+          "description": "Set component-level properties of one light actor, found by object name (not Outliner label) in the first world context: attenuation and source radius/length, cone angles, temperature, indirect/volumetric intensity, translucency, RectLight source size, barn doors and texture, IES profile, light function, shadow bias, cast/volumetric shadows, contact shadows and inverse-squared falloff. Over set_properties it needs no component path, returns a note for a field that does not apply to the light's type, and on a Static-mobility light refuses, writing nothing, any field whose engine setter skips static lights (IES, light function, shadow bias, cast flags, falloff, RectLight source and barn doors). Only fields present change, as one undo step that dirties the level; nothing is saved; a no-op says changed false. Intensity: set_light_intensity; color: set_light_color. Read back with get_light_properties.",
           "params": [
             {
               "name": "light_name",
@@ -40004,7 +40011,7 @@
         },
         {
           "name": "set_reflection_capture_properties",
-          "description": "Set properties on an existing reflection-capture actor (Sphere or Box). Dispatches by the actor's concrete capture-component class; a sphere-only param on a box (or vice versa) is a no-op and reports its <prop>_set=false. box_extent maps to the actor scale (the box capture has no extent UPROPERTY; its size derives from the transform scale). cubemap loads a UTextureCube by path and flips ReflectionSourceType to SpecifiedCubemap. Marks the capture dirty for recapture; reads every set property back.",
+          "description": "Set influence radius (Sphere), transition distance and extent (Box), brightness or cubemap of a Sphere or Box reflection-capture actor found by label or name in the editor world, then mark it dirty for recapture and read each field back. Over set_properties: box_extent maps to the actor scale (the box capture has no extent property), brightness is clamped to [0.5, 4] and a cubemap also switches ReflectionSourceType to SpecifiedCubemap. A param for the other capture shape is a no-op reported as <prop>_set=false. A box_extent that is not exactly 3 numbers, or a cubemap path that does not load as a TextureCube, fails the call before anything is written. Nothing is saved (save_level).",
           "params": [
             {
               "name": "actor_name",
@@ -40035,14 +40042,14 @@
               "name": "box_extent",
               "jsonType": "array",
               "required": false,
-              "description": "Box capture extent as actor scale [X, Y, Z] (Box only; SetActorScale3D)"
+              "description": "Box capture extent as actor scale [X, Y, Z] (Box only; SetActorScale3D). Anything but an array of exactly 3 numbers fails the call and nothing is changed, on a Sphere capture too."
             },
             {
               "name": "cubemap",
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "description": "Path to a UTextureCube; assigning it sets ReflectionSourceType=SpecifiedCubemap"
+              "description": "Path to a UTextureCube; assigning it sets ReflectionSourceType=SpecifiedCubemap. A path that does not load as a TextureCube fails the call and nothing is changed."
             }
           ],
           "returns": "{ actor_name: string, actor_internal_name: string, capture_type: string, influence_radius_set: bool, influence_radius: number, box_transition_distance_set: bool, box_transition_distance: number, brightness_set: bool, brightness: number, box_extent_set: bool, box_extent: [number], cubemap_set: bool, cubemap: string, reflection_source_type: string, marked_dirty: bool }",
@@ -40055,7 +40062,7 @@
         },
         {
           "name": "set_scene_capture_2d_properties",
-          "description": "Sets the given CaptureSource, ProjectionType, FOVAngle, TextureTarget and bCaptureEveryFrame of the USceneCaptureComponent2D on a SceneCapture2D actor in the editor world, without capturing or saving; undoable. An invalid value fails the call, but fields applied before it stay set. Returns each field read back with a *_set flag.",
+          "description": "Set CaptureSource, ProjectionType, FOVAngle, TextureTarget and bCaptureEveryFrame of a SceneCapture2D actor's capture component, found by label or name in the editor world, without capturing or saving. Beyond set_properties it adds only the label lookup and lenient enum names (SCS_ prefix optional, case-insensitive); write any other field with set_properties. An unknown capture_source or projection_type, or a texture_target that does not load as a TextureRenderTarget2D, fails the call before anything is written. Returns each field read back with a *_set flag; get_scene_capture_2d_properties reads them.",
           "params": [
             {
               "name": "actor_name",
@@ -40068,14 +40075,14 @@
               "name": "capture_source",
               "jsonType": "string",
               "required": false,
-              "description": "ESceneCaptureSource (e.g. SceneColorHDR | FinalColorLDR | FinalColorHDR | SceneDepth); the SCS_ prefix is optional"
+              "description": "ESceneCaptureSource (e.g. SceneColorHDR | FinalColorLDR | FinalColorHDR | SceneDepth); the SCS_ prefix is optional; any other value fails the call and nothing is changed"
             },
             {
               "name": "projection_type",
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "description": "Projection mode, \"Perspective\" or \"Orthographic\" (case-insensitive); any other value fails the call; omit to keep the current one"
+              "description": "Projection mode, \"Perspective\" or \"Orthographic\" (case-insensitive); any other value fails the call and nothing is changed; omit to keep the current one"
             },
             {
               "name": "fov_angle",
@@ -40087,7 +40094,7 @@
               "name": "texture_target",
               "jsonType": "string",
               "required": false,
-              "description": "Path to a UTextureRenderTarget2D to assign"
+              "description": "Path to a UTextureRenderTarget2D to assign; a path that does not load as one fails the call and nothing is changed"
             },
             {
               "name": "capture_every_frame",
@@ -40106,7 +40113,7 @@
         },
         {
           "name": "set_sky_atmosphere_properties",
-          "description": "Set the atmosphere properties of a SkyAtmosphere actor's USkyAtmosphereComponent. Only the supplied fields change (applied_count counts them) and the reply reads every property back. Colors are [R,G,B] or [R,G,B,A].",
+          "description": "Set atmosphere fields (Rayleigh/Mie scattering, anisotropy, ground albedo, radius, height, multi-scattering, aerial perspective, height fog) of a SkyAtmosphere actor found by label or name, through the component's setters, which refresh its render state; set_properties writes any other field. Only supplied fields change, in one undo step; all are read back. Colors are linear [R,G,B(,A)], ground_albedo [R,G,B(,A)] whole 0-255 bytes. A malformed field, or a component of Static mobility (its setters change nothing; make it Movable first), is an error and nothing changes. Not saved.",
           "params": [
             {
               "name": "actor_name",
@@ -40149,7 +40156,7 @@
               "name": "ground_albedo",
               "jsonType": "array",
               "required": false,
-              "description": "Optional [R,G,B] ground albedo as 0-255 bytes (FColor)."
+              "description": "Optional [R,G,B] or [R,G,B,A] ground albedo, each a whole number from 0 to 255 (FColor; A defaults to 255)."
             },
             {
               "name": "bottom_radius",
@@ -40192,7 +40199,7 @@
         },
         {
           "name": "set_sky_light_properties",
-          "description": "Set the properties of a SkyLight actor's USkyLightComponent: intensity, light color, indirect and volumetric intensity, lower-hemisphere color and occlusion. Only the supplied fields change (applied_count counts them) and the reply reads every property back. Colors are [R,G,B] or [R,G,B,A].",
+          "description": "Set intensity, light color, indirect and volumetric intensity, lower-hemisphere color and occlusion of a SkyLight actor found by label or name, through the component's setters, which update its rendering state; set_properties writes any other field. Only supplied fields change, in one undo step, and all are read back. light_color and lower_hemisphere_color are linear [R,G,B(,A)]; occlusion_tint is [R,G,B(,A)] in whole 0-255 bytes. A Static SkyLight is refused, since its setters change nothing (make it Stationary or Movable first), and so is a malformed field; nothing changes then. Not saved.",
           "params": [
             {
               "name": "actor_name",
@@ -40235,7 +40242,7 @@
               "name": "occlusion_tint",
               "jsonType": "array",
               "required": false,
-              "description": "Optional [R,G,B] occlusion tint as 0-255 bytes (FColor)."
+              "description": "Optional [R,G,B] or [R,G,B,A] occlusion tint, each a whole number from 0 to 255 (FColor; A defaults to 255)."
             },
             {
               "name": "occlusion_contrast",
@@ -40266,7 +40273,7 @@
         },
         {
           "name": "set_volumetric_cloud_properties",
-          "description": "Set the properties of a VolumetricCloud actor's UVolumetricCloudComponent: layer and planet geometry, ground albedo, tracing distances and sample counts. Only the supplied fields change (applied_count counts them) and the reply reads every property back. ground_albedo is [R,G,B] in 0-255 bytes.",
+          "description": "Set layer and planet geometry, ground albedo, tracing distances and sample counts of a VolumetricCloud actor found by label or name, through the component's setters, which refresh its render state; set_properties writes any other field. Only supplied fields change, in one undo step (applied_count counts them), and the reply reads every property back. ground_albedo is [R,G,B(,A)] in whole 0-255 bytes. A malformed field, or a component of Static mobility (its setters change nothing; make it Movable first), is an error and nothing changes. Not saved.",
           "params": [
             {
               "name": "actor_name",
@@ -40297,7 +40304,7 @@
               "name": "ground_albedo",
               "jsonType": "array",
               "required": false,
-              "description": "Optional [R,G,B] ground albedo as 0-255 bytes (FColor)."
+              "description": "Optional [R,G,B] or [R,G,B,A] ground albedo, each a whole number from 0 to 255 (FColor; A defaults to 255)."
             },
             {
               "name": "tracing_start_max_distance",
@@ -40358,7 +40365,7 @@
         },
         {
           "name": "spawn_box_reflection_capture",
-          "description": "Spawns a BoxReflectionCapture actor into the editor world.  Optionally sets the capture component's Brightness (read back), marks it dirty for recapture.",
+          "description": "Spawn a BoxReflectionCapture actor into the editor world at location in one undo step, optionally set its Brightness (read back), and mark it dirty for recapture. spawn_actor has no reflection-capture type; spawn_sphere_reflection_capture places a sphere probe. Each call adds an actor; not saved (save_level). Tune: set_reflection_capture_properties.",
           "params": [
             {
               "name": "location",
@@ -40384,7 +40391,7 @@
         },
         {
           "name": "spawn_exponential_height_fog",
-          "description": "Spawn a new ExponentialHeightFog actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one, so each call adds another fog actor (not idempotent); nothing is saved (save_level). fog_density, when given, is written to its UExponentialHeightFogComponent with SetFogDensity and density_set turns true; either way the reply reads fog_density back from the component, so without the param it shows the class default. No editor world, or a failed spawn, is an error. actor_name is the label and actor_internal_name the object name. Tune or inspect an existing fog with set_exponential_height_fog_properties and get_exponential_height_fog_properties; other atmosphere actors: spawn_sky_atmosphere, spawn_volumetric_cloud or spawn_sky_light.",
+          "description": "Spawn a new ExponentialHeightFog actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one, so each call adds another fog actor (not idempotent); nothing is saved (save_level). spawn_actor has no fog type, and this one also seeds fog_density: when given, it is written to its UExponentialHeightFogComponent with SetFogDensity and density_set turns true; either way the reply reads fog_density back from the component, so without the param it shows the class default. No editor world, or a failed spawn, is an error. actor_name is the label and actor_internal_name the object name. Tune or inspect an existing fog with set_exponential_height_fog_properties and get_exponential_height_fog_properties; other atmosphere actors: spawn_sky_atmosphere, spawn_volumetric_cloud or spawn_sky_light.",
           "params": [
             {
               "name": "location",
@@ -40410,7 +40417,7 @@
         },
         {
           "name": "spawn_post_process_volume",
-          "description": "Spawn a new PostProcessVolume actor in the editor world at location as one undoable transaction, unbound (affecting the whole world) by default; nothing is saved. Returns actor_name (the label), actor_internal_name, unbound and enabled. Configure it with set_post_process_setting or set_post_process_color_grading.",
+          "description": "Spawn a new PostProcessVolume actor in the editor world at location in one undo step, unbound (affecting the whole world) by default; not saved (save_level). It builds NO brush, so unbound=false covers no space: for a bounded volume use spawn_box_volume(volume_class='PostProcessVolume'). spawn_actor has no post-process type. Returns actor_name (the label), actor_internal_name, unbound and enabled. Configure it with set_post_process_setting or set_post_process_color_grading.",
           "params": [
             {
               "name": "location",
@@ -40436,7 +40443,7 @@
         },
         {
           "name": "spawn_scene_capture_2d",
-          "description": "Spawn a SceneCapture2D actor in the editor world (also while PIE runs, never into PIE) at location and rotation, in one undo step; the level is marked dirty but not saved. Each call spawns another actor (not idempotent) under the engine default label: actor_name is that label, actor_internal_name the object name to address it by later. A fresh capture has no render target, so has_render_target is false until one is assigned. Set its TextureTarget, capture source, projection and FOV with set_scene_capture_2d_properties (a target comes from create_render_target_2d), read them back with get_scene_capture_2d_properties. A reflection probe is spawn_sphere_reflection_capture or spawn_box_reflection_capture; any other actor class: spawn_actor.",
+          "description": "Spawn a SceneCapture2D actor in the editor world (also while PIE runs, never into PIE) at location and rotation, in one undo step; the level is marked dirty but not saved. spawn_actor has no scene-capture type. Each call spawns another actor (not idempotent) under the engine default label: actor_name is that label, actor_internal_name the object name to address it by later. A fresh capture has no render target, so has_render_target is false until one is assigned. Set its TextureTarget, capture source, projection and FOV with set_scene_capture_2d_properties (a target comes from create_render_target_2d), read them back with get_scene_capture_2d_properties. A reflection probe is spawn_sphere_reflection_capture or spawn_box_reflection_capture.",
           "params": [
             {
               "name": "location",
@@ -40463,7 +40470,7 @@
         },
         {
           "name": "spawn_sky_atmosphere",
-          "description": "Spawn a new SkyAtmosphere actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one; nothing is saved. Returns actor_name (the label), actor_internal_name, actor_class and has_component. Tune it with set_sky_atmosphere_properties.",
+          "description": "Spawn a new SkyAtmosphere actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one, so each call adds another; nothing is saved (save_level). spawn_actor has no atmosphere type. Returns actor_name (the label), actor_internal_name, actor_class and has_component. Tune it with set_sky_atmosphere_properties; the rest of a sky: spawn_sky_light, spawn_volumetric_cloud, spawn_exponential_height_fog.",
           "params": [
             {
               "name": "location",
@@ -40483,7 +40490,7 @@
         },
         {
           "name": "spawn_sky_light",
-          "description": "Spawn a new SkyLight actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one; nothing is saved. intensity, when given, is set on its USkyLightComponent, and recapture=true calls RecaptureSky so the light refreshes its captured sky lighting now. The reply reads intensity back from the component and names the actor (actor_name is the label). Tune an existing sky light with set_sky_light_properties; spawn_sky_atmosphere adds the atmosphere.",
+          "description": "Spawn a new SkyLight actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one; nothing is saved. intensity, when given, is set on its USkyLightComponent, and recapture=true calls RecaptureSky so the light refreshes its captured sky lighting now. spawn_actor(type='SkyLight') also spawns one and adds color, a name and a PIE world; pick this one for the recapture. The reply reads intensity back from the component and names the actor (actor_name is the label). Tune an existing sky light with set_sky_light_properties; spawn_sky_atmosphere adds the atmosphere.",
           "params": [
             {
               "name": "location",
@@ -40515,7 +40522,7 @@
         },
         {
           "name": "spawn_sphere_reflection_capture",
-          "description": "Spawns a SphereReflectionCapture actor into the editor world.  Sets the sphere capture component's InfluenceRadius / Brightness if given (read back to verify), marks it dirty for recapture.",
+          "description": "Spawn a SphereReflectionCapture actor into the editor world at location in one undo step, optionally set its InfluenceRadius (cm) and Brightness (read back), and mark it dirty for recapture; spawn_actor has no reflection-capture type, and spawn_box_reflection_capture places a box probe. Each call adds another actor; not saved (save_level). Tune it with set_reflection_capture_properties.",
           "params": [
             {
               "name": "location",
@@ -40547,7 +40554,7 @@
         },
         {
           "name": "spawn_volumetric_cloud",
-          "description": "Spawn a new VolumetricCloud actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one; nothing is saved. Returns actor_name (the label), actor_internal_name, actor_class and has_component. Tune it with set_volumetric_cloud_properties.",
+          "description": "Spawn a new VolumetricCloud actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one, so each call adds another; nothing is saved (save_level). spawn_actor has no cloud type. Returns actor_name (the label), actor_internal_name, actor_class and has_component. Tune it with set_volumetric_cloud_properties; the rest of a sky: spawn_sky_atmosphere, spawn_sky_light, spawn_exponential_height_fog.",
           "params": [
             {
               "name": "location",
@@ -41443,7 +41450,7 @@
         },
         {
           "name": "get_mass_trait_property",
-          "description": "Read a property (name or dotted path) of a trait in a Mass config via reflection (ExportText).",
+          "description": "Read a property (name or dotted path) of a trait on a Mass entity config, picked by trait_class, as ExportText plus its C++ type. Use it because a trait is an instanced object inside the config that get_properties cannot address by class. Write: set_mass_trait_property.",
           "params": [
             {
               "name": "config_path",
@@ -41700,7 +41707,7 @@
         },
         {
           "name": "set_mass_trait_property",
-          "description": "Set a property (name or dotted path) on a trait in a Mass config via reflection (ImportText).",
+          "description": "Set one property (name or dotted struct path) of a trait on a Mass entity config asset from import text, as one undo step, and save it. set_properties needs the trait's object path; this finds it by trait_class (add it: add_mass_trait). The trait gets PostEditChange as after a Details-panel edit; there is no edit gate, and a value that does not import is refused with nothing changed. A failed save makes success false, with saved=false and save_error. Read: get_mass_trait_property.",
           "params": [
             {
               "name": "config_path",
@@ -41730,7 +41737,7 @@
               "description": "String value parsed by FProperty::ImportText_Direct"
             }
           ],
-          "returns": "{ config_path, trait_class, property_name, value, set, saved }",
+          "returns": "{ config_path, trait_class, property_name, value, set, saved, save_error? }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -41740,7 +41747,7 @@
         },
         {
           "name": "spawn_mass_entities",
-          "description": "Trigger entity spawning on a AMassSpawner (DoSpawning from the FTSTicker path, outside Mass processing); reports the global Mass entity-count delta.",
+          "description": "Run DoSpawning on an editor-world AMassSpawner found by actor_label and report the global Mass entity-count delta -- it spawns entities, not an actor (create_mass_spawner_actor places the spawner). All configured types spawn at the spawner's own count (set_mass_spawner_count); a count that differs from it is an error and nothing is spawned. spawned can be 0. Inverse: despawn_mass_entities.",
           "params": [
             {
               "name": "actor_label",
@@ -41757,10 +41764,10 @@
                 -2147483648,
                 2147483647
               ],
-              "description": "Informational only; accepted but does not bound the spawn (default 0)"
+              "description": "Optional; must equal the spawner's own count (set_mass_spawner_count), which is what DoSpawning spawns. Any other value is an error and nothing is spawned."
             }
           ],
-          "returns": "{ actor_label, entity_count_before, entity_count_after, spawned, note }",
+          "returns": "{ actor_label, entity_count_before, entity_count_after, spawned, spawner_count, note }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
@@ -43404,7 +43411,7 @@
         },
         {
           "name": "set_material_expression_property",
-          "description": "Write one property of an expression node of a UMaterial asset (not an instance), found by its object name node_id. param_name names the property on every node type (R on Constant, DefaultValue or SliderMax on ScalarParameter, Constant on Constant3Vector and Constant4Vector, DefaultValue on VectorParameter...); ParameterName renames a node that has a parameter name. A value that does not parse for the property is refused and nothing is written. No undo, no save: it runs PostEditChange and marks the material dirty (persist with save_asset). value_after is the property read back. Instances: set_material_instance_parameter.",
+          "description": "Write one property of an expression node of a UMaterial asset (not an instance), found by its object name node_id. param_name names the property on every node type (R on Constant, DefaultValue or SliderMax on ScalarParameter, Constant on Constant3Vector and Constant4Vector, DefaultValue on VectorParameter...); ParameterName renames a parameter node through its own SetParameterName. Over set_properties on the node it also runs PostEditChange on the material and accepts \"[r,g,b,a]\" or \"r,g,b\" for a linear color. A value that does not parse for the property is refused and nothing is written. No undo, no save: it marks the material dirty (persist with save_asset). value_after is the property read back. Instances: set_material_instance_parameter.",
           "params": [
             {
               "name": "material_path",
@@ -44351,23 +44358,24 @@
         },
         {
           "name": "create_procedural_mesh_component",
-          "description": "Spawn a bare AActor in the editor world and attach a fresh UProceduralMeshComponent as its root. Idempotent: reuses the actor's existing PMC if found.",
+          "description": "Spawn a bare AActor labelled actor_label in the editor world with a new UProceduralMeshComponent as its root, the target the procedural-mesh tools find by label; spawn_actor has no bare actor, and add_component_to_actor adds a PMC to an existing one. The new actor stands at location (the origin when omitted; a location that is not 3 numbers is refused) and the PMC is an instance component, so save_level keeps both; one undo step, the level marked dirty, not saved. Idempotent: an actor already labelled actor_label that has a PMC is returned with reused:true and is not moved (location in the reply is where it stands). A label held by an actor WITHOUT a PMC is an error, since the procedural-mesh tools would find that actor first, and so is a label that is \"None\" or blank; nothing is spawned then.",
           "params": [
             {
               "name": "actor_label",
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Editor label for the new actor"
+              "description": "Editor label for the new actor; the procedural-mesh tools find the actor by it. An actor that already carries it is reused when it has a PMC and refused when it has none (those tools would find it first); a label that is not a valid actor label (\"None\", blank) is refused. Nothing is spawned on a refusal."
             },
             {
               "name": "location",
               "jsonType": "array",
               "required": false,
-              "description": "Optional [x, y, z] world location; defaults to (0,0,0)"
+              "vectorShape": "vector",
+              "description": "Optional [x, y, z] world location of a new actor; defaults to (0,0,0). A reused actor is not moved."
             }
           ],
-          "returns": "{ actor_label: string, actor_name: string, component_index: int, section_count: int, reused: bool }",
+          "returns": "{ actor_label: string, actor_name: string, component_name: string, component_index: int, section_count: int, reused: bool, location: [number, number, number] }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
@@ -45074,7 +45082,7 @@
         },
         {
           "name": "set_eqs_generator_properties",
-          "description": "Set properties of the generator of one option of a UEnvQuery asset by reflection, in one undo step; only the named properties change, the rest of the generator is kept. Keys are the generator class property names: a class property (SearchedActorClass, SearchCenter) takes a class path such as /Script/Engine.Pawn, checked against its base class; an FAIDataProvider value (SearchRadius, GenerateOnlyActorsInRadius) takes {\"DefaultValue\": number or bool}; any other property takes its JSON value. A property that is unknown or rejects the value lands in failed with its error without failing the call, so read set and failed; applied echoes the stored text of each named property. A query that does not load, an option_index out of range or an option with no generator (add_eqs_generator) is an error. The asset is marked dirty, not saved (save_asset). Test scoring: set_eqs_test_scoring; generator classes: list_eqs_generator_types; composition: get_eqs_query_info.",
+          "description": "Set properties of the generator of one option (option_index) of a UEnvQuery asset by reflection, in one undo step; only the named properties change. Use it over set_properties, which needs the generator's object path: here a class property (SearchedActorClass, SearchCenter) takes a class path such as /Script/Engine.Pawn, checked against its base class, and an FAIDataProvider value (SearchRadius, GenerateOnlyActorsInRadius) takes {\"DefaultValue\": number or bool}; others take their JSON value. A property that is unknown or rejects the value lands in failed without failing the call; applied echoes each stored value. A query that does not load, an option_index out of range or an option with no generator (add_eqs_generator) is an error. Marked dirty, not saved (save_asset). Scoring: set_eqs_test_scoring; classes: list_eqs_generator_types; composition: get_eqs_query_info.",
           "params": [
             {
               "name": "query_path",
@@ -45272,7 +45280,7 @@
         },
         {
           "name": "spawn_nav_link_proxy",
-          "description": "Spawn an ANavLinkProxy actor (with its class-default point link) in the editor world at location through the editor actor subsystem, in one undo step, and label it with its internal name so label lookups find it. Each call adds a new actor (not idempotent); the link endpoints are not set here. The level is not saved (save_level) and navigation is not rebuilt (rebuild_navigation). During PIE the editor refuses the spawn and the call is an error, as it is without an editor world. Move it with set_actor_transform; inverse: delete_actor. An area that changes path cost or blocks: spawn_nav_modifier_volume; the navmesh bounds: spawn_navmesh_bounds_volume.",
+          "description": "Spawn an ANavLinkProxy actor (with its class-default point link) in the editor world at location through the editor actor subsystem, in one undo step, and label it with its internal name so label lookups find it. spawn_actor has no nav-link type. Each call adds a new actor (not idempotent); the link endpoints are not set here -- write its PointLinks with set_properties. The level is not saved (save_level) and this call does not rebuild navigation (rebuild_navigation). During PIE the editor refuses the spawn and the call is an error, as it is without an editor world. Move it with set_actor_transform; inverse: delete_actor. An area that changes path cost or blocks: spawn_nav_modifier_volume; the navmesh bounds: spawn_navmesh_bounds_volume.",
           "params": [
             {
               "name": "location",
@@ -45292,7 +45300,7 @@
         },
         {
           "name": "spawn_nav_modifier_volume",
-          "description": "Spawn an ANavModifierVolume in the editor world at location, give it a real box brush of half-extent extent (a spawned volume has none) and optionally set its nav area class, in one undo step, then label it with its internal name so label lookups find it. area_class names a UNavArea subclass already loaded (e.g. NavArea_Null or NavArea_Obstacle; a Blueprint area by its _C name); a name that does not resolve to one is not an error: area_class_applied comes back false and the default area stays. Each call adds a new actor (not idempotent). The level is not saved (save_level) and navigation is not rebuilt (rebuild_navigation). During PIE the editor refuses the spawn and the call is an error. Navmesh bounds: spawn_navmesh_bounds_volume; jump or drop links: spawn_nav_link_proxy; inverse: delete_actor.",
+          "description": "Spawn an ANavModifierVolume in the editor world at location, give it a real box brush of half-extent extent (a spawned volume has none) and optionally set its nav area class, in one undo step, then label it with its internal name so label lookups find it. Over spawn_box_volume(volume_class='NavModifierVolume') it sets the area class in the same call; spawn_box_volume instead re-reads the bounds against the request. area_class names a UNavArea subclass already loaded (e.g. NavArea_Null or NavArea_Obstacle; a Blueprint area by its _C name); a name that does not resolve is not an error: area_class_applied comes back false and the default area stays. An extent axis of 0 or less becomes 100. Each call adds a new actor. Not saved (save_level); this call does not rebuild navigation (rebuild_navigation). Refused during PIE. Navmesh bounds: spawn_navmesh_bounds_volume; links: spawn_nav_link_proxy.",
           "params": [
             {
               "name": "location",
@@ -46418,7 +46426,7 @@
         },
         {
           "name": "add_instanced_static_mesh_component",
-          "description": "Attach an InstancedStaticMeshComponent (ISM) to a placed editor-world actor so you can then scatter many copies of one static mesh through it with add_instanced_static_mesh_instance. Idempotent: if the actor already has an ISM it returns that one with already_existed=true instead of adding a second. This is the working alternative to the foliage scatter tools, which crash the editor in this build.",
+          "description": "Attach an InstancedStaticMeshComponent (ISM) with an optional static mesh to a placed editor-world actor (name or label), in one undo step, to scatter copies of one mesh through it with add_instanced_static_mesh_instance. Over add_component_to_actor it only saves the separate mesh write, and it is idempotent: an existing ISM (a HISM counts) is returned with already_existed=true and its mesh left as it is (static_mesh in the reply says which). Without static_mesh_path the new ISM has no mesh; a path that does not load is an error and nothing is added. Not saved (save_level). The working alternative to the foliage scatter tools, which crash the editor in this build.",
           "params": [
             {
               "name": "actor_name",
@@ -46432,10 +46440,10 @@
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "description": "Optional /Game/... path to a UStaticMesh asset (defaults to engine cube if absent)"
+              "description": "Optional /Game/... path to a UStaticMesh asset; without it the ISM has no mesh. A path that does not load is an error and nothing is added; on an existing ISM it is not applied."
             }
           ],
-          "returns": "{ actor_name: string, component_name: string, component_class: string, num_instances: int, already_existed: bool }",
+          "returns": "{ actor_name: string, component_name: string, component_class: string, num_instances: int, static_mesh: string (the ISM's mesh path, empty when none), already_existed: bool }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
@@ -47557,7 +47565,7 @@
         },
         {
           "name": "set_physical_material_properties",
-          "description": "Load a UPhysicalMaterial, set surface/object properties, save, and read back (read-modify-write; only provided fields change; idempotent set-to-fixed-value).",
+          "description": "Set friction, restitution, density, combine modes, surface type, mass power and sleep thresholds of a PhysicalMaterial asset as one undo step, then save it. Over set_properties: it clamps to the engine ranges, turns combine-mode overrides on, and saves; like a Details-panel edit it runs PostEditChange, so bodies using the material in this session see the new values. Bad enum names, or a call with no field, fail before writing. Values the material already has give changed=false and saved=false; a failed save makes success false, with saved=false and save_error, and still returns the values read back.",
           "params": [
             {
               "name": "physical_material_path",
@@ -47630,7 +47638,7 @@
               "description": "Optional SleepAngularVelocityThreshold (>= 0)"
             }
           ],
-          "returns": "{ physical_material_path: string, friction: number, static_friction: number, restitution: number, density: number, friction_combine_mode: string, override_friction_combine_mode: bool, restitution_combine_mode: string, override_restitution_combine_mode: bool, surface_type: string, raise_mass_to_power: number, sleep_linear_velocity_threshold: number, sleep_angular_velocity_threshold: number, friction_applied: bool, static_friction_applied: bool, restitution_applied: bool, density_applied: bool, friction_combine_mode_applied: bool, restitution_combine_mode_applied: bool, surface_type_applied: bool, raise_mass_to_power_applied: bool, sleep_linear_velocity_threshold_applied: bool, sleep_angular_velocity_threshold_applied: bool, updated: bool }",
+          "returns": "{ physical_material_path: string, friction: number, static_friction: number, restitution: number, density: number, friction_combine_mode: string, override_friction_combine_mode: bool, restitution_combine_mode: string, override_restitution_combine_mode: bool, surface_type: string, raise_mass_to_power: number, sleep_linear_velocity_threshold: number, sleep_angular_velocity_threshold: number, friction_applied: bool, static_friction_applied: bool, restitution_applied: bool, density_applied: bool, friction_combine_mode_applied: bool, restitution_combine_mode_applied: bool, surface_type_applied: bool, raise_mass_to_power_applied: bool, sleep_linear_velocity_threshold_applied: bool, sleep_angular_velocity_threshold_applied: bool, updated: bool, changed: bool, saved: bool, save_error?: string, note?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -47893,7 +47901,7 @@
         },
         {
           "name": "set_physics_body_properties",
-          "description": "Set the physics type, a mass override and/or the advanced FBodyInstance fields (damping, mass scale, inertia scale, centre-of-mass nudge, gravity, mass update on scale) of one body of a UPhysicsAsset, chosen by body_index or else bone_name, in an undo transaction, then save the asset. Only the fields you pass change; passing none is an error and nothing is written. An asset with no bodies, no body found, an unknown physics_type, a mass_scale below 0.001 or a vector that is not 3 numbers is an error, checked before any write. Every field is read back from the authored body (not the live physics actor, which is absent headless). success is false, with save_error, when the save fails (during PIE, for one). get_physics_asset_info reads the body count.",
+          "description": "Set the physics type, a mass override and/or the advanced FBodyInstance fields (damping, mass scale, inertia scale, centre-of-mass nudge, gravity, mass update on scale) of one body of a UPhysicsAsset, chosen by body_index or else bone_name, then save the asset. Use it rather than set_properties, which needs the body setup's object path and the nested DefaultInstance struct: this picks the body by bone, goes through the engine setters for mass (which also switches the override on), mass scale and gravity, and saves. Only the fields you pass change; passing none is an error and nothing is written. An asset with no bodies, no body found, an unknown physics_type, a mass_scale below 0.001 or a vector that is not 3 numbers is an error, checked before any write. Every field is read back from the authored body (not the live physics actor, which is absent headless). success is false, with save_error, when the save fails (during PIE, for one).",
           "params": [
             {
               "name": "physics_asset_path",
@@ -48358,7 +48366,7 @@
         },
         {
           "name": "spawn_field_system_actor",
-          "description": "Spawn a new AFieldSystemActor in the editor world (not PIE) at location, unrotated, assign an existing UFieldSystem asset to its field system component, and set its outliner label. Every call spawns another actor; nothing is saved. A field system asset that does not load, or no editor world, is an error and spawns nothing; has_field_system confirms the assignment by reading it back. actor_label in the reply echoes the request, and actor_name is the new actor's internal name. Create the asset with create_field_system_asset, author its commands with add_field_node and inspect them with get_field_system_info; for any other actor class use spawn_actor.",
+          "description": "Spawn a new AFieldSystemActor in the editor world (not PIE) at location, unrotated, assign an existing UFieldSystem asset to its field system component, and set its outliner label. spawn_actor has no field-system type and could not assign the asset. Every call spawns another actor; no undo step, nothing is saved (save_level). A field system asset that does not load, or no editor world, is an error and spawns nothing; has_field_system confirms the assignment by reading it back. actor_label in the reply echoes the request, and actor_name is the new actor's internal name. Create the asset with create_field_system_asset, author its commands with add_field_node and inspect them with get_field_system_info.",
           "params": [
             {
               "name": "actor_label",
@@ -48392,7 +48400,7 @@
         },
         {
           "name": "spawn_physics_constraint",
-          "description": "Spawns an APhysicsConstraintActor in the editor world at location (zero rotation) in an undo transaction and optionally sets the two actors it constrains, found by object name or label (first match), then recomputes the joint frames. A name that matches no actor is skipped, not an error: check actor1_wired and actor2_wired. Each call adds a new actor; the level is not saved. Tune it with set_physics_constraint_limits and set_physics_constraint_drives, read it with get_physics_constraint_info; for joints inside a Physics Asset use add_physics_asset_constraint.",
+          "description": "Spawns an APhysicsConstraintActor in the editor world at location (zero rotation) in an undo transaction and optionally sets the two actors it constrains, found by object name or label (first match), then recomputes the joint frames; spawn_actor has no constraint type. A name that matches no actor is skipped, not an error: check actor1_wired and actor2_wired. Each call adds a new actor; the level is not saved. Tune it with set_physics_constraint_limits and set_physics_constraint_drives, read it with get_physics_constraint_info; for joints inside a Physics Asset use add_physics_asset_constraint.",
           "params": [
             {
               "name": "location",
@@ -48502,7 +48510,7 @@
       "commands": [
         {
           "name": "add_pcg_component",
-          "description": "Attach a PCG component (the procedural generation engine) to an actor and optionally point it at a PCG graph -- what turns a plain actor or volume into something that scatters meshes and points by rule. Idempotent: an actor that already has one gets it back. The component generates within the actor's BOUNDS, so on a volume with no brush geometry it produces zero instances with no error at all -- confirm the extent with get_actor_bounds first. Then run generate_pcg_component and inspect with get_pcg_component_info.",
+          "description": "Attach a PCG component (the procedural generation engine) to an editor-world actor, found by name or label, and optionally point it at a PCG graph -- what turns a plain actor or volume into something that scatters meshes and points by rule. Over add_component_to_actor it assigns the graph via UPCGComponent::SetGraph, which set_properties cannot (the graph lives in a read-only GraphInstance). Idempotent: an actor that already has one (an APCGVolume does) gets it back, graph re-assigned. It generates within the actor's BOUNDS, so a volume with no brush geometry yields zero instances with no error -- check get_actor_bounds first. Then generate_pcg_component and get_pcg_component_info. Not saved.",
           "params": [
             {
               "name": "actor_name",
@@ -48872,7 +48880,7 @@
         },
         {
           "name": "get_pcg_node_properties",
-          "description": "Reads every editable property of a PCG node's settings object via reflection.  The node is resolved by name from get_pcg_graph_info (or the \"Input\"/\"Output\" tokens); its UPCGSettings is serialized to JSON. Read-only.",
+          "description": "Read the reflected properties of one PCG node's settings object (UPCGSettings), serialized to JSON, the node found by its node_name from get_pcg_graph_info or the \"Input\"/\"Output\" tokens. Use it instead of get_properties, which would need the settings subobject's path. Read-only; write with set_pcg_node_properties.",
           "params": [
             {
               "name": "pcg_graph_path",
@@ -48938,7 +48946,7 @@
         },
         {
           "name": "set_pcg_component_properties",
-          "description": "Sets properties on an actor's UPCGComponent by reflection (Seed, bActivated, bIsComponentPartitioned, GenerationTrigger, ...). Reads the stored values back into the response.",
+          "description": "Write UPROPERTYs (Seed, bActivated, GenerationTrigger, ...) on the PCG component of an editor-world actor found by label or name, reading each stored value back. Over set_properties: no component path and no edit gate, but no PostEditChange is sent, so the component is not refreshed -- run generate_pcg_component. Nothing is saved.",
           "params": [
             {
               "name": "actor_name",
@@ -48997,7 +49005,7 @@
         },
         {
           "name": "set_pcg_node_properties",
-          "description": "Authors a PCG node's settings object via reflection (partial merge + clamp).  Only the keys present in ``properties`` are written; absent keys are untouched. After the merge, PostEditChange() invalidates the node's cached CRC and regenerates its pins. The graph is re-saved and the persisted settings are read back. Idempotent: re-applying the same values is a no-op.",
+          "description": "Write fields of one PCG node's settings object, picked by node_name in a PCG Graph asset, then save the graph and read the settings back. Use it instead of set_properties, which needs the settings object's path: this also clamps numbers to ClampMin/ClampMax and runs PostEditChange, invalidating the node's cached CRC and rebuilding its pins. Only keys in properties are written, in one undo step; keys match property names case-insensitively. An empty object, a key that names no property (the error lists them), a deprecated or instanced one, a null value, or a value of the wrong kind or that does not convert is an error and nothing changes. A call that changes no value still runs PostEditChange and re-saves. \"Input\"/\"Output\" address the endpoints. Read: get_pcg_node_properties.",
           "params": [
             {
               "name": "pcg_graph_path",
@@ -49017,10 +49025,10 @@
               "name": "properties",
               "jsonType": "object",
               "required": true,
-              "description": "Object of UPCGSettings fields to merge (e.g. for a SurfaceSampler: bApplyDensityToPoints(bool), PointsPerSquaredMeter(float>=0), Looseness(float)); absent keys untouched."
+              "description": "Object of UPCGSettings fields to merge, keyed by property name (matched case-insensitively) (e.g. for a SurfaceSampler: bApplyDensityToPoints(bool), PointsPerSquaredMeter(float>=0), Looseness(float)); absent keys untouched. An empty object, a key that names no property of the settings class (or a deprecated one, or one holding instanced subobjects), a null value or a value that does not convert is an error and nothing is changed."
             }
           ],
-          "returns": "{ graph_name: string, asset_path: string, node_name: string, settings_class: string, applied_keys: [string], properties: object, saved: bool, save_error: string }",
+          "returns": "{ graph_name: string, asset_path: string, node_name: string, settings_class: string, applied_keys: [string], properties: object, saved: bool, save_error?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -49030,7 +49038,7 @@
         },
         {
           "name": "spawn_pcg_volume",
-          "description": "Spawns an APCGVolume in the editor world with a REAL cube brush (from ``extent``), optionally assigning a graph. Bounds, origin, scale and brush geometry are RE-READ from the spawned actor, never echoed. Without ``extent`` the volume is spawned brush-less (kept for compatibility) and the response says so explicitly, because a PCG component with null bounds generates 0 instances in total silence.",
+          "description": "Spawn an APCGVolume in the editor world with a REAL cube brush of half-extent extent and optionally assign a PCG graph, in one undo step. Over spawn_box_volume(volume_class='PCGVolume') it adds the graph (UPCGComponent::SetGraph), a rotation and a name (used only when free); add_pcg_component sets a graph on an existing actor. Bounds, scale and brush are RE-READ, never echoed. Without extent the volume is brush-less (kept for compatibility) and the reply warns: null bounds generate 0 instances in total silence. Not saved (save_level).",
           "params": [
             {
               "name": "location",
@@ -49247,7 +49255,7 @@
         },
         {
           "name": "get_actor_properties_by_class",
-          "description": "Enumerate ACTORS by CLASS (or by editor label) and read their PROPERTIES in one call, in the editor world or in a live one. Reads the EDITOR world too (world='editor', with no PIE running), not just a live one. Use it instead of an execute_python loop over GetAllActorsOfClass + get_editor_property: it returns { path, props } per instance and stamps the world that answered, which such a loop does not. Filter with class_name (IsA) and/or actor_label, drill into one `component`, pick which `properties` to read, and use world='server' vs 'client' to separate an authoritative reading from a replicated one.",
+          "description": "Find placed actors by CLASS (IsA) and/or editor label and read chosen properties of each in one call, as { path, props } per instance, in a live PIE world by default or in the editor world with world='editor' (no PIE needed). Pick it when you have no object path, or want the same properties across many actors; for one object you can name, get_properties reads it typed and reports a misspelled name in not_found[], where this tool silently drops it. Filter with class_name and/or actor_label, drill into one `component`, list the `properties` to read, and compare world='server' with 'client' to separate the authoritative value from the replicated one; the reply stamps the world that answered. It replaces an execute_python loop over GetAllActorsOfClass + get_editor_property. Read-only.",
           "params": [
             {
               "name": "class_name",
@@ -49460,7 +49468,7 @@
         },
         {
           "name": "get_properties",
-          "description": "Read one or several named properties off ONE object you can already name (full object path, on-disk asset, CDO/archetype, or a dotted \"Actor[.Component[.Subobject]]\"), typed rather than stringified, returning a { name: typed_value } map, each property's FProperty class, and a not_found[] list of the names that do not exist on that class (unlike get_actor_properties_by_class, a misspelling is REPORTED, not silently dropped). property_name reads one; property_names batches several. Use inspect_object (include_property_metadata=true) when you do not know the names yet, and get_actor_properties_by_class when you have no path and want instances BY CLASS or LABEL. Accepts `world`, so the SAME read can be done on the server and on the client — the cheapest way to prove a value replicated — and the response stamps which world answered.",
+          "description": "Read one or several named properties off ONE object you can already name -- an asset path, a live object's full path, a CDO/archetype, or a dotted \"Actor[.Component[.Subobject]]\" whose first segment is the actor's internal name -- typed rather than stringified, as { name: typed_value } plus each property's FProperty class and not_found[] for names the class does not declare. Pick it when you have the object and the names: inspect_object when you do not know the names yet, get_actor_properties_by_class when you have no path and want instances by class or label (it drops misspelled names; this reports them), get_component_properties to list every property of one component or of a Blueprint component template. property_name reads one; property_names batches several. Accepts `world` (editor, server, client, pie:N), so the same read on server and client is the cheapest proof that a value replicated; the reply stamps which world answered. Read-only.",
           "params": [
             {
               "name": "object_path",
@@ -49521,7 +49529,7 @@
         },
         {
           "name": "inspect_object",
-          "description": "One-shot portrait of an object instance: identity (name, class, class path, super class, is_valid), the class-level flags/metadata/implemented interfaces, EVERY reflected property as a { name: typed_value } map, and -- when it is an actor -- the list of its live components with their classes. The \"I know nothing about this object yet\" entry point: include_properties=false makes it the cheap \"what IS this thing?\" probe (identity and class only), and include_property_metadata=true lists every property with its full editor metadata (type, editable, edit_const, blueprint_visible, replicated, save_game, clamp, tooltip, enum entries...) next to its value, for when the property NAMES are not known yet. Once you know the names, get_properties is far cheaper; get_class_hierarchy expands the class into its whole ancestor chain, and get_actor_components lists components alone. Accepts `world`, so the portrait can be taken of the LIVE server instance or of the client one -- useful when a class is swapped at runtime -- and the response stamps which world answered.",
+          "description": "Portrait of ONE object when you do not know its property names yet: identity (name, class, class path, super class, is_valid), class flags, metadata and implemented interfaces, EVERY reflected property as { name: typed_value }, and for an actor its live components with their classes. Once you know the names, get_properties is far cheaper; get_class_properties gives the property descriptors of a class with no instance, get_class_hierarchy its ancestor chain, and get_actor_components the components alone. include_properties=false makes it the cheap \"what IS this thing?\" probe (identity and class only); include_property_metadata=true adds each property's editor metadata (type, editable, edit_const, blueprint_visible, replicated, save_game, clamp, tooltip, enum entries) next to its value. Accepts `world`, so the portrait can be the live server or client instance -- useful when a class is swapped at runtime -- and the reply stamps which world answered. Read-only.",
           "params": [
             {
               "name": "object_path",
@@ -49800,7 +49808,7 @@
         },
         {
           "name": "set_properties",
-          "description": "Write one or several properties on ONE object instance (editor world only) in a single call, reporting set[] and failed[{property,error}] per name instead of one opaque flag; every write goes through a CPF_Edit/!EditConst gate plus the full Modify/PreEditChange/PostEditChange editor notification, so it is undoable and dirties the package. property_name + value writes one; properties{} writes several. Use set_component_property for a component's own property (it validates gameplay tags, which this does not), and call_function when the value has to go through the object's own setter. WARNING: EDITOR-WORLD ONLY (no `world` parameter) and success only means the import did not error — re-read the values (get_properties / list_instance_overrides) before believing it, especially for FGameplayTag on a placed actor, which reports success and leaves the tag empty.",
+          "description": "Write one or several properties on ONE object you can path to -- an asset, a CDO/archetype, a placed actor, or a dotted \"Actor.Component[.Subobject]\" -- in the EDITOR world, reporting set[] and failed[{property,error}] per name. Pick it for assets, CDOs and actors, or several properties at once; set_component_property for a placed actor's component in a live PIE world or a property this edit gate refuses; a typed set_<type>_properties tool when its description names a step you need (validation, rebuild, recompile, save); call_function to go through the object's own setter. Each write needs an editable, non-EditConst or BlueprintReadWrite property and runs Modify/PreEditChange/PostEditChange like a Details-panel edit: undoable, package dirtied, nothing saved (save_asset / save_level), no Blueprint compiled. Unregistered gameplay tags are refused. WARNING: success only means the import did not error -- re-read with get_properties before believing it, especially an FGameplayTag on a placed actor, which has reported success and left the tag empty.",
           "params": [
             {
               "name": "object_path",
@@ -51673,7 +51681,7 @@
         },
         {
           "name": "get_condition_property",
-          "description": "Read one property of a condition node on a StateTree state by reflection, without changing the asset: an enter condition, or a transition condition with target_kind \"transition\". Returns the value as JSON with its C++ type and has_value; only node struct properties are reachable, not instance data.",
+          "description": "Read one property of a condition node on a StateTree state by reflection, without changing the asset: an enter condition (condition_index), or with target_kind \"transition\" a condition of transition transition_index. Use it instead of get_properties, which cannot address a node inside a state's condition arrays. Returns the value as JSON with its C++ type and has_value; only node struct properties are reachable, not instance data. Whole node: get_condition_info; write: set_condition_property.",
           "params": [
             {
               "name": "tree_path",
@@ -51770,7 +51778,7 @@
         },
         {
           "name": "get_consideration_property",
-          "description": "Read one property of a consideration node on a StateTree state by reflection, without changing the asset. Returns the value as JSON with its C++ type and has_value; only node struct properties are reachable, not instance data. Find the index with list_considerations.",
+          "description": "Read one property of a utility consideration node on a StateTree state (consideration_index, from list_considerations) by reflection, without changing the asset. Use it instead of get_properties, which cannot address a node inside a state's Considerations array. Returns the value as JSON with its C++ type and has_value; only node struct properties are reachable, not instance data. Whole node: get_consideration_info; write: set_consideration_property.",
           "params": [
             {
               "name": "tree_path",
@@ -51844,7 +51852,7 @@
         },
         {
           "name": "get_evaluator_property",
-          "description": "Read one property of a tree-scoped evaluator node of a StateTree asset by reflection, without changing it. Returns the value as JSON with its C++ type and has_value; only node struct properties are reachable, not instance data. Write it with set_evaluator_property.",
+          "description": "Read one property of a tree-scoped evaluator node of a StateTree asset (evaluator_index, from list_evaluators) by reflection, without changing it. Use it instead of get_properties, which cannot address a node inside the tree's Evaluators array. Returns the value as JSON with its C++ type and has_value; only node struct properties are reachable, not instance data. Whole node: get_evaluator_info; write: set_evaluator_property.",
           "params": [
             {
               "name": "tree_path",
@@ -51965,7 +51973,7 @@
         },
         {
           "name": "get_task_property",
-          "description": "Read one property of a task node on a StateTree state by reflection, without changing the asset. Returns the value as JSON with its C++ type and has_value; only node struct properties are reachable, not instance data. Use get_task_info for the whole node and set_task_property to write.",
+          "description": "Read one property of a task node on a StateTree state (task_index, from list_tasks) by reflection, without changing the asset. Use it instead of get_properties, which cannot address a node inside a state's Tasks array. Returns the value as JSON with its C++ type and has_value; only node struct properties are reachable, not instance data. Whole node: get_task_info; write: set_task_property.",
           "params": [
             {
               "name": "tree_path",
@@ -52581,7 +52589,7 @@
         },
         {
           "name": "set_condition_property",
-          "description": "Write one property of a condition node on a StateTree state by reflection and save the asset: an enter condition, or a transition condition with target_kind \"transition\". Only node struct properties are reachable, not instance data. Returns value_changed, new_value and saved; the same value again gives value_changed false.",
+          "description": "Write one property of a condition node on a StateTree state by reflection and save the asset: an enter condition, or with target_kind \"transition\" a condition of transition transition_index. set_properties cannot reach it: the node is a struct in the state's condition list, addressed here by state_name and condition_index. Only node struct properties, not instance data. No undo step, no compile (compile_state_tree). The same value again gives value_changed false and still saves; a failed save makes success false, with saved=false and save_error. Read: get_condition_property.",
           "params": [
             {
               "name": "tree_path",
@@ -52637,7 +52645,7 @@
               "description": "0-based index into the selected condition list; omitting it fails as out of range."
             }
           ],
-          "returns": "{ tree_path, state_name, target_kind, transition_index, condition_index, property, set, value_changed, saved }",
+          "returns": "{ tree_path, state_name, target_kind, transition_index, condition_index, property, set, value_changed, saved, new_value?, save_error? }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -52647,7 +52655,7 @@
         },
         {
           "name": "set_consideration_property",
-          "description": "Set a single field of a consideration instance by reflection (FJsonObjectConverter::JsonValueToFProperty). Idempotent — re-applying the same value is a no-op (returns set:true, value_changed:false).",
+          "description": "Write one property of a utility consideration node of a StateTree state (state_name, consideration_index) and save the asset. set_properties cannot reach it: the node is a struct in the state's Considerations list. Node struct properties only, not instance data. No undo, no compile (compile_state_tree); the same value again gives value_changed false yet saves, and a failed save makes success false, with saved=false and save_error. Read: get_consideration_property.",
           "params": [
             {
               "name": "tree_path",
@@ -52687,7 +52695,7 @@
               "description": "JSON value to apply (any FJsonObjectConverter-supported type)."
             }
           ],
-          "returns": "{ tree_path, state_name, consideration_index, property, set, value_changed, saved }",
+          "returns": "{ tree_path, state_name, consideration_index, property, set, value_changed, saved, new_value?, save_error? }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -52697,7 +52705,7 @@
         },
         {
           "name": "set_evaluator_property",
-          "description": "Write one property of a tree-scoped evaluator node of a StateTree asset by reflection and save the asset. Only node struct properties are reachable, not instance data. Returns value_changed, new_value and saved; the same value again gives value_changed false. Read it back with get_evaluator_property.",
+          "description": "Write one property of a tree-scoped evaluator node of a StateTree asset (evaluator_index) by reflection and save the asset. set_properties cannot reach it: the evaluator is a struct in the tree's Evaluators list, not an addressable object. Only node struct properties are reachable, not instance data. No undo step and no compile (compile_state_tree). value_changed false means the value was already there; the asset is saved anyway, and a failed save makes success false, with saved=false and save_error. Read: get_evaluator_property; indexes: list_evaluators.",
           "params": [
             {
               "name": "tree_path",
@@ -52730,7 +52738,7 @@
               "description": "New value as JSON: a number, bool or string, or an object for a struct property, applied through FJsonObjectConverter."
             }
           ],
-          "returns": "{ tree_path, evaluator_index, property, set, value_changed, saved }",
+          "returns": "{ tree_path, evaluator_index, property, set, value_changed, saved, new_value?, save_error? }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -52853,7 +52861,7 @@
         },
         {
           "name": "set_state_tree_global_task_property",
-          "description": "Write one property of an existing global task of a StateTree asset by reflection and save the asset; despite the name it adds nothing (create the task with add_state_tree_global_task). Only node struct properties are reachable, not instance data. Returns value_changed, new_value and saved.",
+          "description": "Write one property of an existing global task's node struct in a StateTree asset, by global_task_index, and save the asset; despite the name it adds nothing (create the task with add_state_tree_global_task). set_properties cannot reach a StateTree node, so use this; instance data is not reachable. The tree is not compiled (compile_state_tree). Returns value_changed, new_value and saved; a failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "tree_path",
@@ -52886,7 +52894,7 @@
               "description": "New value as JSON: a number, bool or string, or an object for a struct property, applied through FJsonObjectConverter."
             }
           ],
-          "returns": "{ tree_path, global_task_index, property, set, value_changed, saved }",
+          "returns": "{ tree_path, global_task_index, property, set, value_changed, saved, new_value?, save_error? }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -53048,7 +53056,7 @@
         },
         {
           "name": "set_task_property",
-          "description": "Set a single field of a task instance by reflection (FJsonObjectConverter::JsonValueToFProperty). Idempotent — re-applying the same value is a no-op (returns set:true, value_changed:false).",
+          "description": "Write one property of a task's node struct on a StateTree state (state_name + task_index) and save the tree. set_properties cannot reach a StateTree node, so use this; instance data is not reachable. value_changed is false when the value was already held (the tree is still saved). A failed save makes success false, with saved=false and save_error. No undo step, not compiled (compile_state_tree). Read with get_task_property.",
           "params": [
             {
               "name": "tree_path",
@@ -53088,7 +53096,7 @@
               "description": "JSON value to apply (any FJsonObjectConverter-supported type)."
             }
           ],
-          "returns": "{ tree_path, state_name, task_index, property, set, value_changed, saved }",
+          "returns": "{ tree_path, state_name, task_index, property, set, value_changed, saved, new_value?, save_error? }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -54795,7 +54803,7 @@
         },
         {
           "name": "get_audio_section_properties",
-          "description": "Read the playback properties of an audio section (UMovieSceneAudioSection), resolved like set_audio_section_properties (root audio track + section_index).  Pure reader (no transaction/save).  looping reads IsRepeating() (the engine's loop query); volume/pitch are sampled at frame 0; volume_key_count/pitch_key_count report the animated-channel key counts.",
+          "description": "Read the playback settings of one audio section of a Level Sequence (path or bare name): the first root audio track, section by section_index. Use it instead of get_properties because it evaluates what no UPROPERTY holds directly: volume and pitch sampled at frame 0, the key counts of the animated volume/pitch channels, and looping via IsRepeating(); it also reports sound, start offset and attenuation override. Pure reader (no transaction, no save); write with set_audio_section_properties.",
           "params": [
             {
               "name": "sequence_path",
@@ -55858,7 +55866,7 @@
         },
         {
           "name": "set_audio_section_properties",
-          "description": "Set playback properties of one section on a root audio track of a Level Sequence, in one undo step, then save the sequence: its sound, looping (SetRepeating), play until finished, subtitle suppression, attenuation override and attenuation asset, its volume and pitch (SoundVolume / PitchMultiplier channels) and its start offset (how far into the clip playback begins). Only the fields you pass change; a sound or attenuation path that does not load, or an offset outside the frame range, is an error before anything changes. Setting a sound also re-derives the looping flag from it, as the engine does. volume and pitch without time_seconds make their channel one linear key at frame 0 holding that value (a constant); with time_seconds a linear key is ADDED at that time, rounded to a tick frame, even where a key already is. Each field is read back. Whether the call changed anything is measured on the section: when it did not, nothing is saved and the call leaves no undo step (changed false, saved false). Read back with get_audio_section_properties; add the section with add_audio_section.",
+          "description": "Set playback properties of one section (section_index) on a root audio track (audio_track_index) of a Level Sequence, in one undo step, then save the sequence: sound, looping (SetRepeating), play until finished, subtitle suppression, attenuation override and asset, volume, pitch and start offset. Use it rather than set_properties: volume and pitch are keyed channels, not plain properties, the start offset is converted to tick-resolution frames, and the section's own setters run (setting a sound re-derives looping). Only fields you pass change; a sound or attenuation path that does not load, or an offset outside the frame range, is an error before anything changes. volume/pitch without time_seconds become one constant key at frame 0; with time_seconds a linear key is ADDED at that time, rounded to a tick, even over an existing key. When nothing changes, nothing is saved and no undo step is left (changed false). Read: get_audio_section_properties; add: add_audio_section.",
           "params": [
             {
               "name": "sequence_path",
@@ -57881,7 +57889,7 @@
         },
         {
           "name": "spawn_box_volume",
-          "description": "USE THIS, NOT the plain actor spawners, for ANY AVolume-derived actor: it spawns the actor AND builds a real cube brush for it from a half-extent, so the volume actually encloses space. The generic spawners leave an EMPTY UModel brush -- zero bounds, which means 0 nav tiles and no overlap, an actor that looks spawned and does nothing. It then normalizes the residual scale some actor factories stamp on placement and RE-READS the resulting world bounds, so `success` means \"the volume you got matches the volume you asked for\", not \"the call returned\". Called with no class and no extent it gives a 200 cm BlockingVolume cube. One undo step; the level is not saved.",
+          "description": "Spawn ANY AVolume-derived actor (default BlockingVolume) in the editor world AND build a real cube brush for it from a half-extent, so the volume actually encloses space: spawn_actor has no volume types, and a volume spawned without a brush has zero bounds -- 0 nav tiles, no overlap. It then normalizes the residual scale some actor factories stamp on placement (PCGVolume: 25,25,10) and RE-READS the brush bounds, so `success` means the volume matches the extent you asked for, not that the call returned. Typed siblings add one step each: spawn_pcg_volume assigns a graph, spawn_nav_modifier_volume an area class, spawn_level_streaming_volume binds a sub-level. Called with no class and no extent it gives a 200 cm BlockingVolume cube. One undo step; refused during PIE; the level is not saved.",
           "params": [
             {
               "name": "volume_class",
@@ -58583,7 +58591,7 @@
         },
         {
           "name": "get_level_widget_properties",
-          "description": "Retrieve detailed properties and state information for a UUserWidget hosted on a UWidgetComponent in the current editor level, by name: class, validity, visibility, placement of the hosting component, parent, focus, and the direct children of its root panel (one level, each with name, class, depth, valid, enabled and visibility). list_level_widget_components gives the names.",
+          "description": "Read the live state of a UUserWidget hosted on a UWidgetComponent in the current editor level, found by the widget's object name (list_level_widget_components gives the names): class, validity, visibility, enabled and focus, the hosting component's draw size and relative transform, parent, and the direct children of its root panel (one level). Use it for this runtime state, which no UPROPERTY read gives; inspect_object reads the widget's raw properties. A running PIE session is never searched: use read_pie_widgets for live game UI.",
           "params": [
             {
               "name": "widget_name",
@@ -59375,7 +59383,7 @@
         },
         {
           "name": "set_box_slot_properties",
-          "description": "Configure a widget's box-family slot layout (alignment/padding/size).  Applies when the widget is parented under a HorizontalBox/VerticalBox/Overlay/Border/SizeBox/ScrollBox; dispatches by the concrete slot type. Size only applies to Horizontal/Vertical/ScrollBox slots -- on the others it is returned as an honest note. For a CanvasPanel child use set_widget_slot_properties; for a GridPanel child use set_grid_slot_properties.",
+          "description": "Configure a widget's box-family slot layout (alignment/padding/size) in a Widget Blueprint, found by the child widget's name, then compile and save the Widget Blueprint. Applies under a HorizontalBox/VerticalBox/Overlay/Border/SizeBox/ScrollBox, dispatching by slot type through the slot's own setters; set_properties would need the slot object's path and neither compiles nor saves. A padding that is not 1, 2 or 4 numbers, or an unknown alignment or size_rule, fails the call before anything is written. Size only applies to Horizontal/Vertical/ScrollBox slots -- on the others it comes back as a note. No undo step. CanvasPanel child: set_widget_slot_properties; GridPanel child: set_grid_slot_properties.",
           "params": [
             {
               "name": "widget_bp_path",
@@ -59407,7 +59415,7 @@
               "name": "padding",
               "jsonType": "array",
               "required": false,
-              "description": "Optional [Left, Top, Right, Bottom] floats (also accepts [uniform] or [horizontal, vertical])."
+              "description": "Optional [Left, Top, Right, Bottom] floats (also accepts [uniform] or [horizontal, vertical]); any other shape, or an entry that is not a number, fails the call and nothing is changed."
             },
             {
               "name": "size_rule",
@@ -59422,7 +59430,7 @@
               "description": "Optional float fill weight (used with size_rule = Fill; default 1.0)."
             }
           ],
-          "returns": "{ widget_bp_path: string, widget_name: string, slot_type: string, settings_applied: object, applied_count: int, notes: [string], saved: bool, save_error: string }",
+          "returns": "{ widget_bp_path: string, widget_name: string, slot_type: string, settings_applied: object, applied_count: int, notes: [string], saved: bool, save_error?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -59432,7 +59440,7 @@
         },
         {
           "name": "set_grid_slot_properties",
-          "description": "Configure a widget's UGridSlot layout (row/column/spans/alignment/padding/layer/nudge).  Applies when the widget is parented under a GridPanel (create one with add_widget_to_blueprint widget_type=\"GridPanel\"). Setting the same values again is idempotent.",
+          "description": "Configure the UGridSlot of a widget under a GridPanel in a Widget Blueprint, found by the child widget's name: row, column, spans, alignment, padding, layer, nudge. Over set_properties it needs no slot object path, uses the slot's own setters, and compiles and saves the Widget Blueprint; no undo step. A padding that is not 1, 2 or 4 numbers, a nudge that is not exactly 2, or an unknown alignment fails the call before anything is written. Idempotent. GridPanel: add_widget_to_blueprint widget_type=\"GridPanel\"; other panels: set_box_slot_properties, set_widget_slot_properties.",
           "params": [
             {
               "name": "widget_bp_path",
@@ -59488,7 +59496,7 @@
               "name": "padding",
               "jsonType": "array",
               "required": false,
-              "description": "Optional [Left, Top, Right, Bottom] floats."
+              "description": "Optional [Left, Top, Right, Bottom] floats (also accepts [uniform] or [horizontal, vertical]); any other shape, or an entry that is not a number, fails the call and nothing is changed."
             },
             {
               "name": "layer",
@@ -59500,10 +59508,10 @@
               "name": "nudge",
               "jsonType": "array",
               "required": false,
-              "description": "Optional [X, Y] content offset."
+              "description": "Optional [X, Y] content offset; anything but an array of exactly 2 numbers fails the call and nothing is changed."
             }
           ],
-          "returns": "{ widget_bp_path: string, widget_name: string, slot_type: string, settings_applied: object, applied_count: int, saved: bool, save_error: string }",
+          "returns": "{ widget_bp_path: string, widget_name: string, slot_type: string, settings_applied: object, applied_count: int, saved: bool, save_error?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -59913,7 +59921,7 @@
         },
         {
           "name": "set_widget_property",
-          "description": "Set ONE or MANY reflected properties on a widget of a Widget Blueprint, addressing NESTED STYLE FIELDS by dotted path (\"WidgetStyle.Normal.TintColor\", \"WidgetStyle.Hovered.OutlineSettings.CornerRadii\") and reporting FIELD BY FIELD what actually landed.  Two calling shapes over one write path: property_name+value writes a single path; `properties` writes a whole map with ONE Modify + ONE compile + ONE save (a FButtonStyle is ~30 leaf fields -- one call, not 30 recompiles). WARNING: The oracle is `applied[]`/`ignored[]`/`errors[]`, NOT success: a JSON key that matches no reflected field lands in `ignored[]` and `all_applied` goes false instead of the silent no-op the engine's converter reports as success. Read the result back with get_widget_blueprint_tree(property_paths=[...]).",
+          "description": "Set ONE or MANY reflected properties on a widget of a Widget Blueprint, addressing NESTED STYLE FIELDS by dotted path (\"WidgetStyle.Normal.TintColor\", \"Items[0].Label\") and reporting FIELD BY FIELD what landed, then compile and save it (save=false defers). Use it instead of set_properties for widgets: it finds the widget by name in the tree, writes leaf fields inside structs, takes color/margin/brush shorthands and compiles; set_properties takes only top-level names and compiles nothing. Two calling shapes over one write path: property_name+value, or a properties map under ONE Modify + ONE compile + ONE save (a FButtonStyle is ~30 leaf fields -- one call, not 30 recompiles). WARNING: the oracle is applied[]/ignored[]/errors[], NOT success: a key matching no reflected field lands in ignored[] and all_applied goes false. Refused while PIE runs unless force=true. Read back with get_widget_blueprint_tree(property_paths=[...]); slot layout: set_slot_properties.",
           "params": [
             {
               "name": "widget_bp_path",
@@ -59965,7 +59973,7 @@
         },
         {
           "name": "set_widget_slot_properties",
-          "description": "Set the CanvasPanelSlot layout of a widget inside a CanvasPanel of a Widget Blueprint asset -- anchors, offsets, position, size, z_order and auto_size, only those passed -- then compile and save the blueprint; the reply reads the whole slot back. position and size write the same fields as offsets (Left/Top and Right/Bottom) and are applied after it, so they win when both are given. A widget not under a CanvasPanel, or a call with none of the six fields, is an error. Refused while PIE runs unless force=true. For other slot types use set_box_slot_properties, set_grid_slot_properties or set_slot_properties.",
+          "description": "Set the CanvasPanelSlot layout of a widget inside a CanvasPanel of a Widget Blueprint asset -- anchors, offsets, position, size, z_order and auto_size, only those passed -- then compile and save the blueprint; the reply reads the whole slot back. Use it rather than set_slot_properties for canvas layout: it takes plain arrays ([MinX,MinY,MaxX,MaxY], [L,T,R,B], [X,Y]) instead of LayoutData.* paths. position and size write the same fields as offsets (Left/Top and Right/Bottom) and are applied after it, so they win when both are given. An anchors or offsets that is not exactly 4 numbers, or a position or size that is not exactly 2, fails the call before anything is written, compiled or saved. A widget not under a CanvasPanel, or a call with none of the six fields, is an error. Refused while PIE runs unless force=true. For other slot types use set_box_slot_properties, set_grid_slot_properties or set_slot_properties.",
           "params": [
             {
               "name": "widget_bp_path",
@@ -59985,25 +59993,25 @@
               "name": "anchors",
               "jsonType": "array",
               "required": false,
-              "description": "Optional [MinX, MinY, MaxX, MaxY] anchor floats."
+              "description": "Optional [MinX, MinY, MaxX, MaxY] anchor floats; anything but an array of exactly 4 numbers fails the call and nothing is changed."
             },
             {
               "name": "offsets",
               "jsonType": "array",
               "required": false,
-              "description": "Optional [Left, Top, Right, Bottom] offset floats."
+              "description": "Optional [Left, Top, Right, Bottom] offset floats; anything but an array of exactly 4 numbers fails the call and nothing is changed."
             },
             {
               "name": "position",
               "jsonType": "array",
               "required": false,
-              "description": "Optional [X, Y] position."
+              "description": "Optional [X, Y] position; anything but an array of exactly 2 numbers fails the call and nothing is changed."
             },
             {
               "name": "size",
               "jsonType": "array",
               "required": false,
-              "description": "Optional [X, Y] size."
+              "description": "Optional [X, Y] size; anything but an array of exactly 2 numbers fails the call and nothing is changed."
             },
             {
               "name": "z_order",
@@ -60018,7 +60026,7 @@
               "description": "Optional bool: when true, the slot sizes itself to the widget's desired size instead of `size`."
             }
           ],
-          "returns": "{ widget_bp_path: string, widget_name: string, anchors_set: bool, offsets_set: bool, position_set: bool, size_set: bool, z_order_set: bool, auto_size_set: bool, current_anchors: [float], current_offsets: [float], current_position: [float], current_size: [float], current_z_order: int, current_auto_size: bool, saved: bool, save_error: string }",
+          "returns": "{ widget_bp_path: string, widget_name: string, anchors_set: bool, offsets_set: bool, position_set: bool, size_set: bool, z_order_set: bool, auto_size_set: bool, current_anchors: [float], current_offsets: [float], current_position: [float], current_size: [float], current_z_order: int, current_auto_size: bool, saved: bool, save_error?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -62248,7 +62256,7 @@
         },
         {
           "name": "set_water_body_properties",
-          "description": "Set only the given settings of a lake, ocean or river water body, found by actor label in the editor world, reading each back with already_set; nothing is saved. water_velocity and audio_intensity go to the spline point at or before input_key, are read back from that point and synchronize the spline. water_height_offset is ocean-only; the ocean's setter clamps it to >= 0 and rebuilds the body. Every other field that changes gets the editor's change notification, updating the water mesh and landscape. All checks run before any write: a spline value without input_key, a key before the first spline point, water_height_offset on a non-ocean body or an unknown label is an error that changes nothing. A value held exactly is not written (already_set true); otherwise the call is one undo step dirtying the actor's package. River width/depth: set_river_width_depth_at_point; waves: set_water_body_gerstner_waves.",
+          "description": "Set only the given settings of a lake, ocean or river water body, found by actor label in the editor world, reading each back with already_set; nothing is saved. Use it over set_properties for water_velocity/audio_intensity, which live per spline point: they go to the point at or before input_key, are read back from it and synchronize the spline. water_height_offset is ocean-only; the ocean's setter clamps it to >= 0 and rebuilds the body. Every other field that changes gets the editor's change notification, updating the water mesh and landscape. All checks run before any write: a spline value without input_key, a key before the first spline point, water_height_offset on a non-ocean body or an unknown label is an error that changes nothing. A value held exactly is not written (already_set true); otherwise the call is one undo step dirtying the actor's package. River width/depth: set_river_width_depth_at_point; waves: set_water_body_gerstner_waves.",
           "params": [
             {
               "name": "water_body_label",
