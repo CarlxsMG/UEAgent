@@ -1,5 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Misc/EngineVersionComparison.h"
 
 #include "Editor.h"
 #include "Materials/MaterialInstanceConstant.h"
@@ -19,6 +20,10 @@
 #include "EditorAssetLibrary.h"
 #include "Materials/MaterialInstanceDynamic.h"   // get_material_parameters on a live MID
 #include "UObject/UObjectIterator.h"   // FindLiveMid
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+#include "Materials/MaterialParameterCollection.h"   // 5.7 parameter override of a collection parameter
+#include "UObject/UnrealType.h"                      // FStructProperty (5.7 static switch override)
+#endif
 
 namespace UEAgentMaterialInstanceCommands
 {
@@ -54,6 +59,205 @@ namespace
 		}
 		return mcp_common::SaveAssetPackage(MIC->GetOutermost(), MIC, OutError);
 	}
+
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+	// UE 5.7: UMaterialEditingLibrary::IsMaterialInstanceParameterOverridden / ::SetMaterialInstanceParameterOverride
+	// and UMaterialInstance::SetStaticComponentMaskParameterValueEditorOnly arrived in 5.8. These are their bodies,
+	// written with what 5.7 exposes.
+
+	/** 5.8's IsMaterialInstanceParameterOverridden: whether Instance itself stores a value for the parameter, of any type. */
+	bool IsParameterOverridden57(UMaterialInstanceConstant* Instance, FName ParameterName, EMaterialParameterAssociation Association)
+	{
+		if (!Instance)
+		{
+			return false;
+		}
+		const FMaterialParameterInfo ParamInfo(ParameterName, Association, Association == EMaterialParameterAssociation::LayerParameter ? 0 : INDEX_NONE);
+		FMaterialParameterMetadata OutResult;
+		for (int32 TypeIndex = 0; TypeIndex < NumMaterialParameterTypes; ++TypeIndex)
+		{
+			if (Instance->GetParameterOverrideValue(static_cast<EMaterialParameterType>(TypeIndex), ParamInfo, OutResult))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** 5.8's SetStaticComponentMaskParameterValueEditorOnly: overrides the mask on the instance, adding the entry when missing. */
+	void SetStaticComponentMaskParameterValue57(UMaterialInstance* Instance, const FMaterialParameterInfo& ParameterInfo, const FStaticComponentMaskValue& Value)
+	{
+		UMaterialInstanceEditorOnlyData* EditorOnly = Instance->GetEditorOnlyData();
+		if (!EditorOnly)
+		{
+			return;
+		}
+		for (FStaticComponentMaskParameter& Parameter : EditorOnly->StaticParameters.StaticComponentMaskParameters)
+		{
+			if (Parameter.ParameterInfo == ParameterInfo)
+			{
+				Parameter.bOverride = true;
+				Parameter.R = Value.R;
+				Parameter.G = Value.G;
+				Parameter.B = Value.B;
+				Parameter.A = Value.A;
+				return;
+			}
+		}
+		EditorOnly->StaticParameters.StaticComponentMaskParameters.Add(
+			FStaticComponentMaskParameter(ParameterInfo, Value.R, Value.G, Value.B, Value.A, true, FGuid()));
+	}
+
+	/**
+	 * 5.8's SetMaterialInstanceParameterOverride. bOverride=true stores the value the instance now reads as its own
+	 * override; false removes the instance's value so the parent's applies again. Returns false when the parameter is
+	 * not found, or there was no value to remove. Where 5.7 has no public setter (double vector, parameter collection)
+	 * the value goes into the instance's public array; where the storage is private (static switches) it is reached
+	 * through its UPROPERTY.
+	 */
+	bool SetParameterOverride57(UMaterialInstanceConstant* Instance, FName ParameterName, bool bOverride, EMaterialParameterAssociation Association)
+	{
+		if (!Instance)
+		{
+			return false;
+		}
+
+		const FMaterialParameterInfo ParamInfo(ParameterName, Association, Association == EMaterialParameterAssociation::LayerParameter ? 0 : INDEX_NONE);
+		FMaterialParameterMetadata Meta;
+		EMaterialParameterType FoundType = EMaterialParameterType::None;
+		for (int32 TypeIndex = 0; TypeIndex < NumMaterialParameterTypes; ++TypeIndex)
+		{
+			const EMaterialParameterType Type = static_cast<EMaterialParameterType>(TypeIndex);
+			if (Instance->GetParameterValue(Type, ParamInfo, Meta))
+			{
+				FoundType = Type;
+				break;
+			}
+		}
+		if (FoundType == EMaterialParameterType::None)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("SetMaterialInstanceParameterOverride: Parameter '%s' not found in material hierarchy."), *ParameterName.ToString());
+			return false;
+		}
+
+		// Already in the desired state: nothing to do.
+		if (bOverride == Meta.bOverride)
+		{
+			return true;
+		}
+
+		if (bOverride)
+		{
+			// What the internal setters do for the types 5.7 has no public setter for: find or add, then write.
+			auto SetArrayValue = [&ParamInfo](auto& ParameterArray, const auto& NewValue)
+			{
+				auto* Parameter = ParameterArray.FindByPredicate([&ParamInfo](const auto& Param) { return Param.ParameterInfo == ParamInfo; });
+				if (!Parameter)
+				{
+					Parameter = &ParameterArray.AddDefaulted_GetRef();
+					Parameter->ParameterInfo = ParamInfo;
+					Parameter->ExpressionGUID.Invalidate();
+				}
+				Parameter->ParameterValue = NewValue;
+			};
+
+			switch (FoundType)
+			{
+			case EMaterialParameterType::Scalar:				Instance->SetScalarParameterValueEditorOnly(ParamInfo, Meta.Value.AsScalar()); break;
+			case EMaterialParameterType::Vector:				Instance->SetVectorParameterValueEditorOnly(ParamInfo, Meta.Value.AsLinearColor()); break;
+			case EMaterialParameterType::DoubleVector:			SetArrayValue(Instance->DoubleVectorParameterValues, Meta.Value.AsVector4d()); break;
+			case EMaterialParameterType::Texture:				Instance->SetTextureParameterValueEditorOnly(ParamInfo, Meta.Value.Texture); break;
+			case EMaterialParameterType::TextureCollection:		Instance->SetTextureCollectionParameterValueEditorOnly(ParamInfo, Meta.Value.TextureCollection); break;
+			case EMaterialParameterType::Font:					Instance->SetFontParameterValueEditorOnly(ParamInfo, Meta.Value.Font.Value, Meta.Value.Font.Page); break;
+			case EMaterialParameterType::RuntimeVirtualTexture: Instance->SetRuntimeVirtualTextureParameterValueEditorOnly(ParamInfo, Meta.Value.RuntimeVirtualTexture); break;
+			case EMaterialParameterType::SparseVolumeTexture:	Instance->SetSparseVolumeTextureParameterValueEditorOnly(ParamInfo, Meta.Value.SparseVolumeTexture); break;
+			case EMaterialParameterType::StaticSwitch:			Instance->SetStaticSwitchParameterValueEditorOnly(ParamInfo, Meta.Value.AsStaticSwitch()); break;
+			case EMaterialParameterType::ParameterCollection:	SetArrayValue(Instance->ParameterCollectionParameterValues, Meta.Value.ParameterCollection); break;
+			case EMaterialParameterType::StaticComponentMask:	SetStaticComponentMaskParameterValue57(Instance, ParamInfo, Meta.Value.AsStaticComponentMask()); break;
+			default:
+				UE_LOG(LogTemp, Warning, TEXT("SetMaterialInstanceParameterOverride: Unsupported parameter type for '%s'."), *ParameterName.ToString());
+				return false;
+			}
+		}
+		else
+		{
+			bool bRemoved = false;
+
+			// Disabling override: remove the parameter from the appropriate array.
+			auto RemoveParameterByInfo = [&ParamInfo](auto& ParameterArray) -> bool
+			{
+				const int32 Index = ParameterArray.IndexOfByPredicate([&ParamInfo](const auto& Param)
+				{
+					return Param.ParameterInfo == ParamInfo;
+				});
+
+				if (Index != INDEX_NONE)
+				{
+					ParameterArray.RemoveAt(Index);
+					return true;
+				}
+				return false;
+			};
+
+			auto RemoveStaticParameter = [&ParamInfo](auto& StaticParameterArray) -> bool
+			{
+				for (auto& Param : StaticParameterArray)
+				{
+					if (Param.ParameterInfo == ParamInfo)
+					{
+						Param.bOverride = false;
+						return true;
+					}
+				}
+				return false;
+			};
+
+			switch (FoundType)
+			{
+			case EMaterialParameterType::Scalar:				bRemoved = RemoveParameterByInfo(Instance->ScalarParameterValues); break;
+			case EMaterialParameterType::Vector:				bRemoved = RemoveParameterByInfo(Instance->VectorParameterValues); break;
+			case EMaterialParameterType::DoubleVector:			bRemoved = RemoveParameterByInfo(Instance->DoubleVectorParameterValues); break;
+			case EMaterialParameterType::Texture:				bRemoved = RemoveParameterByInfo(Instance->TextureParameterValues); break;
+			case EMaterialParameterType::TextureCollection:		bRemoved = RemoveParameterByInfo(Instance->TextureCollectionParameterValues); break;
+			case EMaterialParameterType::ParameterCollection:	bRemoved = RemoveParameterByInfo(Instance->ParameterCollectionParameterValues); break;
+			case EMaterialParameterType::Font:					bRemoved = RemoveParameterByInfo(Instance->FontParameterValues); break;
+			case EMaterialParameterType::RuntimeVirtualTexture: bRemoved = RemoveParameterByInfo(Instance->RuntimeVirtualTextureParameterValues); break;
+			case EMaterialParameterType::SparseVolumeTexture:	bRemoved = RemoveParameterByInfo(Instance->SparseVolumeTextureParameterValues); break;
+			case EMaterialParameterType::StaticSwitch:
+			{
+				// StaticParametersRuntime is private in 5.7 (5.8's library is a friend of UMaterialInstance); its UPROPERTY is not.
+				const FStructProperty* RuntimeProperty = FindFProperty<FStructProperty>(UMaterialInstance::StaticClass(), TEXT("StaticParametersRuntime"));
+				if (RuntimeProperty && RuntimeProperty->Struct && RuntimeProperty->Struct->GetFName() == FName(TEXT("StaticParameterSetRuntimeData")))
+				{
+					bRemoved = RemoveStaticParameter(RuntimeProperty->ContainerPtrToValuePtr<FStaticParameterSetRuntimeData>(Instance)->StaticSwitchParameters);
+				}
+				break;
+			}
+			case EMaterialParameterType::StaticComponentMask:
+				if (UMaterialInstanceEditorOnlyData* EditorOnly = Instance->GetEditorOnlyData())
+				{
+					bRemoved = RemoveStaticParameter(EditorOnly->StaticParameters.StaticComponentMaskParameters);
+				}
+				break;
+			default:
+				UE_LOG(LogTemp, Warning, TEXT("SetMaterialInstanceParameterOverride: Unsupported parameter type for '%s'."), *ParameterName.ToString());
+			}
+
+			if (!bRemoved)
+			{
+				return false;
+			}
+		}
+
+		UMaterialEditingLibrary::UpdateMaterialInstance(Instance);
+		// 5.8 rebuilds this instance's open editor; 5.7 can only reach it through the editors of its base material.
+		if (UMaterial* BaseMaterial = Instance->GetMaterial())
+		{
+			UMaterialEditingLibrary::RebuildMaterialInstanceEditors(BaseMaterial);
+		}
+		return true;
+	}
+#endif
 }
 
 namespace UEAgentMaterialInstanceImpl
@@ -1128,7 +1332,11 @@ TSharedPtr<FJsonObject> HandleSetMaterialInstanceStaticSwitch(
 
 	// Read back via the getter (never trust the value-setter return).
 	const bool bReadValue = UMaterialEditingLibrary::GetMaterialInstanceStaticSwitchParameterValue(MIC, ParamFName, Assoc);
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+	const bool bFound = IsParameterOverridden57(MIC, ParamFName, Assoc);
+#else
 	const bool bFound = UMaterialEditingLibrary::IsMaterialInstanceParameterOverridden(MIC, ParamFName, Assoc);
+#endif
 
 	TSharedPtr<FJsonObject> Data = UEAgentMaterialInstanceImpl::NewParameterPayload(MIPath, ParamName, Assoc);
 	Data->SetBoolField(TEXT("requested_value"), bValue);
@@ -1172,7 +1380,11 @@ TSharedPtr<FJsonObject> HandleSetMaterialInstanceStaticComponentMask(
 
 	MIC->Modify();
 	// ENGINE setter takes FStaticComponentMaskValue by value (NO 4-bool overload on the setter); de-dups by ParameterInfo.
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+	SetStaticComponentMaskParameterValue57(MIC, ParamInfo, FStaticComponentMaskValue(bR, bG, bB, bA));
+#else
 	MIC->SetStaticComponentMaskParameterValueEditorOnly(ParamInfo, FStaticComponentMaskValue(bR, bG, bB, bA));
+#endif
 
 	UMaterialEditingLibrary::UpdateMaterialInstance(MIC);
 	MIC->PostEditChange();
@@ -1273,7 +1485,11 @@ TSharedPtr<FJsonObject> HandleSetMaterialInstanceParamOverride(
 	// SetMaterialInstanceParameterOverride handles all 11 parameter types, removes the value when
 	// bOverride=false (reverts to parent), runs UpdateMaterialInstance internally, and returns
 	// false honestly when the parameter is not found on the instance.
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+	const bool bApplied = SetParameterOverride57(MIC, ParamFName, bOverride, Assoc);
+#else
 	const bool bApplied = UMaterialEditingLibrary::SetMaterialInstanceParameterOverride(MIC, ParamFName, bOverride, Assoc);
+#endif
 	MIC->PostEditChange();
 	UE_LOG(LogTemp, Verbose, TEXT("set_material_instance_parameter_override: %s.%s [%s] override=%d -> applied=%d"),
 		*MIPath, *ParamName, *AssociationToString(Assoc), bOverride ? 1 : 0, bApplied ? 1 : 0);
@@ -1291,7 +1507,11 @@ TSharedPtr<FJsonObject> HandleSetMaterialInstanceParamOverride(
 		return mcp_common::MakeErrorReply(SaveError);
 
 	// Read back the resulting override flag.
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+	const bool bOverridden = IsParameterOverridden57(MIC, ParamFName, Assoc);
+#else
 	const bool bOverridden = UMaterialEditingLibrary::IsMaterialInstanceParameterOverridden(MIC, ParamFName, Assoc);
+#endif
 
 	TSharedPtr<FJsonObject> Data = UEAgentMaterialInstanceImpl::NewParameterPayload(MIPath, ParamName, Assoc);
 	Data->SetBoolField(TEXT("requested_override"), bOverride);
@@ -1320,7 +1540,11 @@ TSharedPtr<FJsonObject> HandleGetMaterialInstanceParamOverridden(
 	if (TSharedPtr<FJsonObject> Error = MaterialInstance_ReadAssociation(Params, Assoc)) { return Error; }
 
 	const FName ParamFName(*ParamName);
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+	const bool bOverridden = IsParameterOverridden57(MIC, ParamFName, Assoc);
+#else
 	const bool bOverridden = UMaterialEditingLibrary::IsMaterialInstanceParameterOverridden(MIC, ParamFName, Assoc);
+#endif
 
 	TSharedPtr<FJsonObject> Data = UEAgentMaterialInstanceImpl::NewParameterPayload(MIPath, ParamName, Assoc);
 	Data->SetBoolField(TEXT("overridden"), bOverridden);

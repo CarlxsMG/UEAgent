@@ -1,5 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Misc/EngineVersionComparison.h"
 
 #include "Editor.h"
 #include "Engine/World.h"
@@ -155,6 +156,24 @@ namespace
         FScriptArrayHelper Helper(ArrayProp, ArrayPtr);
         return Helper.Num();
     }
+
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    /**
+     * UE 5.7 has no UMotionWarpingComponent::GetWarpTargets(): the protected `WarpTargets` array it returns in 5.8,
+     * read through its reflected property (FindFProperty bypasses C++ access control). Empty when the property
+     * cannot be resolved.
+     */
+    TConstArrayView<FMotionWarpingTarget> MW_GetWarpTargets(const UMotionWarpingComponent* Comp)
+    {
+        const FArrayProperty* ArrayProp = FindFProperty<FArrayProperty>(
+            UMotionWarpingComponent::StaticClass(), TEXT("WarpTargets"));
+        if (!Comp || !ArrayProp)
+        {
+            return TConstArrayView<FMotionWarpingTarget>();
+        }
+        return *ArrayProp->ContainerPtrToValuePtr<TArray<FMotionWarpingTarget>>(Comp);
+    }
+#endif
 
     /** Serialise one FMotionWarpingTarget into a JSON object. */
     TSharedPtr<FJsonObject> MW_TargetToJson(const FMotionWarpingTarget& Target)
@@ -377,7 +396,11 @@ TSharedPtr<FJsonObject> HandleAddWarpTargetToComponent(
     const bool bHasRotation = Params->HasField(TEXT("rotation"));
 
     // The target as it was, for previous_* and changed (a copy: the write below may reallocate the array).
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    const int32 PreviousCount = MW_GetWarpTargets(Comp).Num();
+#else
     const int32 PreviousCount = Comp->GetWarpTargets().Num();
+#endif
     TOptional<FMotionWarpingTarget> Before;
     if (const FMotionWarpingTarget* Found = Comp->FindWarpTarget(TargetName))
     {
@@ -460,7 +483,11 @@ TSharedPtr<FJsonObject> HandleAddWarpTargetToComponent(
 
     TSharedPtr<FJsonObject> Data = MW_StartReply(Actor);
     Data->SetStringField(TEXT("target_name"), TargetNameStr);
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    Data->SetNumberField(TEXT("warp_target_count"), MW_GetWarpTargets(Comp).Num());
+#else
     Data->SetNumberField(TEXT("warp_target_count"), Comp->GetWarpTargets().Num());
+#endif
     Data->SetNumberField(TEXT("previous_count"), PreviousCount);
     Data->SetStringField(TEXT("source"), Source);
     Data->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
@@ -513,11 +540,19 @@ TSharedPtr<FJsonObject> HandleRemoveWarpTarget(
     if (TSharedPtr<FJsonObject> Error = MW_ResolveActorComponent(ActorPath, Actor, Comp)) { return Error; }
 
     // The engine removes one FName at a time: snapshot the names to remove first.
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    const int32 PreviousCount = MW_GetWarpTargets(Comp).Num();
+#else
     const int32 PreviousCount = Comp->GetWarpTargets().Num();
+#endif
     TArray<FName> ToRemove;
     if (bAll)
     {
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+        for (const FMotionWarpingTarget& Existing : MW_GetWarpTargets(Comp))
+#else
         for (const FMotionWarpingTarget& Existing : Comp->GetWarpTargets())
+#endif
         {
             ToRemove.Add(Existing.Name);
         }
@@ -544,9 +579,15 @@ TSharedPtr<FJsonObject> HandleRemoveWarpTarget(
         }
     }
 
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    UE_LOG(LogTemp, Verbose,
+        TEXT("[MCP] remove_motion_warping_target: actor='%s' target='%s' all=%s removed=%d remaining=%d"),
+        *Actor->GetName(), *TargetNameStr, bAll ? TEXT("true") : TEXT("false"), RemovedNames.Num(), MW_GetWarpTargets(Comp).Num());
+#else
     UE_LOG(LogTemp, Verbose,
         TEXT("[MCP] remove_motion_warping_target: actor='%s' target='%s' all=%s removed=%d remaining=%d"),
         *Actor->GetName(), *TargetNameStr, bAll ? TEXT("true") : TEXT("false"), RemovedNames.Num(), Comp->GetWarpTargets().Num());
+#endif
 
     TSharedPtr<FJsonObject> Data = MW_StartReply(Actor);
     if (!bAll)
@@ -557,7 +598,11 @@ TSharedPtr<FJsonObject> HandleRemoveWarpTarget(
     Data->SetNumberField(TEXT("removed_count"), RemovedNames.Num());
     Data->SetArrayField(TEXT("removed_names"), mcp_common::StringsToJson(RemovedNames));
     Data->SetNumberField(TEXT("previous_count"), PreviousCount);
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    Data->SetNumberField(TEXT("warp_target_count"), MW_GetWarpTargets(Comp).Num());
+#else
     Data->SetNumberField(TEXT("warp_target_count"), Comp->GetWarpTargets().Num());
+#endif
     Data->SetBoolField(TEXT("cleared"), bAll && RemovedNames.Num() > 0);
     return mcp_common::MakeOkReply(Data);
 }
@@ -572,7 +617,11 @@ TSharedPtr<FJsonObject> HandleInspectMotionWarpingComponent(
     UMotionWarpingComponent* Comp = nullptr;
     if (TSharedPtr<FJsonObject> Error = MW_ResolveActorComponent(ActorPath, Actor, Comp)) { return Error; }
 
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    const TConstArrayView<FMotionWarpingTarget> Targets = MW_GetWarpTargets(Comp);
+#else
     const TConstArrayView<FMotionWarpingTarget> Targets = Comp->GetWarpTargets();
+#endif
     const TArray<TSharedPtr<FJsonValue>> TargetsArr = MW_TargetsToJsonArray(Targets);
     const int32 ModifierCount = Comp->GetModifiers().Num();
     const int32 SwitchOffCount = MW_ReadSwitchOffConditionCount(Comp);

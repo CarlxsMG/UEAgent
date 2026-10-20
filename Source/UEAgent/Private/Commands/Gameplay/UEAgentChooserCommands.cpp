@@ -1,5 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Misc/EngineVersionComparison.h" // UE_VERSION_OLDER_THAN: the UE 5.7 paths
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "EditorAssetLibrary.h"
@@ -24,8 +25,10 @@
 #include "ObjectChooser_Asset.h"           // FAssetChooser (TObjectPtr<UObject> Asset)
 #include "OutputFloatColumn.h"              // FOutputFloatColumn
 #include "OutputBoolColumn.h"               // FOutputBoolColumn
+#if !UE_VERSION_OLDER_THAN(5, 8, 0) // UE 5.7: the Chooser plugin has no Name or OutputName column (no NameColumn.h / OutputNameColumn.h)
 #include "NameColumn.h"                     // FChooserNameColumn / FNameContextProperty / ENameColumnCellValueComparison
 #include "OutputNameColumn.h"               // FChooserOutputNameColumn
+#endif
 #include "ObjectClassColumn.h"              // FObjectClassColumn / EObjectClassColumnCellValueComparison
 #include "OutputEnumColumn.h"               // FOutputEnumColumn
 #include "MultiEnumColumn.h"                // FMultiEnumColumn
@@ -59,9 +62,13 @@ namespace
 			{ TEXT("OutputObject"), TEXT("OutputObjectColumn") },
 			{ TEXT("OutputFloat"),  TEXT("OutputFloatColumn") },
 			{ TEXT("OutputBool"),   TEXT("OutputBoolColumn") },
+#if !UE_VERSION_OLDER_THAN(5, 8, 0)
 			{ TEXT("OutputName"),   TEXT("ChooserOutputNameColumn") },
+#endif
 			{ TEXT("ObjectClass"),  TEXT("ObjectClassColumn") },
+#if !UE_VERSION_OLDER_THAN(5, 8, 0)
 			{ TEXT("Name"),         TEXT("ChooserNameColumn") },
+#endif
 			{ TEXT("OutputEnum"),   TEXT("OutputEnumColumn") },
 			{ TEXT("MultiEnum"),    TEXT("MultiEnumColumn") },
 			{ TEXT("Randomize"),    TEXT("RandomizeColumn") },
@@ -213,9 +220,13 @@ namespace
 			|| Chooser_VisitAs<FOutputObjectColumn>(Col, Visit)
 			|| Chooser_VisitAs<FOutputFloatColumn>(Col, Visit)
 			|| Chooser_VisitAs<FOutputBoolColumn>(Col, Visit)
+#if !UE_VERSION_OLDER_THAN(5, 8, 0)
 			|| Chooser_VisitAs<FChooserOutputNameColumn>(Col, Visit)
+#endif
 			|| Chooser_VisitAs<FObjectClassColumn>(Col, Visit)
+#if !UE_VERSION_OLDER_THAN(5, 8, 0)
 			|| Chooser_VisitAs<FChooserNameColumn>(Col, Visit)
+#endif
 			|| Chooser_VisitAs<FOutputEnumColumn>(Col, Visit)
 			|| Chooser_VisitAs<FMultiEnumColumn>(Col, Visit)
 			|| Chooser_VisitAs<FRandomizeColumn>(Col, Visit);
@@ -248,10 +259,12 @@ namespace
 		{
 			return FObjectContextProperty::StaticStruct();
 		}
+#if !UE_VERSION_OLDER_THAN(5, 8, 0)
 		if (ColumnStruct == FChooserOutputNameColumn::StaticStruct() || ColumnStruct == FChooserNameColumn::StaticStruct())
 		{
 			return FNameContextProperty::StaticStruct();
 		}
+#endif
 		return nullptr;
 	}
 
@@ -343,10 +356,12 @@ namespace
 		Obj->SetBoolField(TEXT("default_value"), Cell);
 	}
 
+#if !UE_VERSION_OLDER_THAN(5, 8, 0)
 	void Chooser_WriteCell(const TSharedPtr<FJsonObject>& Obj, const FChooserOutputNameColumn&, const FName& Cell)
 	{
 		Obj->SetStringField(TEXT("default_value"), Cell.ToString());
 	}
+#endif
 
 	void Chooser_WriteCell(const TSharedPtr<FJsonObject>& Obj, const FObjectClassColumn&, const FChooserObjectClassRowData& Cell)
 	{
@@ -359,6 +374,7 @@ namespace
 			: TEXT("Any"));
 	}
 
+#if !UE_VERSION_OLDER_THAN(5, 8, 0)
 	void Chooser_WriteCell(const TSharedPtr<FJsonObject>& Obj, const FChooserNameColumn&, const FChooserNameRowData& Cell)
 	{
 		Obj->SetStringField(TEXT("value"), Cell.Value.ToString());
@@ -371,6 +387,7 @@ namespace
 		default: Obj->SetStringField(TEXT("comparison"), TEXT("Unknown")); break;
 		}
 	}
+#endif
 
 	void Chooser_WriteCell(const TSharedPtr<FJsonObject>& Obj, const FOutputEnumColumn&, const FChooserOutputEnumRowData& Cell)
 	{
@@ -647,7 +664,7 @@ TSharedPtr<FJsonObject> HandleCreateChooserTable(const TSharedPtr<FJsonObject>& 
 
 // MCP:add_chooser_column - Add a column of column_type, its input left unbound, to a UChooserTable asset as one undo step, then compile and save the table; success is false, with save_error, when the save fails. Each call adds a new column, even of a type the table already has, except Randomize: a table holds at most one, so an existing Randomize column is returned with already_existed=true and nothing changes. The column goes where the Chooser editor puts it: a filter column before the first output or Randomize column, so filters stay ahead of them; an output column at the end but before a trailing Randomize column; a Randomize column last. The columns after it move up one index; column_index is where the new column went. The new column gets one cell, its DefaultRowValue, per row already in the table, so columns and rows stay in step whichever is added first. Besides the types listed under column_type it accepts OutputFloat, OutputBool, OutputName, OutputEnum, ObjectClass, Name, MultiEnum and Randomize.
 //   @param table_path - Long package path of an existing UChooserTable.
-//   @param column_type - Column struct to add: "FloatRange", "Bool", "Enum", "Object", or "OutputObject".
+//   @param column_type - Column struct to add: "FloatRange", "Bool", "Enum", "Object", or "OutputObject". Name and OutputName need UE 5.8.
 //   @param column_name - Label echoed back in the reply only; it is not stored on the column.
 //   @returns { table_path: string, column_index: int, column_name: string, column_type: string, already_existed: bool, row_count?: int, saved?: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleAddChooserColumnToTable(const TSharedPtr<FJsonObject>& Params)
@@ -668,6 +685,15 @@ TSharedPtr<FJsonObject> HandleAddChooserColumnToTable(const TSharedPtr<FJsonObje
 		return mcp_common::MakeErrorReply(TEXT("add_chooser_column: 'column_name' is required"));
 	}
 
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+	// UE 5.7's Chooser plugin has no FChooserNameColumn / FChooserOutputNameColumn (both arrive in 5.8).
+	if (ColumnType == TEXT("Name") || ColumnType == TEXT("OutputName"))
+	{
+		return mcp_common::MakeErrorReply(FString::Printf(
+			TEXT("add_chooser_column: column_type '%s' needs Unreal Engine 5.8 or later: the 5.7 Chooser plugin has no Name or OutputName column; nothing was changed"),
+			*ColumnType));
+	}
+#endif
 	if (!IsKnownColumnType(ColumnType))
 	{
 		return mcp_common::MakeErrorReply(
@@ -1402,6 +1428,7 @@ TSharedPtr<FJsonObject> HandleSetChooserColumnDefault(const TSharedPtr<FJsonObje
 		C.DefaultRowValue = V;
 		bAnyChange = !bAlreadyExisted;
 	}
+#if !UE_VERSION_OLDER_THAN(5, 8, 0)
 	else if (ColStruct == FChooserOutputNameColumn::StaticStruct())
 	{
 		FChooserOutputNameColumn& C = Col.GetMutable<FChooserOutputNameColumn>();
@@ -1419,6 +1446,7 @@ TSharedPtr<FJsonObject> HandleSetChooserColumnDefault(const TSharedPtr<FJsonObje
 		C.DefaultRowValue = NewVal;
 		bAnyChange = !bAlreadyExisted;
 	}
+#endif
 	else if (ColStruct == FObjectClassColumn::StaticStruct())
 	{
 		FObjectClassColumn& C = Col.GetMutable<FObjectClassColumn>();
@@ -1459,6 +1487,7 @@ TSharedPtr<FJsonObject> HandleSetChooserColumnDefault(const TSharedPtr<FJsonObje
 		C.DefaultRowValue.Value = NewClass;
 		bAnyChange = !bAlreadyExisted;
 	}
+#if !UE_VERSION_OLDER_THAN(5, 8, 0)
 	else if (ColStruct == FChooserNameColumn::StaticStruct())
 	{
 		FChooserNameColumn& C = Col.GetMutable<FChooserNameColumn>();
@@ -1496,6 +1525,7 @@ TSharedPtr<FJsonObject> HandleSetChooserColumnDefault(const TSharedPtr<FJsonObje
 		}
 		bAlreadyExisted = !bAnyChange;
 	}
+#endif
 	else if (ColStruct == FOutputEnumColumn::StaticStruct())
 	{
 		FOutputEnumColumn& C = Col.GetMutable<FOutputEnumColumn>();

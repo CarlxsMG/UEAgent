@@ -1,5 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Misc/EngineVersionComparison.h" // UE_VERSION_OLDER_THAN: the UE 5.7 paths
 #include "Commands/Common/UEAgentGraphUtils.h"
 #include "Commands/Blueprint/GraphNodePinLookup.h"
 
@@ -2228,7 +2229,11 @@ TArray<TSharedPtr<FJsonValue>> LoadReferencerBlueprints(UBlueprint* Blueprint)
         if (UPackage* Pkg = LoadPackage(nullptr, *PackageName.ToString(), LOAD_None))
         {
             TArray<UObject*> Objects;
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+            GetObjectsWithOuter(Pkg, Objects, /*bIncludeNestedObjects*/ false); // UE 5.7: a bool, no EGetObjectsFlags
+#else
             GetObjectsWithOuter(Pkg, Objects, EGetObjectsFlags::None);
+#endif
             for (UObject* Obj : Objects)
             {
                 if (Cast<UBlueprint>(Obj))

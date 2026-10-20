@@ -1061,7 +1061,7 @@ Writes the given Settings fields (value_normalized, clamp_to_normalized_range, v
 |---|---|---|---|
 | `parameter_path` | string | yes | Asset path to the USoundModulationParameter |
 | `value_normalized` | number | no | Optional float in [0,1]; sets Settings.ValueNormalized |
-| `clamp_to_normalized_range` | boolean | no | Optional bool; sets Settings.bClampToNormalizedRange |
+| `clamp_to_normalized_range` | boolean | no | Optional bool; sets Settings.bClampToNormalizedRange. Needs UE 5.8. |
 | `value_unit` | number | no | Optional float (editor-only); sets Settings.ValueUnit |
 
 **Returns:** `{ parameter_path, value_normalized, clamp_to_normalized_range, value_unit, updated, saved }`

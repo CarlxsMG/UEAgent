@@ -9,6 +9,8 @@
 #include "UsdWrappers/VtValue.h"
 #include "UsdWrappers/UsdVariantSets.h"
 #include "UnrealUSDWrapper.h"
+#include "USDMemory.h"  // FScopedUsdAllocs (the UE 5.7 SetMetadata scope)
+#include "Misc/EngineVersionComparison.h"
 #include "Commands/USD/UEAgentUsdRegistry.h"  // stage registry + helpers shared by the USD handlers
 
 #include "Dom/JsonObject.h"
@@ -325,7 +327,7 @@ TSharedPtr<FJsonObject> HandleSetUsdPrimSpecifier(const TSharedPtr<FJsonObject>&
 //   @param stage_name [string!] - Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier.
 //   @param prim_path [string!] - Absolute SdfPath of an existing prim, e.g. "/World/Cube".
 //   @param key [string!] - Registered USD prim metadata field, e.g. "comment", "kind", "customData" or "apiSchemas"; a key USD does not register as prim metadata fails with success false and set=false.
-//   @param value [object!] - The value itself (a scalar, an array, or an object of dictionary entries) or {type?, value}. It is converted to the field's type when that is known, and type is then not used; else type, or the JSON type, decides (bool, number as double, string, object as dictionary). A list op is {"explicit": [...]} or {"prepended": [...], "appended", "deleted", "ordered", "added"}, a reference item "@a.usda@</Prim>", an integer list op item a whole number.
+//   @param value [object!] - The value itself (a scalar, an array, or an object of dictionary entries) or {type?, value}. It is converted to the field's type when that is known, and type is then not used; else type, or the JSON type, decides (bool, number as double, string, object as dictionary). A list op is {"explicit": [...]} or {"prepended": [...], "appended", "deleted", "ordered", "added"}, a reference item "@a.usda@</Prim>", an integer list op item a whole number. On UE 5.7 an integer list op (int, uint, int64 or uint64) cannot be written (needs UE 5.8); reading one works.
 //   @returns { set: bool, prim_path: string, key: string, value: object, declared_type?: string, errors?: [string] }
 TSharedPtr<FJsonObject> HandleSetUsdPrimMetadata(const TSharedPtr<FJsonObject>& Params)
 {
@@ -390,7 +392,14 @@ TSharedPtr<FJsonObject> HandleSetUsdPrimMetadata(const TSharedPtr<FJsonObject>& 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	bool SetOk = false;
 	// The USD errors the write raises are the reason a refused write gives; they land in Data["errors"].
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+	// UE 5.7: FUsdPrim::SetMetadata runs without the USD allocator scope the rest of the wrapper opens, and replacing a
+	// held dictionary or list op then frees, through USD's allocator, memory the Unreal allocator handed out: the
+	// editor closes (measured on 5.7 with USD 25.08; 5.8 does not). The write opens the scope itself.
+	UEAgent::UsdCommon::CaptureUsdErrors([&Prim, &Key, &Vt, &SetOk]() { FScopedUsdAllocs UsdAllocs; SetOk = Prim.SetMetadata(*Key, Vt); }, Data);
+#else
 	UEAgent::UsdCommon::CaptureUsdErrors([&Prim, &Key, &Vt, &SetOk]() { SetOk = Prim.SetMetadata(*Key, Vt); }, Data);
+#endif
 
 	Data->SetStringField(TEXT("prim_path"), PrimPath);
 	Data->SetStringField(TEXT("key"), Key);

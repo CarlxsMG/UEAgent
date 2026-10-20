@@ -1,5 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Misc/EngineVersionComparison.h" // UE_VERSION_OLDER_THAN: the UE 5.7 paths
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AudioModulationStatics.h"
@@ -99,7 +100,11 @@ namespace
 	void AudioMod_AddParameterSettings(const TSharedPtr<FJsonObject>& Data, const USoundModulationParameter* Param)
 	{
 		Data->SetNumberField(TEXT("value_normalized"), Param->Settings.ValueNormalized);
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+		// UE 5.7's FSoundModulationParameterSettings has no bClampToNormalizedRange (added in 5.8): the field is left out.
+#else
 		Data->SetBoolField(TEXT("clamp_to_normalized_range"), Param->Settings.bClampToNormalizedRange);
+#endif
 		Data->SetNumberField(TEXT("value_unit"), Param->Settings.ValueUnit);
 	}
 
@@ -933,7 +938,7 @@ TSharedPtr<FJsonObject> HandleCreateModulationParameter(
 // MCP:set_modulation_parameter_settings - Writes the given Settings fields (value_normalized, clamp_to_normalized_range, value_unit) of a USoundModulationParameter asset and saves it; omitted fields keep their value, and the asset is saved even when none is given. Returns parameter_path, the three settings as stored, updated, saved.
 //   @param parameter_path - Asset path to the USoundModulationParameter
 //   @param value_normalized - Optional float in [0,1]; sets Settings.ValueNormalized
-//   @param clamp_to_normalized_range - Optional bool; sets Settings.bClampToNormalizedRange
+//   @param clamp_to_normalized_range - Optional bool; sets Settings.bClampToNormalizedRange. Needs UE 5.8.
 //   @param value_unit - Optional float (editor-only); sets Settings.ValueUnit
 //   @returns { parameter_path, value_normalized, clamp_to_normalized_range, value_unit, updated, saved }
 TSharedPtr<FJsonObject> HandleSetModulationParameterSettings(
@@ -948,6 +953,16 @@ TSharedPtr<FJsonObject> HandleSetModulationParameterSettings(
 		return AudioMod_CannotLoadReply(TEXT("sound modulation parameter"), ParameterPath);
 	}
 
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+	// UE 5.7's FSoundModulationParameterSettings has no bClampToNormalizedRange (added in 5.8): that one field is
+	// refused before anything is written; the other settings work as on 5.8.
+	bool bClampOn57 = false;
+	if (Params->TryGetBoolField(TEXT("clamp_to_normalized_range"), bClampOn57))
+	{
+		return mcp_common::MakeErrorReply(TEXT("clamp_to_normalized_range needs Unreal Engine 5.8 or later (FSoundModulationParameterSettings::bClampToNormalizedRange does not exist in 5.7); nothing was changed. Call again without it to set the other settings."));
+	}
+
+#endif
 	// Each setter is independent. We do not require a particular field —
 	// passing only the field you want to change is a valid call (matches the
 	// set_control_bus_mix_stage_value pattern in this same file).
@@ -961,7 +976,11 @@ TSharedPtr<FJsonObject> HandleSetModulationParameterSettings(
 	if (Params->TryGetBoolField(TEXT("clamp_to_normalized_range"), ClampValue))
 	{
 		bHasClamp = true;
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+		// Not reached on UE 5.7: clamp_to_normalized_range is refused above, before anything is written.
+#else
 		Param->Settings.bClampToNormalizedRange = ClampValue;
+#endif
 	}
 	double ValueUnitD = 0.0;
 	const bool bHasUnit = Params->TryGetNumberField(TEXT("value_unit"), ValueUnitD);

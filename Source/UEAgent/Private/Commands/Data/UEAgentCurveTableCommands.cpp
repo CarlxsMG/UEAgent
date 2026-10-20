@@ -1,5 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Misc/EngineVersionComparison.h" // UE_VERSION_OLDER_THAN: the UE 5.7 paths
 #include "Commands/Data/DataAuthoringUtils.h"
 
 #include "Engine/CurveTable.h"            // UCurveTable, ECurveTableMode
@@ -639,7 +640,12 @@ TSharedPtr<FJsonObject> HandleDeleteCurveTableRow(const TSharedPtr<FJsonObject>&
     {
         FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "DeleteCurveTableRow", "Delete Curve Table Row"));
         Table->Modify();
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+        FName MutableRowFName = RowFName; // UE 5.7's DeleteRow takes a non-const FName& (it only reads it)
+        Table->DeleteRow(MutableRowFName);
+#else
         Table->DeleteRow(RowFName);
+#endif
 
         bSaved = Impl::SaveTableChange(Table, SaveError);
     }
@@ -696,7 +702,13 @@ TSharedPtr<FJsonObject> HandleRenameCurveTableRow(const TSharedPtr<FJsonObject>&
     {
         FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "RenameCurveTableRow", "Rename Curve Table Row"));
         Table->Modify();
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+        FName MutableOldFName = OldFName; // UE 5.7's RenameRow takes non-const FName& (it only reads them)
+        FName MutableNewFName = NewFName;
+        Table->RenameRow(MutableOldFName, MutableNewFName);
+#else
         Table->RenameRow(OldFName, NewFName);
+#endif
 
         bSaved = Impl::SaveTableChange(Table, SaveError);
     }

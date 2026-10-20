@@ -13,7 +13,7 @@ Author a field command node into a UFieldSystem and persist it.  Builds a transi
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `field_system_path` | string | yes | Asset path of the UFieldSystem (e.g. "/Game/MyGame/FS_Example") |
-| `node_type` | string | yes | One of "RadialFalloff", "PlaneFalloff", "BoxFalloff", "WaveScalar", "UniformScalar", "NoiseField", "UniformInteger", "RadialIntMask", "UniformVector", "RadialVector", "RotatedRadialVector", "RandomVector" |
+| `node_type` | string | yes | One of "RadialFalloff", "PlaneFalloff", "BoxFalloff", "WaveScalar", "UniformScalar", "NoiseField", "UniformInteger", "RadialIntMask", "UniformVector", "RadialVector", "RotatedRadialVector", "RandomVector". RotatedRadialVector needs UE 5.8. |
 | `target` | string | yes | Physics target attribute name, e.g. "LinearForce", "LinearVelocity", "ExternalClusterStrain", "DynamicState" |
 | `magnitude` | number | no | Optional scalar magnitude; defaults to 1.0 |
 | `radius` | number | no | Optional falloff / mask radius; defaults to 100.0 |
@@ -30,7 +30,7 @@ Author a field command node into a UFieldSystem and persist it.  Builds a transi
 | `interior_value` | number | no | Optional RadialIntMask interior integer; defaults to 1 |
 | `exterior_value` | number | no | Optional RadialIntMask exterior integer; defaults to 0 |
 | `mask_condition` | string | no | Optional RadialIntMask condition "Always", "MergeInterior", "MergeExterior"; defaults to "Always" |
-| `angle` | number | no | Optional RotatedRadialVector rotation angle in degrees; defaults to 0.0 |
+| `angle` | number | no | Optional RotatedRadialVector rotation angle in degrees; defaults to 0.0. Needs UE 5.8. |
 
 **Returns:** `{ field_system_path: string, node_type: string, target: string, physics_type_name: string, command_count: int, success: bool, saved: bool, save_error?: string }`
 

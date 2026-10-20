@@ -1,5 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Misc/EngineVersionComparison.h"
 #include "FileHelpers.h" // FEditorFileUtils::GetDirty{World,Content}Packages — the unsaved-work advisory on start_play_in_editor
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Engine/World.h"
@@ -1394,8 +1395,14 @@ TSharedPtr<FJsonObject> HandleCapturePieScreenshot(const TSharedPtr<FJsonObject>
                 return false;
             }), 8.0f);
 
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+        // 5.7 has no bInRestrictToGameViewport: it always captures the whole window, which is what false asks 5.8 for.
+        FScreenshotRequest::RequestScreenshot(OutPath, /*bInShowUI=*/true, /*bAddFilenameSuffix=*/false,
+            /*bHdrScreenshot=*/false, FIntRect());
+#else
         FScreenshotRequest::RequestScreenshot(OutPath, /*bInShowUI=*/true, /*bAddFilenameSuffix=*/false,
             /*bHdrScreenshot=*/false, FIntRect(), /*bInRestrictToGameViewport=*/false);
+#endif
         bUiOverwriteNextFrame = true;
     }
     R->SetBoolField(TEXT("includes_ui"), false);

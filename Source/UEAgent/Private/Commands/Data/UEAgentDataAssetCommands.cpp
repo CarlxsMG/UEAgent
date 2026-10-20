@@ -1,5 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Misc/EngineVersionComparison.h" // UE_VERSION_OLDER_THAN: the UE 5.7 paths
 #include "Commands/Data/DataAuthoringUtils.h"
 #include "Engine/DataAsset.h"
 #include "Engine/DataTable.h"
@@ -603,6 +604,23 @@ namespace
         return Cast<UDataTable>(mcp_common::ResolveObjectByPath(Path, UDataTable::StaticClass()));
     }
 
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    // UE 5.7 has no UCompositeDataTable::GetParentTables(); 5.8 added it as a plain getter of the protected
+    // ParentTables UPROPERTY. 5.7 reads that same array through its property. A missing property (a changed
+    // engine) reads as no parents rather than crashing.
+    const TArray<UDataTable*>& MCPExt_GetParentTables(const UCompositeDataTable* Composite)
+    {
+        static const TArray<UDataTable*> NoParents;
+        static const FArrayProperty* ParentTablesProperty =
+            FindFProperty<FArrayProperty>(UCompositeDataTable::StaticClass(), TEXT("ParentTables"));
+        if (!Composite || !ParentTablesProperty)
+        {
+            return NoParents;
+        }
+        return *ParentTablesProperty->ContainerPtrToValuePtr<TArray<TObjectPtr<UDataTable>>>(Composite);
+    }
+
+#endif
     // Plugin-side re-implementation of UCompositeDataTable::FindLoops (protected in the
     // engine). Root may be nullptr for a composite that does not exist yet -- in that case only
     // pre-existing loops among the prospective parents are reachable, which is exactly what the
@@ -629,8 +647,13 @@ namespace
             {
                 return CompositeParent;
             }
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+            if (const UCompositeDataTable* Found = MCPExt_FindCompositeLoop(
+                    CompositeParent, MCPExt_GetParentTables(CompositeParent), AlreadySeen))
+#else
             if (const UCompositeDataTable* Found = MCPExt_FindCompositeLoop(
                     CompositeParent, CompositeParent->GetParentTables(), AlreadySeen))
+#endif
             {
                 return Found;
             }
@@ -701,7 +724,11 @@ namespace
             return;
         }
 
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+        const TArray<UDataTable*>& Parents = MCPExt_GetParentTables(Composite);
+#else
         const TArray<UDataTable*>& Parents = Composite->GetParentTables();
+#endif
         UScriptStruct* CompositeRowStruct = Composite->RowStruct;
 
         TArray<UDataTable*> Contributing;
@@ -1107,7 +1134,11 @@ TSharedPtr<FJsonObject> HandleCreateCompositeDataTable(const TSharedPtr<FJsonObj
 
     // A composite that already holds exactly this row struct and parent list is the state asked for: it is
     // neither modified, dirtied nor saved, and the reply below still verifies its merge.
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    const bool bUnchanged = bAlreadyExists && Composite->RowStruct == RowStruct && MCPExt_GetParentTables(Composite) == DesiredParents;
+#else
     const bool bUnchanged = bAlreadyExists && Composite->RowStruct == RowStruct && Composite->GetParentTables() == DesiredParents;
+#endif
 
     // ---------------------------------------------------------------------- //
     // STEP 3 -- create the asset (only once the inputs are known-safe).
@@ -1150,7 +1181,11 @@ TSharedPtr<FJsonObject> HandleCreateCompositeDataTable(const TSharedPtr<FJsonObj
         // order: with an empty parent array neither the loop check nor the row-struct
         // check inside UpdateCachedRowMap can fire.
         // ------------------------------------------------------------------ //
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+        TArray<UDataTable*> CurrentParents = MCPExt_GetParentTables(Composite); // copy: RemoveParentTables mutates the live array
+#else
         TArray<UDataTable*> CurrentParents = Composite->GetParentTables(); // copy: RemoveParentTables mutates the live array
+#endif
         bParentListDiffers = (CurrentParents != DesiredParents);
         if (bParentListDiffers)
         {
@@ -1172,7 +1207,11 @@ TSharedPtr<FJsonObject> HandleCreateCompositeDataTable(const TSharedPtr<FJsonObj
     // ---------------------------------------------------------------------- //
     // Verification: re-read the LIVE parent array and the LIVE merged row map.
     // ---------------------------------------------------------------------- //
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    const TArray<UDataTable*>& AppliedParents = MCPExt_GetParentTables(Composite);
+#else
     const TArray<UDataTable*>& AppliedParents = Composite->GetParentTables();
+#endif
     bool bParentsApplied = (AppliedParents.Num() == DesiredParents.Num());
     if (bParentsApplied)
     {
@@ -3188,7 +3227,11 @@ TSharedPtr<FJsonObject> HandleReadDataTableFromPackageFile(const TSharedPtr<FJso
                     return false; // stop
                 }
                 return true;
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+            }, /*bIncludeNestedObjects*/ true); // UE 5.7: a bool, no EGetObjectsFlags
+#else
             }, EGetObjectsFlags::IncludeNestedObjects);
+#endif
         }
         if (!DataTable)
         {
@@ -3264,7 +3307,11 @@ TSharedPtr<FJsonObject> HandleReadDataTableFromPackageFile(const TSharedPtr<FJso
         {
             Obj->ClearFlags(RF_Standalone | RF_Public);
             return true;
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+        }, /*bIncludeNestedObjects*/ true); // UE 5.7: a bool, no EGetObjectsFlags
+#else
         }, EGetObjectsFlags::IncludeNestedObjects);
+#endif
         LoadedPkg->ClearDirtyFlag();
     }
     FPackageName::UnRegisterMountPoint(MountRoot, ContentDir);

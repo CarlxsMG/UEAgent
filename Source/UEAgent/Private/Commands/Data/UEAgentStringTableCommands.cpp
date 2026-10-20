@@ -1,5 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Misc/EngineVersionComparison.h" // UE_VERSION_OLDER_THAN: the UE 5.7 paths
 #include "Commands/Data/DataAuthoringUtils.h"
 
 #include "Internationalization/StringTable.h"        // UStringTable (Engine)
@@ -152,7 +153,11 @@ namespace
         FString PreviousValue;
         const bool bExistedBefore = Table->GetStringTable()->GetSourceString(Key, PreviousValue);
 
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+        Table->GetMutableStringTable()->SetSourceString(Key, SourceString); // UE 5.7 entries have no dev notes
+#else
         Table->GetMutableStringTable()->SetSourceString(Key, SourceString, FString());
+#endif
 
         Table->MarkPackageDirty();
 

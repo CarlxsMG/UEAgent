@@ -1,5 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Misc/EngineVersionComparison.h" // UE_VERSION_OLDER_THAN: the UE 5.7 paths
 
 #include "Engine/Engine.h"
 #include "EngineSettings.h"
@@ -860,7 +861,11 @@ TSharedPtr<FJsonObject> HandleAddCollisionChannel(
 
 	// Claim the first free ECC_GameTraceChannelN slot (N=1..50, the custom channel pool).
 	ECollisionChannel FreeChannel = ECC_MAX;
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+	for (int32 CandidateValue = (int32)ECC_GameTraceChannel1; CandidateValue <= (int32)ECC_GameTraceChannel18; ++CandidateValue) // UE 5.7: 18 custom slots
+#else
 	for (int32 CandidateValue = (int32)ECC_GameTraceChannel1; CandidateValue <= (int32)ECC_GameTraceChannel50; ++CandidateValue)
+#endif
 	{
 		bool bOccupied = false;
 		for (int32 i = 0; i < Helper.Num(); ++i)
@@ -872,7 +877,11 @@ TSharedPtr<FJsonObject> HandleAddCollisionChannel(
 	}
 	if (FreeChannel == ECC_MAX)
 	{
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+		return mcp_common::MakeErrorReply(TEXT("No free custom collision channel slots (all 18 GameTraceChannel slots in use)"));
+#else
 		return mcp_common::MakeErrorReply(TEXT("No free custom collision channel slots (all 50 GameTraceChannel slots in use)"));
+#endif
 	}
 
 	const int32 NewIndex = Helper.AddValue();

@@ -1,5 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Misc/EngineVersionComparison.h"
 
 #include "Editor.h"
 #include "Engine/World.h"
@@ -152,7 +153,7 @@ TSharedPtr<FJsonObject> HandleCreateFieldSystemAsset(
 // ---------------------------------------------------------------------------
 // MCP:add_field_node - Author a field command node into a UFieldSystem and persist it.  Builds a transient authoring field U-node (selected by node_type), resolves the physics target to an EFieldPhysicsType, constructs the runtime FFieldSystemCommand via FFieldObjectCommands::CreateFieldCommand, appends it to UFieldSystem.Commands, and saves the asset.  node_type accepts "RadialFalloff", "PlaneFalloff", "BoxFalloff", "WaveScalar", "UniformScalar", "NoiseField", "UniformInteger", "RadialIntMask", "UniformVector", "RadialVector", "RotatedRadialVector", "RandomVector". Vector nodes pair with vector targets (LinearVelocity/LinearForce); scalar with strain/threshold; integer with state (DynamicState).  target is a physics target attribute name like "LinearVelocity", "ExternalClusterStrain", "DynamicState".  falloff_type accepts "Inverse", "Squared", "Logarithmic", or "None". Defaults to "Linear".
 //   @param field_system_path - Asset path of the UFieldSystem (e.g. "/Game/MyGame/FS_Example")
-//   @param node_type - One of "RadialFalloff", "PlaneFalloff", "BoxFalloff", "WaveScalar", "UniformScalar", "NoiseField", "UniformInteger", "RadialIntMask", "UniformVector", "RadialVector", "RotatedRadialVector", "RandomVector"
+//   @param node_type - One of "RadialFalloff", "PlaneFalloff", "BoxFalloff", "WaveScalar", "UniformScalar", "NoiseField", "UniformInteger", "RadialIntMask", "UniformVector", "RadialVector", "RotatedRadialVector", "RandomVector". RotatedRadialVector needs UE 5.8.
 //   @param target - Physics target attribute name, e.g. "LinearForce", "LinearVelocity", "ExternalClusterStrain", "DynamicState"
 //   @param magnitude - Optional scalar magnitude; defaults to 1.0
 //   @param radius - Optional falloff / mask radius; defaults to 100.0
@@ -169,7 +170,7 @@ TSharedPtr<FJsonObject> HandleCreateFieldSystemAsset(
 //   @param interior_value - Optional RadialIntMask interior integer; defaults to 1
 //   @param exterior_value - Optional RadialIntMask exterior integer; defaults to 0
 //   @param mask_condition - Optional RadialIntMask condition "Always", "MergeInterior", "MergeExterior"; defaults to "Always"
-//   @param angle - Optional RotatedRadialVector rotation angle in degrees; defaults to 0.0
+//   @param angle - Optional RotatedRadialVector rotation angle in degrees; defaults to 0.0. Needs UE 5.8.
 //   @returns { field_system_path: string, node_type: string, target: string, physics_type_name: string, command_count: int, success: bool, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleAddFieldNode(
@@ -339,12 +340,17 @@ TSharedPtr<FJsonObject> HandleAddFieldNode(
 	}
 	else if (NodeKey == TEXT("rotatedradialvector"))
 	{
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+		return mcp_common::MakeRequiresEngineReply(TEXT("add_field_node with node_type RotatedRadialVector"), TEXT("5.8"),
+			TEXT("the Chaos field node URotatedRadialVector does not exist in 5.7"));
+#else
 		URotatedRadialVector* Node = NewObject<URotatedRadialVector>(TransientPkg);
 		Node->Magnitude = static_cast<float>(Magnitude);
 		Node->Position  = Position;
 		Node->Angle     = static_cast<float>(Angle);
 		Node->Axis      = Direction;
 		RootNode = Node;
+#endif
 	}
 	else if (NodeKey == TEXT("randomvector"))
 	{

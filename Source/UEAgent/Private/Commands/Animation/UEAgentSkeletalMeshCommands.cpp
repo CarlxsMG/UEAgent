@@ -1,5 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Misc/EngineVersionComparison.h"
 
 #include "Editor.h"
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -29,6 +30,10 @@
 
 // Skeletal mesh editor subsystem (SkeletalMeshEditor module — editor dep)
 #include "SkeletalMeshEditorSubsystem.h"
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+#include "EditorScriptingHelpers.h"   // CheckIfInEditorAndPIE -- the 5.7 body of SetAllowCPUAccess
+#include "ScopedTransaction.h"        // FScopedTransaction -- the 5.7 body of RemoveSocket
+#endif
 
 // PhysicsAsset (Engine module — needed for assign_skeletal_mesh_physics_asset)
 #include "PhysicsEngine/PhysicsAsset.h"
@@ -123,6 +128,135 @@ namespace
 		}
 		return nullptr;
 	}
+
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+	/** UE 5.7 has no USkeletalMeshEditorSubsystem::SetAllowCPUAccess: the body it has in 5.8
+	 *  (SkeletalMeshEditorSubsystem.cpp), bAllowCPUAccess set on every LOD and the mesh rebuilt. */
+	void SkMesh_SetAllowCPUAccess(USkeletalMesh* TargetMesh, bool bAllowCPUAccess)
+	{
+		TGuardValue<bool> UnattendedScriptGuard(GIsRunningUnattendedScript, true);
+
+		if (!EditorScriptingHelpers::CheckIfInEditorAndPIE())
+		{
+			return;
+		}
+
+		if (TargetMesh == nullptr)
+		{
+			UE_LOG(LogTemp, Error, TEXT("SetAllowCPUAccess: The SkeletalMesh is null."));
+			return;
+		}
+
+		TargetMesh->Modify();
+
+		for (int32 i = 0; i < TargetMesh->GetLODNum(); ++i)
+		{
+			TargetMesh->GetLODInfo(i)->bAllowCPUAccess = bAllowCPUAccess;
+		}
+
+		TargetMesh->PostEditChange();
+	}
+
+	/** UE 5.7 has no USkeletalMeshEditorSubsystem::RemoveSocket: the body it has in 5.8 (SkeletalMeshEditorSubsystem.cpp),
+	 *  in one undo step. The socket FindSocket resolves leaves the mesh's list (or the skeleton's, when only the
+	 *  skeleton has it), a skeleton socket of the same name goes too, and the preview assets attached to that socket
+	 *  name are dropped from the mesh and the skeleton. */
+	bool SkMesh_RemoveSocket(USkeletalMesh* SkeletalMesh, FName SocketName)
+	{
+		if (SkeletalMesh == nullptr)
+		{
+			UE_LOG(LogTemp, Error, TEXT("RemoveSocket: The SkeletalMesh is null."));
+			return false;
+		}
+
+		if (SkeletalMesh->GetSkeleton() == nullptr)
+		{
+			UE_LOG(LogTemp, Error, TEXT("RemoveSocket: The SkeletalMesh's Skeleton is null."));
+			return false;
+		}
+
+		if (SocketName == NAME_None)
+		{
+			UE_LOG(LogTemp, Error, TEXT("RemoveSocket: The SocketName is None."));
+			return false;
+		}
+
+		USkeletalMeshSocket* FoundSocket = SkeletalMesh->FindSocket(SocketName);
+		if (FoundSocket == nullptr)
+		{
+			UE_LOG(LogTemp, Error, TEXT("RemoveSocket: The socket named '%s' does not exist on the SkeletalMesh."), *SocketName.ToString());
+			return false;
+		}
+
+		USkeletalMeshSocket* SkeletonSocket = SkeletalMesh->GetSkeleton()->FindSocket(SocketName);
+		// If they're the same pointer, FindSocket fell back to the skeleton: there is no mesh-specific socket.
+		if (SkeletonSocket == FoundSocket)
+		{
+			SkeletonSocket = nullptr;
+		}
+
+		FScopedTransaction Transaction(NSLOCTEXT("SkeletalMeshEditorSubsystem", "RemoveSocket", "Remove Socket"));
+
+		TArray<TObjectPtr<USkeletalMeshSocket>>& MeshSocketList = SkeletalMesh->GetMeshOnlySocketList();
+		if (MeshSocketList.Contains(FoundSocket))
+		{
+			FoundSocket->SetFlags(RF_Transactional);
+			FoundSocket->Modify();
+			SkeletalMesh->Modify();
+			MeshSocketList.Remove(FoundSocket);
+		}
+		else
+		{
+			// Socket exists only on the skeleton (FindSocket fell through to it).
+			FoundSocket->SetFlags(RF_Transactional);
+			FoundSocket->Modify();
+			SkeletalMesh->GetSkeleton()->Modify();
+			SkeletalMesh->GetSkeleton()->Sockets.Remove(FoundSocket);
+		}
+
+		if (SkeletonSocket != nullptr)
+		{
+			SkeletonSocket->SetFlags(RF_Transactional);
+			SkeletonSocket->Modify();
+			SkeletalMesh->GetSkeleton()->Modify();
+			SkeletalMesh->GetSkeleton()->Sockets.Remove(SkeletonSocket);
+		}
+
+		// Clean up any preview-attached assets referencing the removed socket on the mesh.
+		bool bMeshModified = false;
+		FPreviewAssetAttachContainer& MeshPreviewContainer = SkeletalMesh->GetPreviewAttachedAssetContainer();
+		for (int32 Index = MeshPreviewContainer.Num() - 1; Index >= 0; --Index)
+		{
+			if (MeshPreviewContainer[Index].AttachedTo == SocketName)
+			{
+				if (!bMeshModified)
+				{
+					SkeletalMesh->Modify();
+					bMeshModified = true;
+				}
+				MeshPreviewContainer.RemoveAtSwap(Index);
+			}
+		}
+
+		// Clean up any preview-attached assets referencing the removed socket on the skeleton.
+		bool bSkeletonModified = false;
+		FPreviewAssetAttachContainer& SkeletonPreviewContainer = SkeletalMesh->GetSkeleton()->PreviewAttachedAssetContainer;
+		for (int32 Index = SkeletonPreviewContainer.Num() - 1; Index >= 0; --Index)
+		{
+			if (SkeletonPreviewContainer[Index].AttachedTo == SocketName)
+			{
+				if (!bSkeletonModified)
+				{
+					SkeletalMesh->GetSkeleton()->Modify();
+					bSkeletonModified = true;
+				}
+				SkeletonPreviewContainer.RemoveAtSwap(Index);
+			}
+		}
+
+		return true;
+	}
+#endif
 
 	/** Why these commands must not write the package PackageName, or empty when they may: the save guard refuses a
 	 *  package under an enforced read-only root, a name under no mounted content root has no file, and a package
@@ -824,7 +958,11 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshLodSettings(
 	}
 	if (bHasCpuAccess && bAllLods)
 	{
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+		SkMesh_SetAllowCPUAccess(Mesh, bCpuAccess);
+#else
 		USkeletalMeshEditorSubsystem::SetAllowCPUAccess(Mesh, bCpuAccess);
+#endif
 		AppliedObj->SetBoolField(TEXT("allow_cpu_access"), bCpuAccess);
 	}
 
@@ -1889,7 +2027,11 @@ TSharedPtr<FJsonObject> HandleRemoveSkeletalMeshSocket(
 		*SocketName, *MeshPath);
 
 	Mesh->Modify();
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+	if (!SkMesh_RemoveSocket(Mesh, SocketFName))
+#else
 	if (!USkeletalMeshEditorSubsystem::RemoveSocket(Mesh, SocketFName))
+#endif
 		return mcp_common::MakeErrorReply(
 			FString::Printf(TEXT("RemoveSocket failed for '%s'"), *SocketName));
 

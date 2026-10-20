@@ -1,5 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Misc/EngineVersionComparison.h" // UE_VERSION_OLDER_THAN: the UE 5.7 paths
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Misc/PackageName.h"
@@ -253,6 +254,39 @@ namespace
 		return Struct;
 	}
 
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+	/**
+	 * UE 5.7 has no FStateTreeEditorNode::InitializeAs (added in 5.8). The same steps as the 5.8 implementation:
+	 * reset the node, initialize it as NodeStruct with a new ID, then create its instance data and execution
+	 * runtime data -- a struct in place, a class as a transactional UObject under Outer.
+	 */
+	void StateTree_InitializeEditorNode(FStateTreeEditorNode& EditorNode, UObject* Outer, const UScriptStruct* NodeStruct)
+	{
+		EditorNode.Reset();
+		EditorNode.Node.InitializeAs(NodeStruct);
+		EditorNode.ID = FGuid::NewGuid();
+
+		const FStateTreeNodeBase& NodeBase = EditorNode.Node.Get<FStateTreeNodeBase>();
+		if (const UScriptStruct* InstanceType = Cast<const UScriptStruct>(NodeBase.GetInstanceDataType()))
+		{
+			EditorNode.Instance.InitializeAs(InstanceType);
+		}
+		else if (const UClass* InstanceClass = Cast<const UClass>(NodeBase.GetInstanceDataType()))
+		{
+			EditorNode.InstanceObject = NewObject<UObject>(Outer, InstanceClass, FName(), RF_Transactional);
+		}
+
+		if (const UScriptStruct* RuntimeType = Cast<const UScriptStruct>(NodeBase.GetExecutionRuntimeDataType()))
+		{
+			EditorNode.ExecutionRuntimeData.InitializeAs(RuntimeType);
+		}
+		else if (const UClass* RuntimeClass = Cast<const UClass>(NodeBase.GetExecutionRuntimeDataType()))
+		{
+			EditorNode.ExecutionRuntimeDataObject = NewObject<UObject>(Outer, RuntimeClass, FName(), RF_Transactional);
+		}
+	}
+
+#endif
 	/** The tree's root parameter named Name, or nullptr. */
 	const FPropertyBagPropertyDesc* StateTree_FindRootParameter(const UStateTreeEditorData* ED, FName Name)
 	{
@@ -780,7 +814,11 @@ TSharedPtr<FJsonObject> HandleAddStateTask(
 
 	// AddDefaulted then initialize as the resolved struct (the editor's add-node path).
 	FStateTreeEditorNode& Node = State->Tasks.AddDefaulted_GetRef();
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+	StateTree_InitializeEditorNode(Node, ED, TaskType);
+#else
 	Node.InitializeAs(ED, TaskType);
+#endif
 	const bool bSaved = mcp_common::SaveAssetPackage(Tree->GetPackage(), Tree);
 
 	TSharedPtr<FJsonObject> Data = StateTree_NewStateData(Tree, State);
@@ -809,7 +847,11 @@ TSharedPtr<FJsonObject> HandleAddStateEnterCondition(
 	if (!CondType) { return Err; }
 
 	FStateTreeEditorNode& Node = State->EnterConditions.AddDefaulted_GetRef();
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+	StateTree_InitializeEditorNode(Node, ED, CondType);
+#else
 	Node.InitializeAs(ED, CondType);
+#endif
 	const bool bSaved = mcp_common::SaveAssetPackage(Tree->GetPackage(), Tree);
 
 	TSharedPtr<FJsonObject> Data = StateTree_NewStateData(Tree, State);
@@ -1013,7 +1055,11 @@ TSharedPtr<FJsonObject> HandleAddTransitionCondition(
 
 	FStateTreeTransition& T = State->Transitions[Ti];
 	FStateTreeEditorNode& Node = T.Conditions.AddDefaulted_GetRef();
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+	StateTree_InitializeEditorNode(Node, ED, CondType);
+#else
 	Node.InitializeAs(ED, CondType);
+#endif
 	const bool bSaved = mcp_common::SaveAssetPackage(Tree->GetPackage(), Tree);
 
 	TSharedPtr<FJsonObject> Data = StateTree_NewStateData(Tree, State);
@@ -1043,7 +1089,11 @@ TSharedPtr<FJsonObject> HandleAddStateTreeGlobalTask(
 	if (!TaskType) { return Err; }
 
 	FStateTreeEditorNode& Node = ED->GlobalTasks.AddDefaulted_GetRef();
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+	StateTree_InitializeEditorNode(Node, ED, TaskType);
+#else
 	Node.InitializeAs(ED, TaskType);
+#endif
 	const bool bSaved = mcp_common::SaveAssetPackage(Tree->GetPackage(), Tree);
 
 	TSharedPtr<FJsonObject> Data = StateTree_NewTreeData(Tree);
@@ -1252,7 +1302,11 @@ TSharedPtr<FJsonObject> HandleAddStateEvaluator(
 	// Tree-scoped append, mirroring add_state_tree_global_task but on Evaluators.
 	// Outer is the editor data (ED), not a state.
 	FStateTreeEditorNode& Node = ED->Evaluators.AddDefaulted_GetRef();
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+	StateTree_InitializeEditorNode(Node, ED, EvalType);
+#else
 	Node.InitializeAs(ED, EvalType);
+#endif
 	const bool bSaved = mcp_common::SaveAssetPackage(Tree->GetPackage(), Tree);
 
 	TSharedPtr<FJsonObject> Data = StateTree_NewTreeData(Tree);
@@ -3131,7 +3185,11 @@ TSharedPtr<FJsonObject> HandleAddConsideration(
 
 	// Outer is the state (Considerations are state-scoped, unlike Evaluators/GlobalTasks which are tree-scoped).
 	FStateTreeEditorNode& Node = State->Considerations.AddDefaulted_GetRef();
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+	StateTree_InitializeEditorNode(Node, ED, ConsType);
+#else
 	Node.InitializeAs(ED, ConsType);
+#endif
 	const bool bSaved = mcp_common::SaveAssetPackage(Tree->GetPackage(), Tree);
 
 	TSharedPtr<FJsonObject> Data = StateTree_NewStateData(Tree, State);

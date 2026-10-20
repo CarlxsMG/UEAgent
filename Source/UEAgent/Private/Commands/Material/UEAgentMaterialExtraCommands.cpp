@@ -1,6 +1,7 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
 #include "Commands/Material/AssetPathUtils.h"
+#include "Misc/EngineVersionComparison.h"
 
 #include "MaterialEditingLibrary.h"
 #include "Materials/Material.h"
@@ -48,6 +49,11 @@
 #include "UObject/SoftObjectPath.h"                    // get_material_function_info soft-path load
 #include "Materials/MaterialFunctionMaterialLayer.h"      // create_material_function usage MaterialLayer
 #include "Materials/MaterialFunctionMaterialLayerBlend.h" // create_material_function usage MaterialLayerBlend
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+#include "Editor.h"                                       // GEditor (5.7 disconnect_to_material_output)
+#include "Subsystems/AssetEditorSubsystem.h"
+#include "IMaterialEditor.h"                              // NotifyExternalMaterialChange
+#endif
 
 /** Additional material commands: connect an expression to a material output property, set
  *  expression/instance parameters, recompile a material and set its domain, plus material functions
@@ -195,6 +201,55 @@ namespace UEAgentMaterialExtraImpl
         }
         return nullptr;
     }
+
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    // UE 5.7: UMaterialEditingLibrary::DisconnectMaterialProperty and ::IsMaterialInstanceParameterOverridden arrived
+    // in 5.8. These are their bodies, written with what 5.7 exposes.
+
+    /** 5.8's DisconnectMaterialProperty: clear Material's input for Property and refresh its open Material Editor.
+     *  True when a link was broken, false when the input was already disconnected. */
+    bool DisconnectMaterialProperty57(UMaterial* Material, EMaterialProperty Property)
+    {
+        if (Material == nullptr)
+        {
+            return false;
+        }
+        FExpressionInput* Input = Material->GetExpressionInputForProperty(Property);
+        if (Input == nullptr || !Input->IsConnected())
+        {
+            return false;
+        }
+        Input->Expression = nullptr;
+        Input->OutputIndex = 0;
+        if (GEditor != nullptr)
+        {
+            if (IAssetEditorInstance* Editor = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->FindEditorForAsset(Material, false))
+            {
+                static_cast<IMaterialEditor*>(Editor)->NotifyExternalMaterialChange();
+            }
+        }
+        return true;
+    }
+
+    /** 5.8's IsMaterialInstanceParameterOverridden: whether Instance itself stores a value for the parameter, of any type. */
+    bool IsMaterialInstanceParameterOverridden57(UMaterialInstanceConstant* Instance, FName ParameterName, EMaterialParameterAssociation Association)
+    {
+        if (Instance == nullptr)
+        {
+            return false;
+        }
+        const FMaterialParameterInfo ParamInfo(ParameterName, Association, Association == EMaterialParameterAssociation::LayerParameter ? 0 : INDEX_NONE);
+        FMaterialParameterMetadata OutResult;
+        for (int32 TypeIndex = 0; TypeIndex < NumMaterialParameterTypes; ++TypeIndex)
+        {
+            if (Instance->GetParameterOverrideValue(static_cast<EMaterialParameterType>(TypeIndex), ParamInfo, OutResult))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+#endif
 }
 
 // MCP:connect_to_material_output - Wire one output of an expression node into a main input of a UMaterial asset (BaseColor, Roughness, Normal...). The edit stays in memory: no recompile, no dirty flag, no save, so follow with compile_material and save_asset. Node-to-node wiring is connect_material_expressions.
@@ -256,7 +311,11 @@ TSharedPtr<FJsonObject> HandleDisconnectToMaterialOutput(const TSharedPtr<FJsonO
     // DisconnectMaterialProperty returns false when the property input was already
     // disconnected. The enum always resolves to a valid material input, so false is
     // unambiguously "nothing was connected" (already_disconnected), NOT an error.
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    const bool bDisconnected = UEAgentMaterialExtraImpl::DisconnectMaterialProperty57(Material, Property);
+#else
     const bool bDisconnected = UMaterialEditingLibrary::DisconnectMaterialProperty(Material, Property);
+#endif
 
     Material->MarkPackageDirty();
 
@@ -619,8 +678,13 @@ TSharedPtr<FJsonObject> HandleSetMaterialInstanceParam(const TSharedPtr<FJsonObj
 
     // Second, independent witness: a value that matches by accident (because the
     // parent already had it) is NOT an override.
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    const bool bOverriddenAfter =
+        UEAgentMaterialExtraImpl::IsMaterialInstanceParameterOverridden57(Instance, PName, Assoc);
+#else
     const bool bOverriddenAfter =
         UMaterialEditingLibrary::IsMaterialInstanceParameterOverridden(Instance, PName, Assoc);
+#endif
     Result->SetBoolField(TEXT("overridden_after"), bOverriddenAfter);
     Result->SetBoolField(TEXT("set"), bSet);
 

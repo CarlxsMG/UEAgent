@@ -13,7 +13,7 @@ Add a column of column_type, its input left unbound, to a UChooserTable asset as
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `table_path` | string | yes | Long package path of an existing UChooserTable. |
-| `column_type` | string | yes | Column struct to add: "FloatRange", "Bool", "Enum", "Object", or "OutputObject". |
+| `column_type` | string | yes | Column struct to add: "FloatRange", "Bool", "Enum", "Object", or "OutputObject". Name and OutputName need UE 5.8. |
 | `column_name` | string | yes | Label echoed back in the reply only; it is not stored on the column. |
 
 **Returns:** `{ table_path: string, column_index: int, column_name: string, column_type: string, already_existed: bool, row_count?: int, saved?: bool, save_error?: string }`

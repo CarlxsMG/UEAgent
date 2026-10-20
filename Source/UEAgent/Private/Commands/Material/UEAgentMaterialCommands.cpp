@@ -28,6 +28,15 @@
 #include "ShaderCompiler.h"            // GShaderCompilingManager->FinishAllCompilation (get_material_stats)
 #include "Misc/App.h"                  // FApp::CanEverRender (honest no-RHI gate)
 #include "Templates/Function.h"        // TFunctionRef (graph node visitor)
+#include "Misc/EngineVersionComparison.h"
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+#include "IMaterialEditor.h"                          // NotifyExternalMaterialChange (5.7 disconnect)
+#include "Subsystems/AssetEditorSubsystem.h"
+#include "MaterialGraph/MaterialGraphNode.h"          // GetShortenPinName (5.7 disconnect)
+#include "Materials/MaterialExpressionMaterialFunctionCall.h"
+#include "Particles/ParticleSystemComponent.h"        // 5.7 usage-flag recompile
+#include "EditorSupportDelegates.h"
+#endif
 
 namespace UEAgentMaterialCommands
 {
@@ -378,6 +387,145 @@ namespace UEAgentMaterialCommandsImpl
             return nullptr;
         }
     }
+
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    // UE 5.7: UMaterialEditingLibrary::DisconnectMaterialExpressions and ::SetBaseMaterialUsage arrived in 5.8. These
+    // do the same work with what 5.7 exposes (5.8's bodies, their file-private helpers written out).
+
+    /** Refresh an open Material Editor of Material, as 5.8's library does after editing its graph. */
+    void NotifyMaterialEditorOfChange57(UMaterialInterface* Material)
+    {
+        if (Material == nullptr || GEditor == nullptr || Material->IsA(UMaterialInstanceDynamic::StaticClass()))
+        {
+            return;
+        }
+        if (IAssetEditorInstance* Editor = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->FindEditorForAsset(Material, false))
+        {
+            static_cast<IMaterialEditor*>(Editor)->NotifyExternalMaterialChange();
+        }
+    }
+
+    /** 5.8's DisconnectMaterialExpressions: break the link into ToExpression's input named ToInputName (first input
+     *  when empty). True when a link was broken; false when the input does not exist or was not connected. */
+    bool DisconnectMaterialExpressions57(UMaterialExpression* ToExpression, const FString& ToInputName)
+    {
+        if (ToExpression == nullptr)
+        {
+            return false;
+        }
+        const FName InputName(*ToInputName);
+        FExpressionInput* Input = nullptr;
+        if (InputName.IsNone())
+        {
+            Input = ToExpression->GetInput(0);
+        }
+        else
+        {
+            for (FExpressionInputIterator It{ ToExpression }; It; ++It)
+            {
+                // A function call's pin is compared without its type postfix; any other pin by its shortened name.
+                FName TestName;
+                if (UMaterialExpressionMaterialFunctionCall* FuncCall = Cast<UMaterialExpressionMaterialFunctionCall>(ToExpression))
+                {
+                    TestName = FuncCall->GetInputNameWithType(It.Index, false);
+                }
+                else
+                {
+                    TestName = UMaterialGraphNode::GetShortenPinName(ToExpression->GetInputName(It.Index));
+                }
+                if (TestName == InputName)
+                {
+                    Input = It.Input;
+                    break;
+                }
+            }
+        }
+        if (Input == nullptr || !Input->IsConnected())
+        {
+            return false;
+        }
+        Input->Expression = nullptr;
+        Input->OutputIndex = 0;
+        NotifyMaterialEditorOfChange57(Cast<UMaterial>(ToExpression->GetOuter()));
+        return true;
+    }
+
+    /**
+     * UMaterialInstance::UpdateParameterNames is protected in 5.7 (5.8's library calls it as a friend of the class).
+     * This using-declaration names that same engine function publicly; it is only ever used through the member
+     * pointer it yields, which is of type void (UMaterialInstance::*)(). The type is never instantiated.
+     */
+    struct FMaterialInstanceUpdateParameterNames57 : public UMaterialInstance
+    {
+        using UMaterialInstance::UpdateParameterNames;
+    };
+
+    /**
+     * 5.8's SetBaseMaterialUsage. 5.7's UMaterial::SetUsageByFlag is private, so the public bUsedWith* bit it switches
+     * over is written here; then the recompile 5.8 runs (UMaterialEditingLibrary::RecompileMaterialInternal, private in
+     * 5.7, written out: the public RecompileMaterial would also rebuild texture streaming data behind a modal dialog)
+     * and the same broadcast. Returns early when the flag already holds bValue.
+     */
+    void SetBaseMaterialUsage57(UMaterial* Material, EMaterialUsage Usage, bool bValue)
+    {
+        if (Material == nullptr || Material->GetUsageByFlag(Usage) == bValue)
+        {
+            return;
+        }
+        switch (Usage)
+        {
+        case MATUSAGE_SkeletalMesh:            Material->bUsedWithSkeletalMesh = bValue; break;
+        case MATUSAGE_ParticleSprites:         Material->bUsedWithParticleSprites = bValue; break;
+        case MATUSAGE_BeamTrails:              Material->bUsedWithBeamTrails = bValue; break;
+        case MATUSAGE_MeshParticles:           Material->bUsedWithMeshParticles = bValue; break;
+        case MATUSAGE_NiagaraSprites:          Material->bUsedWithNiagaraSprites = bValue; break;
+        case MATUSAGE_NiagaraRibbons:          Material->bUsedWithNiagaraRibbons = bValue; break;
+        case MATUSAGE_NiagaraMeshParticles:    Material->bUsedWithNiagaraMeshParticles = bValue; break;
+        case MATUSAGE_StaticLighting:          Material->bUsedWithStaticLighting = bValue; break;
+        case MATUSAGE_MorphTargets:            Material->bUsedWithMorphTargets = bValue; break;
+        case MATUSAGE_SplineMesh:              Material->bUsedWithSplineMeshes = bValue; break;
+        case MATUSAGE_InstancedStaticMeshes:   Material->bUsedWithInstancedStaticMeshes = bValue; break;
+        case MATUSAGE_GeometryCollections:     Material->bUsedWithGeometryCollections = bValue; break;
+        case MATUSAGE_Clothing:                Material->bUsedWithClothing = bValue; break;
+        case MATUSAGE_GeometryCache:           Material->bUsedWithGeometryCache = bValue; break;
+        case MATUSAGE_Water:                   Material->bUsedWithWater = bValue; break;
+        case MATUSAGE_HairStrands:             Material->bUsedWithHairStrands = bValue; break;
+        case MATUSAGE_LidarPointCloud:         Material->bUsedWithLidarPointCloud = bValue; break;
+        case MATUSAGE_VirtualHeightfieldMesh:  Material->bUsedWithVirtualHeightfieldMesh = bValue; break;
+        case MATUSAGE_Nanite:                  Material->bUsedWithNanite = bValue; break;
+        case MATUSAGE_Voxels:                  Material->bUsedWithVoxels = bValue; break;
+        case MATUSAGE_VolumetricCloud:         Material->bUsedWithVolumetricCloud = bValue; break;
+        case MATUSAGE_HeterogeneousVolumes:    Material->bUsedWithHeterogeneousVolumes = bValue; break;
+        case MATUSAGE_StaticMesh:              Material->bUsedWithStaticMesh = bValue; break;
+        default:                               return;
+        }
+
+        {
+            FMaterialUpdateContext UpdateContext;
+            UpdateContext.AddMaterial(Material);
+            Material->PreEditChange(nullptr);
+            Material->PostEditChange();
+            Material->MarkPackageDirty();
+            // Particle components re-evaluate their view relevance; child instances refresh their parameter names.
+            for (TObjectIterator<UParticleSystemComponent> It(RF_ClassDefaultObject, true, EInternalObjectFlags::Garbage); It; ++It)
+            {
+                It->bIsViewRelevanceDirty = true;
+            }
+            void (UMaterialInstance::*UpdateNames)() = &FMaterialInstanceUpdateParameterNames57::UpdateParameterNames;
+            for (TObjectIterator<UMaterialInstance> It(RF_ClassDefaultObject, true, EInternalObjectFlags::Garbage); It; ++It)
+            {
+                if (It->Parent == Material)
+                {
+                    UMaterialInstance* ChildInstance = *It;
+                    (ChildInstance->*UpdateNames)();
+                }
+            }
+        }
+        UMaterialEditingLibrary::RebuildMaterialInstanceEditors(Material);
+
+        FEditorSupportDelegates::MaterialUsageFlagsChanged.Broadcast(Material, Usage);
+    }
+#endif
 }
 
 // MCP:create_material - Create a new base material asset (UMaterial) -- the graph-owning master whose parameters and static switches every instance of it inherits. Prefer create_material_instance when you only need a re-skin of something that exists: an instance costs no new shader permutations and leaves the original updatable. After creating, build the graph with create_material_expression + connect_material_expressions, then verify with get_material_stats (compile_errors empty and stats_valid true) -- compile_material only acknowledges, it does not report errors, and a landscape material that fails to compile silently falls back to the default material.
@@ -815,7 +963,11 @@ TSharedPtr<FJsonObject> HandleDisconnectMaterialExpressions(const TSharedPtr<FJs
 
     // A false return means the pin had no link to break. The node exists, so that is reported as
     // already_disconnected instead of an error. No recompile here, matching the connect command.
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    const bool bLinkBroken = UEAgentMaterialCommandsImpl::DisconnectMaterialExpressions57(TargetNode, TargetPin);
+#else
     const bool bLinkBroken = UMaterialEditingLibrary::DisconnectMaterialExpressions(TargetNode, TargetPin);
+#endif
     Graph->MarkPackageDirty();
 
     TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
@@ -929,7 +1081,11 @@ TSharedPtr<FJsonObject> HandleSetMaterialUsageFlag(const TSharedPtr<FJsonObject>
     const bool bAlreadySet = Material->GetUsageByFlag(Usage) == bWantEnabled;
     Material->Modify();
     // The engine setter returns early by itself when the flag already holds the requested value.
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    UEAgentMaterialCommandsImpl::SetBaseMaterialUsage57(Material, Usage, bWantEnabled);
+#else
     UMaterialEditingLibrary::SetBaseMaterialUsage(Material, Usage, bWantEnabled);
+#endif
     Material->MarkPackageDirty();
 
     UE_LOG(LogTemp, Verbose, TEXT("MCP set_material_usage_flag: %s %s=%d (already_set=%d)"),

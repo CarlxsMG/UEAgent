@@ -1,5 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Commands/Common/McpEnumLabels.h"
 #include "Engine/World.h"
 #include "Engine/Level.h"
@@ -472,7 +473,9 @@ TSharedPtr<FJsonObject> HandleStartTrace(const TSharedPtr<FJsonObject>& Params)
         const FTraceAuxiliary::ETraceSystemStatus Status = FTraceAuxiliary::GetTraceSystemStatus();
         const FString StatusStr = (Status == FTraceAuxiliary::ETraceSystemStatus::TracingToFile) ? TEXT("file")
                                     : (Status == FTraceAuxiliary::ETraceSystemStatus::TracingToServer) ? TEXT("server")
+#if !UE_VERSION_OLDER_THAN(5, 8, 0) // TracingToSecureNetwork: secure-network tracing only exists from UE 5.8
                                     : (Status == FTraceAuxiliary::ETraceSystemStatus::TracingToSecureNetwork) ? TEXT("secure_network")
+#endif
                                     : (Status == FTraceAuxiliary::ETraceSystemStatus::TracingToCustomRelay) ? TEXT("custom_relay")
                                     : TEXT("other");
 
@@ -599,7 +602,9 @@ TSharedPtr<FJsonObject> HandleGetTraceStatus(const TSharedPtr<FJsonObject>& Para
         case FTraceAuxiliary::ETraceSystemStatus::Available:              StatusStr = TEXT("available");              break;
         case FTraceAuxiliary::ETraceSystemStatus::TracingToFile:          StatusStr = TEXT("tracing_to_file");        break;
         case FTraceAuxiliary::ETraceSystemStatus::TracingToServer:        StatusStr = TEXT("tracing_to_server");      break;
+#if !UE_VERSION_OLDER_THAN(5, 8, 0) // TracingToSecureNetwork: secure-network tracing only exists from UE 5.8
         case FTraceAuxiliary::ETraceSystemStatus::TracingToSecureNetwork: StatusStr = TEXT("tracing_to_secure_network"); break;
+#endif
         case FTraceAuxiliary::ETraceSystemStatus::TracingToCustomRelay:   StatusStr = TEXT("tracing_to_custom_relay");   break;
         default:                                                          StatusStr = TEXT("unknown");                break;
     }

@@ -1,5 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Commands/Animation/AnimAssetUtils.h"
 
 #include "Animation/Skeleton.h"
@@ -1340,6 +1341,24 @@ namespace
             && A.GetScale3D() == B.GetScale3D();
     }
 
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    // UE 5.7 has no UPoseAsset::GetFullCurveValues. What it returns in 5.8, the pose's FPoseData::SourceCurveData (its
+    // full, non-additive curve values), read through the reflected private PoseContainer.Poses; empty for an index out
+    // of range, as in 5.8.
+    TArray<float> AnimAuthoring_FullCurveValues(const UPoseAsset* PoseAsset, int32 PoseIndex)
+    {
+        const FStructProperty* ContainerProp = FindFProperty<FStructProperty>(UPoseAsset::StaticClass(), TEXT("PoseContainer"));
+        const FArrayProperty* PosesProp = ContainerProp ? FindFProperty<FArrayProperty>(ContainerProp->Struct, TEXT("Poses")) : nullptr;
+        if (!PosesProp)
+        {
+            return TArray<float>();
+        }
+        const TArray<FPoseData>& Poses = *PosesProp->ContainerPtrToValuePtr<TArray<FPoseData>>(
+            ContainerProp->ContainerPtrToValuePtr<void>(PoseAsset));
+        return Poses.IsValidIndex(PoseIndex) ? Poses[PoseIndex].SourceCurveData : TArray<float>();
+    }
+#endif
+
     // Whether UPoseAsset::AddReferencePose(PoseName, RefSkeleton) would leave the asset as it is (PoseAsset.cpp:
     // AddReferencePose, AddOrUpdatePose, CombineTracks and PostProcessData): the pose exists; its tracks are
     // exactly the bones of the skeleton, so no track would be inserted and none dropped as invalid; each track
@@ -1353,7 +1372,13 @@ namespace
             return false;
         }
         const TArray<FName>& Tracks = PoseAsset->GetTrackNames();
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+        // 5.7 has only the copying overload; both return the pose's FPoseData::SourceLocalSpacePose.
+        TArray<FTransform> SourcePose;
+        PoseAsset->GetFullPose(PoseIndex, SourcePose);
+#else
         const TArray<FTransform>& SourcePose = PoseAsset->GetFullPose(PoseIndex);
+#endif
         const TArray<FTransform>& RefPose = RefSkeleton.GetRefBonePose();
         if (Tracks.Num() != RefSkeleton.GetNum() || SourcePose.Num() != Tracks.Num())
         {
@@ -1374,7 +1399,11 @@ namespace
                 return false;
             }
         }
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+        const TArray<float> CurveValues = AnimAuthoring_FullCurveValues(PoseAsset, PoseIndex);
+#else
         const TArray<float>& CurveValues = PoseAsset->GetFullCurveValues(PoseIndex);
+#endif
         if (CurveValues.Num() != PoseAsset->GetNumCurves())
         {
             return false;

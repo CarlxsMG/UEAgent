@@ -1,5 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Misc/EngineVersionComparison.h" // UE_VERSION_OLDER_THAN: the UE 5.7 paths
 #include "Commands/Common/UEAgentGraphUtils.h"
 
 // Engine / editor
@@ -295,7 +296,11 @@ namespace
             , bPackageWasDirty(InCDO->GetOutermost()->IsDirty())
         {
             TArray<UObject*> Subobjects;
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+            GetObjectsWithOuter(InCDO, Subobjects, /*bIncludeNestedObjects*/ false); // UE 5.7: a bool, no EGetObjectsFlags
+#else
             GetObjectsWithOuter(InCDO, Subobjects, EGetObjectsFlags::None);
+#endif
             Snapshot(InCDO);
             for (UObject* Subobject : Subobjects)
             {
@@ -357,7 +362,11 @@ namespace
                 // is no longer referenced once the properties are back, but a save takes every RF_Public object of
                 // the package as an export: it leaves the package, so no later save writes it.
                 TArray<UObject*> Subobjects;
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+                GetObjectsWithOuter(Owner, Subobjects, /*bIncludeNestedObjects*/ false); // UE 5.7: a bool, no EGetObjectsFlags
+#else
                 GetObjectsWithOuter(Owner, Subobjects, EGetObjectsFlags::None);
+#endif
                 for (UObject* Subobject : Subobjects)
                 {
                     if (Subobject->IsA<UGameplayEffectComponent>() && !ExistingSubobjects.Contains(Subobject))
@@ -1496,11 +1505,21 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectStacking(const TSharedPtr<FJsonOb
             default:                                             return TEXT("None");
         } };
 
+    // 5.7 declares GetStackingType() without exporting it, so the read-back does what its body does: None for an
+    // Instant effect, else the field.
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    PRAGMA_DISABLE_DEPRECATION_WARNINGS
+    const EGameplayEffectStackingType ReadStackType = GECDO->DurationPolicy == EGameplayEffectDurationType::Instant
+        ? EGameplayEffectStackingType::None : GECDO->StackingType;
+    PRAGMA_ENABLE_DEPRECATION_WARNINGS
+#else
+    const EGameplayEffectStackingType ReadStackType = GECDO->GetStackingType();
+#endif
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("ge_blueprint_path"), BlueprintPath);
-    Result->SetStringField(TEXT("stacking_type"), StackTypeToStr(GECDO->GetStackingType()));
+    Result->SetStringField(TEXT("stacking_type"), StackTypeToStr(ReadStackType));
     Result->SetNumberField(TEXT("stack_limit"), GECDO->StackLimitCount);
-    Result->SetBoolField(TEXT("stacking_matches"), GECDO->GetStackingType() == StackType);
+    Result->SetBoolField(TEXT("stacking_matches"), ReadStackType == StackType);
     Result->SetBoolField(TEXT("set"), true);
     return mcp_common::MakeOkReply(Result);
 }

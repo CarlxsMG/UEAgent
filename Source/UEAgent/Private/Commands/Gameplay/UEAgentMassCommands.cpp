@@ -1,5 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Commands/Common/UEAgentGraphUtils.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -910,6 +911,17 @@ namespace
 		return nullptr;
 	}
 
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+	/**
+	 * Appends every entity of Archetype to OutEntities, chunk by chunk. 5.7 has no
+	 * FMassEntityManager::ForEachArchetypeChunkEntityList; a whole-archetype collection exports the same handles.
+	 */
+	void Mass_GatherArchetypeEntities(const FMassArchetypeHandle& Archetype, TArray<FMassEntityHandle>& OutEntities)
+	{
+		FMassArchetypeEntityCollection(Archetype).ExportEntityHandles(OutEntities);
+	}
+#endif
+
 	/**
 	 * Add (bAdd) or remove the tag param on the entity_handle param's entity by migrating its archetype, and describe
 	 * the migration in Data; returns the error reply when it cannot (TagRequiredError when tag is missing).
@@ -949,15 +961,23 @@ namespace
 		const FMassArchetypeHandle OldArch = Mgr.GetArchetypeForEntityUnsafe(Handle);
 		// No public GetArchetypeEntities: gather the handles with ForEachArchetypeChunkEntityList.
 		TArray<FMassEntityHandle> ArchEntities;
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+		Mass_GatherArchetypeEntities(OldArch, ArchEntities);
+#else
 		FMassEntityManager::ForEachArchetypeChunkEntityList(OldArch,
 			[&ArchEntities](TConstArrayView<FMassEntityHandle> ChunkEntities)
 			{
 				ArchEntities.Append(ChunkEntities.GetData(), ChunkEntities.Num());
 			});
+#endif
 		FMassArchetypeEntityCollection Collection(OldArch, ArchEntities,
 			FMassArchetypeEntityCollection::NoDuplicates);
 		FMassTagBitSet Tags;
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+		Tags.Add(*TagStruct);  // 5.7's Add takes the struct by reference
+#else
 		Tags.Add(TagStruct);
+#endif
 		if (bAdd)
 		{
 			Mgr.BatchChangeTagsForEntities(MakeArrayView(&Collection, 1), Tags, FMassTagBitSet());
@@ -1272,11 +1292,15 @@ TSharedPtr<FJsonObject> HandleFireMassSignal(const TSharedPtr<FJsonObject>& Para
 			const FMassArchetypeHandle A = C.GetArchetype();
 			if (Mgr.DebugGetArchetypeEntitiesCount(A) <= 0) { continue; }
 			TArray<FMassEntityHandle> ArchEntities;
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+			Mass_GatherArchetypeEntities(A, ArchEntities);
+#else
 			FMassEntityManager::ForEachArchetypeChunkEntityList(A,
 				[&ArchEntities](TConstArrayView<FMassEntityHandle> ChunkEntities)
 				{
 					ArchEntities.Append(ChunkEntities.GetData(), ChunkEntities.Num());
 				});
+#endif
 			if (ArchEntities.Num() == 0) { continue; }
 			SigSub->SignalEntities(FName(*SignalName), ArchEntities);
 			Dispatched += ArchEntities.Num();

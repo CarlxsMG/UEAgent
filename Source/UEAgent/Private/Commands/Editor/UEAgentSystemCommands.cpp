@@ -1,5 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Misc/EngineVersionComparison.h"
 
 #include "Editor.h"
 #include "EditorAssetLibrary.h"
@@ -33,6 +34,11 @@
 #include "PackageTools.h"                     // UPackageTools::ReloadPackages + EReloadPackagesInteractionMode (reload_asset_package)
 #include "UObject/UObjectHash.h"              // ForEachObjectWithPackage (resolve the AActor behind an OFPA hash package name)
 #include "GameFramework/Actor.h"              // AActor::GetActorLabel (makes __ExternalActors__/<hash> readable)
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+#include "AssetImportTask.h"                  // UAssetImportTask::bAutomated -- import_font_file without the modal on 5.7
+#include "Factories/FontFactory.h"            // UFontFactory -- import_font_file's companion UFont on 5.7
+#include "Misc/AssetRegistryInterface.h"      // IAssetRegistryInterface::TryGetAssetByObjectPath (CreateIfNoFontExists on 5.7)
+#endif
 
 /** Project/system commands: console, directories, font import, redirectors, plugins, saving assets,
  *  and the in-memory package-state tools (dirty-package audit + non-interactive package reload). */
@@ -1419,10 +1425,19 @@ TSharedPtr<FJsonObject> HandleImportFontFile(const TSharedPtr<FJsonObject>& Para
 
     UFontFileImportFactory* FontFactory = NewObject<UFontFileImportFactory>();
     FontFactory->bEditorImport = true;
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    // UE 5.7: BatchCreateFontAsset is private and has no CreateIfNoFontExists. An automated import never opens the
+    // modal and never creates the UFont (EditorFactories.cpp); the UFont is created after the import, below.
+    UAssetImportTask* FontImportTask = NewObject<UAssetImportTask>();
+    FontImportTask->bAutomated = true;
+    FontImportTask->Filename = SourceFilePath;
+    FontFactory->SetAssetImportTask(FontImportTask);
+#else
     // WITHOUT this the factory opens a modal and the editor hangs waiting (see the note above).
     FontFactory->BatchCreateFontAsset = bCreateFontAsset
         ? EBatchCreateFontAsset::CreateIfNoFontExists
         : EBatchCreateFontAsset::No;
+#endif
 
     FString Error;
     const FString ImportedPath = mcp_common::FactoryCreateBinaryImport(
@@ -1433,6 +1448,49 @@ TSharedPtr<FJsonObject> HandleImportFontFile(const TSharedPtr<FJsonObject>& Para
         return mcp_common::MakeErrorReply(FString::Printf(
             TEXT("Font import produced no asset from: %s (%s)"), *SourceFilePath, *Error));
     }
+
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+    // UE 5.7: the companion UFont, made as the 5.8 factory makes it under CreateIfNoFontExists (EditorFactories.cpp):
+    // only when no "<face>_Font" asset exists yet, in a unique package next to the face, with a Runtime cache and one
+    // "Default" typeface entry on the face, with the face's flags. It is saved by the block below, as in 5.8.
+    if (bCreateFontAsset)
+    {
+        if (UFontFace* FontFace = Cast<UFontFace>(FSoftObjectPath(ImportedPath).ResolveObject()))
+        {
+            const FString CreatedFontPackageName = FString::Printf(TEXT("%s/%s_Font"),
+                *FPackageName::GetLongPackagePath(FontFace->GetOutermost()->GetName()), *FontFace->GetName());
+            const FString CreatedFontObjectName = FString::Printf(TEXT("%s.%s_Font"),
+                *CreatedFontPackageName, *FontFace->GetName());
+            FAssetData Unused;
+            if (IAssetRegistryInterface::GetPtr()->TryGetAssetByObjectPath(FSoftObjectPath(CreatedFontObjectName), Unused)
+                != UE::AssetRegistry::EExists::Exists)
+            {
+                FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools");
+                FString FontPackageName;
+                FString FontAssetName;
+                AssetToolsModule.Get().CreateUniqueAssetName(CreatedFontPackageName, FString(), FontPackageName, FontAssetName);
+
+                UFontFactory* FontAssetFactory = NewObject<UFontFactory>();
+                FontAssetFactory->bEditAfterNew = false;
+
+                UPackage* FontPackage = CreatePackage(*FontPackageName);
+                UFont* Font = Cast<UFont>(FontAssetFactory->FactoryCreateNew(UFont::StaticClass(), FontPackage,
+                    *FontAssetName, RF_Public | RF_Standalone, nullptr, GWarn));
+                if (Font)
+                {
+                    Font->FontCacheType = EFontCacheType::Runtime;
+
+                    FTypefaceEntry& DefaultTypefaceEntry = Font->GetMutableInternalCompositeFont().DefaultTypeface.Fonts.AddDefaulted_GetRef();
+                    DefaultTypefaceEntry.Name = "Default";
+                    DefaultTypefaceEntry.Font = FFontData(FontFace);
+
+                    FAssetRegistryModule::AssetCreated(Font);
+                    FontPackage->MarkPackageDirty();
+                }
+            }
+        }
+    }
+#endif
 
     // WARNING: the factory creates the companion UFont in a DIFFERENT package ("<path>/<Name>_Font",
     // EditorFactories.cpp) and leaves it MarkPackageDirty but NOT saved --
