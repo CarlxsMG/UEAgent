@@ -1,0 +1,333 @@
+/* The site's additions to Material for MkDocs: the home page, the tool chips and the tool explorer.
+   Colors come from the theme's variables, or from the chip palette below, set for both schemes. */
+
+:root {
+  --ua-chip-read-only: #1a7f37;
+  --ua-chip-additive: #0969da;
+  --ua-chip-destructive: #cf222e;
+  --ua-chip-idempotent: #57606a;
+  --ua-chip-open-world: #9a6700;
+  --ua-chip-pie: #8250df;
+}
+
+[data-md-color-scheme="slate"] {
+  --ua-chip-read-only: #3fb950;
+  --ua-chip-additive: #58a6ff;
+  --ua-chip-destructive: #ff7b72;
+  --ua-chip-idempotent: #9ea7b3;
+  --ua-chip-open-world: #d29922;
+  --ua-chip-pie: #bc8cff;
+}
+
+/* ------------------------------------------------------------------ home page */
+
+.ua-hero {
+  text-align: center;
+  padding: 1.5rem 0 0.5rem;
+}
+
+.ua-hero__logo {
+  display: block;
+  margin: 0 auto;
+}
+
+.md-typeset .ua-hero h1 {
+  margin: 0.6rem 0 0.2rem;
+  color: var(--md-default-fg-color);
+  font-weight: 700;
+  font-size: 2.6em;
+  letter-spacing: -0.02em;
+}
+
+.md-typeset .ua-hero__lead {
+  margin: 0 auto 0.8rem;
+  font-size: 1.3em;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.md-typeset .ua-hero > p:not(.ua-hero__lead) {
+  max-width: 38rem;
+  margin-left: auto;
+  margin-right: auto;
+  color: var(--md-default-fg-color--light);
+}
+
+.md-typeset .ua-hero .md-button {
+  margin: 0.25rem 0.2rem;
+}
+
+.md-typeset .grid.cards.ua-steps {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr));
+}
+
+/* ------------------------------------------------------------------ tool chips */
+
+.md-typeset .ua-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 0 0 0.6em;
+}
+
+.md-typeset .ua-chip {
+  display: inline-block;
+  padding: 0.05rem 0.5rem;
+  border: 1px solid currentColor;
+  border-radius: 1rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.ua-chip--read-only { color: var(--ua-chip-read-only); }
+.ua-chip--additive { color: var(--ua-chip-additive); }
+.ua-chip--destructive { color: var(--ua-chip-destructive); }
+.ua-chip--idempotent { color: var(--ua-chip-idempotent); }
+.ua-chip--open-world { color: var(--ua-chip-open-world); }
+.ua-chip--pie { color: var(--ua-chip-pie); }
+
+/* ------------------------------------------------------------------ tool explorer */
+
+.ua-explorer {
+  margin-top: 1rem;
+}
+
+.md-typeset .ua-x-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 0.8rem 1rem;
+  align-items: end;
+  margin-bottom: 1rem;
+}
+
+@media screen and (max-width: 44.9375em) {
+  .md-typeset .ua-x-controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.md-typeset .ua-x-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--md-default-fg-color--light);
+}
+
+.md-typeset .ua-x-field input,
+.md-typeset .ua-x-field select {
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--md-default-fg-color--lighter);
+  border-radius: 0.2rem;
+  background: var(--md-default-bg-color);
+  color: var(--md-default-fg-color);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 400;
+}
+
+.md-typeset .ua-x-field input:focus,
+.md-typeset .ua-x-field select:focus {
+  outline: 2px solid var(--md-accent-fg-color);
+  outline-offset: 1px;
+}
+
+.md-typeset .ua-x-effect {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.md-typeset .ua-x-effect legend {
+  width: 100%;
+  margin-bottom: 0.25rem;
+  padding: 0;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--md-default-fg-color--light);
+}
+
+.md-typeset .ua-x-effect label {
+  position: relative;
+  cursor: pointer;
+}
+
+.md-typeset .ua-x-effect input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.md-typeset .ua-x-effect span {
+  display: inline-block;
+  padding: 0.3rem 0.8rem;
+  border: 1px solid var(--md-default-fg-color--lighter);
+  border-radius: 1rem;
+  font-size: 0.75rem;
+}
+
+.md-typeset .ua-x-effect input:checked + span {
+  border-color: var(--md-accent-fg-color);
+  background: var(--md-accent-fg-color--transparent);
+  color: var(--md-accent-fg-color);
+  font-weight: 600;
+}
+
+.md-typeset .ua-x-effect input:focus-visible + span {
+  outline: 2px solid var(--md-accent-fg-color);
+  outline-offset: 1px;
+}
+
+.md-typeset .ua-x-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+  font-size: 0.75rem;
+}
+
+.md-typeset .ua-x-checks label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+}
+
+.md-typeset .ua-x-about,
+.md-typeset .ua-x-count,
+.md-typeset .ua-x-status {
+  margin: 0.4rem 0;
+  font-size: 0.75rem;
+  color: var(--md-default-fg-color--light);
+}
+
+.md-typeset ol.ua-x-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.md-typeset ol.ua-x-list > li.ua-x-item {
+  margin: 0;
+  border-bottom: 1px solid var(--md-default-fg-color--lightest);
+  scroll-margin-top: 3.6rem; /* below the theme's sticky header */
+}
+
+/* A parameter's name, alone in the first cell of a table, stays on one line. */
+.md-typeset td:first-child > code:only-child {
+  white-space: nowrap;
+}
+
+.md-typeset .ua-x-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.2rem 0.8rem;
+  width: 100%;
+  padding: 0.6rem 0.4rem;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.md-typeset .ua-x-head:hover,
+.md-typeset .ua-x-head[aria-expanded="true"] {
+  background: var(--md-code-bg-color);
+}
+
+.md-typeset .ua-x-head:focus-visible {
+  outline: 2px solid var(--md-accent-fg-color);
+  outline-offset: -2px;
+}
+
+.md-typeset .ua-x-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.2rem 0.6rem;
+  min-width: 0;
+}
+
+.md-typeset .ua-x-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.md-typeset .ua-x-domain {
+  font-size: 0.7rem;
+  color: var(--md-default-fg-color--light);
+}
+
+.md-typeset .ua-x-head .ua-chips {
+  justify-content: flex-end;
+  margin: 0;
+}
+
+.md-typeset .ua-x-summary {
+  grid-column: 1 / -1;
+  font-size: 0.75rem;
+  color: var(--md-default-fg-color--light);
+}
+
+@media screen and (max-width: 44.9375em) {
+  .md-typeset .ua-x-head {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .md-typeset .ua-x-head .ua-chips {
+    justify-content: flex-start;
+  }
+}
+
+.md-typeset .ua-x-body {
+  padding: 0.2rem 0.4rem 1rem;
+}
+
+.md-typeset .ua-x-label {
+  margin-bottom: 0.2rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.md-typeset .ua-x-call {
+  margin-top: 0;
+}
+
+.md-typeset .ua-x-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.md-typeset .ua-x-actions .md-button {
+  margin: 0;
+  padding: 0.4em 1em;
+  font-size: 0.75rem;
+}
+
+.md-typeset .ua-x-more {
+  margin-top: 1rem;
+}
+
+.md-typeset .ua-x-empty {
+  margin: 1rem 0;
+}
+
+.md-typeset .ua-x-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--md-typeset-a-color);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}

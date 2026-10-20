@@ -2,7 +2,9 @@
 
 # Subsystem
 
-2 tools. Back to the [index](README.md).
+2 tools for inspecting subsystem instances.
+
+Back to the [index](README.md).
 
 ## `inspect_subsystem_instance`
 

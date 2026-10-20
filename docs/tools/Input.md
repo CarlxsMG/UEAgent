@@ -2,7 +2,9 @@
 
 # Input
 
-23 tools. Back to the [index](README.md).
+23 tools for Enhanced Input actions, mapping contexts, modifiers and triggers, key mappings and force feedback.
+
+Back to the [index](README.md).
 
 ## `add_input_modifier`
 

@@ -2,7 +2,9 @@
 
 # Reflection
 
-24 tools. Back to the [index](README.md).
+24 tools for reading and writing the properties of any object, calling functions, classes, structs and enums, and delegates.
+
+Back to the [index](README.md).
 
 ## `call_function`
 

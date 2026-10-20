@@ -2,7 +2,9 @@
 
 # Water
 
-18 tools. Back to the [index](README.md).
+18 tools for water bodies (ocean, lake and river), water zones, their splines and Gerstner waves.
+
+Back to the [index](README.md).
 
 ## `add_water_body_to_zone`
 

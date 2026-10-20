@@ -2,7 +2,9 @@
 
 # HLOD
 
-7 tools. Back to the [index](README.md).
+7 tools for HLOD layers, their settings and their actors.
+
+Back to the [index](README.md).
 
 ## `create_hlod_layer`
 

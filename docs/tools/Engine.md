@@ -2,7 +2,9 @@
 
 # Engine
 
-74 tools. Back to the [index](README.md).
+74 tools for Niagara systems and emitters with their modules, renderers, data interfaces, simulation stages and event handlers, and the engine's status.
+
+Back to the [index](README.md).
 
 ## `add_niagara_data_interface`
 

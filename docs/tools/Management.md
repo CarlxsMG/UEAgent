@@ -2,7 +2,9 @@
 
 # Management
 
-19 tools. Back to the [index](README.md).
+19 tools for moving, renaming, duplicating and deleting assets, Primary Asset rules and IDs, plugins, and the class lineage audits.
+
+Back to the [index](README.md).
 
 ## `add_primary_asset_rule`
 

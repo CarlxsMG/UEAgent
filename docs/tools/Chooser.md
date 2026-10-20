@@ -2,7 +2,9 @@
 
 # Chooser
 
-13 tools. Back to the [index](README.md).
+13 tools for Chooser tables: their columns, rows and outcomes, and evaluating them.
+
+Back to the [index](README.md).
 
 ## `add_chooser_column`
 

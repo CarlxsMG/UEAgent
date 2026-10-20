@@ -2,7 +2,9 @@
 
 # Analysis
 
-13 tools. Back to the [index](README.md).
+13 tools for asset referencers and dependencies, Blueprint and object diffs, and Blueprints that do not compile.
+
+Back to the [index](README.md).
 
 ## `capture_object_snapshot`
 

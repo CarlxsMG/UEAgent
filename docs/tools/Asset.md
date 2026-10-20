@@ -2,7 +2,9 @@
 
 # Asset
 
-56 tools. Back to the [index](README.md).
+56 tools for finding assets by name, type, tag or folder, collections, textures and render targets, static mesh sockets, thumbnails and imports.
+
+Back to the [index](README.md).
 
 ## `add_asset_to_collection`
 

@@ -2,7 +2,9 @@
 
 # Material
 
-69 tools. Back to the [index](README.md).
+69 tools for materials and their expression graphs, material functions, instances and parameters, parameter collections and Substrate.
+
+Back to the [index](README.md).
 
 ## `add_collection_parameter`
 

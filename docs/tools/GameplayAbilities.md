@@ -2,7 +2,9 @@
 
 # GameplayAbilities
 
-57 tools. Back to the [index](README.md).
+57 tools for the Gameplay Ability System: abilities, attribute sets, gameplay effects and their modifiers, cues, tags and events.
+
+Back to the [index](README.md).
 
 ## `activate_ability`
 

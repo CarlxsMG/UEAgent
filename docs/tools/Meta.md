@@ -2,7 +2,9 @@
 
 # Meta
 
-1 tools. Back to the [index](README.md).
+1 tool for running several calls in one pass on the game thread.
+
+Back to the [index](README.md).
 
 ## `execute_batch`
 

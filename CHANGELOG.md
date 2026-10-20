@@ -4,6 +4,15 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 ## Unreleased
 
+### Added
+
+- The documentation site has a home page, a getting-started page and a tool explorer that searches every tool by
+  name or by what it does and filters them by domain, by what a call does to the project and by whether
+  Play-in-Editor refuses it. New pages cover answers and refusals, settings, a glossary, security and privacy, the
+  changelog and contributing. In the reference, each tool shows its annotations and whether PIE refuses it, and a
+  tool's name links to its entry wherever the docs mention it. Each page has its own description and link preview,
+  and the site publishes `llms.txt` and the tool catalog as JSON.
+
 ## 2.1.0 - 2026-10-20
 
 UEAgent runs on Unreal Engine 5.7 as well as 5.8: one source tree, and a precompiled zip for each engine.

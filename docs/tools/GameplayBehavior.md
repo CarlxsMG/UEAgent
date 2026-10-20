@@ -2,7 +2,9 @@
 
 # GameplayBehavior
 
-8 tools. Back to the [index](README.md).
+8 tools for Gameplay Behavior configs, and triggering behaviors on actors.
+
+Back to the [index](README.md).
 
 ## `create_behavior_config`
 

@@ -2,7 +2,9 @@
 
 # Blueprint
 
-84 tools. Back to the [index](README.md).
+84 tools for Blueprint assets, components, variables, functions, events and dispatchers, graph nodes and pins, compiling, and Editor Utility Blueprints.
+
+Back to the [index](README.md).
 
 ## `add_ai_perception_sense`
 

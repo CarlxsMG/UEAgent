@@ -2,7 +2,9 @@
 
 # Editor
 
-109 tools. Back to the [index](README.md).
+109 tools for actors and the selection, the viewport and screenshots, undo and transactions, Python and console commands, logs, enums and structs, media and automation tests.
+
+Back to the [index](README.md).
 
 ## `add_component_to_actor`
 

@@ -4,24 +4,13 @@ While the editor is open, UEAgent serves MCP over Streamable HTTP at `http://127
 (the port is set in **Editor Preferences > Plugins > UEAgent**). Any MCP client that speaks
 Streamable HTTP can connect.
 
-Every client below except Claude Code loads all the tools up front, so the examples ask for the
+Every client here except Claude Code loads all the tools up front, so the examples ask for the
 [compact tool list](#compact-tool-list) with `?tools=compact`. Remove it to give a client every tool.
 
-## Compact tool list
+## Your client
 
-For a client that cannot take the whole catalog, the server lists three meta-tools instead:
-
-| Tool | |
-|---|---|
-| `find_tools` | Searches the tools by words and/or domain; with no arguments, lists the domains |
-| `describe_tool` | One tool's description and input schema |
-| `call_tool` | Runs a tool by name, with the same checks and readback as a direct call |
-
-Ask for it per client with the URL `http://127.0.0.1:55561/mcp?tools=compact`, or for every client
-by starting the editor with the environment variable `UEAGENT_TOOLS=compact` (then `?tools=full`
-gives one client the whole list back).
-
-## Claude Code
+<!-- tabs -->
+### Claude Code
 
 From the editor's status bar, **MCP · 55561 > Connect Claude Code to this project** writes the
 `unreal` entry of the project's `.mcp.json`. Or, for yourself only:
@@ -32,7 +21,7 @@ claude mcp add --transport http unreal http://127.0.0.1:55561/mcp
 
 Claude Code loads tools on demand, so it takes the full list.
 
-## Cursor
+### Cursor
 
 `.cursor/mcp.json` in the project, or `~/.cursor/mcp.json` for every project:
 
@@ -46,9 +35,9 @@ Claude Code loads tools on demand, so it takes the full list.
 }
 ```
 
-## VS Code (GitHub Copilot, agent mode)
+### VS Code
 
-`.vscode/mcp.json` (the root key is `servers`, not `mcpServers`):
+GitHub Copilot, in agent mode: `.vscode/mcp.json` (the root key is `servers`, not `mcpServers`):
 
 ```json
 {
@@ -61,7 +50,7 @@ Claude Code loads tools on demand, so it takes the full list.
 }
 ```
 
-## Windsurf
+### Windsurf
 
 `~/.codeium/windsurf/mcp_config.json` (the key is `serverUrl`), then **Refresh** in the MCP panel:
 
@@ -75,7 +64,7 @@ Claude Code loads tools on demand, so it takes the full list.
 }
 ```
 
-## Claude Desktop
+### Claude Desktop
 
 Its config file only starts local processes, so [mcp-remote](https://www.npmjs.com/package/mcp-remote)
 bridges to the server (it needs Node.js). In `claude_desktop_config.json` (**Settings > Developer >
@@ -94,7 +83,7 @@ Edit Config**):
 
 Quit Claude Desktop completely and open it again to load the change.
 
-## Gemini CLI
+### Gemini CLI
 
 ```bash
 gemini mcp add -t http unreal "http://127.0.0.1:55561/mcp?tools=compact"
@@ -112,7 +101,7 @@ Or in `.gemini/settings.json`, with `httpUrl` (in Gemini CLI, `url` means the ol
 }
 ```
 
-## Codex
+### Codex
 
 ```bash
 codex mcp add unreal --url "http://127.0.0.1:55561/mcp?tools=compact"
@@ -124,6 +113,21 @@ Or in `~/.codex/config.toml`:
 [mcp_servers.unreal]
 url = "http://127.0.0.1:55561/mcp?tools=compact"
 ```
+<!-- /tabs -->
+
+## Compact tool list
+
+For a client that cannot take the whole catalog, the server lists three meta-tools instead:
+
+| Tool | |
+|---|---|
+| `find_tools` | Searches the tools by words and/or domain; with no arguments, lists the domains |
+| `describe_tool` | One tool's description and input schema |
+| `call_tool` | Runs a tool by name, with the same checks and readback as a direct call |
+
+Ask for it per client with the URL `http://127.0.0.1:55561/mcp?tools=compact`, or for every client
+by starting the editor with the environment variable `UEAGENT_TOOLS=compact` (then `?tools=full`
+gives one client the whole list back).
 
 ## With an auth token
 

@@ -2,7 +2,9 @@
 
 # Trigger
 
-11 tools. Back to the [index](README.md).
+11 tools for trigger boxes and spheres, volumes, and their overlap events.
+
+Back to the [index](README.md).
 
 ## `create_trigger`
 

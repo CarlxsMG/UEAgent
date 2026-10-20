@@ -2,7 +2,9 @@
 
 # AI
 
-7 tools. Back to the [index](README.md).
+7 tools for AI perception senses and stimuli sources, sight radius, AI controller Blueprints and team attitudes.
+
+Back to the [index](README.md).
 
 ## `add_ai_stimuli_source`
 

@@ -126,7 +126,7 @@ Claude también las carga solo cuando una petición encaja. Más en [Skills](doc
 
 ## Documentación
 
-También en la web, con buscador: [carlxsmg.github.io/UEAgent](https://carlxsmg.github.io/UEAgent/).
+También en la web, con buscador y un explorador de herramientas: [carlxsmg.github.io/UEAgent](https://carlxsmg.github.io/UEAgent/).
 
 | | |
 |---|---|
@@ -134,9 +134,11 @@ También en la web, con buscador: [carlxsmg.github.io/UEAgent](https://carlxsmg.
 | [Examples](docs/examples.md) | Peticiones que funcionan bien, y las herramientas que usan |
 | [Skills](docs/skills.md) | El plugin de Claude Code: un constructor de skills y tres skills hechas con él |
 | [Tool reference](docs/tools/README.md) | Todas las herramientas, por dominio |
+| [Answers and refusals](docs/responses.md) | Qué devuelve una llamada, y cómo leer un rechazo o un veredicto de readback |
 | [FAQ](docs/faq.md) | Versiones, seguridad, coste |
 | [Troubleshooting](docs/troubleshooting.md) | Cuando un cliente no conecta o una llamada se rechaza |
 | [Architecture](docs/architecture.md) | Cómo recorre una llamada el editor, y el contrato que la rodea |
+| [Glossary](docs/glossary.md) | Las palabras que usan la documentación y las respuestas de las herramientas |
 
 ## Requisitos
 

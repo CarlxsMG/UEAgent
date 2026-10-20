@@ -4,60 +4,60 @@
 
 1742 tools in 55 domains. Every tool also describes itself over MCP (`tools/list`, or `describe_tool` in the [compact tool list](../clients.md#compact-tool-list)); this reference is the same catalog, readable.
 
-| Domain | Tools | Some of them |
+| Domain | Tools | What it covers |
 |---|---|---|
-| [AI](AI.md) | 7 | `add_ai_stimuli_source`, `configure_ai_sight_radius`, `create_ai_controller_blueprint`, `get_actor_team`, ... |
-| [Analysis](Analysis.md) | 13 | `capture_object_snapshot`, `check_asset_circular_dependency`, `diff_blueprint_components`, `diff_blueprints`, ... |
-| [Animation](Animation.md) | 217 | `add_anim_composite_segment`, `add_anim_conduit`, `add_anim_curve_name`, `add_anim_float_curve`, ... |
-| [Asset](Asset.md) | 56 | `add_asset_to_collection`, `add_static_mesh_socket`, `clear_render_target`, `compare_asset_versions`, ... |
-| [Audio](Audio.md) | 93 | `add_bus_to_mix`, `add_metasound_graph_input`, `add_metasound_graph_output`, `add_metasound_interface`, ... |
-| [Audit](Audit.md) | 9 | `audit_asset_references`, `audit_blueprint_health`, `audit_collision_profiles`, `audit_replication`, ... |
-| [BehaviorTree](BehaviorTree.md) | 22 | `add_behavior_tree_child`, `add_behavior_tree_decorator`, `add_behavior_tree_service`, `add_blackboard_key`, ... |
-| [Blueprint](Blueprint.md) | 84 | `add_ai_perception_sense`, `add_blueprint_function`, `add_blueprint_variable`, `add_broadcast_node`, ... |
-| [Camera](Camera.md) | 29 | `add_camera_component`, `add_camera_node_child`, `add_gameplay_camera_component`, `add_spring_arm`, ... |
-| [Chooser](Chooser.md) | 13 | `add_chooser_column`, `add_chooser_row`, `create_chooser_table`, `delete_chooser_table`, ... |
-| [Config](Config.md) | 14 | `add_collision_channel`, `add_collision_profile`, `diff_project_config`, `get_collision_profile`, ... |
-| [DataAsset](DataAsset.md) | 52 | `add_curve_key`, `add_curve_table_key`, `add_curve_table_row`, `add_data_registry_source`, ... |
-| [Documentation](Documentation.md) | 3 | `create_asset_documentation`, `create_project_overview`, `generate_blueprint_docs` |
-| [Editor](Editor.md) | 109 | `add_component_to_actor`, `add_enum_entry`, `add_message_log_entry`, `add_struct_member`, ... |
-| [Engine](Engine.md) | 74 | `add_niagara_data_interface`, `add_niagara_emitter_from_template`, `add_niagara_event_handler`, `add_niagara_module_to_stack`, ... |
-| [Export](Export.md) | 12 | `cancel_render_job`, `configure_render_output`, `create_render_job`, `delete_render_job`, ... |
-| [GameFeatures](GameFeatures.md) | 5 | `activate_game_feature_plugin`, `deactivate_game_feature_plugin`, `get_game_feature_plugin_state`, `list_game_feature_plugins`, ... |
-| [GameFramework](GameFramework.md) | 5 | `get_game_mode_info`, `place_player_start`, `register_spawn_point`, `set_game_mode_classes`, ... |
-| [GameplayAbilities](GameplayAbilities.md) | 57 | `activate_ability`, `add_attribute_to_set`, `add_gameplay_effect_component`, `add_gameplay_effect_modifier`, ... |
-| [GameplayBehavior](GameplayBehavior.md) | 8 | `create_behavior_config`, `end_behavior_on_actor`, `get_behavior_config_info`, `get_behavior_subsystem_info`, ... |
-| [GameplayDebugger](GameplayDebugger.md) | 2 | `register_gameplay_debugger_category`, `unregister_gameplay_debugger_category` |
-| [GameplayTags](GameplayTags.md) | 15 | `add_gameplay_tag_redirect`, `add_gameplay_tag_to_table`, `add_tag_to_object`, `create_gameplay_tag`, ... |
-| [GeometryScript](GeometryScript.md) | 44 | `append_mesh_primitive`, `append_mesh_to_dynamic_mesh`, `apply_adaptive_remesh`, `apply_mesh_boolean`, ... |
-| [Graphics](Graphics.md) | 7 | `get_decal_info`, `set_decal_color`, `set_decal_fade`, `set_decal_material`, ... |
-| [HLOD](HLOD.md) | 7 | `create_hlod_layer`, `get_hlod_layer_actors`, `get_hlod_layer_info`, `get_hlod_layers`, ... |
-| [Input](Input.md) | 23 | `add_input_modifier`, `add_input_trigger`, `add_mapping_to_context`, `create_force_feedback_effect`, ... |
-| [Interchange](Interchange.md) | 19 | `can_reset_interchange_actor`, `can_reset_interchange_world`, `can_translate_interchange_source_data`, `create_interchange_pipeline_asset`, ... |
-| [Level](Level.md) | 115 | `add_foliage_instances`, `add_height_mask_node`, `add_landscape_layer`, `add_landscape_layer_blend_node`, ... |
-| [Lighting](Lighting.md) | 37 | `configure_light_shadows`, `configure_post_processing`, `get_directional_light_cascade_settings`, `get_exponential_height_fog_properties`, ... |
-| [Management](Management.md) | 19 | `add_primary_asset_rule`, `audit_class_purity`, `audit_fork_refs`, `delete_asset`, ... |
-| [Mass](Mass.md) | 22 | `add_mass_tag_to_entity`, `add_mass_trait`, `create_mass_entity_config`, `create_mass_spawner_actor`, ... |
-| [Material](Material.md) | 69 | `add_collection_parameter`, `add_material_attribute_layers_node`, `add_material_function_call`, `add_material_function_input`, ... |
-| [Mesh](Mesh.md) | 11 | `clear_procedural_mesh`, `create_procedural_box_mesh`, `create_procedural_grid_mesh`, `create_procedural_mesh_component`, ... |
-| [Meta](Meta.md) | 1 | `execute_batch` |
-| [Navigation](Navigation.md) | 22 | `add_eqs_generator`, `add_eqs_option`, `add_eqs_test`, `create_eqs_query`, ... |
-| [Networking](Networking.md) | 6 | `configure_replication`, `get_dedicated_server_status`, `get_network_info`, `launch_dedicated_server`, ... |
-| [Optimization](Optimization.md) | 11 | `analyze_asset_performance`, `analyze_assets_performance_batch`, `check_asset_optimization`, `configure_asset_streaming`, ... |
-| [Packaging](Packaging.md) | 3 | `cancel_package_build`, `get_package_build_status`, `start_package_build` |
-| [Performance](Performance.md) | 17 | `add_trace_bookmark`, `assign_runtime_virtual_texture_to_landscape`, `create_runtime_virtual_texture`, `create_runtime_virtual_texture_volume`, ... |
-| [Physics](Physics.md) | 48 | `add_field_node`, `add_geometry_collection_source`, `add_impulse_to_actor`, `add_instanced_static_mesh_component`, ... |
-| [Procedural](Procedural.md) | 20 | `add_pcg_component`, `add_pcg_graph_parameter`, `add_pcg_node`, `add_pcg_subgraph_node`, ... |
-| [Reflection](Reflection.md) | 24 | `call_function`, `compare_objects`, `find_classes_implementing_interface`, `get_actor_properties_by_class`, ... |
-| [Replication](Replication.md) | 5 | `get_actor_replication_info`, `set_actor_net_cull_distance`, `set_actor_net_dormancy`, `set_actor_net_priority`, ... |
-| [SaveGame](SaveGame.md) | 9 | `delete_save_game`, `get_save_game_slot_info`, `list_save_games`, `load_game`, ... |
-| [SmartObjects](SmartObjects.md) | 26 | `add_smart_object_definition_default_behavior`, `add_smart_object_slot`, `add_smart_object_slot_behavior_definition`, `add_smart_object_slot_entrance_annotation`, ... |
-| [StateTree](StateTree.md) | 57 | `add_consideration`, `add_evaluator`, `add_state`, `add_state_enter_condition`, ... |
-| [Subsystem](Subsystem.md) | 2 | `inspect_subsystem_instance`, `list_local_player_subsystems` |
-| [SubsystemAuthoring](SubsystemAuthoring.md) | 3 | `activate_external_subsystem`, `deactivate_external_subsystem`, `list_subsystem_instances` |
-| [Testing](Testing.md) | 9 | `check_blueprint_errors`, `get_blueprint_debug_info`, `list_validators`, `remove_blueprint_breakpoint`, ... |
-| [Timeline](Timeline.md) | 79 | `add_attach_track`, `add_audio_section`, `add_camera_cut`, `add_camera_cut_track`, ... |
-| [Trigger](Trigger.md) | 11 | `create_trigger`, `get_actors_in_trigger`, `get_trigger_events`, `get_trigger_info`, ... |
-| [UI](UI.md) | 49 | `add_list_view`, `add_viewmodel`, `add_widget_animation`, `add_widget_animation_keyframe`, ... |
-| [USD](USD.md) | 46 | `add_usd_internal_reference`, `add_usd_payload`, `add_usd_reference`, `add_usd_variant`, ... |
-| [UVMapping](UVMapping.md) | 4 | `clear_uv_channel`, `get_uv_health_report`, `list_uv_channels`, `set_triangle_uvs` |
-| [Water](Water.md) | 18 | `add_water_body_to_zone`, `configure_water_zone`, `create_lake_water_body`, `create_ocean_water_body`, ... |
+| [AI](AI.md) | 7 | AI perception senses and stimuli sources, sight radius, AI controller Blueprints and team attitudes |
+| [Analysis](Analysis.md) | 13 | Asset referencers and dependencies, Blueprint and object diffs, and Blueprints that do not compile |
+| [Animation](Animation.md) | 217 | Animation Blueprints and state machines, montages, notifies and curves, blend spaces, skeletons and skeletal meshes, IK Rig and retargeting, Control Rig, Pose Search and motion warping |
+| [Asset](Asset.md) | 56 | Finding assets by name, type, tag or folder, collections, textures and render targets, static mesh sockets, thumbnails and imports |
+| [Audio](Audio.md) | 93 | Sound Cues, MetaSounds, submixes and buses, sound classes, attenuation and concurrency, modulation, dialogue and subtitles |
+| [Audit](Audit.md) | 9 | Project-wide checks of asset references, Blueprint health, collision profiles, replication, and widget accessibility, style and text |
+| [BehaviorTree](BehaviorTree.md) | 22 | Behavior Trees with their composites, decorators and services, Blackboards and their keys, and running trees |
+| [Blueprint](Blueprint.md) | 84 | Blueprint assets, components, variables, functions, events and dispatchers, graph nodes and pins, compiling, and Editor Utility Blueprints |
+| [Camera](Camera.md) | 29 | Camera actors and components, spring arms, cine camera lens and focus, camera rigs, shakes and Gameplay Cameras assets |
+| [Chooser](Chooser.md) | 13 | Chooser tables: their columns, rows and outcomes, and evaluating them |
+| [Config](Config.md) | 14 | Project settings and .ini values, collision channels and profiles, the default map, component properties and construction scripts |
+| [DataAsset](DataAsset.md) | 52 | Data Tables, Curve Tables and curves, Data Assets, Data Registries, String Tables and localization |
+| [Documentation](Documentation.md) | 3 | Markdown documentation generated for assets, Blueprints and the project |
+| [Editor](Editor.md) | 109 | Actors and the selection, the viewport and screenshots, undo and transactions, Python and console commands, logs, enums and structs, media and automation tests |
+| [Engine](Engine.md) | 74 | Niagara systems and emitters with their modules, renderers, data interfaces, simulation stages and event handlers, and the engine's status |
+| [Export](Export.md) | 12 | Movie Render Queue jobs, exporting assets, Blueprints and levels as text, asset reports and source control status |
+| [GameFeatures](GameFeatures.md) | 5 | Game Feature plugins: listing, activating, deactivating and unloading them |
+| [GameFramework](GameFramework.md) | 5 | Game modes, their classes and per-level overrides, and player starts |
+| [GameplayAbilities](GameplayAbilities.md) | 57 | The Gameplay Ability System: abilities, attribute sets, gameplay effects and their modifiers, cues, tags and events |
+| [GameplayBehavior](GameplayBehavior.md) | 8 | Gameplay Behavior configs, and triggering behaviors on actors |
+| [GameplayDebugger](GameplayDebugger.md) | 2 | Registering Gameplay Debugger categories |
+| [GameplayTags](GameplayTags.md) | 15 | Gameplay Tags, tag tables and redirects, and the tags on objects |
+| [GeometryScript](GeometryScript.md) | 44 | Dynamic meshes with Geometry Script: primitives, booleans, remeshing, UVs, normals, material IDs and spatial queries |
+| [Graphics](Graphics.md) | 7 | Decal actors: material, size, color, fade and sort order |
+| [HLOD](HLOD.md) | 7 | HLOD layers, their settings and their actors |
+| [Input](Input.md) | 23 | Enhanced Input actions, mapping contexts, modifiers and triggers, key mappings and force feedback |
+| [Interchange](Interchange.md) | 19 | Interchange imports and reimports, pipelines and their stack, translators and factories |
+| [Level](Level.md) | 115 | Placing and transforming actors, landscapes, foliage and splines, World Partition and data layers, level instances and streaming, and Play-in-Editor |
+| [Lighting](Lighting.md) | 37 | Lights and shadows, sky atmosphere, sky light, fog and volumetric clouds, post process, reflection and scene captures, and Lumen |
+| [Management](Management.md) | 19 | Moving, renaming, duplicating and deleting assets, Primary Asset rules and IDs, plugins, and the class lineage audits |
+| [Mass](Mass.md) | 22 | Mass Entity configs and traits, spawners, entities, tags and signals |
+| [Material](Material.md) | 69 | Materials and their expression graphs, material functions, instances and parameters, parameter collections and Substrate |
+| [Mesh](Mesh.md) | 11 | Procedural mesh components and their sections |
+| [Meta](Meta.md) | 1 | Running several calls in one pass on the game thread |
+| [Navigation](Navigation.md) | 22 | The navmesh, Environment Queries (EQS), nav links and modifiers, and collision channel dumps |
+| [Networking](Networking.md) | 6 | Replication settings, network information and dedicated servers |
+| [Optimization](Optimization.md) | 11 | Asset performance analysis, LODs, compression, streaming and memory |
+| [Packaging](Packaging.md) | 3 | Package builds: starting one, its status, and cancelling it |
+| [Performance](Performance.md) | 17 | Frame timing, FPS and memory, Unreal Insights traces, timing regions and runtime virtual textures |
+| [Physics](Physics.md) | 48 | Physics assets and constraints, collision, physical materials, Chaos geometry collections and fields, instanced static meshes, raycasts and overlap queries |
+| [Procedural](Procedural.md) | 20 | PCG graphs, nodes and parameters, PCG components and volumes, and generation |
+| [Reflection](Reflection.md) | 24 | Reading and writing the properties of any object, calling functions, classes, structs and enums, and delegates |
+| [Replication](Replication.md) | 5 | Per-actor replication: net priority, update frequency, cull distance and dormancy |
+| [SaveGame](SaveGame.md) | 9 | Save game slots, saving and loading, and serializing actor state |
+| [SmartObjects](SmartObjects.md) | 26 | Smart Object definitions, slots and their behaviors, tags and annotations, and claiming and using them |
+| [StateTree](StateTree.md) | 57 | State Trees: states, tasks, transitions, conditions, evaluators, considerations, parameters and bindings |
+| [Subsystem](Subsystem.md) | 2 | Inspecting subsystem instances |
+| [SubsystemAuthoring](SubsystemAuthoring.md) | 3 | Listing, activating and deactivating external subsystems |
+| [Testing](Testing.md) | 9 | Blueprint errors and breakpoints, data validation, map check and watching properties in PIE |
+| [Timeline](Timeline.md) | 79 | Level Sequences with their bindings, tracks, sections and keyframes, camera cuts and shots, playback, and Blueprint timelines |
+| [Trigger](Trigger.md) | 11 | Trigger boxes and spheres, volumes, and their overlap events |
+| [UI](UI.md) | 49 | Widget Blueprints and their tree, slots, bindings and animations, MVVM viewmodels, CommonUI stacks, and widgets in PIE |
+| [USD](USD.md) | 46 | USD stages, prims, attributes, variants, references and layers |
+| [UVMapping](UVMapping.md) | 4 | UV channels and their health |
+| [Water](Water.md) | 18 | Water bodies (ocean, lake and river), water zones, their splines and Gerstner waves |

@@ -2,7 +2,9 @@
 
 # Timeline
 
-79 tools. Back to the [index](README.md).
+79 tools for Level Sequences with their bindings, tracks, sections and keyframes, camera cuts and shots, playback, and Blueprint timelines.
+
+Back to the [index](README.md).
 
 ## `add_attach_track`
 

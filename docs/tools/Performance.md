@@ -2,7 +2,9 @@
 
 # Performance
 
-17 tools. Back to the [index](README.md).
+17 tools for frame timing, FPS and memory, Unreal Insights traces, timing regions and runtime virtual textures.
+
+Back to the [index](README.md).
 
 ## `add_trace_bookmark`
 

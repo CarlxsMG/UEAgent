@@ -2,7 +2,9 @@
 
 # Graphics
 
-7 tools. Back to the [index](README.md).
+7 tools for decal actors: material, size, color, fade and sort order.
+
+Back to the [index](README.md).
 
 ## `get_decal_info`
 

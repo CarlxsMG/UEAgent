@@ -2,7 +2,9 @@
 
 # Config
 
-14 tools. Back to the [index](README.md).
+14 tools for project settings and .ini values, collision channels and profiles, the default map, component properties and construction scripts.
+
+Back to the [index](README.md).
 
 ## `add_collision_channel`
 

@@ -2,7 +2,9 @@
 
 # Navigation
 
-22 tools. Back to the [index](README.md).
+22 tools for the navmesh, Environment Queries (EQS), nav links and modifiers, and collision channel dumps.
+
+Back to the [index](README.md).
 
 ## `add_eqs_generator`
 

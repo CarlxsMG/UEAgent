@@ -2,7 +2,9 @@
 
 # GameFramework
 
-5 tools. Back to the [index](README.md).
+5 tools for game modes, their classes and per-level overrides, and player starts.
+
+Back to the [index](README.md).
 
 ## `get_game_mode_info`
 
