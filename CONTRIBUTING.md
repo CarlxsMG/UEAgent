@@ -21,6 +21,7 @@ change has to pass. How a call travels through the editor is in
 | `Tools/` | Python scripts that derive the catalog and the generated tables from the C++, the audits, and `catalog_server.py`, which lists the tools without the editor for MCP directories. |
 | `Resources/command_catalog.json` | The tool catalog the server publishes (generated). |
 | `Resources/ContractTests/` | The contract's test vectors. |
+| `Resources/Skills/` | The agent skills the editor installs into a project (**MCP > Skills**), in the Agent Skills format. Their names start with `ueagent-`, and `Tools/check_skills.py` checks the format and that every tool they name is in the catalog. |
 | `docs/tools/` | The tool reference (generated). |
 | `docs/`, `mkdocs.yml` | The documentation site. `Tools/mkdocs_hooks.py` adds, when it is built, what GitHub does not show: the README sections and root files the pages include, the client tabs, the links from tool names to the reference, the tool chips, the tool explorer's data and `llms.txt`. |
 
@@ -70,14 +71,15 @@ catalog at editor startup and on `mcp.http.restart`.
 
 - The plugin builds with no warning of its own.
 - The documentation site builds with no warning: `pip install mkdocs-material==9.7.7`, then `mkdocs build --strict`.
-- Every generator passes `--check`; CI runs them on each push, with `Tools/check_doc_links.py` and
-  `ruff check Tools`.
+- Every generator passes `--check`; CI runs them on each push, with `Tools/check_doc_links.py`,
+  `Tools/check_skills.py` and `ruff check Tools`.
 - `python Tools/smoke_test.py --launch <a throwaway .uproject> --engine <UE root>` passes: it starts a
   headless editor and checks the server end to end over HTTP.
 - A change to how `McpToolCatalog.cpp` builds a schema is made in `Tools/catalog_server.py` too:
   with the editor open, `python Tools/catalog_server.py --compare` must find no difference.
 - The contract self-tests pass in the editor: `mcp.contract.selftest` on each vector file in
-  `Resources/ContractTests`, and the automation test `Automation RunTests UEAgent.ClaudeCode`.
+  `Resources/ContractTests`, and the automation tests `Automation RunTests UEAgent` (the client
+  files, the skills installer and the rest).
 - A change of behavior says how it was measured: the call before and after, in a headless editor
   when possible.
 - The audits do not get worse: `Tools/audit_outcome_honesty.py` (is each mutating tool's `success`

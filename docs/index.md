@@ -167,8 +167,8 @@ Two answers an agent gets, as the contract tests in `Resources/ContractTests` re
 
     ---
 
-    Claude Code: **MCP · 55561 > Connect Claude Code to this project**. Any other client:
-    [Clients](clients.md).
+    Claude Code: **MCP · 55561 > Connect Claude Code to this project**; Cursor, VS Code and
+    Antigravity CLI: **Connect another client**. Any other client: [Clients](clients.md).
 
 -   **4. Ask**
 
@@ -198,8 +198,8 @@ Two answers an agent gets, as the contract tests in `Resources/ContractTests` re
 
 -   [:material-tools: **Tool explorer**](explorer.md): search the 1,700+ tools by name, domain and what
     they do to the project.
--   [:material-robot-outline: **Skills**](skills.md): the Claude Code plugin, with a skill builder and
-    three skills made with it.
+-   [:material-robot-outline: **Skills**](skills.md): skills for every client, installed from the
+    editor: a skill builder, three skills made with it, and two to report an issue or send a fix.
 -   [:material-book-alphabet: **Glossary**](glossary.md): readback, refusals, undo steps and the other
     words the docs use.
 -   [:material-help-circle-outline: **FAQ**](faq.md): versions, platforms, safety and cost.

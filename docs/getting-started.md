@@ -33,7 +33,8 @@ No green dot? Another program may hold the port: see
 ## 3. Connect your client
 
 **Claude Code:** in the status bar, **MCP · 55561 > Connect Claude Code to this project** writes the
-`unreal` entry of the project's `.mcp.json`. Or, for yourself only:
+`unreal` entry of the project's `.mcp.json`. **Connect another client** does the same for Cursor,
+VS Code and Antigravity CLI. Or, for yourself only:
 
 ```bash
 claude mcp add --transport http unreal http://127.0.0.1:55561/mcp
@@ -71,6 +72,6 @@ refused).
 ## Next
 
 - [Examples](examples.md): prompts that work well, and the tools they use.
-- [Skills](skills.md): the Claude Code plugin, to turn a workflow you repeat into a skill.
+- [Skills](skills.md): install UEAgent's skills from the editor, and turn a workflow you repeat into a skill.
 - [Tool explorer](explorer.md): every tool, searchable by name, domain and effect.
 - [Settings](settings.md): the port, the auth token, the read-only roots and the console commands.

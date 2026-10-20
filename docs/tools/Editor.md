@@ -1016,7 +1016,7 @@ Run a single automation test by name and return its result (synchronous tests on
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `test_name` | string | yes | The exact registered test name (the "test_name" field from list_automation_tests) |
+| `test_name` | string | yes | The test's test_name or its full_test_path, exactly as list_automation_tests gives them (e.g. "UEAgent.ClaudeCode") |
 
 **Returns:** `{ test_name, started, completed, passed, verdict, duration_s, errors, warnings, entries:[{type,message,context,filename,line}], entry_count, note }`
 

@@ -2,7 +2,9 @@
 
 #include "UEAgentBridge.h"
 #include "Mcp/McpActivityPanel.h"
+#include "Mcp/McpAgentClients.h"
 #include "Mcp/McpClaudeCode.h"
+#include "Mcp/McpSkills.h"
 #include "Mcp/McpPreconditions.h"
 #include "Mcp/McpToolCatalog.h"
 #include "UEAgentSettings.h"
@@ -85,6 +87,43 @@ namespace McpEditorUIPrivate
 		return Cached;
 	}
 
+	// The other clients' files, re-read like the .mcp.json: at most every 2 s, or when the menu opens.
+	static const TArray<McpAgentClients::FStatus>& OtherClients(bool bRefresh = false)
+	{
+		static TArray<McpAgentClients::FStatus> Cached;
+		static double LastRead = -1.0;
+		const double Now = FPlatformTime::Seconds();
+		if (bRefresh || LastRead < 0.0 || Now - LastRead > 2.0)
+		{
+			Cached.Reset();
+			for (const McpAgentClients::EClient Client : McpAgentClients::All())
+			{
+				Cached.Add(McpAgentClients::InspectProject(Client));
+			}
+			LastRead = Now;
+		}
+		return Cached;
+	}
+
+	static TArray<FString> ConnectedOtherClients(bool bRefresh = false)
+	{
+		TArray<FString> Names;
+		for (const McpAgentClients::FStatus& Status : OtherClients(bRefresh))
+		{
+			if (Status.IsUsable())
+			{
+				Names.Add(McpAgentClients::DisplayName(Status.Client));
+			}
+		}
+		return Names;
+	}
+
+	// Some client of the project reaches this server.
+	static bool AnyClientConnected(bool bRefresh = false)
+	{
+		return ProjectStatus(bRefresh).IsUsable() || ConnectedOtherClients(bRefresh).Num() > 0;
+	}
+
 	static FString ServerLine()
 	{
 		const UUEAgentBridge* B = Bridge();
@@ -163,6 +202,68 @@ namespace McpEditorUIPrivate
 			Detail += FString::Printf(TEXT(" Set %s to the token before opening Claude Code."), McpClaudeCode::TokenEnvVar);
 		}
 		Notify(LOCTEXT("Copied", "Command copied to the clipboard"), Detail, ENotice::Success);
+	}
+
+	static void ConnectOtherClient(McpAgentClients::EClient Client)
+	{
+		FString Message;
+		const bool bOk = McpAgentClients::Connect(Client, McpAgentClients::ProjectConfigPath(Client), McpClaudeCode::CurrentPort(), McpClaudeCode::CurrentRequiresToken(), Message);
+		OtherClients(/*bRefresh*/ true);
+		const FString Name = McpAgentClients::DisplayName(Client);
+		if (!bOk)
+		{
+			UE_LOG(LogTemp, Error, TEXT("[MCP] Connect %s: %s"), *Name, *Message);
+			Notify(FText::FromString(FString::Printf(TEXT("Could not connect %s"), *Name)), Message, ENotice::Failure);
+			return;
+		}
+		UE_LOG(LogTemp, Display, TEXT("[MCP] Connect %s: %s"), *Name, *Message);
+		Notify(FText::FromString(FString::Printf(TEXT("%s connected to this project"), *Name)),
+			Message + TEXT(" If it was already open in this folder, reload its MCP servers or restart it."), ENotice::Success);
+	}
+
+	static void CopyCodexCommand()
+	{
+		const bool bToken = McpClaudeCode::CurrentRequiresToken();
+		const FString Command = McpAgentClients::CodexAddCommand(McpClaudeCode::CurrentPort(), bToken);
+		FPlatformApplicationMisc::ClipboardCopy(*Command);
+		FString Detail = Command + TEXT("\nPaste it into a terminal: Codex keeps its servers in ~/.codex/config.toml, for every project.");
+		if (bToken)
+		{
+			Detail += FString::Printf(TEXT(" Set %s to the token before opening Codex."), McpClaudeCode::TokenEnvVar);
+		}
+		Notify(LOCTEXT("CopiedCodex", "Command copied to the clipboard"), Detail, ENotice::Success);
+	}
+
+	static void InstallSkills(McpSkills::ETarget Target)
+	{
+		FString Message;
+		const bool bOk = McpSkills::Install(McpSkills::ShippedDir(), McpSkills::ProjectTargetDir(Target), McpSkills::PluginVersion(), Message);
+		const FString For = McpSkills::TargetClients(Target);
+		if (!bOk)
+		{
+			UE_LOG(LogTemp, Error, TEXT("[MCP] Install skills (%s): %s"), McpSkills::TargetId(Target), *Message);
+			Notify(FText::FromString(FString::Printf(TEXT("Could not install the skills for %s"), *For)), Message, ENotice::Failure);
+			return;
+		}
+		UE_LOG(LogTemp, Display, TEXT("[MCP] Install skills (%s): %s"), McpSkills::TargetId(Target), *Message);
+		Notify(FText::FromString(FString::Printf(TEXT("Skills ready for %s"), *For)),
+			Message + TEXT(" A client that is already open may need a restart to see them."), ENotice::Success);
+	}
+
+	static void RemoveSkills()
+	{
+		TArray<FString> Messages;
+		bool bOk = true;
+		for (const McpSkills::ETarget Target : McpSkills::AllTargets())
+		{
+			FString Message;
+			bOk &= McpSkills::Remove(McpSkills::ProjectTargetDir(Target), Message);
+			Messages.Add(Message);
+		}
+		const FString Detail = FString::Join(Messages, TEXT("\n"));
+		UE_LOG(LogTemp, Display, TEXT("[MCP] Remove skills: %s"), *Detail);
+		Notify(bOk ? LOCTEXT("SkillsRemoved", "UEAgent's skills removed from the project") : LOCTEXT("SkillsRemoveFailed", "Some skills could not be removed"),
+			Detail, bOk ? ENotice::Success : ENotice::Failure);
 	}
 
 	static void RestartServer()
@@ -247,7 +348,7 @@ namespace McpEditorUIPrivate
 		switch (ServerState())
 		{
 		case EServerState::Serving:
-			return ProjectStatus().IsUsable() ? FStyleColors::Success : FStyleColors::Warning;
+			return AnyClientConnected() ? FStyleColors::Success : FStyleColors::Warning;
 		case EServerState::ServingNoCatalog:
 			return FStyleColors::Warning;
 		case EServerState::Failed:
@@ -273,8 +374,9 @@ namespace McpEditorUIPrivate
 
 	static FText TooltipText()
 	{
-		return FText::FromString(FString::Printf(TEXT("MCP server: %s\nClaude Code: %s\n\nClick to see the options."),
-			*ServerLine(), *ProjectStatus().Detail));
+		const TArray<FString> Others = ConnectedOtherClients();
+		return FText::FromString(FString::Printf(TEXT("MCP server: %s\nClaude Code: %s\nOther clients: %s\n\nClick to see the options."),
+			*ServerLine(), *ProjectStatus().Detail, Others.Num() > 0 ? *FString::Printf(TEXT("%s connected."), *FString::Join(Others, TEXT(", "))) : TEXT("none connected.")));
 	}
 
 	static TSharedRef<SWidget> InfoBlock(const TArray<FString>& Lines)
@@ -342,9 +444,14 @@ namespace McpEditorUIPrivate
 		}
 		Menu.EndSection();
 
-		Menu.BeginSection("UEAgentClaudeCode", LOCTEXT("ClaudeSection", "Claude Code"));
+		Menu.BeginSection("UEAgentClients", LOCTEXT("ClientsSection", "AI clients"));
 		{
-			Menu.AddWidget(InfoBlock({ Project.Detail, Project.Path }), FText::GetEmpty(), /*bNoIndent*/ true);
+			const TArray<McpAgentClients::FStatus>& Others = OtherClients(/*bRefresh*/ true);
+			const TArray<FString> OthersConnected = ConnectedOtherClients();
+			Menu.AddWidget(InfoBlock({
+				FString::Printf(TEXT("Claude Code: %s"), *Project.Detail),
+				FString::Printf(TEXT("Other clients: %s"), OthersConnected.Num() > 0 ? *FString::Printf(TEXT("%s connected."), *FString::Join(OthersConnected, TEXT(", "))) : TEXT("none connected.")) }),
+				FText::GetEmpty(), /*bNoIndent*/ true);
 			if (Project.State != EState::Connected && Project.State != EState::Unreadable)
 			{
 				Menu.AddMenuEntry(
@@ -353,11 +460,84 @@ namespace McpEditorUIPrivate
 					FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Link"),
 					FUIAction(FExecuteAction::CreateStatic(&ConnectProject)));
 			}
+			Menu.AddSubMenu(
+				LOCTEXT("ConnectOther", "Connect another client"),
+				LOCTEXT("ConnectOtherTip", "Cursor, VS Code and Antigravity CLI read their servers from a file in the project; Codex from your user folder."),
+				FNewMenuDelegate::CreateLambda([Others](FMenuBuilder& Sub)
+				{
+					for (const McpAgentClients::FStatus& Status : Others)
+					{
+						const McpAgentClients::EClient Client = Status.Client;
+						const bool bCanConnect = Status.State != McpAgentClients::EState::Connected
+							&& Status.State != McpAgentClients::EState::Unreadable
+							&& Status.State != McpAgentClients::EState::AuthUnsupported;
+						Sub.AddMenuEntry(
+							FText::FromString(Status.IsUsable()
+								? FString::Printf(TEXT("%s (connected)"), McpAgentClients::DisplayName(Client))
+								: FString::Printf(TEXT("Connect %s"), McpAgentClients::DisplayName(Client))),
+							FText::FromString(bCanConnect
+								? FString::Printf(TEXT("Writes the \"%s\" entry into %s without touching the rest of the file. %s"), McpClaudeCode::ServerName, *Status.Path, *Status.Detail)
+								: Status.Detail),
+							FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Link"),
+							FUIAction(
+								FExecuteAction::CreateLambda([Client]() { ConnectOtherClient(Client); }),
+								FCanExecuteAction::CreateLambda([bCanConnect]() { return bCanConnect; })));
+					}
+					Sub.AddMenuSeparator();
+					Sub.AddMenuEntry(
+						LOCTEXT("CopyCodex", "Copy the \"codex mcp add\" command"),
+						LOCTEXT("CopyCodexTip", "Codex keeps its servers in ~/.codex/config.toml: paste the command into a terminal once, for every project."),
+						FSlateIcon(FAppStyle::GetAppStyleSetName(), "GenericCommands.Copy"),
+						FUIAction(FExecuteAction::CreateStatic(&CopyCodexCommand)));
+				}),
+				/*bInOpenSubMenuOnClick*/ false,
+				FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Link"));
 			Menu.AddMenuEntry(
 				LOCTEXT("CopyCommand", "Copy the \"claude mcp add\" command"),
 				LOCTEXT("CopyCommandTip", "To connect it only for you, without touching the repo's .mcp.json: paste it into a terminal opened in the project folder."),
 				FSlateIcon(FAppStyle::GetAppStyleSetName(), "GenericCommands.Copy"),
 				FUIAction(FExecuteAction::CreateStatic(&CopyAddCommand)));
+		}
+		Menu.EndSection();
+
+		Menu.BeginSection("UEAgentSkills", LOCTEXT("SkillsSection", "Skills"));
+		{
+			TArray<FString> Lines;
+			bool bAnyInstalled = false;
+			TArray<TPair<McpSkills::ETarget, McpSkills::FStatus>> Targets;
+			for (const McpSkills::ETarget Target : McpSkills::AllTargets())
+			{
+				const McpSkills::FStatus Status = McpSkills::InspectProject(Target);
+				bAnyInstalled |= Status.AnyInstalled();
+				Lines.Add(FString::Printf(TEXT("%s (%s): %s"), McpSkills::TargetClients(Target), McpSkills::TargetRelativeDir(Target), *Status.Summary()));
+				Targets.Add({ Target, Status });
+			}
+			Menu.AddWidget(InfoBlock(Lines), FText::GetEmpty(), /*bNoIndent*/ true);
+			for (const auto& Pair : Targets)
+			{
+				const McpSkills::ETarget Target = Pair.Key;
+				const McpSkills::FStatus& Status = Pair.Value;
+				const bool bCurrent = Status.AnyInstalled() && !Status.NeedsUpdate();
+				const FString Verb = Status.NeedsUpdate() ? TEXT("Update") : TEXT("Install");
+				Menu.AddMenuEntry(
+					FText::FromString(bCurrent
+						? FString::Printf(TEXT("Skills for %s are current"), McpSkills::TargetClients(Target))
+						: FString::Printf(TEXT("%s the skills for %s"), *Verb, McpSkills::TargetClients(Target))),
+					FText::FromString(FString::Printf(TEXT("Copies UEAgent's skills (how to use its tools, and how to report an issue or send a fix) into %s, stamped with version %s. Only folders UEAgent installed are ever replaced or deleted."),
+						*Status.Dir, *Status.Version)),
+					FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Download"),
+					FUIAction(
+						FExecuteAction::CreateLambda([Target]() { InstallSkills(Target); }),
+						FCanExecuteAction::CreateLambda([bCurrent]() { return !bCurrent; })));
+			}
+			if (bAnyInstalled)
+			{
+				Menu.AddMenuEntry(
+					LOCTEXT("RemoveSkills", "Remove UEAgent's skills from the project"),
+					LOCTEXT("RemoveSkillsTip", "Deletes the skill folders UEAgent installed in .claude/skills and .agents/skills, and nothing else."),
+					FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Delete"),
+					FUIAction(FExecuteAction::CreateStatic(&RemoveSkills)));
+			}
 		}
 		Menu.EndSection();
 
@@ -439,18 +619,19 @@ namespace McpEditorUIPrivate
 			return;
 		}
 		const McpClaudeCode::FStatus& Project = ProjectStatus(/*bRefresh*/ true);
-		// Only what "Connect" can repair: not an unreadable file, nor a rejection by Claude Code.
-		if (Project.State == EState::Connected || Project.State == EState::Unreadable)
+		// Only what "Connect" can repair: not an unreadable file, nor a rejection by Claude Code. And
+		// not when the project already uses another client.
+		if (Project.State == EState::Connected || Project.State == EState::Unreadable || ConnectedOtherClients(/*bRefresh*/ true).Num() > 0)
 		{
 			return;
 		}
 
-		FNotificationInfo Info(LOCTEXT("HintTitle", "Claude Code is not connected to this editor"));
-		Info.SubText = FText::FromString(Project.Detail);
+		FNotificationInfo Info(LOCTEXT("HintTitle", "No AI client is connected to this editor"));
+		Info.SubText = FText::FromString(Project.Detail + TEXT(" Cursor, VS Code, Antigravity CLI and Codex: the \"MCP\" menu in the status bar."));
 		Info.bFireAndForget = false;
 		Info.WidthOverride = 440.0f;
 		Info.ButtonDetails.Add(FNotificationButtonInfo(
-			LOCTEXT("HintConnect", "Connect"),
+			LOCTEXT("HintConnect", "Connect Claude Code"),
 			FText::FromString(FString::Printf(TEXT("Writes the \"%s\" entry into %s without touching the rest of the file."), McpClaudeCode::ServerName, *Project.Path)),
 			FSimpleDelegate::CreateLambda([]()
 			{
