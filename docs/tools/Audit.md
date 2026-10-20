@@ -2,7 +2,9 @@
 
 # Audit
 
-9 tools. Back to the [index](README.md).
+9 tools for project-wide checks of asset references, Blueprint health, collision profiles, replication, and widget accessibility, style and text.
+
+Back to the [index](README.md).
 
 ## `audit_asset_references`
 

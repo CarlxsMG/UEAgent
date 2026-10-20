@@ -2,7 +2,9 @@
 
 # Physics
 
-48 tools. Back to the [index](README.md).
+48 tools for physics assets and constraints, collision, physical materials, Chaos geometry collections and fields, instanced static meshes, raycasts and overlap queries.
+
+Back to the [index](README.md).
 
 ## `add_field_node`
 

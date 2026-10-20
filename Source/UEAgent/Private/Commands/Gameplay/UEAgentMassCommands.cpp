@@ -1273,6 +1273,14 @@ TSharedPtr<FJsonObject> HandleFireMassSignal(const TSharedPtr<FJsonObject>& Para
 			return mcp_common::MakeErrorReply(
 				FString::Printf(TEXT("Invalid entity_handle: %s"), *HandleStr));
 		}
+		// UMassSignalSubsystem::SignalEntity check()s that the handle is set: a zero index or serial number closed the
+		// editor. A handle of no live entity is refused too, as the other entity commands refuse it.
+		UMassEntitySubsystem* EntitySub = W->GetSubsystem<UMassEntitySubsystem>();
+		if (Handle.Index <= 0 || Handle.SerialNumber == 0 || !EntitySub || !EntitySub->GetEntityManager().IsEntityValid(Handle))
+		{
+			return mcp_common::MakeErrorReply(FString::Printf(
+				TEXT("entity_handle %s names no live Mass entity (query_mass_entities gives the live ones); nothing was signalled"), *HandleStr));
+		}
 		SigSub->SignalEntity(FName(*SignalName), Handle);
 		Dispatched = 1;
 	}

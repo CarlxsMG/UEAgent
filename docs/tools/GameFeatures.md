@@ -2,7 +2,9 @@
 
 # GameFeatures
 
-5 tools. Back to the [index](README.md).
+5 tools for Game Feature plugins: listing, activating, deactivating and unloading them.
+
+Back to the [index](README.md).
 
 ## `activate_game_feature_plugin`
 

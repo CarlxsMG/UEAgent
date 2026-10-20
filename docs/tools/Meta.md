@@ -2,7 +2,9 @@
 
 # Meta
 
-1 tools. Back to the [index](README.md).
+1 tool for running several calls in one pass on the game thread.
+
+Back to the [index](README.md).
 
 ## `execute_batch`
 
@@ -14,6 +16,6 @@ Run SEVERAL commands back-to-back inside the SAME game-thread pass, with no inte
 |---|---|---|---|
 | `commands` | array | yes | [{command_type: string, params?: object}, ...] (required, non-empty) |
 | `stop_on_error` | boolean | no | Stop after the first failing sub-command (default false) |
-| `transaction` | boolean | no | Wrap the whole run in one undo transaction, so a single undo reverts all of it (begin_transaction / end_transaction, or cancel_transaction instead when stop_on_error tripped on an error). Default false. |
+| `transaction` | boolean | no | Wrap the whole run in one undo transaction, so a single undo reverts all of it (begin_transaction / end_transaction). When stop_on_error trips on an error, cancel_transaction closes it instead and rolls back what the run had recorded, items reported ok included: transaction_rolled_back says whether it did. Default false. |
 
-**Returns:** `{ success: bool, results: [{index: int, command_type: string, ok: bool, payload?: any, error?: string}], stopped_early: bool }`
+**Returns:** `{ success: bool, results: [{index: int, command_type: string, ok: bool, payload?: any, error?: string}], stopped_early: bool, transaction_rolled_back?: bool (with transaction, when stop_on_error tripped) }`

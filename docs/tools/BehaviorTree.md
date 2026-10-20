@@ -2,7 +2,9 @@
 
 # BehaviorTree
 
-22 tools. Back to the [index](README.md).
+22 tools for Behavior Trees with their composites, decorators and services, Blackboards and their keys, and running trees.
+
+Back to the [index](README.md).
 
 ## `add_behavior_tree_child`
 

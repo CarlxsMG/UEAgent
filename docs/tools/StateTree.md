@@ -2,7 +2,9 @@
 
 # StateTree
 
-57 tools. Back to the [index](README.md).
+57 tools for State Trees: states, tasks, transitions, conditions, evaluators, considerations, parameters and bindings.
+
+Back to the [index](README.md).
 
 ## `add_consideration`
 

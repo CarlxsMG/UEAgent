@@ -2,7 +2,9 @@
 
 # SmartObjects
 
-26 tools. Back to the [index](README.md).
+26 tools for Smart Object definitions, slots and their behaviors, tags and annotations, and claiming and using them.
+
+Back to the [index](README.md).
 
 ## `add_smart_object_definition_default_behavior`
 

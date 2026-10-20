@@ -2,7 +2,9 @@
 
 # Export
 
-12 tools. Back to the [index](README.md).
+12 tools for Movie Render Queue jobs, exporting assets, Blueprints and levels as text, asset reports and source control status.
+
+Back to the [index](README.md).
 
 ## `cancel_render_job`
 

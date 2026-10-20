@@ -2,7 +2,9 @@
 
 # GeometryScript
 
-44 tools. Back to the [index](README.md).
+44 tools for dynamic meshes with Geometry Script: primitives, booleans, remeshing, UVs, normals, material IDs and spatial queries.
+
+Back to the [index](README.md).
 
 ## `append_mesh_primitive`
 

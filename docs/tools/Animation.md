@@ -2,7 +2,9 @@
 
 # Animation
 
-217 tools. Back to the [index](README.md).
+217 tools for Animation Blueprints and state machines, montages, notifies and curves, blend spaces, skeletons and skeletal meshes, IK Rig and retargeting, Control Rig, Pose Search and motion warping.
+
+Back to the [index](README.md).
 
 ## `add_anim_composite_segment`
 

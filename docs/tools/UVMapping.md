@@ -2,7 +2,9 @@
 
 # UVMapping
 
-4 tools. Back to the [index](README.md).
+4 tools for UV channels and their health.
+
+Back to the [index](README.md).
 
 ## `clear_uv_channel`
 

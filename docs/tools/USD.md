@@ -2,7 +2,9 @@
 
 # USD
 
-46 tools. Back to the [index](README.md).
+46 tools for USD stages, prims, attributes, variants, references and layers.
+
+Back to the [index](README.md).
 
 ## `add_usd_internal_reference`
 

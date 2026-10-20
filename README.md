@@ -121,7 +121,7 @@ Claude also loads them by itself when a request matches. More in [Skills](docs/s
 
 ## Documentation
 
-Also on the web, with search: [carlxsmg.github.io/UEAgent](https://carlxsmg.github.io/UEAgent/).
+Also on the web, with search and a tool explorer: [carlxsmg.github.io/UEAgent](https://carlxsmg.github.io/UEAgent/).
 
 | | |
 |---|---|
@@ -129,9 +129,11 @@ Also on the web, with search: [carlxsmg.github.io/UEAgent](https://carlxsmg.gith
 | [Examples](docs/examples.md) | Prompts that work well, and the tools they use |
 | [Skills](docs/skills.md) | The Claude Code plugin: a skill builder and three skills made with it |
 | [Tool reference](docs/tools/README.md) | Every tool, by domain |
+| [Answers and refusals](docs/responses.md) | What a call returns, and how to read a refusal or a readback verdict |
 | [FAQ](docs/faq.md) | Versions, safety, cost |
 | [Troubleshooting](docs/troubleshooting.md) | When a client cannot connect or a call is refused |
 | [Architecture](docs/architecture.md) | How a call travels through the editor, and the contract around it |
+| [Glossary](docs/glossary.md) | The words the docs and the tools' answers use |
 
 ## Requirements
 

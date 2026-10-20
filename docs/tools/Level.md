@@ -2,7 +2,9 @@
 
 # Level
 
-115 tools. Back to the [index](README.md).
+115 tools for placing and transforming actors, landscapes, foliage and splines, World Partition and data layers, level instances and streaming, and Play-in-Editor.
+
+Back to the [index](README.md).
 
 ## `add_foliage_instances`
 

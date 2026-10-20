@@ -2,7 +2,9 @@
 
 # Replication
 
-5 tools. Back to the [index](README.md).
+5 tools for per-actor replication: net priority, update frequency, cull distance and dormancy.
+
+Back to the [index](README.md).
 
 ## `get_actor_replication_info`
 

@@ -22,6 +22,7 @@ change has to pass. How a call travels through the editor is in
 | `Resources/command_catalog.json` | The tool catalog the server publishes (generated). |
 | `Resources/ContractTests/` | The contract's test vectors. |
 | `docs/tools/` | The tool reference (generated). |
+| `docs/`, `mkdocs.yml` | The documentation site. `Tools/mkdocs_hooks.py` adds, when it is built, what GitHub does not show: the README sections and root files the pages include, the client tabs, the links from tool names to the reference, the tool chips, the tool explorer's data and `llms.txt`. |
 
 ## Adding a tool
 
@@ -61,12 +62,14 @@ change has to pass. How a call travels through the editor is in
    ```
 
 A new family is a new `.cpp` with its namespace, a `// MCP-DOMAIN: <Domain>` marker and its
-`FRegistrar`; nothing else changes. The server reads the catalog at editor startup and on
-`mcp.http.restart`.
+`FRegistrar`; nothing else changes. A new domain also gets a phrase in `DOMAIN_SUMMARY`
+(`Tools/codegen_tool_docs.py`), which the reference uses to say what the domain covers. The server reads the
+catalog at editor startup and on `mcp.http.restart`.
 
 ## Before a pull request
 
 - The plugin builds with no warning of its own.
+- The documentation site builds with no warning: `pip install mkdocs-material==9.7.7`, then `mkdocs build --strict`.
 - Every generator passes `--check`; CI runs them on each push, with `Tools/check_doc_links.py` and
   `ruff check Tools`.
 - `python Tools/smoke_test.py --launch <a throwaway .uproject> --engine <UE root>` passes: it starts a

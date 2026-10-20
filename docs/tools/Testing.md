@@ -2,7 +2,9 @@
 
 # Testing
 
-9 tools. Back to the [index](README.md).
+9 tools for Blueprint errors and breakpoints, data validation, map check and watching properties in PIE.
+
+Back to the [index](README.md).
 
 ## `check_blueprint_errors`
 

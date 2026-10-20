@@ -2,7 +2,9 @@
 
 # SaveGame
 
-9 tools. Back to the [index](README.md).
+9 tools for save game slots, saving and loading, and serializing actor state.
+
+Back to the [index](README.md).
 
 ## `delete_save_game`
 

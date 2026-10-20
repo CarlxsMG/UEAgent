@@ -2,7 +2,9 @@
 
 # DataAsset
 
-52 tools. Back to the [index](README.md).
+52 tools for Data Tables, Curve Tables and curves, Data Assets, Data Registries, String Tables and localization.
+
+Back to the [index](README.md).
 
 ## `add_curve_key`
 
@@ -466,9 +468,9 @@ List localization targets configured in the Localization Dashboard (ULocalizatio
 
 ## `read_data_table_from_package_file`
 
-*Read-only.*
+*Destructive.*
 
-Read a DataTable from any .uasset file on disk (e.g. a backup) under a throwaway mount, so a live asset with the same /Game name is untouched; then unmounts and, by default, garbage-collects. Returns table_name, row_struct, row_count and rows as native JSON, or one row via row_name.
+Read a DataTable from any .uasset file on disk (e.g. a backup) through a throwaway copy loaded under /Temp/, so a live asset with the same /Game name is untouched; then deletes the copy and, by default, garbage-collects. Returns table_name, row_struct, row_count and rows as native JSON, or one row via row_name.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

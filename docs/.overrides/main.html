@@ -1,0 +1,59 @@
+{#- The theme's page, plus what a shared link and a search engine read: the home page's title, the Open Graph
+    and Twitter card of every page, and the structured data of the home page. Tools/mkdocs_hooks.py gives every
+    page a description and copies .github/social-preview.png to assets/. -#}
+{% extends "base.html" %}
+
+{% block htmltitle %}
+  {% if page and page.is_homepage %}
+    <title>{{ config.site_name }}: {{ config.site_description.rstrip(".") }}</title>
+  {% else %}
+    {{ super() }}
+  {% endif %}
+{% endblock %}
+
+{% block extrahead %}
+  {% if page and page.is_homepage %}
+    {% set share_title = config.site_name ~ ": " ~ config.site_description.rstrip(".") %}
+  {% elif page and page.title %}
+    {% set share_title = (page.title | striptags) ~ " - " ~ config.site_name %}
+  {% else %}
+    {% set share_title = config.site_name %}
+  {% endif %}
+  {% set share_description = page.meta.description if page and page.meta and page.meta.description else config.site_description %}
+  {% set share_image = config.site_url ~ "assets/social-preview.png" %}
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="{{ config.site_name }}">
+  <meta property="og:title" content="{{ share_title }}">
+  <meta property="og:description" content="{{ share_description }}">
+  {% if page and page.canonical_url %}
+    <meta property="og:url" content="{{ page.canonical_url }}">
+  {% endif %}
+  <meta property="og:image" content="{{ share_image }}">
+  <meta property="og:image:width" content="1280">
+  <meta property="og:image:height" content="640">
+  <meta property="og:image:alt" content="UEAgent, the MCP server for Unreal Engine 5">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{ share_title }}">
+  <meta name="twitter:description" content="{{ share_description }}">
+  <meta name="twitter:image" content="{{ share_image }}">
+  {% if page and page.is_homepage %}
+    <script type="application/ld+json">
+      {{ {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": config.site_name,
+        "description": share_description,
+        "url": config.site_url,
+        "image": share_image,
+        "applicationCategory": "DeveloperApplication",
+        "applicationSubCategory": "MCP server",
+        "operatingSystem": "Windows",
+        "softwareRequirements": "Unreal Engine 5.7 or 5.8",
+        "codeRepository": config.repo_url,
+        "license": "https://opensource.org/licenses/MIT",
+        "isAccessibleForFree": true,
+        "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}
+      } | tojson }}
+    </script>
+  {% endif %}
+{% endblock %}

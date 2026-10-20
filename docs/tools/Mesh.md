@@ -2,7 +2,9 @@
 
 # Mesh
 
-11 tools. Back to the [index](README.md).
+11 tools for procedural mesh components and their sections.
+
+Back to the [index](README.md).
 
 ## `clear_procedural_mesh`
 

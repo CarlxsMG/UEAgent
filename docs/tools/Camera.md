@@ -2,7 +2,9 @@
 
 # Camera
 
-29 tools. Back to the [index](README.md).
+29 tools for camera actors and components, spring arms, cine camera lens and focus, camera rigs, shakes and Gameplay Cameras assets.
+
+Back to the [index](README.md).
 
 ## `add_camera_component`
 

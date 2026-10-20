@@ -2,7 +2,40 @@
 
 Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](https://semver.org).
 
-## Unreleased
+## 2.1.1 - 2026-10-20
+
+A closer review of the 5.7 build, with new tests on both engines. Most of what it found was on 5.8 as well.
+
+### Added
+
+- The documentation site has a home page, a getting-started page and a tool explorer that searches every tool by
+  name or by what it does and filters them by domain, by what a call does to the project and by whether
+  Play-in-Editor refuses it. New pages cover answers and refusals, settings, a glossary, security and privacy, the
+  changelog and contributing. In the reference, each tool shows its annotations and whether PIE refuses it, and a
+  tool's name links to its entry wherever the docs mention it. Each page has its own description and link preview,
+  and the site publishes `llms.txt` and the tool catalog as JSON.
+
+### Fixed
+
+- Stopping Play-in-Editor closed the editor after `create_widget` had made a widget in the PIE world. The call's
+  undo step kept the PIE game instance and the widget, and the engine's check for leaked worlds failed on Stop. A
+  call's undo step that holds objects of the running PIE session is no longer kept; what the call did stays.
+  `end_transaction` closes such a transaction without an undo entry (`recorded: false`), and when PIE ends with them
+  still in the undo history, the history is reset, as the engine does for its own PIE objects.
+- `cancel_transaction` said it rolled the edits back, and left them in place. It now reverts what the transaction
+  recorded and reports `rolled_back`. `execute_batch` with `transaction` and `stop_on_error` uses it when an item
+  fails, so the items that ran before are reverted too; `transaction_rolled_back` says so.
+- `reparent_widget` moved a widget into itself and saved the tree with a cycle. A new parent that is the widget or
+  one of its descendants is now refused, and nothing changes.
+- `duplicate_widget` answered success while the copy was lost: the next compile renamed it `TRASH_<name>_0`, and
+  the reply said `duplicated: false`. The copy now gets its name after the Blueprint registers it, and a copy that
+  is not in the tree is an error.
+- `fire_mass_signal` with an `entity_handle` that names no live entity: index 0 closed the editor, and any other
+  dead handle answered success. Both are now refused, and nothing is signalled.
+- `read_data_table_from_package_file` raised an engine ensure on every call: it loaded the file for a diff outside
+  `/Temp/`. It now reads a throwaway copy under `Saved/Diff`, as the editor does for a source-control diff, and deletes
+  it afterwards.
+- The descriptions of `import_font_file` and `set_audio_section_properties` say what each engine does.
 
 ## 2.1.0 - 2026-10-20
 

@@ -2,7 +2,9 @@
 
 # Mass
 
-22 tools. Back to the [index](README.md).
+22 tools for Mass Entity configs and traits, spawners, entities, tags and signals.
+
+Back to the [index](README.md).
 
 ## `add_mass_tag_to_entity`
 

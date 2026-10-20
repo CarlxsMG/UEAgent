@@ -2,7 +2,9 @@
 
 # Procedural
 
-20 tools. Back to the [index](README.md).
+20 tools for PCG graphs, nodes and parameters, PCG components and volumes, and generation.
+
+Back to the [index](README.md).
 
 ## `add_pcg_component`
 

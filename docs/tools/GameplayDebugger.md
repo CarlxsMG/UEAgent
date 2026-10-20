@@ -2,7 +2,9 @@
 
 # GameplayDebugger
 
-2 tools. Back to the [index](README.md).
+2 tools for registering Gameplay Debugger categories.
+
+Back to the [index](README.md).
 
 ## `register_gameplay_debugger_category`
 

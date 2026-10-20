@@ -2,7 +2,9 @@
 
 # Interchange
 
-19 tools. Back to the [index](README.md).
+19 tools for Interchange imports and reimports, pipelines and their stack, translators and factories.
+
+Back to the [index](README.md).
 
 ## `can_reset_interchange_actor`
 

@@ -2,7 +2,9 @@
 
 # Networking
 
-6 tools. Back to the [index](README.md).
+6 tools for replication settings, network information and dedicated servers.
+
+Back to the [index](README.md).
 
 ## `configure_replication`
 

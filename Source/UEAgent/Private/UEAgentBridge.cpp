@@ -17,6 +17,7 @@
 #include "Editor/LevelEditor/Public/LevelEditorSubsystem.h" // ULevelEditorSubsystem::IsInPlayInEditor -- the same check is_play_in_editor_active uses
 #include "Editor.h"                     // GEditor + FEditorDelegates (PIE ownership guard)
 #include "ScopedTransaction.h"         // FScopedTransaction -- one undo step per call
+#include "Editor/Transactor.h"         // FTransaction -- the PIE-session check of the undo step
 #include "Mcp/McpActivity.h"           // the Activity panel's record of each call
 #include "HAL/PlatformTime.h"          // FPlatformTime -- each call's duration
 #include "HAL/IConsoleManager.h"       // mcp.UndoStepPerCall
@@ -706,6 +707,14 @@ void UUEAgentBridge::OnEndPIE(bool /*bIsSimulating*/)
     // FPyReferenceCollector::AddReferencedObjects as the sole retainer of the PIE world.
     const int32 PurgedRoots = mcp_common::PurgePIEScriptRefs();
     UE_LOG(LogTemp, Verbose, TEXT("[MCP] PIE ended; owner cleared, %d PIE root(s) purged of script refs"), PurgedRoots);
+
+    // The same checkf fires when the undo history still holds the PIE GameInstance (a transaction that recorded a
+    // widget made in PIE, by any path). The engine resets the history for its own PIE objects only after this point
+    // and does not see this kind; the PIE worlds still exist here, so they can be recognised.
+    if (mcp_common::ResetUndoHistoryHoldingPieSession())
+    {
+        UE_LOG(LogTemp, Display, TEXT("[MCP] PIE ended; the undo history held objects of the PIE session and was reset"));
+    }
 }
 
 TSharedPtr<FJsonObject> UUEAgentBridge::CheckPIEOwnershipGuard(const FString& CommandType, const TSharedPtr<FJsonObject>& Params, const FString& SessionId)
@@ -990,7 +999,8 @@ namespace McpBridgeParams
 // Each tool call is ONE undo step, named after the tool ("UEAgent: spawn_actor"), so Ctrl+Z reverts a
 // call as a whole. The handlers' own FScopedTransactions nest into it. A call that changes nothing leaves
 // no entry: the engine drops a transaction without changes, and one that only touched PIE objects
-// (FTransaction::IsTransient). A tool that resets the buffer mid-call (a map load) is safe too:
+// (FTransaction::IsTransient); a step that holds an object of the running PIE session the engine does not
+// see as one (HoldsPieSessionObjects) is dropped here. A tool that resets the buffer mid-call (a map load) is safe too:
 // UTransBuffer::Reset purges the open transaction, and End tolerates the purge.
 namespace McpUndoStep
 {
@@ -1016,6 +1026,16 @@ namespace McpUndoStep
             TEXT("reset_transaction_buffer"), TEXT("set_undo_barrier"), TEXT("remove_undo_barrier"),
             TEXT("build_blueprint_graph") };
         return Commands.Contains(CommandType);
+    }
+
+    // Whether the open undo step holds an object of the running Play-in-Editor session the engine does not drop by
+    // itself: a PIE GameInstance, or what it outers (a widget made with CreateWidget). See
+    // mcp_common::TransactionHoldsPieSessionObjects.
+    static bool HoldsPieSessionObjects()
+    {
+        // GUndo is the open transaction; the editor's buffer makes only FTransactions (the engine casts it the same way).
+        return GEditor && GEditor->PlayWorld && GUndo
+            && mcp_common::TransactionHoldsPieSessionObjects(static_cast<const FTransaction*>(GUndo));
     }
 
     // A `execute_batch` is one step for all its commands, unless it opens its own transaction
@@ -1153,6 +1173,12 @@ TSharedPtr<FJsonObject> UUEAgentBridge::DispatchSingleCommand(const FString& Com
             // UTransBuffer::Cancel removes the step without applying it, and gives back the redo history its
             // Begin had set aside: right for a step the handler proved holds no change.
             if (mcp_common::ConsumeDiscardUndoStepRequest() && bOutermostStep)
+            {
+                UndoStep.Cancel();
+            }
+            // A step that holds the running game's objects is dropped (its changes stay): undoing them means
+            // nothing once PIE ends, and keeping them closes the editor when PIE stops.
+            else if (bOutermostStep && McpUndoStep::HoldsPieSessionObjects())
             {
                 UndoStep.Cancel();
             }
