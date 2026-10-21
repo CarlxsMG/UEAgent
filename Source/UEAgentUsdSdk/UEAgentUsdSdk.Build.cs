@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 using UnrealBuildTool;
 
 // The USD values the engine's USD wrapper has no conversion for (integer list ops, path expressions), read and built

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 using UnrealBuildTool;
 
 public class UEAgent : ModuleRules

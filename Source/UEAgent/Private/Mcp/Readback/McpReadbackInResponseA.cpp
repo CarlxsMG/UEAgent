@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 // IN_RESPONSE (1/3): the evidence is already in the command's response -- zero cost.
 
 #include "McpReadbackCheckUtil.h"

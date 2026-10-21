@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 // Colour parameters of the property handlers: the *_properties commands that
 // Tools/codegen_property_handlers.py generates, and the hand-written post-process ones.
 // Replies write colours back with mcp_common::ColorToJsonArray.

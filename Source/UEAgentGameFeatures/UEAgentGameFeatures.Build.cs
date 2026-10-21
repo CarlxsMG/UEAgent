@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 using UnrealBuildTool;
 
 // The Game Features commands' engine side (IUEAgentGameFeaturesBackend, declared in UEAgent). A module of

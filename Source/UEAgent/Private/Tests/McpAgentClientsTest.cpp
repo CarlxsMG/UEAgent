@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 // Test of the other clients' files (Mcp/McpAgentClients.h) on temporary files: it touches neither the
 // project's files nor the server. Headless:
 //   UnrealEditor-Cmd <uproject> -ExecCmds="Automation RunTests UEAgent.AgentClients" -testexit="Automation Test Queue Empty" -unattended -nopause -NullRHI

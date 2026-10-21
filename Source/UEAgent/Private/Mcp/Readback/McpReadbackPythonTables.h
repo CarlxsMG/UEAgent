@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 #pragma once
 // Tables for the execute_python readback check. Order matters: findings are reported in table
 // order.

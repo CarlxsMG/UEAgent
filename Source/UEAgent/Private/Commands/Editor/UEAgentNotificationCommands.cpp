@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
 // Shared message-log token extraction (mcp_message_log::TokenizedMessageToJson).

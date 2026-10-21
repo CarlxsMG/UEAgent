@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 // Asset-path checks and asset loads the animation command families share.
 #pragma once
 

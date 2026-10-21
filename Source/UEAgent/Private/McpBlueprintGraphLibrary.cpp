@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 #include "McpBlueprintGraphLibrary.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"

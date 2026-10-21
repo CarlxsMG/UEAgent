@@ -4,8 +4,18 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 ## Unreleased
 
+### Added
+
+- Every file under `Source/` starts with a copyright notice, which Fab requires of a code plugin, and
+  `Tools/check_copyright.py` checks it in CI. `Tools/package_release.py --fab` builds the source archive
+  Fab takes for an engine version (see RELEASING.md).
+
 ### Fixed
 
+- Building the plugin warned 148 times that a monolithic header should not be used: three shared headers
+  included `Json.h`, and two command families `UMG.h` and `EngineSettings.h`. They include the headers they
+  use one by one, as IWYU and Fab require. On 5.7, the build also warned about `USDMemory.h` where the
+  `SetMetadata` write opens USD's allocator scope; the warning does not apply there, and is turned off.
 - The plugin's description in **Edit > Plugins** said about 2,100 tools, the count before 2.0; there are 1,742.
 
 ## 2.2.0 - 2026-10-20

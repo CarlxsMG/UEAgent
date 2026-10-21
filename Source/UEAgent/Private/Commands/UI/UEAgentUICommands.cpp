@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
 #include "Commands/UI/UMGWidgetUtils.h"
@@ -7,7 +9,6 @@
 #include "EngineUtils.h"
 #include "Components/WidgetComponent.h"
 #include "Blueprint/UserWidget.h"
-#include "UMG.h"
 #include "GameFramework/PlayerController.h"
 #include "UObject/UObjectGlobals.h"
 #include "Kismet/GameplayStatics.h"

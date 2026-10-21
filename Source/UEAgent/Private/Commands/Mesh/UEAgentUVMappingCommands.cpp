@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 //
 // Read-only UV-mapping diagnostics (base + per-vertex extension):
 // list_uv_channels + get_uv_health_report, both pure-read, headless-safe.

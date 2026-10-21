@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 #include "Mcp/McpPreconditions.h"
 
 #include "Mcp/McpPythonScan.h"

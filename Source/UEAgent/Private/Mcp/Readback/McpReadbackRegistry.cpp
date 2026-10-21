@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 #include "../McpReadbackChecks.h"
 
 // The family index. Each family lives in its own file; the core (the generic FOLLOW_UP and the

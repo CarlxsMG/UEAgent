@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 #include "Mcp/McpCommandFamilies.h"
 #include "SaveGameSystem.h"     // ISaveGameSystem::GetSaveGameNames (list_save_games)
 #include "PlatformFeatures.h"    // IPlatformFeaturesModule::GetSaveGameSystem

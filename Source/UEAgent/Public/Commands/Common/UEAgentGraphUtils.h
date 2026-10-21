@@ -1,7 +1,10 @@
+// Copyright (c) 2026 CarlxsMG.
+
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Json.h"
+#include "Dom/JsonObject.h"
+#include "Dom/JsonValue.h"
 #include "EdGraph/EdGraphPin.h"
 
 class UBlueprint;

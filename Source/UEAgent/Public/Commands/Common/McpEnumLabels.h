@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 // Engine enum values spelled for replies the way the engine names them.
 #pragma once
 

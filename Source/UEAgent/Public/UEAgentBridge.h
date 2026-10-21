@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -5,7 +7,8 @@
 #include "Containers/Ticker.h"
 #include "Async/Future.h"           // TFuture -- EnqueueToolCall's return type
 #include "Http.h"
-#include "Json.h"
+#include "Dom/JsonObject.h"
+#include "Dom/JsonValue.h"
 #include "UEAgentBridge.generated.h"
 
 // Native MCP server (Streamable HTTP) -- see Mcp/McpHttpServer.h.

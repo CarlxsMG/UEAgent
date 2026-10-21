@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 #include "Mcp/McpPythonScan.h"
 
 // Unique namespace per file: the module is built as a unity build (see Build.cs).

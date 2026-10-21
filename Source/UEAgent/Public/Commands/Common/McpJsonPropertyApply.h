@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 // HONEST JSON -> FProperty applier, via reflection.
 //
 // It exists because the engine path (FJsonObjectConverter, which mcp_common::SetObjectProperty

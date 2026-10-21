@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 #include "UEAgentBridge.h"
 // per-command KNOWN-PARAM table, generated from the catalog (Tools/codegen_param_table.py).
 // Used by the single point ALL responses go through (DispatchSingleCommand) to REPORT

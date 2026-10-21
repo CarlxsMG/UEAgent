@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 #include "Mcp/McpJsonFile.h"
 
 #include "Dom/JsonValue.h"

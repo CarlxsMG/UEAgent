@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 #include "Mcp/McpReadback.h"
 
 #include "McpReadbackChecks.h"

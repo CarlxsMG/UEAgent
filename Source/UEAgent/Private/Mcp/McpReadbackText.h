@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 #pragma once
 // Readback contract notes. After a tool runs, the readback layer re-reads the editor state and,
 // when the tool's answer is misleading (a false success, a zero that proves nothing, a write that

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 // Native wrapper around UAIPerceptionStimuliSourceComponent (UE 5.8 source:
 // AIModule/Classes/Perception/AIPerceptionStimuliSourceComponent.h). The component is the
 // canonical engine way to make an actor perceivable by an AI Perception system.

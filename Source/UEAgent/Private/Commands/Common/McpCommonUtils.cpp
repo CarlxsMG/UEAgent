@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 #include "Commands/Common/McpCommonUtils.h"
 #include "Commands/Common/McpEnumLabels.h"
 #include "UEAgentProjectSettings.h"

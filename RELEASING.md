@@ -43,3 +43,19 @@ GitHub lists the merged pull requests, grouped by label as `.github/release.yml`
 
 Then announce the release in
 [Discussions](https://github.com/CarlxsMG/UEAgent/discussions/categories/announcements).
+
+## 4. Fab
+
+Fab takes the source, one archive per engine version, and Epic compiles it. Its distribution
+agreement requires each update to reach Fab no later than any other channel, GitHub included, so
+upload a release to Fab before or together with the GitHub release.
+
+```bash
+python Tools/package_release.py --engine "C:/Program Files/Epic Games/UE_5.8" --out D:/UEAgentFab58 --fab --fab-url com.epicgames.launcher://ue/Fab/product/<id>
+python Tools/package_release.py --engine "C:/Program Files/Epic Games/UE_5.7" --out D:/UEAgentFab57 --fab --fab-url com.epicgames.launcher://ue/Fab/product/<id>
+```
+
+The FabURL comes from the listing in the publisher portal. The script refuses what Fab is known to
+refuse, builds the archive with `BuildPlugin -Rocket` as Fab's requirements ask, and warns about
+compiler warnings in UEAgent's code and names Fab's naming rule does not list. Upload each
+`UEAgent-X.Y.Z-UE5.x-Fab.zip` as the listing's project version for its engine.
