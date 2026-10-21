@@ -41,6 +41,18 @@ public:
 	UPROPERTY(config, EditAnywhere, Category = "Claude Code")
 	bool bShowConnectHint = true;
 
+	/**
+	 * On editor startup, asks GitHub at most once a day whether a newer UEAgent has been released,
+	 * and says so with a notification. Off, UEAgent connects to GitHub only when you click "Check for
+	 * updates" in the "MCP" menu of the status bar.
+	 */
+	UPROPERTY(config, EditAnywhere, Category = "Updates")
+	bool bCheckForUpdatesAtStartup = false;
+
+	/** When UEAgent last asked GitHub for the latest release (UTC ticks): the startup check waits a day. */
+	UPROPERTY(config)
+	int64 LastUpdateCheckTicks = 0;
+
 	virtual FName GetCategoryName() const override { return TEXT("Plugins"); }
 
 	/** The port actually used: the command line wins over the settings. */

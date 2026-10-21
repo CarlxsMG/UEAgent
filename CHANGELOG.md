@@ -6,6 +6,20 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 ### Added
 
+- **Updates from the editor.** **MCP · 55561 > Check for updates** asks GitHub for the latest release, and
+  **Download and install** downloads the zip for this engine, checks it against the release's `SHA256SUMS.txt`,
+  unpacks it into `Saved/UEAgentUpdate` and checks that it holds the new version. The editor holds the plugin's
+  DLLs, so the update installs when the editor closes, or right away with **Restart now**, which reopens it
+  afterwards. A script (`Resources/Update/apply_update.ps1`) waits for the editor to close and swaps the folders.
+  The previous version is kept in `Saved/UEAgentUpdate/Backup`, and if the new one cannot be moved in, the previous
+  one is put back. The next startup reports the result, and a failed attempt is tried again at the next exit.
+  - A git clone is never overwritten: the menu says to use `git pull`. A copy installed under the engine (Fab, the
+    launcher) is updated from the launcher.
+  - **Check for updates at startup** (Editor Preferences > Plugins > UEAgent, off by default) asks at most once a
+    day and shows a notification only when there is something new.
+  - Console: `mcp.update.check`, `mcp.update.status`, `mcp.update.download`, `mcp.update.cancel`.
+  - Privacy: GitHub is UEAgent's only connection of its own, made only when you check or turn the startup check on.
+
 - A documentation page, [Choosing an MCP server](docs/choosing.md): how a server inside the editor differs from one
   outside it, and the questions to ask any MCP server for Unreal, with UEAgent's answers and what it does not do.
 

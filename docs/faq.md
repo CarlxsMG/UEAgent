@@ -31,9 +31,11 @@ projects alike. The MCP client and the model behind it may have costs of their o
 
 ## Does it send my project anywhere?
 
-UEAgent itself does not: no telemetry, no analytics, no update checks. The server only listens on
-`127.0.0.1`, and a tool's answer goes to the client you connected. What that client sends to its
-model provider is up to the client.
+UEAgent itself does not: no telemetry, no analytics. Its only connection of its own is to GitHub, to
+look for a newer release, when you click **Check for updates** or, if you turn it on, once a day on
+startup. That request says which version of UEAgent asks, and nothing about your project. The server
+only listens on `127.0.0.1`, and a tool's answer goes to the client you connected. What that client
+sends to its model provider is up to the client.
 
 ## Is it safe to let an agent drive my editor?
 
@@ -80,8 +82,14 @@ that run Python in the editor. Node.js is only needed to connect Claude Desktop,
 
 ## How do I update it?
 
-Close the editor, replace `Plugins/UEAgent` with the new release, and reconnect your client so it
-lists the tools again.
+From the editor: **MCP · 55561 > Check for updates**, then **Download and install**. The update is
+installed when the editor closes, or right away with **Restart now**, and the previous version is kept
+in `Saved/UEAgentUpdate/Backup`. To be told about new releases without checking, turn on **Check for
+updates at startup** in the [settings](settings.md).
+
+A git clone is updated with `git pull`, and a copy installed from Fab from the Epic Games Launcher. By
+hand: close the editor and replace `Plugins/UEAgent` with the new release. Either way, reconnect your
+client so it lists the tools again.
 
 ## A tool does something wrong. Where do I report it?
 
