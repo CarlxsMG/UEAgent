@@ -28,6 +28,8 @@
 #include "StaticMeshEditorSubsystemHelpers.h"     // EScriptCollisionShapeType (K-DOP shapes)
 #include "Editor.h"                                // GEditor->GetEditorSubsystem<>()
 #include "PhysicsAssetUtils.h"                    // FPhysicsAssetUtils (PhysicsUtilities)
+#include "MeshUtilitiesCommon.h"                  // FBoneVertInfo
+#include "MeshUtilitiesEngine.h"                  // FMeshUtilitiesEngine::CalcBoneVertInfos (MeshUtilitiesEngine)
 #include "PhysicsEngine/PhysicsConstraintTemplate.h" // UPhysicsConstraintTemplate (DefaultInstance, SetDefaultProfile)
 #include "PhysicsEngine/ConstraintInstance.h"     // FConstraintInstance (Set*Limit, SnapTransformsToDefault, EConstraintTransformComponentFlags)
 #include "Chaos/ChaosEngineInterface.h"           // EAngularConstraintMotion / ELinearConstraintMotion (ACM_*/LCM_*)
@@ -603,7 +605,7 @@ TSharedPtr<FJsonObject> HandleCreatePhysicsAsset(const TSharedPtr<FJsonObject>& 
     return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("create_physics_asset"), SaveError);
 }
 
-// MCP:get_physics_asset_info - Read a UPhysicsAsset without changing it: body_count and constraint_count; each body's index, bone_name and primitive_count; every constraint with its name, child and parent bones, swing, twist and linear motions and limits, and its drive, breakable and projection settings; skeletal_mesh_path, the asset's preview mesh (empty when none, and not necessarily a mesh that uses the asset); and skeleton_bones, that mesh's bone names, the names body and constraint tools accept. A path that does not load as a physics asset is an error. Edit bodies with set_physics_body_properties, joints with add_physics_asset_constraint, set_physics_asset_constraint_limits or set_physics_asset_constraint_drives; a world constraint actor is get_physics_constraint_info.
+// MCP:get_physics_asset_info - Read a UPhysicsAsset without changing it: body_count and constraint_count; each body's index, bone_name and primitive_count; every constraint with its name, child and parent bones, swing, twist and linear motions and limits, and its drive, breakable and projection settings; skeletal_mesh_path, the asset's preview mesh (empty when none, and not necessarily a mesh that uses the asset); and skeleton_bones, that mesh's bone names, the names body and constraint tools accept. A path that does not load as a physics asset is an error. Edit bodies with set_physics_body_properties, joints with add_physics_asset_constraint, set_physics_asset_constraint_limits or set_physics_asset_constraint_drives; a world constraint actor is get_physics_constraint_info. Add or remove a bone's body: add_physics_asset_body / remove_physics_asset_body.
 //   @param physics_asset_path - Path of the UPhysicsAsset, e.g. "/Game/Physics/PA_Hero" or "/Game/Physics/PA_Hero.PA_Hero".
 //   @returns { asset_path: string, asset_name: string, body_count: number, constraint_count: number, skeletal_mesh_path: string, bodies: [{ index: number, bone_name: string, primitive_count?: number }], skeleton_bones: [string], constraints: [object] }
 TSharedPtr<FJsonObject> HandleGetPhysicsAssetInfo(const TSharedPtr<FJsonObject>& Params)
@@ -1307,6 +1309,235 @@ TSharedPtr<FJsonObject> HandleRemovePhysicsAssetConstraint(const TSharedPtr<FJso
     return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("remove_physics_asset_constraint"), SaveError);
 }
 
+// MCP:add_physics_asset_body - Add a body for one bone to a UPhysicsAsset (FPhysicsAssetUtils::CreateNewBody) with ONE collision primitive, in one undo step, then save the asset. Without radius, length or extent the primitive is FITTED to the preview mesh's vertices weighted to that bone, as the Physics Asset editor's Add Body does (FPhysicsAssetUtils::CreateCollisionsFromBones): a capsule, sphere, box or convex hull. With any of them it is a primitive of that size centred on the bone instead -- a capsule (radius, length), a sphere (radius) or a box (extent [x,y,z]); a convex hull is fitted only, so it refuses sizes. A bone with no vertices weighted to it cannot be fitted: that is an error naming the explicit-size way, and nothing is kept; so is a convex without a preview mesh. With no preview mesh and no sizes the primitive gets the default sizes (fitted=false, and a note says so). No constraint is made: joint it with add_physics_asset_constraint, tune it with set_physics_body_properties. A bone that already has a body is a success with already_existed=true and nothing changed or saved; a bone the preview mesh's skeleton does not have is an error. Inverse: remove_physics_asset_body; read: get_physics_asset_info. A failed save makes success false with save_error.
+//   @param physics_asset_path - /Game path to the UPhysicsAsset.
+//   @param bone_name - Bone the body follows (one body per bone; get_physics_asset_info lists skeleton_bones).
+//   @param primitive - "capsule" (default), "sphere", "box" or "convex" (fitted only).
+//   @param radius [number] - Capsule or sphere radius in cm; giving it makes an explicit-size primitive instead of a fitted one (default 10 when another size is given).
+//   @param length [number] - Capsule length in cm between the two sphere centres; giving it makes an explicit-size primitive (default 20).
+//   @param extent [array] - Box size [x, y, z] in cm; giving it makes an explicit-size primitive (default [20, 20, 20]).
+//   @returns { physics_asset_path: string, bone_name: string, body_index: int, primitive: string, fitted: bool, added: bool, already_existed: bool, primitive_count: int, body_count: int, bone_in_skeleton: bool, saved: bool, save_error?: string, note?: string }
+TSharedPtr<FJsonObject> HandleAddPhysicsAssetBody(const TSharedPtr<FJsonObject>& Params)
+{
+    FString AssetPath, BoneName;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("physics_asset_path"), AssetPath)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("bone_name"), BoneName)) { return Missing; }
+    FString Primitive = TEXT("capsule");
+    Params->TryGetStringField(TEXT("primitive"), Primitive);
+    Primitive = Primitive.ToLower();
+    if (Primitive != TEXT("capsule") && Primitive != TEXT("sphere") && Primitive != TEXT("box") && Primitive != TEXT("convex"))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Unknown primitive '%s' (use capsule, sphere, box or convex); nothing was changed"), *Primitive));
+    }
+    // Any size given asks for an explicit primitive; none asks for one fitted to the mesh.
+    const bool bExplicitSize = Params->HasField(TEXT("radius")) || Params->HasField(TEXT("length")) || Params->HasField(TEXT("extent"));
+    if (bExplicitSize && Primitive == TEXT("convex"))
+    {
+        return mcp_common::MakeErrorReply(TEXT("A convex hull is fitted to the mesh only: drop radius/length/extent, or ask for a capsule, sphere or box; nothing was changed"));
+    }
+    double Radius = 10.0;
+    Params->TryGetNumberField(TEXT("radius"), Radius);
+    double Length = 20.0;
+    Params->TryGetNumberField(TEXT("length"), Length);
+    FVector Extent(20.0, 20.0, 20.0);
+    const TArray<TSharedPtr<FJsonValue>>* ExtentArr = nullptr;
+    if (Params->TryGetArrayField(TEXT("extent"), ExtentArr))
+    {
+        if (ExtentArr->Num() != 3)
+        {
+            return mcp_common::MakeErrorReply(TEXT("extent must be [x, y, z]; nothing was changed"));
+        }
+        Extent = FVector((*ExtentArr)[0]->AsNumber(), (*ExtentArr)[1]->AsNumber(), (*ExtentArr)[2]->AsNumber());
+    }
+    if (Radius <= 0.0 || Length < 0.0 || Extent.X <= 0.0 || Extent.Y <= 0.0 || Extent.Z <= 0.0)
+    {
+        return mcp_common::MakeErrorReply(TEXT("radius and extent must be positive and length not negative; nothing was changed"));
+    }
+
+    UPhysicsAsset* PhysAsset = nullptr;
+    if (TSharedPtr<FJsonObject> Error = PhysicsAsset_LoadAsset(AssetPath, PhysAsset))
+    {
+        return Error;
+    }
+    const FName BoneFName(*BoneName);
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("physics_asset_path"), PhysAsset->GetPathName());
+    ResultObj->SetStringField(TEXT("bone_name"), BoneName);
+    ResultObj->SetStringField(TEXT("primitive"), Primitive);
+
+    // One body per bone: an existing one is returned as it is.
+    const int32 Existing = PhysAsset->FindBodyIndex(BoneFName);
+    if (Existing != INDEX_NONE)
+    {
+        const USkeletalBodySetup* Body = PhysAsset->SkeletalBodySetups[Existing];
+        ResultObj->SetNumberField(TEXT("body_index"), Existing);
+        ResultObj->SetBoolField(TEXT("added"), false);
+        ResultObj->SetBoolField(TEXT("already_existed"), true);
+        ResultObj->SetNumberField(TEXT("primitive_count"), Body ? Body->AggGeom.GetElementCount() : 0);
+        ResultObj->SetNumberField(TEXT("body_count"), PhysAsset->SkeletalBodySetups.Num());
+        ResultObj->SetBoolField(TEXT("saved"), false);
+        ResultObj->SetStringField(TEXT("note"), TEXT("the bone already has a body; nothing changed"));
+        return mcp_common::MakeOkReply(ResultObj);
+    }
+
+    bool bBoneInSkeleton = false;
+    USkeletalMesh* Preview = PhysAsset->GetPreviewMesh();
+    if (!Preview && Primitive == TEXT("convex"))
+    {
+        return mcp_common::MakeErrorReply(TEXT("A convex hull is fitted to the preview mesh, and this physics asset has none; nothing was changed"));
+    }
+    if (Preview)
+    {
+        bBoneInSkeleton = Preview->GetRefSkeleton().FindBoneIndex(BoneFName) != INDEX_NONE;
+        if (!bBoneInSkeleton)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("Bone '%s' is not in the skeleton of the preview mesh %s (get_physics_asset_info lists skeleton_bones); nothing was changed"),
+                *BoneName, *Preview->GetPathName()));
+        }
+    }
+
+    FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "AddPhysicsAssetBody", "Add Physics Asset Body"));
+    PhysAsset->Modify();
+    const FPhysAssetCreateParams CreateParams;
+    const int32 BodyIndex = FPhysicsAssetUtils::CreateNewBody(PhysAsset, BoneFName, CreateParams);
+    USkeletalBodySetup* Body = PhysAsset->SkeletalBodySetups.IsValidIndex(BodyIndex) ? PhysAsset->SkeletalBodySetups[BodyIndex].Get() : nullptr;
+    if (!Body)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("CreateNewBody did not create a body for '%s'"), *BoneName));
+    }
+    Body->Modify();
+    const bool bFit = !bExplicitSize && Preview != nullptr;
+    if (bFit)
+    {
+        // The editor's Add Body: the vertices each bone dominates, then the primitive fitted to this bone's share.
+        FPhysAssetCreateParams FitParams;
+        FitParams.GeomType = Primitive == TEXT("sphere") ? EFG_Sphere
+            : Primitive == TEXT("box") ? EFG_Box
+            : Primitive == TEXT("convex") ? EFG_SingleConvexHull
+            : EFG_Sphyl;
+        FitParams.VertWeight = EVW_DominantWeight;
+        TArray<FBoneVertInfo> Infos;
+        FMeshUtilitiesEngine::CalcBoneVertInfos(Preview, Infos, /*bOnlyDominant=*/true, /*SourceLodIndex=*/0);
+        TArray<int32> Fitted;
+        const bool bFitted = FPhysicsAssetUtils::CreateCollisionsFromBones(PhysAsset, Preview, TArray<int32>{ BodyIndex }, FitParams, Infos, Fitted);
+        if (!bFitted || PhysAsset->FindBodyIndex(BoneFName) == INDEX_NONE)
+        {
+            // CreateCollisionsFromBones already destroyed the empty body; drop what is left of the step too.
+            if (PhysAsset->FindBodyIndex(BoneFName) != INDEX_NONE)
+            {
+                FPhysicsAssetUtils::DestroyBody(PhysAsset, PhysAsset->FindBodyIndex(BoneFName));
+            }
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("No %s could be fitted to bone '%s': the preview mesh %s has no vertices weighted to it. Give radius/length/extent for a primitive of that size; nothing was saved"),
+                *Primitive, *BoneName, *Preview->GetPathName()));
+        }
+    }
+    else if (Primitive == TEXT("capsule"))
+    {
+        FKSphylElem Capsule(static_cast<float>(Radius), static_cast<float>(Length));
+        Body->AggGeom.SphylElems.Add(Capsule);
+    }
+    else if (Primitive == TEXT("sphere"))
+    {
+        Body->AggGeom.SphereElems.Add(FKSphereElem(static_cast<float>(Radius)));
+    }
+    else
+    {
+        Body->AggGeom.BoxElems.Add(FKBoxElem(static_cast<float>(Extent.X), static_cast<float>(Extent.Y), static_cast<float>(Extent.Z)));
+    }
+    Body->InvalidatePhysicsData();
+    Body->CreatePhysicsMeshes();
+    PhysAsset->UpdateBoundsBodiesArray();
+    PhysAsset->MarkPackageDirty();
+
+    FString SaveError;
+    const bool bSaved = mcp_common::SaveAssetPackage(PhysAsset->GetOutermost(), PhysAsset, SaveError);
+
+    // The re-read: the body the bone resolves to now.
+    const int32 ReadIndex = PhysAsset->FindBodyIndex(BoneFName);
+    const USkeletalBodySetup* ReadBody = PhysAsset->SkeletalBodySetups.IsValidIndex(ReadIndex) ? PhysAsset->SkeletalBodySetups[ReadIndex].Get() : nullptr;
+    ResultObj->SetNumberField(TEXT("body_index"), ReadIndex);
+    ResultObj->SetBoolField(TEXT("added"), ReadBody != nullptr);
+    ResultObj->SetBoolField(TEXT("already_existed"), false);
+    ResultObj->SetNumberField(TEXT("primitive_count"), ReadBody ? ReadBody->AggGeom.GetElementCount() : 0);
+    ResultObj->SetNumberField(TEXT("body_count"), PhysAsset->SkeletalBodySetups.Num());
+    ResultObj->SetBoolField(TEXT("bone_in_skeleton"), bBoneInSkeleton);
+    ResultObj->SetBoolField(TEXT("fitted"), bFit);
+    if (!Preview)
+    {
+        ResultObj->SetStringField(TEXT("note"), bExplicitSize
+            ? TEXT("the physics asset has no preview mesh, so the bone name was not checked against a skeleton")
+            : TEXT("the physics asset has no preview mesh, so the bone name was not checked and the primitive has the default sizes instead of a fit"));
+    }
+    return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("add_physics_asset_body"), SaveError);
+}
+
+// MCP:remove_physics_asset_body - Remove the body of one bone from a UPhysicsAsset (FPhysicsAssetUtils::DestroyBody, as the Physics Asset editor's Delete does): the body goes with every constraint that joins it (constraints_removed) and its entries in the collision table, in one undo step, then the asset is saved. Inverse of add_physics_asset_body; the bodies after it move down one index. Give bone_name (preferred) or body_index. A bone with no body, or an index out of range, is an honest no-op (removed=false, already_absent=true, nothing saved). A failed save makes success false with save_error. Read: get_physics_asset_info.
+//   @param physics_asset_path - /Game path to the UPhysicsAsset.
+//   @param bone_name - Bone whose body to remove; preferred over body_index when both are given.
+//   @param body_index [int] - Index of the body to remove (get_physics_asset_info lists them), used when bone_name is absent.
+//   @returns { physics_asset_path: string, bone_name: string, body_index: int, removed: bool, already_absent: bool, constraints_removed: int, body_count: int, constraint_count: int, saved: bool, save_error?: string }
+TSharedPtr<FJsonObject> HandleRemovePhysicsAssetBody(const TSharedPtr<FJsonObject>& Params)
+{
+    FString AssetPath;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("physics_asset_path"), AssetPath)) { return Missing; }
+    FString BoneName;
+    Params->TryGetStringField(TEXT("bone_name"), BoneName);
+    int32 BodyIndex = INDEX_NONE;
+    const bool bHasIndex = Params->TryGetNumberField(TEXT("body_index"), BodyIndex);
+    if (BoneName.IsEmpty() && !bHasIndex)
+    {
+        return mcp_common::MakeErrorReply(TEXT("Provide bone_name (preferred) or body_index"));
+    }
+
+    UPhysicsAsset* PhysAsset = nullptr;
+    if (TSharedPtr<FJsonObject> Error = PhysicsAsset_LoadAsset(AssetPath, PhysAsset))
+    {
+        return Error;
+    }
+    const int32 Idx = !BoneName.IsEmpty() ? PhysAsset->FindBodyIndex(FName(*BoneName)) : BodyIndex;
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("physics_asset_path"), PhysAsset->GetPathName());
+    if (!PhysAsset->SkeletalBodySetups.IsValidIndex(Idx) || !PhysAsset->SkeletalBodySetups[Idx])
+    {
+        ResultObj->SetStringField(TEXT("bone_name"), BoneName);
+        ResultObj->SetNumberField(TEXT("body_index"), Idx);
+        ResultObj->SetBoolField(TEXT("removed"), false);
+        ResultObj->SetBoolField(TEXT("already_absent"), true);
+        ResultObj->SetNumberField(TEXT("constraints_removed"), 0);
+        ResultObj->SetNumberField(TEXT("body_count"), PhysAsset->SkeletalBodySetups.Num());
+        ResultObj->SetNumberField(TEXT("constraint_count"), PhysAsset->ConstraintSetup.Num());
+        ResultObj->SetBoolField(TEXT("saved"), false);
+        return mcp_common::MakeOkReply(ResultObj);
+    }
+    const FName RemovedBone = PhysAsset->SkeletalBodySetups[Idx]->BoneName;
+    const int32 ConstraintsBefore = PhysAsset->ConstraintSetup.Num();
+
+    FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "RemovePhysicsAssetBody", "Remove Physics Asset Body"));
+    PhysAsset->Modify();
+    FPhysicsAssetUtils::DestroyBody(PhysAsset, Idx);
+    PhysAsset->MarkPackageDirty();
+
+    if (PhysAsset->FindBodyIndex(RemovedBone) != INDEX_NONE)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Bone '%s' still has a body after DestroyBody; nothing was saved"), *RemovedBone.ToString()));
+    }
+    FString SaveError;
+    const bool bSaved = mcp_common::SaveAssetPackage(PhysAsset->GetOutermost(), PhysAsset, SaveError);
+
+    ResultObj->SetStringField(TEXT("bone_name"), RemovedBone.ToString());
+    ResultObj->SetNumberField(TEXT("body_index"), Idx);
+    ResultObj->SetBoolField(TEXT("removed"), true);
+    ResultObj->SetBoolField(TEXT("already_absent"), false);
+    ResultObj->SetNumberField(TEXT("constraints_removed"), ConstraintsBefore - PhysAsset->ConstraintSetup.Num());
+    ResultObj->SetNumberField(TEXT("body_count"), PhysAsset->SkeletalBodySetups.Num());
+    ResultObj->SetNumberField(TEXT("constraint_count"), PhysAsset->ConstraintSetup.Num());
+    return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("remove_physics_asset_body"), SaveError);
+}
+
 // MCP:set_physics_asset_constraint_limits - Set the linear/angular motion types and limits of an existing constraint inside a UPhysicsAsset (read-modify-write: only the axes you provide change).  Angular limits are in degrees; the linear limit is a single value shared across X/Y/Z (cm).  Each *_motion is Free|Limited|Locked; providing a *_limit without its motion implies Limited on that axis.  Idempotent (set-to-fixed-value).
 //   @param physics_asset_path - /Game path to the UPhysicsAsset.
 //   @param constraint_name - Name (JointName) of the constraint to edit (see get_physics_asset_info).
@@ -1491,10 +1722,12 @@ TSharedPtr<FJsonObject> HandleSetPhysicsAssetConstraintDrives(const TSharedPtr<F
 
 const McpCommandFamilies::FRegistrar Registration =
 {
+    { TEXT("add_physics_asset_body"), &HandleAddPhysicsAssetBody },
     { TEXT("add_physics_asset_constraint"), &HandleAddPhysicsAssetConstraint },
     { TEXT("add_static_mesh_simple_collision"), &HandleAddSimpleCollisionToStaticMesh },
     { TEXT("create_physics_asset"), &HandleCreatePhysicsAsset },
     { TEXT("get_physics_asset_info"), &HandleGetPhysicsAssetInfo },
+    { TEXT("remove_physics_asset_body"), &HandleRemovePhysicsAssetBody },
     { TEXT("remove_physics_asset_constraint"), &HandleRemovePhysicsAssetConstraint },
     { TEXT("remove_static_mesh_collision"), &HandleRemoveStaticMeshCollision },
     { TEXT("set_physics_asset_constraint_drives"), &HandleSetPhysicsAssetConstraintDrives },

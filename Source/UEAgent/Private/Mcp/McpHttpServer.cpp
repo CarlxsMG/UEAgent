@@ -51,11 +51,16 @@ namespace McpHttpServerPrivate
 		TEXT("- A refusal (isError) comes before the call runs: the call is known to crash or freeze the editor, or is unreliable ")
 		TEXT("while Play-in-Editor runs. The message says what to do instead; stop PIE before compiling Blueprints or saving.\n")
 		TEXT("- Look assets and actors up instead of guessing their names, and name assets by their full path (/Game/...).\n")
-		TEXT("- Similar tools: get_properties reads named properties of one object you can path to, inspect_object one you know ")
+		TEXT("- A tool's name starts with its verb, one verb per operation: get_ reads one thing (get_<x>_info, all of it), list_ ")
+		TEXT("enumerates, find_ searches by name or condition, is_/has_ answer yes or no; create_ makes an asset, add_ puts a part ")
+		TEXT("into an asset or actor, spawn_ places an actor in a world; set_ writes; remove_ takes a part out, delete_ deletes an ")
+		TEXT("asset or actor, clear_ empties a list.\n")
+		TEXT("- Similar tools: get_properties reads named properties of one object you can path to, get_object_info one you know ")
 		TEXT("nothing about, get_actor_properties_by_class placed actors by class or label, get_component_properties a whole ")
-		TEXT("component. set_properties writes any object in the editor; set_component_property a placed actor's component, also ")
-		TEXT("in a live PIE world. A typed tool (set_light_properties, spawn_sky_atmosphere, add_spline_component...) says in ")
-		TEXT("its description what it does that the generic one does not.\n")
+		TEXT("component. set_properties writes any setting of an asset, an actor or a component (\"Actor.Component\", by name or ")
+		TEXT("class) -- a light, fog, sky, decal, camera, post-process volume, sound, Niagara system... -- and saves an asset with ")
+		TEXT("save=true; set_component_property writes a component in a live PIE world. spawn_actor places an actor of any class ")
+		TEXT("with its properties, spawn_box_volume a volume. A typed tool says in its description what it does that these do not.\n")
 		TEXT("- For many small edits, use `execute_batch`: one call, one pass on the game thread.\n")
 		TEXT("- After editing a Blueprint graph, compile it and read the compiler's messages.\n")
 		TEXT("- When no tool fits, `execute_python` runs Unreal's Python API in the editor.");
@@ -1033,7 +1038,8 @@ bool FMcpHttpConnection::HandleToolsCall(const TSharedPtr<FJsonValue>& Id, const
 			return SendJson(200, MakeRpcResult(Id, MakeToolResult(ToJsonText(MetaAnswer.ToSharedRef()), bMetaError)), bKeepAlive) && bKeepAlive;
 		}
 	}
-	const FMcpToolCatalog::FTool* Tool = Catalog.IsValid() ? Catalog->FindTool(ToolName) : nullptr;
+	// A renamed tool's old name runs the new one; the bridge resolves it again and says so in the reply.
+	const FMcpToolCatalog::FTool* Tool = Catalog.IsValid() ? Catalog->FindTool(FMcpToolCatalog::ResolveCallName(ToolName)) : nullptr;
 	if (!Tool)
 	{
 		FString Unknown = FString::Printf(TEXT("Unknown tool: %s"), *ToolName);

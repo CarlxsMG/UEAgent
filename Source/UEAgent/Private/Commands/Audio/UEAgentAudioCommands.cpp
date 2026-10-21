@@ -68,7 +68,7 @@ namespace UEAgentAudioImpl
         return FString::Printf(TEXT("Sound not found: %s. Use full path like '/Game/Audio/MySound.MySound'"), *Path);
     }
 
-    // The first world context the engine holds. configure_audio_3d and get_audio_settings have
+    // The first world context the engine holds. set_audio_3d_settings and get_audio_settings have
     // always read this one instead of asking GEditor for its editor world.
     UWorld* FirstContextWorld()
     {
@@ -237,7 +237,7 @@ namespace UEAgentAudioImpl
         }
     }
 
-    // Read-back context shared by set_audio_volume and configure_audio_3d.
+    // Read-back context shared by set_audio_volume and set_audio_3d_settings.
     void AddPlaybackContext(const TSharedPtr<FJsonObject>& Out, UAudioComponent* AudioComp)
     {
         Out->SetBoolField(TEXT("audio_enabled"), AudioComp->IsActive());
@@ -251,7 +251,7 @@ namespace UEAgentAudioImpl
         AddOwnerFields(Out, AudioComp->GetOwner(), /*bDetailed=*/false);
     }
 
-    // Values configure_audio_3d describes for a named preset.
+    // Values set_audio_3d_settings describes for a named preset.
     struct FSpatialPreset
     {
         bool bEnable3D = false;
@@ -290,7 +290,7 @@ namespace UEAgentAudioImpl
         return nullptr;
     }
 
-    // Advice attached to configure_audio_3d, judged on the preset's numbers.
+    // Advice attached to set_audio_3d_settings, judged on the preset's numbers.
     TArray<TSharedPtr<FJsonValue>> SpatialAdvice(const FSpatialPreset& Preset, const bool bHasSound)
     {
         TArray<TSharedPtr<FJsonValue>> Advice;
@@ -675,7 +675,8 @@ TSharedPtr<FJsonObject> HandleSetAudioVolume(const TSharedPtr<FJsonObject>& Para
     return Report;
 }
 
-// MCP:configure_audio_3d - Applies a 3D audio preset to an audio component of the editor world: spatialization (bAllowSpatialization) and an attenuation override, a sphere whose inner radius is attenuation_radius and whose falloff distance is attenuation_distance ('Disabled' turns both off). audio_3d_configured is read back from the component. attenuation_falloff and the cone numbers only describe the preset (a sphere has no cone).
+// MCP:set_audio_3d_settings - Applies a 3D audio preset to an audio component of the editor world: spatialization (bAllowSpatialization) and an attenuation override, a sphere whose inner radius is attenuation_radius and whose falloff distance is attenuation_distance ('Disabled' turns both off). audio_3d_configured is read back from the component. attenuation_falloff and the cone numbers only describe the preset (a sphere has no cone).
+//   @renamed-from configure_audio_3d
 //   @param audio_component_name - Name of the audio component to configure
 //   @param audio_3d_settings - 3D setting preset: 'Enabled', 'Disabled', 'High', 'Medium', or 'Low' (case-insensitive); any other name is an error
 //   @returns { audio_component_name: string, audio_3d_settings: string, audio_3d_configured: bool, audio_3d_message: string, old_3d_enabled: bool, new_3d_enabled: bool, attenuation_override: bool, applied_attenuation_radius?: number, applied_falloff_distance?: number, 3d_enabled: bool, spatialization_enabled: bool, attenuation_distance: number, attenuation_radius: number, attenuation_falloff: number, attenuation_cone_angle: number, attenuation_cone_feather: number, audio_3d_recommendations: [string] }
@@ -959,7 +960,7 @@ TSharedPtr<FJsonObject> HandleSetAudioSound(const TSharedPtr<FJsonObject>& Param
 
 const McpCommandFamilies::FRegistrar Registration =
 {
-    { TEXT("configure_audio_3d"), &HandleConfigureAudio3D },
+    { TEXT("set_audio_3d_settings"), &HandleConfigureAudio3D },
     { TEXT("get_audio_component_properties"), &HandleGetAudioComponentProperties },
     { TEXT("get_audio_settings"), &HandleGetAudioSettings },
     { TEXT("play_sound"), &HandlePlaySound },

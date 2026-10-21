@@ -1,6 +1,7 @@
 // Copyright (c) 2026 CarlxsMG.
 
 #include "Mcp/McpCommandFamilies.h"
+#include "Mcp/McpToolCatalog.h"
 #include "Commands/Common/McpCommonUtils.h"
 #include "Misc/EngineVersionComparison.h" // UE_VERSION_OLDER_THAN: the UE 5.7 paths
 #include "Commands/Common/UEAgentGraphUtils.h"
@@ -56,6 +57,7 @@
 #include "Misc/FileHelper.h"              // Persist the +PropertyRedirects (GConfig does NOT work: the engine deletes the section when it reads it)
 #include "Misc/Paths.h"                   // FPaths::ProjectConfigDir
 #include "K2Node_EditablePinBase.h"
+#include "K2Node_Tunnel.h"                // macro signatures: the entry and exit tunnels
 #include "K2Node_Timeline.h"
 #include "K2Node_ComponentBoundEvent.h"
 // list_widget_bound_events: the binding nodes do NOT share a base. UK2Node_AddDelegate derives from
@@ -71,6 +73,10 @@
 #include "K2Node_Knot.h"
 #include "EdGraphNode_Comment.h"
 #include "Engine/TimelineTemplate.h"
+#include "Curves/CurveFloat.h"            // Blueprint timeline tracks: float and event curves
+#include "Curves/CurveVector.h"
+#include "Curves/CurveLinearColor.h"
+#include "Curves/RichCurve.h"
 #include "Components/PrimitiveComponent.h"
 
 #include "Editor.h"
@@ -1796,16 +1802,16 @@ TSharedPtr<FJsonObject> HandleMoveNode(const TSharedPtr<FJsonObject>& Params)
     return Result;
 }
 
-// MCP:add_comment_node - Add a resizable comment box (UEdGraphNode_Comment) to a graph. KNOWN BUG: the 'text' parameter is LOST -- the comment is assigned before the node is finalized and the engine's PostPlacedNewNode then overwrites it, so every box created this way reads "Comment"; the returned "comment" field is the oracle and there is no MCP way to fix it (write the rationale in the system's docs instead, and delete the empty box). It also has NO pins, so a pin_defaults entry aimed at it breaks a whole build_blueprint_graph batch.
+// MCP:add_comment_node - Add a resizable comment box (UEdGraphNode_Comment) with text to a graph, in one undo step. The text is written after the engine places the node (its PostPlacedNewNode resets the box to "Comment"), and the returned "comment" field is the box's text read back; without text the box keeps the engine's "Comment". It has NO pins, so a pin_defaults entry aimed at it breaks a whole build_blueprint_graph batch. Read back: get_graph_nodes (compact=false: compact skips comment boxes); remove: delete_node.
 //   @param blueprint_name - Blueprint asset name or path
-//   @param text - Comment text; currently IGNORED (see the bug above), the box always ends up saying "Comment"
+//   @param text - Comment text shown in the box; omitted or empty leaves the engine default "Comment"
 //   @param graph_name - Target graph name; defaults to the Blueprint's event graph when omitted
 //   @param width - Comment box width in pixels; defaults to 400
 //   @param height - Comment box height in pixels; defaults to 200
 //   @param position_x - Node X position on the graph canvas (ignored when node_position is set)
 //   @param position_y - Node Y position on the graph canvas (ignored when node_position is set)
 //   @param node_position - Node canvas position as [x, y]; takes precedence over position_x/position_y
-//   @returns { node_id, class, title, pos_x, pos_y, comment } -- no pins array. comment=="Comment" means the requested text was not written.
+//   @returns { node_id, class, title, pos_x, pos_y, comment } -- no pins array; comment is the text the box holds, read back after placement.
 TSharedPtr<FJsonObject> HandleAddCommentNode(const TSharedPtr<FJsonObject>& Params)
 {
     FString BlueprintName, Text;
@@ -1826,12 +1832,16 @@ TSharedPtr<FJsonObject> HandleAddCommentNode(const TSharedPtr<FJsonObject>& Para
     Graph->Modify();
 
     UEdGraphNode_Comment* Node = UEAgentGraphCommandsImpl::SpawnNode<UEdGraphNode_Comment>(Graph, Position,
-        [Width, Height, &Text](UEdGraphNode_Comment* CommentNode)
+        [Width, Height](UEdGraphNode_Comment* CommentNode)
         {
             CommentNode->NodeWidth = (int32)Width;
             CommentNode->NodeHeight = (int32)Height;
-            CommentNode->NodeComment = Text;
         });
+    // PostPlacedNewNode (run by Finalize) writes the default "Comment" into NodeComment, so the text goes in after.
+    if (!Text.IsEmpty())
+    {
+        Node->NodeComment = Text;
+    }
 
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
     Graph->NotifyGraphChanged();
@@ -2739,15 +2749,106 @@ namespace
         }
         return nullptr;
     }
+
+    /** The macro graph of Blueprint (Blueprint->MacroGraphs) called MacroName, or null. */
+    UEdGraph* FindMacroGraph(UBlueprint* Blueprint, const FString& MacroName)
+    {
+        if (!Blueprint)
+        {
+            return nullptr;
+        }
+        const FName MacroFName(*MacroName);
+        for (UEdGraph* G : Blueprint->MacroGraphs)
+        {
+            if (G && G->GetFName() == MacroFName)
+            {
+                return G;
+            }
+        }
+        return nullptr;
+    }
+
+    /**
+     * The tunnel node that carries a macro's inputs (bOutputs false: the entry tunnel, whose pins are outputs) or its
+     * outputs (the exit tunnel, whose pins are inputs). Exact class: macro instances and composites are tunnels too.
+     */
+    UK2Node_Tunnel* FindMacroTunnel(UEdGraph* MacroGraph, bool bOutputs)
+    {
+        for (UEdGraphNode* Node : MacroGraph->Nodes)
+        {
+            UK2Node_Tunnel* Tunnel = Cast<UK2Node_Tunnel>(Node);
+            if (!Tunnel || Tunnel->GetClass() != UK2Node_Tunnel::StaticClass())
+            {
+                continue;
+            }
+            if (bOutputs ? (Tunnel->bCanHaveInputs && !Tunnel->bCanHaveOutputs) : (Tunnel->bCanHaveOutputs && !Tunnel->bCanHaveInputs))
+            {
+                return Tunnel;
+            }
+        }
+        return nullptr;
+    }
+
+    /**
+     * The nodes whose user-defined pins are one side of a graph's signature: a function's entry node (inputs) or its
+     * result nodes (outputs; a function can have several), or a macro's entry or exit tunnel.
+     */
+    TArray<UK2Node_EditablePinBase*> SignatureNodes(UEdGraph* FuncGraph, UEdGraph* MacroGraph, bool bIsOutput)
+    {
+        TArray<UK2Node_EditablePinBase*> Out;
+        if (MacroGraph)
+        {
+            if (UK2Node_Tunnel* Tunnel = FindMacroTunnel(MacroGraph, bIsOutput))
+            {
+                Out.Add(Tunnel);
+            }
+        }
+        else if (!bIsOutput)
+        {
+            TArray<UK2Node_FunctionEntry*> Entries;
+            FuncGraph->GetNodesOfClass<UK2Node_FunctionEntry>(Entries);
+            for (UK2Node_FunctionEntry* Entry : Entries)
+            {
+                Out.Add(Entry);
+            }
+        }
+        else
+        {
+            TArray<UK2Node_FunctionResult*> Results;
+            FuncGraph->GetNodesOfClass<UK2Node_FunctionResult>(Results);
+            for (UK2Node_FunctionResult* Result : Results)
+            {
+                Out.Add(Result);
+            }
+        }
+        return Out;
+    }
+
+    /** The names of the user-defined pins of Nodes, each once: the parameters of one side of a signature. */
+    TArray<FString> UserPinNames(const TArray<UK2Node_EditablePinBase*>& Nodes)
+    {
+        TArray<FString> Names;
+        for (const UK2Node_EditablePinBase* Node : Nodes)
+        {
+            for (const TSharedPtr<FUserPinInfo>& Info : Node->UserDefinedPins)
+            {
+                if (Info.IsValid())
+                {
+                    Names.AddUnique(Info->PinName.ToString());
+                }
+            }
+        }
+        return Names;
+    }
 }
 
-// MCP:add_function_parameter - Add an input or output (return) parameter to an existing Blueprint FUNCTION graph -- interface-override graphs included -- and reconstruct its Entry/Result node. TWO HARD LIMITS, both silent-ish: it cannot create an ARRAY parameter (there is no is_array; the param comes out SCALAR with success), so redesign the signature to read the array where it lives; and it cannot reach a CUSTOM EVENT ("Function graph not found"), so a Server/Client RPC WITH arguments must be authored as a function plus set_blueprint_function_rpc. On a Blueprint just given a new function, compile_blueprint between creation and this call.
+// MCP:add_function_parameter - Add an input or output (return) parameter to an existing Blueprint FUNCTION graph -- interface-override graphs included -- or to a MACRO graph (create_blueprint_macro), and reconstruct its Entry/Result node or the macro's input/output tunnel. A macro also takes param_type "exec", an execution pin, so it can get several exec inputs and outputs. TWO HARD LIMITS, both silent-ish: it cannot create an ARRAY parameter (there is no is_array; the param comes out SCALAR with success), so redesign the signature to read the array where it lives; and it cannot reach a CUSTOM EVENT ("Function graph not found"), so a Server/Client RPC WITH arguments must be authored as a function plus set_blueprint_function_rpc. On a Blueprint just given a new function, compile_blueprint between creation and this call. Inverse: remove_function_parameter.
 //   @param blueprint_name - Blueprint name or path.
-//   @param function_name - Name of an existing function graph (FunctionGraphs or an interface-override graph). A custom event is NOT a function graph and is rejected here.
+//   @param function_name - Name of an existing function graph (FunctionGraphs or an interface-override graph), or of a macro graph of this Blueprint when no function has that name. A custom event is NOT a function graph and is rejected here.
 //   @param param_name - New parameter name; made unique, so the applied name is the one echoed back in the response.
-//   @param param_type - Type string: bool, int, int64, float, string, name, text, byte, Vector, or a struct/enum/class/object name or path. Arrays are NOT expressible.
+//   @param param_type - Type string: bool, int, int64, float, string, name, text, byte, Vector, or a struct/enum/class/object name or path; "exec" on a macro. Arrays are NOT expressible.
 //   @param is_output - When true, add an output/return param (an input pin on the Result node) instead of an input; defaults to false
-//   @returns { blueprint_name, function_name, param_name, param_type, is_output } -- param_name is the pin name actually created (uniquified). Verify with get_graph_nodes at compact=false: compact hides the new, still-unlinked pin and makes it look like nothing was created.
+//   @returns { blueprint_name, function_name, param_name, param_type, is_output, graph_kind? } -- param_name is the pin name actually created (uniquified); graph_kind is "macro" when the parameter went on a macro. Verify with get_graph_nodes at compact=false: compact hides the new, still-unlinked pin and makes it look like nothing was created.
 TSharedPtr<FJsonObject> HandleAddFunctionParameter(const TSharedPtr<FJsonObject>& Params)
 {
     FString BlueprintName, FunctionName, ParamName, ParamType;
@@ -2759,16 +2860,57 @@ TSharedPtr<FJsonObject> HandleAddFunctionParameter(const TSharedPtr<FJsonObject>
     UBlueprint* Blueprint = nullptr;
     if (TSharedPtr<FJsonObject> Error = UEAgentGraphCommandsImpl::FindBlueprint(BlueprintName, Blueprint)) { return Error; }
 
+    // A function first, as before; a macro only when no function graph has that name.
     UEdGraph* FuncGraph = FindFunctionGraph(Blueprint, FunctionName);
-    if (!FuncGraph)
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Function graph not found: %s"), *FunctionName));
+    UEdGraph* MacroGraph = FuncGraph ? nullptr : FindMacroGraph(Blueprint, FunctionName);
+    if (!FuncGraph && !MacroGraph)
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Function graph not found: %s (no macro graph has that name either)"), *FunctionName));
 
     FEdGraphPinType PinType;
-    if (!FUEAgentGraphUtils::ResolvePinType(ParamType, PinType))
+    if (MacroGraph && ParamType.TrimStartAndEnd().Equals(TEXT("exec"), ESearchCase::IgnoreCase))
+    {
+        PinType.PinCategory = UEdGraphSchema_K2::PC_Exec;
+    }
+    else if (!FUEAgentGraphUtils::ResolvePinType(ParamType, PinType))
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("Could not resolve param_type: %s"), *ParamType));
 
     bool bIsOutput = false;
     Params->TryGetBoolField(TEXT("is_output"), bIsOutput);
+
+    if (MacroGraph)
+    {
+        // A macro's inputs are OUTPUT pins of its entry tunnel, its outputs INPUT pins of its exit tunnel.
+        UK2Node_Tunnel* Tunnel = FindMacroTunnel(MacroGraph, bIsOutput);
+        if (!Tunnel)
+            return mcp_common::MakeErrorReply(FString::Printf(TEXT("Macro '%s' has no %s tunnel node"),
+                *FunctionName, bIsOutput ? TEXT("output") : TEXT("input")));
+        const EEdGraphPinDirection PinDir = bIsOutput ? EGPD_Input : EGPD_Output;
+        for (const UEdGraphPin* P : Tunnel->Pins)
+        {
+            if (P && P->Direction == PinDir && P->PinName == FName(*ParamName))
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(
+                    TEXT("Macro '%s' already has an %s named '%s'; nothing was added."),
+                    *FunctionName, bIsOutput ? TEXT("output") : TEXT("input"), *ParamName));
+            }
+        }
+
+        FScopedTransaction Transaction(LOCTEXT("AddMacroParam", "MCP: Add Macro Parameter"));
+        Blueprint->Modify();
+        Tunnel->Modify();
+        UEdGraphPin* NewMacroPin = Tunnel->CreateUserDefinedPin(FName(*ParamName), PinType, PinDir, /*bUseUniqueName=*/false);
+        if (!NewMacroPin)
+            return mcp_common::MakeErrorReply(TEXT("Failed to create the macro parameter pin (invalid type or duplicate name)"));
+        Tunnel->ReconstructNode();
+        FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+
+        TSharedPtr<FJsonObject> MacroResult = UEAgentGraphCommandsImpl::BlueprintReply(BlueprintName, TEXT("function_name"), FunctionName);
+        MacroResult->SetStringField(TEXT("param_name"), NewMacroPin->PinName.ToString());
+        MacroResult->SetStringField(TEXT("param_type"), ParamType);
+        MacroResult->SetBoolField(TEXT("is_output"), bIsOutput);
+        MacroResult->SetStringField(TEXT("graph_kind"), TEXT("macro"));
+        return MacroResult;
+    }
 
     TArray<UK2Node_FunctionEntry*> EntryNodes;
     FuncGraph->GetNodesOfClass<UK2Node_FunctionEntry>(EntryNodes);
@@ -2837,7 +2979,7 @@ TSharedPtr<FJsonObject> HandleAddFunctionParameter(const TSharedPtr<FJsonObject>
     return Result;
 }
 
-// MCP:add_function_local_variable - Add a variable scoped to ONE function graph (interface-override graphs included), instead of a class member like add_blueprint_variable -- use it for scratch state that no other graph should see. Reach it from the graph with add_graph_node node_type=variable_get/variable_set and scope="local" (the default scope="auto" already prefers a local over a member of the same name).
+// MCP:add_function_local_variable - Add a variable scoped to ONE function graph (interface-override graphs included), instead of a class member like add_blueprint_variable -- use it for scratch state that no other graph should see. Reach it from the graph with add_graph_node node_type=variable_get/variable_set and scope="local" (the default scope="auto" already prefers a local over a member of the same name). Inverse: remove_function_local_variable, whose reply lists the function's locals.
 //   @param blueprint_name - Blueprint asset name or path
 //   @param function_name - Name of an existing function graph (FunctionGraphs or an interface-override graph)
 //   @param variable_name - Variable name; the call fails if the name already exists in that function
@@ -2875,6 +3017,677 @@ TSharedPtr<FJsonObject> HandleAddFunctionLocalVariable(const TSharedPtr<FJsonObj
     TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::BlueprintReply(BlueprintName, TEXT("function_name"), FunctionName);
     Result->SetStringField(TEXT("variable_name"), VarName);
     Result->SetStringField(TEXT("variable_type"), VarType);
+    return Result;
+}
+
+// MCP:remove_function_parameter - Remove an input or output parameter from a Blueprint function graph -- interface-override graphs included -- or from a macro graph, in one undo step: the user pin leaves the Entry node (inputs) or every Result node (outputs), or the macro's input or output tunnel, and the node is reconstructed, so links to that pin break. Inverse of add_function_parameter; for an override of a C++ or interface function, reconcile_function_signature fits the signature to the parent instead. Nothing is compiled or saved: call sites update at the next compile_blueprint. A parameter that is not there is an honest no-op (removed=false, the parameters it does have in params); a missing Blueprint or graph is an error. The reply re-reads the signature (params_left). Read the pins: get_graph_nodes at compact=false. Refused during PIE unless force=true.
+//   @param blueprint_name - Blueprint name or path.
+//   @param function_name - Name of the function graph, or of a macro graph when no function has that name.
+//   @param param_name - Name of the parameter to remove, as add_function_parameter returned it.
+//   @param is_output - true to remove an output/return parameter, false (default) an input.
+//   @returns { blueprint_name, function_name, param_name, is_output, graph_kind, removed, params_left: [string], params?: [string], note? }
+TSharedPtr<FJsonObject> HandleRemoveFunctionParameter(const TSharedPtr<FJsonObject>& Params)
+{
+    FString BlueprintName, FunctionName, ParamName;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("blueprint_name"), BlueprintName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("function_name"), FunctionName)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("param_name"), ParamName)) { return Missing; }
+    bool bIsOutput = false;
+    Params->TryGetBoolField(TEXT("is_output"), bIsOutput);
+
+    UBlueprint* Blueprint = nullptr;
+    if (TSharedPtr<FJsonObject> Error = UEAgentGraphCommandsImpl::FindBlueprint(BlueprintName, Blueprint)) { return Error; }
+
+    UEdGraph* FuncGraph = FindFunctionGraph(Blueprint, FunctionName);
+    UEdGraph* MacroGraph = FuncGraph ? nullptr : FindMacroGraph(Blueprint, FunctionName);
+    if (!FuncGraph && !MacroGraph)
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Function graph not found: %s (no macro graph has that name either); nothing was changed"), *FunctionName));
+
+    const TArray<UK2Node_EditablePinBase*> Nodes = SignatureNodes(FuncGraph, MacroGraph, bIsOutput);
+    const FName PinFName(*ParamName);
+    TArray<UK2Node_EditablePinBase*> Holders;
+    for (UK2Node_EditablePinBase* Node : Nodes)
+    {
+        if (Node->UserDefinedPins.ContainsByPredicate([&PinFName](const TSharedPtr<FUserPinInfo>& Info) { return Info.IsValid() && Info->PinName == PinFName; }))
+        {
+            Holders.Add(Node);
+        }
+    }
+
+    TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::BlueprintReply(BlueprintName, TEXT("function_name"), FunctionName);
+    Result->SetStringField(TEXT("param_name"), ParamName);
+    Result->SetBoolField(TEXT("is_output"), bIsOutput);
+    Result->SetStringField(TEXT("graph_kind"), MacroGraph ? TEXT("macro") : TEXT("function"));
+    if (Holders.Num() == 0)
+    {
+        const TArray<FString> Existing = UserPinNames(Nodes);
+        Result->SetBoolField(TEXT("removed"), false);
+        Result->SetArrayField(TEXT("params"), mcp_common::StringsToJson(Existing));
+        Result->SetArrayField(TEXT("params_left"), mcp_common::StringsToJson(Existing));
+        Result->SetStringField(TEXT("note"), FString::Printf(TEXT("the %s has no %s parameter named '%s'; nothing changed"),
+            MacroGraph ? TEXT("macro") : TEXT("function"), bIsOutput ? TEXT("output") : TEXT("input"), *ParamName));
+        return Result;
+    }
+
+    FScopedTransaction Transaction(LOCTEXT("RemoveFnParam", "MCP: Remove Function Parameter"));
+    Blueprint->Modify();
+    for (UK2Node_EditablePinBase* Node : Holders)
+    {
+        Node->Modify();
+        Node->RemoveUserDefinedPinByName(PinFName);
+        Node->ReconstructNode();
+    }
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+
+    // The re-read: no signature node keeps the parameter.
+    const TArray<FString> Left = UserPinNames(SignatureNodes(FuncGraph, MacroGraph, bIsOutput));
+    if (Left.Contains(ParamName))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("'%s' is still on the signature after RemoveUserDefinedPinByName"), *ParamName));
+    }
+    Result->SetBoolField(TEXT("removed"), true);
+    Result->SetArrayField(TEXT("params_left"), mcp_common::StringsToJson(Left));
+    return Result;
+}
+
+// MCP:remove_function_local_variable - Remove a local variable from one Blueprint function graph (interface-override graphs included), with the get/set nodes that read or write it in that function, in one undo step -- what deleting it from the My Blueprint panel does. Inverse of add_function_local_variable; delete_blueprint_variable removes MEMBER variables only. Nothing is compiled or saved. A local that is not there is an honest no-op (removed=false); a missing Blueprint or function is an error. The reply re-reads the function's locals (local_variables), the only reader of them: get_blueprint_variables lists members. Refused during PIE unless force=true.
+//   @param blueprint_name - Blueprint asset name or path
+//   @param function_name - Name of the function graph (FunctionGraphs or an interface-override graph)
+//   @param variable_name - Name of the local variable to remove
+//   @returns { blueprint_name, function_name, variable_name, removed, local_variables: [string], note? }
+TSharedPtr<FJsonObject> HandleRemoveFunctionLocalVariable(const TSharedPtr<FJsonObject>& Params)
+{
+    FString BlueprintName, FunctionName, VarName;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("blueprint_name"), BlueprintName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("function_name"), FunctionName)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("variable_name"), VarName)) { return Missing; }
+
+    UBlueprint* Blueprint = nullptr;
+    if (TSharedPtr<FJsonObject> Error = UEAgentGraphCommandsImpl::FindBlueprint(BlueprintName, Blueprint)) { return Error; }
+
+    UEdGraph* FuncGraph = FindFunctionGraph(Blueprint, FunctionName);
+    if (!FuncGraph)
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Function graph not found: %s; nothing was changed"), *FunctionName));
+
+    const auto LocalNames = [FuncGraph]()
+    {
+        TArray<FString> Names;
+        TArray<UK2Node_FunctionEntry*> Entries;
+        FuncGraph->GetNodesOfClass<UK2Node_FunctionEntry>(Entries);
+        for (const UK2Node_FunctionEntry* Entry : Entries)
+        {
+            for (const FBPVariableDescription& Local : Entry->LocalVariables)
+            {
+                Names.AddUnique(Local.VarName.ToString());
+            }
+        }
+        return Names;
+    };
+
+    const FName VarFName(*VarName);
+    UK2Node_FunctionEntry* Entry = nullptr;
+    FBPVariableDescription* Local = FBlueprintEditorUtils::FindLocalVariable(Blueprint, FuncGraph, VarFName, &Entry);
+    TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::BlueprintReply(BlueprintName, TEXT("function_name"), FunctionName);
+    Result->SetStringField(TEXT("variable_name"), VarName);
+    if (!Local || !Entry)
+    {
+        Result->SetBoolField(TEXT("removed"), false);
+        Result->SetArrayField(TEXT("local_variables"), mcp_common::StringsToJson(LocalNames()));
+        Result->SetStringField(TEXT("note"), TEXT("the function has no local variable of that name; nothing changed"));
+        return Result;
+    }
+
+    // FBlueprintEditorUtils::RemoveLocalVariable, without its scope lookup: that one needs the function compiled into
+    // the skeleton class, and a function just made has no UFunction there yet.
+    FScopedTransaction Transaction(LOCTEXT("RemoveFnLocalVar", "MCP: Remove Function Local Variable"));
+    Blueprint->Modify();
+    Entry->Modify();
+    Entry->LocalVariables.RemoveAll([&VarFName](const FBPVariableDescription& Var) { return Var.VarName == VarFName; });
+    FBlueprintEditorUtils::RemoveVariableNodes(Blueprint, VarFName, /*bForSelfOnly=*/true, FuncGraph);
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+
+    if (FBlueprintEditorUtils::FindLocalVariable(Blueprint, FuncGraph, VarFName) != nullptr)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Local variable '%s' is still on the function after the removal"), *VarName));
+    }
+    Result->SetBoolField(TEXT("removed"), true);
+    Result->SetArrayField(TEXT("local_variables"), mcp_common::StringsToJson(LocalNames()));
+    return Result;
+}
+
+// MCP:remove_blueprint_macro - Delete a macro graph owned by the Blueprint (Blueprint->MacroGraphs), in one undo step. Inverse of create_blueprint_macro; remove_blueprint_function deletes function graphs only. The macro's instances in the Blueprint's graphs go with it, so a macro still in use is refused (instance_count says how many) unless delete_instances=true. Nothing is compiled or saved. A macro that is not there is an honest no-op (removed=false); a missing Blueprint is an error. The reply re-reads MacroGraphs; list the graphs with get_blueprint_functions. Refused during PIE unless force=true.
+//   @param blueprint_name - Blueprint name or path.
+//   @param macro_name - Name of the macro graph, as create_blueprint_macro returned it in graph_name.
+//   @param delete_instances - true to delete the macro even when nodes of this Blueprint instance it (they are deleted too); default false refuses.
+//   @returns { blueprint_name, macro_name, removed, instance_count, instances_removed, macro_count, note? }
+TSharedPtr<FJsonObject> HandleRemoveBlueprintMacro(const TSharedPtr<FJsonObject>& Params)
+{
+    FString BlueprintName, MacroName;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("blueprint_name"), BlueprintName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("macro_name"), MacroName)) { return Missing; }
+    bool bDeleteInstances = false;
+    Params->TryGetBoolField(TEXT("delete_instances"), bDeleteInstances);
+
+    UBlueprint* Blueprint = nullptr;
+    if (TSharedPtr<FJsonObject> Error = UEAgentGraphCommandsImpl::FindBlueprint(BlueprintName, Blueprint)) { return Error; }
+
+    TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::BlueprintReply(BlueprintName, TEXT("macro_name"), MacroName);
+    UEdGraph* MacroGraph = FindMacroGraph(Blueprint, MacroName);
+    if (!MacroGraph)
+    {
+        Result->SetBoolField(TEXT("removed"), false);
+        Result->SetNumberField(TEXT("instance_count"), 0);
+        Result->SetNumberField(TEXT("instances_removed"), 0);
+        Result->SetNumberField(TEXT("macro_count"), Blueprint->MacroGraphs.Num());
+        Result->SetStringField(TEXT("note"), TEXT("the Blueprint owns no macro of that name; nothing changed"));
+        return Result;
+    }
+
+    TArray<UK2Node_MacroInstance*> MacroNodes;
+    FBlueprintEditorUtils::GetAllNodesOfClass(Blueprint, MacroNodes);
+    int32 InstanceCount = 0;
+    for (const UK2Node_MacroInstance* Node : MacroNodes)
+    {
+        if (Node && Node->GetMacroGraph() == MacroGraph)
+        {
+            ++InstanceCount;
+        }
+    }
+    if (InstanceCount > 0 && !bDeleteInstances)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Macro '%s' is instanced by %d node(s) of this Blueprint, which would be deleted with it; pass delete_instances=true to delete them too. Nothing was changed."),
+            *MacroName, InstanceCount));
+    }
+
+    // RemoveGraph also deletes the macro's instance nodes; MarkTransient without Recompile, as create_blueprint_macro
+    // compiles nothing either.
+    FScopedTransaction Transaction(LOCTEXT("RemoveBlueprintMacro", "MCP: Remove Blueprint Macro"));
+    Blueprint->Modify();
+    FBlueprintEditorUtils::RemoveGraph(Blueprint, MacroGraph, EGraphRemoveFlags::MarkTransient);
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+
+    if (FindMacroGraph(Blueprint, MacroName) != nullptr)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Macro '%s' is still in MacroGraphs after RemoveGraph"), *MacroName));
+    }
+    Result->SetBoolField(TEXT("removed"), true);
+    Result->SetNumberField(TEXT("instance_count"), InstanceCount);
+    Result->SetNumberField(TEXT("instances_removed"), InstanceCount);
+    Result->SetNumberField(TEXT("macro_count"), Blueprint->MacroGraphs.Num());
+    return Result;
+}
+
+// ---------------------------------------------------------------------------
+// Blueprint Timeline tracks: add_blueprint_timeline_track / remove_blueprint_timeline_track and the reader
+// get_blueprint_timeline_info. A track lives on the UTimelineTemplate (FloatTracks, VectorTracks,
+// LinearColorTracks, EventTracks) with its curve outered to the generated class, as the Timeline editor makes it
+// (STimelineEditor::CreateNewTrack); the UK2Node_Timeline is reconstructed so the track's pin appears, and the
+// Blueprint is compiled, as add_timeline_to_blueprint does.
+// ---------------------------------------------------------------------------
+namespace
+{
+    const TCHAR* TimelineTrackTypeName(int32 TrackType)
+    {
+        switch (TrackType)
+        {
+        case FTTTrackBase::TT_Event:             return TEXT("event");
+        case FTTTrackBase::TT_FloatInterp:       return TEXT("float");
+        case FTTTrackBase::TT_VectorInterp:      return TEXT("vector");
+        case FTTTrackBase::TT_LinearColorInterp: return TEXT("color");
+        default:                                 return TEXT("unknown");
+        }
+    }
+
+    /** The timeline TimelineName names (its variable name) and its node; the error reply when the timeline is missing. */
+    TSharedPtr<FJsonObject> FindTimelineTarget(UBlueprint* Blueprint, const FString& TimelineName,
+        UTimelineTemplate*& OutTemplate, UK2Node_Timeline*& OutNode)
+    {
+        OutTemplate = Blueprint->FindTimelineTemplateByVariableName(FName(*TimelineName));
+        OutNode = OutTemplate ? FBlueprintEditorUtils::FindNodeForTimeline(Blueprint, OutTemplate) : nullptr;
+        if (!OutTemplate)
+        {
+            TArray<FString> Names;
+            for (const UTimelineTemplate* Template : Blueprint->Timelines)
+            {
+                if (Template)
+                {
+                    Names.Add(Template->GetVariableName().ToString());
+                }
+            }
+            return mcp_common::MakeErrorReply(FString::Printf(TEXT("No timeline '%s' on this Blueprint (its timelines: %s); nothing was changed"),
+                *TimelineName, Names.Num() ? *FString::Join(Names, TEXT(", ")) : TEXT("none")));
+        }
+        return nullptr;
+    }
+
+    /** One key as {time, value}: Value is a number, or an array for a vector or color track. */
+    TSharedPtr<FJsonValue> TimelineKeyJson(double Time, const TSharedPtr<FJsonValue>& Value)
+    {
+        TSharedPtr<FJsonObject> Key = MakeShared<FJsonObject>();
+        Key->SetNumberField(TEXT("time"), Time);
+        Key->SetField(TEXT("value"), Value);
+        return MakeShared<FJsonValueObject>(Key);
+    }
+
+    /** The keys of a multi-channel curve as {time, value:[...]}, one per distinct key time across the channels. */
+    TArray<TSharedPtr<FJsonValue>> MultiChannelKeysJson(const FRichCurve* Channels, int32 NumChannels)
+    {
+        TArray<float> Times;
+        for (int32 Channel = 0; Channel < NumChannels; ++Channel)
+        {
+            for (const FRichCurveKey& Key : Channels[Channel].GetConstRefOfKeys())
+            {
+                Times.AddUnique(Key.Time);
+            }
+        }
+        Times.Sort();
+        TArray<TSharedPtr<FJsonValue>> Out;
+        for (const float Time : Times)
+        {
+            TArray<TSharedPtr<FJsonValue>> Values;
+            for (int32 Channel = 0; Channel < NumChannels; ++Channel)
+            {
+                Values.Add(MakeShared<FJsonValueNumber>(Channels[Channel].Eval(Time)));
+            }
+            Out.Add(TimelineKeyJson(Time, MakeShared<FJsonValueArray>(Values)));
+        }
+        return Out;
+    }
+
+    TSharedPtr<FJsonObject> TimelineTrackJson(const TCHAR* Type, const FTTTrackBase& Track, const UCurveBase* Curve, TArray<TSharedPtr<FJsonValue>> Keys)
+    {
+        TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
+        Out->SetStringField(TEXT("track_name"), Track.GetTrackName().ToString());
+        Out->SetStringField(TEXT("track_type"), Type);
+        Out->SetStringField(TEXT("curve"), Curve ? Curve->GetPathName() : FString());
+        Out->SetBoolField(TEXT("external_curve"), Track.bIsExternalCurve);
+        Out->SetNumberField(TEXT("key_count"), Keys.Num());
+        Out->SetArrayField(TEXT("keys"), Keys);
+        return Out;
+    }
+
+    /** Every track of Template as JSON, event tracks first, as the Timeline editor groups them. */
+    TArray<TSharedPtr<FJsonValue>> TimelineTracksJson(const UTimelineTemplate* Template)
+    {
+        TArray<TSharedPtr<FJsonValue>> Out;
+        for (const FTTEventTrack& Track : Template->EventTracks)
+        {
+            TArray<TSharedPtr<FJsonValue>> Keys;
+            if (Track.CurveKeys)
+            {
+                for (const FRichCurveKey& Key : Track.CurveKeys->FloatCurve.GetConstRefOfKeys())
+                {
+                    Keys.Add(TimelineKeyJson(Key.Time, MakeShared<FJsonValueNumber>(Key.Value)));
+                }
+            }
+            Out.Add(MakeShared<FJsonValueObject>(TimelineTrackJson(TEXT("event"), Track, Track.CurveKeys, Keys)));
+        }
+        for (const FTTFloatTrack& Track : Template->FloatTracks)
+        {
+            TArray<TSharedPtr<FJsonValue>> Keys;
+            if (Track.CurveFloat)
+            {
+                for (const FRichCurveKey& Key : Track.CurveFloat->FloatCurve.GetConstRefOfKeys())
+                {
+                    Keys.Add(TimelineKeyJson(Key.Time, MakeShared<FJsonValueNumber>(Key.Value)));
+                }
+            }
+            Out.Add(MakeShared<FJsonValueObject>(TimelineTrackJson(TEXT("float"), Track, Track.CurveFloat, Keys)));
+        }
+        for (const FTTVectorTrack& Track : Template->VectorTracks)
+        {
+            Out.Add(MakeShared<FJsonValueObject>(TimelineTrackJson(TEXT("vector"), Track, Track.CurveVector,
+                Track.CurveVector ? MultiChannelKeysJson(Track.CurveVector->FloatCurves, 3) : TArray<TSharedPtr<FJsonValue>>())));
+        }
+        for (const FTTLinearColorTrack& Track : Template->LinearColorTracks)
+        {
+            Out.Add(MakeShared<FJsonValueObject>(TimelineTrackJson(TEXT("color"), Track, Track.CurveLinearColor,
+                Track.CurveLinearColor ? MultiChannelKeysJson(Track.CurveLinearColor->FloatCurves, 4) : TArray<TSharedPtr<FJsonValue>>())));
+        }
+        return Out;
+    }
+
+    /** The type and index of the track named TrackName on Template; false when no track has that name. */
+    bool FindTimelineTrack(const UTimelineTemplate* Template, const FName TrackName, int32& OutType, int32& OutIndex)
+    {
+        OutIndex = Template->EventTracks.IndexOfByPredicate([&TrackName](const FTTEventTrack& T) { return T.GetTrackName() == TrackName; });
+        if (OutIndex != INDEX_NONE) { OutType = FTTTrackBase::TT_Event; return true; }
+        OutIndex = Template->FloatTracks.IndexOfByPredicate([&TrackName](const FTTFloatTrack& T) { return T.GetTrackName() == TrackName; });
+        if (OutIndex != INDEX_NONE) { OutType = FTTTrackBase::TT_FloatInterp; return true; }
+        OutIndex = Template->VectorTracks.IndexOfByPredicate([&TrackName](const FTTVectorTrack& T) { return T.GetTrackName() == TrackName; });
+        if (OutIndex != INDEX_NONE) { OutType = FTTTrackBase::TT_VectorInterp; return true; }
+        OutIndex = Template->LinearColorTracks.IndexOfByPredicate([&TrackName](const FTTLinearColorTrack& T) { return T.GetTrackName() == TrackName; });
+        if (OutIndex != INDEX_NONE) { OutType = FTTTrackBase::TT_LinearColorInterp; return true; }
+        return false;
+    }
+
+    /** The timeline's settings, tracks and node pins: what get_blueprint_timeline_info returns and the writers re-read. */
+    void AddTimelineState(const TSharedPtr<FJsonObject>& Out, const UTimelineTemplate* Template, const UK2Node_Timeline* Node)
+    {
+        Out->SetNumberField(TEXT("length"), Template->TimelineLength);
+        Out->SetStringField(TEXT("length_mode"), Template->LengthMode == ETimelineLengthMode::TL_LastKeyFrame ? TEXT("LastKeyFrame") : TEXT("TimelineLength"));
+        Out->SetBoolField(TEXT("auto_play"), Template->bAutoPlay != 0);
+        Out->SetBoolField(TEXT("loop"), Template->bLoop != 0);
+        Out->SetBoolField(TEXT("replicated"), Template->bReplicated != 0);
+        Out->SetBoolField(TEXT("ignore_time_dilation"), Template->bIgnoreTimeDilation != 0);
+        const TArray<TSharedPtr<FJsonValue>> Tracks = TimelineTracksJson(Template);
+        Out->SetNumberField(TEXT("track_count"), Tracks.Num());
+        Out->SetArrayField(TEXT("tracks"), Tracks);
+        if (Node)
+        {
+            Out->SetStringField(TEXT("node_id"), Node->NodeGuid.ToString());
+            Out->SetStringField(TEXT("graph_name"), Node->GetGraph() ? Node->GetGraph()->GetName() : FString());
+            TArray<FString> PinNames;
+            for (const UEdGraphPin* Pin : Node->Pins)
+            {
+                if (Pin && Pin->Direction == EGPD_Output)
+                {
+                    PinNames.Add(Pin->PinName.ToString());
+                }
+            }
+            Out->SetArrayField(TEXT("output_pins"), mcp_common::StringsToJson(PinNames));
+        }
+    }
+
+    /** The channel values of one key value into Out: a number for one component, else an array of that many (a color may omit alpha). */
+    bool ReadKeyComponents(const TSharedPtr<FJsonValue>& Value, int32 NumComponents, TArray<float>& Out)
+    {
+        Out.Reset();
+        if (NumComponents == 1)
+        {
+            double Number = 0.0;
+            if (!Value.IsValid() || !Value->TryGetNumber(Number)) { return false; }
+            Out.Add(static_cast<float>(Number));
+            return true;
+        }
+        const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
+        if (!Value.IsValid() || !Value->TryGetArray(Arr)) { return false; }
+        // A color takes 3 or 4 components (alpha 1 when omitted); a vector exactly 3.
+        if (Arr->Num() != NumComponents && !(NumComponents == 4 && Arr->Num() == 3)) { return false; }
+        for (const TSharedPtr<FJsonValue>& Component : *Arr)
+        {
+            double Number = 0.0;
+            if (!Component.IsValid() || !Component->TryGetNumber(Number)) { return false; }
+            Out.Add(static_cast<float>(Number));
+        }
+        if (Out.Num() == 3 && NumComponents == 4) { Out.Add(1.0f); }
+        return true;
+    }
+}
+
+// MCP:add_blueprint_timeline_track - Add a track to a Timeline of a Blueprint, with optional keys, as the Timeline editor's "+ Track" does: a float, vector, color or event track whose curve is made inside the Blueprint, then the timeline node is reconstructed (a float/vector/color track gets an output pin of its name, an event track an exec output) and the Blueprint compiled; one undo step (the compile is not undone). The reply re-reads the timeline (tracks, output_pins). keys is [[time, value], ...]: value a number for float, [x,y,z] for vector, [r,g,b] or [r,g,b,a] for color, nothing for event ([time] or a bare time). A track name already used on the timeline, a malformed key or an unknown track_type is an error and nothing changes; so is a missing Blueprint or timeline. Keys past the timeline length stay but play only if length grows. Refused during PIE unless force=true. Timelines come from add_timeline_to_blueprint; read: get_blueprint_timeline_info; inverse: remove_blueprint_timeline_track.
+//   @param blueprint_name - Name (or full object path) of an Actor Blueprint.
+//   @param timeline_name - The timeline's variable name, as add_timeline_to_blueprint returned it.
+//   @param track_type - float | vector | color | event
+//   @param track_name - Name of the new track, unique on this timeline; it names the node's output pin.
+//   @param keys [array] - Optional keys, [[time, value], ...] (see the description for value by track type).
+//   @param interpolation - Optional key interpolation for float/vector/color: "linear" (default) | "cubic" | "constant".
+//   @returns { blueprint_name, timeline_name, track_name, track_type, added, keys_added, curve, length, length_mode, auto_play, loop, replicated, ignore_time_dilation, track_count, tracks: [{track_name, track_type, curve, external_curve, key_count, keys: [{time, value}]}], node_id, graph_name, output_pins: [string] }
+TSharedPtr<FJsonObject> HandleAddBlueprintTimelineTrack(const TSharedPtr<FJsonObject>& Params)
+{
+    FString BlueprintName, TimelineName, TrackTypeRaw, TrackName;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("blueprint_name"), BlueprintName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("timeline_name"), TimelineName)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("track_type"), TrackTypeRaw)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("track_name"), TrackName)) { return Missing; }
+
+    const FString TrackType = TrackTypeRaw.ToLower();
+    int32 Type = INDEX_NONE;
+    int32 NumComponents = 1;
+    if (TrackType == TEXT("float")) { Type = FTTTrackBase::TT_FloatInterp; }
+    else if (TrackType == TEXT("vector")) { Type = FTTTrackBase::TT_VectorInterp; NumComponents = 3; }
+    else if (TrackType == TEXT("color") || TrackType == TEXT("linearcolor")) { Type = FTTTrackBase::TT_LinearColorInterp; NumComponents = 4; }
+    else if (TrackType == TEXT("event")) { Type = FTTTrackBase::TT_Event; NumComponents = 0; }
+    if (Type == INDEX_NONE)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Unknown track_type '%s' (use float, vector, color or event); nothing was changed"), *TrackTypeRaw));
+    }
+
+    FString InterpRaw = TEXT("linear");
+    Params->TryGetStringField(TEXT("interpolation"), InterpRaw);
+    const FString Interp = InterpRaw.ToLower();
+    ERichCurveInterpMode InterpMode = RCIM_Linear;
+    if (Interp == TEXT("cubic")) { InterpMode = RCIM_Cubic; }
+    else if (Interp == TEXT("constant")) { InterpMode = RCIM_Constant; }
+    else if (Interp != TEXT("linear"))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Unknown interpolation '%s' (use linear, cubic or constant); nothing was changed"), *InterpRaw));
+    }
+
+    // Every key parses before anything is touched.
+    struct FParsedKey { float Time = 0.0f; TArray<float> Values; };
+    TArray<FParsedKey> Keys;
+    const TArray<TSharedPtr<FJsonValue>>* KeysJson = nullptr;
+    if (Params->TryGetArrayField(TEXT("keys"), KeysJson))
+    {
+        for (int32 Index = 0; Index < KeysJson->Num(); ++Index)
+        {
+            const TSharedPtr<FJsonValue>& Entry = (*KeysJson)[Index];
+            FParsedKey Parsed;
+            double Time = 0.0;
+            const TArray<TSharedPtr<FJsonValue>>* Pair = nullptr;
+            bool bOk = false;
+            if (Entry.IsValid() && Entry->TryGetArray(Pair) && Pair->Num() >= 1 && (*Pair)[0]->TryGetNumber(Time))
+            {
+                Parsed.Time = static_cast<float>(Time);
+                bOk = NumComponents == 0
+                    ? Pair->Num() <= 2
+                    : (Pair->Num() == 2 && ReadKeyComponents((*Pair)[1], NumComponents, Parsed.Values));
+            }
+            else if (NumComponents == 0 && Entry.IsValid() && Entry->TryGetNumber(Time))
+            {
+                Parsed.Time = static_cast<float>(Time);
+                bOk = true;
+            }
+            if (!bOk)
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(
+                    TEXT("keys[%d] is not a valid %s key: give [time, %s]; nothing was changed"), Index, *TrackType,
+                    NumComponents == 0 ? TEXT("(no value)") : NumComponents == 1 ? TEXT("number") : NumComponents == 3 ? TEXT("[x,y,z]") : TEXT("[r,g,b(,a)]")));
+            }
+            Keys.Add(MoveTemp(Parsed));
+        }
+    }
+
+    UBlueprint* Blueprint = nullptr;
+    if (TSharedPtr<FJsonObject> Error = UEAgentGraphCommandsImpl::FindBlueprint(BlueprintName, Blueprint)) { return Error; }
+    UTimelineTemplate* Template = nullptr;
+    UK2Node_Timeline* Node = nullptr;
+    if (TSharedPtr<FJsonObject> Error = FindTimelineTarget(Blueprint, TimelineName, Template, Node)) { return Error; }
+    if (!Node || !Node->GetGraph())
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Timeline '%s' has no node in any graph to reconstruct; nothing was changed"), *TimelineName));
+    }
+    const FName TrackFName(*TrackName);
+    if (!Template->IsNewTrackNameValid(TrackFName))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Timeline '%s' already has a track named '%s'; nothing was changed"), *TimelineName, *TrackName));
+    }
+    UClass* OwnerClass = Blueprint->GeneratedClass;
+    if (!OwnerClass)
+    {
+        return mcp_common::MakeErrorReply(TEXT("The Blueprint has no generated class yet (compile_blueprint first); nothing was changed"));
+    }
+
+    FScopedTransaction Transaction(LOCTEXT("AddTimelineTrack", "MCP: Add Blueprint Timeline Track"));
+    Blueprint->Modify();
+    Node->Modify();
+    Template->Modify();
+
+    // The curve is public so the timeline instances of placed actors can reference it, as the Timeline editor makes it.
+    const auto AddScalarKeys = [&Keys, InterpMode](FRichCurve& Curve, int32 Component, bool bEvent)
+    {
+        for (const FParsedKey& Key : Keys)
+        {
+            const FKeyHandle Handle = Curve.AddKey(Key.Time, bEvent ? 0.0f : Key.Values[Component]);
+            if (!bEvent)
+            {
+                Curve.SetKeyInterpMode(Handle, InterpMode);
+            }
+        }
+    };
+    FTTTrackId NewTrackId;
+    NewTrackId.TrackType = Type;
+    UCurveBase* Curve = nullptr;
+    if (Type == FTTTrackBase::TT_Event)
+    {
+        NewTrackId.TrackIndex = Template->EventTracks.Num();
+        FTTEventTrack NewTrack;
+        NewTrack.SetTrackName(TrackFName, Template);
+        NewTrack.CurveKeys = NewObject<UCurveFloat>(OwnerClass, NAME_None, RF_Public);
+        NewTrack.CurveKeys->bIsEventCurve = true;
+        AddScalarKeys(NewTrack.CurveKeys->FloatCurve, 0, /*bEvent=*/true);
+        Curve = NewTrack.CurveKeys;
+        Template->EventTracks.Add(NewTrack);
+    }
+    else if (Type == FTTTrackBase::TT_FloatInterp)
+    {
+        NewTrackId.TrackIndex = Template->FloatTracks.Num();
+        FTTFloatTrack NewTrack;
+        NewTrack.SetTrackName(TrackFName, Template);
+        NewTrack.CurveFloat = NewObject<UCurveFloat>(OwnerClass, NAME_None, RF_Public);
+        AddScalarKeys(NewTrack.CurveFloat->FloatCurve, 0, /*bEvent=*/false);
+        Curve = NewTrack.CurveFloat;
+        Template->FloatTracks.Add(NewTrack);
+    }
+    else if (Type == FTTTrackBase::TT_VectorInterp)
+    {
+        NewTrackId.TrackIndex = Template->VectorTracks.Num();
+        FTTVectorTrack NewTrack;
+        NewTrack.SetTrackName(TrackFName, Template);
+        NewTrack.CurveVector = NewObject<UCurveVector>(OwnerClass, NAME_None, RF_Public);
+        for (int32 Component = 0; Component < 3; ++Component)
+        {
+            AddScalarKeys(NewTrack.CurveVector->FloatCurves[Component], Component, /*bEvent=*/false);
+        }
+        Curve = NewTrack.CurveVector;
+        Template->VectorTracks.Add(NewTrack);
+    }
+    else
+    {
+        NewTrackId.TrackIndex = Template->LinearColorTracks.Num();
+        FTTLinearColorTrack NewTrack;
+        NewTrack.SetTrackName(TrackFName, Template);
+        NewTrack.CurveLinearColor = NewObject<UCurveLinearColor>(OwnerClass, NAME_None, RF_Public);
+        for (int32 Component = 0; Component < 4; ++Component)
+        {
+            AddScalarKeys(NewTrack.CurveLinearColor->FloatCurves[Component], Component, /*bEvent=*/false);
+        }
+        Curve = NewTrack.CurveLinearColor;
+        Template->LinearColorTracks.Add(NewTrack);
+    }
+    Template->AddDisplayTrack(NewTrackId);
+    Node->ReconstructNode();
+    UEAgentGraphCommandsImpl::MarkModifiedAndCompile(Blueprint, Node->GetGraph());
+
+    // The re-read, after the compile: the template the Blueprint holds now.
+    UTimelineTemplate* After = Blueprint->FindTimelineTemplateByVariableName(FName(*TimelineName));
+    int32 FoundType = INDEX_NONE, FoundIndex = INDEX_NONE;
+    if (!After || !FindTimelineTrack(After, TrackFName, FoundType, FoundIndex))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Track '%s' is not on timeline '%s' after the compile"), *TrackName, *TimelineName));
+    }
+    TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::BlueprintReply(BlueprintName, TEXT("timeline_name"), TimelineName);
+    Result->SetStringField(TEXT("track_name"), TrackName);
+    Result->SetStringField(TEXT("track_type"), TimelineTrackTypeName(FoundType));
+    Result->SetBoolField(TEXT("added"), true);
+    Result->SetNumberField(TEXT("keys_added"), Keys.Num());
+    Result->SetStringField(TEXT("curve"), Curve ? Curve->GetPathName() : FString());
+    AddTimelineState(Result, After, FBlueprintEditorUtils::FindNodeForTimeline(Blueprint, After));
+    return Result;
+}
+
+// MCP:remove_blueprint_timeline_track - Remove a track (float, vector, color or event) from a Timeline of a Blueprint by its name, as the Timeline editor's Delete Track does, then reconstruct the timeline node (the track's output pin goes, and its links with it) and compile the Blueprint; one undo step (the compile is not undone). Inverse of add_blueprint_timeline_track. A track that is not there is an honest no-op (removed=false, nothing compiled); a missing Blueprint or timeline is an error. The reply re-reads the timeline (tracks, output_pins). Refused during PIE unless force=true. The whole timeline: delete_node on its node; read: get_blueprint_timeline_info.
+//   @param blueprint_name - Name (or full object path) of an Actor Blueprint.
+//   @param timeline_name - The timeline's variable name.
+//   @param track_name - Name of the track to remove (get_blueprint_timeline_info lists them).
+//   @returns { blueprint_name, timeline_name, track_name, track_type?, removed, length, length_mode, auto_play, loop, replicated, ignore_time_dilation, track_count, tracks: [...], node_id, graph_name, output_pins: [string], note? }
+TSharedPtr<FJsonObject> HandleRemoveBlueprintTimelineTrack(const TSharedPtr<FJsonObject>& Params)
+{
+    FString BlueprintName, TimelineName, TrackName;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("blueprint_name"), BlueprintName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("timeline_name"), TimelineName)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("track_name"), TrackName)) { return Missing; }
+
+    UBlueprint* Blueprint = nullptr;
+    if (TSharedPtr<FJsonObject> Error = UEAgentGraphCommandsImpl::FindBlueprint(BlueprintName, Blueprint)) { return Error; }
+    UTimelineTemplate* Template = nullptr;
+    UK2Node_Timeline* Node = nullptr;
+    if (TSharedPtr<FJsonObject> Error = FindTimelineTarget(Blueprint, TimelineName, Template, Node)) { return Error; }
+
+    TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::BlueprintReply(BlueprintName, TEXT("timeline_name"), TimelineName);
+    Result->SetStringField(TEXT("track_name"), TrackName);
+    const FName TrackFName(*TrackName);
+    int32 Type = INDEX_NONE, Index = INDEX_NONE;
+    if (!FindTimelineTrack(Template, TrackFName, Type, Index))
+    {
+        Result->SetBoolField(TEXT("removed"), false);
+        Result->SetStringField(TEXT("note"), TEXT("the timeline has no track of that name; nothing changed"));
+        AddTimelineState(Result, Template, Node);
+        return Result;
+    }
+    if (!Node || !Node->GetGraph())
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Timeline '%s' has no node in any graph to reconstruct; nothing was changed"), *TimelineName));
+    }
+
+    FScopedTransaction Transaction(LOCTEXT("RemoveTimelineTrack", "MCP: Remove Blueprint Timeline Track"));
+    Blueprint->Modify();
+    Node->Modify();
+    Template->Modify();
+
+    // The display order indexes each track array, so its entry goes first (RemoveDisplayTrack shifts the later
+    // entries of the same type down), then the track itself.
+    for (int32 Display = 0; Display < Template->GetNumDisplayTracks(); ++Display)
+    {
+        const FTTTrackId Id = Template->GetDisplayTrackId(Display);
+        if (Id.TrackType == Type && Id.TrackIndex == Index)
+        {
+            Template->RemoveDisplayTrack(Display);
+            break;
+        }
+    }
+    switch (Type)
+    {
+    case FTTTrackBase::TT_Event:       Template->EventTracks.RemoveAt(Index); break;
+    case FTTTrackBase::TT_FloatInterp: Template->FloatTracks.RemoveAt(Index); break;
+    case FTTTrackBase::TT_VectorInterp: Template->VectorTracks.RemoveAt(Index); break;
+    default:                           Template->LinearColorTracks.RemoveAt(Index); break;
+    }
+    Node->ReconstructNode();
+    UEAgentGraphCommandsImpl::MarkModifiedAndCompile(Blueprint, Node->GetGraph());
+
+    UTimelineTemplate* After = Blueprint->FindTimelineTemplateByVariableName(FName(*TimelineName));
+    int32 StillType = INDEX_NONE, StillIndex = INDEX_NONE;
+    if (!After || FindTimelineTrack(After, TrackFName, StillType, StillIndex))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Track '%s' is still on timeline '%s' after the removal"), *TrackName, *TimelineName));
+    }
+    Result->SetStringField(TEXT("track_type"), TimelineTrackTypeName(Type));
+    Result->SetBoolField(TEXT("removed"), true);
+    AddTimelineState(Result, After, FBlueprintEditorUtils::FindNodeForTimeline(Blueprint, After));
+    return Result;
+}
+
+// MCP:get_blueprint_timeline_info - Read one Timeline of a Blueprint: its length and length mode, auto_play, loop, replicated and ignore_time_dilation, every track (float, vector, color, event) with its curve and keys ({time, value}; value an array for vector and color), and its node (node_id, graph_name, output_pins: Update, Finished, Direction and one pin per track). Read-only. Timelines are made by add_timeline_to_blueprint and their tracks by add_blueprint_timeline_track / remove_blueprint_timeline_track; get_timeline_info is about Level Sequences. A missing Blueprint or timeline is an error listing the timelines it has.
+//   @param blueprint_name - Name (or full object path) of the Blueprint.
+//   @param timeline_name - The timeline's variable name, as add_timeline_to_blueprint returned it.
+//   @returns { blueprint_name, timeline_name, length, length_mode, auto_play, loop, replicated, ignore_time_dilation, track_count, tracks: [{track_name, track_type, curve, external_curve, key_count, keys: [{time, value}]}], node_id?, graph_name?, output_pins?: [string] }
+TSharedPtr<FJsonObject> HandleGetBlueprintTimelineInfo(const TSharedPtr<FJsonObject>& Params)
+{
+    FString BlueprintName, TimelineName;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("blueprint_name"), BlueprintName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("timeline_name"), TimelineName)) { return Missing; }
+
+    UBlueprint* Blueprint = nullptr;
+    if (TSharedPtr<FJsonObject> Error = UEAgentGraphCommandsImpl::FindBlueprint(BlueprintName, Blueprint)) { return Error; }
+    UTimelineTemplate* Template = nullptr;
+    UK2Node_Timeline* Node = nullptr;
+    if (TSharedPtr<FJsonObject> Error = FindTimelineTarget(Blueprint, TimelineName, Template, Node)) { return Error; }
+
+    TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::BlueprintReply(BlueprintName, TEXT("timeline_name"), TimelineName);
+    AddTimelineState(Result, Template, Node);
     return Result;
 }
 
@@ -3498,7 +4311,7 @@ TSharedPtr<FJsonObject> HandleSetComponentReplication(const TSharedPtr<FJsonObje
 //  Blueprint advanced graph nodes                                       //
 // ===================================================================== //
 
-// MCP:add_timeline_to_blueprint - Add a Timeline to an Actor Blueprint: creates BOTH the UTimelineTemplate variable and its UK2Node_Timeline node in one call, sets a fixed length in seconds, compiles, and verifies the template really registered (timeline_created). Actor-derived Blueprints only. It does NOT author curves or tracks -- the node comes with Play/Stop/Reverse inputs and Update/Finished outputs and nothing driven; a requested name already in use is silently uniquified, so wire the RETURNED timeline_name.
+// MCP:add_timeline_to_blueprint - Add a Timeline to an Actor Blueprint: creates BOTH the UTimelineTemplate variable and its UK2Node_Timeline node in one call, sets a fixed length in seconds, compiles, and verifies the template really registered (timeline_created). Actor-derived Blueprints only. It authors no curves or tracks itself -- the node comes with Play/Stop/Reverse inputs and Update/Finished outputs and nothing driven; add tracks with add_blueprint_timeline_track and read them with get_blueprint_timeline_info. A requested name already in use is silently uniquified, so wire the RETURNED timeline_name.
 //   @param blueprint_name - Name (or full object path) of an Actor Blueprint.
 //   @param timeline_name - Desired variable name for the timeline; if it is taken, a unique one is generated and returned instead.
 //   @param length - Timeline length in seconds (sets fixed-length mode); defaults to 5.0
@@ -4683,7 +5496,7 @@ TSharedPtr<FJsonObject> HandleValidatePinConnection(const TSharedPtr<FJsonObject
     return Result;
 }
 
-// MCP:create_blueprint_macro - Create an EMPTY, Tunnel-terminated macro graph owned by this Blueprint's MacroGraphs (a reusable snippet, not a function: macros inline at compile time and can carry multiple exec outputs). Idempotent -- an existing macro of that name is returned with already_existed:true. Fill it with add_graph_node using graph_name=<macro>, then instantiate it with add_graph_node node_type="macro_instance", which finds the Blueprint's own macros.
+// MCP:create_blueprint_macro - Create an EMPTY, Tunnel-terminated macro graph owned by this Blueprint's MacroGraphs (a reusable snippet, not a function: macros inline at compile time and can carry multiple exec outputs). Idempotent -- an existing macro of that name is returned with already_existed:true. Fill it with add_graph_node using graph_name=<macro>, then instantiate it with add_graph_node node_type="macro_instance", which finds the Blueprint's own macros. Give it inputs and outputs (exec included) with add_function_parameter function_name=<macro>; inverse: remove_blueprint_macro.
 //   @param blueprint_name - Blueprint name or path.
 //   @param macro_name - Name for the new macro graph.
 //   @returns { blueprint_name, macro_name, graph_name, already_existed } -- graph_name is what to pass as graph_name / macro_graph downstream.
@@ -4974,7 +5787,7 @@ TSharedPtr<FJsonObject> HandleBuildBlueprintGraph(const TSharedPtr<FJsonObject>&
             AddValidationError(TEXT("nodes"), Index, LocalId,
                 TEXT("node item requires a non-empty string field 'command_type'"));
         }
-        else if (!AllowedNodeCommands.Contains(SubCommandType))
+        else if (!AllowedNodeCommands.Contains(FMcpToolCatalog::ResolveCallName(SubCommandType)))
         {
             AddValidationError(TEXT("nodes"), Index, LocalId, FString::Printf(
                 TEXT("'%s' is not a node-creating command usable inside build_blueprint_graph's 'nodes' array"),
@@ -5190,6 +6003,8 @@ TSharedPtr<FJsonObject> HandleBuildBlueprintGraph(const TSharedPtr<FJsonObject>&
         NodeResult->SetStringField(TEXT("id"), LocalId);
         NodeResult->SetStringField(TEXT("command_type"), SubCommandType);
 
+        // A renamed node command's old name runs the new one.
+        SubCommandType = FMcpToolCatalog::ResolveCallName(SubCommandType);
         if (!AllowedNodeCommands.Contains(SubCommandType))
         {
             bAnyError = true;
@@ -5615,6 +6430,12 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("add_event_dispatcher"), &HandleAddEventDispatcher },
     { TEXT("add_function_local_variable"), &HandleAddFunctionLocalVariable },
     { TEXT("add_function_parameter"), &HandleAddFunctionParameter },
+    { TEXT("add_blueprint_timeline_track"), &HandleAddBlueprintTimelineTrack },
+    { TEXT("get_blueprint_timeline_info"), &HandleGetBlueprintTimelineInfo },
+    { TEXT("remove_blueprint_macro"), &HandleRemoveBlueprintMacro },
+    { TEXT("remove_blueprint_timeline_track"), &HandleRemoveBlueprintTimelineTrack },
+    { TEXT("remove_function_local_variable"), &HandleRemoveFunctionLocalVariable },
+    { TEXT("remove_function_parameter"), &HandleRemoveFunctionParameter },
     { TEXT("add_graph_node"), &HandleAddGraphNode },
     { TEXT("add_input_action_event_node"), &HandleAddInputActionEventNode },
     { TEXT("add_object_bound_event"), &HandleAddObjectBoundEvent },

@@ -2,7 +2,7 @@
 
 # Audio
 
-93 tools for Sound Cues, MetaSounds, submixes and buses, sound classes, attenuation and concurrency, modulation, dialogue and subtitles.
+94 tools for Sound Cues, MetaSounds, submixes and buses, sound classes, attenuation and concurrency, modulation, dialogue and subtitles.
 
 Back to the [index](README.md).
 
@@ -56,7 +56,7 @@ Add a graph output of data_type (default Audio; others include Float, Int32, Boo
 
 *Additive.*
 
-Adds a registered interface to an existing MetaSound Source's graph.  Obtains a builder for the saved asset via the editor subsystem's FindOrBeginBuilding (the reliable headless path), validates the interface via IsInterfaceRegistered, then calls UMetaSoundBuilderBase::AddInterface (which adds the interface's input/output nodes). The asset is saved after the edit.
+Adds a registered interface to an existing MetaSound Source's graph.  Obtains a builder for the saved asset via the editor subsystem's FindOrBeginBuilding (the reliable headless path), validates the interface via IsInterfaceRegistered, then calls UMetaSoundBuilderBase::AddInterface (which adds the interface's input/output nodes). The asset is saved after the edit. Inverse: remove_metasound_interface.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -69,7 +69,7 @@ Adds a registered interface to an existing MetaSound Source's graph.  Obtains a 
 
 *Destructive.*
 
-Add a real process node to a MetaSound Source graph by its registered class name (e.g. UE/Sine/Audio).  Unlike add_metasound_graph_input (which adds a graph input node), this instantiates a DSP node so you can author a real signal patch headless. Returns the node's GUID (node_id) and its enumerated input/output pins (name + data_type) for follow-up set/connect calls. The asset is saved. NOT idempotent: each call adds a new node instance (delete + recreate the source for a clean run).
+Add a real process node to a MetaSound Source graph by its registered class name (e.g. UE/Sine/Audio).  Unlike add_metasound_graph_input (which adds a graph input node), this instantiates a DSP node so you can author a real signal patch headless. Returns the node's GUID (node_id) and its enumerated input/output pins (name + data_type) for follow-up set/connect calls. The asset is saved. NOT idempotent: each call adds a new node instance (delete + recreate the source for a clean run). Wire it with connect_metasound_nodes, connect_metasound_graph_input_to_node or connect_metasound_node_to_graph_output; edges: list_metasound_connections.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -99,7 +99,7 @@ Appends a USoundControlBus as an input of a USoundModulationPatch asset and save
 
 *Additive.*
 
-Append a new node of node_type to the AllNodes of a USoundCue asset, in one undo step, and save the cue; node_id is its index there, the id the other sound cue tools take. node_type is matched without case, and an unknown type or a cue that does not load is an error. The node starts unconnected and is not the cue output: wire it with connect_sound_cue_nodes and make the root with set_sound_cue_first_node. For a WavePlayer, sound_wave_path sets its wave; a wave that does not load is not an error (sound_wave_set=false), and other types ignore it. Each call adds another node (not idempotent). A failed save, as during PIE, makes success false with save_error. Node settings: set_sound_cue_node_properties; read back: get_sound_cue_graph; a new cue: create_sound_cue.
+Append a new node of node_type to the AllNodes of a USoundCue asset, in one undo step, and save the cue; node_id is its index there, the id the other sound cue tools take. node_type is matched without case, and an unknown type or a cue that does not load is an error. The node starts unconnected and is not the cue output: wire it with connect_sound_cue_nodes and make the root with set_sound_cue_first_node. For a WavePlayer, sound_wave_path sets its wave; a wave that does not load is not an error (sound_wave_set=false), and other types ignore it. Each call adds another node (not idempotent). A failed save, as during PIE, makes success false with save_error. Node settings: set_sound_cue_node_properties; read back: get_sound_cue_graph; a new cue: create_sound_cue. Inverse: remove_sound_cue_node.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -126,7 +126,7 @@ Append a new effect of a concrete USoundfieldEffectBase class to a USoundfieldSu
 
 *Additive.*
 
-Append one effect preset to the end of a USoundSubmix's effect chain and save the submix. effect_preset_path wins: that existing USoundEffectSubmixPreset asset is appended by reference. Otherwise a new preset of effect_preset_class, or, when neither is given, of a concrete class found by reflection (SubmixEffectDynamicsProcessorPreset when it is loaded), is created inside the submix's own package under a unique &lt;Submix>_Effect name; resolved_from says which of the three ran. Every call appends another entry, duplicates included. A submix or preset that does not load, or a class that is not a concrete preset subclass, is an error; a failed save makes success false with saved=false and save_error. Read the chain with get_submix_effect_chain and tune an entry with set_submix_effect_settings; a soundfield submix takes add_soundfield_effect_to_submix.
+Append one effect preset to the end of a USoundSubmix's effect chain and save the submix. effect_preset_path wins: that existing USoundEffectSubmixPreset asset is appended by reference. Otherwise a new preset of effect_preset_class, or, when neither is given, of a concrete class found by reflection (SubmixEffectDynamicsProcessorPreset when it is loaded), is created inside the submix's own package under a unique &lt;Submix>_Effect name; resolved_from says which of the three ran. Every call appends another entry, duplicates included. A submix or preset that does not load, or a class that is not a concrete preset subclass, is an error; a failed save makes success false with saved=false and save_error. Read the chain with get_submix_effect_chain and tune an entry with set_submix_effect_settings; a soundfield submix takes add_soundfield_effect_to_submix. Inverse: remove_submix_effect_from_chain.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -155,24 +155,26 @@ Append one cue (text, start_offset, duration, duration_type, subtitle_type, prio
 
 **Returns:** `{ asset_path: string, cue_index: int, text: string, success: bool, already_existed: bool, cue_count: int, saved: bool, message: string? }`
 
-## `configure_audio_3d`
+## `connect_metasound_graph_input_to_node`
 
-*Destructive, idempotent.*
+*Destructive.*
 
-Applies a 3D audio preset to an audio component of the editor world: spatialization (bAllowSpatialization) and an attenuation override, a sphere whose inner radius is attenuation_radius and whose falloff distance is attenuation_distance ('Disabled' turns both off). audio_3d_configured is read back from the component. attenuation_falloff and the cone numbers only describe the preset (a sphere has no cone).
+Wire the graph input graph_input_name of a MetaSound Source to the input to_input_name of node to_node_id, in one undo step, then save the asset -- how a parameter (a Float input "Frequency") drives a node pin. Same rules as connect_metasound_nodes: matching data types, an input already fed is re-fed (replaced=true), the same edge already there changes nothing (already_connected=true), and an unknown graph input, node or pin is an error with nothing changed. Read back: list_metasound_connections; inverse: disconnect_metasound_nodes on the node input. Graph input to graph output: connect_metasound_graph_input_to_output.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `audio_component_name` | string | yes | Name of the audio component to configure |
-| `audio_3d_settings` | string | yes | 3D setting preset: 'Enabled', 'Disabled', 'High', 'Medium', or 'Low' (case-insensitive); any other name is an error |
+| `metasound_path` | string | yes | Asset path of the MetaSound Source. |
+| `graph_input_name` | string | yes | Name of the graph input (get_metasound_info lists them). |
+| `to_node_id` | string | yes | GUID of the node whose input receives the edge. |
+| `to_input_name` | string | yes | Name of that node's input pin. |
 
-**Returns:** `{ audio_component_name: string, audio_3d_settings: string, audio_3d_configured: bool, audio_3d_message: string, old_3d_enabled: bool, new_3d_enabled: bool, attenuation_override: bool, applied_attenuation_radius?: number, applied_falloff_distance?: number, 3d_enabled: bool, spatialization_enabled: bool, attenuation_distance: number, attenuation_radius: number, attenuation_falloff: number, attenuation_cone_angle: number, attenuation_cone_feather: number, audio_3d_recommendations: [string] }`
+**Returns:** `{ asset_path: string, graph_input_name: string, to_node_id: string, to_input_name: string, from_data_type: string, to_data_type: string, connected: bool, already_connected: bool, replaced: bool, saved: bool, save_error: string?, note: string? }`
 
 ## `connect_metasound_graph_input_to_output`
 
 *Destructive.*
 
-Connects a graph input node's output to a graph output node's input.  Resolves the source handle from a graph INPUT node by name (FindGraphInputNode -> the input node's output handle) and the destination handle from a graph OUTPUT node by name (FindGraphOutputNode -> the output node's input handle), then calls UMetaSoundBuilderBase::ConnectNodes and verifies via NodesAreConnected. The connection is real where the two data types match (e.g. a Float graph input connected to a Float graph output). Saves the asset.
+Connects a graph input node's output to a graph output node's input.  Resolves the source handle from a graph INPUT node by name (FindGraphInputNode -> the input node's output handle) and the destination handle from a graph OUTPUT node by name (FindGraphOutputNode -> the output node's input handle), then calls UMetaSoundBuilderBase::ConnectNodes and verifies via NodesAreConnected. The connection is real where the two data types match (e.g. a Float graph input connected to a Float graph output). Saves the asset. Graph input to a node: connect_metasound_graph_input_to_node; edges: list_metasound_connections.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -186,7 +188,7 @@ Connects a graph input node's output to a graph output node's input.  Resolves t
 
 *Destructive, idempotent.*
 
-Connect a concrete node's output pin to a named graph output, completing a signal patch (e.g. Sine.Audio -> the source's audio output).  Uses ConnectNodeOutputToGraphOutput (idempotent: replaces any existing edge). Reports the honest EMetaSoundBuilderResult.
+Connect a concrete node's output pin to a named graph output, completing a signal patch (e.g. Sine.Audio -> the source's audio output).  Uses ConnectNodeOutputToGraphOutput (idempotent: replaces any existing edge). Reports the honest EMetaSoundBuilderResult. Node to node: connect_metasound_nodes; edges: list_metasound_connections.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -196,6 +198,22 @@ Connect a concrete node's output pin to a named graph output, completing a signa
 | `graph_output_name` | string | yes | Name of the target graph output (discover via get_metasound_info). |
 
 **Returns:** `{ asset_path: string, node_id: string, node_output_name: string, graph_output_name: string, connected: bool, result: string, saved: bool }`
+
+## `connect_metasound_nodes`
+
+*Destructive.*
+
+Wire the output from_output_name of node from_node_id to the input to_input_name of node to_node_id in a MetaSound Source graph, in one undo step, then save the asset -- the node-to-node edge a patch needs (Sine.Audio -> ADSR.In). Node ids come from add_metasound_node or list_metasound_nodes, pin names from their inputs/outputs. The two pins must carry the same data type. An input takes one edge, so an input already fed from elsewhere is re-fed (replaced=true); the same edge already there changes and saves nothing (already_connected=true). A bad id, an unknown pin or a type mismatch is an error and nothing changes. Read back: list_metasound_connections; inverse: disconnect_metasound_nodes. A graph input as the source: connect_metasound_graph_input_to_node; a graph output as the target: connect_metasound_node_to_graph_output.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `metasound_path` | string | yes | Asset path of the MetaSound Source. |
+| `from_node_id` | string | yes | GUID of the node whose output feeds the edge. |
+| `from_output_name` | string | yes | Name of that node's output pin (e.g. "Audio"). |
+| `to_node_id` | string | yes | GUID of the node whose input receives the edge. |
+| `to_input_name` | string | yes | Name of that node's input pin (e.g. "In"). |
+
+**Returns:** `{ asset_path: string, from_node_id: string, from_output_name: string, to_node_id: string, to_input_name: string, from_data_type: string, to_data_type: string, connected: bool, already_connected: bool, replaced: bool, saved: bool, save_error: string?, note: string? }`
 
 ## `connect_sound_cue_nodes`
 
@@ -345,7 +363,7 @@ Creates a USoundModulationParameter asset of the chosen concrete class at parame
 
 *Additive.*
 
-Create a USoundAttenuation asset at package_path/name, or load the one already there, then force bAttenuate on, apply the optional falloff_distance and sphere radius, and save it (re-running edits the existing asset). Returns the values read back; set_sound_attenuation_properties edits every other field.
+Create a USoundAttenuation asset at package_path/name, or load the one already there, then force bAttenuate on, apply the optional falloff_distance and sphere radius, and save it (re-running edits the existing asset). Returns the values read back; set_properties edits every other field.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -360,7 +378,7 @@ Create a USoundAttenuation asset at package_path/name, or load the one already t
 
 *Destructive, idempotent.*
 
-Create a USoundClass asset at package_path/name (package_path defaults to /Game/Audio) and save it. A sound class already at that path is loaded instead (already_exists true, created false) and the volume and pitch you pass overwrite its values before it is saved again; omitted ones keep their current values, the engine defaults on a new class. Idempotent. The reply reads volume and pitch back from the asset, and applied_volume / applied_pitch say which were written. An invalid path, or an asset of another class there, is an error; a failed save (for example during PIE) makes success false with saved=false and save_error. Edit the other properties with set_sound_class_properties, read them with get_sound_class_properties, and wire the hierarchy with set_sound_class_parent.
+Create a USoundClass asset at package_path/name (package_path defaults to /Game/Audio) and save it. A sound class already at that path is loaded instead (already_exists true, created false) and the volume and pitch you pass overwrite its values before it is saved again; omitted ones keep their current values, the engine defaults on a new class. Idempotent. The reply reads volume and pitch back from the asset, and applied_volume / applied_pitch say which were written. An invalid path, or an asset of another class there, is an error; a failed save (for example during PIE) makes success false with saved=false and save_error. Edit the other properties with set_properties, read them with get_sound_class_properties, and wire the hierarchy with set_sound_class_parent.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -375,7 +393,7 @@ Create a USoundClass asset at package_path/name (package_path defaults to /Game/
 
 *Additive.*
 
-Create a USoundConcurrency asset at package_path/name, or load the one already there, optionally set MaxCount, and save it. Returns max_count read back, created, already_exists and saved; set_sound_concurrency_properties edits the other concurrency settings.
+Create a USoundConcurrency asset at package_path/name, or load the one already there, optionally set MaxCount, and save it. Returns max_count read back, created, already_exists and saved; set_properties edits the other concurrency settings.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -507,6 +525,20 @@ Disconnects whatever node output currently drives a named graph output, clearing
 
 **Returns:** `{ asset_path: string, graph_output_name: string, data_type: string, disconnected: bool, already_disconnected: bool, result: string, saved: bool, save_error: string? }`
 
+## `disconnect_metasound_nodes`
+
+*Destructive.*
+
+Drop the edge that feeds the input to_input_name of node to_node_id in a MetaSound Source graph, whatever drives it -- another node's output or a graph input -- in one undo step, then save the asset. Inverse of connect_metasound_nodes and connect_metasound_graph_input_to_node: an input takes one edge, so the input names it. The reply says which output fed it (from_node_id, from_output_name) and re-reads the input. An input with no edge is an honest no-op (disconnected=false, already_disconnected=true, nothing saved); a bad node id or an unknown pin is an error. Read first: list_metasound_connections; a graph output's edge: disconnect_metasound_node_from_graph_output.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `metasound_path` | string | yes | Asset path of the MetaSound Source. |
+| `to_node_id` | string | yes | GUID of the node whose input loses its edge. |
+| `to_input_name` | string | yes | Name of that node's input pin. |
+
+**Returns:** `{ asset_path: string, to_node_id: string, to_input_name: string, from_node_id: string?, from_node_name: string?, from_output_name: string?, disconnected: bool, already_disconnected: bool, saved: bool, save_error: string? }`
+
 ## `disconnect_sound_cue_nodes`
 
 *Destructive.*
@@ -585,7 +617,7 @@ Reads the stages of a USoundControlBusMix asset without changing it. Returns mix
 
 *Read-only.*
 
-Read the top-level metadata of a MetaSound Source asset (a preset included), loading it if needed: its class, the root graph class name, the graph inputs and outputs (name and type) with their counts, interface_count (the number of interfaces the document declares) and the node, connection (edge) and variable counts of the root graph's default page; with include_defaults, each input's default value too. Read-only; a path that does not resolve to a UMetaSoundSource, a MetaSound Patch included, is an error. list_metasound_nodes lists the nodes; get_assets_by_type with asset_type MetaSoundSource finds sources.
+Read the top-level metadata of a MetaSound Source asset (a preset included), loading it if needed: its class, the root graph class name, the graph inputs and outputs (name and type) with their counts, interface_count (the number of interfaces the document declares) and the node, connection (edge) and variable counts of the root graph's default page; with include_defaults, each input's default value too. Read-only; a path that does not resolve to a UMetaSoundSource, a MetaSound Patch included, is an error. list_metasound_nodes lists the nodes; get_assets_by_type with asset_type MetaSoundSource finds sources. The edges themselves: list_metasound_connections.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -646,41 +678,17 @@ Reads a USoundModulationParameter asset without changing it. Returns parameter_p
 
 **Returns:** `{ parameter_path, parameter_class, value_normalized, clamp_to_normalized_range, value_unit }`
 
-## `get_sound_attenuation_properties`
-
-*Read-only.*
-
-Read the whole FSoundAttenuationSettings struct (shape, falloff, spatialization, LPF, occlusion, reverb send) of a USoundAttenuation asset as one settings object, with the keys set_sound_attenuation_properties takes, plus asset_class. A convenience over get_properties on its Attenuation property, shaped for that write tool; it reads the asset, not what an audio component applies (get_audio_component_properties). Read-only.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `attenuation_path` | string | yes | Full content path of the target USoundAttenuation. |
-
-**Returns:** `{ attenuation_path: string, asset_class: string, settings: object }`
-
 ## `get_sound_class_properties`
 
 *Read-only.*
 
-Read a USoundClass asset: every FSoundClassProperties field that set_sound_class_properties writes (volume, pitch, filters, reverb and routing flags, output_target, loading_behavior) plus its name and its direct parent and direct children by name and path. A flattened view under the snake_case keys that tool takes; get_properties reads the raw Properties struct or any other UPROPERTY. parent_class is "None" for a root class, and child_count is the number of children listed (null references are skipped). One level only: walk further by calling it again on a parent or child. Read-only; it loads the asset by object or package path, and one that does not load as a USoundClass is an error.
+Read a USoundClass asset: every FSoundClassProperties field that set_properties writes (volume, pitch, filters, reverb and routing flags, output_target, loading_behavior) plus its name and its direct parent and direct children by name and path. A flattened view under the snake_case keys that tool takes; get_properties reads the raw Properties struct or any other UPROPERTY. parent_class is "None" for a root class, and child_count is the number of children listed (null references are skipped). One level only: walk further by calling it again on a parent or child. Read-only; it loads the asset by object or package path, and one that does not load as a USoundClass is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sound_class_path` | string | yes | Content path of the USoundClass asset. |
 
 **Returns:** `{ name: string, sound_class_path: string, volume: float, pitch: float, low_pass_frequency: float, attenuation_distance_scale: float, lfe_bleed: float, voice_center_channel_volume: float, radio_filter_volume: float, radio_filter_volume_threshold: float, default_2d_reverb_send_amount: float, apply_effects: bool, always_play: bool, is_ui_sound: bool, is_music: bool, center_channel_only: bool, apply_ambient_volumes: bool, reverb: bool, output_target: string, loading_behavior: string, parent_class: string, parent_class_path: string, child_classes: [{name, path}], child_count: int }`
-
-## `get_sound_concurrency_properties`
-
-*Read-only.*
-
-Read the whole FSoundConcurrencySettings struct (maxCount, bLimitToOwner, resolutionRule, retriggerTime, volume scaling, voice stealing) of a USoundConcurrency asset as one settings object, with the keys set_sound_concurrency_properties takes, plus asset_class. A convenience over get_properties on its Concurrency property, shaped for that write tool. Read-only.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `concurrency_path` | string | yes | Full content path of the target USoundConcurrency. |
-
-**Returns:** `{ concurrency_path: string, asset_class: string, settings: object }`
 
 ## `get_sound_cue_graph`
 
@@ -718,18 +726,6 @@ Read the routing fields of a USoundSourceBus asset: source_bus_channels (Mono or
 
 **Returns:** `{ ssb_path: string, asset_class: string, source_bus_channels: string, duration: float, audio_bus_path: string, audio_bus_class: string }`
 
-## `get_sound_wave_properties`
-
-*Read-only.*
-
-Read every reflected property of a USoundWave asset, its USoundBase fields included (CompressionQuality, SampleRateQuality, SoundGroup, Volume, Pitch, Priority, SoundClassObject, AttenuationSettings and the rest), as the settings object FJsonObjectConverter exports, so keys start lower-case (compressionQuality); settings also carries bLooping, echoed as looping. Like inspect_object on the asset, but keyed as set_sound_wave_properties accepts it; get_properties reads a few named fields. Read-only: it loads the asset if needed and changes nothing. A path that does not load as a USoundWave is an error. Write the same fields back with set_sound_wave_properties (bLooping through its looping param); a sound class is read with get_sound_class_properties and a level's audio component with get_audio_component_properties.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `sound_wave_path` | string | yes | Full content path of the target USoundWave, e.g. "/Game/Audio/MySound". |
-
-**Returns:** `{ sound_wave_path: string, asset_class: string, settings: object, looping: bool }`
-
 ## `get_soundfield_submix_info`
 
 *Read-only.*
@@ -753,6 +749,18 @@ Read the effect chain of a USoundSubmix asset in order: one entry per slot with 
 | `submix_path` | string | yes | Asset path of the USoundSubmix, e.g. "/Game/Audio/SM_Master.SM_Master". |
 
 **Returns:** `{ submix_path: string, effects: [object], chain_length: int }`
+
+## `list_metasound_connections`
+
+*Read-only.*
+
+List every edge of the default graph of a MetaSound Source: from which node and output pin to which node and input pin, with each node's name and class (a graph input or output node is named after the input or output), plus count. Read-only. It reads what connect_metasound_nodes, connect_metasound_graph_input_to_node, connect_metasound_graph_input_to_output and connect_metasound_node_to_graph_output write; node ids are those of list_metasound_nodes, and an input's edge is dropped with disconnect_metasound_nodes. Patches are refused.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `metasound_path` | string | yes | MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain". |
+
+**Returns:** `{ metasound_path: string, count: int, connections: [{ from_node_id, from_node_name, from_node_class, from_output_name, to_node_id, to_node_name, to_node_class, to_input_name, data_type }] }`
 
 ## `list_metasound_node_types`
 
@@ -858,6 +866,19 @@ Removes a graph OUTPUT (and its node) from a MetaSound Source by name (inverse o
 
 **Returns:** `{ asset_path: string, output_name: string, removed: bool, already_absent: bool, saved: bool, save_error: string?, note: string? }`
 
+## `remove_metasound_interface`
+
+*Destructive.*
+
+Remove an interface from a MetaSound Source graph, with the graph inputs and outputs (and their nodes) it declared, in one undo step, then save the asset. Inverse of add_metasound_interface. The reply re-reads the document's interfaces (interface_count, still_declared). An interface the graph does not declare is an honest no-op (removed=false, nothing saved); a source that does not load is an error. Removing the source interface a one-shot MetaSound Source needs (UE.Source...) leaves a source the engine may refuse to play; get_metasound_info lists what is declared.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `metasound_path` | string | yes | Asset path of the MetaSound Source. |
+| `interface_name` | string | yes | Name of the declared interface to remove, as add_metasound_interface took it. |
+
+**Returns:** `{ asset_path: string, interface_name: string, removed: bool, still_declared: bool, interface_count: int, saved: bool, save_error: string?, note: string? }`
+
 ## `remove_metasound_node`
 
 *Destructive, idempotent.*
@@ -884,6 +905,32 @@ Removes every input of a USoundModulationPatch asset whose bus has the same asse
 
 **Returns:** `{ patch_path, bus_path, removed, already_removed, input_count, saved }`
 
+## `remove_sound_cue_node`
+
+*Destructive.*
+
+Delete one node from a USoundCue asset, in one undo step, then save the cue. Inverse of add_sound_cue_node: every input slot that held the node is emptied (slots are kept, as disconnect_sound_cue_nodes keeps them), the cue output (FirstNode) is cleared when it was this node, the node leaves AllNodes, and its node in the cue editor's graph goes too when the cue has one. node_id is an index into AllNodes, so the nodes after it move down by one: id_remap lists {old_id, new_id} for each, and the ids from earlier calls are stale. A cue that does not load or a node_id out of range is an error and nothing changes. A failed save, as during PIE, makes success false with save_error. Read back: get_sound_cue_graph.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `cue_path` | string | yes | Full asset path of the cue |
+| `node_id` | number | yes | node_id of the node to delete (its index in the cue AllNodes, from add_sound_cue_node or get_sound_cue_graph) |
+
+**Returns:** `{ cue_path: string, node_id: int, node_class: string, removed: bool, slots_cleared: int, first_node_cleared: bool, graph_node_removed: bool, id_remap: [{old_id, new_id}], node_count: int, saved: bool, save_error?: string }`
+
+## `remove_sound_mix_class_override`
+
+*Destructive.*
+
+Remove the sound class adjuster for one sound class from a USoundMix, in one undo step, then save the mix. Inverse of set_sound_mix_class_override, which adds or updates that adjuster. A mix with no adjuster for the class is an honest no-op (removed=false, nothing saved); a mix or class that does not load is an error. The reply re-reads the mix's adjusters (remaining_classes). A failed save makes success false with save_error.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `sound_mix_path` | string | yes | Content path of the USoundMix asset. |
+| `sound_class_path` | string | yes | Content path of the USoundClass whose adjuster to remove. |
+
+**Returns:** `{ sound_mix_path: string, sound_class_path: string, removed: bool, removed_count: int, total_adjusters: int, remaining_classes: [string], saved: bool, save_error?: string }`
+
 ## `remove_soundfield_effect`
 
 *Destructive.*
@@ -897,6 +944,19 @@ Detach the effect at effect_index from a USoundfieldSubmix effect chain (undoabl
 
 **Returns:** `{ submix_path, effect_index, removed_effect_class, removed_effect_path, removed: true, already_absent: false, chain_length, saved, save_error? } -- success only when saved; with no concrete effect class loaded the call fails with { submix_path, effect_index, removed: false, saved: false, note } and the chain is not touched.`
 
+## `remove_submix_effect_from_chain`
+
+*Destructive.*
+
+Remove the entry at effect_index from a USoundSubmix's effect chain, in one undo step, notify the submix of the edit (as the Details panel does, so a running audio device rebuilds the chain) and save the submix. Inverse of add_submix_effect_to_chain; the later entries move up one index. The preset itself is not deleted: a preset add_submix_effect_to_chain made inside the submix package stays in it unreferenced, one appended by path stays where it was. An index out of range or a submix that does not load is an error and nothing changes; a failed save makes success false with save_error. Read the chain first with get_submix_effect_chain; a soundfield submix's effects: remove_soundfield_effect.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `submix_path` | string | yes | Full content path of the target USoundSubmix |
+| `effect_index` | number | yes | 0-based position in the chain, as get_submix_effect_chain lists it |
+
+**Returns:** `{ submix_path: string, effect_index: int, removed_effect: string, removed_effect_class: string, removed: bool, chain_length: int, chain: [string], saved: bool, save_error?: string }`
+
 ## `remove_subtitle_cue`
 
 *Destructive, idempotent.*
@@ -909,6 +969,19 @@ Remove a single FSubtitleAssetData cue by index. Inverse of add_subtitle_cue; us
 | `cue_index` | number | yes | 0-based index into Subtitles[]. |
 
 **Returns:** `{ asset_path, cue_index, removed, previous_count, new_count }`
+
+## `set_audio_3d_settings`
+
+*Destructive, idempotent.*
+
+Applies a 3D audio preset to an audio component of the editor world: spatialization (bAllowSpatialization) and an attenuation override, a sphere whose inner radius is attenuation_radius and whose falloff distance is attenuation_distance ('Disabled' turns both off). audio_3d_configured is read back from the component. attenuation_falloff and the cone numbers only describe the preset (a sphere has no cone).
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `audio_component_name` | string | yes | Name of the audio component to configure |
+| `audio_3d_settings` | string | yes | 3D setting preset: 'Enabled', 'Disabled', 'High', 'Medium', or 'Low' (case-insensitive); any other name is an error |
+
+**Returns:** `{ audio_component_name: string, audio_3d_settings: string, audio_3d_configured: bool, audio_3d_message: string, old_3d_enabled: bool, new_3d_enabled: bool, attenuation_override: bool, applied_attenuation_radius?: number, applied_falloff_distance?: number, 3d_enabled: bool, spatialization_enabled: bool, attenuation_distance: number, attenuation_radius: number, attenuation_falloff: number, attenuation_cone_angle: number, attenuation_cone_feather: number, audio_3d_recommendations: [string] }`
 
 ## `set_audio_bus_channels`
 
@@ -1094,19 +1167,6 @@ Sets the output USoundModulationParameter of a USoundModulationPatch asset, or c
 
 **Returns:** `{ patch_path, parameter_path, parameter_class, updated, cleared, saved }`
 
-## `set_sound_attenuation_properties`
-
-*Destructive, idempotent.*
-
-Merge fields into a SoundAttenuation asset's Attenuation settings (absent keys kept), clamp to ClampMin/ClampMax and save; set_properties neither clamps nor saves. Keys match field names case-insensitively. An empty settings object, a key that names no field (the error lists them), a null value, or a value that is not of the field's kind or does not convert is an error and nothing changes. Plugin sub-objects are not reached. A failed save makes success false.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `attenuation_path` | string | yes | Full content path of the target USoundAttenuation. |
-| `settings` | object | yes | Object of FSoundAttenuationSettings/FBaseAttenuationSettings fields to merge; absent keys untouched. e.g. bAttenuate, bSpatialize, attenuationShape(Sphere/Capsule/Box/Cone), distanceAlgorithm, falloffDistance, dBAttenuationAtMax(-60..0), attenuationShapeExtents{x,y,z}, bAttenuateWithLPF, lPFFrequencyAtMin/Max, bEnableOcclusion, occlusionVolumeAttenuation, bEnableReverbSend, reverbWetLevelMin/Max. Nested plugin sub-objects (pluginSettings, audioLinkSettingsOverride) are NOT authored here. Keys match the field names case-insensitively; an empty object, a key that names no field, a null value or a value that does not convert is an error and nothing is changed. |
-
-**Returns:** `{ attenuation_path: string, asset_class: string, settings: object, applied_keys: [string], saved: bool }`
-
 ## `set_sound_class_parent`
 
 *Destructive, idempotent.*
@@ -1119,49 +1179,6 @@ Make one USoundClass the child of another, wiring ParentClass and ChildClasses, 
 | `parent_sound_class_path` | string | yes | Asset path of the USoundClass that becomes its parent, e.g. "/Game/Audio/SC_SFX.SC_SFX". |
 
 **Returns:** `{ child: string, parent: string, child_path: string, parent_path: string, child_count: int, saved_parent: bool, saved_child: bool }`
-
-## `set_sound_class_properties`
-
-*Destructive, idempotent.*
-
-Write the given FSoundClassProperties fields of a SoundClass asset (volume, pitch, filters, routing and loading flags) as flat named params, then save it. Use it over set_properties, which would need the nested Properties struct and leaves it unsaved; the parent link is set_sound_class_parent. Only fields you pass change; values are not range-checked and an unknown output_target or loading_behavior name is skipped (applied_&lt;field> false). Returns every current value plus saved; get_sound_class_properties reads them.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `sound_class_path` | string | yes | Content path of the USoundClass asset. |
-| `volume` | number | no | Volume multiplier for sounds of this class (Properties.Volume), e.g. 0.5 for half |
-| `pitch` | number | no | Pitch multiplier for sounds of this class (Properties.Pitch), e.g. 1.2 |
-| `low_pass_frequency` | number | no | Low-pass filter cutoff frequency in Hz (Properties.LowPassFilterFrequency) |
-| `attenuation_distance_scale` | number | no | Scale on the distance used for attenuation (Properties.AttenuationDistanceScale): 0.5 attenuates a sound 1000 units away as if it were 500 away |
-| `lfe_bleed` | number | no | Amount of the sound sent to the LFE (subwoofer) channel (Properties.LFEBleed) |
-| `voice_center_channel_volume` | number | no | Amount sent to the center channel (Properties.VoiceCenterChannelVolume); does not propagate to child classes |
-| `radio_filter_volume` | number | no | Volume of the legacy radio filter effect (Properties.RadioFilterVolume) |
-| `radio_filter_volume_threshold` | number | no | Volume at which the legacy radio filter kicks in (Properties.RadioFilterVolumeThreshold) |
-| `default_2d_reverb_send_amount` | number | no | Reverb send amount for unattenuated (2D) sounds of this class (Properties.Default2DReverbSendAmount) |
-| `apply_effects` | boolean | no | Bool for Properties.bApplyEffects (Output to Master EQ Submix): route referencing sounds to the Master EQ submix |
-| `always_play` | boolean | no | Bool for Properties.bAlwaysPlay: inflate the priority of referencing sounds so they always play |
-| `is_ui_sound` | boolean | no | Bool for Properties.bIsUISound: sounds of this class keep playing while the game is paused in the UI |
-| `is_music` | boolean | no | Bool for Properties.bIsMusic: mark the class as music (propagates to child classes only when the parent is true) |
-| `center_channel_only` | boolean | no | Bool for Properties.bCenterChannelOnly: force sounds of this class to the center channel |
-| `apply_ambient_volumes` | boolean | no | Bool for Properties.bApplyAmbientVolumes: apply the Interior/Exterior volume and low-pass modifiers |
-| `reverb` | boolean | no | Bool for Properties.bReverb (Send to Master Reverb Submix): send referencing sounds to the reverb submix |
-| `output_target` | string | no | Properties.OutputTarget enum name (Speaker\|Controller\|ControllerFallbackToSpeaker); case-insensitive, ignored if unrecognized. |
-| `loading_behavior` | string | no | Properties.LoadingBehavior enum name (Inherited\|RetainOnLoad\|PrimeOnLoad\|LoadOnDemand\|ForceInline); case-insensitive, ignored if unrecognized. |
-
-**Returns:** `{ sound_class_path: string, success: bool, volume: float, pitch: float, low_pass_frequency: float, attenuation_distance_scale: float, lfe_bleed: float, voice_center_channel_volume: float, radio_filter_volume: float, radio_filter_volume_threshold: float, default_2d_reverb_send_amount: float, apply_effects: bool, always_play: bool, is_ui_sound: bool, is_music: bool, center_channel_only: bool, apply_ambient_volumes: bool, reverb: bool, output_target: string, loading_behavior: string, applied_volume: bool, applied_pitch: bool, applied_low_pass_frequency: bool, applied_attenuation_distance_scale: bool, applied_lfe_bleed: bool, applied_voice_center_channel_volume: bool, applied_radio_filter_volume: bool, applied_radio_filter_volume_threshold: bool, applied_default_2d_reverb_send_amount: bool, applied_apply_effects: bool, applied_always_play: bool, applied_is_ui_sound: bool, applied_is_music: bool, applied_center_channel_only: bool, applied_apply_ambient_volumes: bool, applied_reverb: bool, applied_output_target: bool, applied_loading_behavior: bool, saved: bool }`
-
-## `set_sound_concurrency_properties`
-
-*Destructive, idempotent.*
-
-Merge fields into a SoundConcurrency asset's Concurrency settings (maxCount, resolutionRule, volume scaling...; absent keys kept), clamp to ClampMin/ClampMax and save; set_properties neither clamps nor saves. Keys match field names case-insensitively. An empty settings object, a key that names no field (the error lists them), a null value, or a value that is not of the field's kind or does not convert is an error and nothing changes. A failed save makes success false.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `concurrency_path` | string | yes | Full content path of the target USoundConcurrency. |
-| `settings` | object | yes | Object of FSoundConcurrencySettings fields to merge (maxCount(int>=1), bLimitToOwner(bool), resolutionRule(enum name), retriggerTime, volumeScale(0..1), volumeScaleMode(enum), bVolumeScaleCanRelease, volumeScaleAttackTime, volumeScaleReleaseTime, voiceStealReleaseTime); absent keys untouched. Keys match the field names case-insensitively; an empty object, a key that names no field, a null value or a value that does not convert is an error and nothing is changed. |
-
-**Returns:** `{ concurrency_path: string, asset_class: string, settings: object, applied_keys: [string], saved: bool }`
 
 ## `set_sound_cue_first_node`
 
@@ -1194,7 +1211,7 @@ Set EditAnywhere properties of one Sound Cue node, located by node_id, then refr
 
 *Destructive, idempotent.*
 
-Sets a sound class adjuster override in a USoundMix.  Loads the USoundMix and USoundClass, adds or updates an FSoundClassAdjuster in the mix's SoundClassEffects array, then saves.
+Sets a sound class adjuster override in a USoundMix.  Loads the USoundMix and USoundClass, adds or updates an FSoundClassAdjuster in the mix's SoundClassEffects array, then saves. Inverse: remove_sound_mix_class_override.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1246,20 +1263,6 @@ Merge a FRuntimeFloatCurve JSON into BusSends[send_index].CustomSendLevelCurve o
 | `distance_curve` | object | yes | FRuntimeFloatCurve fields by their UPROPERTY names, e.g. {"EditorCurveData": {"Keys": [{"Time": 0.0, "Value": 1.0}, {"Time": 1.0, "Value": 0.0}]}}; Time 0-1 maps to MinSendDistance-MaxSendDistance and Keys replaces the key list. Fields left out keep their current values; unknown keys are ignored without error. |
 
 **Returns:** `{ ssb_path: string, send_index: int, bus_sends_count: int, distance_curve: object, applied_keys: [string], saved: bool }`
-
-## `set_sound_wave_properties`
-
-*Destructive, idempotent.*
-
-Merge USoundWave/USoundBase fields into a SoundWave asset (absent keys kept), set bLooping via looping, clamp to ClampMin/ClampMax and save; set_properties neither clamps nor saves. Each property whose value changes runs PostEditChangeProperty, as a details-panel edit does: compression settings rebuild the audio and MaxDistance follows AttenuationSettings. Keys match property names case-insensitively. A key that names no property (the error lists them), a deprecated or instanced-subobject one, a null value, a value of the wrong kind or that does not convert, bLooping inside settings, or a looping that is not true or false is an error and nothing changes. A failed save makes success false.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `sound_wave_path` | string | yes | Full content path of the target USoundWave (e.g. /Game/Audio/MySound). |
-| `settings` | object | no | Object of USoundWave/USoundBase UPROPERTY fields to merge, keyed by property name (matched case-insensitively); absent keys untouched. e.g. CompressionQuality(1..100), SampleRateQuality(Max/High/Medium/Low/Min), SoundGroup(SOUNDGROUP_Default/SOUNDGROUP_Effects/SOUNDGROUP_UI/SOUNDGROUP_Music/SOUNDGROUP_Voice), SoundAssetCompressionType(BinkAudio/ADPCM/PCM/Opus/PlatformSpecific/ProjectDefined), Volume(>=0), Pitch(0.125..4.0), Priority(0..100), VirtualizationMode(Disabled/PlayWhenSilent/Restart/SeekRestart), SoundClassObject(asset path), AttenuationSettings(asset path). A key that names no property, a deprecated one or one holding instanced subobjects, a null value, a value that does not convert, a settings value that is not an object, or `bLooping` (use the `looping` param) is an error and nothing is changed. |
-| `looping` | boolean | no | Optional bool; sets the bLooping bitfield directly (when this sound is played directly, not via a cue). A value that is not true or false is an error and nothing is changed. |
-
-**Returns:** `{ sound_wave_path: string, asset_class: string, settings: object, applied_keys: [string], applied_looping: bool, looping: bool, saved: bool, save_error?: string }`
 
 ## `set_submix_effect_settings`
 

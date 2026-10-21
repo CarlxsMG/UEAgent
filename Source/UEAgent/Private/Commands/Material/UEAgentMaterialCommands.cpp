@@ -97,6 +97,47 @@ namespace UEAgentMaterialCommandsImpl
         }
     }
 
+    /**
+     * The graph owner a node command names, loaded as create_material_expression loads it: a UMaterial, or a
+     * UMaterialFunction (tried first when the caller used material_function_path). Exactly one of OutMaterial and
+     * OutFunction is set on success; otherwise the not-found reply.
+     */
+    TSharedPtr<FJsonObject> LoadGraphOwner(const FString& Path, bool bFunctionKey, UMaterial*& OutMaterial, UMaterialFunction*& OutFunction)
+    {
+        OutMaterial = nullptr;
+        OutFunction = nullptr;
+        if (bFunctionKey)
+        {
+            OutFunction = AssetPathUtils::LoadOrLoadSoftPathString<UMaterialFunction>(Path);
+        }
+        if (OutFunction == nullptr)
+        {
+            OutMaterial = AssetPathUtils::LoadOrLoadSoftPathString<UMaterial>(Path);
+        }
+        if (OutMaterial == nullptr && OutFunction == nullptr && !bFunctionKey)
+        {
+            OutFunction = AssetPathUtils::LoadOrLoadSoftPathString<UMaterialFunction>(Path);
+        }
+        if (OutMaterial == nullptr && OutFunction == nullptr)
+        {
+            return NotFoundByPath(bFunctionKey ? TEXT("Material function") : TEXT("Material"), Path);
+        }
+        return nullptr;
+    }
+
+    /** The expression of Function's own graph called NodeName, or nullptr. */
+    UMaterialExpression* FindFunctionNode(UMaterialFunction* Function, const FString& NodeName)
+    {
+        for (const TObjectPtr<UMaterialExpression>& Node : Function->GetExpressions())
+        {
+            if (Node && Node->GetName() == NodeName)
+            {
+                return Node;
+            }
+        }
+        return nullptr;
+    }
+
     /** The node of Material called NodeName (object names are unique per outer), or nullptr. */
     UMaterialExpression* FindGraphNode(UMaterial* Material, const FString& NodeName)
     {
@@ -739,7 +780,7 @@ TSharedPtr<FJsonObject> HandleCreateMaterialInstance(const TSharedPtr<FJsonObjec
     return Reply;
 }
 
-// MCP:create_material_expression - Add ONE node to a material graph -- or to a material function's internal graph -- by expression class path (e.g. /Script/Engine.MaterialExpressionConstant, ...TextureSample, ...ScalarParameter), at a graph position. The building block of headless material authoring: create the nodes, then wire them with connect_material_expressions and connect_to_material_output (inside a function: connect_material_function_pins, then recompile_material_function). The node arrives UNCONNECTED, so nothing renders differently until it is wired -- verify with get_material_graph_info and get_material_stats, not with the success flag.
+// MCP:create_material_expression - Add ONE node to a material graph -- or to a material function's internal graph -- by expression class path (e.g. /Script/Engine.MaterialExpressionConstant, ...TextureSample, ...ScalarParameter), at a graph position. The building block of headless material authoring: create the nodes, then wire them with connect_material_expressions and connect_to_material_output (inside a function: connect_material_function_pins, then recompile_material_function). The node arrives UNCONNECTED, so nothing renders differently until it is wired -- verify with get_material_graph_info and get_material_stats, not with the success flag. Inverse: delete_material_expression (with material_function_path inside a function).
 //   @param material_path - Full path to the material (e.g., '/Game/Materials/MyMaterial.MyMaterial'); a UMaterialFunction path is accepted too and creates the node inside that function
 //   @param material_function_path - Alias of material_path that addresses a UMaterialFunction (or material layer): the node is created inside the function's graph
 //   @param expression_class_name - Material expression class name (e.g., '/Script/Engine.MaterialExpressionConstant')
@@ -839,20 +880,58 @@ TSharedPtr<FJsonObject> HandleCreateMaterialExpression(const TSharedPtr<FJsonObj
     return Reply;
 }
 
-// MCP:delete_material_expression - Delete ONE node from a material graph by name. Deliberately one at a time, and that is the safe way to empty a graph: the engine's bulk delete_all_material_expressions can leave half the nodes behind with no error, and a rebuild on top then produces duplicate parameter names that no parameter listing reveals (duplicates collapse by name). Loop this instead, re-reading get_material_graph_info until its expression_count reaches 0. The underlying engine call also returns false while having done the work, so count the nodes rather than trusting the flag.
-//   @param material_path - Full path to the material (e.g., '/Game/Materials/MyMaterial.MyMaterial')
+// MCP:delete_material_expression - Delete ONE node from a material graph -- or from a material function's internal graph -- by name. Deliberately one at a time, and that is the safe way to empty a graph: the engine's bulk delete_all_material_expressions can leave half the nodes behind with no error, and a rebuild on top then produces duplicate parameter names that no parameter listing reveals (duplicates collapse by name). Loop this instead, re-reading get_material_graph_info until its expression_count reaches 0. The underlying engine call also returns false while having done the work, so count the nodes rather than trusting the flag. Inside a function (material_function_path, or a function path in material_path) the links into the node are broken, the node leaves the function's expressions and the reply re-reads them (deleted, expression_count); the change stays in memory until recompile_material_function saves it. Inverse of create_material_expression; a node that is not there is an error and nothing changes.
+//   @param material_path - Full path to the material (e.g., '/Game/Materials/MyMaterial.MyMaterial'); a UMaterialFunction path is accepted too and deletes the node inside that function
+//   @param material_function_path - Alias of material_path that addresses a UMaterialFunction (or material layer): the node is deleted from the function's graph
 //   @param expression_name - Name of the material expression to delete
-//   @returns { material_path: string, expression_name: string, success: bool }
+//   @returns { material_path: string, material_function_path?: string, expression_name: string, deleted?: bool, expression_count?: int, success: bool }
 
 TSharedPtr<FJsonObject> HandleDeleteMaterialExpression(const TSharedPtr<FJsonObject>& Params)
 {
+    // material_path, else material_function_path; which key was used decides what is tried first.
     FString GraphPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("material_path"), GraphPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+    bool bFunctionKey = false;
+    if (!Params->TryGetStringField(TEXT("material_path"), GraphPath))
+    {
+        if (!Params->TryGetStringField(TEXT("material_function_path"), GraphPath))
+        {
+            return mcp_common::MissingParameterReply(TEXT("material_path"));
+        }
+        bFunctionKey = true;
+    }
     FString NodeName;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("expression_name"), NodeName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
 
     UMaterial* Graph = nullptr;
-    if (TSharedPtr<FJsonObject> LoadError = UEAgentMaterialCommandsImpl::LoadBaseMaterial(GraphPath, Graph)) { return LoadError; }
+    UMaterialFunction* FunctionGraph = nullptr;
+    if (TSharedPtr<FJsonObject> LoadError = UEAgentMaterialCommandsImpl::LoadGraphOwner(GraphPath, bFunctionKey, Graph, FunctionGraph)) { return LoadError; }
+
+    if (FunctionGraph != nullptr)
+    {
+        UMaterialExpression* FunctionNode = UEAgentMaterialCommandsImpl::FindFunctionNode(FunctionGraph, NodeName);
+        if (FunctionNode == nullptr)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(TEXT("Material expression not found in function %s: %s"),
+                *FunctionGraph->GetPathName(), *NodeName));
+        }
+        UMaterialEditingLibrary::DeleteMaterialExpressionInFunction(FunctionGraph, FunctionNode);
+        FunctionGraph->MarkPackageDirty();
+
+        // The re-read: the node is no longer one of the function's expressions.
+        if (UEAgentMaterialCommandsImpl::FindFunctionNode(FunctionGraph, NodeName) != nullptr)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("DeleteMaterialExpressionInFunction left %s in the function's expressions"), *NodeName));
+        }
+        TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
+        Reply->SetStringField(TEXT("material_path"), GraphPath);
+        Reply->SetStringField(TEXT("material_function_path"), FunctionGraph->GetPathName());
+        Reply->SetStringField(TEXT("expression_name"), NodeName);
+        Reply->SetBoolField(TEXT("deleted"), true);
+        Reply->SetNumberField(TEXT("expression_count"), FunctionGraph->GetExpressions().Num());
+        Reply->SetBoolField(TEXT("success"), true);
+        return Reply;
+    }
 
     // The node collection of a material is not public API, so the node is found by walking the
     // live expression objects and keeping the one owned by this material.
@@ -939,25 +1018,39 @@ TSharedPtr<FJsonObject> HandleConnectMaterialExpressions(const TSharedPtr<FJsonO
     return Reply;
 }
 
-// MCP:disconnect_material_expressions - Disconnect an input of a material expression (inverse of connect_material_expressions).  Idempotent: an input that is already disconnected returns already_disconnected=true (still success — the expression exists, there simply was no connection to break).
-//   @param material_path - Full path to the material (e.g., '/Game/Materials/MyMaterial.MyMaterial')
+// MCP:disconnect_material_expressions - Disconnect an input of a material expression (inverse of connect_material_expressions) -- in a material, or inside a material function's graph (inverse of connect_material_function_pins) when material_function_path, or a function path in material_path, is given.  Idempotent: an input that is already disconnected returns already_disconnected=true (still success — the expression exists, there simply was no connection to break). Inside a function the change stays in memory until recompile_material_function saves it.
+//   @param material_path - Full path to the material (e.g., '/Game/Materials/MyMaterial.MyMaterial'); a UMaterialFunction path is accepted too and disconnects inside that function
+//   @param material_function_path - Alias of material_path that addresses a UMaterialFunction (or material layer): the input is disconnected inside the function's graph
 //   @param to_expression_name - Name of the destination material expression whose input is disconnected
 //   @param to_input_name - Name of the input pin to disconnect (empty = first input)
-//   @returns { material_path: string, to_expression_name: string, to_input_name: string, disconnected: bool, already_disconnected: bool, success: bool }
+//   @returns { material_path: string, material_function_path?: string, to_expression_name: string, to_input_name: string, disconnected: bool, already_disconnected: bool, success: bool }
 
 TSharedPtr<FJsonObject> HandleDisconnectMaterialExpressions(const TSharedPtr<FJsonObject>& Params)
 {
+    // material_path, else material_function_path; which key was used decides what is tried first.
     FString GraphPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("material_path"), GraphPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+    bool bFunctionKey = false;
+    if (!Params->TryGetStringField(TEXT("material_path"), GraphPath))
+    {
+        if (!Params->TryGetStringField(TEXT("material_function_path"), GraphPath))
+        {
+            return mcp_common::MissingParameterReply(TEXT("material_path"));
+        }
+        bFunctionKey = true;
+    }
     FString TargetNodeName;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("to_expression_name"), TargetNodeName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
     FString TargetPin;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("to_input_name"), TargetPin, mcp_common::EAllowEmpty::Yes)) { return Missing; }
 
-    // Same resolution as connect_material_expressions: direct load, soft-path retry, then the node.
+    // Same resolution as connect_material_expressions: direct load, soft-path retry, then the node; a function
+    // graph is searched among the function's own expressions.
     UMaterial* Graph = nullptr;
-    if (TSharedPtr<FJsonObject> LoadError = UEAgentMaterialCommandsImpl::LoadBaseMaterial(GraphPath, Graph)) { return LoadError; }
-    UMaterialExpression* TargetNode = UEAgentMaterialCommandsImpl::FindGraphNode(Graph, TargetNodeName);
+    UMaterialFunction* FunctionGraph = nullptr;
+    if (TSharedPtr<FJsonObject> LoadError = UEAgentMaterialCommandsImpl::LoadGraphOwner(GraphPath, bFunctionKey, Graph, FunctionGraph)) { return LoadError; }
+    UMaterialExpression* TargetNode = FunctionGraph != nullptr
+        ? UEAgentMaterialCommandsImpl::FindFunctionNode(FunctionGraph, TargetNodeName)
+        : UEAgentMaterialCommandsImpl::FindGraphNode(Graph, TargetNodeName);
     if (TargetNode == nullptr)
     {
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("To expression not found: %s"), *TargetNodeName));
@@ -970,9 +1063,17 @@ TSharedPtr<FJsonObject> HandleDisconnectMaterialExpressions(const TSharedPtr<FJs
 #else
     const bool bLinkBroken = UMaterialEditingLibrary::DisconnectMaterialExpressions(TargetNode, TargetPin);
 #endif
-    Graph->MarkPackageDirty();
-
     TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
+    if (FunctionGraph != nullptr)
+    {
+        FunctionGraph->MarkPackageDirty();
+        Reply->SetStringField(TEXT("material_function_path"), FunctionGraph->GetPathName());
+    }
+    else
+    {
+        Graph->MarkPackageDirty();
+    }
+
     Reply->SetStringField(TEXT("material_path"), GraphPath);
     Reply->SetStringField(TEXT("to_expression_name"), TargetNodeName);
     Reply->SetStringField(TEXT("to_input_name"), TargetPin);

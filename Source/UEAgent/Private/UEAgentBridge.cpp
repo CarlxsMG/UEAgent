@@ -149,7 +149,7 @@
 // What is kept: ALL the scalars of the payload (the counters, which is what is asked about
 // most of the time) and, for each array/object moved out, its length. The detail is lost from
 // the response -- which is exactly what the cut would lose anyway, only silently and with
-// nowhere to look for it. The file goes to Saved/MCPAudits/, which read_mcp_audit_file reads.
+// nowhere to look for it. The file goes to Saved/MCPAudits/, which get_mcp_audit_report reads.
 // =====================================================================================
 namespace McpOversize
 {
@@ -174,7 +174,7 @@ namespace McpOversize
     }
 
     /** Writes Payload to Saved/MCPAudits/oversize_<command>_<UTC>.json. Same directory and
-     *  format as AU_WriteReport, so read_mcp_audit_file reads it unchanged. */
+     *  format as AU_WriteReport, so get_mcp_audit_report reads it unchanged. */
     static bool WriteReport(const FString& CommandType, const FString& JsonString, FString& OutPath)
     {
         const FString AuditDir = FPaths::ProjectSavedDir() / TEXT("MCPAudits");
@@ -196,13 +196,13 @@ namespace McpOversize
 
     /** EXEMPT commands: those whose job IS to return a large report.
      *
-     * Without this it is a LOOP: an offloaded report is read back with read_mcp_audit_file,
+     * Without this it is a LOOP: an offloaded report is read back with get_mcp_audit_report,
      * that read overflows TOO and returns yet another path -- and so on indefinitely, one
      * file per attempt, with the detail never arriving. Offloading the offload reader makes
      * UNREACHABLE exactly what was just saved. */
     static bool IsExempt(const FString& CommandType)
     {
-        return CommandType == TEXT("read_mcp_audit_file");
+        return CommandType == TEXT("get_mcp_audit_report");
     }
 
     /** If the payload does not fit, writes it out and replaces it with scalars + lengths + path.
@@ -259,7 +259,7 @@ namespace McpOversize
             Slim->SetStringField(TEXT("report_path"), ReportPath);
             Slim->SetStringField(TEXT("offload_note"),
                 TEXT("This response did not fit; its scalar fields are intact and the full payload was "
-                     "written to disk. Read it with read_mcp_audit_file(path=report_path). To get it "
+                     "written to disk. Read it with get_mcp_audit_report(path=report_path). To get it "
                      "inline instead, narrow the query (max_results / a filter) and call again."));
         }
         else
@@ -1074,8 +1074,13 @@ namespace McpUndoStep
     }
 }
 
-TSharedPtr<FJsonObject> UUEAgentBridge::DispatchSingleCommand(const FString& CommandType, const TSharedPtr<FJsonObject>& Params)
+TSharedPtr<FJsonObject> UUEAgentBridge::DispatchSingleCommand(const FString& RequestedCommandType, const TSharedPtr<FJsonObject>& Params)
 {
+    // A renamed tool's old name runs the new one, and the reply says so (data.retired_name), as it does for a retired
+    // tool. Everything below, the tables keyed by command included, sees the name the tool runs under.
+    FString RetiredNameNote;
+    const FString CommandType = FMcpToolCatalog::ResolveCallName(RequestedCommandType, SubCommandDepth > 0 ? nullptr : &RetiredNameNote);
+
     // PIE-safety gate. It goes HERE and not in the queued work item -- where the PIE OWNERSHIP
     // guard lives -- because `execute_batch` calls DispatchSingleCommand DIRECTLY: any batch would skip a
     // gate in the work item, and a batch is exactly how a bulk compile gets triggered.
@@ -1316,6 +1321,29 @@ TSharedPtr<FJsonObject> UUEAgentBridge::DispatchSingleCommand(const FString& Com
             // Alias report. Same three rules as unknown_params (additive, inside `data`,
             // created only when there is something to say). It goes FIRST so that, if a
             // response carries both, the `data` object already exists and is not created twice.
+            if (ResultJson.IsValid() && !RetiredNameNote.IsEmpty())
+            {
+                // A failure is answered with its error alone, so the note rides in the error text as well.
+                FString FailureText;
+                bool bReportedSuccess = true;
+                if (ResultJson->TryGetBoolField(TEXT("success"), bReportedSuccess) && !bReportedSuccess
+                    && ResultJson->TryGetStringField(TEXT("error"), FailureText))
+                {
+                    ResultJson->SetStringField(TEXT("error"), FString::Printf(TEXT("%s (%s)"), *FailureText, *RetiredNameNote));
+                }
+                const TSharedPtr<FJsonObject>* ExistingData = nullptr;
+                if (ResultJson->TryGetObjectField(TEXT("data"), ExistingData) && ExistingData != nullptr && ExistingData->IsValid())
+                {
+                    (*ExistingData)->SetStringField(TEXT("retired_name"), RetiredNameNote);
+                }
+                else
+                {
+                    TSharedPtr<FJsonObject> NewData = MakeShareable(new FJsonObject);
+                    NewData->SetStringField(TEXT("retired_name"), RetiredNameNote);
+                    ResultJson->SetObjectField(TEXT("data"), NewData);
+                }
+            }
+
             if (ResultJson.IsValid() && AliasedParamsJson.Num() > 0)
             {
                 const TSharedPtr<FJsonObject>* ExistingData = nullptr;
@@ -1403,13 +1431,16 @@ TSharedPtr<FJsonObject> UUEAgentBridge::DispatchSingleCommand(const FString& Com
 // tools/call of the native MCP server: the normal dispatch plus the READBACK contract, all in
 // the SAME game-thread pass -- the before snapshot, the command, the re-read and the offload
 // note see exactly the same state, with no race from network round trips in between.
-TFuture<FString> UUEAgentBridge::EnqueueToolCall(const FString& CommandType, const TSharedPtr<FJsonObject>& Params, const FString& SessionId)
+TFuture<FString> UUEAgentBridge::EnqueueToolCall(const FString& RequestedCommandType, const TSharedPtr<FJsonObject>& Params, const FString& SessionId)
 {
     TPromise<FString> Promise;
     TFuture<FString> Future = Promise.GetFuture();
 
-    TUniqueFunction<void()> Work = [this, CommandType, Params, SessionId, Promise = MoveTemp(Promise)]() mutable
+    TUniqueFunction<void()> Work = [this, RequestedCommandType, Params, SessionId, Promise = MoveTemp(Promise)]() mutable
     {
+        // The guards, the contract and the activity log go by the name the tool runs under (a renamed tool's new name);
+        // DispatchSingleCommand gets the name as called, so its reply can say the old name was used.
+        const FString CommandType = FMcpToolCatalog::ResolveCallName(RequestedCommandType);
         const FDateTime Started = FDateTime::Now();
         const double StartSeconds = FPlatformTime::Seconds();
 
@@ -1434,7 +1465,7 @@ TFuture<FString> UUEAgentBridge::EnqueueToolCall(const FString& CommandType, con
         TSharedPtr<FJsonObject> Envelope = CheckPIEOwnershipGuard(CommandType, Params, SessionId);
         if (!Envelope.IsValid())
         {
-            Envelope = DispatchSingleCommand(CommandType, Params); // rewrites aliases and rotations IN PLACE
+            Envelope = DispatchSingleCommand(RequestedCommandType, Params); // rewrites aliases and rotations IN PLACE
         }
 
         bool bRefused = false;

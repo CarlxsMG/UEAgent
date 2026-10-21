@@ -140,6 +140,7 @@ namespace
 }
 
 // MCP:spawn_text_render_actor - Spawn a TextRenderActor with its text, color (0..255, opaque) and world size set in the same call, into the ACTIVE world: the first PIE/game world when one runs (the actor then vanishes when play stops), otherwise the editor world. spawn_actor has no text-render type, and unlike it this has no world selector -- with several PIE instances it takes the first PIE context, not necessarily the server. world_size is read back. One undo step in the editor world; not saved (save_level).
+//   @retired spawn_actor - type="TextRenderActor", location, rotation, properties={"TextRenderComponent.Text":"...","TextRenderComponent.TextRenderColor":{"R":255,"G":255,"B":255,"A":255},"TextRenderComponent.WorldSize":..}
 //   @param text - Optional text to assign to the text render component
 //   @param location - Optional [x, y, z] world location
 //   @param rotation - Optional [pitch, yaw, roll] world rotation

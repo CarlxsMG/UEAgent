@@ -544,7 +544,7 @@ namespace UEAgentLightingImpl
     }
 
     // =============================================================================================
-    // configure_light_shadows
+    // set_light_shadow_quality
     // =============================================================================================
 
     // A named shadow preset. Only bCastShadows is applied to the light; the three numbers are reported
@@ -1133,7 +1133,7 @@ namespace UEAgentLightingImpl
     }
 
     // =============================================================================================
-    // configure_post_processing
+    // set_post_process_quality
     // =============================================================================================
 
     // Features a preset drives, in the order their console variables are written.
@@ -1211,7 +1211,7 @@ namespace UEAgentLightingImpl
         bool bApplied = false;
     };
 
-    // What configure_post_processing reports, every field from the read-back of the console variables.
+    // What set_post_process_quality reports, every field from the read-back of the console variables.
     struct FPostProcessState
     {
         bool bConfigured = false;     // every variable reads the preset's level
@@ -1278,7 +1278,7 @@ namespace UEAgentLightingImpl
                 Mismatches.Add(FString::Printf(TEXT("%s reads %d, not %d"), PostFeatures[Index].ConsoleVariable, Reading.Value, Reading.Requested));
             }
         }
-        return FString::Printf(TEXT("configure_post_processing: the preset did not apply: %s. post_processing_variables carries every reading"),
+        return FString::Printf(TEXT("set_post_process_quality: the preset did not apply: %s. post_processing_variables carries every reading"),
             *FString::Join(Mismatches, TEXT("; ")));
     }
 
@@ -1427,7 +1427,7 @@ UObject* LoadOptionalAssetParam(const TSharedPtr<FJsonObject>& Params, const FSt
 
 // Lights and shadows
 
-// MCP:get_light_properties - Read a light actor of the editor level, found by object name (not label), in one call: owner transform, intensity, color, mobility and every field set_light_properties writes, plus the type-specific ones (point/spot falloff and cones, RectLight source and barn doors, directional sun-light flags). A convenience view of the actor and its first light component; get_properties reads any other UPROPERTY. Every value is read off the component: light_intensity_units is the unit name (Unitless, Candelas, Lumens, EV or Nits) on point, spot and rect lights and is left out for a directional light, whose intensity is lux; the falloff keys appear only on point and spot lights; light_lighting_channel_mask packs LightingChannels (1 = channel 0, 2 = channel 1, 4 = channel 2). light_type is always 'Light Component'; the kind is light_subtype. An unknown name is an error. Read-only.
+// MCP:get_light_properties - Read a light actor of the editor level, found by object name (not label), in one call: owner transform, intensity, color, mobility and every field set_properties writes, plus the type-specific ones (point/spot falloff and cones, RectLight source and barn doors, directional sun-light flags). A convenience view of the actor and its first light component; get_properties reads any other UPROPERTY. Every value is read off the component: light_intensity_units is the unit name (Unitless, Candelas, Lumens, EV or Nits) on point, spot and rect lights and is left out for a directional light, whose intensity is lux; the falloff keys appear only on point and spot lights; light_lighting_channel_mask packs LightingChannels (1 = channel 0, 2 = channel 1, 4 = channel 2). light_type is always 'Light Component'; the kind is light_subtype. An unknown name is an error. Read-only.
 //   @param light_name - Name of the light actor to query
 //   @returns { light_name, light_found, light_message, light_class (owner actor class), light_type ("Light Component" for every light; the kind is light_subtype), light_position: { x, y, z }, light_rotation: { pitch, yaw, roll }, light_scale: { x, y, z } (owner actor transform), light_intensity, light_intensity_units? (point/spot/rect only: Unitless, Candelas, Lumens, EV or Nits), light_color: { r, g, b, a }, light_enabled, light_cast_shadows, light_affect_world, light_mobility, light_use_inverse_squared_falloff? (point/spot only), light_falloff_exponent? (point/spot only), light_lighting_channel_mask (1 = channel 0, 2 = channel 1, 4 = channel 2), light_temperature, light_use_temperature, light_indirect_lighting_intensity, light_volumetric_scattering_intensity, light_affect_translucent_lighting, light_use_ies_brightness, light_ies_brightness_scale, light_ies_texture, light_function_scale: { x, y, z }, light_function_fade_distance, light_function_disabled_brightness, light_function_material, light_shadow_bias, light_cast_volumetric_shadow, light_contact_shadow_length, light_contact_shadow_length_in_ws, light_subtype (DirectionalLight, PointLight, SpotLight, RectLight or Unknown), light_atmosphere_sun_light? (directional: 1 or 0), light_atmosphere_sun_light_index? (directional), light_atmosphere_sun_disk_color_scale?: { r, g, b, a } (directional), light_attenuation_radius? (point/spot/rect), light_source_radius? (point/spot), light_soft_source_radius? (point/spot), light_source_length? (point/spot), light_inner_cone_angle? (spot), light_outer_cone_angle? (spot), light_source_width? (rect), light_source_height? (rect), light_barn_door_angle? (rect), light_barn_door_length? (rect), light_source_texture? (rect), light_tags: [string], light_level, light_world }
 TSharedPtr<FJsonObject> HandleGetLightProperties(const TSharedPtr<FJsonObject>& Params)
@@ -1444,6 +1444,7 @@ TSharedPtr<FJsonObject> HandleGetLightProperties(const TSharedPtr<FJsonObject>& 
 }
 
 // MCP:set_light_properties - Set component-level properties of one light actor, found by object name (not Outliner label) in the first world context: attenuation and source radius/length, cone angles, temperature, indirect/volumetric intensity, translucency, RectLight source size, barn doors and texture, IES profile, light function, shadow bias, cast/volumetric shadows, contact shadows and inverse-squared falloff. Over set_properties it needs no component path, returns a note for a field that does not apply to the light's type, and on a Static-mobility light refuses, writing nothing, any field whose engine setter skips static lights (IES, light function, shadow bias, cast flags, falloff, RectLight source and barn doors). Only fields present change, as one undo step that dirties the level; nothing is saved; a no-op says changed false. Intensity: set_light_intensity; color: set_light_color. Read back with get_light_properties.
+//   @retired set_properties - object_path="<light>.LightComponent", properties={"Intensity":..,"LightColor":{"R","G","B","A"} (0-255),"AttenuationRadius":..,"Temperature":..,"bUseTemperature":true,"IESTexture":"/Game/..."}
 //   @param light_name - Name of the light actor to modify.
 //   @param attenuation_radius - float, light reach — local lights only (Point/Spot/Rect).
 //   @param source_radius - float, soft source radius (Point/Spot).
@@ -1694,7 +1695,8 @@ TSharedPtr<FJsonObject> HandleSetLightProperties(const TSharedPtr<FJsonObject>& 
     return ResultObj;
 }
 
-// MCP:set_light_intensity - Set the Intensity of one light actor with ULightComponent::SetIntensity and read it back: the actor is the first one in the engine's first world context (normally the editor level) whose object name matches light_name and that owns a ULightComponent (a sky light does not). The change is one undo step that marks the level dirty; nothing is saved. A request equal to the current intensity changes nothing, records no undo step and answers intensity_changed false. The engine's setter ignores a Static-mobility light, so changing one is an error and nothing is written; an unknown light or a missing intensity is an error too. Color: set_light_color; temperature, radius and the other fields: set_light_properties; shadows: configure_light_shadows; full read-back: get_light_properties.
+// MCP:set_light_intensity - Set the Intensity of one light actor with ULightComponent::SetIntensity and read it back: the actor is the first one in the engine's first world context (normally the editor level) whose object name matches light_name and that owns a ULightComponent (a sky light does not). The change is one undo step that marks the level dirty; nothing is saved. A request equal to the current intensity changes nothing, records no undo step and answers intensity_changed false. The engine's setter ignores a Static-mobility light, so changing one is an error and nothing is written; an unknown light or a missing intensity is an error too. Color: set_light_color; temperature, radius and the other fields: set_light_properties; shadows: set_light_shadow_quality; full read-back: get_light_properties.
+//   @retired set_properties - object_path="<light>.LightComponent", properties={"Intensity":..}
 //   @param light_name - Object name of the light actor (e.g. "PointLight_2"), compared case-insensitively; the Outliner label is not matched
 //   @param intensity - New intensity as a float in the light's own units (lux for a directional light, its intensity units for a local light); not clamped
 //   @returns { light_name, old_intensity, new_intensity, requested_intensity, intensity_set, intensity_changed, intensity_message, light_enabled, light_cast_shadows, light_affect_world, light_mobility, light_type, light_atmosphere_sun_light?, light_attenuation_radius?, light_inner_cone_angle?, light_outer_cone_angle?, light_position: { x, y, z }, light_color: { r, g, b, a } }
@@ -1753,6 +1755,7 @@ TSharedPtr<FJsonObject> HandleSetLightIntensity(const TSharedPtr<FJsonObject>& P
 }
 
 // MCP:set_light_color - Set the LightColor of one light actor with ULightComponent::SetLightColor: the actor is the first one in the engine's first world context (normally the editor level) whose object name matches light_name and that owns a ULightComponent (a sky light does not). The light stores an 8-bit sRGB color, so each channel is clamped to 0-1 and quantized, and color_set compares the stored color with the quantized request; old_color and new_color are the linear readings before and after. The change is one undo step that marks the level dirty, and nothing is saved; a request that quantizes to the stored color changes nothing (color_changed false). The engine's setter ignores a Static-mobility light, so changing one is an error and nothing is written; an unknown light or unparsable color is an error too. Brightness: set_light_intensity; color temperature: set_light_properties; read back: get_light_properties.
+//   @retired set_properties - object_path="<light>.LightComponent", properties={"LightColor":{"R":255,"G":200,"B":150,"A":255}} (8-bit sRGB)
 //   @param light_name - Object name of the light actor (e.g. "PointLight_2"), compared case-insensitively; the Outliner label is not matched
 //   @param color - Color in 'R,G,B,A' or 'R,G,B' format (values 0-1) or hex '#RRGGBB' format; alpha defaults to 1, and in the comma form a part that is not a number reads as 0
 //   @returns { light_name, requested_color, color_set, color_changed, color_message, old_color: { r, g, b, a }, new_color: { r, g, b, a }, light_enabled, light_cast_shadows, light_affect_world, light_intensity, light_mobility, light_type, light_atmosphere_sun_light?, light_attenuation_radius?, light_inner_cone_angle?, light_outer_cone_angle?, light_position: { x, y, z } }
@@ -1819,7 +1822,9 @@ TSharedPtr<FJsonObject> HandleSetLightColor(const TSharedPtr<FJsonObject>& Param
     return Reply;
 }
 
-// MCP:configure_light_shadows - Configure shadow settings for a light actor using preset shadow qualities. Enabled/Disabled switch cast shadows; High, Medium and Low also set ShadowBias, ShadowSlopeBias and ShadowSharpen (0.1/0.1/1.0, 0.2/0.2/0.5, 0.5/0.5/0.0). Everything is read back from the light; it does not touch whether the light affects the world. The change is one undo step that marks the level dirty, and nothing is saved; a light that already has the preset changes nothing and answers shadows_changed false. Changing cast shadows or the bias of a Static-mobility light, which the engine's setters ignore, is an error and nothing is written. Single fields: set_light_properties; cascades: set_directional_light_cascade_settings.
+// MCP:set_light_shadow_quality - Configure shadow settings for a light actor using preset shadow qualities. Enabled/Disabled switch cast shadows; High, Medium and Low also set ShadowBias, ShadowSlopeBias and ShadowSharpen (0.1/0.1/1.0, 0.2/0.2/0.5, 0.5/0.5/0.0). Everything is read back from the light; it does not touch whether the light affects the world. The change is one undo step that marks the level dirty, and nothing is saved; a light that already has the preset changes nothing and answers shadows_changed false. Changing cast shadows or the bias of a Static-mobility light, which the engine's setters ignore, is an error and nothing is written. Single fields: set_light_properties; cascades: set_directional_light_cascade_settings.
+//   @retired set_properties - object_path="<light>.LightComponent", properties={"CastShadows":true,"ShadowBias":..,"ShadowSlopeBias":..,"ShadowSharpen":..} (the presets were High 0.1/0.1/1.0, Medium 0.2/0.2/0.5, Low 0.5/0.5/0.0)
+//   @renamed-from configure_light_shadows
 //   @param light_name - Name of the light actor to configure
 //   @param shadow_settings - Shadow configuration: 'Enabled', 'Disabled', 'High', 'Medium', or 'Low' (case-insensitive); any other name is an error
 //   @returns { light_name, shadow_settings, shadows_configured, shadows_changed, shadow_message, old_cast_shadows, new_cast_shadows, old_affect_world, new_affect_world, shadows_enabled, affect_world, bias_applied, shadow_bias, shadow_slope_bias, shadow_filter_sharpen, light_enabled, light_intensity, light_mobility, light_type, light_atmosphere_sun_light, light_cascade_distribution_exponent, light_cascade_transition_fraction, light_attenuation_radius, light_source_radius, light_source_length, light_inner_cone_angle, light_outer_cone_angle, x, y, z, r, g, b, a }
@@ -1902,7 +1907,7 @@ TSharedPtr<FJsonObject> HandleConfigureLightShadows(const TSharedPtr<FJsonObject
     if (!bConfigured)
     {
         Reply->SetBoolField(TEXT("success"), false);
-        Reply->SetStringField(TEXT("error"), mcp_common::MeasuredOutcomeError(TEXT("configure_light_shadows"), TEXT("shadows_configured")));
+        Reply->SetStringField(TEXT("error"), mcp_common::MeasuredOutcomeError(TEXT("set_light_shadow_quality"), TEXT("shadows_configured")));
     }
     return Reply;
 }
@@ -1957,7 +1962,9 @@ TSharedPtr<FJsonObject> HandleGetRenderingSettings(const TSharedPtr<FJsonObject>
     return Report;
 }
 
-// MCP:configure_post_processing - Apply a post-processing quality preset by setting six renderer console variables with console priority (r.BloomQuality, r.MotionBlurQuality, r.DepthOfFieldQuality, r.AmbientOcclusionLevels, r.LensFlareQuality, r.SSR.Quality); anti-aliasing, global illumination and color grading have none in UE 5.8 and are left alone. Enabled and High set all to 2; Medium sets bloom, depth of field and ambient occlusion to 1, their lowest level above off, and the rest to 0; Disabled and Low set all to 0, so Low equals Disabled. Each variable is read back into post_processing_variables, the *_enabled flags say whether it reads above 0, and one that did not take its level makes success false. The change is engine-wide for this session: no volume is edited, nothing saved or undoable. An unknown preset, or a variable this engine lacks, is an error and nothing changes. Per-volume settings: set_post_process_setting, set_post_process_volume_settings; one variable: set_cvar, get_cvar.
+// MCP:set_post_process_quality - Apply a post-processing quality preset by setting six renderer console variables with console priority (r.BloomQuality, r.MotionBlurQuality, r.DepthOfFieldQuality, r.AmbientOcclusionLevels, r.LensFlareQuality, r.SSR.Quality); anti-aliasing, global illumination and color grading have none in UE 5.8 and are left alone. Enabled and High set all to 2; Medium sets bloom, depth of field and ambient occlusion to 1, their lowest level above off, and the rest to 0; Disabled and Low set all to 0, so Low equals Disabled. Each variable is read back into post_processing_variables, the *_enabled flags say whether it reads above 0, and one that did not take its level makes success false. The change is engine-wide for this session: no volume is edited, nothing saved or undoable. An unknown preset, or a variable this engine lacks, is an error and nothing changes. Per-volume settings: set_post_process_setting, set_post_process_volume_settings; one variable: set_cvar, get_cvar.
+//   @retired set_cvar - one set_cvar per variable, in one execute_batch: r.BloomQuality, r.MotionBlurQuality, r.DepthOfFieldQuality, r.AmbientOcclusionLevels, r.LensFlareQuality, r.SSR.Quality (High 2, Medium 1/0, Low 0)
+//   @renamed-from configure_post_processing
 //   @param post_process_settings - Post-processing setting: 'Enabled', 'Disabled', 'High', 'Medium', or 'Low'; case is ignored
 //   @returns { post_process_settings, post_processing_configured, post_processing_message, post_processing_enabled, bloom_enabled, motion_blur_enabled, depth_of_field_enabled, ambient_occlusion_enabled, lens_flare_enabled, screen_space_reflections_enabled, post_processing_variables: [{ variable, previous, requested, value, applied }], world_name, post_process_volume_count, post_process_volume_details: [{ volume_name, volume_class, volume_enabled, volume_unbound, volume_priority, volume_blend_weight, volume_blend_radius, volume_position: { x, y, z } }], post_processing_recommendations, performance_impact, performance_rating }
 TSharedPtr<FJsonObject> HandleConfigurePostProcessing(const TSharedPtr<FJsonObject>& Params)
@@ -2077,6 +2084,7 @@ UDirectionalLightComponent* ResolveDirectionalLightComponent(const TSharedPtr<FJ
 // set_light_properties works across light types and writes no CSM field.
 
 // MCP:set_directional_light_cascade_settings - Configure Cascaded Shadow Map (CSM) settings on a directional light: dynamic shadow distance (movable/stationary), cascade count, distribution exponent, transition fraction, distance-fadeout fraction, and per-object inset shadows for movable objects. Partial update (idempotent): only fields present are written; the engine setters auto-dedup, and the inset-shadows bit (no setter) is guarded by hand. The edit is one undo step that marks the level dirty, nothing is saved, and a call that changes nothing leaves neither and says changed false. Errors honestly if the actor is not a directional light. Verify by read-back (every field is echoed) or via get_directional_light_cascade_settings.
+//   @retired set_properties - object_path="<light>.DirectionalLightComponent", properties={"DynamicShadowDistanceMovableLight":..,"DynamicShadowCascades":..,"bUseInsetShadowsForMovableObjects":..}
 //   @param light_name [string!] - Name of the directional light actor to modify
 //   @param dynamic_shadow_distance_movable [number] - How far CSM dynamic shadows cover for a movable light, measured from the camera (0 disables)
 //   @param dynamic_shadow_distance_stationary [number] - How far CSM dynamic shadows cover for a stationary light, measured from the camera (0 disables)
@@ -2163,6 +2171,7 @@ TSharedPtr<FJsonObject> HandleSetDirectionalLightCascadeSettings(const TSharedPt
 }
 
 // MCP:get_directional_light_cascade_settings - Read the seven Cascaded Shadow Map (CSM) settings of a directional light: dynamic shadow distance (movable/stationary), cascade count, distribution exponent, transition fraction, distance-fadeout fraction, and per-object inset shadows for movable objects. Round-trips set_directional_light_cascade_settings. Errors honestly if the actor is not a directional light.
+//   @retired get_properties - object_path="<light>.DirectionalLightComponent", property_names=["DynamicShadowDistanceMovableLight","DynamicShadowDistanceStationaryLight","DynamicShadowCascades","CascadeDistributionExponent","CascadeTransitionFraction","ShadowDistanceFadeoutFraction","bUseInsetShadowsForMovableObjects"]
 //   @param light_name [string!] - Name of the directional light actor to query
 //   @returns { light_name, light_subtype, dynamic_shadow_distance_movable, dynamic_shadow_distance_stationary, num_dynamic_shadow_cascades, cascade_distribution_exponent, cascade_transition_fraction, shadow_distance_fadeout_fraction, use_inset_shadows_for_movable_objects }
 TSharedPtr<FJsonObject> HandleGetDirectionalLightCascadeSettings(const TSharedPtr<FJsonObject>& Params)
@@ -2211,11 +2220,12 @@ namespace
     }
 }
 
-// configure_post_processing applies preset buckets globally; set_post_process_volume_settings writes the
+// set_post_process_quality applies preset buckets globally; set_post_process_volume_settings writes the
 // FPostProcessSettings of one specific volume actor and returns the values actually in effect
 // (get_post_process_settings reads them back).
 
 // MCP:set_post_process_volume_settings - Set enabled, priority, film_grain_intensity and motion_blur_amount of a PostProcessVolume in the editor world as one undo step; only the fields you pass change, and film grain and motion blur also get their bOverride flag so they take effect. The level is not saved. Returns applied_count and applied_fields; other settings use set_post_process_setting.
+//   @retired set_properties - object_path=<post-process volume>, properties={"bEnabled":..,"Priority":..,"Settings":{"bOverride_<Name>":true,"<Name>":value}}
 //   @param volume_name - Editor label of the PostProcessVolume in the editor world; object names are not matched.
 //   @param enabled - Whether the volume is enabled (APostProcessVolume bEnabled).
 //   @param priority [number] - Blend priority among overlapping volumes, a number such as 1; a numeric string is also accepted.
@@ -2279,8 +2289,8 @@ TSharedPtr<FJsonObject> HandleSetPostProcessVolumeSettings(
 
 const McpCommandFamilies::FRegistrar Registration =
 {
-    { TEXT("configure_light_shadows"), &HandleConfigureLightShadows },
-    { TEXT("configure_post_processing"), &HandleConfigurePostProcessing },
+    { TEXT("set_light_shadow_quality"), &HandleConfigureLightShadows },
+    { TEXT("set_post_process_quality"), &HandleConfigurePostProcessing },
     { TEXT("get_directional_light_cascade_settings"), &HandleGetDirectionalLightCascadeSettings },
     { TEXT("get_light_properties"), &HandleGetLightProperties },
     { TEXT("get_lighting_quality"), &HandleGetLightingQuality },

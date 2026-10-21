@@ -285,7 +285,7 @@ namespace UEAgentTimelineImpl
 
 // --- Level Sequence assets ----------------------------------------------------------
 
-// MCP:create_level_sequence - Creates a Level Sequence asset at package_path/sequence_name and saves it, with playback range [0, duration) and frame_rate, truncated to whole fps, as both tick resolution and display rate; the end frame is duration times that whole rate, to the nearest frame. If that asset already exists it is loaded and those settings are overwritten, its keys, sections and ranges migrated to the new rate so nothing moves in time; sequence_created tells a new asset from an existing one. Not undoable; another asset class at the path, or a duration shorter than one frame, is an error. To retime an existing sequence use set_sequence_frame_rate or set_sequence_playback_range (duration); list sequences with get_level_sequences.
+// MCP:create_level_sequence - Creates a Level Sequence asset at package_path/sequence_name and saves it, with playback range [0, duration) and frame_rate, truncated to whole fps, as both tick resolution and display rate; the end frame is duration times that whole rate, to the nearest frame. If that asset already exists it is loaded and those settings are overwritten, its keys, sections and ranges migrated to the new rate so nothing moves in time; sequence_created tells a new asset from an existing one. Not undoable; another asset class at the path, or a duration shorter than one frame, is an error. To retime an existing sequence use set_sequence_frame_rate or set_sequence_settings (duration); list sequences with get_level_sequences.
 //   @param sequence_name - Name of the new sequence to create
 //   @param package_path - Target content path, defaults to /Game/Sequences
 //   @param duration - Playback duration in seconds, above 0 and at most 3600, default 10
@@ -428,7 +428,7 @@ TSharedPtr<FJsonObject> HandleGetLevelSequences(const TSharedPtr<FJsonObject>& P
 
 // --- Playback length and frame rate stored in an asset ------------------------------
 
-// MCP:set_sequence_frame_rate - Change the frame rate of a Level Sequence: its tick resolution AND its display rate, as create_level_sequence sets them (one tick per frame). Every key, section and range is migrated to the new rate, so nothing moves in time. To change only the display rate, use set_sequence_display_rate.
+// MCP:set_sequence_frame_rate - Change the frame rate of a Level Sequence: its tick resolution AND its display rate, as create_level_sequence sets them (one tick per frame). Every key, section and range is migrated to the new rate, so nothing moves in time. To change only the display rate, use set_sequence_settings.
 //   @param sequence_name - Name of the sequence to modify
 //   @param frame_rate - New frame rate in fps, must be greater than 0; NTSC rates (23.976, 29.97, 59.94) become N*1000/1001
 //   @returns { sequence_name: string, frame_rate: number, numerator: int, denominator: int, previous_frame_rate: number, frame_rate_set: bool } -- read back from the movie scene
@@ -556,7 +556,7 @@ TSharedPtr<FJsonObject> HandlePlayLevelSequenceRuntime(const TSharedPtr<FJsonObj
     return mcp_common::MakeOkReply(Report);
 }
 
-// MCP:pause_level_sequence_runtime - Pauses, at its current position, the runtime ULevelSequencePlayer whose player_key play_level_sequence_runtime returned. Players live in the PIE or game world and stop resolving once it ends. Returns player_key, paused, playing and current_time in seconds; read it later with get_level_sequence_status_runtime.
+// MCP:pause_level_sequence_runtime - Pauses, at its current position, the runtime ULevelSequencePlayer whose player_key play_level_sequence_runtime returned. Players live in the PIE or game world and stop resolving once it ends. Returns player_key, paused, playing and current_time in seconds; read it later with get_level_sequence_status_runtime. Inverse: resume_level_sequence_runtime.
 //   @param player_key - Player key returned from play_level_sequence_runtime
 //   @returns { player_key: string, paused: bool, playing: bool, current_time: number }
 TSharedPtr<FJsonObject> HandlePauseLevelSequenceRuntime(const TSharedPtr<FJsonObject>& Params)
@@ -579,6 +579,43 @@ TSharedPtr<FJsonObject> HandlePauseLevelSequenceRuntime(const TSharedPtr<FJsonOb
     Report->SetBoolField(TEXT("playing"), Found.Player->IsPlaying());
     Report->SetNumberField(TEXT("current_time"), Found.Player->GetCurrentTime().AsSeconds());
     return mcp_common::MakeOkReply(Report);
+}
+
+// MCP:resume_level_sequence_runtime - Resume, from where it stopped, the runtime ULevelSequencePlayer whose player_key play_level_sequence_runtime returned, after pause_level_sequence_runtime (ULevelSequencePlayer::Play on the same player; play_level_sequence_runtime would make a new player and actor instead). A player already playing is an honest no-op (resumed=false, a note). A key that is unknown, released by stop_level_sequence_runtime or gone with its PIE session is an error. Returns playing and paused read back after the call and current_time in seconds; runtime state only, nothing saved. Read it later with get_level_sequence_status_runtime.
+//   @param player_key - Player key returned from play_level_sequence_runtime
+//   @returns { player_key: string, resumed: bool, playing: bool, paused: bool, current_time: number, note?: string }
+TSharedPtr<FJsonObject> HandleResumeLevelSequenceRuntime(const TSharedPtr<FJsonObject>& Params)
+{
+    namespace Impl = UEAgentTimelineImpl;
+
+    FString PlayerKey;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("player_key"), PlayerKey, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+
+    const Impl::FRuntimePlayerLookup Found = Impl::LookUpRuntimePlayer(RuntimePlayersByKey, PlayerKey);
+    if (Found.Error.IsValid())
+    {
+        return Found.Error;
+    }
+
+    TSharedPtr<FJsonObject> Report = MakeShared<FJsonObject>();
+    Report->SetStringField(TEXT("player_key"), PlayerKey);
+    const bool bWasPlaying = Found.Player->IsPlaying();
+    if (!bWasPlaying)
+    {
+        Found.Player->Play();
+    }
+    const bool bPlaying = Found.Player->IsPlaying();
+    Report->SetBoolField(TEXT("resumed"), !bWasPlaying && bPlaying);
+    Report->SetBoolField(TEXT("playing"), bPlaying);
+    Report->SetBoolField(TEXT("paused"), Found.Player->IsPaused());
+    Report->SetNumberField(TEXT("current_time"), Found.Player->GetCurrentTime().AsSeconds());
+    if (bWasPlaying)
+    {
+        Report->SetStringField(TEXT("note"), TEXT("The player was already playing; nothing changed."));
+        return mcp_common::MakeOkReply(Report);
+    }
+    return mcp_common::MakeOutcomeReply(Report, bPlaying,
+        bPlaying ? FString() : mcp_common::MeasuredOutcomeError(TEXT("resume_level_sequence_runtime"), TEXT("playing")));
 }
 
 // MCP:stop_level_sequence_runtime - Stops the runtime ULevelSequencePlayer whose player_key play_level_sequence_runtime returned, forgets the key and destroys the ALevelSequenceActor hosting it, so the key is invalid afterwards. Returns player_key, stopped (true when a playing or paused player was stopped, read back after Stop) and playing as read just after Stop. A player that had already stopped (it reached its end, say) is still released: success with stopped false and a note. A player still playing or paused after Stop is an error, and the key and its actor are kept. Use pause_level_sequence_runtime to keep the player.
@@ -964,6 +1001,7 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("get_sequence_tracks"), &HandleGetSequenceTracks },
     { TEXT("get_timeline_info"), &HandleGetTimelineInfo },
     { TEXT("pause_level_sequence_runtime"), &HandlePauseLevelSequenceRuntime },
+    { TEXT("resume_level_sequence_runtime"), &HandleResumeLevelSequenceRuntime },
     { TEXT("pause_timeline"), &HandlePauseTimeline },
     { TEXT("play_level_sequence_runtime"), &HandlePlayLevelSequenceRuntime },
     { TEXT("play_timeline"), &HandlePlayTimeline },

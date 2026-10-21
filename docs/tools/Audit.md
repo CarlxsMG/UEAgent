@@ -10,7 +10,7 @@ Back to the [index](README.md).
 
 *Destructive.*
 
-Project-wide reference audit under folder_path: assets with zero referencers ("orphans") and dependencies pointing at a package no longer on disk ("broken"). Metadata-only through the AssetRegistry -- it never LOADS the assets, so it scales to a large project without spiking memory. It returns only a summary plus a report path; read the detail back with read_mcp_audit_file. For one asset rather than a sweep, use get_asset_referencers / get_asset_dependencies; for unused assets only, find_unused_assets.
+Project-wide reference audit under folder_path: assets with zero referencers ("orphans") and dependencies pointing at a package no longer on disk ("broken"). Metadata-only through the AssetRegistry -- it never LOADS the assets, so it scales to a large project without spiking memory. It returns only a summary plus a report path; read the detail back with get_mcp_audit_report. For one asset rather than a sweep, use get_asset_referencers / get_asset_dependencies; for unused assets only, find_unused_assets.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -25,7 +25,7 @@ Project-wide reference audit under folder_path: assets with zero referencers ("o
 
 *Destructive.*
 
-Project-wide compile-sweep: RECOMPILES every Blueprint under folder_path and records error/warning counts. By far the heaviest audit here (it compiles, it does not just read metadata) and it runs synchronously in the editor -- ALWAYS scope it with folder_path on a large project, and lean on max_results, which is a hard cap. It returns only a summary plus a report path; read the detail back with read_mcp_audit_file. To find already-broken Blueprints WITHOUT recompiling anything, use find_erroring_blueprints instead.
+Project-wide compile-sweep: RECOMPILES every Blueprint under folder_path and records error/warning counts. By far the heaviest audit here (it compiles, it does not just read metadata) and it runs synchronously in the editor -- ALWAYS scope it with folder_path on a large project, and lean on max_results, which is a hard cap. It returns only a summary plus a report path; read the detail back with get_mcp_audit_report. To find already-broken Blueprints WITHOUT recompiling anything, use find_erroring_blueprints instead.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -39,7 +39,7 @@ Project-wide compile-sweep: RECOMPILES every Blueprint under folder_path and rec
 
 *Destructive.*
 
-Aggregate report of every project collision profile AND every collision channel (built-in + custom), including which custom ECC_GameTraceChannelN slots are already taken -- the question to ask before add_collision_channel. Cheap: it reads the collision settings in memory, with no AssetRegistry scan and no asset loading, so unlike the other audit_* sweeps it takes no folder_path and no max_results. Returns a summary + a report path (read the detail with read_mcp_audit_file).
+Aggregate report of every project collision profile AND every collision channel (built-in + custom), including which custom ECC_GameTraceChannelN slots are already taken -- the question to ask before add_collision_channel. Cheap: it reads the collision settings in memory, with no AssetRegistry scan and no asset loading, so unlike the other audit_* sweeps it takes no folder_path and no max_results. Returns a summary + a report path (read the detail with get_mcp_audit_report).
 
 No parameters.
 
@@ -49,7 +49,7 @@ No parameters.
 
 *Destructive.*
 
-Project-wide replication audit: for every Blueprint under folder_path, which variables are Replicated (CPF_Net), whether the class itself replicates (AActor::GetIsReplicated on the GeneratedClass CDO), and which UFUNCTIONs are RPCs (FUNC_NetFuncFlags). It returns only a SUMMARY plus a report path -- the full per-Blueprint detail is written to Saved/MCPAudits/ and must be read back with read_mcp_audit_file. For one actor rather than a sweep, use get_actor_replication_info.
+Project-wide replication audit: for every Blueprint under folder_path, which variables are Replicated (CPF_Net), whether the class itself replicates (AActor::GetIsReplicated on the GeneratedClass CDO), and which UFUNCTIONs are RPCs (FUNC_NetFuncFlags). It returns only a SUMMARY plus a report path -- the full per-Blueprint detail is written to Saved/MCPAudits/ and must be read back with get_mcp_audit_report. For one actor rather than a sweep, use get_actor_replication_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -116,7 +116,7 @@ Sweep Widget Blueprints and report which player-visible texts are typed INLINE r
 
 *Destructive.*
 
-Snapshot of every actor in the ACTIVE PIE world, with every property flagged Replicated or SaveGame (generic -- no judgment call about what is "relevant"). It requires a live PIE session: with none running for pie_client_index it errors cleanly instead of silently snapshotting the EDITOR world, which is what makes it usable as co-op evidence -- point it at a client index to prove a value really replicated. On a large world ALWAYS pass class_filter and/or max_actors. Returns a summary plus a report path; read the detail with read_mcp_audit_file.
+Snapshot of every actor in the ACTIVE PIE world, with every property flagged Replicated or SaveGame (generic -- no judgment call about what is "relevant"). It requires a live PIE session: with none running for pie_client_index it errors cleanly instead of silently snapshotting the EDITOR world, which is what makes it usable as co-op evidence -- point it at a client index to prove a value really replicated. On a large world ALWAYS pass class_filter and/or max_actors. Returns a summary plus a report path; read the detail with get_mcp_audit_report.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -126,7 +126,7 @@ Snapshot of every actor in the ACTIVE PIE world, with every property flagged Rep
 
 **Returns:** `{ path: string, truncated: bool, summary: { actor_count: int, actors_seen: int, total_matching_actors: int, max_actors: int, truncated: bool, class_filter: [string], replicated_property_count: int, savegame_property_count: int, savegame_filter_status: "active"|"dead_in_this_run" }, report_size_bytes: int, verification: {...}, verification_checks: [...] } -- class_filter lists the resolved class paths; success is false when the report is missing or empty on disk.`
 
-## `read_mcp_audit_file`
+## `get_mcp_audit_report`
 
 *Read-only.*
 

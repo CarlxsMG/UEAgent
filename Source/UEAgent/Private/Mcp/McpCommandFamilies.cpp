@@ -2,6 +2,7 @@
 
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Mcp/McpToolCatalog.h"
 
 namespace McpCommandFamilies
 {
@@ -26,7 +27,8 @@ namespace McpCommandFamilies
 
     TSharedPtr<FJsonObject> Run(const FString& Command, const TSharedPtr<FJsonObject>& Params)
     {
-        if (const FHandler* Handler = Registry().Find(Command))
+        // A renamed tool's old name runs the new one (the bridge has usually resolved it already).
+        if (const FHandler* Handler = Registry().Find(FMcpToolCatalog::ResolveCallName(Command)))
         {
             return (*Handler)(Params);
         }

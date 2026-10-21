@@ -430,8 +430,55 @@ void FMcpToolCatalog::SetCurrent(TSharedPtr<const FMcpToolCatalog> NewCatalog)
 
 const FMcpToolCatalog::FTool* FMcpToolCatalog::FindTool(const FString& ToolName) const
 {
-	const int32* Index = IndexByName.Find(ToolName);
-	return Index ? &Tools[*Index] : nullptr;
+	if (const int32* Index = IndexByName.Find(ToolName))
+	{
+		return &Tools[*Index];
+	}
+	const int32* RetiredIndex = RetiredIndexByName.Find(ToolName);
+	return RetiredIndex ? &RetiredTools[*RetiredIndex] : nullptr;
+}
+
+FString FMcpToolCatalog::ResolveCallName(const FString& Name, FString* OutNote)
+{
+	const TSharedPtr<const FMcpToolCatalog> Catalog = GetCurrent();
+	if (!Catalog.IsValid())
+	{
+		if (OutNote)
+		{
+			OutNote->Reset();
+		}
+		return Name;
+	}
+	return Catalog->ResolveName(Name, OutNote);
+}
+
+FString FMcpToolCatalog::ResolveName(const FString& Name, FString* OutNote) const
+{
+	if (OutNote)
+	{
+		OutNote->Reset();
+	}
+	if (const FString* NewName = RenamedTools.Find(Name))
+	{
+		if (OutNote)
+		{
+			*OutNote = FString::Printf(
+				TEXT("%s is the old name of %s, which ran this call. Call it %s: the old name is not in the tool list and stops working in UEAgent 3.0."),
+				*Name, **NewName, **NewName);
+		}
+		return *NewName;
+	}
+	if (OutNote)
+	{
+		if (const int32* Index = RetiredIndexByName.Find(Name))
+		{
+			const FTool& Tool = RetiredTools[*Index];
+			*OutNote = FString::Printf(
+				TEXT("%s is retired: it is not in the tool list and stops working in UEAgent 3.0. %s does the same%s%s"),
+				*Tool.Name, *Tool.RetiredFor, Tool.RetiredHow.IsEmpty() ? TEXT(".") : TEXT(": "), *Tool.RetiredHow);
+		}
+	}
+	return Name;
 }
 
 bool FMcpToolCatalog::LooksLikeRotationName(const FString& ParamName)
@@ -554,9 +601,15 @@ TSharedPtr<const FMcpToolCatalog> FMcpToolCatalog::LoadFromFile(const FString& P
 			Tool.Domain = DomainName;
 			(*CommandObj)->TryGetStringField(TEXT("name"), Tool.Name);
 			(*CommandObj)->TryGetStringField(TEXT("description"), Tool.Description);
-			if (Tool.Name.IsEmpty() || Catalog->IndexByName.Contains(Tool.Name))
+			if (Tool.Name.IsEmpty() || Catalog->IndexByName.Contains(Tool.Name) || Catalog->RetiredIndexByName.Contains(Tool.Name))
 			{
 				continue; // no name, or a duplicate: the first one wins, as in the catalog
+			}
+			const TSharedPtr<FJsonObject>* RetiredObj = nullptr;
+			if ((*CommandObj)->TryGetObjectField(TEXT("retired"), RetiredObj) && RetiredObj && RetiredObj->IsValid())
+			{
+				(*RetiredObj)->TryGetStringField(TEXT("use"), Tool.RetiredFor);
+				(*RetiredObj)->TryGetStringField(TEXT("how"), Tool.RetiredHow);
 			}
 			(*CommandObj)->TryGetStringField(TEXT("returns"), Tool.Returns);
 			Tool.Returns.TrimStartAndEndInline();
@@ -712,8 +765,16 @@ TSharedPtr<const FMcpToolCatalog> FMcpToolCatalog::LoadFromFile(const FString& P
 			{
 				ToolJson->SetObjectField(TEXT("annotations"), Tool.Annotations);
 			}
-			ToolsJson.Add(MakeShared<FJsonValueObject>(ToolJson));
 			Tool.InputSchema = InputSchema;
+
+			// A retired tool still runs, so its schema is built like any other, but only FindTool sees it.
+			if (!Tool.RetiredFor.IsEmpty())
+			{
+				Catalog->RetiredIndexByName.Add(Tool.Name, Catalog->RetiredTools.Num());
+				Catalog->RetiredTools.Add(MoveTemp(Tool));
+				continue;
+			}
+			ToolsJson.Add(MakeShared<FJsonValueObject>(ToolJson));
 
 			Catalog->TotalParams += Tool.Params.Num();
 			Catalog->IndexByName.Add(Tool.Name, Catalog->Tools.Num());
@@ -725,6 +786,21 @@ TSharedPtr<const FMcpToolCatalog> FMcpToolCatalog::LoadFromFile(const FString& P
 	{
 		OutError = FString::Printf(TEXT("the catalog '%s' has no tools"), *Path);
 		return nullptr;
+	}
+
+	// Old name -> new name. An old name that is still a tool, or a new name that is not one, is skipped: the call
+	// would run something other than what the old name did, or nothing.
+	const TSharedPtr<FJsonObject>* RenamedObj = nullptr;
+	if (Root->TryGetObjectField(TEXT("renamed"), RenamedObj) && RenamedObj && RenamedObj->IsValid())
+	{
+		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : (*RenamedObj)->Values)
+		{
+			FString NewName;
+			if (Pair.Value.IsValid() && Pair.Value->TryGetString(NewName) && !Catalog->FindTool(Pair.Key) && Catalog->FindTool(NewName))
+			{
+				Catalog->RenamedTools.Add(Pair.Key, NewName);
+			}
+		}
 	}
 
 	TSharedPtr<FJsonObject> ListResult = MakeShared<FJsonObject>();

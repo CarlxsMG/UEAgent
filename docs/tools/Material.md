@@ -2,7 +2,7 @@
 
 # Material
 
-69 tools for materials and their expression graphs, material functions, instances and parameters, parameter collections and Substrate.
+65 tools for materials and their expression graphs, material functions, instances and parameters, parameter collections and Substrate.
 
 Back to the [index](README.md).
 
@@ -25,7 +25,7 @@ Add a scalar or vector (RGBA color) parameter with a new GUID to a Material Para
 
 *Additive.*
 
-Adds a new MaterialAttributeLayers expression to a UMaterial asset, turns on bUseMaterialAttributes (the separate pins such as Base Color stop driving the material), wires the node into MaterialAttributes, recompiles and saves. Not idempotent: each call adds another node. Fails when the save fails; returns connected_material_attributes and num_expressions.
+Adds a new MaterialAttributeLayers expression to a UMaterial asset, turns on bUseMaterialAttributes (the separate pins such as Base Color stop driving the material), wires the node into MaterialAttributes, recompiles and saves. Not idempotent: each call adds another node. Fails when the save fails; returns connected_material_attributes and num_expressions. Unwire: disconnect_to_material_output output_property=MaterialAttributes.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -111,7 +111,7 @@ Wire one material node's output pin into another node's input pin -- the call th
 
 *Destructive.*
 
-Wire two material expression nodes inside a UMaterialFunction graph by name.
+Wire two material expression nodes inside a UMaterialFunction graph by name. Read back: get_material_graph_info on the function; inverse: disconnect_material_expressions with material_function_path.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -127,7 +127,7 @@ Wire two material expression nodes inside a UMaterialFunction graph by name.
 
 *Destructive.*
 
-Connect the Slab BSDF output to the material's Front Material input.  GATED by Substrate: when Substrate is disabled this returns a clear error ("Substrate disabled: cannot connect slab to Front Material...") because the Front Material input is only meaningful with Substrate enabled. When enabled, connects via ConnectMaterialProperty(MP_FrontMaterial) and recompiles.
+Connect the Slab BSDF output to the material's Front Material input.  GATED by Substrate: when Substrate is disabled this returns a clear error ("Substrate disabled: cannot connect slab to Front Material...") because the Front Material input is only meaningful with Substrate enabled. When enabled, connects via ConnectMaterialProperty(MP_FrontMaterial) and recompiles. Unwire: disconnect_to_material_output output_property=FrontMaterial.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -145,7 +145,7 @@ Wire one output of an expression node into a main input of a UMaterial asset (Ba
 |---|---|---|---|
 | `material_path` | string | yes | UMaterial asset path, e.g. "/Game/Materials/M_Rock"; a material instance path fails with Material not found. |
 | `from_node_id` | string | yes | Id of the source expression (from create_material_expression / get_material_graph_info). |
-| `output_property` | string | yes | Material input to feed, case-insensitive: BaseColor, Metallic, Specular, Roughness, Anisotropy, Normal, Tangent, EmissiveColor (or Emissive), Opacity, OpacityMask, WorldPositionOffset (WPO), AmbientOcclusion (AO), Refraction, PixelDepthOffset, SubsurfaceColor. |
+| `output_property` | string | yes | Material input to feed, case-insensitive: BaseColor, Metallic, Specular, Roughness, Anisotropy, Normal, Tangent, EmissiveColor (or Emissive), Opacity, OpacityMask, WorldPositionOffset (WPO), AmbientOcclusion (AO), Refraction, PixelDepthOffset, SubsurfaceColor, FrontMaterial (Substrate), MaterialAttributes. |
 | `from_pin` | string | no | Output pin name on the source node, e.g. "RGB" or "R"; omitted or empty uses its first output. |
 
 **Returns:** `{ material: string, from_node_id: string, output_property: string, connected: bool }`
@@ -167,7 +167,7 @@ Copy parameter values from a source material or material instance into a transie
 
 *Additive.*
 
-Bulk-copy every scalar, vector and texture OVERRIDE from one material instance to another -- the way to clone a calibration onto a sibling instance instead of re-setting parameters one by one. Copies overrides only, so anything the source inherited untouched is not carried, and STATIC SWITCHES are not copied at all (set those with set_material_instance_static_switch). Read the copied counts in the reply and verify with get_material_parameters; diff_material_instances shows what still differs.
+Bulk-copy every scalar, vector and texture OVERRIDE from one material instance to another -- the way to clone a calibration onto a sibling instance instead of re-setting parameters one by one. Copies overrides only, so anything the source inherited untouched is not carried, and STATIC SWITCHES are not copied at all (set those with set_material_instance_parameter). Read the copied counts in the reply and verify with get_material_parameters; diff_material_instances shows what still differs.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -207,7 +207,7 @@ Create a new base material asset (UMaterial) -- the graph-owning master whose pa
 
 *Additive.*
 
-Add ONE node to a material graph -- or to a material function's internal graph -- by expression class path (e.g. /Script/Engine.MaterialExpressionConstant, ...TextureSample, ...ScalarParameter), at a graph position. The building block of headless material authoring: create the nodes, then wire them with connect_material_expressions and connect_to_material_output (inside a function: connect_material_function_pins, then recompile_material_function). The node arrives UNCONNECTED, so nothing renders differently until it is wired -- verify with get_material_graph_info and get_material_stats, not with the success flag.
+Add ONE node to a material graph -- or to a material function's internal graph -- by expression class path (e.g. /Script/Engine.MaterialExpressionConstant, ...TextureSample, ...ScalarParameter), at a graph position. The building block of headless material authoring: create the nodes, then wire them with connect_material_expressions and connect_to_material_output (inside a function: connect_material_function_pins, then recompile_material_function). The node arrives UNCONNECTED, so nothing renders differently until it is wired -- verify with get_material_graph_info and get_material_stats, not with the success flag. Inverse: delete_material_expression (with material_function_path inside a function).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -335,14 +335,15 @@ Create a USubsurfaceProfile asset named name in package_path (default /Game/Game
 
 *Destructive.*
 
-Delete ONE node from a material graph by name. Deliberately one at a time, and that is the safe way to empty a graph: the engine's bulk delete_all_material_expressions can leave half the nodes behind with no error, and a rebuild on top then produces duplicate parameter names that no parameter listing reveals (duplicates collapse by name). Loop this instead, re-reading get_material_graph_info until its expression_count reaches 0. The underlying engine call also returns false while having done the work, so count the nodes rather than trusting the flag.
+Delete ONE node from a material graph -- or from a material function's internal graph -- by name. Deliberately one at a time, and that is the safe way to empty a graph: the engine's bulk delete_all_material_expressions can leave half the nodes behind with no error, and a rebuild on top then produces duplicate parameter names that no parameter listing reveals (duplicates collapse by name). Loop this instead, re-reading get_material_graph_info until its expression_count reaches 0. The underlying engine call also returns false while having done the work, so count the nodes rather than trusting the flag. Inside a function (material_function_path, or a function path in material_path) the links into the node are broken, the node leaves the function's expressions and the reply re-reads them (deleted, expression_count); the change stays in memory until recompile_material_function saves it. Inverse of create_material_expression; a node that is not there is an error and nothing changes.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `material_path` | string | yes | Full path to the material (e.g., '/Game/Materials/MyMaterial.MyMaterial') |
+| `material_path` | string | yes | Full path to the material (e.g., '/Game/Materials/MyMaterial.MyMaterial'); a UMaterialFunction path is accepted too and deletes the node inside that function |
 | `expression_name` | string | yes | Name of the material expression to delete |
+| `material_function_path` | string | no | Alias of material_path that addresses a UMaterialFunction (or material layer): the node is deleted from the function's graph |
 
-**Returns:** `{ material_path: string, expression_name: string, success: bool }`
+**Returns:** `{ material_path: string, material_function_path?: string, expression_name: string, deleted?: bool, expression_count?: int, success: bool }`
 
 ## `delete_material_function_input`
 
@@ -370,16 +371,6 @@ Delete a UMaterialExpressionFunctionOutput node from a material function (invers
 
 **Returns:** `{ function_path: string, node_id: string, deleted: bool, already_absent: bool, num_inputs: number, num_outputs: number }`
 
-## `detect_substrate_enabled`
-
-*Read-only.*
-
-Report whether Substrate (Strata) materials are enabled in this editor.  Always works. Returns substrate_enabled (from Substrate::IsSubstrateEnabled), the r.Substrate cvar value, and a note when disabled. Enabling Substrate requires editing config and restarting the editor.
-
-No parameters.
-
-**Returns:** `{ substrate_enabled: bool, r_substrate_cvar: int, note?: string, detected: bool }`
-
 ## `diff_material_instances`
 
 *Read-only.*
@@ -397,15 +388,16 @@ Diff two Material Instance Constants: what side B overrides differ from side A (
 
 *Destructive, idempotent.*
 
-Disconnect an input of a material expression (inverse of connect_material_expressions).  Idempotent: an input that is already disconnected returns already_disconnected=true (still success — the expression exists, there simply was no connection to break).
+Disconnect an input of a material expression (inverse of connect_material_expressions) -- in a material, or inside a material function's graph (inverse of connect_material_function_pins) when material_function_path, or a function path in material_path, is given.  Idempotent: an input that is already disconnected returns already_disconnected=true (still success — the expression exists, there simply was no connection to break). Inside a function the change stays in memory until recompile_material_function saves it.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `material_path` | string | yes | Full path to the material (e.g., '/Game/Materials/MyMaterial.MyMaterial') |
+| `material_path` | string | yes | Full path to the material (e.g., '/Game/Materials/MyMaterial.MyMaterial'); a UMaterialFunction path is accepted too and disconnects inside that function |
 | `to_expression_name` | string | yes | Name of the destination material expression whose input is disconnected |
 | `to_input_name` | string | yes | Name of the input pin to disconnect (empty = first input) |
+| `material_function_path` | string | no | Alias of material_path that addresses a UMaterialFunction (or material layer): the input is disconnected inside the function's graph |
 
-**Returns:** `{ material_path: string, to_expression_name: string, to_input_name: string, disconnected: bool, already_disconnected: bool, success: bool }`
+**Returns:** `{ material_path: string, material_function_path?: string, to_expression_name: string, to_input_name: string, disconnected: bool, already_disconnected: bool, success: bool }`
 
 ## `disconnect_to_material_output`
 
@@ -416,7 +408,7 @@ Disconnect a material output property (inverse of connect_to_material_output).  
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `material_path` | string | yes | Material asset path. |
-| `output_property` | string | yes | BaseColor, Metallic, Roughness, Normal, Emissive, Opacity, OpacityMask, Specular, ... (same strings as connect_to_material_output) |
+| `output_property` | string | yes | BaseColor, Metallic, Roughness, Normal, Emissive, Opacity, OpacityMask, Specular, ... (same strings as connect_to_material_output), FrontMaterial (the Substrate slab wire connect_substrate_slab_to_material makes) and MaterialAttributes (the wire add_material_attribute_layers_node makes) included |
 
 **Returns:** `{ material: string, output_property: string, disconnected: bool, already_disconnected: bool }`
 
@@ -492,7 +484,7 @@ Read the expression graph of a UMaterial asset -- or of a UMaterialFunction / ma
 
 *Read-only.*
 
-One-call overview of a material instance (constant, or any other UMaterialInstance): parent material path, name and class, COUNTS of scalar/vector/texture overrides, base property overrides, static switches and static component masks, and the base property overrides themselves -- blend mode, two-sided, shading model and opacity mask clip value, each with its own bOverride_ flag. The flag matters as much as the value: an override that is false means the parent's setting wins whatever value is stored, and a material that looks wrong despite correct parameters is often a blend-mode override. A triage read for parameters -- counts, not values, so it can say "there are 14 static switches here" but never which ones are on: for parameter values use get_material_parameters (parameter_type all includes the static switches). set_material_instance_parent and set_material_instance_base_overrides write what it reports.
+One-call overview of a material instance (constant, or any other UMaterialInstance): parent material path, name and class, COUNTS of scalar/vector/texture overrides, base property overrides, static switches and static component masks, and the base property overrides themselves -- blend mode, two-sided, shading model and opacity mask clip value, each with its own bOverride_ flag. The flag matters as much as the value: an override that is false means the parent's setting wins whatever value is stored, and a material that looks wrong despite correct parameters is often a blend-mode override. A triage read for parameters -- counts, not values, so it can say "there are 14 static switches here" but never which ones are on: for parameter values use get_material_parameters (parameter_type all includes the static switches). set_material_instance_parent and set_properties write what it reports.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -518,7 +510,7 @@ Is this parameter set on the INSTANCE, or just inherited from the parent? Return
 
 *Read-only.*
 
-Read a material's layer stack: the layer functions and blend functions it uses, in order, with has_layers telling you whether the material is layered at all. Check this before any set_material_layer_parameter call -- on a non-layered material the layer indices mean nothing, and here is where you learn which index is which surface.
+Read a material's layer stack: the layer functions and blend functions it uses, in order, with has_layers telling you whether the material is layered at all. Check this before any set_material_instance_parameter call -- on a non-layered material the layer indices mean nothing, and here is where you learn which index is which surface.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -606,6 +598,16 @@ Is this material allowed to be used on that kind of geometry? Reads one EMateria
 | `usage` | string | yes | Usage flag name, with or without the MATUSAGE_ prefix (e.g., 'SkeletalMesh' or 'MATUSAGE_SkeletalMesh') |
 
 **Returns:** `{ material_path: string, usage: string, enabled: bool, success: bool }`
+
+## `is_substrate_enabled`
+
+*Read-only.*
+
+Report whether Substrate (Strata) materials are enabled in this editor.  Always works. Returns substrate_enabled (from Substrate::IsSubstrateEnabled), the r.Substrate cvar value, and a note when disabled. Enabling Substrate requires editing config and restarting the editor.
+
+No parameters.
+
+**Returns:** `{ substrate_enabled: bool, r_substrate_cvar: int, note?: string, detected: bool }`
 
 ## `recompile_material_function`
 
@@ -767,22 +769,6 @@ Set properties on an existing UMaterialExpressionFunctionOutput (located by node
 
 **Returns:** `{ function_path: string, node_id: string, output_name: string, applied: bool }`
 
-## `set_material_instance_base_overrides`
-
-*Destructive, idempotent.*
-
-Set one or more base property overrides (BasePropertyOverrides) on a Material Instance Constant. Each provided axis sets BOTH its bOverride_ flag and value; omitted axes are left untouched. Persists to the asset.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `material_instance_path` | string | yes | Content path to the UMaterialInstanceConstant, e.g. /Game/MyGame/MI_Example |
-| `blend_mode` | string | no | Optional EBlendMode name ("Translucent" or "BLEND_Translucent"): Opaque/Masked/Translucent/Additive/Modulate/AlphaComposite/AlphaHoldout. |
-| `two_sided` | boolean | no | Optional bool to override the two-sided flag. |
-| `shading_model` | string | no | Optional EMaterialShadingModel name ("Unlit" or "MSM_Unlit"): Unlit/DefaultLit/Subsurface/ClearCoat/... |
-| `opacity_mask_clip_value` | number | no | Optional float to override the opacity mask clip value. |
-
-**Returns:** `{ material_instance_path: string, applied_count: int, saved: bool, override_blend_mode: bool, blend_mode: string, override_two_sided: bool, two_sided: bool, override_shading_model: bool, shading_model: string, override_opacity_mask_clip_value: bool, opacity_mask_clip_value: float, blend_mode_warning?: string, shading_model_warning?: string }`
-
 ## `set_material_instance_dynamic_parameter`
 
 *Destructive, idempotent.*
@@ -805,14 +791,16 @@ Set a scalar, vector (color) or texture parameter override on a transient Materi
 
 *Destructive, idempotent.*
 
-Set a scalar, vector, texture or static-switch global parameter on a Material Instance Constant asset and re-read it: set comes from the re-read (the engine setter always returns false), plus value_after and overridden_after. Malformed vectors are rejected. Marks the package dirty; does not save.
+Set a parameter override on a Material Instance Constant asset and re-read it: a scalar, vector or texture global parameter (set comes from the re-read, as the engine setter always returns false, plus value_after and overridden_after; the package is marked dirty, not saved), a static switch or static component mask (its static permutation rebuilt and the instance saved), or, with layer_index, a scalar, vector or texture parameter of one layer of a layered instance. Malformed vectors are rejected. set_material_instance_parameter_override toggles or clears overrides; set_material_instance_dynamic_parameter writes a transient MID.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `instance_path` | string | yes | Asset path of the UMaterialInstanceConstant, e.g. "/Game/Materials/MI_Rock". |
 | `param_name` | string | yes | Parameter name as defined in the parent material, e.g. "BaseTint"; only global parameters are reached, not layer parameters. |
 | `value` | any | no | Value. Scalar: a number (JSON number or numeric string). Vector: '(R=..,G=..,B=..,A=..)', '[r,g,b,a]', '[r,g,b]', 'r,g,b,a', 'r,g,b', or a real JSON array of 3-4 numbers; anything else is REJECTED (never written as black). Texture: an asset path. Static switch: a bool or 'true'/'false'. |
-| `param_type` | string | no | "scalar" \| "vector" \| "texture" \| "static_switch" (optional, inferred from the value: a JSON array => vector, a JSON bool => static_switch, a JSON number => scalar, a string starting with '/' => texture, with '(' or '[' => vector, else scalar. A bool passed AS A STRING still reads as scalar, so pass param_type explicitly in that case) |
+| `association` | string | no | Optional, static switch or component mask: GlobalParameter (default), LayerParameter or BlendParameter |
+| `layer_index` | number | no | Optional: the zero-based layer of a layered instance; with a scalar, vector or texture param_type it writes that layer's parameter |
+| `param_type` | string | no | "scalar" \| "vector" \| "texture" \| "static_switch" \| "static_component_mask" (a value [r, g, b, a] of bools) (optional, inferred from the value: a JSON array => vector, a JSON bool => static_switch, a JSON number => scalar, a string starting with '/' => texture, with '(' or '[' => vector, else scalar. A bool passed AS A STRING still reads as scalar, so pass param_type explicitly in that case) |
 
 **Returns:** `{ instance: string, instance_path: string, param_name: string, param_type: string, value_format?: string, set: bool, value_after: number|object|string|bool|null, overridden_after: bool, value_requested: number|object|string|bool, requested: {...} }`
 
@@ -845,62 +833,11 @@ Re-parent a material instance onto a different base material -- how you swap an 
 
 **Returns:** `{ material_instance_path: string, old_parent: string, new_parent: string, changed: bool }`
 
-## `set_material_instance_static_component_mask`
-
-*Destructive, idempotent.*
-
-Set a static component-mask (R/G/B/A bools) parameter override on a Material Instance Constant, rebuild the static permutation and persist. Reads back via GetParameterValue. Editor-only.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `material_instance_path` | string | yes | Content path to the UMaterialInstanceConstant. |
-| `parameter_name` | string | yes | Name of the static component-mask parameter. |
-| `r` | boolean | no | Optional bool channel mask (default false). |
-| `g` | boolean | no | Optional bool channel mask (default false). |
-| `b` | boolean | no | Optional bool channel mask (default false). |
-| `a` | boolean | no | Optional bool channel mask (default false). |
-| `association` | string | no | Optional EMaterialParameterAssociation: "Global" (default), "Layer", or "Blend". |
-| `layer_index` | number | no | Optional zero-based index for Layer/Blend association (ignored for Global). |
-
-**Returns:** `{ material_instance_path: string, parameter_name: string, association: string, requested: {r,g,b,a}, value: {r,g,b,a}, found: bool, saved: bool }`
-
-## `set_material_instance_static_switch`
-
-*Destructive, idempotent.*
-
-Set a static-switch (static bool) parameter override on a Material Instance Constant, then rebuild the static permutation and persist. Reads the value back via the getter (the engine value-setter wrapper always returns false, so its return is never trusted). Editor-only.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `material_instance_path` | string | yes | Content path to the UMaterialInstanceConstant. |
-| `parameter_name` | string | yes | Name of the static-switch parameter. |
-| `value` | boolean | yes | Bool value to assign to the switch. |
-| `association` | string | no | Optional EMaterialParameterAssociation: "Global" (default), "Layer", or "Blend". |
-| `layer_index` | number | no | Optional zero-based index for Layer/Blend association (ignored for Global). |
-
-**Returns:** `{ material_instance_path: string, parameter_name: string, association: string, requested_value: bool, value: bool, found: bool, saved: bool }`
-
-## `set_material_layer_parameter`
-
-*Destructive, idempotent.*
-
-Write a scalar / vector / texture parameter scoped to ONE layer of a layered material instance (addressed by zero-based layer_index), so each layer of a blend keeps its own tiling, tint or texture. Different from set_material_instance_parameter_override, which targets the Global association and would hit the wrong slot on a layered material. Do not trust the success flag -- the engine's setters are known to report failure while doing the work; re-read with get_material_parameters (parameter_name, association Layer, layer_index).
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `material_instance_path` | string | yes | Content path to the MIC, e.g. /Game/MyGame/MI_Example |
-| `parameter_name` | string | yes | Name of the parameter to set |
-| `parameter_type` | string | yes | One of "scalar", "vector", "texture" |
-| `layer_index` | number | yes | Zero-based layer index (for LayerParameter association) |
-| `value` | any | yes | For scalar: a float. For vector: dict {r, g, b, a}. For texture: a content path string. |
-
-**Returns:** `{ material_instance_path: string, parameter_name: string, layer_index: int, success: bool }`
-
 ## `set_material_layer_stack`
 
 *Destructive, idempotent.*
 
-Define which material-layer and blend functions a layered material instance stacks, in order -- how you compose a surface (base + dirt + snow) out of reusable layer functions instead of editing the base material graph. Order is significant and layers are addressed downstream by index (set_material_layer_parameter), so re-stacking renumbers existing per-layer values. Read the result back with get_material_layer_stack.
+Define which material-layer and blend functions a layered material instance stacks, in order -- how you compose a surface (base + dirt + snow) out of reusable layer functions instead of editing the base material graph. Order is significant and layers are addressed downstream by index (set_material_instance_parameter), so re-stacking renumbers existing per-layer values. Read the result back with get_material_layer_stack.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

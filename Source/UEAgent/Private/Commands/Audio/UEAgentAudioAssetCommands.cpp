@@ -27,6 +27,7 @@
 #include "UObject/StructOnScope.h"      // FStructOnScope (the scratch copy a settings merge runs on)
 #include "UObject/UnrealType.h"         // FProperty / FNumericProperty (staged sound wave properties)
 #include "UObject/EnumProperty.h"       // FEnumProperty (the JSON kind a settings key of an enum must hold)
+#include "ScopedTransaction.h"          // remove_submix_effect_from_chain: one undo step
 
 /**
  * Sound asset authoring commands: sound classes and their hierarchy, mixes, attenuation, concurrency,
@@ -349,7 +350,7 @@ namespace
 // ---------------------------------------------------------------------------- //
 // create_sound_class
 // ---------------------------------------------------------------------------- //
-// MCP:create_sound_class - Create a USoundClass asset at package_path/name (package_path defaults to /Game/Audio) and save it. A sound class already at that path is loaded instead (already_exists true, created false) and the volume and pitch you pass overwrite its values before it is saved again; omitted ones keep their current values, the engine defaults on a new class. Idempotent. The reply reads volume and pitch back from the asset, and applied_volume / applied_pitch say which were written. An invalid path, or an asset of another class there, is an error; a failed save (for example during PIE) makes success false with saved=false and save_error. Edit the other properties with set_sound_class_properties, read them with get_sound_class_properties, and wire the hierarchy with set_sound_class_parent.
+// MCP:create_sound_class - Create a USoundClass asset at package_path/name (package_path defaults to /Game/Audio) and save it. A sound class already at that path is loaded instead (already_exists true, created false) and the volume and pitch you pass overwrite its values before it is saved again; omitted ones keep their current values, the engine defaults on a new class. Idempotent. The reply reads volume and pitch back from the asset, and applied_volume / applied_pitch say which were written. An invalid path, or an asset of another class there, is an error; a failed save (for example during PIE) makes success false with saved=false and save_error. Edit the other properties with set_properties, read them with get_sound_class_properties, and wire the hierarchy with set_sound_class_parent.
 //   @param name - Name of the new Sound Class asset
 //   @param package_path - Target content path, defaults to /Game/Audio
 //   @param volume - Optional Volume multiplier on FSoundClassProperties; also written to a class that already exists, unchanged when omitted
@@ -457,7 +458,7 @@ TSharedPtr<FJsonObject> HandleCreateSoundMix(const TSharedPtr<FJsonObject>& Para
 // ---------------------------------------------------------------------------- //
 // create_sound_attenuation
 // ---------------------------------------------------------------------------- //
-// MCP:create_sound_attenuation - Create a USoundAttenuation asset at package_path/name, or load the one already there, then force bAttenuate on, apply the optional falloff_distance and sphere radius, and save it (re-running edits the existing asset). Returns the values read back; set_sound_attenuation_properties edits every other field.
+// MCP:create_sound_attenuation - Create a USoundAttenuation asset at package_path/name, or load the one already there, then force bAttenuate on, apply the optional falloff_distance and sphere radius, and save it (re-running edits the existing asset). Returns the values read back; set_properties edits every other field.
 //   @param name - Name of the new Sound Attenuation asset
 //   @param package_path - Target content path, defaults to /Game/Audio
 //   @param falloff_distance - FalloffDistance in Unreal units (cm): how far beyond the inner shape the volume fades out. Unchanged when omitted.
@@ -523,7 +524,7 @@ TSharedPtr<FJsonObject> HandleCreateSoundAttenuation(const TSharedPtr<FJsonObjec
 // ---------------------------------------------------------------------------- //
 // create_sound_concurrency
 // ---------------------------------------------------------------------------- //
-// MCP:create_sound_concurrency - Create a USoundConcurrency asset at package_path/name, or load the one already there, optionally set MaxCount, and save it. Returns max_count read back, created, already_exists and saved; set_sound_concurrency_properties edits the other concurrency settings.
+// MCP:create_sound_concurrency - Create a USoundConcurrency asset at package_path/name, or load the one already there, optionally set MaxCount, and save it. Returns max_count read back, created, already_exists and saved; set_properties edits the other concurrency settings.
 //   @param name - Name of the new Sound Concurrency asset
 //   @param package_path - Target content path, defaults to /Game/Audio
 //   @param max_count - Most sounds of this group that play at once (MaxCount); values below 1 become 1 and fractions are truncated. Unchanged when omitted.
@@ -596,7 +597,7 @@ TSharedPtr<FJsonObject> HandleCreateSoundSubmix(const TSharedPtr<FJsonObject>& P
 // preset asset if effect_preset_path is given; else NewObjects a concrete preset
 // subclass into the submix's package), appends it to SubmixEffectChain, and saves.
 // ---------------------------------------------------------------------------- //
-// MCP:add_submix_effect_to_chain - Append one effect preset to the end of a USoundSubmix's effect chain and save the submix. effect_preset_path wins: that existing USoundEffectSubmixPreset asset is appended by reference. Otherwise a new preset of effect_preset_class, or, when neither is given, of a concrete class found by reflection (SubmixEffectDynamicsProcessorPreset when it is loaded), is created inside the submix's own package under a unique <Submix>_Effect name; resolved_from says which of the three ran. Every call appends another entry, duplicates included. A submix or preset that does not load, or a class that is not a concrete preset subclass, is an error; a failed save makes success false with saved=false and save_error. Read the chain with get_submix_effect_chain and tune an entry with set_submix_effect_settings; a soundfield submix takes add_soundfield_effect_to_submix.
+// MCP:add_submix_effect_to_chain - Append one effect preset to the end of a USoundSubmix's effect chain and save the submix. effect_preset_path wins: that existing USoundEffectSubmixPreset asset is appended by reference. Otherwise a new preset of effect_preset_class, or, when neither is given, of a concrete class found by reflection (SubmixEffectDynamicsProcessorPreset when it is loaded), is created inside the submix's own package under a unique <Submix>_Effect name; resolved_from says which of the three ran. Every call appends another entry, duplicates included. A submix or preset that does not load, or a class that is not a concrete preset subclass, is an error; a failed save makes success false with saved=false and save_error. Read the chain with get_submix_effect_chain and tune an entry with set_submix_effect_settings; a soundfield submix takes add_soundfield_effect_to_submix. Inverse: remove_submix_effect_from_chain.
 //   @param submix_path - Full content path of the target USoundSubmix
 //   @param effect_preset_path - Optional existing USoundEffectSubmixPreset asset to append by reference; wins over effect_preset_class
 //   @param effect_preset_class - Optional concrete USoundEffectSubmixPreset subclass (short name or path) to instantiate in the submix's package; with neither preset param a class is picked by reflection
@@ -691,6 +692,58 @@ TSharedPtr<FJsonObject> HandleAddSubmixEffectToChain(const TSharedPtr<FJsonObjec
     ResultObj->SetNumberField(TEXT("chain_length"), Submix->SubmixEffectChain.Num());
 
     return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("add_submix_effect_to_chain"), SaveError);
+}
+
+// MCP:remove_submix_effect_from_chain - Remove the entry at effect_index from a USoundSubmix's effect chain, in one undo step, notify the submix of the edit (as the Details panel does, so a running audio device rebuilds the chain) and save the submix. Inverse of add_submix_effect_to_chain; the later entries move up one index. The preset itself is not deleted: a preset add_submix_effect_to_chain made inside the submix package stays in it unreferenced, one appended by path stays where it was. An index out of range or a submix that does not load is an error and nothing changes; a failed save makes success false with save_error. Read the chain first with get_submix_effect_chain; a soundfield submix's effects: remove_soundfield_effect.
+//   @param submix_path - Full content path of the target USoundSubmix
+//   @param effect_index [int] - 0-based position in the chain, as get_submix_effect_chain lists it
+//   @returns { submix_path: string, effect_index: int, removed_effect: string, removed_effect_class: string, removed: bool, chain_length: int, chain: [string], saved: bool, save_error?: string }
+TSharedPtr<FJsonObject> HandleRemoveSubmixEffectFromChain(const TSharedPtr<FJsonObject>& Params)
+{
+    FString SubmixPath;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("submix_path"), SubmixPath)) { return Missing; }
+    int32 EffectIndex = 0;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("effect_index"), EffectIndex)) { return Missing; }
+
+    USoundSubmix* Submix = nullptr;
+    if (TSharedPtr<FJsonObject> Error = AudioAsset_Load(SubmixPath, TEXT("USoundSubmix"), Submix)) { return Error; }
+    if (!Submix->SubmixEffectChain.IsValidIndex(EffectIndex))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("effect_index %d is out of range: the chain has %d entries; nothing was changed"), EffectIndex, Submix->SubmixEffectChain.Num()));
+    }
+
+    const USoundEffectSubmixPreset* Removed = Submix->SubmixEffectChain[EffectIndex];
+    const FString RemovedName = Removed ? Removed->GetPathName() : FString();
+    const FString RemovedClass = Removed ? Removed->GetClass()->GetName() : FString();
+
+    const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "RemoveSubmixEffect", "MCP: Remove Submix Effect"));
+    Submix->Modify();
+    Submix->SubmixEffectChain.RemoveAt(EffectIndex);
+    if (FProperty* ChainProperty = USoundSubmix::StaticClass()->FindPropertyByName(GET_MEMBER_NAME_CHECKED(USoundSubmix, SubmixEffectChain)))
+    {
+        FPropertyChangedEvent ChangedEvent(ChainProperty, EPropertyChangeType::ArrayRemove);
+        // PostEditChangeProperty is protected on USoundSubmix; UObject declares it public.
+        static_cast<UObject*>(Submix)->PostEditChangeProperty(ChangedEvent);
+    }
+
+    FString SaveError;
+    const bool bSaved = mcp_common::SaveAssetPackage(Submix->GetOutermost(), Submix, SaveError);
+
+    TArray<FString> Chain;
+    for (const TObjectPtr<USoundEffectSubmixPreset>& Entry : Submix->SubmixEffectChain)
+    {
+        Chain.Add(Entry ? Entry->GetName() : FString(TEXT("None")));
+    }
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("submix_path"), Submix->GetPathName());
+    ResultObj->SetNumberField(TEXT("effect_index"), EffectIndex);
+    ResultObj->SetStringField(TEXT("removed_effect"), RemovedName);
+    ResultObj->SetStringField(TEXT("removed_effect_class"), RemovedClass);
+    ResultObj->SetBoolField(TEXT("removed"), true);
+    ResultObj->SetNumberField(TEXT("chain_length"), Submix->SubmixEffectChain.Num());
+    ResultObj->SetArrayField(TEXT("chain"), mcp_common::StringsToJson(Chain));
+    return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("remove_submix_effect_from_chain"), SaveError);
 }
 
 // ---------------------------------------------------------------------------- //
@@ -958,6 +1011,7 @@ namespace
 }
 
 // MCP:set_sound_concurrency_properties - Merge fields into a SoundConcurrency asset's Concurrency settings (maxCount, resolutionRule, volume scaling...; absent keys kept), clamp to ClampMin/ClampMax and save; set_properties neither clamps nor saves. Keys match field names case-insensitively. An empty settings object, a key that names no field (the error lists them), a null value, or a value that is not of the field's kind or does not convert is an error and nothing changes. A failed save makes success false.
+//   @retired set_properties - object_path=<concurrency>, properties={"Concurrency":{"MaxCount":..,...}}, clamp=true, save=true
 //   @param concurrency_path - Full content path of the target USoundConcurrency.
 //   @param settings - Object of FSoundConcurrencySettings fields to merge (maxCount(int>=1), bLimitToOwner(bool), resolutionRule(enum name), retriggerTime, volumeScale(0..1), volumeScaleMode(enum), bVolumeScaleCanRelease, volumeScaleAttackTime, volumeScaleReleaseTime, voiceStealReleaseTime); absent keys untouched. Keys match the field names case-insensitively; an empty object, a key that names no field, a null value or a value that does not convert is an error and nothing is changed.
 //   @returns { concurrency_path: string, asset_class: string, settings: object, applied_keys: [string], saved: bool }
@@ -975,6 +1029,7 @@ TSharedPtr<FJsonObject> HandleSetSoundConcurrencyProperties(const TSharedPtr<FJs
 }
 
 // MCP:get_sound_concurrency_properties - Read the whole FSoundConcurrencySettings struct (maxCount, bLimitToOwner, resolutionRule, retriggerTime, volume scaling, voice stealing) of a USoundConcurrency asset as one settings object, with the keys set_sound_concurrency_properties takes, plus asset_class. A convenience over get_properties on its Concurrency property, shaped for that write tool. Read-only.
+//   @retired get_properties - object_path=<concurrency asset>, property_names=["Concurrency"]
 //   @param concurrency_path - Full content path of the target USoundConcurrency.
 //   @returns { concurrency_path: string, asset_class: string, settings: object }
 TSharedPtr<FJsonObject> HandleGetSoundConcurrencyProperties(const TSharedPtr<FJsonObject>& Params)
@@ -1004,6 +1059,7 @@ namespace
 }
 
 // MCP:set_sound_attenuation_properties - Merge fields into a SoundAttenuation asset's Attenuation settings (absent keys kept), clamp to ClampMin/ClampMax and save; set_properties neither clamps nor saves. Keys match field names case-insensitively. An empty settings object, a key that names no field (the error lists them), a null value, or a value that is not of the field's kind or does not convert is an error and nothing changes. Plugin sub-objects are not reached. A failed save makes success false.
+//   @retired set_properties - object_path=<attenuation>, properties={"Attenuation":{"FalloffDistance":..,...}}, clamp=true, save=true
 //   @param attenuation_path - Full content path of the target USoundAttenuation.
 //   @param settings - Object of FSoundAttenuationSettings/FBaseAttenuationSettings fields to merge; absent keys untouched. e.g. bAttenuate, bSpatialize, attenuationShape(Sphere/Capsule/Box/Cone), distanceAlgorithm, falloffDistance, dBAttenuationAtMax(-60..0), attenuationShapeExtents{x,y,z}, bAttenuateWithLPF, lPFFrequencyAtMin/Max, bEnableOcclusion, occlusionVolumeAttenuation, bEnableReverbSend, reverbWetLevelMin/Max. Nested plugin sub-objects (pluginSettings, audioLinkSettingsOverride) are NOT authored here. Keys match the field names case-insensitively; an empty object, a key that names no field, a null value or a value that does not convert is an error and nothing is changed.
 //   @returns { attenuation_path: string, asset_class: string, settings: object, applied_keys: [string], saved: bool }
@@ -1021,6 +1077,7 @@ TSharedPtr<FJsonObject> HandleSetSoundAttenuationProperties(const TSharedPtr<FJs
 }
 
 // MCP:get_sound_attenuation_properties - Read the whole FSoundAttenuationSettings struct (shape, falloff, spatialization, LPF, occlusion, reverb send) of a USoundAttenuation asset as one settings object, with the keys set_sound_attenuation_properties takes, plus asset_class. A convenience over get_properties on its Attenuation property, shaped for that write tool; it reads the asset, not what an audio component applies (get_audio_component_properties). Read-only.
+//   @retired get_properties - object_path=<attenuation asset>, property_names=["Attenuation"]
 //   @param attenuation_path - Full content path of the target USoundAttenuation.
 //   @returns { attenuation_path: string, asset_class: string, settings: object }
 TSharedPtr<FJsonObject> HandleGetSoundAttenuationProperties(const TSharedPtr<FJsonObject>& Params)
@@ -1052,6 +1109,7 @@ TSharedPtr<FJsonObject> HandleGetSoundAttenuationProperties(const TSharedPtr<FJs
 // through a dedicated `looping` bool param, never through settings. Saves.
 // ---------------------------------------------------------------------------- //
 // MCP:set_sound_wave_properties - Merge USoundWave/USoundBase fields into a SoundWave asset (absent keys kept), set bLooping via looping, clamp to ClampMin/ClampMax and save; set_properties neither clamps nor saves. Each property whose value changes runs PostEditChangeProperty, as a details-panel edit does: compression settings rebuild the audio and MaxDistance follows AttenuationSettings. Keys match property names case-insensitively. A key that names no property (the error lists them), a deprecated or instanced-subobject one, a null value, a value of the wrong kind or that does not convert, bLooping inside settings, or a looping that is not true or false is an error and nothing changes. A failed save makes success false.
+//   @retired set_properties - object_path=<sound wave>, properties={"Volume":..,"bLooping":..,...}, clamp=true, save=true
 //   @param sound_wave_path - Full content path of the target USoundWave (e.g. /Game/Audio/MySound).
 //   @param settings - Object of USoundWave/USoundBase UPROPERTY fields to merge, keyed by property name (matched case-insensitively); absent keys untouched. e.g. CompressionQuality(1..100), SampleRateQuality(Max/High/Medium/Low/Min), SoundGroup(SOUNDGROUP_Default/SOUNDGROUP_Effects/SOUNDGROUP_UI/SOUNDGROUP_Music/SOUNDGROUP_Voice), SoundAssetCompressionType(BinkAudio/ADPCM/PCM/Opus/PlatformSpecific/ProjectDefined), Volume(>=0), Pitch(0.125..4.0), Priority(0..100), VirtualizationMode(Disabled/PlayWhenSilent/Restart/SeekRestart), SoundClassObject(asset path), AttenuationSettings(asset path). A key that names no property, a deprecated one or one holding instanced subobjects, a null value, a value that does not convert, a settings value that is not an object, or `bLooping` (use the `looping` param) is an error and nothing is changed.
 //   @param looping - Optional bool; sets the bLooping bitfield directly (when this sound is played directly, not via a cue). A value that is not true or false is an error and nothing is changed.
@@ -1158,7 +1216,8 @@ TSharedPtr<FJsonObject> HandleSetSoundWaveProperties(const TSharedPtr<FJsonObjec
 // ---------------------------------------------------------------------------- //
 // get_sound_wave_properties  (REAL read)
 // ---------------------------------------------------------------------------- //
-// MCP:get_sound_wave_properties - Read every reflected property of a USoundWave asset, its USoundBase fields included (CompressionQuality, SampleRateQuality, SoundGroup, Volume, Pitch, Priority, SoundClassObject, AttenuationSettings and the rest), as the settings object FJsonObjectConverter exports, so keys start lower-case (compressionQuality); settings also carries bLooping, echoed as looping. Like inspect_object on the asset, but keyed as set_sound_wave_properties accepts it; get_properties reads a few named fields. Read-only: it loads the asset if needed and changes nothing. A path that does not load as a USoundWave is an error. Write the same fields back with set_sound_wave_properties (bLooping through its looping param); a sound class is read with get_sound_class_properties and a level's audio component with get_audio_component_properties.
+// MCP:get_sound_wave_properties - Read every reflected property of a USoundWave asset, its USoundBase fields included (CompressionQuality, SampleRateQuality, SoundGroup, Volume, Pitch, Priority, SoundClassObject, AttenuationSettings and the rest), as the settings object FJsonObjectConverter exports, so keys start lower-case (compressionQuality); settings also carries bLooping, echoed as looping. Like get_object_info on the asset, but keyed as set_sound_wave_properties accepts it; get_properties reads a few named fields. Read-only: it loads the asset if needed and changes nothing. A path that does not load as a USoundWave is an error. Write the same fields back with set_sound_wave_properties (bLooping through its looping param); a sound class is read with get_sound_class_properties and a level's audio component with get_audio_component_properties.
+//   @retired get_object_info - object_path=<sound wave>: every property; get_properties for named ones
 //   @param sound_wave_path - Full content path of the target USoundWave, e.g. "/Game/Audio/MySound".
 //   @returns { sound_wave_path: string, asset_class: string, settings: object, looping: bool }
 TSharedPtr<FJsonObject> HandleGetSoundWaveProperties(const TSharedPtr<FJsonObject>& Params)
@@ -1368,6 +1427,7 @@ TSharedPtr<FJsonObject> HandleCreateDialogueVoice(const TSharedPtr<FJsonObject>&
 const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("add_submix_effect_to_chain"), &HandleAddSubmixEffectToChain },
+    { TEXT("remove_submix_effect_from_chain"), &HandleRemoveSubmixEffectFromChain },
     { TEXT("create_dialogue_voice"), &HandleCreateDialogueVoice },
     { TEXT("create_dialogue_wave"), &HandleCreateDialogueWave },
     { TEXT("create_sound_attenuation"), &HandleCreateSoundAttenuation },

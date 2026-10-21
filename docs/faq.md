@@ -63,7 +63,7 @@ first, each with its time, duration, outcome (OK, a readback warning, failed or 
 Any MCP client that speaks Streamable HTTP. [Clients](clients.md) has the setup for Claude Code,
 Cursor, VS Code, Windsurf, Claude Desktop, Gemini CLI and Codex.
 
-## My client cannot take 1,700 tools
+## My client cannot take 1,600 tools
 
 Connect it with `?tools=compact` at the end of the URL: it then lists three tools that search,
 describe and run the rest. See [Compact tool list](clients.md#compact-tool-list).

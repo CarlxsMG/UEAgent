@@ -1,5 +1,5 @@
 ---
-description: UEAgent is an Unreal Engine 5 editor plugin that serves MCP from inside the editor. More than 1,700 tools let Claude Code, Cursor or any MCP client build in Unreal, each call checked before it runs and read back after.
+description: UEAgent is an Unreal Engine 5 editor plugin that serves MCP from inside the editor. More than 1,600 tools let Claude Code, Cursor or any MCP client build in Unreal, each call checked before it runs and read back after.
 hide:
   - navigation
   - toc
@@ -13,7 +13,7 @@ hide:
 
 <p class="ua-hero__lead">The MCP server for Unreal Engine 5, built into the editor.</p>
 
-More than 1,700 tools let Claude Code, Cursor or any MCP client build in Unreal: Blueprints, materials,
+More than 1,600 tools let Claude Code, Cursor or any MCP client build in Unreal: Blueprints, materials,
 levels, animation, Niagara and more. Every call is checked before it runs and read back after.
 
 [Download the latest release](https://github.com/CarlxsMG/UEAgent/releases/latest){ .md-button .md-button--primary }
@@ -89,7 +89,7 @@ between. Every call, from every client, runs on the editor's game thread through
 flowchart LR
     A["AI agent<br/>Claude Code, Cursor, ..."] -- "MCP over HTTP" --> P
     subgraph E["Unreal Editor + UEAgent"]
-        P["Preconditions<br/>refuse known crashes"] --> H["Tool<br/>1,700+ of them"] --> R["Readback<br/>re-read the state"]
+        P["Preconditions<br/>refuse known crashes"] --> H["Tool<br/>1,600+ of them"] --> R["Readback<br/>re-read the state"]
     end
     R -- "verified result" --> A
 ```
@@ -196,7 +196,7 @@ Two answers an agent gets, as the contract tests in `Resources/ContractTests` re
 
 <div class="grid cards" markdown>
 
--   [:material-tools: **Tool explorer**](explorer.md): search the 1,700+ tools by name, domain and what
+-   [:material-tools: **Tool explorer**](explorer.md): search the 1,600+ tools by name, domain and what
     they do to the project.
 -   [:material-robot-outline: **Skills**](skills.md): skills for every client, installed from the
     editor: a skill builder, three skills made with it, and two to report an issue or send a fix.

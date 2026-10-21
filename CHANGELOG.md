@@ -2,21 +2,117 @@
 
 Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](https://semver.org).
 
-## Unreleased
+## 2.3.0 - 2026-10-21
+
+One tool per intent, one verb per operation, and every part you can add you can also read and remove. 167 tools that
+did what another tool already does leave the list, 39 are renamed, and 38 new tools close the gaps. Nothing breaks: an
+old or retired name keeps working until 3.0, and its reply says what to call instead.
 
 ### Added
 
+- **`set_properties` reaches what the typed setters did.** The actor can be named by a label only it has, and a
+  component by a class only one of its components has (`"Sun.DirectionalLightComponent"`). `save=true` saves an asset,
+  and `clamp=true` keeps numbers inside the property's ClampMin/ClampMax and lists what it clamped. A blend space is
+  resampled after a write. When a path does not resolve, the error says which part missed and lists the actor's
+  components.
+- **`spawn_actor` places any actor class**: an engine or plugin class by name or path, or a Blueprint. It writes the
+  actor's properties in the same call (`{"ExponentialHeightFogComponent.FogDensity": 0.05}`) and reports
+  `has_authority`.
+- **One tool for each thing that has settings:**
+  - `set_viewport_settings`, `set_section_properties`, `set_sequence_settings`;
+  - `set_niagara_emitter_properties`, `set_niagara_component_variable`;
+  - `set_gameplay_effect_modifier`, `set_gameplay_effect_component`;
+  - `set_motion_warping_target`, and `create_water_body` with a body type.
+
+  `set_material_instance_parameter` also takes static switches, component masks and layer parameters.
+  `list_collision_channels` reports the query each custom channel answers to.
+- **What could only be added can now be read and removed:**
+  - **Widget Blueprints:** `remove_widget_from_blueprint`; widget-animation tracks and keys with
+    `get_widget_animation_tracks`, `remove_widget_animation_track`, `remove_widget_animation_keyframe`.
+  - **MetaSounds:** wire nodes to each other and to graph inputs with `connect_metasound_nodes` and
+    `connect_metasound_graph_input_to_node`; also `disconnect_metasound_nodes`, `list_metasound_connections`,
+    `remove_metasound_interface`.
+  - **Other audio:** `remove_sound_cue_node`, `remove_submix_effect_from_chain`, `remove_sound_mix_class_override`.
+  - **Blueprints:**
+    - Timeline tracks: `add_blueprint_timeline_track`, `remove_blueprint_timeline_track`,
+      `get_blueprint_timeline_info`.
+    - `remove_function_parameter`, `remove_function_local_variable`, `remove_blueprint_macro`,
+      `remove_ai_perception_sense`.
+  - **Behavior Trees:** a node's settings, such as a MoveTo's blackboard key or a Wait's time, with
+    `get_behavior_tree_node_properties` and `set_behavior_tree_node_property`.
+  - **Animation and physics:** `remove_montage_segment`, `remove_anim_notify_name`, `remove_rigvm_link`,
+    `add_physics_asset_body`, `remove_physics_asset_body`.
+  - **Project and world:** `remove_collision_channel`, `remove_collision_profile`, `remove_pcg_graph_parameter`,
+    `unload_world_partition_region`, `remove_asset_metadata_tag`, `set_chooser_cell`.
+  - **USD:** `clear_usd_payloads`, `remove_usd_variant_set`, `remove_usd_variant`.
+  - **Cameras, Niagara and Sequencer:** `remove_camera_node_child`, `remove_niagara_user_parameter`,
+    `resume_level_sequence_runtime`.
+- **Existing tools reach more:**
+  - The section tools reach sections of root tracks (shots, camera cuts, audio, events) without a `binding_guid`.
+  - `remove_sequence_track` removes a binding's track or the camera-cut track.
+  - `delete_material_expression` and `disconnect_material_expressions` work inside material functions.
+  - `add_function_parameter` adds a macro's inputs and outputs.
+  - `set_camera_node_parameters` takes a child node.
+- **Old and retired names keep working.** A call to one runs as before. Its reply carries `data.retired_name`, which
+  names the tool that does the same and how; on a failure, the error text says so too, and so does `describe_tool`.
+  These names are left out of `tools/list`, `find_tools` and the reference.
+  [Retired names](docs/tools/retired.md) lists them.
 - Every file under `Source/` starts with a copyright notice, which Fab requires of a code plugin, and
   `Tools/check_copyright.py` checks it in CI. `Tools/package_release.py --fab` builds the source archive
   Fab takes for an engine version (see RELEASING.md).
 
+### Changed
+
+- **One verb per operation.**
+
+  | Verb | Use |
+  |---|---|
+  | `get_` | reads one thing |
+  | `list_` | enumerates |
+  | `find_` | searches |
+  | `is_`, `has_` | answer yes or no |
+  | `create_` | makes an asset |
+  | `add_` | puts a part into an asset or an actor |
+  | `spawn_` | places an actor |
+  | `set_` | writes |
+  | `remove_`, `delete_`, `clear_` | take away |
+
+  39 tools were renamed to follow it, for example:
+  - `inspect_object` → `get_object_info`
+  - `search_assets_by_pattern` → `find_assets_by_name`
+  - `query_gameplay_tags` → `find_gameplay_tags`
+  - `configure_replication` → `set_actor_replication`
+  - `place_player_start` → `spawn_player_start`
+
+  The server's instructions state the verbs, and the catalog generator refuses a new tool that starts with a synonym.
+- `set_properties` refuses a key inside a struct that names no field of it; before, it skipped the key silently.
+- The skills use only tools that are still listed.
+
 ### Fixed
 
+- `add_comment_node` keeps its text.
+- `add_anim_notify_name` records an undo step on a skeleton duplicated from engine content.
+- `get_material_graph_info` no longer counts a deleted node as an orphan.
+- `add_widget_to_blueprint` named the runtime tool `remove_widget` as its inverse; it now names
+  `remove_widget_from_blueprint`.
 - Building the plugin warned 148 times that a monolithic header should not be used: three shared headers
   included `Json.h`, and two command families `UMG.h` and `EngineSettings.h`. They include the headers they
   use one by one, as IWYU and Fab require. On 5.7, the build also warned about `USDMemory.h` where the
   `SetMetadata` write opens USD's allocator scope; the warning does not apply there, and is turned off.
-- The plugin's description in **Edit > Plugins** said about 2,100 tools, the count before 2.0; there are 1,742.
+- The plugin's description in **Edit > Plugins** said about 2,100 tools, the count before 2.0.
+
+### Retired
+
+167 tools, each still callable until 3.0, with its replacement:
+
+| Retired | Use instead |
+|---|---|
+| Typed setters and readers of lights, fog, sky, clouds, decals, cine cameras, post-process, replication, sounds, Niagara systems, physical materials, montages, foliage types and other assets | `set_properties`, `get_properties` |
+| Class-specific spawners | `spawn_actor`, `spawn_box_volume` |
+| Per-setting tools for the viewport, Sequencer sections, sequences, Niagara emitters, Niagara component variables, GameplayEffects, material static parameters, motion warping and water bodies | The tools above |
+| Four batch twins | `execute_batch` |
+
+[Retired names](docs/tools/retired.md) gives the call that replaces each.
 
 ## 2.2.0 - 2026-10-20
 

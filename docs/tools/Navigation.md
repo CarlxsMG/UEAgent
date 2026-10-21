@@ -2,7 +2,7 @@
 
 # Navigation
 
-22 tools for the navmesh, Environment Queries (EQS), nav links and modifiers, and collision channel dumps.
+19 tools for the navmesh, Environment Queries (EQS), nav links and modifiers, and collision channel dumps.
 
 Back to the [index](README.md).
 
@@ -82,16 +82,6 @@ Aligns this project's custom collision channels with another project's config BY
 | `other_project_config_dir` | string | yes | Path to the OTHER project's Config directory (containing DefaultEngine.ini); the project root also works (Config/DefaultEngine.ini is tried as a fallback) |
 
 **Returns:** `{ other_ini_path, other_ini_found, aligned_by, this_channel_count, other_channel_count, shifted_count, matched:[{name, is_trace_type, channel_this, channel_other, channel_shifted, query_this, query_other, query_shifted}], only_in_this:[{name, channel, query_type}], only_in_other:[{name, channel, query_type}], success }`
-
-## `dump_collision_channels`
-
-*Read-only.*
-
-Dumps this project's custom collision channels (from config): each ECC_GameTraceChannelN / object channel -> friendly name, whether it's a trace or object channel, and its TraceTypeQueryN / ObjectTypeQueryN index (the value a raycast/overlap passes). Read-only. Read from GConfig [/Script/Engine.CollisionProfile] DefaultChannelResponses.
-
-No parameters.
-
-**Returns:** `{ source, builtin_trace_count, builtin_object_count, count, channels:[{channel, channel_value, name, is_trace_type, is_static_object, is_custom_game_slot, default_response, query_type, query_index, query_number}], success }`
 
 ## `get_eqs_query_info`
 
@@ -266,29 +256,3 @@ Configures generation settings on the editor world's default ARecastNavMesh (par
 | `rebuild` | boolean | no | Optional bool (default false); when true, calls UNavigationSystemV1::Build() synchronously to apply |
 
 **Returns:** `{ recast_navmesh_present, navmesh_name, applied:{field:value}, requires_rebuild, rebuilt, note, success }`
-
-## `spawn_nav_link_proxy`
-
-*Additive.*
-
-Spawn an ANavLinkProxy actor (with its class-default point link) in the editor world at location through the editor actor subsystem, in one undo step, and label it with its internal name so label lookups find it. spawn_actor has no nav-link type. Each call adds a new actor (not idempotent); the link endpoints are not set here -- write its PointLinks with set_properties. The level is not saved (save_level) and this call does not rebuild navigation (rebuild_navigation). During PIE the editor refuses the spawn and the call is an error, as it is without an editor world. Move it with set_actor_transform; inverse: delete_actor. An area that changes path cost or blocks: spawn_nav_modifier_volume; the navmesh bounds: spawn_navmesh_bounds_volume.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `location` | array | no | [x, y, z] world location for the nav link proxy in cm; missing spawns at the origin, and any other value is an error and nothing is spawned |
-
-**Returns:** `{ actor_name, actor_label, actor_path, actor_class, success }`
-
-## `spawn_nav_modifier_volume`
-
-*Additive.*
-
-Spawn an ANavModifierVolume in the editor world at location, give it a real box brush of half-extent extent (a spawned volume has none) and optionally set its nav area class, in one undo step, then label it with its internal name so label lookups find it. Over spawn_box_volume(volume_class='NavModifierVolume') it sets the area class in the same call; spawn_box_volume instead re-reads the bounds against the request. area_class names a UNavArea subclass already loaded (e.g. NavArea_Null or NavArea_Obstacle; a Blueprint area by its _C name); a name that does not resolve is not an error: area_class_applied comes back false and the default area stays. An extent axis of 0 or less becomes 100. Each call adds a new actor. Not saved (save_level); this call does not rebuild navigation (rebuild_navigation). Refused during PIE. Navmesh bounds: spawn_navmesh_bounds_volume; links: spawn_nav_link_proxy.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `location` | array | no | [x, y, z] world location for the volume in cm; missing spawns at the origin, and any other value is an error and nothing is spawned |
-| `area_class` | string | no | Optional UNavArea subclass name to apply via SetAreaClass, e.g. NavArea_Null; unresolved names are ignored with area_class_applied false |
-| `extent` | array | no | Optional [x, y, z] box half-extent in cm (default 100,100,100, a 200 cm box); a component of 0 or less becomes 100 |
-
-**Returns:** `{ actor_name, actor_label, actor_path, actor_class, brush_built, area_class_applied, area_class, success }`

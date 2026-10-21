@@ -43,18 +43,24 @@ SUPPORTED_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 
 INSTRUCTIONS = (
     "This server lists UEAgent's tools without the Unreal Editor. The tools themselves run inside the "
-    "editor: install the UEAgent plugin (https://github.com/CarlxsMG/UEAgent) in an Unreal Engine 5.8 "
+    "editor: install the UEAgent plugin (https://github.com/CarlxsMG/UEAgent) in an Unreal Engine 5.7 or 5.8 "
     f"project, open the project, and connect your MCP client to {EDITOR_URL}."
+    "\n\nA tool's name starts with its verb, one verb per operation: get_ reads one thing (get_<x>_info, all of "
+    "it), list_ enumerates, find_ searches by name or condition, is_/has_ answer yes or no; create_ makes an asset, "
+    "add_ puts a part into an asset or actor, spawn_ places an actor in a world; set_ writes; remove_ takes a part "
+    "out, delete_ deletes an asset or actor, clear_ empties a list."
     "\n\nSimilar tools: get_properties reads named properties of one "
-    "object you can path to, inspect_object one you know nothing about, get_actor_properties_by_class "
+    "object you can path to, get_object_info one you know nothing about, get_actor_properties_by_class "
     "placed actors by class or label, get_component_properties a whole component. set_properties writes "
-    "any object in the editor; set_component_property a placed actor's component, also in a live PIE "
-    "world. A typed tool (set_light_properties, spawn_sky_atmosphere, add_spline_component...) says in "
-    "its description what it does that the generic one does not."
+    "any setting of an asset, an actor or a component (\"Actor.Component\", by name or class) -- a light, fog, "
+    "sky, decal, camera, post-process volume, sound, Niagara system... -- and saves an asset with save=true; "
+    "set_component_property writes a component in a live PIE world. spawn_actor places an actor of any class "
+    "with its properties, spawn_box_volume a volume. A typed tool says in its description what it does that "
+    "these do not."
 )
 CALL_ERROR = (
     "UEAgent's tools run inside the Unreal Editor, and this server only lists them. Install the UEAgent "
-    "plugin (https://github.com/CarlxsMG/UEAgent) in an Unreal Engine 5.8 project, open the project, and "
+    "plugin (https://github.com/CarlxsMG/UEAgent) in an Unreal Engine 5.7 or 5.8 project, open the project, and "
     f"connect your MCP client to {EDITOR_URL}."
 )
 
@@ -163,6 +169,8 @@ def build_tools(catalog: dict, pie_unsafe: set[str], aliases: dict[str, list[tup
             name = command.get("name") or ""
             if not name or name.lower() in seen:
                 continue  # no name, or a duplicate: the first one wins
+            if command.get("retired"):
+                continue  # still runs in the editor, but tools/list leaves it out
 
             params: list[dict] = []
             for raw in command.get("params") or []:
@@ -305,7 +313,7 @@ def serve() -> int:
 def check() -> int:
     """Builds the list, then runs this script as a server and talks to it over stdio."""
     catalog = json.loads(CATALOG.read_text(encoding="utf-8"))
-    commands = sum(len(domain["commands"]) for domain in catalog["domains"])
+    commands = sum(not command.get("retired") for domain in catalog["domains"] for command in domain["commands"])
     tools = load_tools()
     with_force = sum("force" in tool["inputSchema"]["properties"] for tool in tools)
     aliases = sum(
@@ -321,7 +329,8 @@ def check() -> int:
     # A name another spelling stands for is never in `required`: the server accepts either.
     by_name = {tool["name"]: tool for tool in tools}
     spellings = [(command["name"], param["aliasOf"]) for domain in catalog["domains"]
-                 for command in domain["commands"] for param in command.get("params") or [] if param.get("aliasOf")]
+                 for command in domain["commands"] if not command.get("retired")
+                 for param in command.get("params") or [] if param.get("aliasOf")]
     still_required = sorted({f"{tool}.{name}" for tool, name in spellings
                              if name in by_name[tool]["inputSchema"].get("required", [])})
     if not spellings:

@@ -56,13 +56,18 @@ public:
 	// tools/call of the native MCP server: the dispatch plus the READBACK contract (before
 	// snapshot, re-read, offload note) in the SAME game-thread pass. The future carries
 	// {"is_error": bool, "result": <what the model sees>}.
-	TFuture<FString> EnqueueToolCall(const FString& CommandType, const TSharedPtr<FJsonObject>& Params, const FString& SessionId);
+	TFuture<FString> EnqueueToolCall(const FString& RequestedCommandType, const TSharedPtr<FJsonObject>& Params, const FString& SessionId);
 
 	// Dispatches ONE command by name on the CALLING thread (no thread hop, no queueing) and
 	// returns the {"status":"success"|"error", ...} envelope. Game thread only: it runs from a
 	// queued work item, or in a loop for `execute_batch`. A handler must never wait on the queue: the
-	// queue is drained by the very call stack that is running the handler.
-	TSharedPtr<FJsonObject> DispatchSingleCommand(const FString& CommandType, const TSharedPtr<FJsonObject>& Params);
+	// queue is drained by the very call stack that is running the handler. A renamed tool's old name runs the new tool,
+	// and the reply's data.retired_name says so, as it does for a retired tool.
+	TSharedPtr<FJsonObject> DispatchSingleCommand(const FString& RequestedCommandType, const TSharedPtr<FJsonObject>& Params);
+
+	// Above zero while a tool runs other tools (mcp_common::RunSubCommands): the names it calls are its own choice, so
+	// DispatchSingleCommand adds no retired-name note to them.
+	int32 SubCommandDepth = 0;
 
 private:
 	// --- PIE ownership guard (game thread only -> no locks) --------------------

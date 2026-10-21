@@ -562,7 +562,7 @@ TSharedPtr<FJsonObject> HandleCreateBlendSpace(const TSharedPtr<FJsonObject>& Pa
 // ---------------------------------------------------------------------------
 // add_anim_notify_name
 // ---------------------------------------------------------------------------
-// MCP:add_anim_notify_name - Register a notify name in the AnimationNotifies list of a USkeleton inside an undo transaction and save the skeleton package; returns present, notify_count and saved. A name already registered is a success with added=false, already_existed=true and saved=false, and the skeleton is neither modified nor saved. Without skeleton_path it edits /Engine/EngineMeshes/SkeletalCube_Skeleton. A failed save makes success false, with saved=false and save_error.
+// MCP:add_anim_notify_name - Register a notify name in the AnimationNotifies list of a USkeleton inside an undo transaction and save the skeleton package; returns present, notify_count and saved. A name already registered is a success with added=false, already_existed=true and saved=false, and the skeleton is neither modified nor saved. Without skeleton_path it edits /Engine/EngineMeshes/SkeletalCube_Skeleton. A failed save makes success false, with saved=false and save_error. Inverse: remove_anim_notify_name.
 //   @param notify_name - The notify name to register (e.g. 'Footstep').
 //   @param skeleton_path - Asset path of the USkeleton to edit (/Game/...); when omitted or empty the engine asset /Engine/EngineMeshes/SkeletalCube_Skeleton is edited and saved.
 //   @returns { skeleton_path, notify_name, present, added, already_existed, notify_count, saved, save_error, message }
@@ -592,6 +592,9 @@ TSharedPtr<FJsonObject> HandleAddAnimNotifyName(const TSharedPtr<FJsonObject>& P
 
     {
         const FScopedTransaction Transaction(LOCTEXT("AddAnimNotifyName", "Add Anim Notify Name"));
+        // A skeleton duplicated from engine content can lack RF_Transactional, and then Modify() records nothing: the
+        // edit would be no undo step at all, whatever the transaction says.
+        Skeleton->SetFlags(RF_Transactional);
         Skeleton->Modify();
         Skeleton->AddNewAnimationNotify(NotifyFName);
     }
@@ -608,6 +611,71 @@ TSharedPtr<FJsonObject> HandleAddAnimNotifyName(const TSharedPtr<FJsonObject>& P
         ? TEXT("Anim notify registered on skeleton and saved to disk")
         : FString::Printf(TEXT("Anim notify registered in-memory; save not persisted (%s)"), *SaveError));
     return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("add_anim_notify_name"), SaveError);
+}
+
+// MCP:remove_anim_notify_name - Unregister a notify name from the AnimationNotifies list of a USkeleton (USkeleton::RemoveAnimationNotify) inside an undo transaction and save the skeleton package. Inverse of add_anim_notify_name. It only drops the name from the skeleton's list: notify events already placed on animations keep their name (remove_anim_notify takes those off). A name that is not registered is a success with removed=false, already_absent=true and saved=false, and the skeleton is neither modified nor saved. Without skeleton_path it edits /Engine/EngineMeshes/SkeletalCube_Skeleton, as add_anim_notify_name does. The reply re-reads the list (notify_names). A failed save makes success false, with saved=false and save_error.
+//   @param notify_name - The notify name to unregister (e.g. 'Footstep').
+//   @param skeleton_path - Asset path of the USkeleton to edit (/Game/...); when omitted or empty the engine asset /Engine/EngineMeshes/SkeletalCube_Skeleton is edited and saved.
+//   @returns { skeleton_path, notify_name, present, removed, already_absent, notify_count, notify_names: [string], saved, save_error, message }
+TSharedPtr<FJsonObject> HandleRemoveAnimNotifyName(const TSharedPtr<FJsonObject>& Params)
+{
+    FString NotifyName;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("notify_name"), NotifyName)) { return Missing; }
+
+    USkeleton* Skeleton = nullptr;
+    if (TSharedPtr<FJsonObject> Error = AnimAuthoring_ReadSkeleton(Params, Skeleton)) { return Error; }
+
+    const FName NotifyFName(*NotifyName);
+    const auto NotifyNames = [Skeleton]()
+    {
+        TArray<FString> Names;
+        for (const FName& Name : Skeleton->AnimationNotifies)
+        {
+            Names.Add(Name.ToString());
+        }
+        return Names;
+    };
+
+    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+    Obj->SetStringField(TEXT("skeleton_path"), Skeleton->GetPathName());
+    Obj->SetStringField(TEXT("notify_name"), NotifyName);
+
+    // A name that is not registered changes nothing: answered before Modify() would dirty the skeleton.
+    if (!Skeleton->AnimationNotifies.Contains(NotifyFName))
+    {
+        Obj->SetBoolField(TEXT("present"), false);
+        Obj->SetBoolField(TEXT("removed"), false);
+        Obj->SetBoolField(TEXT("already_absent"), true);
+        Obj->SetNumberField(TEXT("notify_count"), Skeleton->AnimationNotifies.Num());
+        Obj->SetArrayField(TEXT("notify_names"), mcp_common::StringsToJson(NotifyNames()));
+        return AnimAuthoring_NoChangeReply(Obj, TEXT("Anim notify name is not registered on the skeleton; nothing changed, nothing saved"));
+    }
+
+    {
+        const FScopedTransaction Transaction(LOCTEXT("RemoveAnimNotifyName", "Remove Anim Notify Name"));
+        // A skeleton duplicated from engine content can lack RF_Transactional, and then Modify() records nothing: the
+        // edit would be no undo step at all, whatever the transaction says.
+        Skeleton->SetFlags(RF_Transactional);
+        Skeleton->Modify();
+        Skeleton->RemoveAnimationNotify(NotifyFName);
+    }
+    if (Skeleton->AnimationNotifies.Contains(NotifyFName))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("'%s' is still registered after RemoveAnimationNotify; nothing was saved"), *NotifyName));
+    }
+
+    FString SaveError;
+    const bool bSaved = AnimAuthoring_SavePackageOf(Skeleton, SaveError);
+
+    Obj->SetBoolField(TEXT("present"), false);
+    Obj->SetBoolField(TEXT("removed"), true);
+    Obj->SetBoolField(TEXT("already_absent"), false);
+    Obj->SetNumberField(TEXT("notify_count"), Skeleton->AnimationNotifies.Num());
+    Obj->SetArrayField(TEXT("notify_names"), mcp_common::StringsToJson(NotifyNames()));
+    Obj->SetStringField(TEXT("message"), bSaved
+        ? TEXT("Anim notify name unregistered from the skeleton and saved to disk")
+        : FString::Printf(TEXT("Anim notify name unregistered in memory; save not persisted (%s)"), *SaveError));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("remove_anim_notify_name"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -929,7 +997,7 @@ TSharedPtr<FJsonObject> HandleAddMontageNotify(const TSharedPtr<FJsonObject>& Pa
 // ---------------------------------------------------------------------------
 // get_montage_info
 // ---------------------------------------------------------------------------
-// MCP:get_montage_info - Read a UAnimMontage without changing it: skeleton_path, section, slot and notify counts with their name lists, blend_in/blend_out times, blend modes, enable_auto_blend_out, blend_out_trigger_time, sync_group and sync_slot_index. Change them with set_montage_properties.
+// MCP:get_montage_info - Read a UAnimMontage without changing it: skeleton_path, section, slot and notify counts with their name lists, blend_in/blend_out times, blend modes, enable_auto_blend_out, blend_out_trigger_time, sync_group and sync_slot_index. Change them with set_properties.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
 //   @returns { montage_path, skeleton_path, section_count, slot_count, notify_count, sections, slots, notifies, blend_in, blend_out, blend_mode_in, blend_mode_out, enable_auto_blend_out, blend_out_trigger_time, sync_group, sync_slot_index }
 TSharedPtr<FJsonObject> HandleGetMontageInfo(const TSharedPtr<FJsonObject>& Params)
@@ -1777,7 +1845,7 @@ namespace
 // ---------------------------------------------------------------------------
 // remove_blend_space_sample
 // ---------------------------------------------------------------------------
-// remove_blend_space_sample and edit_blend_space_sample validate the index with IsValidBlendSampleIndex, NEVER
+// remove_blend_space_sample and set_blend_space_sample validate the index with IsValidBlendSampleIndex, NEVER
 // with GetBlendSample, which checkf-asserts on an invalid index.
 
 // MCP:remove_blend_space_sample - Remove a blend sample (by index) from a BlendSpace. WARNING: the remaining indices REORDER -- the engine removes with a swap, so the LAST sample lands in the deleted slot. Never remove a batch by descending index and assume the rest held still: the full post-op sample list is returned so the caller can re-sync before the next call. A failed save makes success false, with saved=false and save_error.
@@ -1828,9 +1896,10 @@ TSharedPtr<FJsonObject> HandleRemoveBlendspaceSample(const TSharedPtr<FJsonObjec
 }
 
 // ---------------------------------------------------------------------------
-// edit_blend_space_sample
+// set_blend_space_sample
 // ---------------------------------------------------------------------------
-// MCP:edit_blend_space_sample - Edit a blend sample (by index): blend value and/or animation. At least one of blend_value / animation_path is required; both are individually optional so you can retime a sample without touching its animation, or swap the animation without moving it. A sample that already has those values is a success with value_edited=false, animation_replaced=false and saved=false, and the blend space is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
+// MCP:set_blend_space_sample - Edit a blend sample (by index): blend value and/or animation. At least one of blend_value / animation_path is required; both are individually optional so you can retime a sample without touching its animation, or swap the animation without moving it. A sample that already has those values is a success with value_edited=false, animation_replaced=false and saved=false, and the blend space is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
+//   @renamed-from edit_blend_space_sample
 //   @param blendspace_path - Full asset path to the UBlendSpace.
 //   @param index - Index of the sample to edit.
 //   @param blend_value - New blend position: single number (1D) or array of up to 3 numbers (optional).
@@ -1906,7 +1975,7 @@ TSharedPtr<FJsonObject> HandleEditBlendspaceSample(const TSharedPtr<FJsonObject>
         // EditSampleValue returns false (no mutation) on invalid index or an
         // out-of-bounds / too-close value — propagate as an honest failure, not a crash.
         bValueEdited = BlendSpace->EditSampleValue(Index, BlendValue);
-        UE_LOG(LogTemp, Verbose, TEXT("edit_blend_space_sample: EditSampleValue(%d, %s) -> %s"),
+        UE_LOG(LogTemp, Verbose, TEXT("set_blend_space_sample: EditSampleValue(%d, %s) -> %s"),
                Index, *BlendValue.ToString(), bValueEdited ? TEXT("true") : TEXT("false"));
         if (!bValueEdited)
         {
@@ -1920,7 +1989,7 @@ TSharedPtr<FJsonObject> HandleEditBlendspaceSample(const TSharedPtr<FJsonObject>
     if (bHasAnimation)
     {
         bAnimationReplaced = BlendSpace->ReplaceSampleAnimation(Index, NewAnim);
-        UE_LOG(LogTemp, Verbose, TEXT("edit_blend_space_sample: ReplaceSampleAnimation(%d, %s) -> %s"),
+        UE_LOG(LogTemp, Verbose, TEXT("set_blend_space_sample: ReplaceSampleAnimation(%d, %s) -> %s"),
                Index, *AnimationPath, bAnimationReplaced ? TEXT("true") : TEXT("false"));
         if (!bAnimationReplaced)
         {
@@ -1944,13 +2013,13 @@ TSharedPtr<FJsonObject> HandleEditBlendspaceSample(const TSharedPtr<FJsonObject>
     Obj->SetNumberField(TEXT("num_samples"), NumSamples);
     Obj->SetArrayField(TEXT("samples"), BuildBlendSampleArray(BlendSpace));
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Sample edited"), bSaved, SaveError));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("edit_blend_space_sample"), SaveError);
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_blend_space_sample"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
 // get_blend_space_samples
 // ---------------------------------------------------------------------------
-// MCP:get_blend_space_samples - Read every sample of a UBlendSpace or UBlendSpace1D in index order (animation path, blend_x/blend_y/blend_z, rate_scale) plus num_samples and the per-axis input smoothing under interpolation. Read-only; change samples with add_blend_space_sample, edit_blend_space_sample or remove_blend_space_sample.
+// MCP:get_blend_space_samples - Read every sample of a UBlendSpace or UBlendSpace1D in index order (animation path, blend_x/blend_y/blend_z, rate_scale) plus num_samples and the per-axis input smoothing under interpolation. Read-only; change samples with add_blend_space_sample, set_blend_space_sample or remove_blend_space_sample.
 //   @param blendspace_path - Full asset path to the UBlendSpace.
 //   @returns { animation, blend_x, blend_y, blend_z, rate_scale, blendspace_path, num_samples, samples }
 TSharedPtr<FJsonObject> HandleGetBlendspaceSamples(const TSharedPtr<FJsonObject>& Params)
@@ -3596,7 +3665,7 @@ namespace
 // add_montage_segment — append an FAnimSegment referencing a real UAnimSequence
 // to a montage slot track, then recompute the montage length.
 // ---------------------------------------------------------------------------
-// MCP:add_montage_segment - Append an animation segment referencing a real UAnimSequence to a montage slot. A failed save makes success false, with saved=false and save_error.
+// MCP:add_montage_segment - Append an animation segment referencing a real UAnimSequence to a montage slot. A failed save makes success false, with saved=false and save_error. Inverse: remove_montage_segment; read: get_montage_info.
 //   @param montage_path - Object path of the UAnimMontage (e.g. "/Game/MyGame/AM_Example").
 //   @param anim_sequence_path - Object path of the UAnimSequence to reference.
 //   @param slot_name - Montage slot name (e.g. DefaultSlot)
@@ -3665,6 +3734,62 @@ TSharedPtr<FJsonObject> HandleAddMontageSegment(const TSharedPtr<FJsonObject>& P
     Obj->SetNumberField(TEXT("loop_count"), Segment.LoopingCount);
     Obj->SetBoolField(TEXT("success"), true);
     return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("add_montage_segment"), SaveError);
+}
+
+// MCP:remove_montage_segment - Remove the segment at segment_index from a slot track of a UAnimMontage, in one undo step, recompute the montage length and save the montage. Inverse of add_montage_segment; the segments after it move down one index, and the gap it leaves on the track stays until collapse_montage_segments closes it. A montage that does not load, a slot it does not have, or an index out of range is an error and nothing changes. The reply re-reads the slot (segment_count, montage_length). A failed save makes success false, with saved=false and save_error. Read the montage: get_montage_info.
+//   @param montage_path - Object path of the UAnimMontage (e.g. "/Game/MyGame/AM_Example").
+//   @param slot_name - Montage slot name (e.g. DefaultSlot).
+//   @param segment_index [int] - Zero-based index of the segment in that slot's track.
+//   @returns { montage_path, slot_name, segment_index, removed_anim_sequence_path, removed, segment_count, montage_length, success, saved, save_error }
+TSharedPtr<FJsonObject> HandleRemoveMontageSegment(const TSharedPtr<FJsonObject>& Params)
+{
+    FString MontagePath;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("montage_path"), MontagePath)) { return Missing; }
+    FString SlotName;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("slot_name"), SlotName)) { return Missing; }
+    int32 SegmentIndex = 0;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("segment_index"), SegmentIndex)) { return Missing; }
+
+    UAnimMontage* Montage = nullptr;
+    if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadOrError(MontagePath, TEXT("AnimMontage"), Montage)) { return Error; }
+    FSlotAnimationTrack* SlotTrack = AnimAuthoring_FindSlotTrack(Montage, FName(*SlotName));
+    if (!SlotTrack)
+    {
+        TArray<FString> Slots;
+        for (const FSlotAnimationTrack& Track : Montage->SlotAnimTracks)
+        {
+            Slots.Add(Track.SlotName.ToString());
+        }
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Montage has no slot '%s' (its slots: %s); nothing was changed"),
+            *SlotName, *FString::Join(Slots, TEXT(", "))));
+    }
+    if (!SlotTrack->AnimTrack.AnimSegments.IsValidIndex(SegmentIndex))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("segment_index %d is out of range: slot '%s' has %d segment(s); nothing was changed"),
+            SegmentIndex, *SlotName, SlotTrack->AnimTrack.AnimSegments.Num()));
+    }
+
+    const UAnimSequenceBase* RemovedAnim = SlotTrack->AnimTrack.AnimSegments[SegmentIndex].GetAnimReference();
+    const FString RemovedAnimPath = RemovedAnim ? RemovedAnim->GetPathName() : FString();
+
+    const FScopedTransaction Transaction(LOCTEXT("RemoveMontageSegment", "MCP: Remove Montage Segment"));
+    Montage->Modify();
+    SlotTrack->AnimTrack.AnimSegments.RemoveAt(SegmentIndex);
+    const float NewLength = Montage->CalculateSequenceLength();
+
+    FString SaveError;
+    const bool bSaved = AnimAuthoring_SavePackageOf(Montage, SaveError);
+
+    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+    Obj->SetStringField(TEXT("montage_path"), Montage->GetPathName());
+    Obj->SetStringField(TEXT("slot_name"), SlotName);
+    Obj->SetNumberField(TEXT("segment_index"), SegmentIndex);
+    Obj->SetStringField(TEXT("removed_anim_sequence_path"), RemovedAnimPath);
+    Obj->SetBoolField(TEXT("removed"), true);
+    Obj->SetNumberField(TEXT("segment_count"), SlotTrack->AnimTrack.AnimSegments.Num());
+    Obj->SetNumberField(TEXT("montage_length"), NewLength);
+    Obj->SetBoolField(TEXT("success"), true);
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("remove_montage_segment"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -4721,6 +4846,7 @@ TSharedPtr<FJsonObject> HandleLinkMontageSections(const TSharedPtr<FJsonObject>&
 // GetBlendParameter().
 // ---------------------------------------------------------------------------
 // MCP:set_blend_space_properties - Configure an existing blend space's X and (2D only) Y axis: name, min, max, grid divisions. Over set_properties it addresses each axis field by name, clamps grid to >= 1, rebuilds the runtime sample data (ValidateSampleData/ResampleData) and saves. On a 1D blend space the y_axis_* params are ignored with a note. Only the supplied fields change, in one undo step; min below max is not checked. Values the axes already have are a success with changed=false, applied_count 0, saved=false and a note, and nothing is modified or saved. A failed save makes success false, with saved=false and save_error. New blend space: create_blend_space.
+//   @retired set_properties - object_path=<blend space>, properties={"BlendParameters":[{"DisplayName":"Speed","Min":0,"Max":600,"GridNum":4},{}]}, clamp=true, save=true (the blend space is resampled)
 //   @param blend_space_path - Full asset path of the UBlendSpace / UBlendSpace1D.
 //   @param x_axis_name - Optional X axis display name.
 //   @param x_axis_min [number] - Optional X axis minimum value.
@@ -5151,7 +5277,7 @@ TSharedPtr<FJsonObject> HandleRemoveAnimCompositeSegment(const TSharedPtr<FJsonO
 // Edit an existing notify + set montage blend/sync properties
 // ===========================================================================
 //
-// edit_anim_notify edits an existing notify event; get_anim_notifies is its reader
+// set_anim_notify edits an existing notify event; get_anim_notifies is its reader
 // (name/time/duration/track_index). The event lives in UAnimSequenceBase::Notifies
 // (TArray<FAnimNotifyEvent>, AnimSequenceBase.h — always present, NOT editor-only),
 // the SAME array add_anim_notify/get_anim_notifies use; we mutate the element in place
@@ -5201,7 +5327,8 @@ namespace
     }
 }
 
-// MCP:edit_anim_notify - Edit an existing FAnimNotifyEvent on a UAnimSequence (identified by name + occurrence) in an undo transaction and save it. No editable field is an error before anything changes; edits that leave the event as it is are a success with applied=false, applied_count 0 and saved=false, and the sequence is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
+// MCP:set_anim_notify - Edit an existing FAnimNotifyEvent on a UAnimSequence (identified by name + occurrence) in an undo transaction and save it. No editable field is an error before anything changes; edits that leave the event as it is are a success with applied=false, applied_count 0 and saved=false, and the sequence is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
+//   @renamed-from edit_anim_notify
 //   @param animation_path - Full asset path to the UAnimSequence.
 //   @param notify_name - NotifyName of the event to edit (FName). Names are not unique; see occurrence_index.
 //   @param occurrence_index - Zero-based index AMONG events sharing notify_name (default 0)
@@ -5333,7 +5460,7 @@ TSharedPtr<FJsonObject> HandleEditAnimNotify(const TSharedPtr<FJsonObject>& Para
         }
     }
 
-    UE_LOG(LogTemp, Verbose, TEXT("[edit_anim_notify] %s notify '%s'[occ %d] -> %d field(s) applied (timing_changed=%d)"),
+    UE_LOG(LogTemp, Verbose, TEXT("[set_anim_notify] %s notify '%s'[occ %d] -> %d field(s) applied (timing_changed=%d)"),
         *AnimSeq->GetPathName(), *NotifyName, OccurrenceIndex, AppliedCount, bTimingChanged ? 1 : 0);
 
     FString SaveError;
@@ -5365,10 +5492,11 @@ TSharedPtr<FJsonObject> HandleEditAnimNotify(const TSharedPtr<FJsonObject>& Para
     }
     Obj->SetBoolField(TEXT("applied"), true);
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Anim notify edited"), bSaved, SaveError));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("edit_anim_notify"), SaveError);
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_anim_notify"), SaveError);
 }
 
 // MCP:set_montage_properties - Set only the supplied blend-in/blend-out times, global rate scale, blend modes, auto blend out, trigger time, sync group/slot and deprecated root motion fields of a UAnimMontage in one undo step and save it. Over set_properties it sets the blend times through FAlphaBlend::SetBlendTime (clamped to >= 0), validates enum names before any write and saves in the same call; other montage properties: set_properties. Bad enum names, or no field, are refused before any change; values the montage already has give changed=false, applied_count 0 and saved=false, nothing modified or saved. A failed save makes success false, with saved=false and save_error.
+//   @retired set_properties - object_path=<montage>, properties={"BlendIn":{"BlendTime":..},"BlendOut":{"BlendTime":..},...}, clamp=true, save=true
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
 //   @param name - Alias of montage_path.
 //   @param blend_in - Blend-in time in seconds (BlendIn), clamped to >= 0. Optional.
@@ -5673,7 +5801,7 @@ TSharedPtr<FJsonObject> HandleSetMontageProperties(const TSharedPtr<FJsonObject>
 // on InterpolationTime/DampingRatio/MaxSpeed fire only through the editor property
 // path, so we clamp to >=0 here.
 // ---------------------------------------------------------------------------
-// MCP:set_blend_space_interpolation - Set a blend space's INPUT-SMOOTHING (interpolation) per axis: smoothing time, damping ratio, max speed, smoothing type.  Distinct from set_blend_space_properties (which only sets the BlendParameters axis name/min/max/grid). Writes UBlendSpace::InterpolationParam[axis] via reflection. 1D smooths axis 0 only; 2D smooths X (axis 0) and Y (axis 1). Only the supplied fields change, in one undo transaction, then the blend space is saved; an unknown smoothing type is an error before anything changes, and values the axes already have are a success with changed=false, applied_count 0, saved=false and a note, with nothing modified or saved. A failed save makes success false, with saved=false and save_error.
+// MCP:set_blend_space_interpolation - Set a blend space's INPUT-SMOOTHING (interpolation) per axis: smoothing time, damping ratio, max speed, smoothing type.  Distinct from set_properties (which only sets the BlendParameters axis name/min/max/grid). Writes UBlendSpace::InterpolationParam[axis] via reflection. 1D smooths axis 0 only; 2D smooths X (axis 0) and Y (axis 1). Only the supplied fields change, in one undo transaction, then the blend space is saved; an unknown smoothing type is an error before anything changes, and values the axes already have are a success with changed=false, applied_count 0, saved=false and a note, with nothing modified or saved. A failed save makes success false, with saved=false and save_error.
 //   @param blend_space_path - Full asset path of the UBlendSpace / UBlendSpace1D.
 //   @param x_interpolation_time [number] - Optional X-axis smoothing time in seconds (>= 0; 0 disables smoothing).
 //   @param x_damping_ratio [number] - Optional X-axis damping ratio (>= 0; only used when type is SpringDamper).
@@ -6665,6 +6793,8 @@ const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("add_anim_composite_segment"), &HandleAddAnimCompositeSegment },
     { TEXT("add_anim_curve_name"), &HandleAddAnimCurveName },
+    { TEXT("remove_anim_notify_name"), &HandleRemoveAnimNotifyName },
+    { TEXT("remove_montage_segment"), &HandleRemoveMontageSegment },
     { TEXT("add_anim_float_curve"), &HandleAddAnimFloatCurve },
     { TEXT("add_anim_notify"), &HandleAddAnimNotify },
     { TEXT("add_anim_notify_name"), &HandleAddAnimNotifyName },
@@ -6685,8 +6815,8 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("create_pose_asset"), &HandleCreatePoseAsset },
     { TEXT("create_pose_asset_from_anim_sequence"), &HandleCreatePoseAssetFromAnimSequence },
     { TEXT("remove_montage_section"), &HandleDeleteMontageSection },
-    { TEXT("edit_anim_notify"), &HandleEditAnimNotify },
-    { TEXT("edit_blend_space_sample"), &HandleEditBlendspaceSample },
+    { TEXT("set_anim_notify"), &HandleEditAnimNotify },
+    { TEXT("set_blend_space_sample"), &HandleEditBlendspaceSample },
     { TEXT("get_anim_asset_info"), &HandleGetAnimAssetInfo },
     { TEXT("get_anim_curve_data"), &HandleGetAnimCurveData },
     { TEXT("get_anim_notifies"), &HandleGetAnimNotifies },

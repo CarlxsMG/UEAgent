@@ -99,7 +99,7 @@ SOURCE = "Resources/command_catalog.json"
 # ---------------------------------------------------------------------------
 SUFFIX_ALIASES: list[tuple[str, str]] = [
     ("machine_name", "add_anim_transition says machine_name and its siblings state_machine_name"),
-    ("pattern", "search_assets_by_pattern calls it search_pattern"),
+    ("pattern", "find_assets_by_name calls it search_pattern"),
 ]
 
 # PRUNED, written down so they are not re-added: path, name, index, tag, property,
@@ -172,7 +172,7 @@ EXPLICIT_ALIASES: list[tuple[str, str, str]] = [
     ("name_pattern", "pattern",
      "list_enums/list_modules/list_structs say name_pattern and their neighbours say pattern"),
     ("enum_path", "enum_name", "get_enum_info, called with the Asset Registry object path"),
-    ("tag_query", "query_tag", "query_gameplay_tags calls it query_tag"),
+    ("tag_query", "query_tag", "find_gameplay_tags calls it query_tag"),
 ]
 
 WRAP_COLUMN = 100

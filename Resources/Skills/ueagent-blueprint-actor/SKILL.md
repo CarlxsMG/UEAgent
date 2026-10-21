@@ -29,8 +29,8 @@ from the editor's **MCP** menu). Your client may show them with a prefix, such a
    `get_function_pins` instead of guessing them.
 5. **Compile**: `compile_blueprint` with `return_messages: true`. If it reports errors, read the
    graph with `get_graph_nodes`, fix it, and compile again until `succeeded` is true.
-6. **Place it**: `spawn_blueprint_actor` with `blueprint_name`, `actor_name` and a `location` in view
-   of the camera.
+6. **Place it**: `spawn_actor` with `type` set to the Blueprint's asset path, a `name` and a `location`
+   in view of the camera.
 
 ## Verify
 

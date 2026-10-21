@@ -14,6 +14,7 @@
 
 #include "CoreMinimal.h"
 #include "UsdWrappers/VtValue.h"
+#include "UsdWrappers/ForwardDeclarations.h"  // UE::FUsdStage (an alias of a template)
 
 namespace UEAgent::UsdSdk
 {
@@ -91,4 +92,28 @@ namespace UEAgent::UsdSdk
 	 * OutError naming the index of the first text that does not parse and USD's parse error, and Out unchanged.
 	 */
 	UEAGENTUSDSDK_API bool MakePathExpressionArray(const TArray<FString>& Texts, UE::FVtValue& Out, FString& OutError);
+
+	/** What a variant edit did to the prim specs of a prim. */
+	struct FVariantEditResult
+	{
+		int32 SpecsEdited = 0;   // the prim specs of the stage's local layer stack that changed
+		int32 SpecsSkipped = 0;  // prim specs that hold the opinion on a layer outside it (a reference or payload), left as they are
+	};
+
+	/**
+	 * Removes the variant set VariantSetName from the prim at PrimPath, the way the variant set editor deletes one: on
+	 * every prim spec of the prim on the stage's local layer stack (root, sublayers and session layer), the variant set
+	 * spec, its name in the variant set name list and its variant selection go. False, with OutError, when the stage
+	 * or the prim does not resolve.
+	 */
+	UEAGENTUSDSDK_API bool RemoveVariantSet(const UE::FUsdStage& Stage, const FString& PrimPath, const FString& VariantSetName,
+		FVariantEditResult& OutResult, FString& OutError);
+
+	/**
+	 * Removes the variant VariantName of the variant set VariantSetName from the prim at PrimPath: on every prim spec of
+	 * the prim on the stage's local layer stack, the variant spec goes, and a selection of that variant is cleared.
+	 * False, with OutError, when the stage or the prim does not resolve.
+	 */
+	UEAGENTUSDSDK_API bool RemoveVariant(const UE::FUsdStage& Stage, const FString& PrimPath, const FString& VariantSetName,
+		const FString& VariantName, FVariantEditResult& OutResult, FString& OutError);
 }

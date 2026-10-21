@@ -2,23 +2,9 @@
 
 # Trigger
 
-11 tools for trigger boxes and spheres, volumes, and their overlap events.
+10 tools for trigger boxes and spheres, volumes, and their overlap events.
 
 Back to the [index](README.md).
-
-## `create_trigger`
-
-*Additive.*
-
-Creates a trigger actor (TriggerBox or TriggerSphere) at a specified location. These two shapes only -- for a brush-based ATriggerVolume use spawn_box_volume(volume_class="TriggerVolume") instead.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `trigger_name` | string | yes | Name label for the trigger actor |
-| `trigger_type` | string | no | Trigger class: "TriggerBox" (default) or "TriggerSphere". "TriggerVolume" is deliberately REJECTED here -- ATriggerVolume derives from AVolume/ABrush and needs a real UModel brush built for it, so spawning it through this path would hand you a success-shaped actor with no real collision; use spawn_box_volume(volume_class="TriggerVolume"), which builds that brush. |
-| `location` | array | no | World [x, y, z] location to spawn the trigger (default 0,0,0) |
-
-**Returns:** `{ trigger_name, trigger_type, actor_name, actor_path, success }`
 
 ## `get_actors_in_trigger`
 
@@ -28,7 +14,7 @@ List and count the actors that a TriggerBox, TriggerSphere or TriggerVolume in t
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `trigger_name` | string | yes | Object name or editor label of the trigger actor, such as the actor_name returned by create_trigger. |
+| `trigger_name` | string | yes | Object name or editor label of the trigger actor, such as the actor_name returned by spawn_actor. |
 
 **Returns:** `{ trigger_name, actor_name (the trigger's object name), actor_class (the trigger's class), actors: [{actor_name, actor_class}], actor_count }`
 
@@ -137,7 +123,7 @@ Resize a TriggerSphere in the editor world by setting the unscaled radius of its
 
 *Additive.*
 
-Spawn ANY AVolume-derived actor (default BlockingVolume) in the editor world AND build a real cube brush for it from a half-extent, so the volume actually encloses space: spawn_actor has no volume types, and a volume spawned without a brush has zero bounds -- 0 nav tiles, no overlap. It then normalizes the residual scale some actor factories stamp on placement (PCGVolume: 25,25,10) and RE-READS the brush bounds, so `success` means the volume matches the extent you asked for, not that the call returned. Typed siblings add one step each: spawn_pcg_volume assigns a graph, spawn_nav_modifier_volume an area class, spawn_level_streaming_volume binds a sub-level. Called with no class and no extent it gives a 200 cm BlockingVolume cube. One undo step; refused during PIE; the level is not saved.
+Spawn ANY AVolume-derived actor (default BlockingVolume) in the editor world AND build a real cube brush for it from a half-extent, so the volume actually encloses space: spawn_actor has no volume types, and a volume spawned without a brush has zero bounds -- 0 nav tiles, no overlap. It then normalizes the residual scale some actor factories stamp on placement (PCGVolume: 25,25,10) and RE-READS the brush bounds, so `success` means the volume matches the extent you asked for, not that the call returned. One more step finishes the typed volumes: add_pcg_component(graph) on a PCGVolume, set_properties {"AreaClass": ...} on a NavModifierVolume, {"bUnbound": true} on an unbound PostProcessVolume; spawn_level_streaming_volume binds a sub-level. Called with no class and no extent it gives a 200 cm BlockingVolume cube. One undo step; refused during PIE; the level is not saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

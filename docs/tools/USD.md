@@ -2,7 +2,7 @@
 
 # USD
 
-46 tools for USD stages, prims, attributes, variants, references and layers.
+49 tools for USD stages, prims, attributes, variants, references and layers.
 
 Back to the [index](README.md).
 
@@ -25,7 +25,7 @@ Add an internal reference composition arc (references another prim inside the SA
 
 *Additive.*
 
-Add a payload composition arc to a prim (load-on-demand; payloads are NOT loaded by the stage unless an explicit Load rule says so).
+Add a payload composition arc to a prim (load-on-demand; payloads are NOT loaded by the stage unless an explicit Load rule says so). Inverse: clear_usd_payloads (one payload with asset_path).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -57,7 +57,7 @@ Add an external reference composition arc to a prim (asset_path -> target prim, 
 
 *Additive, idempotent.*
 
-Add a new variant to an existing variant set at the requested list position; idempotent (returns already_existed:true when the variant is already present)
+Add a new variant to an existing variant set at the requested list position; idempotent (returns already_existed:true when the variant is already present). Inverse: remove_usd_variant.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -73,7 +73,7 @@ Add a new variant to an existing variant set at the requested list position; ide
 
 *Additive, idempotent.*
 
-Author a new (empty) variant set on a prim at the requested list position; idempotent (returns already_existed:true when the set is already present)
+Author a new (empty) variant set on a prim at the requested list position; idempotent (returns already_existed:true when the set is already present). Inverse: remove_usd_variant_set.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -112,6 +112,21 @@ Clear authored values of a USD attribute on a prim of an open stage: with time, 
 | `time` | number | no | Time code of the single sample to clear (ClearAtTime); omit it to clear the default value and all samples (Clear). |
 
 **Returns:** `{ prim_path: string, attr_name: string, cleared: bool, present: bool, time: number? }`
+
+## `clear_usd_payloads`
+
+*Destructive, idempotent.*
+
+Remove the payload arcs of a prim: every payload (UsdPayloads::ClearPayloads), or with asset_path the one payload to that layer and target prim (RemovePayload). Inverse of add_usd_payload, which clear_usd_references does not touch; the edit lands on the stage's current edit target layer, as the add did. Irreversible, like every USD composition edit here (no undo). had_payloads and has_payloads are the prim read before and after (UsdPrim::HasAuthoredPayloads). A stage or prim that does not resolve is an error; a prim with no payload is an honest no-op (cleared=false). Save the layer with save_usd_stage.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `stage_name` | string | yes | Name the stage was registered under. |
+| `prim_path` | string | yes | Prim whose payloads should be removed. |
+| `asset_path` | string | no | Optional identifier of the payload's layer: only the payload to that layer (and prim_path_for_target) goes. |
+| `prim_path_for_target` | string | no | With asset_path, the prim inside that layer the payload targets, as given to add_usd_payload. Empty (default) means '/', as for add_usd_payload. |
+
+**Returns:** `{ stage_name: string, prim_path: string, asset_path?: string, had_payloads: bool, cleared: bool, has_payloads: bool, errors: [string]? }`
 
 ## `clear_usd_references`
 
@@ -531,6 +546,35 @@ Remove a sublayer by index from the stage's root layer's composition stack.
 | `sublayer_index` | number | yes | 0-based index into GetSubLayerPaths() of the root layer. |
 
 **Returns:** `{ stage_name: string, sublayer_index: int, removed: bool, new_count: int, errors: [string]? }`
+
+## `remove_usd_variant`
+
+*Destructive.*
+
+Delete one variant from a variant set of a prim of a cached USD stage: on every spec of the prim in the stage's local layer stack the variant spec goes (with the opinions authored inside it), and a selection of that variant is cleared. Inverse of add_usd_variant. Opinions on a layer outside the local stack (a reference or payload) are left as they are and counted in specs_skipped. A set the prim does not have is an error; a variant the set does not have is an honest no-op (removed=false). Irreversible, like every USD composition edit here (no undo); save with save_usd_stage. Read: list_usd_variant_sets; the whole set: remove_usd_variant_set.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `prim_path` | string | yes | SdfPath of the prim that authors the variant set |
+| `variant_set_name` | string | yes | Variant set that holds the variant |
+| `variant_name` | string | yes | Name of the variant to delete |
+| `stage_name` | string | no | Stage cache key |
+
+**Returns:** `{ prim_path: string, variant_set_name: string, variant_name: string, removed: bool, specs_edited: int, specs_skipped: int, still_present: bool, variant_names: [string] }`
+
+## `remove_usd_variant_set`
+
+*Destructive.*
+
+Delete a variant set from a prim of a cached USD stage, as the variant set editor does: on every spec of the prim in the stage's local layer stack (root, sublayers, session layer) the variant set with all its variants goes, with its name in the variant set list and its selection. Inverse of add_usd_variant_set; clear_usd_variant_selection only clears the selection. Opinions authored on a layer outside the local stack (one brought in by a reference or payload) are left as they are and counted in specs_skipped, so the set can still show (still_present). A prim that does not author the set is an honest no-op (removed=false); a missing stage or prim is an error. Irreversible, like every USD composition edit here (no undo); save with save_usd_stage. Read: list_usd_variant_sets.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `prim_path` | string | yes | SdfPath of the prim that authors the variant set |
+| `variant_set_name` | string | yes | Name of the variant set to delete |
+| `stage_name` | string | no | Stage cache key |
+
+**Returns:** `{ prim_path: string, variant_set_name: string, removed: bool, specs_edited: int, specs_skipped: int, still_present: bool }`
 
 ## `save_usd_stage`
 

@@ -395,6 +395,7 @@ TSharedPtr<FJsonObject> HandleCreatePhysicalMaterial(const TSharedPtr<FJsonObjec
 // set_physical_material_properties
 // --------------------------------------------------------------------------- //
 // MCP:set_physical_material_properties - Set friction, restitution, density, combine modes, surface type, mass power and sleep thresholds of a PhysicalMaterial asset as one undo step, then save it. Over set_properties: it clamps to the engine ranges, turns combine-mode overrides on, and saves; like a Details-panel edit it runs PostEditChange, so bodies using the material in this session see the new values. Bad enum names, or a call with no field, fail before writing. Values the material already has give changed=false and saved=false; a failed save makes success false, with saved=false and save_error, and still returns the values read back.
+//   @retired set_properties - object_path=<physical material>, properties={"Friction":..,"Restitution":..,"Density":..,"bOverrideFrictionCombineMode":true,"FrictionCombineMode":"Max"}, clamp=true, save=true
 //   @param physical_material_path - /Game path to the physical material asset.
 //   @param friction - Optional new (kinetic) Friction value (>= 0)
 //   @param static_friction - Optional new StaticFriction value (>= 0)

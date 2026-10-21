@@ -2,7 +2,7 @@
 
 # BehaviorTree
 
-22 tools for Behavior Trees with their composites, decorators and services, Blackboards and their keys, and running trees.
+24 tools for Behavior Trees with their composites, decorators and services, Blackboards and their keys, and running trees.
 
 Back to the [index](README.md).
 
@@ -10,7 +10,7 @@ Back to the [index](README.md).
 
 *Additive, idempotent.*
 
-Add a child under a BehaviorTree composite: a composite (Selector/Sequence/SimpleParallel) when composite is given, or a leaf task (Wait/MoveTo/PlaySound/RunBehavior/...) when task_class is given; exactly one of the two. The child is appended to the parent's Children (array order = execution order). Authoring is data-only: ParentNode/ExecutionIndex are assigned by the BT runtime at load (run_behavior_tree). Idempotent by child_name within the parent, whatever its kind. The returned child_name is how you address a composite as a parent for further children.
+Add a child under a BehaviorTree composite: a composite (Selector/Sequence/SimpleParallel) when composite is given, or a leaf task (Wait/MoveTo/PlaySound/RunBehavior/...) when task_class is given; exactly one of the two. The child is appended to the parent's Children (array order = execution order). Authoring is data-only: ParentNode/ExecutionIndex are assigned by the BT runtime at load (run_behavior_tree). Idempotent by child_name within the parent, whatever its kind. The returned child_name is how you address a composite as a parent for further children. Configure the node (a MoveTo's key, a Wait's time) with set_behavior_tree_node_property; read its settings with get_behavior_tree_node_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -26,7 +26,7 @@ Add a child under a BehaviorTree composite: a composite (Selector/Sequence/Simpl
 
 *Additive, idempotent.*
 
-Attach a decorator (execution condition) to a specific child-edge of a BehaviorTree composite.  The decorator is appended to that child's Decorators array and gates whether the child may run. Authoring is data-only: ParentNode/ExecutionIndex are assigned by the BT runtime at load (run_behavior_tree). Idempotent by decorator_name within the child-edge.
+Attach a decorator (execution condition) to a specific child-edge of a BehaviorTree composite.  The decorator is appended to that child's Decorators array and gates whether the child may run. Authoring is data-only: ParentNode/ExecutionIndex are assigned by the BT runtime at load (run_behavior_tree). Idempotent by decorator_name within the child-edge. Configure it (key, condition) with set_behavior_tree_node_property; read: get_behavior_tree_node_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -42,7 +42,7 @@ Attach a decorator (execution condition) to a specific child-edge of a BehaviorT
 
 *Additive, idempotent.*
 
-Attach a service (background tick) to a BehaviorTree composite.  The service is appended to the composite's Services array and ticks while that composite branch is active. Authoring is data-only: ParentNode/ExecutionIndex are assigned by the BT runtime at load (run_behavior_tree). Idempotent by service_name within the composite.
+Attach a service (background tick) to a BehaviorTree composite.  The service is appended to the composite's Services array and ticks while that composite branch is active. Authoring is data-only: ParentNode/ExecutionIndex are assigned by the BT runtime at load (run_behavior_tree). Idempotent by service_name within the composite. Configure it with set_behavior_tree_node_property; read: get_behavior_tree_node_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -99,13 +99,28 @@ Create a UBlackboardData asset with no parent at package_path/name (default fold
 
 *Read-only.*
 
-Read a UBehaviorTree asset found by content path: its name, its blackboard asset with every key it holds in key-ID order, parent blackboard keys first (name, type, instance_synced, the base class or enum subsettings, inherited, and defined_in naming the blackboard that declares the key), and the node tree from RootNode -- each node's name and class, a composite's services and children, and the decorators on each child edge, nested up to 64 levels. Nothing is written. A missing path, or one that does not load as a behavior tree, is an error; a tree with no root gives root_node null. The runtime state of a tree running on an AI actor is get_behavior_tree_status; blackboard asset details: get_blackboard_data; build the tree with set_behavior_tree_root, add_behavior_tree_child, add_behavior_tree_decorator and add_behavior_tree_service.
+Read a UBehaviorTree asset found by content path: its name, its blackboard asset with every key it holds in key-ID order, parent blackboard keys first (name, type, instance_synced, the base class or enum subsettings, inherited, and defined_in naming the blackboard that declares the key), and the node tree from RootNode -- each node's name and class, a composite's services and children, and the decorators on each child edge, nested up to 64 levels. Nothing is written. A missing path, or one that does not load as a behavior tree, is an error; a tree with no root gives root_node null. The runtime state of a tree running on an AI actor is get_behavior_tree_status; blackboard asset details: get_blackboard_data; build the tree with set_behavior_tree_root, add_behavior_tree_child, add_behavior_tree_decorator and add_behavior_tree_service. A node's settings: get_behavior_tree_node_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `behavior_tree_path` | string | yes | Content path of the UBehaviorTree asset, e.g. "/Game/AI/BT_Enemy"; a bare asset name is not resolved |
 
 **Returns:** `{ behavior_tree_path: string, name: string, blackboard_asset: string|null, blackboard_keys: [{ name: string, type: string, instance_synced: bool, inherited: bool, defined_in: string }], root_node: object|null }`
+
+## `get_behavior_tree_node_properties`
+
+*Read-only.*
+
+Read the settings of one node of a BehaviorTree asset -- a composite, a task, a decorator or a service, found by its node name anywhere in the tree -- as typed JSON: every editable property of its class (name, type, category, value), a blackboard key selector read as its key name with the key types it accepts (allowed_key_types), a value-or-key pair (a Wait's WaitTime) as {Key, DefaultValue}. property_name narrows it to one. Read-only. It reads what set_behavior_tree_node_property writes; the tree's shape and node names come from get_behavior_tree_info. A missing tree or node is an error listing the nodes; a name several nodes share is an error naming each, to narrow with parent_name.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `behavior_tree_path` | string | yes | Path to the UBehaviorTree asset. |
+| `node_name` | string | yes | Name of the node: the child_name, decorator_name or service_name given when it was added; "Root" for the root composite. |
+| `parent_name` | string | no | Optional name of the composite (or, for a task's service, the task) holding the node, to pick one of several nodes with the same name; "Root" for the root. |
+| `property_name` | string | no | Optional: read only this property (a dotted path into a struct is accepted, e.g. "WaitTime.DefaultValue"). |
+
+**Returns:** `{ behavior_tree_path, node_name, node_class, role: "root"|"composite"|"task"|"decorator"|"service"|"root_decorator", parent_name, blackboard_asset, property_count, properties: [{name, type, category, value, blackboard_key?, allowed_key_types?, value_or_blackboard_key?}] }`
 
 ## `get_behavior_tree_status`
 
@@ -250,6 +265,22 @@ Start a BehaviorTree asset with AAIController::RunBehaviorTree on an AIControlle
 | `behavior_tree_path` | string | yes | Asset path of the UBehaviorTree, e.g. "/Game/AI/BT_Enemy"; a bare asset name is not resolved. |
 
 **Returns:** `{ actor_name: string, behavior_tree_path: string, started: bool, ai_controller: string }`
+
+## `set_behavior_tree_node_property`
+
+*Destructive, idempotent.*
+
+Write one setting of one node of a BehaviorTree asset -- a composite, task, decorator or service found by its node name -- then save the tree; no undo step. This is how a placed node is told what to do: a MoveTo's BlackboardKey, a Wait's WaitTime, a Blackboard decorator's key and condition. property_name is an editable property of the node's class or a dotted path into it. A blackboard key selector takes the key's NAME as a string: the key must exist in the tree's blackboard (or a parent) and be a type the selector accepts, else an error naming the keys; a value-or-key pair (WaitTime) takes a plain value for its DefaultValue or {"key": "&lt;blackboard key>"}, a key of a type the pair accepts (a float pair takes a Float key); anything else takes typed JSON (numbers, bools, enum names, structs as objects). A property the class does not have, one that is not editable, or a value that does not fit is an error and nothing is written. The reply re-reads the property (value_after). Read: get_behavior_tree_node_properties; place nodes: add_behavior_tree_child / add_behavior_tree_decorator / add_behavior_tree_service.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `behavior_tree_path` | string | yes | Path to the UBehaviorTree asset. |
+| `node_name` | string | yes | Name of the node (its child_name, decorator_name or service_name); "Root" for the root composite. |
+| `property_name` | string | yes | Editable property of the node's class (e.g. "BlackboardKey", "WaitTime", "AcceptableRadius") or a dotted path into one ("WaitTime.DefaultValue"). |
+| `value` | any | yes | The value: a key name string for a blackboard key selector; a plain value or {"key": name} for a value-or-key pair; typed JSON otherwise. |
+| `parent_name` | string | no | Optional name of the composite (or task) holding the node, to pick one of several nodes with the same name. |
+
+**Returns:** `{ behavior_tree_path, node_name, node_class, property_name, value_after, key_type?, saved, save_error? }`
 
 ## `set_behavior_tree_root`
 

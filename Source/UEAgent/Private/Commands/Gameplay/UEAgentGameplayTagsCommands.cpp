@@ -303,7 +303,7 @@ TSharedPtr<FJsonObject> HandleCreateGameplayTag(const TSharedPtr<FJsonObject>& P
     }
 
     // The path of the editor's "Add New Gameplay Tag" widget: the tag joins the project's list in the .ini and the
-    // tag tree is refreshed, so query_gameplay_tags lists it.
+    // tag tree is refreshed, so find_gameplay_tags lists it.
     const FName SourceFName = SourceName.IsEmpty() ? NAME_None : FName(*SourceName);
     if (!IGameplayTagsEditorModule::Get().AddNewGameplayTagToINI(TagName, DevComment, SourceFName))
     {
@@ -314,7 +314,7 @@ TSharedPtr<FJsonObject> HandleCreateGameplayTag(const TSharedPtr<FJsonObject>& P
     return Registered(Created.IsValid() ? Created.ToString() : TagName, TEXT("Gameplay tag created and registered in INI"));
 }
 
-// MCP:get_gameplay_tag_info - Does this exact tag string exist and resolve right now, and if so its detail: its PARENT tag and where it is defined. found=false is a normal answer, not an error -- the precondition to check BEFORE using a tag anywhere: an unregistered tag is not an error in UE, it silently becomes an empty/None tag, and a query made with an empty tag fails exactly like a valid tag that does not match. The parent is how you walk the hierarchy (Material.Wood.Oak answers to Material.Wood); hierarchy matching is ASYMMETRIC, HasAny(A, B) only succeeds when a tag of A is B or a DESCENDANT of B, so putting a family where a leaf is expected quietly fails. The source says where the tag comes from -- native C++, DefaultGameplayTags.ini, a tag DataTable, or transient (registered live this session and NOT on disk) -- with its comment and native / restricted / explicit flags: whether a tag survives an editor restart, which file to edit to change it, and whether it is YOURS or a vendor's or the engine's before you rename or remove it. Exact lookup: use query_gameplay_tags for a branch.
+// MCP:get_gameplay_tag_info - Does this exact tag string exist and resolve right now, and if so its detail: its PARENT tag and where it is defined. found=false is a normal answer, not an error -- the precondition to check BEFORE using a tag anywhere: an unregistered tag is not an error in UE, it silently becomes an empty/None tag, and a query made with an empty tag fails exactly like a valid tag that does not match. The parent is how you walk the hierarchy (Material.Wood.Oak answers to Material.Wood); hierarchy matching is ASYMMETRIC, HasAny(A, B) only succeeds when a tag of A is B or a DESCENDANT of B, so putting a family where a leaf is expected quietly fails. The source says where the tag comes from -- native C++, DefaultGameplayTags.ini, a tag DataTable, or transient (registered live this session and NOT on disk) -- with its comment and native / restricted / explicit flags: whether a tag survives an editor restart, which file to edit to change it, and whether it is YOURS or a vendor's or the engine's before you rename or remove it. Exact lookup: use find_gameplay_tags for a branch.
 //   @param tag_name - Name of the gameplay tag to look up
 //   @returns { tag_name: string, found: bool, tag_string?: string, tag_name_string?: string, parent_tag?: string, source?: string, comment?: string, is_native?: bool, is_restricted?: bool, is_explicit?: bool, allow_non_restricted_children?: bool }
 TSharedPtr<FJsonObject> HandleGetGameplayTagInfo(const TSharedPtr<FJsonObject>& Params)
@@ -364,7 +364,8 @@ TSharedPtr<FJsonObject> HandleGetGameplayTagInfo(const TSharedPtr<FJsonObject>& 
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:query_gameplay_tags - Search the registered gameplay tags for everything under a tag -- the discovery call for "what tags exist under Material.Wood" or "is there already a tag for this" -- or, with no query_tag, list EVERY registered tag (the full vocabulary, plugins and vendor content included; projects run to thousands, so prefer a branch). count_only returns just the count: the cheap health probe that the registry loaded, or that create_gameplay_tag registered (compare before and after). Sees the LIVE registry, so a tag added this session by create_gameplay_tag shows up even if the ini was restored, and one that only exists as text in a file does not. A query_tag that is not registered is an error; to test one exact string use get_gameplay_tag_info.
+// MCP:find_gameplay_tags - Search the registered gameplay tags for everything under a tag -- the discovery call for "what tags exist under Material.Wood" or "is there already a tag for this" -- or, with no query_tag, list EVERY registered tag (the full vocabulary, plugins and vendor content included; projects run to thousands, so prefer a branch). count_only returns just the count: the cheap health probe that the registry loaded, or that create_gameplay_tag registered (compare before and after). Sees the LIVE registry, so a tag added this session by create_gameplay_tag shows up even if the ini was restored, and one that only exists as text in a file does not. A query_tag that is not registered is an error; to test one exact string use get_gameplay_tag_info.
+//   @renamed-from query_gameplay_tags
 //   @param query_tag - Optional tag whose branch to list (the tag itself and all of its descendants); omitted or empty lists every registered tag
 //   @param count_only - Optional bool, default false: return count (and manager_valid) without the matching_tags list
 //   @returns { query_tag: string, count: int, manager_valid: bool, matching_tags?: [{ tag_name: string, tag_string: string }] }
@@ -710,7 +711,7 @@ TSharedPtr<FJsonObject> HandleRemoveGameplayTagFromTable(const TSharedPtr<FJsonO
     return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("remove_gameplay_tag_from_table"));
 }
 
-// MCP:get_gameplay_tag_table_rows - List every tag declared in a gameplay tag DataTable (FGameplayTagTableRow), with its developer comment and whether the live tag manager has it registered -- what this table contributes to the project vocabulary, as opposed to query_gameplay_tags which returns the merged live registry from all sources. valid is false when any row's tag is not registered, and missing_tags names each such tag with its row key, so the table can be fixed or the tags registered. Read-only.
+// MCP:get_gameplay_tag_table_rows - List every tag declared in a gameplay tag DataTable (FGameplayTagTableRow), with its developer comment and whether the live tag manager has it registered -- what this table contributes to the project vocabulary, as opposed to find_gameplay_tags which returns the merged live registry from all sources. valid is false when any row's tag is not registered, and missing_tags names each such tag with its row key, so the table can be fixed or the tags registered. Read-only.
 //   @param table_path - Full asset path of the gameplay tag data table
 //   @returns { table_path: string, row_struct: string, rows: [{ row_name: string, tag: string, dev_comment: string, registered: bool }], row_count: int, valid: bool, missing_count: int, missing_tags: [{ tag_name: string, row_name: string }] }
 TSharedPtr<FJsonObject> HandleGetGameplayTagTableRows(const TSharedPtr<FJsonObject>& Params)
@@ -1130,7 +1131,7 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("get_gameplay_tag_table_rows"), &HandleGetGameplayTagTableRows },
     { TEXT("get_object_tags"), &HandleGetObjectTags },
     { TEXT("has_gameplay_tags"), &HandleHasAnyGameplayTags },
-    { TEXT("query_gameplay_tags"), &HandleQueryGameplayTags },
+    { TEXT("find_gameplay_tags"), &HandleQueryGameplayTags },
     { TEXT("remove_gameplay_tag"), &HandleRemoveGameplayTag },
     { TEXT("remove_gameplay_tag_from_table"), &HandleRemoveGameplayTagFromTable },
     { TEXT("remove_gameplay_tag_redirect"), &HandleRemoveGameplayTagRedirect },

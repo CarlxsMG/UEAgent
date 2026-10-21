@@ -8,6 +8,8 @@
   "refuse_static": true,
   "set_desc": "Set intensity, light color, indirect and volumetric intensity, lower-hemisphere color and occlusion of a SkyLight actor found by label or name, through the component's setters, which update its rendering state; set_properties writes any other field. Only supplied fields change, in one undo step, and all are read back. light_color and lower_hemisphere_color are linear [R,G,B(,A)]; occlusion_tint is [R,G,B(,A)] in whole 0-255 bytes. A Static SkyLight is refused, since its setters change nothing (make it Stationary or Movable first), and so is a malformed field; nothing changes then. Not saved.",
   "get_desc": "Read the intensity, color and occlusion settings of a SkyLight actor's component, found by label or name in the editor world, under the snake_case names set_sky_light_properties takes. A curated view; get_properties (internal names only) reads any other UPROPERTY on it.",
+  "set_retired": "set_properties - object_path=\"<actor>.SkyLightComponent\", properties={\"Intensity\":..,\"Contrast\":..,\"LightColor\":{\"R\",\"G\",\"B\",\"A\"}}; recapture with call_function(function_name=\"RecaptureSky\")",
+  "get_retired": "get_properties - object_path=\"<actor>.SkyLightComponent\", property_names=[\"Intensity\",\"LightColor\",\"Contrast\",...], or get_component_properties for all of them",
   "fields": [
     { "json": "intensity", "setter": "SetIntensity", "readback": "Intensity", "type": "float", "desc": "Optional sky light intensity." },
     { "json": "light_color", "setter": "SetLightColor", "readback": "LightColor", "type": "linear_color", "desc": "Optional [R,G,B(,A)] light color (stored as FColor).",

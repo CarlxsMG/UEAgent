@@ -766,7 +766,7 @@ namespace McpReadbackInResponseC
 			RB_warn_tampered_proxy_0);
 	}
 
-	/** Setting replicated movement gives no headless oracle of the movement mirror. configure_replication applies only
+	/** Setting replicated movement gives no headless oracle of the movement mirror. set_actor_replication applies only
 	 *  the settings sent, so this speaks only when replicate_movement was one of them. */
 	static FO WarnMovementMirror(const FO& Params, const FO& Result)
 	{
@@ -783,6 +783,17 @@ namespace McpReadbackInResponseC
 	{
 		return StandingWarning(Result, TEXT("water_without_swim_volume"), TextField(Params, TEXT("actor_label")),
 			TextField(Params, TEXT("water_zone_label")), RB_warn_water_without_swim_volume_0);
+	}
+
+	/** create_water_body runs the creator of its body_type: the same check that creator gets. */
+	static FO CheckWaterBodyCreated(const FO& Params, const FO& Result)
+	{
+		const FString BodyType = TextOf(Get(Params, TEXT("body_type"))).ToLower();
+		if (BodyType == TEXT("ocean"))
+		{
+			return CheckOceanCreated(Params, Result);
+		}
+		return BodyType == TEXT("lake") || BodyType == TEXT("river") ? WarnWaterWithoutSwimVolume(Params, Result) : nullptr;
 	}
 
 	/** The largest of extent[] and size, or unset. */
@@ -1125,8 +1136,9 @@ void McpReadbackChecks::RegisterInResponseC(McpReadback::FTables& Tables)
 	T.Add(TEXT("smooth_landscape_in_box"), &CheckClampedSmoothing);
 	T.Add(TEXT("set_blueprint_variable_replication"), &CheckUnverifiableReplication);
 	T.Add(TEXT("possess_pawn"), &WarnTamperedProxy);
-	T.Add(TEXT("configure_replication"), &WarnMovementMirror);
+	T.Add(TEXT("set_actor_replication"), &WarnMovementMirror);
 	AddForEach({ TEXT("create_lake_water_body"), TEXT("create_river_water_body") }, &WarnWaterWithoutSwimVolume);
+	T.Add(TEXT("create_water_body"), &CheckWaterBodyCreated);
 	T.Add(TEXT("spawn_box_volume"), &WarnVolumeCollision);
 	T.Add(TEXT("add_spline_mesh_component"), &WarnUndeformedCollision);
 	T.Add(TEXT("rerun_construction_scripts"), &WarnConstructionScriptErases);

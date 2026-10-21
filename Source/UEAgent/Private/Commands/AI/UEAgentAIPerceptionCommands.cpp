@@ -157,7 +157,8 @@ TSharedPtr<FJsonObject> HandleCreateAIControllerBlueprint(const TSharedPtr<FJson
 
 // Runtime AI perception introspection and configuration.
 
-// MCP:configure_ai_sight_radius - Set SightRadius and LoseSightRadius (default sight_radius times 1.5) on the sight config of the AIPerceptionComponent of an AI-possessed pawn or an AIController. The actor is looked up in the editor world, not PIE, so an unpossessed pawn is an error. Returns sight_radius, lose_sight_radius and sight_sense_count; 0 means no sight config, nothing changed.
+// MCP:set_ai_sight_radius - Set SightRadius and LoseSightRadius (default sight_radius times 1.5) on the sight config of the AIPerceptionComponent of an AI-possessed pawn or an AIController. The actor is looked up in the editor world, not PIE, so an unpossessed pawn is an error. Returns sight_radius, lose_sight_radius and sight_sense_count; 0 means no sight config, nothing changed.
+//   @renamed-from configure_ai_sight_radius
 //   @param actor_name - Object name or editor label of the pawn or AIController in the editor world; the first match is used.
 //   @param sight_radius - New SightRadius in cm, greater than 0.
 //   @param lose_sight_radius - New LoseSightRadius in cm, the distance at which an already seen target is lost, 0 or more; default sight_radius times 1.5.
@@ -469,7 +470,7 @@ TSharedPtr<FJsonObject> HandleSetNativeTeamAttitude(const TSharedPtr<FJsonObject
 const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("add_ai_stimuli_source"), &HandleAddAiStimuliSource },
-    { TEXT("configure_ai_sight_radius"), &HandleConfigureAISightRadius },
+    { TEXT("set_ai_sight_radius"), &HandleConfigureAISightRadius },
     { TEXT("create_ai_controller_blueprint"), &HandleCreateAIControllerBlueprint },
     { TEXT("get_actor_team"), &HandleGetActorTeam },
     { TEXT("get_ai_perceived_actors"), &HandleGetAIPerceivedActors },

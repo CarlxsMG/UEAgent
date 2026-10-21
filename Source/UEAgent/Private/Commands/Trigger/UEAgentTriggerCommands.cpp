@@ -148,6 +148,7 @@ AActor* FindActorByName(const FString& Name)
 // Shape triggers: creation, inspection, overlap set-up and overlap queries.
 
 // MCP:create_trigger - Creates a trigger actor (TriggerBox or TriggerSphere) at a specified location. These two shapes only -- for a brush-based ATriggerVolume use spawn_box_volume(volume_class="TriggerVolume") instead.
+//   @retired spawn_actor - type="TriggerBox" or "TriggerSphere", name, location
 //   @param trigger_name - Name label for the trigger actor
 //   @param trigger_type - Trigger class: "TriggerBox" (default) or "TriggerSphere". "TriggerVolume" is deliberately REJECTED here -- ATriggerVolume derives from AVolume/ABrush and needs a real UModel brush built for it, so spawning it through this path would hand you a success-shaped actor with no real collision; use spawn_box_volume(volume_class="TriggerVolume"), which builds that brush.
 //   @param location - World [x, y, z] location to spawn the trigger (default 0,0,0)
@@ -230,7 +231,7 @@ TSharedPtr<FJsonObject> HandleGetTriggerInfo(const TSharedPtr<FJsonObject>& Para
 }
 
 // MCP:get_actors_in_trigger - List and count the actors that a TriggerBox, TriggerSphere or TriggerVolume in the editor world (not PIE) currently reports as overlapping (AActor::GetOverlappingActors), without changing anything. Returns actor_count and actors [{actor_name, actor_class}], plus the trigger's own object name and class. The first actor whose object name or editor label matches is used; when it is not a trigger the call fails.
-//   @param trigger_name - Object name or editor label of the trigger actor, such as the actor_name returned by create_trigger.
+//   @param trigger_name - Object name or editor label of the trigger actor, such as the actor_name returned by spawn_actor.
 //   @returns { trigger_name, actor_name (the trigger's object name), actor_class (the trigger's class), actors: [{actor_name, actor_class}], actor_count }
 TSharedPtr<FJsonObject> HandleGetActorsInTrigger(const TSharedPtr<FJsonObject>& Params)
 {
@@ -370,7 +371,7 @@ TSharedPtr<FJsonObject> HandleGetVolumeInfo(const TSharedPtr<FJsonObject>& Param
     return mcp_common::MakeOkReply(Report);
 }
 
-// MCP:spawn_box_volume - Spawn ANY AVolume-derived actor (default BlockingVolume) in the editor world AND build a real cube brush for it from a half-extent, so the volume actually encloses space: spawn_actor has no volume types, and a volume spawned without a brush has zero bounds -- 0 nav tiles, no overlap. It then normalizes the residual scale some actor factories stamp on placement (PCGVolume: 25,25,10) and RE-READS the brush bounds, so `success` means the volume matches the extent you asked for, not that the call returned. Typed siblings add one step each: spawn_pcg_volume assigns a graph, spawn_nav_modifier_volume an area class, spawn_level_streaming_volume binds a sub-level. Called with no class and no extent it gives a 200 cm BlockingVolume cube. One undo step; refused during PIE; the level is not saved.
+// MCP:spawn_box_volume - Spawn ANY AVolume-derived actor (default BlockingVolume) in the editor world AND build a real cube brush for it from a half-extent, so the volume actually encloses space: spawn_actor has no volume types, and a volume spawned without a brush has zero bounds -- 0 nav tiles, no overlap. It then normalizes the residual scale some actor factories stamp on placement (PCGVolume: 25,25,10) and RE-READS the brush bounds, so `success` means the volume matches the extent you asked for, not that the call returned. One more step finishes the typed volumes: add_pcg_component(graph) on a PCGVolume, set_properties {"AreaClass": ...} on a NavModifierVolume, {"bUnbound": true} on an unbound PostProcessVolume; spawn_level_streaming_volume binds a sub-level. Called with no class and no extent it gives a 200 cm BlockingVolume cube. One undo step; refused during PIE; the level is not saved.
 //   @param volume_class [string] - Optional volume class (default "BlockingVolume"): short reflected name ('BlockingVolume', 'KillZVolume', 'PainCausingVolume', 'PostProcessVolume', 'TriggerVolume', 'NavMeshBoundsVolume', 'PhysicsVolume', 'PCGVolume', case-insensitive, with or without a leading 'A') or a full object path ('/Script/Engine.TriggerVolume'). Must be a concrete AVolume subclass; anything else is an error.
 //   @param location - World [x, y, z] location to spawn the volume (default 0,0,0)
 //   @param extent [array] - Optional [x, y, z] in unreal units, each component > 0; default [100, 100, 100] (a 200 cm cube). !!! THIS IS THE SEMI-AXIS (HALF-size), NOT the full edge length !!! extent=[500,500,200] builds a 1000 x 1000 x 400 cube and, with the scale normalized, gives world bounds of +/-500 / +/-200 around `location`. Check `bounds_extent_actual` against what you asked for. A value that is not an array is an error.

@@ -474,6 +474,7 @@ TSharedPtr<FJsonObject> HandleListMassTraits(
 //   config-link is not done.
 // ---------------------------------------------------------------------------
 // MCP:create_mass_spawner_actor - Spawn an AMassSpawner actor into the editor world at location (zero rotation) and label it; the level is not saved. config_path is only echoed, not linked (config_linked:false): link configs with set_mass_spawner_entity_types. Use a unique label, since the spawner tools take the first match.
+//   @retired spawn_actor - type="MassSpawner", name, location
 //   @param actor_label - Editor label for the new spawner actor
 //   @param config_path - Optional entity config asset path (echoed; not linked)
 //   @param location - Optional spawn location [X, Y, Z] in world units (cm), default the origin; ignored unless it holds exactly 3 numbers
@@ -528,7 +529,7 @@ TSharedPtr<FJsonObject> HandleCreateMassSpawnerActor(
 //   spawn-data-generator for locations and may complete asynchronously, so 'spawned'
 //   can be 0 even when entity types are configured.
 // ---------------------------------------------------------------------------
-// MCP:spawn_mass_entities - Run DoSpawning on an editor-world AMassSpawner found by actor_label and report the global Mass entity-count delta -- it spawns entities, not an actor (create_mass_spawner_actor places the spawner). All configured types spawn at the spawner's own count (set_mass_spawner_count); a count that differs from it is an error and nothing is spawned. spawned can be 0. Inverse: despawn_mass_entities.
+// MCP:spawn_mass_entities - Run DoSpawning on an editor-world AMassSpawner found by actor_label and report the global Mass entity-count delta -- it spawns entities, not an actor (spawn_actor places the spawner). All configured types spawn at the spawner's own count (set_mass_spawner_count); a count that differs from it is an error and nothing is spawned. spawned can be 0. Inverse: despawn_mass_entities.
 //   @param actor_label - Editor label of the AMassSpawner actor
 //   @param count - Optional; must equal the spawner's own count (set_mass_spawner_count), which is what DoSpawning spawns. Any other value is an error and nothing is spawned.
 //   @returns { actor_label, entity_count_before, entity_count_after, spawned, spawner_count, note }
@@ -1000,9 +1001,10 @@ namespace
 }
 
 // ---------------------------------------------------------------------------
-// destroy_mass_entity
+// delete_mass_entity
 // ---------------------------------------------------------------------------
-// MCP:destroy_mass_entity - Destroy a single Mass entity by its handle (Index:SerialNumber), or with all=true every Mass entity in the editor world (not a PIE world), archetype by archetype; no undo either way. Give exactly one of entity_handle and all. To despawn what one spawner made use despawn_mass_entities.
+// MCP:delete_mass_entity - Destroy a single Mass entity by its handle (Index:SerialNumber), or with all=true every Mass entity in the editor world (not a PIE world), archetype by archetype; no undo either way. Give exactly one of entity_handle and all. To despawn what one spawner made use despawn_mass_entities.
+//   @renamed-from destroy_mass_entity
 //   @param entity_handle - "{Index}:{SerialNumber}" string returned by spawn/query. Provide this OR all.
 //   @param all - Optional bool, default false: true destroys every entity of the editor world's entity manager instead of one. Provide this OR entity_handle.
 //   @returns { entity_handle?: string, destroyed?: bool, already_destroyed?: bool, all?: bool, destroyed_count?: int, before_count?: int, after_count?: int }
@@ -1121,9 +1123,10 @@ TSharedPtr<FJsonObject> HandleGetMassEntityInfo(const TSharedPtr<FJsonObject>& P
 }
 
 // ---------------------------------------------------------------------------
-// query_mass_entities
+// get_mass_entity_count
 // ---------------------------------------------------------------------------
-// MCP:query_mass_entities - Count entities matching a fragment/tag requirement. Requires "fragment" (UScriptStruct path or name) and optional "presence" ("All"|"Any"|"None" — default "All"). For tag-only queries use "tag" (UScriptStruct path).
+// MCP:get_mass_entity_count - Count entities matching a fragment/tag requirement. Requires "fragment" (UScriptStruct path or name) and optional "presence" ("All"|"Any"|"None" — default "All"). For tag-only queries use "tag" (UScriptStruct path).
+//   @renamed-from query_mass_entities
 //   @param fragment - Script struct path or name (e.g. "/Script/MassMovement.MassMovementFragment" or "FMassMovementFragment").
 //   @param tag - Optional. Same format as fragment. Use to require an FMassTag marker.
 //   @param presence - "All" (default), "Any", or "None".
@@ -1281,7 +1284,7 @@ TSharedPtr<FJsonObject> HandleFireMassSignal(const TSharedPtr<FJsonObject>& Para
 		if (Handle.Index <= 0 || Handle.SerialNumber == 0 || !EntitySub || !EntitySub->GetEntityManager().IsEntityValid(Handle))
 		{
 			return mcp_common::MakeErrorReply(FString::Printf(
-				TEXT("entity_handle %s names no live Mass entity (query_mass_entities gives the live ones); nothing was signalled"), *HandleStr));
+				TEXT("entity_handle %s names no live Mass entity (get_mass_entity_count gives the live ones); nothing was signalled"), *HandleStr));
 		}
 		SigSub->SignalEntity(FName(*SignalName), Handle);
 		Dispatched = 1;
@@ -1352,7 +1355,7 @@ TSharedPtr<FJsonObject> HandleGetMassConfigParent(const TSharedPtr<FJsonObject>&
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:list_mass_archetypes - Census the Mass entities of the editor world (not a PIE world), read-only: every archetype with its live-entity and fragment counts. Returns archetype_count, total_entities (the sum over the archetypes), total (the entity manager's own count) and archetypes [{archetype_id, entity_count, fragment_count}]; get_mass_entity_info names the fragments of one entity, query_mass_entities counts by fragment or tag.
+// MCP:list_mass_archetypes - Census the Mass entities of the editor world (not a PIE world), read-only: every archetype with its live-entity and fragment counts. Returns archetype_count, total_entities (the sum over the archetypes), total (the entity manager's own count) and archetypes [{archetype_id, entity_count, fragment_count}]; get_mass_entity_info names the fragments of one entity, get_mass_entity_count counts by fragment or tag.
 //   @returns { archetype_count: int, total_entities: int, total: int, archetypes: [{ archetype_id: string, entity_count: int, fragment_count: int }] }
 TSharedPtr<FJsonObject> HandleListMassArchetypes(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1396,7 +1399,7 @@ const McpCommandFamilies::FRegistrar Registration =
 	{ TEXT("create_mass_entity_config"), &HandleCreateMassEntityConfig },
 	{ TEXT("create_mass_spawner_actor"), &HandleCreateMassSpawnerActor },
 	{ TEXT("despawn_mass_entities"), &HandleDespawnMassEntities },
-	{ TEXT("destroy_mass_entity"), &HandleDestroyMassEntity },
+	{ TEXT("delete_mass_entity"), &HandleDestroyMassEntity },
 	{ TEXT("fire_mass_signal"), &HandleFireMassSignal },
 	{ TEXT("get_mass_config_parent"), &HandleGetMassConfigParent },
 	{ TEXT("get_mass_entity_info"), &HandleGetMassEntityInfo },
@@ -1405,7 +1408,7 @@ const McpCommandFamilies::FRegistrar Registration =
 	{ TEXT("list_mass_archetypes"), &HandleListMassArchetypes },
 	{ TEXT("list_mass_tag_types"), &HandleListMassTraitTypes },
 	{ TEXT("list_mass_traits"), &HandleListMassTraits },
-	{ TEXT("query_mass_entities"), &HandleQueryMassEntities },
+	{ TEXT("get_mass_entity_count"), &HandleQueryMassEntities },
 	{ TEXT("remove_mass_trait"), &HandleRemoveMassTrait },
 	{ TEXT("remove_mass_tag_from_entity"), &HandleRemoveMassTraitFromEntity },
 	{ TEXT("set_mass_config_parent"), &HandleSetMassConfigParent },

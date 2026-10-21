@@ -69,6 +69,7 @@ namespace UEAgentEnvironmentImpl
 }
 
 // MCP:spawn_sky_atmosphere - Spawn a new SkyAtmosphere actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one, so each call adds another; nothing is saved (save_level). spawn_actor has no atmosphere type. Returns actor_name (the label), actor_internal_name, actor_class and has_component. Tune it with set_sky_atmosphere_properties; the rest of a sky: spawn_sky_light, spawn_volumetric_cloud, spawn_exponential_height_fog.
+//   @retired spawn_actor - type="SkyAtmosphere", location
 //   @param location - [X, Y, Z] world location in cm; defaults to the origin. Any other value (an object, another length) is an error and nothing is spawned.
 //   @returns { actor_name: string, actor_internal_name: string, actor_class: string, has_component: bool, spawned: bool }
 
@@ -93,6 +94,7 @@ TSharedPtr<FJsonObject> HandleSpawnSkyAtmosphere(const TSharedPtr<FJsonObject>& 
 }
 
 // MCP:spawn_volumetric_cloud - Spawn a new VolumetricCloud actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one, so each call adds another; nothing is saved (save_level). spawn_actor has no cloud type. Returns actor_name (the label), actor_internal_name, actor_class and has_component. Tune it with set_volumetric_cloud_properties; the rest of a sky: spawn_sky_atmosphere, spawn_sky_light, spawn_exponential_height_fog.
+//   @retired spawn_actor - type="VolumetricCloud", location
 //   @param location - [X, Y, Z] world location in cm; defaults to the origin. Any other value (an object, another length) is an error and nothing is spawned.
 //   @returns { actor_name: string, actor_internal_name: string, actor_class: string, has_component: bool, spawned: bool }
 
@@ -118,6 +120,7 @@ TSharedPtr<FJsonObject> HandleSpawnVolumetricCloud(const TSharedPtr<FJsonObject>
 }
 
 // MCP:spawn_exponential_height_fog - Spawn a new ExponentialHeightFog actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one, so each call adds another fog actor (not idempotent); nothing is saved (save_level). spawn_actor has no fog type, and this one also seeds fog_density: when given, it is written to its UExponentialHeightFogComponent with SetFogDensity and density_set turns true; either way the reply reads fog_density back from the component, so without the param it shows the class default. No editor world, or a failed spawn, is an error. actor_name is the label and actor_internal_name the object name. Tune or inspect an existing fog with set_exponential_height_fog_properties and get_exponential_height_fog_properties; other atmosphere actors: spawn_sky_atmosphere, spawn_volumetric_cloud or spawn_sky_light.
+//   @retired spawn_actor - type="ExponentialHeightFog", location, properties={"ExponentialHeightFogComponent.FogDensity":..}
 //   @param location - Optional [X, Y, Z] world location in cm (defaults to origin); any other value is an error and nothing is spawned
 //   @param fog_density - Optional fog density multiplier; if supplied, applied to the component and read back
 //   @returns { actor_name: string, actor_internal_name: string, actor_class: string, density_set: bool, fog_density: number, spawned: bool }
@@ -159,6 +162,7 @@ TSharedPtr<FJsonObject> HandleSpawnExponentialHeightFog(const TSharedPtr<FJsonOb
 }
 
 // MCP:spawn_sky_light - Spawn a new SkyLight actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one; nothing is saved. intensity, when given, is set on its USkyLightComponent, and recapture=true calls RecaptureSky so the light refreshes its captured sky lighting now. spawn_actor(type='SkyLight') also spawns one and adds color, a name and a PIE world; pick this one for the recapture. The reply reads intensity back from the component and names the actor (actor_name is the label). Tune an existing sky light with set_sky_light_properties; spawn_sky_atmosphere adds the atmosphere.
+//   @retired spawn_actor - type="SkyLight", intensity, then call_function(object_path="<actor>.SkyLightComponent", function_name="RecaptureSky") to recapture
 //   @param location - Optional [X, Y, Z] world location (defaults to origin)
 //   @param intensity - Optional SkyLight intensity multiplier; if supplied, applied to the component
 //   @param recapture - If true, call RecaptureSky on the component (optional, default false)
@@ -210,6 +214,7 @@ TSharedPtr<FJsonObject> HandleSpawnSkyLight(const TSharedPtr<FJsonObject>& Param
 }
 
 // MCP:spawn_post_process_volume - Spawn a new PostProcessVolume actor in the editor world at location in one undo step, unbound (affecting the whole world) by default; not saved (save_level). It builds NO brush, so unbound=false covers no space: for a bounded volume use spawn_box_volume(volume_class='PostProcessVolume'). spawn_actor has no post-process type. Returns actor_name (the label), actor_internal_name, unbound and enabled. Configure it with set_post_process_setting or set_post_process_color_grading.
+//   @retired spawn_box_volume - volume_class="PostProcessVolume", location, extent; then set_properties(object_path=<label>, properties={"bUnbound":true}) for an unbound one
 //   @param location - [X, Y, Z] world location in cm; defaults to the origin. Any other value (an object, another length) is an error and nothing is spawned.
 //   @param unbound - true (default) makes the volume affect the whole world; false limits it to its brush, which this spawn leaves without geometry, so it then covers no space.
 //   @returns { actor_name: string, actor_internal_name: string, actor_class: string, unbound: bool, enabled: bool, spawned: bool }
@@ -242,6 +247,7 @@ TSharedPtr<FJsonObject> HandleSpawnPostProcessVolume(const TSharedPtr<FJsonObjec
 }
 
 // MCP:set_post_process_setting - Sets a post-process setting on a PostProcessVolume (sets bOverride flag + field, reads back).          exposure (auto_exposure_bias), exposure_min, exposure_max, exposure_method         (0=Histogram,1=Basic,2=Manual), lumen_gi / dynamic_global_illumination_method         (0=None,1=Lumen,2=ScreenSpace,3=Plugin)
+//   @retired set_properties - object_path=<post-process volume>, properties={"Settings":{"bOverride_<Name>":true,"<Name>":value}}
 //   @param actor_name - Label/name of the target PostProcessVolume actor
 //   @param setting - One of: bloom_intensity, vignette_intensity, ambient_occlusion_intensity,
 //   @param value - Numeric value to apply (enum index for method/gi settings)
@@ -411,6 +417,7 @@ namespace
 }
 
 // MCP:set_post_process_color_grading - Set the global AND per-range (shadows/midtones/highlights) color-grading wheels plus white balance and the range pivots on a PostProcessVolume.  Each wheel is an FVector4 [R, G, B, master]; white balance and pivots are scalars — set_post_process_setting never covered these. Setting a field also turns on its bOverride flag (so it takes effect) and reads the value back. Only the supplied fields change.
+//   @retired set_properties - object_path=<post-process volume>, properties={"Settings":{"bOverride_ColorSaturation":true,"ColorSaturation":{"X":1,"Y":1,"Z":1,"W":1}}}
 //   @param actor_name - Label/name of the target PostProcessVolume actor.
 //   @param saturation [array] - Optional [R, G, B, master] saturation (default master 1.0; neutral is [1,1,1,1]).
 //   @param contrast [array] - Optional [R, G, B, master] contrast (neutral [1,1,1,1]).
@@ -502,7 +509,7 @@ TSharedPtr<FJsonObject> HandleSetPostProcessColorGrading(const TSharedPtr<FJsonO
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:get_post_process_settings - Read a PostProcessVolume without changing it: the actor-level enabled / unbounded / priority, its color grading and the scalar settings set_post_process_setting manages, each with its override flag, plus film grain, motion blur, the auto-exposure method and the color grading LUT.  Every graded or scalar value comes with `overridden` (its bOverride_* flag) so you can see what is actually active.
+// MCP:get_post_process_settings - Read a PostProcessVolume without changing it: the actor-level enabled / unbounded / priority, its color grading and the scalar settings set_properties manages, each with its override flag, plus film grain, motion blur, the auto-exposure method and the color grading LUT.  Every graded or scalar value comes with `overridden` (its bOverride_* flag) so you can see what is actually active.
 //   @param actor_name - Label/name of the target PostProcessVolume actor.
 //   @returns { actor_name: string, enabled: bool, unbounded: bool, priority: number, color_grading: { saturation, contrast, gamma, gain, offset, saturation_shadows, saturation_midtones, saturation_highlights, contrast_shadows, contrast_midtones, contrast_highlights (each {value:[float], overridden}) }, white_balance: { white_temp, white_tint, shadows_max, highlights_min (each {value, overridden}) }, scalars: { bloom_intensity, vignette_intensity, ambient_occlusion_intensity, auto_exposure_bias, auto_exposure_min_brightness, auto_exposure_max_brightness (each {value, overridden}) }, film_grain_intensity: number, motion_blur_amount: number, color_grading_lut_path: string, exposure_method: int, auto_exposure_method: string, dynamic_global_illumination_method: int }
 TSharedPtr<FJsonObject> HandleGetPostProcessSettings(const TSharedPtr<FJsonObject>& Params)
@@ -790,6 +797,7 @@ namespace
 }
 
 // MCP:set_sky_atmosphere_properties - Set atmosphere fields (Rayleigh/Mie scattering, anisotropy, ground albedo, radius, height, multi-scattering, aerial perspective, height fog) of a SkyAtmosphere actor found by label or name, through the component's setters, which refresh its render state; set_properties writes any other field. Only supplied fields change, in one undo step; all are read back. Colors are linear [R,G,B(,A)], ground_albedo [R,G,B(,A)] whole 0-255 bytes. A malformed field, or a component of Static mobility (its setters change nothing; make it Movable first), is an error and nothing changes. Not saved.
+//   @retired set_properties - object_path="<actor>.SkyAtmosphereComponent", properties with the engine names (BottomRadius, RayleighScatteringScale, GroundAlbedo as {"R","G","B","A"} bytes...)
 //   @param actor_name - Label/name of the target SkyAtmosphere actor.
 //   @param rayleigh_scattering [array] - Optional [R,G,B(,A)] Rayleigh scattering color.
 //   @param rayleigh_scattering_scale [number] - Optional Rayleigh scattering scale.
@@ -908,6 +916,7 @@ TSharedPtr<FJsonObject> HandleSetSkyAtmosphereProperties(const TSharedPtr<FJsonO
 }
 
 // MCP:get_sky_atmosphere_properties - Read the atmosphere settings of a SkyAtmosphere actor's component, found by label or name in the editor world, under the snake_case names set_sky_atmosphere_properties takes (Rayleigh/Mie scattering, ground albedo, planet radius, height). A curated view; get_properties (internal names only) reads any other UPROPERTY on the component.
+//   @retired get_properties - object_path="<actor>.SkyAtmosphereComponent", property_names=[engine names], or get_component_properties for all of them
 //   @param actor_name - Label/name of the target SkyAtmosphere actor.
 //   @returns { actor_name: string, properties: { rayleigh_scattering:[R,G,B,A], rayleigh_scattering_scale, mie_scattering:[R,G,B,A], mie_scattering_scale, mie_anisotropy, ground_albedo:[R,G,B,A], bottom_radius, atmosphere_height, multi_scattering_factor, aerial_perspective_view_distance_scale, height_fog_contribution } }
 TSharedPtr<FJsonObject> HandleGetSkyAtmosphereProperties(const TSharedPtr<FJsonObject>& Params)
@@ -963,6 +972,7 @@ namespace
 }
 
 // MCP:set_exponential_height_fog_properties - Set an ExponentialHeightFog actor's fog component, actor found by label or name in the editor world: density, falloff, inscattering, distances, max opacity, volumetric fog, second fog layer, directional inscattering. Over set_properties it needs no component path and goes through the component's own setters; other fog properties: set_properties. Supplied fields only, one undo step, not saved (save_level); applied_count counts them and every property is read back. Colors are [R,G,B(,A)] floats, volumetric_fog_albedo [R,G,B(,A)] whole 0-255 bytes. Every field is checked before any write: a color that is not 3 or 4 numbers, a byte color with a fraction or a value past 255, a number given as a string or a non-boolean volumetric_fog is an error and nothing changes.
+//   @retired set_properties - object_path="<actor>.ExponentialHeightFogComponent", properties={"FogDensity":..,"FogHeightFalloff":..,"FogInscatteringLuminance":{"R","G","B","A"},"SecondFogData":{"FogDensity":..}}
 //   @param actor_name - Label/name of the target ExponentialHeightFog actor.
 //   @param fog_density [number] - Optional global fog density.
 //   @param fog_height_falloff [number] - Optional height falloff.
@@ -1129,6 +1139,7 @@ TSharedPtr<FJsonObject> HandleSetExponentialHeightFogProperties(const TSharedPtr
 }
 
 // MCP:get_exponential_height_fog_properties - Read the fog of an ExponentialHeightFog actor's component, found by label or name in the editor world, under the snake_case names set_exponential_height_fog_properties takes (density, falloff, inscattering, distances, volumetric fog, second layer). A curated view; get_properties (internal names only) reads any other UPROPERTY on the component.
+//   @retired get_properties - object_path="<actor>.ExponentialHeightFogComponent", property_names=["FogDensity","FogHeightFalloff",...], or get_component_properties for all of them
 //   @param actor_name - Label/name of the target ExponentialHeightFog actor.
 //   @returns { actor_name: string, properties: { fog_density, fog_height_falloff, fog_inscattering_color:[R,G,B,A], fog_max_opacity, start_distance, end_distance, fog_cutoff_distance, volumetric_fog, volumetric_fog_scattering_distribution, volumetric_fog_albedo:[R,G,B,A], volumetric_fog_emissive:[R,G,B,A], volumetric_fog_extinction_scale, second_fog_density, second_fog_height_falloff, second_fog_height_offset, directional_inscattering_exponent, directional_inscattering_start_distance, directional_inscattering_color:[R,G,B,A] } }
 TSharedPtr<FJsonObject> HandleGetExponentialHeightFogProperties(const TSharedPtr<FJsonObject>& Params)
@@ -1178,6 +1189,7 @@ namespace
 }
 
 // MCP:set_volumetric_cloud_properties - Set layer and planet geometry, ground albedo, tracing distances and sample counts of a VolumetricCloud actor found by label or name, through the component's setters, which refresh its render state; set_properties writes any other field. Only supplied fields change, in one undo step (applied_count counts them), and the reply reads every property back. ground_albedo is [R,G,B(,A)] in whole 0-255 bytes. A malformed field, or a component of Static mobility (its setters change nothing; make it Movable first), is an error and nothing changes. Not saved.
+//   @retired set_properties - object_path="<actor>.VolumetricCloudComponent", properties with the engine names (LayerBottomAltitude, LayerHeight...)
 //   @param actor_name - Label/name of the target VolumetricCloud actor.
 //   @param layer_bottom_altitude [number] - Optional layer bottom altitude (km).
 //   @param layer_height [number] - Optional layer height (km).
@@ -1304,6 +1316,7 @@ TSharedPtr<FJsonObject> HandleSetVolumetricCloudProperties(const TSharedPtr<FJso
 }
 
 // MCP:get_volumetric_cloud_properties - Read the layer and tracing settings of a VolumetricCloud actor's component, found by label or name in the editor world, under the snake_case names set_volumetric_cloud_properties takes. A curated view; get_properties (internal names only) reads any other UPROPERTY on the component.
+//   @retired get_properties - object_path="<actor>.VolumetricCloudComponent", property_names=[engine names], or get_component_properties for all of them
 //   @param actor_name - Label/name of the target VolumetricCloud actor.
 //   @returns { actor_name: string, properties: { layer_bottom_altitude, layer_height, planet_radius, ground_albedo:[R,G,B,A], tracing_start_max_distance, tracing_max_distance, sky_light_cloud_bottom_occlusion, view_sample_count_scale, shadow_view_sample_count_scale, shadow_tracing_distance, stop_tracing_transmittance_threshold, use_per_sample_atmospheric_light_transmittance } }
 TSharedPtr<FJsonObject> HandleGetVolumetricCloudProperties(const TSharedPtr<FJsonObject>& Params)
@@ -1349,6 +1362,7 @@ namespace
 }
 
 // MCP:set_sky_light_properties - Set intensity, light color, indirect and volumetric intensity, lower-hemisphere color and occlusion of a SkyLight actor found by label or name, through the component's setters, which update its rendering state; set_properties writes any other field. Only supplied fields change, in one undo step, and all are read back. light_color and lower_hemisphere_color are linear [R,G,B(,A)]; occlusion_tint is [R,G,B(,A)] in whole 0-255 bytes. A Static SkyLight is refused, since its setters change nothing (make it Stationary or Movable first), and so is a malformed field; nothing changes then. Not saved.
+//   @retired set_properties - object_path="<actor>.SkyLightComponent", properties={"Intensity":..,"Contrast":..,"LightColor":{"R","G","B","A"}}; recapture with call_function(function_name="RecaptureSky")
 //   @param actor_name - Label/name of the target SkyLight actor.
 //   @param intensity [number] - Optional sky light intensity.
 //   @param light_color [array] - Optional [R,G,B(,A)] light color (stored as FColor).
@@ -1452,6 +1466,7 @@ TSharedPtr<FJsonObject> HandleSetSkyLightProperties(const TSharedPtr<FJsonObject
 }
 
 // MCP:get_sky_light_properties - Read the intensity, color and occlusion settings of a SkyLight actor's component, found by label or name in the editor world, under the snake_case names set_sky_light_properties takes. A curated view; get_properties (internal names only) reads any other UPROPERTY on it.
+//   @retired get_properties - object_path="<actor>.SkyLightComponent", property_names=["Intensity","LightColor","Contrast",...], or get_component_properties for all of them
 //   @param actor_name - Label/name of the target SkyLight actor.
 //   @returns { actor_name: string, properties: { intensity, light_color:[R,G,B,A], indirect_lighting_intensity, volumetric_scattering_intensity, lower_hemisphere_color:[R,G,B,A], occlusion_tint:[R,G,B,A], occlusion_contrast, occlusion_exponent, min_occlusion } }
 TSharedPtr<FJsonObject> HandleGetSkyLightProperties(const TSharedPtr<FJsonObject>& Params)

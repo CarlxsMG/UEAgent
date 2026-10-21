@@ -675,7 +675,7 @@ TSharedPtr<FJsonObject> HandleCreateMetaSoundSource(const TSharedPtr<FJsonObject
 // interface (validated first via IsInterfaceRegistered) to the graph, which
 // adds the interface's input/output nodes. Saves the asset.
 // ---------------------------------------------------------------------------
-// MCP:add_metasound_interface - Adds a registered interface to an existing MetaSound Source's graph.  Obtains a builder for the saved asset via the editor subsystem's FindOrBeginBuilding (the reliable headless path), validates the interface via IsInterfaceRegistered, then calls UMetaSoundBuilderBase::AddInterface (which adds the interface's input/output nodes). The asset is saved after the edit.
+// MCP:add_metasound_interface - Adds a registered interface to an existing MetaSound Source's graph.  Obtains a builder for the saved asset via the editor subsystem's FindOrBeginBuilding (the reliable headless path), validates the interface via IsInterfaceRegistered, then calls UMetaSoundBuilderBase::AddInterface (which adds the interface's input/output nodes). The asset is saved after the edit. Inverse: remove_metasound_interface.
 //   @param metasound_path - Asset path of the MetaSound Source (e.g. "/Game/MetaSounds/MS_Example" or fully-qualified ".MS_Example").
 //   @param interface_name - Name of a registered MetaSound interface to add (required)
 //   @returns { asset_path: string, node_kind: string, interface_name: string, added: bool, saved: bool }
@@ -884,7 +884,7 @@ TSharedPtr<FJsonObject> HandleMetaSoundSetInputDefault(const TSharedPtr<FJsonObj
 // the node/edge/variable counts of the root graph's default page; optionally the
 // default of each input, read through the editor builder.
 // ---------------------------------------------------------------------------
-// MCP:get_metasound_info - Read the top-level metadata of a MetaSound Source asset (a preset included), loading it if needed: its class, the root graph class name, the graph inputs and outputs (name and type) with their counts, interface_count (the number of interfaces the document declares) and the node, connection (edge) and variable counts of the root graph's default page; with include_defaults, each input's default value too. Read-only; a path that does not resolve to a UMetaSoundSource, a MetaSound Patch included, is an error. list_metasound_nodes lists the nodes; get_assets_by_type with asset_type MetaSoundSource finds sources.
+// MCP:get_metasound_info - Read the top-level metadata of a MetaSound Source asset (a preset included), loading it if needed: its class, the root graph class name, the graph inputs and outputs (name and type) with their counts, interface_count (the number of interfaces the document declares) and the node, connection (edge) and variable counts of the root graph's default page; with include_defaults, each input's default value too. Read-only; a path that does not resolve to a UMetaSoundSource, a MetaSound Patch included, is an error. list_metasound_nodes lists the nodes; get_assets_by_type with asset_type MetaSoundSource finds sources. The edges themselves: list_metasound_connections.
 //   @param metasound_path - Asset path of the MetaSound Source, as a package path like "/Game/MetaSounds/MS_Example" or an object path like "/Game/MetaSounds/MS_Example.MS_Example"
 //   @param include_defaults - Optional bool (default false). When true, each inputs[] entry gains value: its default as the MetaSound editor builder reads it (a literal string), or "(inherited)" when the builder has none (a preset input taken from its referenced asset). Opens the editor builder for the asset; the asset is not changed.
 //   @returns { source_name: string, asset_path: string, class_name: string, graph_class_name: string, input_count: number, output_count: number, interface_count: number, node_count: number, connection_count: number, variable_count: number, inputs: [{ name: string, type: string, value?: string }], outputs: [{ name: string, type: string }] }
@@ -1179,7 +1179,7 @@ TSharedPtr<FJsonObject> HandleAddMetaSoundGraphOutput(const TSharedPtr<FJsonObje
 // (the cov fixture deliberately uses a guaranteed-compatible Float->Float pair).
 // Verified via NodesAreConnected. Saves the asset.
 // ---------------------------------------------------------------------------
-// MCP:connect_metasound_graph_input_to_output - Connects a graph input node's output to a graph output node's input.  Resolves the source handle from a graph INPUT node by name (FindGraphInputNode -> the input node's output handle) and the destination handle from a graph OUTPUT node by name (FindGraphOutputNode -> the output node's input handle), then calls UMetaSoundBuilderBase::ConnectNodes and verifies via NodesAreConnected. The connection is real where the two data types match (e.g. a Float graph input connected to a Float graph output). Saves the asset.
+// MCP:connect_metasound_graph_input_to_output - Connects a graph input node's output to a graph output node's input.  Resolves the source handle from a graph INPUT node by name (FindGraphInputNode -> the input node's output handle) and the destination handle from a graph OUTPUT node by name (FindGraphOutputNode -> the output node's input handle), then calls UMetaSoundBuilderBase::ConnectNodes and verifies via NodesAreConnected. The connection is real where the two data types match (e.g. a Float graph input connected to a Float graph output). Saves the asset. Graph input to a node: connect_metasound_graph_input_to_node; edges: list_metasound_connections.
 //   @param metasound_path - Asset path of the MetaSound Source.
 //   @param from_node_output_name - Name of the graph INPUT to use as the connection source.
 //   @param to_node_input_name - Name of the graph OUTPUT to use as the connection target.
@@ -1230,7 +1230,7 @@ TSharedPtr<FJsonObject> HandleConnectMetaSoundNodes(const TSharedPtr<FJsonObject
 // AddNodeByClassName overload. Returns the new node's GUID + its input/output pins
 // (discovered at runtime) so a follow-up call can set defaults / wire it.
 // ---------------------------------------------------------------------------
-// MCP:add_metasound_node - Add a real process node to a MetaSound Source graph by its registered class name (e.g. UE/Sine/Audio).  Unlike add_metasound_graph_input (which adds a graph input node), this instantiates a DSP node so you can author a real signal patch headless. Returns the node's GUID (node_id) and its enumerated input/output pins (name + data_type) for follow-up set/connect calls. The asset is saved. NOT idempotent: each call adds a new node instance (delete + recreate the source for a clean run).
+// MCP:add_metasound_node - Add a real process node to a MetaSound Source graph by its registered class name (e.g. UE/Sine/Audio).  Unlike add_metasound_graph_input (which adds a graph input node), this instantiates a DSP node so you can author a real signal patch headless. Returns the node's GUID (node_id) and its enumerated input/output pins (name + data_type) for follow-up set/connect calls. The asset is saved. NOT idempotent: each call adds a new node instance (delete + recreate the source for a clean run). Wire it with connect_metasound_nodes, connect_metasound_graph_input_to_node or connect_metasound_node_to_graph_output; edges: list_metasound_connections.
 //   @param metasound_path - Asset path of the MetaSound Source.
 //   @param class_namespace - Registered node class namespace, e.g. "UE".
 //   @param class_name - Registered node class name, e.g. "Sine".
@@ -1363,7 +1363,7 @@ TSharedPtr<FJsonObject> HandleMetaSoundSetNodeInputDefault(const TSharedPtr<FJso
 // purpose-built ConnectNodeOutputToGraphOutput (idempotent: it clears any existing
 // edge before adding). Single canonical path (no runtime fallback).
 // ---------------------------------------------------------------------------
-// MCP:connect_metasound_node_to_graph_output - Connect a concrete node's output pin to a named graph output, completing a signal patch (e.g. Sine.Audio -> the source's audio output).  Uses ConnectNodeOutputToGraphOutput (idempotent: replaces any existing edge). Reports the honest EMetaSoundBuilderResult.
+// MCP:connect_metasound_node_to_graph_output - Connect a concrete node's output pin to a named graph output, completing a signal patch (e.g. Sine.Audio -> the source's audio output).  Uses ConnectNodeOutputToGraphOutput (idempotent: replaces any existing edge). Reports the honest EMetaSoundBuilderResult. Node to node: connect_metasound_nodes; edges: list_metasound_connections.
 //   @param metasound_path - Asset path of the MetaSound Source.
 //   @param node_id - GUID of the source node (from add_metasound_node).
 //   @param node_output_name - Name of the node's output pin (e.g. "Audio").
@@ -2194,8 +2194,415 @@ TSharedPtr<FJsonObject> HandleGetMetaSoundNodeProperty(
 	return mcp_common::MakeOkReply(Data);
 }
 
+// ===========================================================================
+// Node-to-node wiring: connect_metasound_nodes, connect_metasound_graph_input_to_node, disconnect_metasound_nodes
+// and their reader list_metasound_connections. The graph-output tools above only reach the graph's outputs; a real
+// patch (Sine -> ADSR -> Out) needs node outputs wired to node inputs. A MetaSound input takes ONE edge, so an
+// input is the address of a connection: disconnecting names the input and drops whatever feeds it.
+// ===========================================================================
+namespace
+{
+    // The input pin InputName of node NodeId in Builder's graph; the error reply when the id is not a GUID or the
+    // node has no such input (the reply lists the inputs it has).
+    TSharedPtr<FJsonObject> MetaSound_FindNodeInput(UMetaSoundBuilderBase* Builder, const FString& NodeId, const FString& InputName,
+        FMetaSoundBuilderNodeInputHandle& OutHandle)
+    {
+        FMetaSoundNodeHandle NodeHandle;
+        if (!ParseMetaSoundNodeHandle(NodeId, NodeHandle))
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("Invalid to_node_id (expected a node GUID from add_metasound_node or list_metasound_nodes): %s; nothing was changed"), *NodeId));
+        }
+        if (!Builder->ContainsNode(NodeHandle))
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("No node %s in the graph (list_metasound_nodes lists them); nothing was changed"), *NodeId));
+        }
+        EMetaSoundBuilderResult Result = EMetaSoundBuilderResult::Failed;
+        OutHandle = Builder->FindNodeInputByName(NodeHandle, FName(*InputName), Result);
+        if (Result != EMetaSoundBuilderResult::Succeeded || !OutHandle.IsSet())
+        {
+            TArray<FString> Names;
+            for (const TSharedPtr<FJsonValue>& Input : EnumerateNodeInputs(Builder, NodeHandle))
+            {
+                Names.Add(Input->AsObject()->GetStringField(TEXT("name")));
+            }
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("Node %s has no input '%s' (its inputs: %s); nothing was changed"), *NodeId, *InputName, *FString::Join(Names, TEXT(", "))));
+        }
+        return nullptr;
+    }
+
+    // Wires From to To with ConnectNodes and re-reads the edge. Shared by the two connect tools: an edge already
+    // there changes and saves nothing; an input fed from elsewhere is re-fed (replaced=true), since an input takes
+    // one edge.
+    TSharedPtr<FJsonObject> MetaSound_ConnectHandles(UMetaSoundSource* Source, UMetaSoundBuilderBase* Builder,
+        const FMetaSoundBuilderNodeOutputHandle& From, const FMetaSoundBuilderNodeInputHandle& To,
+        const TSharedPtr<FJsonObject>& Data, const TCHAR* Command)
+    {
+        FName FromName, FromType, ToName, ToType;
+        EMetaSoundBuilderResult DataResult = EMetaSoundBuilderResult::Failed;
+        Builder->GetNodeOutputData(From, FromName, FromType, DataResult);
+        Builder->GetNodeInputData(To, ToName, ToType, DataResult);
+        Data->SetStringField(TEXT("from_data_type"), FromType.ToString());
+        Data->SetStringField(TEXT("to_data_type"), ToType.ToString());
+        if (Builder->NodesAreConnected(From, To))
+        {
+            Data->SetBoolField(TEXT("connected"), true);
+            Data->SetBoolField(TEXT("already_connected"), true);
+            Data->SetBoolField(TEXT("replaced"), false);
+            Data->SetBoolField(TEXT("saved"), false);
+            Data->SetStringField(TEXT("note"), TEXT("the edge is already there; nothing changed and nothing was saved"));
+            return mcp_common::MakeOkReply(Data);
+        }
+        if (FromType != ToType)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("Cannot connect a %s output to a %s input; nothing was changed"), *FromType.ToString(), *ToType.ToString()));
+        }
+        const bool bWasFed = Builder->NodeInputIsConnected(To);
+
+        FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "MetaSoundConnectNodes", "MetaSound Connect Nodes"));
+        Source->Modify();
+        if (bWasFed)
+        {
+            EMetaSoundBuilderResult DisconnectResult = EMetaSoundBuilderResult::Failed;
+            Builder->DisconnectNodeInput(To, DisconnectResult);
+        }
+        EMetaSoundBuilderResult ConnectResult = EMetaSoundBuilderResult::Failed;
+        Builder->ConnectNodes(From, To, ConnectResult);
+        const bool bConnected = Builder->NodesAreConnected(From, To);
+        if (ConnectResult != EMetaSoundBuilderResult::Succeeded || !bConnected)
+        {
+            Transaction.Cancel();
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("ConnectNodes did not make the edge (result %s)%s"),
+                ConnectResult == EMetaSoundBuilderResult::Succeeded ? TEXT("Succeeded") : TEXT("Failed"),
+                bWasFed ? TEXT("; the input's previous edge was dropped, the asset is not saved") : TEXT("; nothing was changed")));
+        }
+
+        FString SaveErr;
+        const bool bSaved = MetaSound_MarkDirtyAndSave(Source, SaveErr);
+        Data->SetBoolField(TEXT("connected"), true);
+        Data->SetBoolField(TEXT("already_connected"), false);
+        Data->SetBoolField(TEXT("replaced"), bWasFed);
+        return mcp_common::MakeSavedReply(Data, bSaved, Command, SaveErr);
+    }
+}
+
+// MCP:connect_metasound_nodes - Wire the output from_output_name of node from_node_id to the input to_input_name of node to_node_id in a MetaSound Source graph, in one undo step, then save the asset -- the node-to-node edge a patch needs (Sine.Audio -> ADSR.In). Node ids come from add_metasound_node or list_metasound_nodes, pin names from their inputs/outputs. The two pins must carry the same data type. An input takes one edge, so an input already fed from elsewhere is re-fed (replaced=true); the same edge already there changes and saves nothing (already_connected=true). A bad id, an unknown pin or a type mismatch is an error and nothing changes. Read back: list_metasound_connections; inverse: disconnect_metasound_nodes. A graph input as the source: connect_metasound_graph_input_to_node; a graph output as the target: connect_metasound_node_to_graph_output.
+//   @param metasound_path - Asset path of the MetaSound Source.
+//   @param from_node_id - GUID of the node whose output feeds the edge.
+//   @param from_output_name - Name of that node's output pin (e.g. "Audio").
+//   @param to_node_id - GUID of the node whose input receives the edge.
+//   @param to_input_name - Name of that node's input pin (e.g. "In").
+//   @returns { asset_path: string, from_node_id: string, from_output_name: string, to_node_id: string, to_input_name: string, from_data_type: string, to_data_type: string, connected: bool, already_connected: bool, replaced: bool, saved: bool, save_error: string?, note: string? }
+
+TSharedPtr<FJsonObject> HandleConnectMetaSoundNodeToNode(const TSharedPtr<FJsonObject>& Params)
+{
+    FString MetaSoundPath, FromNodeId, FromOutputName, ToNodeId, ToInputName;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("metasound_path"), MetaSoundPath)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("from_node_id"), FromNodeId)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("from_output_name"), FromOutputName)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("to_node_id"), ToNodeId)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("to_input_name"), ToInputName)) { return Missing; }
+
+    UMetaSoundSource* Source = nullptr;
+    TSharedPtr<FJsonObject> Error;
+    UMetaSoundBuilderBase* Builder = MetaSound_OpenSourceBuilder(MetaSoundPath, Source, Error);
+    if (!Builder)
+    {
+        return Error;
+    }
+
+    FMetaSoundNodeHandle FromNode;
+    if (!ParseMetaSoundNodeHandle(FromNodeId, FromNode) || !Builder->ContainsNode(FromNode))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("No node %s in the graph (from_node_id must be a node GUID from list_metasound_nodes); nothing was changed"), *FromNodeId));
+    }
+    EMetaSoundBuilderResult FindResult = EMetaSoundBuilderResult::Failed;
+    const FMetaSoundBuilderNodeOutputHandle From = Builder->FindNodeOutputByName(FromNode, FName(*FromOutputName), FindResult);
+    if (FindResult != EMetaSoundBuilderResult::Succeeded || !From.IsSet())
+    {
+        TArray<FString> Names;
+        for (const TSharedPtr<FJsonValue>& Output : EnumerateNodeOutputs(Builder, FromNode))
+        {
+            Names.Add(Output->AsObject()->GetStringField(TEXT("name")));
+        }
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Node %s has no output '%s' (its outputs: %s); nothing was changed"), *FromNodeId, *FromOutputName, *FString::Join(Names, TEXT(", "))));
+    }
+    FMetaSoundBuilderNodeInputHandle To;
+    if (TSharedPtr<FJsonObject> Failure = MetaSound_FindNodeInput(Builder, ToNodeId, ToInputName, To))
+    {
+        return Failure;
+    }
+
+    TSharedPtr<FJsonObject> Data = MetaSound_NewPayload(Source);
+    Data->SetStringField(TEXT("from_node_id"), FromNodeId);
+    Data->SetStringField(TEXT("from_output_name"), FromOutputName);
+    Data->SetStringField(TEXT("to_node_id"), ToNodeId);
+    Data->SetStringField(TEXT("to_input_name"), ToInputName);
+    return MetaSound_ConnectHandles(Source, Builder, From, To, Data, TEXT("connect_metasound_nodes"));
+}
+
+// MCP:connect_metasound_graph_input_to_node - Wire the graph input graph_input_name of a MetaSound Source to the input to_input_name of node to_node_id, in one undo step, then save the asset -- how a parameter (a Float input "Frequency") drives a node pin. Same rules as connect_metasound_nodes: matching data types, an input already fed is re-fed (replaced=true), the same edge already there changes nothing (already_connected=true), and an unknown graph input, node or pin is an error with nothing changed. Read back: list_metasound_connections; inverse: disconnect_metasound_nodes on the node input. Graph input to graph output: connect_metasound_graph_input_to_output.
+//   @param metasound_path - Asset path of the MetaSound Source.
+//   @param graph_input_name - Name of the graph input (get_metasound_info lists them).
+//   @param to_node_id - GUID of the node whose input receives the edge.
+//   @param to_input_name - Name of that node's input pin.
+//   @returns { asset_path: string, graph_input_name: string, to_node_id: string, to_input_name: string, from_data_type: string, to_data_type: string, connected: bool, already_connected: bool, replaced: bool, saved: bool, save_error: string?, note: string? }
+
+TSharedPtr<FJsonObject> HandleConnectMetaSoundGraphInputToNode(const TSharedPtr<FJsonObject>& Params)
+{
+    FString MetaSoundPath, GraphInputName, ToNodeId, ToInputName;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("metasound_path"), MetaSoundPath)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("graph_input_name"), GraphInputName)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("to_node_id"), ToNodeId)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("to_input_name"), ToInputName)) { return Missing; }
+
+    UMetaSoundSource* Source = nullptr;
+    TSharedPtr<FJsonObject> Error;
+    UMetaSoundBuilderBase* Builder = MetaSound_OpenSourceBuilder(MetaSoundPath, Source, Error);
+    if (!Builder)
+    {
+        return Error;
+    }
+
+    FName InputType;
+    FMetaSoundBuilderNodeOutputHandle From;
+    EMetaSoundBuilderResult FindResult = EMetaSoundBuilderResult::Failed;
+    Builder->FindGraphInputNode(FName(*GraphInputName), InputType, From, FindResult);
+    if (FindResult != EMetaSoundBuilderResult::Succeeded || !From.IsSet())
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("No graph input '%s' (get_metasound_info lists the inputs); nothing was changed"), *GraphInputName));
+    }
+    FMetaSoundBuilderNodeInputHandle To;
+    if (TSharedPtr<FJsonObject> Failure = MetaSound_FindNodeInput(Builder, ToNodeId, ToInputName, To))
+    {
+        return Failure;
+    }
+
+    TSharedPtr<FJsonObject> Data = MetaSound_NewPayload(Source);
+    Data->SetStringField(TEXT("graph_input_name"), GraphInputName);
+    Data->SetStringField(TEXT("to_node_id"), ToNodeId);
+    Data->SetStringField(TEXT("to_input_name"), ToInputName);
+    return MetaSound_ConnectHandles(Source, Builder, From, To, Data, TEXT("connect_metasound_graph_input_to_node"));
+}
+
+// MCP:disconnect_metasound_nodes - Drop the edge that feeds the input to_input_name of node to_node_id in a MetaSound Source graph, whatever drives it -- another node's output or a graph input -- in one undo step, then save the asset. Inverse of connect_metasound_nodes and connect_metasound_graph_input_to_node: an input takes one edge, so the input names it. The reply says which output fed it (from_node_id, from_output_name) and re-reads the input. An input with no edge is an honest no-op (disconnected=false, already_disconnected=true, nothing saved); a bad node id or an unknown pin is an error. Read first: list_metasound_connections; a graph output's edge: disconnect_metasound_node_from_graph_output.
+//   @param metasound_path - Asset path of the MetaSound Source.
+//   @param to_node_id - GUID of the node whose input loses its edge.
+//   @param to_input_name - Name of that node's input pin.
+//   @returns { asset_path: string, to_node_id: string, to_input_name: string, from_node_id: string?, from_node_name: string?, from_output_name: string?, disconnected: bool, already_disconnected: bool, saved: bool, save_error: string? }
+
+TSharedPtr<FJsonObject> HandleDisconnectMetaSoundNodeInput(const TSharedPtr<FJsonObject>& Params)
+{
+    FString MetaSoundPath, ToNodeId, ToInputName;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("metasound_path"), MetaSoundPath)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("to_node_id"), ToNodeId)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("to_input_name"), ToInputName)) { return Missing; }
+
+    UMetaSoundSource* Source = nullptr;
+    TSharedPtr<FJsonObject> Error;
+    UMetaSoundBuilderBase* Builder = MetaSound_OpenSourceBuilder(MetaSoundPath, Source, Error);
+    if (!Builder)
+    {
+        return Error;
+    }
+    FMetaSoundBuilderNodeInputHandle To;
+    if (TSharedPtr<FJsonObject> Failure = MetaSound_FindNodeInput(Builder, ToNodeId, ToInputName, To))
+    {
+        return Failure;
+    }
+
+    TSharedPtr<FJsonObject> Data = MetaSound_NewPayload(Source);
+    Data->SetStringField(TEXT("to_node_id"), ToNodeId);
+    Data->SetStringField(TEXT("to_input_name"), ToInputName);
+    if (!Builder->NodeInputIsConnected(To))
+    {
+        Data->SetBoolField(TEXT("disconnected"), false);
+        Data->SetBoolField(TEXT("already_disconnected"), true);
+        Data->SetBoolField(TEXT("saved"), false);
+        return mcp_common::MakeOkReply(Data);
+    }
+
+    // The output that feeds the input, read from the document's edges before they change.
+    const FMetasoundFrontendGraph& Graph = Source->GetConstDocument().RootGraph.GetConstDefaultGraph();
+    for (const FMetasoundFrontendEdge& Edge : Graph.Edges)
+    {
+        if (Edge.ToNodeID == To.NodeID && Edge.ToVertexID == To.VertexID)
+        {
+            Data->SetStringField(TEXT("from_node_id"), Edge.FromNodeID.ToString());
+            for (const FMetasoundFrontendNode& Node : Graph.Nodes)
+            {
+                if (Node.GetID() != Edge.FromNodeID)
+                {
+                    continue;
+                }
+                Data->SetStringField(TEXT("from_node_name"), Node.Name.ToString());
+                for (const FMetasoundFrontendVertex& Output : Node.Interface.Outputs)
+                {
+                    if (Output.VertexID == Edge.FromVertexID)
+                    {
+                        Data->SetStringField(TEXT("from_output_name"), Output.Name.ToString());
+                    }
+                }
+            }
+            break;
+        }
+    }
+
+    FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "MetaSoundDisconnectNodeInput", "MetaSound Disconnect Node Input"));
+    Source->Modify();
+    EMetaSoundBuilderResult DisconnectResult = EMetaSoundBuilderResult::Failed;
+    Builder->DisconnectNodeInput(To, DisconnectResult);
+    if (DisconnectResult != EMetaSoundBuilderResult::Succeeded || Builder->NodeInputIsConnected(To))
+    {
+        Transaction.Cancel();
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("DisconnectNodeInput left input '%s' of node %s connected; nothing was saved"), *ToInputName, *ToNodeId));
+    }
+
+    FString SaveErr;
+    const bool bSaved = MetaSound_MarkDirtyAndSave(Source, SaveErr);
+    Data->SetBoolField(TEXT("disconnected"), true);
+    Data->SetBoolField(TEXT("already_disconnected"), false);
+    return mcp_common::MakeSavedReply(Data, bSaved, TEXT("disconnect_metasound_nodes"), SaveErr);
+}
+
+// MCP:list_metasound_connections - List every edge of the default graph of a MetaSound Source: from which node and output pin to which node and input pin, with each node's name and class (a graph input or output node is named after the input or output), plus count. Read-only. It reads what connect_metasound_nodes, connect_metasound_graph_input_to_node, connect_metasound_graph_input_to_output and connect_metasound_node_to_graph_output write; node ids are those of list_metasound_nodes, and an input's edge is dropped with disconnect_metasound_nodes. Patches are refused.
+//   @param metasound_path - MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain".
+//   @returns { metasound_path: string, count: int, connections: [{ from_node_id, from_node_name, from_node_class, from_output_name, to_node_id, to_node_name, to_node_class, to_input_name, data_type }] }
+
+TSharedPtr<FJsonObject> HandleListMetaSoundConnections(const TSharedPtr<FJsonObject>& Params)
+{
+    FString MetaSoundPath;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("metasound_path"), MetaSoundPath)) { return Missing; }
+    UMetaSoundSource* Source = mcp_common::ResolveAsset<UMetaSoundSource>(MetaSoundPath);
+    if (!Source)
+    {
+        return MetaSound_CannotLoadSourceReply(MetaSoundPath);
+    }
+    const FMetasoundFrontendDocument& Doc = Source->GetConstDocument();
+    const FMetasoundFrontendGraph& Graph = Doc.RootGraph.GetConstDefaultGraph();
+
+    TMap<FGuid, FString> ClassIdToName;
+    for (const FMetasoundFrontendClass& Dep : Doc.Dependencies)
+    {
+        ClassIdToName.Add(Dep.ID, Dep.Metadata.GetClassName().ToString());
+    }
+    TMap<FGuid, const FMetasoundFrontendNode*> NodesById;
+    for (const FMetasoundFrontendNode& Node : Graph.Nodes)
+    {
+        NodesById.Add(Node.GetID(), &Node);
+    }
+    const auto VertexName = [](const TArray<FMetasoundFrontendVertex>& Vertices, const FGuid& VertexId, FString& OutType) -> FString
+    {
+        for (const FMetasoundFrontendVertex& Vertex : Vertices)
+        {
+            if (Vertex.VertexID == VertexId)
+            {
+                OutType = Vertex.TypeName.ToString();
+                return Vertex.Name.ToString();
+            }
+        }
+        return FString();
+    };
+
+    TArray<TSharedPtr<FJsonValue>> EdgesJson;
+    for (const FMetasoundFrontendEdge& Edge : Graph.Edges)
+    {
+        const FMetasoundFrontendNode* const* FromNode = NodesById.Find(Edge.FromNodeID);
+        const FMetasoundFrontendNode* const* ToNode = NodesById.Find(Edge.ToNodeID);
+        FString DataType, ToType;
+        TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+        Entry->SetStringField(TEXT("from_node_id"), Edge.FromNodeID.ToString());
+        Entry->SetStringField(TEXT("from_node_name"), FromNode ? (*FromNode)->Name.ToString() : FString());
+        const FString* FromClass = FromNode ? ClassIdToName.Find((*FromNode)->ClassID) : nullptr;
+        Entry->SetStringField(TEXT("from_node_class"), FromClass ? *FromClass : FString());
+        Entry->SetStringField(TEXT("from_output_name"), FromNode ? VertexName((*FromNode)->Interface.Outputs, Edge.FromVertexID, DataType) : FString());
+        Entry->SetStringField(TEXT("to_node_id"), Edge.ToNodeID.ToString());
+        Entry->SetStringField(TEXT("to_node_name"), ToNode ? (*ToNode)->Name.ToString() : FString());
+        const FString* ToClass = ToNode ? ClassIdToName.Find((*ToNode)->ClassID) : nullptr;
+        Entry->SetStringField(TEXT("to_node_class"), ToClass ? *ToClass : FString());
+        Entry->SetStringField(TEXT("to_input_name"), ToNode ? VertexName((*ToNode)->Interface.Inputs, Edge.ToVertexID, ToType) : FString());
+        Entry->SetStringField(TEXT("data_type"), DataType.IsEmpty() ? ToType : DataType);
+        EdgesJson.Add(MakeShared<FJsonValueObject>(Entry));
+    }
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("metasound_path"), MetaSoundPath);
+    Data->SetNumberField(TEXT("count"), EdgesJson.Num());
+    Data->SetArrayField(TEXT("connections"), EdgesJson);
+    return mcp_common::MakeOkReply(Data);
+}
+
+// ---------------------------------------------------------------------------
+// remove_metasound_interface: the inverse of add_metasound_interface. RemoveInterface takes the interface's input
+// and output members (and their nodes) out of the graph, as the MetaSound editor's interface list does.
+// ---------------------------------------------------------------------------
+// MCP:remove_metasound_interface - Remove an interface from a MetaSound Source graph, with the graph inputs and outputs (and their nodes) it declared, in one undo step, then save the asset. Inverse of add_metasound_interface. The reply re-reads the document's interfaces (interface_count, still_declared). An interface the graph does not declare is an honest no-op (removed=false, nothing saved); a source that does not load is an error. Removing the source interface a one-shot MetaSound Source needs (UE.Source...) leaves a source the engine may refuse to play; get_metasound_info lists what is declared.
+//   @param metasound_path - Asset path of the MetaSound Source.
+//   @param interface_name - Name of the declared interface to remove, as add_metasound_interface took it.
+//   @returns { asset_path: string, interface_name: string, removed: bool, still_declared: bool, interface_count: int, saved: bool, save_error: string?, note: string? }
+
+TSharedPtr<FJsonObject> HandleMetaSoundRemoveInterface(const TSharedPtr<FJsonObject>& Params)
+{
+    FString MetaSoundPath, InterfaceName;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("metasound_path"), MetaSoundPath)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("interface_name"), InterfaceName)) { return Missing; }
+
+    UMetaSoundSource* Source = nullptr;
+    TSharedPtr<FJsonObject> Error;
+    UMetaSoundBuilderBase* Builder = MetaSound_OpenSourceBuilder(MetaSoundPath, Source, Error);
+    if (!Builder)
+    {
+        return Error;
+    }
+
+    TSharedPtr<FJsonObject> Data = MetaSound_NewPayload(Source);
+    Data->SetStringField(TEXT("interface_name"), InterfaceName);
+    const FName InterfaceFName(*InterfaceName);
+    if (!Builder->InterfaceIsDeclared(InterfaceFName))
+    {
+        Data->SetBoolField(TEXT("removed"), false);
+        Data->SetBoolField(TEXT("still_declared"), false);
+        Data->SetNumberField(TEXT("interface_count"), Source->GetConstDocument().Interfaces.Num());
+        Data->SetBoolField(TEXT("saved"), false);
+        Data->SetStringField(TEXT("note"), TEXT("the graph does not declare that interface; nothing changed"));
+        return mcp_common::MakeOkReply(Data);
+    }
+
+    FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "MetaSoundRemoveInterface", "MetaSound Remove Interface"));
+    Source->Modify();
+    EMetaSoundBuilderResult RemoveResult = EMetaSoundBuilderResult::Failed;
+    Builder->RemoveInterface(InterfaceFName, RemoveResult);
+    const bool bStillDeclared = Builder->InterfaceIsDeclared(InterfaceFName);
+    if (RemoveResult != EMetaSoundBuilderResult::Succeeded || bStillDeclared)
+    {
+        Transaction.Cancel();
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("RemoveInterface failed for '%s' (the graph still declares it); nothing was saved"), *InterfaceName));
+    }
+
+    FString SaveErr;
+    const bool bSaved = MetaSound_MarkDirtyAndSave(Source, SaveErr);
+    Data->SetBoolField(TEXT("removed"), true);
+    Data->SetBoolField(TEXT("still_declared"), false);
+    Data->SetNumberField(TEXT("interface_count"), Source->GetConstDocument().Interfaces.Num());
+    return mcp_common::MakeSavedReply(Data, bSaved, TEXT("remove_metasound_interface"), SaveErr);
+}
+
 const McpCommandFamilies::FRegistrar Registration =
 {
+    { TEXT("connect_metasound_nodes"), &HandleConnectMetaSoundNodeToNode },
+    { TEXT("connect_metasound_graph_input_to_node"), &HandleConnectMetaSoundGraphInputToNode },
+    { TEXT("disconnect_metasound_nodes"), &HandleDisconnectMetaSoundNodeInput },
+    { TEXT("list_metasound_connections"), &HandleListMetaSoundConnections },
+    { TEXT("remove_metasound_interface"), &HandleMetaSoundRemoveInterface },
     { TEXT("add_metasound_graph_input"), &HandleAddMetaSoundGraphInput },
     { TEXT("add_metasound_graph_output"), &HandleAddMetaSoundGraphOutput },
     { TEXT("connect_metasound_graph_input_to_output"), &HandleConnectMetaSoundNodes },

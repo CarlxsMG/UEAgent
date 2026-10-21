@@ -25,7 +25,7 @@
  * caller knows whether the authored graph will actually compile.
  *
  * Commands:
- *   - detect_substrate_enabled           : report Substrate::IsSubstrateEnabled() + r.Substrate cvar
+ *   - is_substrate_enabled           : report Substrate::IsSubstrateEnabled() + r.Substrate cvar
  *                                          (always works)
  *   - create_substrate_slab_node         : add a SubstrateSlabBSDF node to a UMaterial asset
  *   - set_substrate_slab_scalar          : drive a slab pin (e.g. Roughness) with a Constant node
@@ -114,9 +114,10 @@ namespace
 }
 
 // ---------------------------------------------------------------------------
-// detect_substrate_enabled  (ALWAYS works)
+// is_substrate_enabled  (ALWAYS works)
 // ---------------------------------------------------------------------------
-// MCP:detect_substrate_enabled - Report whether Substrate (Strata) materials are enabled in this editor.  Always works. Returns substrate_enabled (from Substrate::IsSubstrateEnabled), the r.Substrate cvar value, and a note when disabled. Enabling Substrate requires editing config and restarting the editor.
+// MCP:is_substrate_enabled - Report whether Substrate (Strata) materials are enabled in this editor.  Always works. Returns substrate_enabled (from Substrate::IsSubstrateEnabled), the r.Substrate cvar value, and a note when disabled. Enabling Substrate requires editing config and restarting the editor.
+//   @renamed-from detect_substrate_enabled
 //   @returns { substrate_enabled: bool, r_substrate_cvar: int, note?: string, detected: bool }
 
 TSharedPtr<FJsonObject> HandleDetectSubstrateEnabled(
@@ -255,7 +256,7 @@ TSharedPtr<FJsonObject> HandleSetSubstrateSlabScalar(
 // ---------------------------------------------------------------------------
 // connect_substrate_slab_to_material  (gated by Substrate; honest warn when disabled)
 // ---------------------------------------------------------------------------
-// MCP:connect_substrate_slab_to_material - Connect the Slab BSDF output to the material's Front Material input.  GATED by Substrate: when Substrate is disabled this returns a clear error ("Substrate disabled: cannot connect slab to Front Material...") because the Front Material input is only meaningful with Substrate enabled. When enabled, connects via ConnectMaterialProperty(MP_FrontMaterial) and recompiles.
+// MCP:connect_substrate_slab_to_material - Connect the Slab BSDF output to the material's Front Material input.  GATED by Substrate: when Substrate is disabled this returns a clear error ("Substrate disabled: cannot connect slab to Front Material...") because the Front Material input is only meaningful with Substrate enabled. When enabled, connects via ConnectMaterialProperty(MP_FrontMaterial) and recompiles. Unwire: disconnect_to_material_output output_property=FrontMaterial.
 //   @param material_path - Content path to the UMaterial holding the slab node
 //   @returns { material_path: string, slab_node_id: string, connected_to: string, connected: bool, substrate_enabled: bool, r_substrate_cvar: int, note?: string } | (error: "Substrate disabled: ...")
 
@@ -308,7 +309,7 @@ const McpCommandFamilies::FRegistrar Registration =
 {
 	{ TEXT("connect_substrate_slab_to_material"), &HandleConnectSubstrateSlabToMaterial },
 	{ TEXT("create_substrate_slab_node"), &HandleCreateSubstrateSlabNode },
-	{ TEXT("detect_substrate_enabled"), &HandleDetectSubstrateEnabled },
+	{ TEXT("is_substrate_enabled"), &HandleDetectSubstrateEnabled },
 	{ TEXT("set_substrate_slab_scalar"), &HandleSetSubstrateSlabScalar },
 };
 } // namespace UEAgentMaterialSubstrateCommands

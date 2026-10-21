@@ -34,7 +34,7 @@
 #include "Dom/JsonObject.h"                // diff_data_tables: FJsonObject::Values / TryGetField
 // External .uasset read via throwaway mount + collision-safe LoadPackage
 #include "Misc/Paths.h"                    // FPaths::FileExists / GetPath / GetBaseFilename / ConvertRelativePathToFull
-#include "HAL/FileManager.h"              // IFileManager::Copy / DeleteDirectory: the throwaway copy of read_data_table_from_package_file
+#include "HAL/FileManager.h"              // IFileManager::Copy / DeleteDirectory: the throwaway copy of get_data_table_from_package_file
 #include "Misc/FileHelper.h"               // FFileHelper::SaveStringToFile for export_data_table_as_{json,csv} file_path
 #include "UObject/UnrealType.h"            // FMapProperty / FSoftObjectProperty / FStructProperty for get_data_table_info columns
 #include "HAL/IConsoleManager.h"           // CVar guard (DataTableJSON.ExportUsingPropertyVisitor) in MCPExt_RowToNativeJsonObject
@@ -380,7 +380,7 @@ namespace UEAgentDataAssetCommandsImpl
 
 // Single-record data assets: create one, read it back, write one property.
 
-// MCP:create_data_asset - Create a DataAsset instance of a given parent class -- the single-record alternative to a DataTable row, for configuration that wants its own asset and its own reference (a biome definition, a lock profile, a weapon config). Pick a DataAsset when things point AT it individually; pick a DataTable when you want many rows edited together. Fill it with set_data_asset_property and read it back with get_data_asset_info.
+// MCP:create_data_asset - Create a DataAsset instance of a given parent class -- the single-record alternative to a DataTable row, for configuration that wants its own asset and its own reference (a biome definition, a lock profile, a weapon config). Pick a DataAsset when things point AT it individually; pick a DataTable when you want many rows edited together. Fill it with set_properties and read it back with get_data_asset_info.
 //   @param asset_name - Name of the new DataAsset to create.
 //   @param package_path - Target content package path where the asset is created (check the body for the default)
 //   @param parent_class - DataAsset parent class name (defaults to DataAsset)
@@ -453,7 +453,7 @@ TSharedPtr<FJsonObject> HandleCreateDataAsset(const TSharedPtr<FJsonObject>& Par
         bSaved ? FString() : mcp_common::MeasuredOutcomeError(TEXT("create_data_asset"), TEXT("bSaved")));
 }
 
-// MCP:get_data_asset_info - Read a DataAsset's class and ALL of its reflected properties with their current values -- the read-back oracle for set_data_asset_property, and better than inspecting it from Python, where StructBase.to_dict() on a user-defined struct returns an empty dict and a GameplayTag prints as {} whether it holds a tag or not, both of which read as "nothing was written" when the values are actually there.
+// MCP:get_data_asset_info - Read a DataAsset's class and ALL of its reflected properties with their current values -- the read-back oracle for set_properties, and better than inspecting it from Python, where StructBase.to_dict() on a user-defined struct returns an empty dict and a GameplayTag prints as {} whether it holds a tag or not, both of which read as "nothing was written" when the values are actually there.
 //   @param asset_path - The full asset path to the DataAsset.
 //   @returns { asset_path, asset_name, asset_class, asset_path_name, properties: [{ name, type, value }] }
 TSharedPtr<FJsonObject> HandleGetDataAssetInfo(const TSharedPtr<FJsonObject>& Params)
@@ -478,6 +478,7 @@ TSharedPtr<FJsonObject> HandleGetDataAssetInfo(const TSharedPtr<FJsonObject>& Pa
 }
 
 // MCP:set_data_asset_property - Write ONE reflected property on a DataAsset, save the asset, and return old_value and new_value read back. Pick it over set_properties when you want the save in the same call or the before/after proof; set_properties writes several properties at once, undoably, without saving. It runs PreEditChange/PostEditChangeProperty but records no undo step and does not check that the property is editable. A text value uses UE text form: structs as "(X=1,Y=2,Z=3)", object references as a full asset path, GameplayTags as (TagName="A.B"); a JSON object or array goes through the JSON importer instead (a struct as an object, an array as an array). A value that does not import is refused. get_data_asset_info dumps them all.
+//   @retired set_properties - object_path=<data asset>, property_name, value, save=true
 //   @param data_asset_path - Full asset path of the DataAsset.
 //   @param property_name - Name of the UPROPERTY to set (class property name).
 //   @param value - New value: a string in UE text form (structs "(X=1,Y=2,Z=3)", object refs as a full asset path), a number or a bool; or a JSON object/array, written through the JSON importer (a struct as an object, an array or set as an array, a map as an object). null is refused.
@@ -2907,10 +2908,10 @@ TSharedPtr<FJsonObject> HandleGetCurveKeys(const TSharedPtr<FJsonObject>& Params
 }
 
 // ========================================================================== //
-// read_data_table_from_package_file -- read a DataTable from a RAW EXTERNAL .uasset file (collision-safe)
+// get_data_table_from_package_file -- read a DataTable from a RAW EXTERNAL .uasset file (collision-safe)
 // diff_data_tables                 -- per-row/per-cell DataTable diff (two assets, or before/after JSON)
 //
-// read_data_table_from_package_file: the file declares a /Game/... package name shared with the LIVE project, so a
+// get_data_table_from_package_file: the file declares a /Game/... package name shared with the LIVE project, so a
 // plain LoadPackage(nullptr, "/Game/...", ...) would collide with the in-memory copy.
 // We dodge that the way the editor loads a source-control revision for a diff: the file (and its .uexp/.ubulk
 // companions) is copied into a throwaway folder under Saved/Diff and loaded from there under the /Temp/ root
@@ -3163,7 +3164,8 @@ namespace
     }
 } // namespace
 
-// MCP:read_data_table_from_package_file - Read a DataTable from any .uasset file on disk (e.g. a backup) through a throwaway copy loaded under /Temp/, so a live asset with the same /Game name is untouched; then deletes the copy and, by default, garbage-collects. Returns table_name, row_struct, row_count and rows as native JSON, or one row via row_name.
+// MCP:get_data_table_from_package_file - Read a DataTable from any .uasset file on disk (e.g. a backup) through a throwaway copy loaded under /Temp/, so a live asset with the same /Game name is untouched; then deletes the copy and, by default, garbage-collects. Returns table_name, row_struct, row_count and rows as native JSON, or one row via row_name.
+//   @renamed-from read_data_table_from_package_file
 //   @param package_file - Absolute filesystem path to the external .uasset (alias: file_path)
 //   @param object_name - Optional name of the DataTable object inside the package (defaults to the first UDataTable / the package's primary asset)
 //   @param row_name - Optional single row to return; when omitted every row is returned
@@ -3795,7 +3797,7 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("get_data_table_row"), &HandleGetDataTableRow },
     { TEXT("get_data_table_rows"), &HandleGetDataTableRows },
     { TEXT("import_data_table_csv"), &HandleImportDataTableCSV },
-    { TEXT("read_data_table_from_package_file"), &HandleReadDataTableFromPackageFile },
+    { TEXT("get_data_table_from_package_file"), &HandleReadDataTableFromPackageFile },
     { TEXT("remove_curve_key"), &HandleRemoveCurveKey },
     { TEXT("rename_data_table_row"), &HandleRenameDataTableRow },
     { TEXT("set_data_asset_property"), &HandleSetDataAssetProperty },

@@ -168,6 +168,7 @@ public class UEAgent : ModuleRules
 					"InputBlueprintNodes", // UK2Node_EnhancedInputAction (add_enhanced_input_action_node); EnhancedInput plugin UncookedOnly module
 					"InputEditor",         // Public dep of InputBlueprintNodes (UInputAction editor types) -- keep the link island complete
 					"PhysicsUtilities",    // FPhysicsAssetUtils::CreateFromSkeletalMesh (Developer module)
+					"MeshUtilitiesEngine", // FMeshUtilitiesEngine::CalcBoneVertInfos -- the vertices add_physics_asset_body fits a body to (Developer module)
 					"DataLayerEditor",     // UDataLayerEditorSubsystem assignment
 					"CollectionManager",   // ICollectionManager collections (Developer module)
 					"ControlRigDeveloper", // UControlRigBlueprint

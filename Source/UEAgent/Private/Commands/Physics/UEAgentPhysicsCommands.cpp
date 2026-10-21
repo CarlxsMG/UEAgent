@@ -1051,7 +1051,8 @@ TSharedPtr<FJsonObject> HandleRemoveIsmInstance(const TSharedPtr<FJsonObject>& P
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:update_instanced_static_mesh_instance_transform - Move, rotate or rescale ONE existing instance of an InstancedStaticMeshComponent in place, by index -- cheaper than remove + re-add and it keeps the index stable. Leave mark_render_state_dirty at its default true or the viewport keeps drawing the old transform.
+// MCP:set_instanced_static_mesh_instance_transform - Move, rotate or rescale ONE existing instance of an InstancedStaticMeshComponent in place, by index -- cheaper than remove + re-add and it keeps the index stable. Leave mark_render_state_dirty at its default true or the viewport keeps drawing the old transform.
+//   @renamed-from update_instanced_static_mesh_instance_transform
 //   @param actor_name - Display label or internal name of the actor carrying the ISM component (required)
 //   @param component_name - Optional ISM component name
 //   @param instance_index - Index of the instance to update (required, >=0)
@@ -1246,7 +1247,8 @@ TSharedPtr<FJsonObject> HandleRaycastScene(const TSharedPtr<FJsonObject>& Params
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:query_scene_overlaps - Sphere / box / capsule overlap query against the world: "what is inside this volume?", returning one JSON entry per overlapping actor+component instead of export-text, so no Python is needed to parse it. Use it over raycast_scene when the question is proximity/containment rather than line of sight -- e.g. is the pawn actually inside a water body's real collision, is anything blocking a build spot. Accepts the same `world` selector (editor / server / client / pie:N): an editor-world query does NOT see World-Partition/OFPA actor collision, so pass a live PIE world, and in co-op say WHICH one or an empty result is uninterpretable.
+// MCP:find_scene_overlaps - Sphere / box / capsule overlap query against the world: "what is inside this volume?", returning one JSON entry per overlapping actor+component instead of export-text, so no Python is needed to parse it. Use it over raycast_scene when the question is proximity/containment rather than line of sight -- e.g. is the pawn actually inside a water body's real collision, is anything blocking a build spot. Accepts the same `world` selector (editor / server / client / pie:N): an editor-world query does NOT see World-Partition/OFPA actor collision, so pass a live PIE world, and in co-op say WHICH one or an empty result is uninterpretable.
+//   @renamed-from query_scene_overlaps
 //   @param shape [string!] - "sphere" | "box" | "capsule"
 //   @param location [array!] - World-space [x, y, z] shape center
 //   @param radius [number] - Sphere/capsule radius (required for those shapes)
@@ -1353,7 +1355,7 @@ TSharedPtr<FJsonObject> HandleOverlapScene(const TSharedPtr<FJsonObject>& Params
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:get_actor_bounds - Measure how BIG an actor really is: its aggregate world-space bounding box (origin, half-extent, min, max) in the EDITOR world. The size oracle for placement and footprint questions, and the honest test for "did that volume/brush actually get built" -- a spawned volume whose extent comes back (0,0,0) has no geometry no matter what the spawning tool reported. Its `components` filter is the reason to prefer it over reading a component property: "all" (default, AActor::GetActorBounds -- inflated by interaction/trigger shapes), "colliding" (only collision-enabled components) or "mesh"/"rendered" (UMeshComponent geometry ONLY, so trigger spheres/boxes are excluded and the box hugs what you actually see). Editor world only -- for a PIE-world footprint use query_scene_overlaps/raycast_scene with a `world` selector.
+// MCP:get_actor_bounds - Measure how BIG an actor really is: its aggregate world-space bounding box (origin, half-extent, min, max) in the EDITOR world. The size oracle for placement and footprint questions, and the honest test for "did that volume/brush actually get built" -- a spawned volume whose extent comes back (0,0,0) has no geometry no matter what the spawning tool reported. Its `components` filter is the reason to prefer it over reading a component property: "all" (default, AActor::GetActorBounds -- inflated by interaction/trigger shapes), "colliding" (only collision-enabled components) or "mesh"/"rendered" (UMeshComponent geometry ONLY, so trigger spheres/boxes are excluded and the box hugs what you actually see). Editor world only -- for a PIE-world footprint use find_scene_overlaps/raycast_scene with a `world` selector.
 //   @param actor_name [string!] - Actor name or editor label
 //   @param components [string] - Which components contribute: "all" (default; everything, trigger shapes included) | "colliding" (collision-enabled only) | "mesh" | "rendered" (UMeshComponent geometry only)
 //   @param include_child_actors [bool] - Include child-actor components' bounds. Defaults to false.
@@ -1512,9 +1514,9 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("get_instanced_static_mesh_instance_info"), &HandleGetIsmInstanceInfo },
     { TEXT("get_physics_settings"), &HandleGetPhysicsSettings },
     { TEXT("get_scene_bounds"), &HandleGetSceneBounds },
-    { TEXT("query_scene_overlaps"), &HandleOverlapScene },
+    { TEXT("find_scene_overlaps"), &HandleOverlapScene },
     { TEXT("raycast_scene"), &HandleRaycastScene },
     { TEXT("remove_instanced_static_mesh_instance"), &HandleRemoveIsmInstance },
-    { TEXT("update_instanced_static_mesh_instance_transform"), &HandleUpdateIsmInstanceTransform },
+    { TEXT("set_instanced_static_mesh_instance_transform"), &HandleUpdateIsmInstanceTransform },
 };
 } // namespace UEAgentPhysicsCommands

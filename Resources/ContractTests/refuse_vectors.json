@@ -825,7 +825,7 @@
       "delegate_name": "OnTakeAnyDamage"
      },
      "probes": {
-      "inspect_object": {
+      "get_object_info": {
        "success": false,
        "error": "does not resolve"
       }
@@ -836,7 +836,7 @@
      },
      "expect_probe_calls": [
       [
-       "inspect_object",
+       "get_object_info",
        {
         "object_path": "BP_X_0",
         "include_properties": false
@@ -860,7 +860,7 @@
       "get_event_dispatchers": {
        "dispatchers": []
       },
-      "inspect_object": {
+      "get_object_info": {
        "class_name": "BP_X_C",
        "class_path": "/Game/Main/BP_X.BP_X_C"
       }
@@ -871,7 +871,7 @@
      },
      "expect_probe_calls": [
       [
-       "inspect_object",
+       "get_object_info",
        {
         "object_path": "BP_X_0",
         "include_properties": false
@@ -907,7 +907,7 @@
         }
        ]
       },
-      "inspect_object": {
+      "get_object_info": {
        "class_name": "BP_Sensor_Range_C",
        "class_path": "/Game/MyGame/Gameplay/BP_Sensor_Range.BP_Sensor_Range_C"
       }
@@ -918,7 +918,7 @@
      },
      "expect_probe_calls": [
       [
-       "inspect_object",
+       "get_object_info",
        {
         "object_path": "S_0",
         "include_properties": false
@@ -954,7 +954,7 @@
         }
        ]
       },
-      "inspect_object": {
+      "get_object_info": {
        "class_name": "AC_Stats_C",
        "class_path": "/Game/VendorPack/AC_Stats.AC_Stats_C"
       }
@@ -965,7 +965,7 @@
      },
      "expect_probe_calls": [
       [
-       "inspect_object",
+       "get_object_info",
        {
         "object_path": "BP_X.AC_Stats",
         "include_properties": false
@@ -1005,7 +1005,7 @@
         }
        ]
       },
-      "inspect_object": {
+      "get_object_info": {
        "class_name": "BP_Sensor_Range_C",
        "class_path": "/Game/Main/BP_Sensor_Range.BP_Sensor_Range_C"
       }
@@ -1016,7 +1016,7 @@
      },
      "expect_probe_calls": [
       [
-       "inspect_object",
+       "get_object_info",
        {
         "object_path": "S_0",
         "include_properties": false
@@ -1044,7 +1044,7 @@
       "delegate_name": "OnActorHit"
      },
      "probes": {
-      "inspect_object": {
+      "get_object_info": {
        "class_name": "PlayerStart",
        "class_path": "/Script/Engine.PlayerStart"
       }
@@ -1055,7 +1055,7 @@
      },
      "expect_probe_calls": [
       [
-       "inspect_object",
+       "get_object_info",
        {
         "object_path": "PlayerStart_0",
         "include_properties": false
@@ -1083,7 +1083,7 @@
         }
        ]
       },
-      "inspect_object": {
+      "get_object_info": {
        "class_name": "BP_Y_C"
       }
      },
@@ -1093,7 +1093,7 @@
      },
      "expect_probe_calls": [
       [
-       "inspect_object",
+       "get_object_info",
        {
         "object_path": "Y_0",
         "include_properties": false
@@ -1266,7 +1266,7 @@
      "probes": {},
      "expect": {
       "refused": true,
-      "message": "capture_pie_screenshot with include_ui CRASHES THE EDITOR (access violation in D3D12/Slate). And without include_ui it does not serve the usual purpose either: it does NOT render UMG -- the UI is not in the image. To inspect the UI, use read_pie_widgets; for an image of the viewport, capture_viewport; to judge real gameplay, ask the user to play-test it in PIE."
+      "message": "capture_pie_screenshot with include_ui CRASHES THE EDITOR (access violation in D3D12/Slate). And without include_ui it does not serve the usual purpose either: it does NOT render UMG -- the UI is not in the image. To inspect the UI, use list_pie_widgets; for an image of the viewport, capture_viewport; to judge real gameplay, ask the user to play-test it in PIE."
      },
      "expect_probe_calls": []
     }
@@ -1300,7 +1300,7 @@
      "probes": {},
      "expect": {
       "refused": true,
-      "message": "capture_pie_screenshot with include_ui CRASHES THE EDITOR (access violation in D3D12/Slate). And without include_ui it does not serve the usual purpose either: it does NOT render UMG -- the UI is not in the image. To inspect the UI, use read_pie_widgets; for an image of the viewport, capture_viewport; to judge real gameplay, ask the user to play-test it in PIE."
+      "message": "capture_pie_screenshot with include_ui CRASHES THE EDITOR (access violation in D3D12/Slate). And without include_ui it does not serve the usual purpose either: it does NOT render UMG -- the UI is not in the image. To inspect the UI, use list_pie_widgets; for an image of the viewport, capture_viewport; to judge real gameplay, ask the user to play-test it in PIE."
      },
      "expect_probe_calls": []
     }

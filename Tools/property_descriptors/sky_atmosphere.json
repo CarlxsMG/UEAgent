@@ -8,6 +8,8 @@
   "refuse_static": true,
   "set_desc": "Set atmosphere fields (Rayleigh/Mie scattering, anisotropy, ground albedo, radius, height, multi-scattering, aerial perspective, height fog) of a SkyAtmosphere actor found by label or name, through the component's setters, which refresh its render state; set_properties writes any other field. Only supplied fields change, in one undo step; all are read back. Colors are linear [R,G,B(,A)], ground_albedo [R,G,B(,A)] whole 0-255 bytes. A malformed field, or a component of Static mobility (its setters change nothing; make it Movable first), is an error and nothing changes. Not saved.",
   "get_desc": "Read the atmosphere settings of a SkyAtmosphere actor's component, found by label or name in the editor world, under the snake_case names set_sky_atmosphere_properties takes (Rayleigh/Mie scattering, ground albedo, planet radius, height). A curated view; get_properties (internal names only) reads any other UPROPERTY on the component.",
+  "set_retired": "set_properties - object_path=\"<actor>.SkyAtmosphereComponent\", properties with the engine names (BottomRadius, RayleighScatteringScale, GroundAlbedo as {\"R\",\"G\",\"B\",\"A\"} bytes...)",
+  "get_retired": "get_properties - object_path=\"<actor>.SkyAtmosphereComponent\", property_names=[engine names], or get_component_properties for all of them",
   "fields": [
     { "json": "rayleigh_scattering", "setter": "SetRayleighScattering", "readback": "RayleighScattering", "type": "linear_color", "desc": "Optional [R,G,B(,A)] Rayleigh scattering color." },
     { "json": "rayleigh_scattering_scale", "setter": "SetRayleighScatteringScale", "readback": "RayleighScatteringScale", "type": "float", "desc": "Optional Rayleigh scattering scale." },

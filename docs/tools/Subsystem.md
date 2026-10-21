@@ -6,7 +6,7 @@
 
 Back to the [index](README.md).
 
-## `inspect_subsystem_instance`
+## `get_subsystem_instance_info`
 
 *Read-only.*
 

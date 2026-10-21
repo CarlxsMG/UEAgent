@@ -217,7 +217,9 @@ namespace UEAgentNetworkingImpl
 
 // Replication and net roles
 
-// MCP:configure_replication - Configure the replication of an editor-world actor found by object name or label: movement (bReplicateMovement) and lifecycle (bReplicates: the actor is spawned and destroyed on clients). Only the settings sent are applied, inside one undoable transaction, and each is read back: a call that sends neither replicate_movement nor replicate_lifecycle changes nothing and is an error. Physics has no switch of its own in the engine -- a simulating root's state travels with movement replication -- so replicate_physics is reported in not_applied. Only that placed instance changes, not its class defaults; nothing is saved. Read every replication setting with get_actor_replication_info.
+// MCP:set_actor_replication - Configure the replication of an editor-world actor found by object name or label: movement (bReplicateMovement) and lifecycle (bReplicates: the actor is spawned and destroyed on clients). Only the settings sent are applied, inside one undoable transaction, and each is read back: a call that sends neither replicate_movement nor replicate_lifecycle changes nothing and is an error. Physics has no switch of its own in the engine -- a simulating root's state travels with movement replication -- so replicate_physics is reported in not_applied. Only that placed instance changes, not its class defaults; nothing is saved. Read every replication setting with get_actor_replication_info.
+//   @retired set_properties - object_path=<actor>, properties={"bReplicates":true,"bReplicateMovement":true}
+//   @renamed-from configure_replication
 //   @param actor_name - Object name or label of the actor in the editor world (first match)
 //   @param replicate_movement - Optional: whether to replicate movement (bReplicateMovement); applied only when sent
 //   @param replicate_physics - Optional; NOT applied, see the description; listed in not_applied when sent
@@ -238,7 +240,7 @@ TSharedPtr<FJsonObject> HandleConfigureReplication(const TSharedPtr<FJsonObject>
     const bool bPhysicsSent = Params->TryGetBoolField(TEXT("replicate_physics"), bPhysics);
     if (!bMovementSent && !bLifecycleSent)
     {
-        return mcp_common::MakeErrorReply(TEXT("configure_replication: nothing to apply -- send replicate_movement and/or replicate_lifecycle (replicate_physics has no engine switch of its own)."));
+        return mcp_common::MakeErrorReply(TEXT("set_actor_replication: nothing to apply -- send replicate_movement and/or replicate_lifecycle (replicate_physics has no engine switch of its own)."));
     }
 
     AActor* Actor = nullptr;
@@ -303,10 +305,10 @@ TSharedPtr<FJsonObject> HandleConfigureReplication(const TSharedPtr<FJsonObject>
     Report->SetBoolField(TEXT("actor_valid"), IsValid(Actor));
     Report->SetStringField(TEXT("actor_class"), Actor->GetClass()->GetName());
     return mcp_common::MakeOutcomeReply(Report, bConfigured,
-        bConfigured ? FString() : FString(TEXT("configure_replication: the actor does not read back the requested replication settings.")));
+        bConfigured ? FString() : FString(TEXT("set_actor_replication: the actor does not read back the requested replication settings.")));
 }
 
-// MCP:set_network_authority - Set the local net role (AActor::SetRole) of an editor-world actor, found by object name rather than label, to Authority, SimulatedProxy, AutonomousProxy or None (case-insensitive; any other value is an error before anything changes). Only that placed instance's in-memory Role changes: RemoteRole and replication settings stay as they are, there is no undo entry and the level is not marked dirty. authority_set compares the role read back with the request. Read roles with get_actor_replication_info (one actor) or get_network_info (every replicated actor, filterable by role); choose what replicates with configure_replication.
+// MCP:set_network_authority - Set the local net role (AActor::SetRole) of an editor-world actor, found by object name rather than label, to Authority, SimulatedProxy, AutonomousProxy or None (case-insensitive; any other value is an error before anything changes). Only that placed instance's in-memory Role changes: RemoteRole and replication settings stay as they are, there is no undo entry and the level is not marked dirty. authority_set compares the role read back with the request. Read roles with get_actor_replication_info (one actor) or get_network_info (every replicated actor, filterable by role); choose what replicates with set_properties.
 //   @param actor_name - Object name of the editor-world actor (case-insensitive); labels are not matched
 //   @param authority - The network authority role to set; valid values: Authority, SimulatedProxy, AutonomousProxy, None
 //   @returns { actor_name: string, authority_set: bool, previous_authority: string, requested_authority: string, actual_authority: string, actor_valid: bool, actor_class: string }
@@ -595,7 +597,7 @@ TSharedPtr<FJsonObject> HandleStopDedicatedServer(const TSharedPtr<FJsonObject>&
 
 const McpCommandFamilies::FRegistrar Registration =
 {
-    { TEXT("configure_replication"), &HandleConfigureReplication },
+    { TEXT("set_actor_replication"), &HandleConfigureReplication },
     { TEXT("get_dedicated_server_status"), &HandleGetDedicatedServerStatus },
     { TEXT("get_network_info"), &HandleGetNetworkInfo },
     { TEXT("launch_dedicated_server"), &HandleLaunchDedicatedServer },

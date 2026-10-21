@@ -298,7 +298,7 @@ TSharedPtr<FJsonObject> HandleSetActorMaterial(const TSharedPtr<FJsonObject>& Pa
     return Result;
 }
 
-// MCP:focus_viewport - Move the camera of every level editor viewport to frame one actor of the editor world, found by internal name or outliner label (first match), or, when actor_name is omitted, the actors currently selected. Only the viewport cameras change: nothing in the level, no undo entry, nothing saved, and the selection stays as it is. An actor_name that matches nothing, or no actor_name with an empty selection, is an error. The reply has focused_actor (the internal name) in actor mode or focused_count in selection mode, never both. To place the camera at an exact location and rotation use set_viewport_camera, read it back with get_viewport_state, and select actors first with select_actors.
+// MCP:focus_viewport - Move the camera of every level editor viewport to frame one actor of the editor world, found by internal name or outliner label (first match), or, when actor_name is omitted, the actors currently selected. Only the viewport cameras change: nothing in the level, no undo entry, nothing saved, and the selection stays as it is. An actor_name that matches nothing, or no actor_name with an empty selection, is an error. The reply has focused_actor (the internal name) in actor mode or focused_count in selection mode, never both. To place the camera at an exact location and rotation use set_viewport_settings, read it back with get_viewport_state, and select actors first with select_actors.
 //   @param actor_name - Optional internal name or outliner label of the actor to frame; omitted, the current selection is framed
 //   @returns { focused_actor?: string, focused_count?: int }
 //   @hints additive idempotent

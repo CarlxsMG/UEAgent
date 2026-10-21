@@ -22,6 +22,9 @@
 #include "Components/LightComponent.h"
 #include "Components/SkyLightComponent.h"
 #include "Camera/CameraActor.h"
+#include "GameFramework/Volume.h"         // spawn_actor sends a volume to spawn_box_volume, which builds its brush
+#include "Commands/Common/UEAgentGraphUtils.h" // spawn_actor: FUEAgentGraphUtils::ResolveClass for any actor class
+#include "Mcp/McpCommandFamilies.h"
 #include "GameFramework/Character.h"
 #include "Components/StaticMeshComponent.h"
 #include "EditorSubsystem.h"
@@ -67,7 +70,7 @@
 // editor's trans buffer) is in Editor/TransBuffer.h.
 #include "Editor/Transactor.h"
 #include "Editor/TransBuffer.h"
-// Landscape height sampling for place_actor_on_terrain: headless line traces miss
+// Landscape height sampling for snap_actor_to_landscape: headless line traces miss
 // the landscape, so the heightmap is read directly (the sampler get_landscape_height_at uses).
 #include "Landscape.h"                    // ALandscape
 #include "LandscapeProxy.h"               // ALandscapeProxy / GetLandscapeInfo
@@ -94,7 +97,7 @@ namespace
     // Forward declarations -- definitions live further down in this translation
     // unit's (single) unnamed namespace, after the transaction handlers. Declared
     // up here so the snap / batch-terrain handlers above the definitions can call
-    // the heightmap sampler that place_actor_on_terrain uses.
+    // the heightmap sampler that snap_actor_to_landscape uses.
     bool SampleFirstLandscapeHeightAtXY(UWorld* World, double WorldX, double WorldY,
                                         double& OutWorldZ, bool& OutInBounds,
                                         ALandscape*& OutLandscape, FString& OutReason);
@@ -696,8 +699,8 @@ TSharedPtr<FJsonObject> HandleFindActorsByName(const TSharedPtr<FJsonObject>& Pa
     return Reply;
 }
 
-// MCP:spawn_actor - Place a BUILT-IN engine actor -- StaticMeshActor, PointLight, SpotLight, DirectionalLight, RectLight, SkyLight, CameraActor or Character -- into the editor level or a live PIE world, at an optional location/rotation/scale, optionally seeding a light's intensity and color, and return the created actor's JSON. Only these types: spawn_blueprint_actor places a Blueprint class, and the typed spawn_* tools (spawn_post_process_volume, spawn_decal_actor, spawn_sky_atmosphere...) place their class and set its own fields in the same call. Refuses a name an actor already has (omit name to let the engine pick a unique one); the spawn is undoable. It creates the actor in MEMORY only -- save_level (with the .umap writable) puts it on disk. WARNING: with 2+ PIE clients world='pie' can land in the CLIENT world, producing an actor the authority never sees -- ask for world='server' instead, and check the reply's world_package/net_mode to see where the actor went.
-//   @param type - One of StaticMeshActor, PointLight, SpotLight, DirectionalLight, RectLight, SkyLight, CameraActor, Character (case-insensitive); a light also by its short name Point, Spot, Directional, Rect or Sky. Anything else is a clean error; Blueprints go through spawn_blueprint_actor.
+// MCP:spawn_actor - Place an actor of ANY placeable class -- a built-in short name (StaticMeshActor, PointLight, SpotLight, DirectionalLight, RectLight, SkyLight, CameraActor, Character), another engine or plugin class by name or path (SkyAtmosphere, ExponentialHeightFog, VolumetricCloud, SceneCapture2D, TextRenderActor, NiagaraActor, /Script/Engine.DecalActor...) or a Blueprint asset path -- into the editor level or a live PIE world, at an optional location/rotation/scale, and set its properties in the same call: properties={"Prop": v} on the actor, {"Component.Prop": v} on a component named so or of a class only one component has (e.g. {"ExponentialHeightFogComponent.FogDensity": 0.05}), written as set_properties writes them. A volume needs a brush: spawn_box_volume places one; an abstract or non-placeable class is refused. Refuses a name an actor already has (omit name to let the engine pick a unique one); the spawn is undoable. A property that cannot be written makes the call fail with properties_failed while the actor stays, so fix it with set_properties or remove it with delete_actor. It creates the actor in MEMORY only -- save_level (with the .umap writable) puts it on disk. WARNING: with 2+ PIE clients world='pie' can land in the CLIENT world, producing an actor the authority never sees -- ask for world='server' instead, and check has_authority and world_package in the reply.
+//   @param type - The actor class: a built-in short name (StaticMeshActor, PointLight, SpotLight, DirectionalLight, RectLight, SkyLight, CameraActor, Character; a light also as Point, Spot, Directional, Rect or Sky), any other actor class by name or /Script path, or a Blueprint asset path (/Game/BP_Door). Volumes go through spawn_box_volume.
 //   @param name - Optional internal name (and label) for the new actor; must be unused in the target world or the call is refused. When omitted the engine names the actor uniquely and the label is the class default.
 //   @param location - Optional world location, ARRAY form only: [x, y, z]; the origin when omitted. Any other value (an object, another length) is an error and nothing is spawned.
 //   @param rotation - Optional world rotation as the array [pitch, yaw, roll] -- note index 2 is ROLL, not yaw -- or, unambiguously, the object {"pitch":..,"yaw":..,"roll":..}, which is the recommended form. Defaults to zero. Directional, spot and rect lights shine along its forward axis.
@@ -705,8 +708,9 @@ TSharedPtr<FJsonObject> HandleFindActorsByName(const TSharedPtr<FJsonObject>& Pa
 //   @param static_mesh - Optional UStaticMesh asset path, only honoured for type=StaticMeshActor (e.g. /Engine/BasicShapes/Cube).
 //   @param intensity - Optional, light types only: the light component's Intensity in the light's units (Directional: lux; Sky: a multiplier); engine default when omitted. Sent for a non-light type it is refused and nothing is spawned.
 //   @param color - Optional, light types only: [r, g, b] linear color, usually 0..1; engine default (white) when omitted. Sent for a non-light type it is refused and nothing is spawned.
+//   @param properties [object] - Optional {"Prop": value, "Component.Prop": value} written after the spawn with set_properties' writer: engine property names, a struct as a JSON object of the fields to change.
 //   @param world - Optional world selector for WHERE the actor is spawned: absent/'editor' (default) | 'pie' (ambiguous: PlayWorld, else the first PIE context) | 'game' (alias of 'pie') | 'server' (the PIE world with authority -- what you want for anything replicated) | 'client' | 'pie:N'. Case-insensitive; an unrecognised value is a clean error listing the worlds present, never a silent spawn into the editor world.
-//   @returns { actor JSON via DescribeActorObject: name, class, location, rotation, scale, plus world: string (the normalized selector that resolved), world_name: string, world_package: string (the UEDPIE_N prefix lives HERE), world_type: string, net_mode: string, pie_instance: int, light_intensity?: number (light types: the intensity now on the component), light_color?: [r, g, b] (light types: the color now on the component) }
+//   @returns { actor JSON via DescribeActorObject: name, class, location, rotation, scale, plus world: string (the normalized selector that resolved), world_name: string, world_package: string (the UEDPIE_N prefix lives HERE), world_type: string, net_mode: string, pie_instance: int, has_authority: bool, local_role: string, light_intensity?: number (light types: the intensity now on the component), light_color?: [r, g, b] (light types: the color now on the component), properties_set?: [string], properties_failed?: [{property, error}] (with properties) }
 
 TSharedPtr<FJsonObject> HandleSpawnActor(const TSharedPtr<FJsonObject>& Params)
 {
@@ -725,9 +729,31 @@ TSharedPtr<FJsonObject> HandleSpawnActor(const TSharedPtr<FJsonObject>& Params)
     }
 
     UClass* SpawnClass = UEAgentEditorCommandsImpl::BuiltInSpawnClass(TypeName);
+    const bool bBuiltIn = SpawnClass != nullptr;
     if (SpawnClass == nullptr)
     {
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Unknown actor type: %s"), *TypeName));
+        // Any other actor class: a native name or path (SkyAtmosphere, /Script/Engine.SkyAtmosphere) or a Blueprint.
+        SpawnClass = FUEAgentGraphUtils::ResolveClass(TypeName);
+        if (SpawnClass == nullptr)
+        {
+            return mcp_common::MakeErrorReply(FUEAgentGraphUtils::DescribeClassNotFound(TypeName)
+                + TEXT(". type takes an actor class: a native name or path, or a Blueprint asset path; nothing was spawned"));
+        }
+        if (!SpawnClass->IsChildOf(AActor::StaticClass()))
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(TEXT("%s is not an actor class; nothing was spawned"), *SpawnClass->GetPathName()));
+        }
+        if (SpawnClass->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_NewerVersionExists | CLASS_NotPlaceable))
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("%s cannot be placed in a level (it is abstract, deprecated, replaced or not placeable); nothing was spawned"), *SpawnClass->GetPathName()));
+        }
+        if (SpawnClass->IsChildOf(AVolume::StaticClass()))
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("%s is a volume, which needs a brush to enclose anything: spawn_box_volume volume_class=%s builds one. Nothing was spawned"),
+                *SpawnClass->GetName(), *SpawnClass->GetName()));
+        }
     }
 
     // Optional light seeding, refused up front on a type that has no light component to take it.
@@ -803,6 +829,11 @@ TSharedPtr<FJsonObject> HandleSpawnActor(const TSharedPtr<FJsonObject>& Params)
     FScopedTransaction SpawnTransaction(UEAgentEditorCommandsImpl::UndoTitle(TEXT("Spawn Actor"), bNamed ? NewName : TypeName));
 
     FActorSpawnParameters SpawnParams;
+    if (!bBuiltIn)
+    {
+        // As the class-specific spawners did: a placed actor is wanted where it was asked, overlapping or not.
+        SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    }
     if (bNamed)
     {
         SpawnParams.Name = FName(*NewName);
@@ -884,6 +915,12 @@ TSharedPtr<FJsonObject> HandleSpawnActor(const TSharedPtr<FJsonObject>& Params)
     }
     Reply->SetStringField(TEXT("world"), SelectorUsed);
     mcp_common::AddWorldEvidence(Reply, World);
+    // Its real authority: a client-world spawn exists for nobody else, yet would otherwise look like a server one.
+    Reply->SetBoolField(TEXT("has_authority"), Spawned->HasAuthority());
+    if (const UEnum* NetRoleEnum = StaticEnum<ENetRole>())
+    {
+        Reply->SetStringField(TEXT("local_role"), NetRoleEnum->GetNameStringByValue(static_cast<int64>(Spawned->GetLocalRole())));
+    }
     if (IntensityNow.IsSet())
     {
         Reply->SetNumberField(TEXT("light_intensity"), IntensityNow.GetValue());
@@ -893,6 +930,108 @@ TSharedPtr<FJsonObject> HandleSpawnActor(const TSharedPtr<FJsonObject>& Params)
         const FLinearColor& C = ColorNow.GetValue();
         Reply->SetArrayField(TEXT("light_color"), {
             MakeShared<FJsonValueNumber>(C.R), MakeShared<FJsonValueNumber>(C.G), MakeShared<FJsonValueNumber>(C.B) });
+    }
+
+    // properties: written once the actor exists, through set_properties' writer (Details-panel semantics), on the
+    // actor ("Prop") or on one of its components ("Component.Prop", by name or by a class only one component has).
+    const TSharedPtr<FJsonObject>* PropsObj = nullptr;
+    if (Params->TryGetObjectField(TEXT("properties"), PropsObj) && PropsObj && PropsObj->IsValid() && (*PropsObj)->Values.Num() > 0)
+    {
+        TArray<TSharedPtr<FJsonValue>> SetNames;
+        TArray<TSharedPtr<FJsonValue>> Failed;
+        auto AddFailure = [&Failed](const FString& Key, const FString& Error)
+        {
+            TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+            Entry->SetStringField(TEXT("property"), Key);
+            Entry->SetStringField(TEXT("error"), Error);
+            Failed.Add(MakeShared<FJsonValueObject>(Entry));
+        };
+        // Grouped by the object they go to, in the order given.
+        TArray<UObject*> Targets;
+        TArray<TSharedPtr<FJsonObject>> TargetProperties;
+        TArray<FString> TargetPrefixes;
+        for (const auto& Entry : (*PropsObj)->Values)
+        {
+            const TPair<FString, TSharedPtr<FJsonValue>> Pair(FString(*Entry.Key), Entry.Value);
+            UObject* Target = Spawned;
+            FString Prefix;
+            FString PropertyName = Pair.Key;
+            int32 Dot = INDEX_NONE;
+            if (Pair.Key.FindChar(TEXT('.'), Dot))
+            {
+                TArray<FString> Ambiguous;
+                Prefix = Pair.Key.Left(Dot);
+                PropertyName = Pair.Key.Mid(Dot + 1);
+                Target = mcp_common::FindComponentByNameOrClass(Spawned, Prefix, &Ambiguous);
+                if (!Target)
+                {
+                    AddFailure(Pair.Key, Ambiguous.Num() > 0
+                        ? FString::Printf(TEXT("%d components are of class %s (%s); name one"), Ambiguous.Num(), *Prefix, *FString::Join(Ambiguous, TEXT(", ")))
+                        : FString::Printf(TEXT("the actor has no component named %s, nor exactly one of that class"), *Prefix));
+                    continue;
+                }
+            }
+            int32 TargetIndex = Targets.IndexOfByKey(Target);
+            if (TargetIndex == INDEX_NONE)
+            {
+                TargetIndex = Targets.Add(Target);
+                TargetProperties.Add(MakeShared<FJsonObject>());
+                TargetPrefixes.Add(Prefix.IsEmpty() ? FString() : Prefix + TEXT("."));
+            }
+            TargetProperties[TargetIndex]->SetField(PropertyName, Pair.Value);
+        }
+        for (int32 TargetIndex = 0; TargetIndex < Targets.Num(); ++TargetIndex)
+        {
+            const FString& Prefix = TargetPrefixes[TargetIndex];
+            TSharedPtr<FJsonObject> WriteParams = MakeShared<FJsonObject>();
+            WriteParams->SetStringField(TEXT("object_path"), Targets[TargetIndex]->GetPathName());
+            WriteParams->SetObjectField(TEXT("properties"), TargetProperties[TargetIndex]);
+            const TSharedPtr<FJsonObject> Written = McpCommandFamilies::Run(TEXT("set_properties"), WriteParams);
+            const TSharedPtr<FJsonObject>* Data = nullptr;
+            const TSharedPtr<FJsonObject> Outcome = Written.IsValid() && Written->TryGetObjectField(TEXT("data"), Data) && Data ? *Data : Written;
+            const TArray<TSharedPtr<FJsonValue>>* SetList = nullptr;
+            const TArray<TSharedPtr<FJsonValue>>* FailedList = nullptr;
+            const bool bHasSet = Outcome.IsValid() && Outcome->TryGetArrayField(TEXT("set"), SetList) && SetList;
+            const bool bHasFailed = Outcome.IsValid() && Outcome->TryGetArrayField(TEXT("failed"), FailedList) && FailedList;
+            if (bHasSet)
+            {
+                for (const TSharedPtr<FJsonValue>& Name : *SetList)
+                {
+                    SetNames.Add(MakeShared<FJsonValueString>(Prefix + Name->AsString()));
+                }
+            }
+            if (bHasFailed)
+            {
+                for (const TSharedPtr<FJsonValue>& Entry : *FailedList)
+                {
+                    const TSharedPtr<FJsonObject>* EntryObj = nullptr;
+                    if (Entry->TryGetObject(EntryObj) && EntryObj)
+                    {
+                        AddFailure(Prefix + (*EntryObj)->GetStringField(TEXT("property")), (*EntryObj)->GetStringField(TEXT("error")));
+                    }
+                }
+            }
+            if (!bHasSet && !bHasFailed)
+            {
+                FString Error;
+                if (Written.IsValid())
+                {
+                    Written->TryGetStringField(TEXT("error"), Error);
+                }
+                for (const auto& Pair : TargetProperties[TargetIndex]->Values)
+                {
+                    AddFailure(Prefix + FString(*Pair.Key), Error.IsEmpty() ? FString(TEXT("not written")) : Error);
+                }
+            }
+        }
+        Reply->SetArrayField(TEXT("properties_set"), SetNames);
+        Reply->SetArrayField(TEXT("properties_failed"), Failed);
+        if (Failed.Num() > 0)
+        {
+            return mcp_common::MakeOutcomeReply(Reply, false, FString::Printf(
+                TEXT("%s was spawned, but %d of its properties were not written (properties_failed says why). The actor exists: fix them with set_properties, or remove it with delete_actor."),
+                *Spawned->GetActorLabel(), Failed.Num()));
+        }
     }
     return Reply;
 }
@@ -947,7 +1086,7 @@ TSharedPtr<FJsonObject> HandleDeleteActor(const TSharedPtr<FJsonObject>& Params)
     return Reply;
 }
 
-// MCP:set_actor_transform - Move, rotate and/or scale ONE actor (omitted components are left as they are) and return the actor's re-read transform plus the identity of the world that was written. Undoable, and it calls Modify() first -- which matters, because moving an actor from Python does NOT dirty its OFPA package and then save_level reports success while writing nothing. Takes a `world` selector, so it also reaches a LIVE PIE pawn (an editor-only lookup would answer "Actor not found" for an actor that exists in another world). Use set_actor_transforms for many actors, place_actor_on_terrain to drop one onto the landscape.
+// MCP:set_actor_transform - Move, rotate and/or scale ONE actor (omitted components are left as they are) and return the actor's re-read transform plus the identity of the world that was written. Undoable, and it calls Modify() first -- which matters, because moving an actor from Python does NOT dirty its OFPA package and then save_level reports success while writing nothing. Takes a `world` selector, so it also reaches a LIVE PIE pawn (an editor-only lookup would answer "Actor not found" for an actor that exists in another world). Use execute_batch for many actors, snap_actor_to_landscape to drop one onto the landscape.
 //   @param name - Actor's internal name (GetName) or editor label (GetActorLabel), case-insensitive whole-string match.
 //   @param world - Optional: "editor" (default) | "pie" | "server" | "client" | "pie:N". In co-op the authoritative pawn lives on the server, and a move written to the client world will be corrected by replication.
 //   @param location - Optional new WORLD location, ARRAY form only: [x, y, z]. Absolute, not a delta; any other value (an object, another length) is an error and the actor is not touched.
@@ -2095,6 +2234,7 @@ TSharedPtr<FJsonObject> HandleGetCurrentLevel(const TSharedPtr<FJsonObject>& Par
 // Many actors in one undoable step
 
 // MCP:set_actor_transforms - Move/rotate/scale MANY actors in a single undoable transaction, each with its own optional location/rotation/scale, reporting success_count, failure_count and the names that did not resolve. Cheaper and atomically undoable versus N set_actor_transform calls. Calls Modify() per actor so their OFPA packages dirty and save_level actually writes them. Takes the same `world` selector as set_actor_transform, so it reaches a live PIE world too. WARNING: resolves the INTERNAL name only (no editor labels, unlike set_actor_transform); a name it cannot find is counted in failure_count, not raised as an error -- read that number.
+//   @retired execute_batch - one set_actor_transform per actor, with transaction=true for one undo step
 //   @param actor_transforms - Array of objects {actor_name: internal GetName; location?: [x,y,z] array only; rotation?: [pitch,yaw,roll] or the safer {pitch,yaw,roll}; scale?: [x,y,z] array only}. Omitted components keep their current value; an entry with no actor_name just increments failure_count, and a malformed vector silently reads as zero.
 //   @param world - Optional: "editor" (default) | "pie" | "server" | "client" | "pie:N". The response stamps which world answered.
 //   @returns { success_count: int, failure_count: int (unresolved or malformed entries -- check it), updated_actors: [actor JSON re-read after the write], failed_actors?: [string], world_name, world_package, ... }
@@ -2225,11 +2365,11 @@ TSharedPtr<FJsonObject> HandleBatchDeleteActors(const TSharedPtr<FJsonObject>& P
 
 // Grounding (trace or heightmap) and lining actors up
 
-// MCP:snap_actor_to_ground - Drop ONE editor-world actor straight down until its bounds bottom rests on whatever is below -- meshes, BSP or the landscape. It line-traces first and, because headless traces routinely MISS the landscape, falls back to sampling the heightmap so the actor still lands; sampled_from tells you which path answered. Use place_actor_on_terrain when the ground is definitely the landscape and you want no trace at all, place_actors_on_terrain for many actors.
+// MCP:snap_actor_to_ground - Drop ONE editor-world actor straight down until its bounds bottom rests on whatever is below -- meshes, BSP or the landscape. It line-traces first and, because headless traces routinely MISS the landscape, falls back to sampling the heightmap so the actor still lands; sampled_from tells you which path answered. Use snap_actor_to_landscape when the ground is definitely the landscape and you want no trace at all, execute_batch for many actors.
 //   @param actor_name - Name of the actor to snap (editor world).
 //   @param trace_distance - Optional downward trace distance in cm; defaults to 10000
 //   @param align_to_surface - When true, rotate actor to match the surface normal (trace hits only; the heightmap fallback has no normal); defaults to false
-//   @param fallback_heightmap - When true (default) and the downward line trace misses (headless traces routinely miss the landscape), fall back to sampling the landscape heightmap at the actor's XY (same sampler as place_actor_on_terrain) so the actor still lands. Set false to require a real trace hit.
+//   @param fallback_heightmap - When true (default) and the downward line trace misses (headless traces routinely miss the landscape), fall back to sampling the landscape heightmap at the actor's XY (same sampler as snap_actor_to_landscape) so the actor still lands. Set false to require a real trace hit.
 //   @returns { actor: actor JSON, hit: bool, landed: bool, sampled_from: 'trace'|'heightmap', hit_actor?: string, hit_distance?: number }
 
 TSharedPtr<FJsonObject> HandleSnapActorToGround(const TSharedPtr<FJsonObject>& Params)
@@ -2281,7 +2421,7 @@ TSharedPtr<FJsonObject> HandleSnapActorToGround(const TSharedPtr<FJsonObject>& P
     }
     else if (bAllowHeightmap)
     {
-        // Same sampler as place_actor_on_terrain.
+        // Same sampler as snap_actor_to_landscape.
         double HeightmapZ = 0.0;
         ALandscape* SampledLandscape = nullptr;
         FString SampleReason;
@@ -2342,7 +2482,7 @@ TSharedPtr<FJsonObject> HandleSnapActorToGround(const TSharedPtr<FJsonObject>& P
     return Reply;
 }
 
-// MCP:align_actors - Snap two or more editor-world actors onto a shared location, rotation and/or scale taken from a reference (the first, the last, their average, or a named actor). Use it to straighten a hand-placed row or make a set of props share an orientation, in one undoable step; set_actor_transforms is the tool when each actor needs a DIFFERENT transform. WARNING: aligning "location" collapses them onto the same point -- for a row, align only rotation/scale and set positions yourself.
+// MCP:align_actors - Snap two or more editor-world actors onto a shared location, rotation and/or scale taken from a reference (the first, the last, their average, or a named actor). Use it to straighten a hand-placed row or make a set of props share an orientation, in one undoable step; execute_batch of set_actor_transform calls, with transaction=true, is the tool when each actor needs a DIFFERENT transform. WARNING: aligning "location" collapses them onto the same point -- for a row, align only rotation/scale and set positions yourself.
 //   @param actor_names - Array of at least 2 INTERNAL actor names (GetName) in the editor world; fewer is an error, and editor labels do not resolve.
 //   @param align_type - "location" (default), "rotation", "scale" or "all" -- which transform components get copied from the reference.
 //   @param reference - Where the target values come from: "first" (default), "last", "average" (the componentwise mean of all of them), or the internal name of one of the listed actors.
@@ -3274,7 +3414,7 @@ TSharedPtr<FJsonObject> HandleRemoveUndoBarrier(const TSharedPtr<FJsonObject>& P
 }
 
 // ========================================================================== //
-// place_actor_on_terrain -- height-sample based grounding (no line trace)
+// snap_actor_to_landscape -- height-sample based grounding (no line trace)
 // ========================================================================== //
 namespace
 {
@@ -3403,7 +3543,8 @@ namespace
     }
 }
 
-// MCP:place_actor_on_terrain - Ground an actor on the landscape by sampling the heightmap at its XY (no line trace; traces miss the landscape headless). Sets the actor's Z so either its mesh bbox bottom or its origin sits at the sampled height + z_offset.
+// MCP:snap_actor_to_landscape - Ground an actor on the landscape by sampling the heightmap at its XY (no line trace; traces miss the landscape headless). Sets the actor's Z so either its mesh bbox bottom or its origin sits at the sampled height + z_offset.
+//   @renamed-from place_actor_on_terrain
 //   @param actor_name - Internal name of the actor to place (Actor->GetName())
 //   @param align - Optional 'mesh_bbox_bottom' (default; drops the lowest mesh-geometry point onto the ground) or 'actor_origin' (puts the actor origin at the ground)
 //   @param z_offset - Optional extra world-Z added above the sampled ground height; defaults to 0
@@ -3443,7 +3584,7 @@ TSharedPtr<FJsonObject> HandlePlaceActorOnTerrain(const TSharedPtr<FJsonObject>&
     FString Reason;
     if (!SampleFirstLandscapeHeightAtXY(EditorWorld, Start.X, Start.Y, LandedZ, bInBounds, Landscape, Reason))
     {
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("place_actor_on_terrain: %s"), *Reason));
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("snap_actor_to_landscape: %s"), *Reason));
     }
 
     // Undoable; Modify() also dirties the OFPA package (see snap_actor_to_ground).
@@ -3473,7 +3614,8 @@ TSharedPtr<FJsonObject> HandlePlaceActorOnTerrain(const TSharedPtr<FJsonObject>&
     return Reply;
 }
 
-// MCP:place_actors_on_terrain - Ground many actors on the landscape in one call by sampling the heightmap at each actor's XY (no line trace; scatter without per-point python). Same grounding math as place_actor_on_terrain, applied per actor.
+// MCP:place_actors_on_terrain - Ground many actors on the landscape in one call by sampling the heightmap at each actor's XY (no line trace; scatter without per-point python). Same grounding math as snap_actor_to_landscape, applied per actor.
+//   @retired execute_batch - one snap_actor_to_landscape per actor, with transaction=true for one undo step
 //   @param actors - Array of { name (Actor->GetName()) OR label (Actor->GetActorLabel()), z_offset? (per-actor override), align? ('mesh_bbox_bottom'|'actor_origin', per-actor override) }
 //   @param align - Optional default align for entries without their own; 'mesh_bbox_bottom' (default; drops the lowest mesh point) or 'actor_origin'
 //   @param z_offset - Optional default extra world-Z above the sampled ground for entries without their own; defaults to 0
@@ -3616,7 +3758,7 @@ TSharedPtr<FJsonObject> HandleBatchPlaceActorsOnTerrain(const TSharedPtr<FJsonOb
 
         TargetActor->Modify();
 
-        // The same grounding math as place_actor_on_terrain.
+        // The same grounding math as snap_actor_to_landscape.
         FString AlignUsed;
         const double NewActorZ = UEAgentEditorCommandsImpl::GroundedActorZ(
             TargetActor, PreviousZ, LandedZ + ZOffset, Align, AlignUsed);
@@ -3676,7 +3818,7 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("load_level"), &HandleLoadLevel },
     { TEXT("move_actors_to_level"), &HandleMoveActorsToLevel },
     { TEXT("paste_actors"), &HandlePasteActors },
-    { TEXT("place_actor_on_terrain"), &HandlePlaceActorOnTerrain },
+    { TEXT("snap_actor_to_landscape"), &HandlePlaceActorOnTerrain },
     { TEXT("redo"), &HandleRedo },
     { TEXT("remove_component_from_actor"), &HandleRemoveComponentFromActor },
     { TEXT("remove_undo_barrier"), &HandleRemoveUndoBarrier },

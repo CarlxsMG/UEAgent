@@ -2,7 +2,7 @@
 
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
-#include "Commands/Common/UEAgentGraphUtils.h" // FUEAgentGraphUtils::ResolveClass for inspect_subsystem_instance
+#include "Commands/Common/UEAgentGraphUtils.h" // FUEAgentGraphUtils::ResolveClass for get_subsystem_instance_info
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
@@ -13,7 +13,7 @@
 #include "Subsystems/LocalPlayerSubsystem.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/Class.h"
-#include "UObject/UnrealType.h"   // FProperty walk for inspect_subsystem_instance
+#include "UObject/UnrealType.h"   // FProperty walk for get_subsystem_instance_info
 
 /**
  * Live subsystem instance commands: list the local-player subsystems, and inspect the public properties of
@@ -62,7 +62,7 @@ UGameInstance* GetGameInstance(const TSharedPtr<FJsonObject>& Params, UWorld*& O
 //
 // All handlers are read-only and headless-safe — they don't touch the
 // SubsystemCollection mutation API (which is reserved for engine init /
-// PIE startup). The reflection walk in inspect_subsystem_instance filters
+// PIE startup). The reflection walk in get_subsystem_instance_info filters
 // to EditAnywhere or Blueprint-visible UPROPERTYs (the standard "exposed to
 // gameplay layer" surface); transient fields are skipped so we never leak
 // internal engine state.
@@ -117,7 +117,8 @@ TSharedPtr<FJsonObject> HandleListLocalPlayerSubsystems(const TSharedPtr<FJsonOb
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:inspect_subsystem_instance - Find the live instance of a subsystem class by its lifetime and read its exposed properties (EditAnywhere or Blueprint-visible, inherited included, Transient skipped), each with name, C++ type, property class, edit and blueprint_visible flags, and its value exported as text (empty when it cannot be exported); include_properties=false skips the property walk for a cheap "is it there, and what is it called" lookup. lifetime picks the host: world reads the world the world selector picks, the editor world by default; gameinstance and localplayer read the game instance of that world, the running Play-in-Editor world by default, since the editor world never has one (without PIE they fail saying so). The reply names the world it read (world_package, world_type). A missing host or instance is an error. Read-only. To enumerate use list_subsystem_instances or list_local_player_subsystems.
+// MCP:get_subsystem_instance_info - Find the live instance of a subsystem class by its lifetime and read its exposed properties (EditAnywhere or Blueprint-visible, inherited included, Transient skipped), each with name, C++ type, property class, edit and blueprint_visible flags, and its value exported as text (empty when it cannot be exported); include_properties=false skips the property walk for a cheap "is it there, and what is it called" lookup. lifetime picks the host: world reads the world the world selector picks, the editor world by default; gameinstance and localplayer read the game instance of that world, the running Play-in-Editor world by default, since the editor world never has one (without PIE they fail saying so). The reply names the world it read (world_package, world_type). A missing host or instance is an error. Read-only. To enumerate use list_subsystem_instances or list_local_player_subsystems.
+//   @renamed-from inspect_subsystem_instance
 //   @param subsystem_class - Class of the subsystem to inspect: short reflected name (with or without the U prefix), /Script path, or a Blueprint subsystem's class path. Must derive from USubsystem.
 //   @param class_name - Alias of subsystem_class.
 //   @param lifetime - Which host resolves the instance: one of engine | gameinstance | world | editor | localplayer (case-insensitive).
@@ -290,7 +291,7 @@ TSharedPtr<FJsonObject> HandleInspectSubsystemInstance(const TSharedPtr<FJsonObj
 
 const McpCommandFamilies::FRegistrar Registration =
 {
-    { TEXT("inspect_subsystem_instance"), &HandleInspectSubsystemInstance },
+    { TEXT("get_subsystem_instance_info"), &HandleInspectSubsystemInstance },
     { TEXT("list_local_player_subsystems"), &HandleListLocalPlayerSubsystems },
 };
 } // namespace UEAgentSubsystemCommands

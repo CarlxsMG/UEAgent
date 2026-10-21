@@ -2,7 +2,7 @@
 
 # Asset
 
-56 tools for finding assets by name, type, tag or folder, collections, textures and render targets, static mesh sockets, thumbnails and imports.
+57 tools for finding assets by name, type, tag or folder, collections, textures and render targets, static mesh sockets, thumbnails and imports.
 
 Back to the [index](README.md).
 
@@ -288,6 +288,21 @@ Export a render target to an image file on disk: PNG, except an RGBA16f or RGBA3
 
 **Returns:** `{ render_target_path: string, output_directory: string, filename: string, file_path: string, exported: bool, file_exists: bool, file_size_bytes: number }`
 
+## `find_assets_by_name`
+
+*Read-only.*
+
+Find assets by NAME, scanning every mounted content root (/Game, /Engine, /Water, plugin mounts, ...) and returning name, object path, class and package per hit. The broad "does anything called &lt;token> exist, and where?" search. It has TWO match modes and picks one automatically, reporting which in `match_mode`: a pattern WITHOUT `*`/`?` is a case-insensitive SUBSTRING test (FString::Contains) -- pass the bare token, this is the common case; a pattern WITH `*` or `?` is a real glob (FString::MatchesWildcard). WARNING: The glob is ANCHORED AT BOTH ENDS -- it matches the WHOLE name, not a substring -- so `Grass*` means "starts with Grass" and `*Grass*` is what reproduces substring behaviour. It only ever looks at the asset NAME, so it cannot find an asset by its folder or by a class it belongs to: use resolve_asset_by_name to check ONE exact name and get every homonym, get_assets_in_folder to enumerate a directory, get_assets_by_type for the 5 built-in type filters, and get_assets_by_tag for an Asset Registry tag.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `search_pattern` | string | yes | Matched against the asset NAME. Contains no `*`/`?` -> case-insensitive substring (FString::Contains). Contains `*` or `?` -> glob (FString::MatchesWildcard), ANCHORED at both ends: `*` matches any run including empty, `?` matches 0 or 1 character (UE semantics, not exactly 1). Not a regex. |
+| `max_results` | number | no | Cap on number of matched assets (1..50000); defaults to 1000. WARNING: Hitting the cap ABORTS the enumeration, so `total_scanned` then counts only the assets visited before the early-out, not the whole registry. |
+| `case_sensitive` | boolean | no | When true, match is case-sensitive; defaults to false |
+| `wait_for_scan` | boolean | no | When true (default), force-completes the AssetRegistry scan before enumerating so a still-loading registry cannot report total_scanned:0. Set false to skip the (possibly blocking) wait. |
+
+**Returns:** `{ assets: [{ name, path, class, package, is_loaded }], count: int, total_scanned: int, scan_was_pending: bool, search_pattern: string, match_mode: "substring"|"wildcard", case_sensitive: bool, max_results: int, results_truncated: bool }`
+
 ## `generate_asset_thumbnail`
 
 *Additive.*
@@ -304,7 +319,7 @@ Render and cache an asset's thumbnail (or report the existing cached one).  When
 
 *Read-only.*
 
-Retrieve ONE asset by exact name and return its identity (name, class, object path, package, is_loaded, file size) plus, with load_full_data, type-specific detail: a Blueprint's parent class / compile status / generated class, a StaticMesh's section-vertex-LOD counts, whether a material is an instance; with include_tags, its Asset Registry tags (the indexed key/value pairs an asset publishes -- parent class, mesh stats, fork-lineage tags) read without a load. WARNING: When the name is ambiguous it still resolves to the FIRST match and merely lists the rest in `ambiguous_matches` -- check that field, or use resolve_asset_by_name, which refuses to pick for you. The fallback name scan only covers /Game, so an /Engine or plugin-mount asset must be addressed by its full package or object path. Use get_assets_by_names for a batch, get_assets_by_tag to search BY a tag value, and search_assets_by_pattern when you only know part of the name.
+Retrieve ONE asset by exact name and return its identity (name, class, object path, package, is_loaded, file size) plus, with load_full_data, type-specific detail: a Blueprint's parent class / compile status / generated class, a StaticMesh's section-vertex-LOD counts, whether a material is an instance; with include_tags, its Asset Registry tags (the indexed key/value pairs an asset publishes -- parent class, mesh stats, fork-lineage tags) read without a load. WARNING: When the name is ambiguous it still resolves to the FIRST match and merely lists the rest in `ambiguous_matches` -- check that field, or use resolve_asset_by_name, which refuses to pick for you. The fallback name scan only covers /Game, so an /Engine or plugin-mount asset must be addressed by its full package or object path. Use get_assets_by_names for a batch, get_assets_by_tag to search BY a tag value, and find_assets_by_name when you only know part of the name.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -412,7 +427,7 @@ Search assets BY an Asset Registry tag (FARFilter::TagsAndValues), server-side a
 
 *Read-only.*
 
-List every asset of a CLASS under a content path, with name, object path, class, package and is_loaded, plus total_found and results_truncated. Takes any resolvable class -- "DataTable", "NiagaraSystem", "LandscapeGrassType", a "/Script/Module.Class" path -- matched WITH its subclasses, plus five shortcuts kept for convenience: "Blueprint", "StaticMesh", "Texture" (Texture2D exactly), "Sound" (SoundWave exactly) and "Material", which is the one that earns its keep by grouping Material + MaterialInstanceConstant + MaterialInstanceDynamic. Searches /Game by default and any mount via package_path (/Engine, /Water, plugin content). Sister tools: get_assets_in_folder to enumerate a directory whatever the class, search_assets_by_pattern to search by NAME, get_assets_by_tag to search by an Asset Registry tag.
+List every asset of a CLASS under a content path, with name, object path, class, package and is_loaded, plus total_found and results_truncated. Takes any resolvable class -- "DataTable", "NiagaraSystem", "LandscapeGrassType", a "/Script/Module.Class" path -- matched WITH its subclasses, plus five shortcuts kept for convenience: "Blueprint", "StaticMesh", "Texture" (Texture2D exactly), "Sound" (SoundWave exactly) and "Material", which is the one that earns its keep by grouping Material + MaterialInstanceConstant + MaterialInstanceDynamic. Searches /Game by default and any mount via package_path (/Engine, /Water, plugin content). Sister tools: get_assets_in_folder to enumerate a directory whatever the class, find_assets_by_name to search by NAME, get_assets_by_tag to search by an Asset Registry tag.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -426,7 +441,7 @@ List every asset of a CLASS under a content path, with name, object path, class,
 
 *Read-only.*
 
-Enumerate every asset under a content FOLDER (recursively by default), each with name, object path, class, package and is_loaded, plus total_found so you can tell a truncated listing from a complete one. The "what is actually in this directory?" inventory -- metadata only, it never loads an asset. Reaches any mounted content root, not just /Game. Pick this over search_assets_by_pattern when you know WHERE to look rather than what the name contains, over get_assets_by_type when you want everything regardless of class, and over resolve_asset_by_name when you do not have an exact name at all.
+Enumerate every asset under a content FOLDER (recursively by default), each with name, object path, class, package and is_loaded, plus total_found so you can tell a truncated listing from a complete one. The "what is actually in this directory?" inventory -- metadata only, it never loads an asset. Reaches any mounted content root, not just /Game. Pick this over find_assets_by_name when you know WHERE to look rather than what the name contains, over get_assets_by_type when you want everything regardless of class, and over resolve_asset_by_name when you do not have an exact name at all.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -608,6 +623,19 @@ Removes an asset from a collection and reads back its object count (idempotent; 
 
 **Returns:** `{ collection_name: string, share_type: string, asset_path: string, removed: bool, already_absent: bool, verified: bool, object_count: number }`
 
+## `remove_asset_metadata_tag`
+
+*Destructive.*
+
+Remove one string metadata tag (UMetaData) from an asset and save it (UEditorAssetLibrary::RemoveMetadataTag); no undo step, since package metadata is outside the undo history, and refused by the engine during PIE (the tag stays, reported as an error). Inverse of set_asset_metadata_tag. A key the asset has no tag for is an honest no-op (removed=false, nothing saved); an asset that does not exist is an error. The reply re-reads the tags (still_present, tag_count). Read: get_asset_metadata_tags.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `asset_path` | string | yes | /Game path to the asset (e.g. "/Game/MyGame/M_Example"). |
+| `key` | string | yes | Metadata tag name (FName) to remove, e.g. "Author". |
+
+**Returns:** `{ asset_path: string, key: string, removed: bool, still_present: bool, tag_count: int, saved: bool }`
+
 ## `remove_static_mesh_socket`
 
 *Destructive, idempotent.*
@@ -654,11 +682,11 @@ Rename an existing static mesh socket (guards against name collisions; idempoten
 
 *Read-only.*
 
-Resolve an exact asset name (or path) to EVERY matching asset and report `match_count` + `unambiguous`, instead of silently picking the first one the way get_asset_by_name, get_blueprint_parent, get_graph_nodes and the rest of the by-name tools do. Run this FIRST whenever you are about to address an asset by bare name: a project can have hundreds of duplicate names (the same name in a vendored pack and in the game's own folders, plus dated backup copies), and `unambiguous:false` is the only warning you will get before another tool hands you a stale backup's contents as if they were the real asset. From there, pass the full path everywhere. match_count:0 with success:true is a valid, informative answer -- it means "no asset with this exact name", which is a real measurement of non-existence (unlike search_assets_by_pattern's count:0, which can just mean the pattern had a wildcard in it).
+Resolve an exact asset name (or path) to EVERY matching asset and report `match_count` + `unambiguous`, instead of silently picking the first one the way get_asset_by_name, get_blueprint_parent, get_graph_nodes and the rest of the by-name tools do. Run this FIRST whenever you are about to address an asset by bare name: a project can have hundreds of duplicate names (the same name in a vendored pack and in the game's own folders, plus dated backup copies), and `unambiguous:false` is the only warning you will get before another tool hands you a stale backup's contents as if they were the real asset. From there, pass the full path everywhere. match_count:0 with success:true is a valid, informative answer -- it means "no asset with this exact name", which is a real measurement of non-existence (unlike find_assets_by_name's count:0, which can just mean the pattern had a wildcard in it).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `asset_name` | string | yes | EXACT bare asset name or full package/asset path. This is an equality test, not a substring one -- use search_assets_by_pattern when you only know part of the name. |
+| `asset_name` | string | yes | EXACT bare asset name or full package/asset path. This is an equality test, not a substring one -- use find_assets_by_name when you only know part of the name. |
 | `class_filter` | string | no | Optional class short name or /Script path (e.g. "Blueprint", "DataTable") to constrain the match; matches subclasses too |
 | `search_root` | string | no | Root package path for the fallback scan used when asset_name is not an exact package-name hit; defaults to "/Game", so an asset under /Engine or a plugin mount needs its root passed here explicitly |
 
@@ -677,26 +705,11 @@ Lightweight BINARY scan of a .uasset/.umap on disk (NO editor load): tokenizes t
 
 **Returns:** `{ package_file: string, resolved_path: string, exists: bool, file_size_bytes: number, modified: string, pattern: string, ref_path_unique: int, ref_path_occurrences: number, ref_paths: [{token, count}], match_unique: int, match_occurrences: number, matches: [{token, count}] }`
 
-## `search_assets_by_pattern`
-
-*Read-only.*
-
-Find assets by NAME, scanning every mounted content root (/Game, /Engine, /Water, plugin mounts, ...) and returning name, object path, class and package per hit. The broad "does anything called &lt;token> exist, and where?" search. It has TWO match modes and picks one automatically, reporting which in `match_mode`: a pattern WITHOUT `*`/`?` is a case-insensitive SUBSTRING test (FString::Contains) -- pass the bare token, this is the common case; a pattern WITH `*` or `?` is a real glob (FString::MatchesWildcard). WARNING: The glob is ANCHORED AT BOTH ENDS -- it matches the WHOLE name, not a substring -- so `Grass*` means "starts with Grass" and `*Grass*` is what reproduces substring behaviour. It only ever looks at the asset NAME, so it cannot find an asset by its folder or by a class it belongs to: use resolve_asset_by_name to check ONE exact name and get every homonym, get_assets_in_folder to enumerate a directory, get_assets_by_type for the 5 built-in type filters, and get_assets_by_tag for an Asset Registry tag.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `search_pattern` | string | yes | Matched against the asset NAME. Contains no `*`/`?` -> case-insensitive substring (FString::Contains). Contains `*` or `?` -> glob (FString::MatchesWildcard), ANCHORED at both ends: `*` matches any run including empty, `?` matches 0 or 1 character (UE semantics, not exactly 1). Not a regex. |
-| `max_results` | number | no | Cap on number of matched assets (1..50000); defaults to 1000. WARNING: Hitting the cap ABORTS the enumeration, so `total_scanned` then counts only the assets visited before the early-out, not the whole registry. |
-| `case_sensitive` | boolean | no | When true, match is case-sensitive; defaults to false |
-| `wait_for_scan` | boolean | no | When true (default), force-completes the AssetRegistry scan before enumerating so a still-loading registry cannot report total_scanned:0. Set false to skip the (possibly blocking) wait. |
-
-**Returns:** `{ assets: [{ name, path, class, package, is_loaded }], count: int, total_scanned: int, scan_was_pending: bool, search_pattern: string, match_mode: "substring"|"wildcard", case_sensitive: bool, max_results: int, results_truncated: bool }`
-
 ## `set_asset_metadata_tag`
 
 *Destructive, idempotent.*
 
-Sets (or overwrites) a string metadata tag on an asset and saves it.  The asset is loaded, UEditorAssetLibrary::SetMetadataTag is applied, the owning package is saved, and the value is read back to verify.
+Sets (or overwrites) a string metadata tag on an asset and saves it.  The asset is loaded, UEditorAssetLibrary::SetMetadataTag is applied, the owning package is saved, and the value is read back to verify. Inverse: remove_asset_metadata_tag.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

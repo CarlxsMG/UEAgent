@@ -73,11 +73,24 @@ Create a DataTable of gameplay tags (row struct FGameplayTagTableRow) -- the alt
 
 **Returns:** `{ name: string, package_path: string, table_path: string, row_struct: string, success: bool, already_exists: bool, saved: bool, message: string }`
 
+## `find_gameplay_tags`
+
+*Read-only.*
+
+Search the registered gameplay tags for everything under a tag -- the discovery call for "what tags exist under Material.Wood" or "is there already a tag for this" -- or, with no query_tag, list EVERY registered tag (the full vocabulary, plugins and vendor content included; projects run to thousands, so prefer a branch). count_only returns just the count: the cheap health probe that the registry loaded, or that create_gameplay_tag registered (compare before and after). Sees the LIVE registry, so a tag added this session by create_gameplay_tag shows up even if the ini was restored, and one that only exists as text in a file does not. A query_tag that is not registered is an error; to test one exact string use get_gameplay_tag_info.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `query_tag` | string | no | Optional tag whose branch to list (the tag itself and all of its descendants); omitted or empty lists every registered tag |
+| `count_only` | boolean | no | Optional bool, default false: return count (and manager_valid) without the matching_tags list |
+
+**Returns:** `{ query_tag: string, count: int, manager_valid: bool, matching_tags?: [{ tag_name: string, tag_string: string }] }`
+
 ## `get_gameplay_tag_info`
 
 *Read-only.*
 
-Does this exact tag string exist and resolve right now, and if so its detail: its PARENT tag and where it is defined. found=false is a normal answer, not an error -- the precondition to check BEFORE using a tag anywhere: an unregistered tag is not an error in UE, it silently becomes an empty/None tag, and a query made with an empty tag fails exactly like a valid tag that does not match. The parent is how you walk the hierarchy (Material.Wood.Oak answers to Material.Wood); hierarchy matching is ASYMMETRIC, HasAny(A, B) only succeeds when a tag of A is B or a DESCENDANT of B, so putting a family where a leaf is expected quietly fails. The source says where the tag comes from -- native C++, DefaultGameplayTags.ini, a tag DataTable, or transient (registered live this session and NOT on disk) -- with its comment and native / restricted / explicit flags: whether a tag survives an editor restart, which file to edit to change it, and whether it is YOURS or a vendor's or the engine's before you rename or remove it. Exact lookup: use query_gameplay_tags for a branch.
+Does this exact tag string exist and resolve right now, and if so its detail: its PARENT tag and where it is defined. found=false is a normal answer, not an error -- the precondition to check BEFORE using a tag anywhere: an unregistered tag is not an error in UE, it silently becomes an empty/None tag, and a query made with an empty tag fails exactly like a valid tag that does not match. The parent is how you walk the hierarchy (Material.Wood.Oak answers to Material.Wood); hierarchy matching is ASYMMETRIC, HasAny(A, B) only succeeds when a tag of A is B or a DESCENDANT of B, so putting a family where a leaf is expected quietly fails. The source says where the tag comes from -- native C++, DefaultGameplayTags.ini, a tag DataTable, or transient (registered live this session and NOT on disk) -- with its comment and native / restricted / explicit flags: whether a tag survives an editor restart, which file to edit to change it, and whether it is YOURS or a vendor's or the engine's before you rename or remove it. Exact lookup: use find_gameplay_tags for a branch.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -99,7 +112,7 @@ No parameters.
 
 *Read-only.*
 
-List every tag declared in a gameplay tag DataTable (FGameplayTagTableRow), with its developer comment and whether the live tag manager has it registered -- what this table contributes to the project vocabulary, as opposed to query_gameplay_tags which returns the merged live registry from all sources. valid is false when any row's tag is not registered, and missing_tags names each such tag with its row key, so the table can be fixed or the tags registered. Read-only.
+List every tag declared in a gameplay tag DataTable (FGameplayTagTableRow), with its developer comment and whether the live tag manager has it registered -- what this table contributes to the project vocabulary, as opposed to find_gameplay_tags which returns the merged live registry from all sources. valid is false when any row's tag is not registered, and missing_tags names each such tag with its row key, so the table can be fixed or the tags registered. Read-only.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -132,19 +145,6 @@ Test the tags an object owns (through IGameplayTagAssetInterface, else its first
 | `match` | string | no | Optional "any" (default) \| "all" \| "none": OR, AND, or the negation of OR |
 
 **Returns:** `{ object_path: string, match: string, result: bool, has_any?: bool, has_all?: bool, has_none?: bool, requested: [string], owned_tags: [string] }`
-
-## `query_gameplay_tags`
-
-*Read-only.*
-
-Search the registered gameplay tags for everything under a tag -- the discovery call for "what tags exist under Material.Wood" or "is there already a tag for this" -- or, with no query_tag, list EVERY registered tag (the full vocabulary, plugins and vendor content included; projects run to thousands, so prefer a branch). count_only returns just the count: the cheap health probe that the registry loaded, or that create_gameplay_tag registered (compare before and after). Sees the LIVE registry, so a tag added this session by create_gameplay_tag shows up even if the ini was restored, and one that only exists as text in a file does not. A query_tag that is not registered is an error; to test one exact string use get_gameplay_tag_info.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `query_tag` | string | no | Optional tag whose branch to list (the tag itself and all of its descendants); omitted or empty lists every registered tag |
-| `count_only` | boolean | no | Optional bool, default false: return count (and manager_valid) without the matching_tags list |
-
-**Returns:** `{ query_tag: string, count: int, manager_valid: bool, matching_tags?: [{ tag_name: string, tag_string: string }] }`
 
 ## `remove_gameplay_tag`
 

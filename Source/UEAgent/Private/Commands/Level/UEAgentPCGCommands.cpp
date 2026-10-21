@@ -32,6 +32,7 @@
 #include "StructUtils/PropertyBag.h" // FInstancedPropertyBag / FPropertyBagPropertyDesc (graph params)
 #include "PCGData.h"                 // FPCGDataCollection / FPCGTaggedData (get_pcg_generated_data)
 #include "PCGSubgraph.h"             // UPCGBaseSubgraphSettings::SetSubgraph (add_pcg_subgraph_node)
+#include "Elements/PCGUserParameterGet.h" // UPCGUserParameterGetSettings (remove_pcg_graph_parameter: the getter nodes)
 #include "Misc/PackageName.h"
 // spawn_pcg_volume: an APCGVolume spawned without a brush has extent (0,0,0) and a
 // UPCGComponent with null bounds generates 0 instances in total silence. These headers
@@ -557,7 +558,7 @@ namespace
 // saves it. Uses CreatePackage + NewObject<UPCGGraph> (the PCGGraphFactory lives
 // in the PCGEditor module and is not needed here; UPCGGraph has no modal setup).
 // ---------------------------------------------------------------------------
-// MCP:create_pcg_graph - Create an empty UPCGGraph asset at package_path/name and save it, or return the UPCGGraph already there unchanged (created=false, already_exists=true, nothing saved), so repeat calls are idempotent. A fresh graph holds only its implicit Input and Output nodes, which node_count leaves out (0). Another asset class at that path, or an invalid path, is an error; a failed save, as during PIE, makes success false with save_error. No undo step is recorded. Requires the PCG plugin. Next: add nodes with add_pcg_node (types from list_pcg_node_types), wire them with connect_pcg_nodes, expose tunables with add_pcg_graph_parameter, read back with get_pcg_graph_info, and use it in the level through spawn_pcg_volume or add_pcg_component.
+// MCP:create_pcg_graph - Create an empty UPCGGraph asset at package_path/name and save it, or return the UPCGGraph already there unchanged (created=false, already_exists=true, nothing saved), so repeat calls are idempotent. A fresh graph holds only its implicit Input and Output nodes, which node_count leaves out (0). Another asset class at that path, or an invalid path, is an error; a failed save, as during PIE, makes success false with save_error. No undo step is recorded. Requires the PCG plugin. Next: add nodes with add_pcg_node (types from list_pcg_node_types), wire them with connect_pcg_nodes, expose tunables with add_pcg_graph_parameter, read back with get_pcg_graph_info, and use it in the level through spawn_box_volume or add_pcg_component.
 //   @param name - Name of the PCG Graph asset to create; the object path becomes package_path/name.name.
 //   @param package_path - Destination /Game folder (default /Game/PCG); a trailing slash is ignored.
 //   @returns { graph_name: string, asset_path: string, created: bool, already_exists?: bool, node_count: int, saved?: bool, save_error?: string }
@@ -804,6 +805,7 @@ TSharedPtr<FJsonObject> HandleGetPCGGraphInfo(const TSharedPtr<FJsonObject>& Par
 // half-extent means what it says.
 // ---------------------------------------------------------------------------
 // MCP:spawn_pcg_volume - Spawn an APCGVolume in the editor world with a REAL cube brush of half-extent extent and optionally assign a PCG graph, in one undo step. Over spawn_box_volume(volume_class='PCGVolume') it adds the graph (UPCGComponent::SetGraph), a rotation and a name (used only when free); add_pcg_component sets a graph on an existing actor. Bounds, scale and brush are RE-READ, never echoed. Without extent the volume is brush-less (kept for compatibility) and the reply warns: null bounds generate 0 instances in total silence. Not saved (save_level).
+//   @retired spawn_box_volume - volume_class="PCGVolume", location, extent; then add_pcg_component(graph) on it, which reuses the volume's PCG component
 //   @param location [string!] - World location [X, Y, Z] for the volume.
 //   @param extent - Cube HALF-size [x, y, z] in unreal units, each > 0 (same convention as spawn_box_volume / spawn_navmesh_bounds_volume). STRONGLY RECOMMENDED: omitting it leaves the volume with extent (0,0,0) and the PCG component generates 0 instances with no error and no warning.
 //   @param rotation - Optional [pitch, yaw, roll] rotation for the volume (default 0,0,0).
@@ -1144,6 +1146,7 @@ TSharedPtr<FJsonObject> HandleCleanupPCGComponent(const TSharedPtr<FJsonObject>&
 }
 
 // MCP:set_pcg_component_properties - Write UPROPERTYs (Seed, bActivated, GenerationTrigger, ...) on the PCG component of an editor-world actor found by label or name, reading each stored value back. Over set_properties: no component path and no edit gate, but no PostEditChange is sent, so the component is not refreshed -- run generate_pcg_component. Nothing is saved.
+//   @retired set_properties - object_path="<actor>.PCGComponent", properties with the engine names
 //   @param actor_name - Actor holding the UPCGComponent (required)
 //   @param properties - JSON object { PropertyName: value, ... } applied to the component
 //   @returns { actor_name, set:[name], failed:[{name, error}], applied:{name: stored_value_text} }
@@ -1306,7 +1309,7 @@ TSharedPtr<FJsonObject> HandleGetPCGGraphParameters(const TSharedPtr<FJsonObject
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:add_pcg_graph_parameter - Expose a tunable on a PCG graph (bool / int / float / double / string) so density, radius or a toggle can be driven from outside instead of being welded into a node. Idempotent (already_existed when the name is taken). Only worth doing on graphs you own -- adding one to a library graph means editing that asset. Set a value with set_pcg_graph_parameter and list them with get_pcg_graph_parameters.
+// MCP:add_pcg_graph_parameter - Expose a tunable on a PCG graph (bool / int / float / double / string) so density, radius or a toggle can be driven from outside instead of being welded into a node. Idempotent (already_existed when the name is taken). Only worth doing on graphs you own -- adding one to a library graph means editing that asset. Set a value with set_pcg_graph_parameter and list them with get_pcg_graph_parameters; inverse: remove_pcg_graph_parameter.
 //   @param pcg_graph_path - /Game/... path to the UPCGGraph (required)
 //   @param name - Parameter name (required)
 //   @param type - "bool" | "int" | "float" | "double" | "string" (required)
@@ -1398,6 +1401,88 @@ TSharedPtr<FJsonObject> HandleSetPCGGraphParameter(const TSharedPtr<FJsonObject>
     Data->SetStringField(TEXT("type"), PBTypeToString(Type));
     Data->SetBoolField(TEXT("set"), bSet);
     Data->SetField(TEXT("value"), PBReadValue(*Graph->GetUserParametersStruct(), ParamName, Type));
+    return mcp_common::MakeOkReply(Data);
+}
+
+// MCP:remove_pcg_graph_parameter - Remove a user parameter from a PCG graph asset, in one undo step, and delete the Get Parameter nodes that read it, as the PCG editor does when a parameter goes (getter_nodes_removed); the graph is marked dirty, not saved, as add_pcg_graph_parameter leaves it. Inverse of add_pcg_graph_parameter. A name the graph has no parameter for is an honest no-op (removed=false); a graph that does not load is an error (a PCGGraphInstance is not accepted, as for set_pcg_graph_parameter). The reply re-reads the parameters (parameters). Generated output is not refreshed: cleanup_pcg_component then generate_pcg_component. Read: get_pcg_graph_parameters.
+//   @param pcg_graph_path - /Game/... path to the UPCGGraph (required)
+//   @param name - Parameter name to remove (required)
+//   @returns { pcg_graph_path, name, removed, getter_nodes_removed, parameter_count, parameters: [string], note? }
+TSharedPtr<FJsonObject> HandleRemovePCGGraphParameter(const TSharedPtr<FJsonObject>& Params)
+{
+    FString GraphPath, Name;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("pcg_graph_path"), GraphPath)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("name"), Name)) { return Missing; }
+
+    UPCGGraph* Graph = mcp_common::ResolveAsset<UPCGGraph>(GraphPath);
+    if (!Graph)
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("PCG graph not found: %s"), *GraphPath));
+
+    const FName ParamName(*Name);
+    const auto ParameterNames = [Graph]()
+    {
+        TArray<FString> Names;
+        const FInstancedPropertyBag* Bag = Graph->GetUserParametersStruct();
+        const UPropertyBag* BagStruct = Bag ? Bag->GetPropertyBagStruct() : nullptr;
+        if (BagStruct)
+        {
+            for (const FPropertyBagPropertyDesc& Desc : BagStruct->GetPropertyDescs())
+            {
+                Names.Add(Desc.Name.ToString());
+            }
+        }
+        return Names;
+    };
+    const auto CountGetters = [Graph, &ParamName]()
+    {
+        int32 Count = 0;
+        for (const UPCGNode* Node : Graph->GetNodes())
+        {
+            const UPCGUserParameterGetSettings* Getter = Node ? Cast<UPCGUserParameterGetSettings>(Node->GetSettings()) : nullptr;
+            if (Getter && Getter->PropertyName == ParamName)
+            {
+                ++Count;
+            }
+        }
+        return Count;
+    };
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("pcg_graph_path"), GraphPath);
+    Data->SetStringField(TEXT("name"), Name);
+    const FInstancedPropertyBag* Bag = Graph->GetUserParametersStruct();
+    if (!Bag || !Bag->FindPropertyDescByName(ParamName))
+    {
+        const TArray<FString> Names = ParameterNames();
+        Data->SetBoolField(TEXT("removed"), false);
+        Data->SetNumberField(TEXT("getter_nodes_removed"), 0);
+        Data->SetNumberField(TEXT("parameter_count"), Names.Num());
+        Data->SetArrayField(TEXT("parameters"), mcp_common::StringsToJson(Names));
+        Data->SetStringField(TEXT("note"), TEXT("the graph has no parameter of that name; nothing changed"));
+        return mcp_common::MakeOkReply(Data);
+    }
+
+    const int32 GettersBefore = CountGetters();
+    FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "RemovePCGGraphParameter", "Remove PCG Graph Parameter"));
+    Graph->Modify();
+    Graph->UpdateUserParametersStruct([&ParamName](FInstancedPropertyBag& MutableBag)
+    {
+        MutableBag.RemovePropertyByName(ParamName);
+    });
+    // The event the PCG editor raises when a parameter goes: it deletes the Get Parameter nodes left without one.
+    Graph->OnGraphParametersChanged(GettersBefore > 0 ? EPCGGraphParameterEvent::RemovedUsed : EPCGGraphParameterEvent::RemovedUnused, ParamName);
+    Graph->MarkPackageDirty();
+
+    const FInstancedPropertyBag* After = Graph->GetUserParametersStruct();
+    if (After && After->FindPropertyDescByName(ParamName))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Parameter '%s' is still on the graph after the removal"), *Name));
+    }
+    const TArray<FString> Names = ParameterNames();
+    Data->SetBoolField(TEXT("removed"), true);
+    Data->SetNumberField(TEXT("getter_nodes_removed"), GettersBefore - CountGetters());
+    Data->SetNumberField(TEXT("parameter_count"), Names.Num());
+    Data->SetArrayField(TEXT("parameters"), mcp_common::StringsToJson(Names));
     return mcp_common::MakeOkReply(Data);
 }
 
@@ -1854,6 +1939,7 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("get_pcg_generated_data"), &HandleGetPCGGeneratedData },
     { TEXT("get_pcg_graph_info"), &HandleGetPCGGraphInfo },
     { TEXT("get_pcg_graph_parameters"), &HandleGetPCGGraphParameters },
+    { TEXT("remove_pcg_graph_parameter"), &HandleRemovePCGGraphParameter },
     { TEXT("get_pcg_node_properties"), &HandleGetPCGNodeProperties },
     { TEXT("list_pcg_node_types"), &HandleListPCGNodeTypes },
     { TEXT("remove_pcg_node"), &HandleRemovePCGNode },

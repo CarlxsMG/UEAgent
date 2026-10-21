@@ -18,22 +18,6 @@ Cancels the in-progress movie render, if one is running (honest headless gate). 
 
 **Returns:** `{ canceled: bool, was_rendering: bool, note: string }`
 
-## `configure_render_output`
-
-*Destructive, idempotent.*
-
-Configures output resolution / directory / image format on a render job's config.  Finds (or adds) a UMoviePipelineOutputSetting on the job's primary configuration to set resolution + output directory, and adds the matching image-sequence output container for the requested format (png/jpg/exr/bmp).
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `job_name` | string | yes | Name of an existing render job in the queue (from create_render_job). |
-| `resolution_x` | number | no | Output width in pixels (optional, must be paired with resolution_y) |
-| `resolution_y` | number | no | Output height in pixels (optional, must be paired with resolution_x) |
-| `output_dir` | string | no | Output directory path (optional) |
-| `format` | string | no | Image format: "png" \| "jpg" \| "exr" \| "bmp" (optional, default "png"; exr falls back to png if class unavailable) |
-
-**Returns:** `{ job_name: string, format: string, configured: bool, resolution_x: number?, resolution_y: number?, output_dir: string?, settings: [string], setting_count: number }`
-
 ## `create_render_job`
 
 *Additive.*
@@ -157,3 +141,19 @@ Authors a one-off render job for a sequence and starts the (async) movie render.
 | `map_path` | string | no | Optional map object path (e.g. "/Game/Maps/MyMap.MyMap") |
 
 **Returns:** `{ sequence_name: string, job_name: string, job_created: bool, queue_job_count: number, render_started: bool, render_async: bool, note: string }`
+
+## `set_render_job_output`
+
+*Destructive, idempotent.*
+
+Configures output resolution / directory / image format on a render job's config.  Finds (or adds) a UMoviePipelineOutputSetting on the job's primary configuration to set resolution + output directory, and adds the matching image-sequence output container for the requested format (png/jpg/exr/bmp).
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `job_name` | string | yes | Name of an existing render job in the queue (from create_render_job). |
+| `resolution_x` | number | no | Output width in pixels (optional, must be paired with resolution_y) |
+| `resolution_y` | number | no | Output height in pixels (optional, must be paired with resolution_x) |
+| `output_dir` | string | no | Output directory path (optional) |
+| `format` | string | no | Image format: "png" \| "jpg" \| "exr" \| "bmp" (optional, default "png"; exr falls back to png if class unavailable) |
+
+**Returns:** `{ job_name: string, format: string, configured: bool, resolution_x: number?, resolution_y: number?, output_dir: string?, settings: [string], setting_count: number }`

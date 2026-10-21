@@ -1,5 +1,5 @@
 ---
-description: Search UEAgent's 1,700+ MCP tools for Unreal Engine by name or by what they do, filter them by domain and by what a call does to the project, and copy a call.
+description: Search UEAgent's 1,600+ MCP tools for Unreal Engine by name or by what they do, filter them by domain and by what a call does to the project, and copy a call.
 hide:
   - toc
 ---

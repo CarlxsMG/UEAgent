@@ -55,8 +55,9 @@ CHIP_TITLES = {
     "pie": "Refused while Play-in-Editor runs, unless the call passes force: true",
 }
 
-TOOLS: dict[str, str] = {}      # tool name -> its domain
-DOMAINS: list[dict] = []        # the catalog's domains, sorted by name
+TOOLS: dict[str, str] = {}      # listed tool name -> its domain
+GONE: set[str] = set()          # retired tools and old names: they link to the Retired names page
+DOMAINS: list[dict] = []        # the catalog's domains with their listed tools, sorted by name
 PIE_REFUSED: set[str] = set()   # the tools the PIE guard refuses while Play-in-Editor runs
 NAV = None
 
@@ -175,6 +176,8 @@ def chips(markdown: str) -> str:
 
 
 def tool_href(name: str, page: str) -> str:
+    if name not in TOOLS:
+        return posixpath.relpath("tools/retired.md", posixpath.dirname(page) or ".")
     target = f"tools/{TOOLS[name]}.md"
     if target == page:
         return f"#{name}"
@@ -185,7 +188,7 @@ def link_tools(markdown: str, page: str) -> str:
     """Every inline code span that is exactly a tool's name, outside links and headings, made a link to the tool."""
     def link(match: re.Match) -> str:
         name = match.group(1)
-        return f"[`{name}`]({tool_href(name, page)})" if name in TOOLS else match.group(0)
+        return f"[`{name}`]({tool_href(name, page)})" if name in TOOLS or name in GONE else match.group(0)
 
     def in_text(text: str) -> str:
         out, at = [], 0
@@ -236,9 +239,17 @@ def first_paragraph(markdown: str) -> str:
 # ------------------------------------------------------------------ MkDocs events
 def on_config(config):
     with open(catalog_server.CATALOG, encoding="utf-8") as f:
-        DOMAINS[:] = sorted(json.load(f)["domains"], key=lambda d: d["domain"])
+        catalog = json.load(f)
+    # Retired tools still run but are not listed, so they have no entry in the reference: their names, and the old
+    # names of renamed tools, link to the Retired names page instead.
+    DOMAINS[:] = sorted(({"domain": d["domain"], "commands": [c for c in d["commands"] if not c.get("retired")]}
+                         for d in catalog["domains"]), key=lambda d: d["domain"])
+    DOMAINS[:] = [d for d in DOMAINS if d["commands"]]
     TOOLS.clear()
     TOOLS.update({c["name"]: d["domain"] for d in DOMAINS for c in d["commands"]})
+    GONE.clear()
+    GONE.update(c["name"] for d in catalog["domains"] for c in d["commands"] if c.get("retired"))
+    GONE.update(catalog.get("renamed") or {})
     PIE_REFUSED.clear()
     PIE_REFUSED.update(catalog_server.pie_unsafe_commands(catalog_server.PIE_TABLE.read_text(encoding="utf-8")))
 
@@ -250,7 +261,8 @@ def on_config(config):
             (title, value), = item.items()
             if value == "tools/README.md":
                 items[position] = {title: ["tools/README.md"] + [{d["domain"]: f"tools/{d['domain']}.md"}
-                                                                   for d in DOMAINS]}
+                                                                   for d in DOMAINS]
+                                   + ([{"Retired names": "tools/retired.md"}] if GONE else [])}
                 return True
             if isinstance(value, list) and expand(value):
                 return True

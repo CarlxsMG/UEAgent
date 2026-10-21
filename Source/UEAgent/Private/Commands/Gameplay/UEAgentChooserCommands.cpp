@@ -935,13 +935,14 @@ TSharedPtr<FJsonObject> HandleSetChooserRowOutcome(const TSharedPtr<FJsonObject>
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_chooser_row_outcome"), SaveError);
 }
 
-// MCP:inspect_chooser_table - Read-only summary of a UChooserTable: ResultType, OutputObjectType, column count + per-column type names, ResultsStructs count, ContextData count, effective row count.
+// MCP:get_chooser_table_info - Read-only summary of a UChooserTable: ResultType, OutputObjectType, column count + per-column type names, ResultsStructs count, ContextData count, effective row count.
+//   @renamed-from inspect_chooser_table
 //   @param table_path - Long package path of an existing UChooserTable.
 //   @returns { table_path: string, result_type: string, output_object_class: string|null, column_count: int, columns: [{index, type}], row_count: int, results_count: int, context_data_count: int }
 TSharedPtr<FJsonObject> HandleInspectChooserTable(const TSharedPtr<FJsonObject>& Params)
 {
 	TSharedPtr<FJsonObject> Error;
-	UChooserTable* Table = Chooser_LoadTableParam(Params, TEXT("inspect_chooser_table"), Error);
+	UChooserTable* Table = Chooser_LoadTableParam(Params, TEXT("get_chooser_table_info"), Error);
 	if (!Table)
 	{
 		return Error;
@@ -1221,7 +1222,372 @@ TSharedPtr<FJsonObject> HandleRemoveChooserColumn(const TSharedPtr<FJsonObject>&
 	return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("remove_chooser_column"), SaveError);
 }
 
-// MCP:set_chooser_column_default - Set the DefaultRowValue of one UChooserTable column, the cell value rows appended by add_chooser_row inherit; set it before adding rows. The fields that apply depend on the column type (see the params); others are ignored. A change is one undo step and is compiled and saved, and success is false, with save_error, when the save fails; a value the column already holds changes nothing (already_existed true, saved false).
+namespace
+{
+	/** The cell CellRef writes: the column's DefaultRowValue for INDEX_NONE, else the cell of row RowIndex. */
+	template <typename ColumnType>
+	auto& Chooser_CellRef(ColumnType& Column, int32 RowIndex)
+	{
+		return RowIndex == INDEX_NONE ? Column.DefaultRowValue : Chooser_RowArray(Column)[RowIndex];
+	}
+
+	/**
+	 * Writes the typed cell value the params give (min/max/b_no_min/b_no_max, default_value, comparison, value,
+	 * asset_path, class_path: the fields that apply to the column type) into a cell of the column copy Col: its
+	 * DefaultRowValue for RowIndex INDEX_NONE (set_chooser_column_default), else the cell of row RowIndex, which the
+	 * caller has range-checked (set_chooser_cell). bOutAnyChange is whether the cell changed, bOutAlreadyExisted
+	 * whether it already held the value. The error reply, prefixed with Command, for a value that does not fit or a
+	 * column type no command writes; null otherwise.
+	 */
+	TSharedPtr<FJsonObject> Chooser_ApplyCellParams(const TSharedPtr<FJsonObject>& Params, const TCHAR* Command,
+		FInstancedStruct& Col, int32 RowIndex, bool& bOutAnyChange, bool& bOutAlreadyExisted)
+	{
+		const UScriptStruct* ColStruct = Col.GetScriptStruct();
+		const FString ColumnType = ColStruct->GetName();
+		bool bAlreadyExisted = false;
+		bool bAnyChange = false;
+
+		if (ColStruct == FFloatRangeColumn::StaticStruct())
+		{
+			FFloatRangeColumn& C = Col.GetMutable<FFloatRangeColumn>();
+			auto& Cell = Chooser_CellRef(C, RowIndex);
+			bool bSetSomething = false;
+			if (Params->HasField(TEXT("min")))
+			{
+				double V = 0.0; Params->TryGetNumberField(TEXT("min"), V);
+				const float NewMin = static_cast<float>(V);
+				if (!bAnyChange && Cell.Min != NewMin) { bAnyChange = true; }
+				Cell.Min = NewMin;
+				bSetSomething = true;
+			}
+			if (Params->HasField(TEXT("max")))
+			{
+				double V = 0.0; Params->TryGetNumberField(TEXT("max"), V);
+				const float NewMax = static_cast<float>(V);
+				if (!bAnyChange && Cell.Max != NewMax) { bAnyChange = true; }
+				Cell.Max = NewMax;
+				bSetSomething = true;
+			}
+			if (Params->HasField(TEXT("b_no_min")))
+			{
+				bool V = false; Params->TryGetBoolField(TEXT("b_no_min"), V);
+				if (!bAnyChange && Cell.bNoMin != V) { bAnyChange = true; }
+				Cell.bNoMin = V;
+				bSetSomething = true;
+			}
+			if (Params->HasField(TEXT("b_no_max")))
+			{
+				bool V = false; Params->TryGetBoolField(TEXT("b_no_max"), V);
+				if (!bAnyChange && Cell.bNoMax != V) { bAnyChange = true; }
+				Cell.bNoMax = V;
+				bSetSomething = true;
+			}
+			if (!bSetSomething)
+			{
+				return mcp_common::MakeErrorReply(
+					FString::Printf(TEXT("%s(FloatRange): provide at least one of min/max/b_no_min/b_no_max"), Command));
+			}
+			bAlreadyExisted = !bAnyChange;
+		}
+		else if (ColStruct == FBoolColumn::StaticStruct())
+		{
+			FBoolColumn& C = Col.GetMutable<FBoolColumn>();
+			auto& Cell = Chooser_CellRef(C, RowIndex);
+			FString DV;
+			Params->TryGetStringField(TEXT("default_value"), DV);
+			if (DV.IsEmpty())
+			{
+				return mcp_common::MakeErrorReply(
+					FString::Printf(TEXT("%s(Bool): 'default_value' is required (MatchFalse|MatchTrue|MatchAny)"), Command));
+			}
+			EBoolColumnCellValue NewVal = EBoolColumnCellValue::MatchAny;
+			if (DV.Equals(TEXT("MatchFalse"), ESearchCase::IgnoreCase))        { NewVal = EBoolColumnCellValue::MatchFalse; }
+			else if (DV.Equals(TEXT("MatchTrue"), ESearchCase::IgnoreCase))    { NewVal = EBoolColumnCellValue::MatchTrue; }
+			else if (DV.Equals(TEXT("MatchAny"), ESearchCase::IgnoreCase))     { NewVal = EBoolColumnCellValue::MatchAny; }
+			else
+			{
+				return mcp_common::MakeErrorReply(
+					FString::Printf(TEXT("%s(Bool): unknown default_value '%s' (expected MatchFalse|MatchTrue|MatchAny)"), Command, *DV));
+			}
+			bAlreadyExisted = (Cell == NewVal);
+			Cell = NewVal;
+			bAnyChange = !bAlreadyExisted;
+		}
+		else if (ColStruct == FEnumColumn::StaticStruct())
+		{
+			FEnumColumn& C = Col.GetMutable<FEnumColumn>();
+			auto& Cell = Chooser_CellRef(C, RowIndex);
+			bool bSetSomething = false;
+
+			FString ComparisonStr;
+			if (Params->TryGetStringField(TEXT("comparison"), ComparisonStr) && !ComparisonStr.IsEmpty())
+			{
+				EEnumColumnCellValueComparison NewCmp = EEnumColumnCellValueComparison::MatchEqual;
+				if (ComparisonStr.Equals(TEXT("MatchEqual"), ESearchCase::IgnoreCase))       { NewCmp = EEnumColumnCellValueComparison::MatchEqual; }
+				else if (ComparisonStr.Equals(TEXT("MatchNotEqual"), ESearchCase::IgnoreCase)) { NewCmp = EEnumColumnCellValueComparison::MatchNotEqual; }
+				else if (ComparisonStr.Equals(TEXT("MatchAny"), ESearchCase::IgnoreCase))    { NewCmp = EEnumColumnCellValueComparison::MatchAny; }
+				else if (ComparisonStr.Equals(TEXT("Modulus"), ESearchCase::IgnoreCase))     { NewCmp = EEnumColumnCellValueComparison::Modulus; }
+				else
+				{
+					return mcp_common::MakeErrorReply(
+						FString::Printf(TEXT("%s(Enum): unknown comparison '%s' (expected MatchEqual|MatchNotEqual|MatchAny|Modulus)"), Command, *ComparisonStr));
+				}
+				if (!bAnyChange && Cell.Comparison != NewCmp) { bAnyChange = true; }
+				Cell.Comparison = NewCmp;
+				bSetSomething = true;
+			}
+			if (Params->HasField(TEXT("value")))
+			{
+				int32 V = 0; Params->TryGetNumberField(TEXT("value"), V);
+				const uint8 NewVal = static_cast<uint8>(FMath::Clamp(V, 0, 255));
+				if (!bAnyChange && Cell.Value != NewVal) { bAnyChange = true; }
+				Cell.Value = NewVal;
+				bSetSomething = true;
+			}
+			if (!bSetSomething)
+			{
+				return mcp_common::MakeErrorReply(
+					FString::Printf(TEXT("%s(Enum): provide at least one of comparison/value"), Command));
+			}
+			bAlreadyExisted = !bAnyChange;
+		}
+		else if (ColStruct == FObjectColumn::StaticStruct())
+		{
+			FObjectColumn& C = Col.GetMutable<FObjectColumn>();
+			auto& Cell = Chooser_CellRef(C, RowIndex);
+			FString AssetPath;
+			Params->TryGetStringField(TEXT("asset_path"), AssetPath);
+			if (AssetPath.IsEmpty())
+			{
+				return mcp_common::MakeErrorReply(
+					FString::Printf(TEXT("%s(Object): 'asset_path' is required"), Command));
+			}
+			UObject* Asset = LoadObject<UObject>(nullptr, *AssetPath);
+			if (!Asset)
+			{
+				return mcp_common::MakeErrorReply(
+					FString::Printf(TEXT("%s(Object): could not load UObject at %s"), Command, *AssetPath));
+			}
+			const FSoftObjectPath NewSoftPath(Asset);
+			bAlreadyExisted = (Cell.Comparison == EObjectColumnCellValueComparison::MatchEqual)
+				&& (Cell.Value.ToSoftObjectPath() == NewSoftPath);
+			Cell.Comparison = EObjectColumnCellValueComparison::MatchEqual;
+			Cell.Value = NewSoftPath;
+			bAnyChange = !bAlreadyExisted;
+		}
+		else if (ColStruct == FOutputObjectColumn::StaticStruct())
+		{
+			FOutputObjectColumn& C = Col.GetMutable<FOutputObjectColumn>();
+			auto& Cell = Chooser_CellRef(C, RowIndex);
+			FString AssetPath;
+			Params->TryGetStringField(TEXT("asset_path"), AssetPath);
+			if (AssetPath.IsEmpty())
+			{
+				return mcp_common::MakeErrorReply(
+					FString::Printf(TEXT("%s(OutputObject): 'asset_path' is required"), Command));
+			}
+			UObject* Asset = LoadObject<UObject>(nullptr, *AssetPath);
+			if (!Asset)
+			{
+				return mcp_common::MakeErrorReply(
+					FString::Printf(TEXT("%s(OutputObject): could not load UObject at %s"), Command, *AssetPath));
+			}
+			if (!Cell.Value.IsValid() || Cell.Value.GetScriptStruct() != FAssetChooser::StaticStruct())
+			{
+				Cell.Value.InitializeAs(FAssetChooser::StaticStruct());
+			}
+			FAssetChooser& AssetChooser = Cell.Value.GetMutable<FAssetChooser>();
+			bAlreadyExisted = (AssetChooser.Asset == Asset);
+			AssetChooser.Asset = Asset;
+			bAnyChange = !bAlreadyExisted;
+		}
+		else if (ColStruct == FOutputFloatColumn::StaticStruct())
+		{
+			FOutputFloatColumn& C = Col.GetMutable<FOutputFloatColumn>();
+			auto& Cell = Chooser_CellRef(C, RowIndex);
+			if (!Params->HasField(TEXT("default_value")))
+			{
+				return mcp_common::MakeErrorReply(
+					FString::Printf(TEXT("%s(OutputFloat): 'default_value' is required (number)"), Command));
+			}
+			double V = 0.0; Params->TryGetNumberField(TEXT("default_value"), V);
+			bAlreadyExisted = (Cell == V);
+			Cell = V;
+			bAnyChange = !bAlreadyExisted;
+		}
+		else if (ColStruct == FOutputBoolColumn::StaticStruct())
+		{
+			FOutputBoolColumn& C = Col.GetMutable<FOutputBoolColumn>();
+			auto& Cell = Chooser_CellRef(C, RowIndex);
+			if (!Params->HasField(TEXT("default_value")))
+			{
+				return mcp_common::MakeErrorReply(
+					FString::Printf(TEXT("%s(OutputBool): 'default_value' is required (bool)"), Command));
+			}
+			bool V = false; Params->TryGetBoolField(TEXT("default_value"), V);
+			bAlreadyExisted = (Cell == V);
+			Cell = V;
+			bAnyChange = !bAlreadyExisted;
+		}
+	#if !UE_VERSION_OLDER_THAN(5, 8, 0)
+		else if (ColStruct == FChooserOutputNameColumn::StaticStruct())
+		{
+			FChooserOutputNameColumn& C = Col.GetMutable<FChooserOutputNameColumn>();
+			auto& Cell = Chooser_CellRef(C, RowIndex);
+			// Read, then tested, like the Bool column: a negated read would publish default_value as
+			// required for every column type, while most of them never read it.
+			FString DV;
+			Params->TryGetStringField(TEXT("default_value"), DV);
+			if (DV.IsEmpty())
+			{
+				return mcp_common::MakeErrorReply(
+					FString::Printf(TEXT("%s(OutputName): 'default_value' is required (string)"), Command));
+			}
+			const FName NewVal(*DV);
+			bAlreadyExisted = (Cell == NewVal);
+			Cell = NewVal;
+			bAnyChange = !bAlreadyExisted;
+		}
+	#endif
+		else if (ColStruct == FObjectClassColumn::StaticStruct())
+		{
+			FObjectClassColumn& C = Col.GetMutable<FObjectClassColumn>();
+			auto& Cell = Chooser_CellRef(C, RowIndex);
+			FString ClassPath;
+			Params->TryGetStringField(TEXT("class_path"), ClassPath);
+			if (ClassPath.IsEmpty())
+			{
+				return mcp_common::MakeErrorReply(
+					FString::Printf(TEXT("%s(ObjectClass): 'class_path' is required"), Command));
+			}
+			UClass* NewClass = LoadObject<UClass>(nullptr, *ClassPath);
+			if (!NewClass)
+			{
+				NewClass = LoadClass<UObject>(nullptr, *ClassPath);
+			}
+			if (!NewClass)
+			{
+				return mcp_common::MakeErrorReply(
+					FString::Printf(TEXT("%s(ObjectClass): could not load UClass at %s"), Command, *ClassPath));
+			}
+			EObjectClassColumnCellValueComparison NewCmp = EObjectClassColumnCellValueComparison::SubClassOf;
+			FString ComparisonStr;
+			if (Params->TryGetStringField(TEXT("comparison"), ComparisonStr) && !ComparisonStr.IsEmpty())
+			{
+				if (ComparisonStr.Equals(TEXT("Equal"), ESearchCase::IgnoreCase))            { NewCmp = EObjectClassColumnCellValueComparison::Equal; }
+				else if (ComparisonStr.Equals(TEXT("NotEqual"), ESearchCase::IgnoreCase))    { NewCmp = EObjectClassColumnCellValueComparison::NotEqual; }
+				else if (ComparisonStr.Equals(TEXT("SubClassOf"), ESearchCase::IgnoreCase))  { NewCmp = EObjectClassColumnCellValueComparison::SubClassOf; }
+				else if (ComparisonStr.Equals(TEXT("NotSubClassOf"), ESearchCase::IgnoreCase)) { NewCmp = EObjectClassColumnCellValueComparison::NotSubClassOf; }
+				else if (ComparisonStr.Equals(TEXT("Any"), ESearchCase::IgnoreCase))         { NewCmp = EObjectClassColumnCellValueComparison::Any; }
+				else
+				{
+					return mcp_common::MakeErrorReply(
+						FString::Printf(TEXT("%s(ObjectClass): unknown comparison '%s' (expected Equal|NotEqual|SubClassOf|NotSubClassOf|Any)"), Command, *ComparisonStr));
+				}
+			}
+			bAlreadyExisted = (Cell.Comparison == NewCmp) && (Cell.Value == NewClass);
+			Cell.Comparison = NewCmp;
+			Cell.Value = NewClass;
+			bAnyChange = !bAlreadyExisted;
+		}
+	#if !UE_VERSION_OLDER_THAN(5, 8, 0)
+		else if (ColStruct == FChooserNameColumn::StaticStruct())
+		{
+			FChooserNameColumn& C = Col.GetMutable<FChooserNameColumn>();
+			auto& Cell = Chooser_CellRef(C, RowIndex);
+			bool bSetSomething = false;
+
+			FString ComparisonStr;
+			if (Params->TryGetStringField(TEXT("comparison"), ComparisonStr) && !ComparisonStr.IsEmpty())
+			{
+				ENameColumnCellValueComparison NewCmp = ENameColumnCellValueComparison::MatchEqual;
+				if (ComparisonStr.Equals(TEXT("MatchEqual"), ESearchCase::IgnoreCase))       { NewCmp = ENameColumnCellValueComparison::MatchEqual; }
+				else if (ComparisonStr.Equals(TEXT("MatchNotEqual"), ESearchCase::IgnoreCase)) { NewCmp = ENameColumnCellValueComparison::MatchNotEqual; }
+				else if (ComparisonStr.Equals(TEXT("MatchAny"), ESearchCase::IgnoreCase))    { NewCmp = ENameColumnCellValueComparison::MatchAny; }
+				else if (ComparisonStr.Equals(TEXT("Modulus"), ESearchCase::IgnoreCase))     { NewCmp = ENameColumnCellValueComparison::Modulus; }
+				else
+				{
+					return mcp_common::MakeErrorReply(
+						FString::Printf(TEXT("%s(Name): unknown comparison '%s' (expected MatchEqual|MatchNotEqual|MatchAny|Modulus)"), Command, *ComparisonStr));
+				}
+				if (!bAnyChange && Cell.Comparison != NewCmp) { bAnyChange = true; }
+				Cell.Comparison = NewCmp;
+				bSetSomething = true;
+			}
+			FString ValueStr;
+			if (Params->TryGetStringField(TEXT("value"), ValueStr) && !ValueStr.IsEmpty())
+			{
+				const FName NewVal(*ValueStr);
+				if (!bAnyChange && Cell.Value != NewVal) { bAnyChange = true; }
+				Cell.Value = NewVal;
+				bSetSomething = true;
+			}
+			if (!bSetSomething)
+			{
+				return mcp_common::MakeErrorReply(
+					FString::Printf(TEXT("%s(Name): provide at least one of comparison/value"), Command));
+			}
+			bAlreadyExisted = !bAnyChange;
+		}
+	#endif
+		else if (ColStruct == FOutputEnumColumn::StaticStruct())
+		{
+			FOutputEnumColumn& C = Col.GetMutable<FOutputEnumColumn>();
+			auto& Cell = Chooser_CellRef(C, RowIndex);
+			if (!Params->HasField(TEXT("value")))
+			{
+				return mcp_common::MakeErrorReply(
+					FString::Printf(TEXT("%s(OutputEnum): 'value' is required (int, 0-255)"), Command));
+			}
+			int32 V = 0; Params->TryGetNumberField(TEXT("value"), V);
+			const uint8 NewVal = static_cast<uint8>(FMath::Clamp(V, 0, 255));
+			bAlreadyExisted = (Cell.Value == NewVal);
+			Cell.Value = NewVal;
+			bAnyChange = !bAlreadyExisted;
+		}
+		else if (ColStruct == FMultiEnumColumn::StaticStruct())
+		{
+			FMultiEnumColumn& C = Col.GetMutable<FMultiEnumColumn>();
+			auto& Cell = Chooser_CellRef(C, RowIndex);
+			if (!Params->HasField(TEXT("value")))
+			{
+				return mcp_common::MakeErrorReply(
+					FString::Printf(TEXT("%s(MultiEnum): 'value' is required (int, bitmask)"), Command));
+			}
+			int64 V = 0; Params->TryGetNumberField(TEXT("value"), V);
+			const uint32 NewVal = static_cast<uint32>(V);
+			bAlreadyExisted = (Cell.Value == NewVal);
+			Cell.Value = NewVal;
+			bAnyChange = !bAlreadyExisted;
+		}
+		else if (ColStruct == FRandomizeColumn::StaticStruct())
+		{
+			FRandomizeColumn& C = Col.GetMutable<FRandomizeColumn>();
+			auto& Cell = Chooser_CellRef(C, RowIndex);
+			if (!Params->HasField(TEXT("default_value")))
+			{
+				return mcp_common::MakeErrorReply(
+					FString::Printf(TEXT("%s(Randomize): 'default_value' is required (number, probability weight)"), Command));
+			}
+			double V = 0.0; Params->TryGetNumberField(TEXT("default_value"), V);
+			const float NewVal = static_cast<float>(V);
+			bAlreadyExisted = FMath::IsNearlyEqual(Cell, NewVal);
+			Cell = NewVal;
+			bAnyChange = !bAlreadyExisted;
+		}
+		else
+		{
+			return mcp_common::MakeErrorReply(
+				FString::Printf(TEXT("%s: column type '%s' is not supported (FloatRange|Bool|Enum|Object|OutputObject|OutputFloat|OutputBool|OutputName|ObjectClass|Name|OutputEnum|MultiEnum|Randomize only)"), Command, *ColumnType));
+		}
+
+		bOutAnyChange = bAnyChange;
+		bOutAlreadyExisted = bAlreadyExisted;
+		return nullptr;
+	}
+}
+
+// MCP:set_chooser_column_default - Set the DefaultRowValue of one UChooserTable column, the cell value rows appended by add_chooser_row inherit; set it before adding rows (a row already there: set_chooser_cell). The fields that apply depend on the column type (see the params); others are ignored. A change is one undo step and is compiled and saved, and success is false, with save_error, when the save fails; a value the column already holds changes nothing (already_existed true, saved false).
 //   @param table_path - Long package path of an existing UChooserTable.
 //   @param column_index - 0-based column index to update.
 //   @param min - FloatRange column: default lower bound of the row's float range.
@@ -1255,325 +1621,9 @@ TSharedPtr<FJsonObject> HandleSetChooserColumnDefault(const TSharedPtr<FJsonObje
 	bool bAlreadyExisted = false;
 	bool bAnyChange = false;
 
-	if (ColStruct == FFloatRangeColumn::StaticStruct())
+	if (TSharedPtr<FJsonObject> Refused = Chooser_ApplyCellParams(Params, TEXT("set_chooser_column_default"), Col, INDEX_NONE, bAnyChange, bAlreadyExisted))
 	{
-		FFloatRangeColumn& C = Col.GetMutable<FFloatRangeColumn>();
-		bool bSetSomething = false;
-		if (Params->HasField(TEXT("min")))
-		{
-			double V = 0.0; Params->TryGetNumberField(TEXT("min"), V);
-			const float NewMin = static_cast<float>(V);
-			if (!bAnyChange && C.DefaultRowValue.Min != NewMin) { bAnyChange = true; }
-			C.DefaultRowValue.Min = NewMin;
-			bSetSomething = true;
-		}
-		if (Params->HasField(TEXT("max")))
-		{
-			double V = 0.0; Params->TryGetNumberField(TEXT("max"), V);
-			const float NewMax = static_cast<float>(V);
-			if (!bAnyChange && C.DefaultRowValue.Max != NewMax) { bAnyChange = true; }
-			C.DefaultRowValue.Max = NewMax;
-			bSetSomething = true;
-		}
-		if (Params->HasField(TEXT("b_no_min")))
-		{
-			bool V = false; Params->TryGetBoolField(TEXT("b_no_min"), V);
-			if (!bAnyChange && C.DefaultRowValue.bNoMin != V) { bAnyChange = true; }
-			C.DefaultRowValue.bNoMin = V;
-			bSetSomething = true;
-		}
-		if (Params->HasField(TEXT("b_no_max")))
-		{
-			bool V = false; Params->TryGetBoolField(TEXT("b_no_max"), V);
-			if (!bAnyChange && C.DefaultRowValue.bNoMax != V) { bAnyChange = true; }
-			C.DefaultRowValue.bNoMax = V;
-			bSetSomething = true;
-		}
-		if (!bSetSomething)
-		{
-			return mcp_common::MakeErrorReply(
-				TEXT("set_chooser_column_default(FloatRange): provide at least one of min/max/b_no_min/b_no_max"));
-		}
-		bAlreadyExisted = !bAnyChange;
-	}
-	else if (ColStruct == FBoolColumn::StaticStruct())
-	{
-		FBoolColumn& C = Col.GetMutable<FBoolColumn>();
-		FString DV;
-		Params->TryGetStringField(TEXT("default_value"), DV);
-		if (DV.IsEmpty())
-		{
-			return mcp_common::MakeErrorReply(
-				TEXT("set_chooser_column_default(Bool): 'default_value' is required (MatchFalse|MatchTrue|MatchAny)"));
-		}
-		EBoolColumnCellValue NewVal = EBoolColumnCellValue::MatchAny;
-		if (DV.Equals(TEXT("MatchFalse"), ESearchCase::IgnoreCase))        { NewVal = EBoolColumnCellValue::MatchFalse; }
-		else if (DV.Equals(TEXT("MatchTrue"), ESearchCase::IgnoreCase))    { NewVal = EBoolColumnCellValue::MatchTrue; }
-		else if (DV.Equals(TEXT("MatchAny"), ESearchCase::IgnoreCase))     { NewVal = EBoolColumnCellValue::MatchAny; }
-		else
-		{
-			return mcp_common::MakeErrorReply(
-				FString::Printf(TEXT("set_chooser_column_default(Bool): unknown default_value '%s' (expected MatchFalse|MatchTrue|MatchAny)"), *DV));
-		}
-		bAlreadyExisted = (C.DefaultRowValue == NewVal);
-		C.DefaultRowValue = NewVal;
-		bAnyChange = !bAlreadyExisted;
-	}
-	else if (ColStruct == FEnumColumn::StaticStruct())
-	{
-		FEnumColumn& C = Col.GetMutable<FEnumColumn>();
-		bool bSetSomething = false;
-
-		FString ComparisonStr;
-		if (Params->TryGetStringField(TEXT("comparison"), ComparisonStr) && !ComparisonStr.IsEmpty())
-		{
-			EEnumColumnCellValueComparison NewCmp = EEnumColumnCellValueComparison::MatchEqual;
-			if (ComparisonStr.Equals(TEXT("MatchEqual"), ESearchCase::IgnoreCase))       { NewCmp = EEnumColumnCellValueComparison::MatchEqual; }
-			else if (ComparisonStr.Equals(TEXT("MatchNotEqual"), ESearchCase::IgnoreCase)) { NewCmp = EEnumColumnCellValueComparison::MatchNotEqual; }
-			else if (ComparisonStr.Equals(TEXT("MatchAny"), ESearchCase::IgnoreCase))    { NewCmp = EEnumColumnCellValueComparison::MatchAny; }
-			else if (ComparisonStr.Equals(TEXT("Modulus"), ESearchCase::IgnoreCase))     { NewCmp = EEnumColumnCellValueComparison::Modulus; }
-			else
-			{
-				return mcp_common::MakeErrorReply(
-					FString::Printf(TEXT("set_chooser_column_default(Enum): unknown comparison '%s' (expected MatchEqual|MatchNotEqual|MatchAny|Modulus)"), *ComparisonStr));
-			}
-			if (!bAnyChange && C.DefaultRowValue.Comparison != NewCmp) { bAnyChange = true; }
-			C.DefaultRowValue.Comparison = NewCmp;
-			bSetSomething = true;
-		}
-		if (Params->HasField(TEXT("value")))
-		{
-			int32 V = 0; Params->TryGetNumberField(TEXT("value"), V);
-			const uint8 NewVal = static_cast<uint8>(FMath::Clamp(V, 0, 255));
-			if (!bAnyChange && C.DefaultRowValue.Value != NewVal) { bAnyChange = true; }
-			C.DefaultRowValue.Value = NewVal;
-			bSetSomething = true;
-		}
-		if (!bSetSomething)
-		{
-			return mcp_common::MakeErrorReply(
-				TEXT("set_chooser_column_default(Enum): provide at least one of comparison/value"));
-		}
-		bAlreadyExisted = !bAnyChange;
-	}
-	else if (ColStruct == FObjectColumn::StaticStruct())
-	{
-		FObjectColumn& C = Col.GetMutable<FObjectColumn>();
-		FString AssetPath;
-		Params->TryGetStringField(TEXT("asset_path"), AssetPath);
-		if (AssetPath.IsEmpty())
-		{
-			return mcp_common::MakeErrorReply(
-				TEXT("set_chooser_column_default(Object): 'asset_path' is required"));
-		}
-		UObject* Asset = LoadObject<UObject>(nullptr, *AssetPath);
-		if (!Asset)
-		{
-			return mcp_common::MakeErrorReply(
-				FString::Printf(TEXT("set_chooser_column_default(Object): could not load UObject at %s"), *AssetPath));
-		}
-		const FSoftObjectPath NewSoftPath(Asset);
-		bAlreadyExisted = (C.DefaultRowValue.Comparison == EObjectColumnCellValueComparison::MatchEqual)
-			&& (C.DefaultRowValue.Value.ToSoftObjectPath() == NewSoftPath);
-		C.DefaultRowValue.Comparison = EObjectColumnCellValueComparison::MatchEqual;
-		C.DefaultRowValue.Value = NewSoftPath;
-		bAnyChange = !bAlreadyExisted;
-	}
-	else if (ColStruct == FOutputObjectColumn::StaticStruct())
-	{
-		FOutputObjectColumn& C = Col.GetMutable<FOutputObjectColumn>();
-		FString AssetPath;
-		Params->TryGetStringField(TEXT("asset_path"), AssetPath);
-		if (AssetPath.IsEmpty())
-		{
-			return mcp_common::MakeErrorReply(
-				TEXT("set_chooser_column_default(OutputObject): 'asset_path' is required"));
-		}
-		UObject* Asset = LoadObject<UObject>(nullptr, *AssetPath);
-		if (!Asset)
-		{
-			return mcp_common::MakeErrorReply(
-				FString::Printf(TEXT("set_chooser_column_default(OutputObject): could not load UObject at %s"), *AssetPath));
-		}
-		if (!C.DefaultRowValue.Value.IsValid() || C.DefaultRowValue.Value.GetScriptStruct() != FAssetChooser::StaticStruct())
-		{
-			C.DefaultRowValue.Value.InitializeAs(FAssetChooser::StaticStruct());
-		}
-		FAssetChooser& AssetChooser = C.DefaultRowValue.Value.GetMutable<FAssetChooser>();
-		bAlreadyExisted = (AssetChooser.Asset == Asset);
-		AssetChooser.Asset = Asset;
-		bAnyChange = !bAlreadyExisted;
-	}
-	else if (ColStruct == FOutputFloatColumn::StaticStruct())
-	{
-		FOutputFloatColumn& C = Col.GetMutable<FOutputFloatColumn>();
-		if (!Params->HasField(TEXT("default_value")))
-		{
-			return mcp_common::MakeErrorReply(
-				TEXT("set_chooser_column_default(OutputFloat): 'default_value' is required (number)"));
-		}
-		double V = 0.0; Params->TryGetNumberField(TEXT("default_value"), V);
-		bAlreadyExisted = (C.DefaultRowValue == V);
-		C.DefaultRowValue = V;
-		bAnyChange = !bAlreadyExisted;
-	}
-	else if (ColStruct == FOutputBoolColumn::StaticStruct())
-	{
-		FOutputBoolColumn& C = Col.GetMutable<FOutputBoolColumn>();
-		if (!Params->HasField(TEXT("default_value")))
-		{
-			return mcp_common::MakeErrorReply(
-				TEXT("set_chooser_column_default(OutputBool): 'default_value' is required (bool)"));
-		}
-		bool V = false; Params->TryGetBoolField(TEXT("default_value"), V);
-		bAlreadyExisted = (C.DefaultRowValue == V);
-		C.DefaultRowValue = V;
-		bAnyChange = !bAlreadyExisted;
-	}
-#if !UE_VERSION_OLDER_THAN(5, 8, 0)
-	else if (ColStruct == FChooserOutputNameColumn::StaticStruct())
-	{
-		FChooserOutputNameColumn& C = Col.GetMutable<FChooserOutputNameColumn>();
-		// Read, then tested, like the Bool column: a negated read would publish default_value as
-		// required for every column type, while most of them never read it.
-		FString DV;
-		Params->TryGetStringField(TEXT("default_value"), DV);
-		if (DV.IsEmpty())
-		{
-			return mcp_common::MakeErrorReply(
-				TEXT("set_chooser_column_default(OutputName): 'default_value' is required (string)"));
-		}
-		const FName NewVal(*DV);
-		bAlreadyExisted = (C.DefaultRowValue == NewVal);
-		C.DefaultRowValue = NewVal;
-		bAnyChange = !bAlreadyExisted;
-	}
-#endif
-	else if (ColStruct == FObjectClassColumn::StaticStruct())
-	{
-		FObjectClassColumn& C = Col.GetMutable<FObjectClassColumn>();
-		FString ClassPath;
-		Params->TryGetStringField(TEXT("class_path"), ClassPath);
-		if (ClassPath.IsEmpty())
-		{
-			return mcp_common::MakeErrorReply(
-				TEXT("set_chooser_column_default(ObjectClass): 'class_path' is required"));
-		}
-		UClass* NewClass = LoadObject<UClass>(nullptr, *ClassPath);
-		if (!NewClass)
-		{
-			NewClass = LoadClass<UObject>(nullptr, *ClassPath);
-		}
-		if (!NewClass)
-		{
-			return mcp_common::MakeErrorReply(
-				FString::Printf(TEXT("set_chooser_column_default(ObjectClass): could not load UClass at %s"), *ClassPath));
-		}
-		EObjectClassColumnCellValueComparison NewCmp = EObjectClassColumnCellValueComparison::SubClassOf;
-		FString ComparisonStr;
-		if (Params->TryGetStringField(TEXT("comparison"), ComparisonStr) && !ComparisonStr.IsEmpty())
-		{
-			if (ComparisonStr.Equals(TEXT("Equal"), ESearchCase::IgnoreCase))            { NewCmp = EObjectClassColumnCellValueComparison::Equal; }
-			else if (ComparisonStr.Equals(TEXT("NotEqual"), ESearchCase::IgnoreCase))    { NewCmp = EObjectClassColumnCellValueComparison::NotEqual; }
-			else if (ComparisonStr.Equals(TEXT("SubClassOf"), ESearchCase::IgnoreCase))  { NewCmp = EObjectClassColumnCellValueComparison::SubClassOf; }
-			else if (ComparisonStr.Equals(TEXT("NotSubClassOf"), ESearchCase::IgnoreCase)) { NewCmp = EObjectClassColumnCellValueComparison::NotSubClassOf; }
-			else if (ComparisonStr.Equals(TEXT("Any"), ESearchCase::IgnoreCase))         { NewCmp = EObjectClassColumnCellValueComparison::Any; }
-			else
-			{
-				return mcp_common::MakeErrorReply(
-					FString::Printf(TEXT("set_chooser_column_default(ObjectClass): unknown comparison '%s' (expected Equal|NotEqual|SubClassOf|NotSubClassOf|Any)"), *ComparisonStr));
-			}
-		}
-		bAlreadyExisted = (C.DefaultRowValue.Comparison == NewCmp) && (C.DefaultRowValue.Value == NewClass);
-		C.DefaultRowValue.Comparison = NewCmp;
-		C.DefaultRowValue.Value = NewClass;
-		bAnyChange = !bAlreadyExisted;
-	}
-#if !UE_VERSION_OLDER_THAN(5, 8, 0)
-	else if (ColStruct == FChooserNameColumn::StaticStruct())
-	{
-		FChooserNameColumn& C = Col.GetMutable<FChooserNameColumn>();
-		bool bSetSomething = false;
-
-		FString ComparisonStr;
-		if (Params->TryGetStringField(TEXT("comparison"), ComparisonStr) && !ComparisonStr.IsEmpty())
-		{
-			ENameColumnCellValueComparison NewCmp = ENameColumnCellValueComparison::MatchEqual;
-			if (ComparisonStr.Equals(TEXT("MatchEqual"), ESearchCase::IgnoreCase))       { NewCmp = ENameColumnCellValueComparison::MatchEqual; }
-			else if (ComparisonStr.Equals(TEXT("MatchNotEqual"), ESearchCase::IgnoreCase)) { NewCmp = ENameColumnCellValueComparison::MatchNotEqual; }
-			else if (ComparisonStr.Equals(TEXT("MatchAny"), ESearchCase::IgnoreCase))    { NewCmp = ENameColumnCellValueComparison::MatchAny; }
-			else if (ComparisonStr.Equals(TEXT("Modulus"), ESearchCase::IgnoreCase))     { NewCmp = ENameColumnCellValueComparison::Modulus; }
-			else
-			{
-				return mcp_common::MakeErrorReply(
-					FString::Printf(TEXT("set_chooser_column_default(Name): unknown comparison '%s' (expected MatchEqual|MatchNotEqual|MatchAny|Modulus)"), *ComparisonStr));
-			}
-			if (!bAnyChange && C.DefaultRowValue.Comparison != NewCmp) { bAnyChange = true; }
-			C.DefaultRowValue.Comparison = NewCmp;
-			bSetSomething = true;
-		}
-		FString ValueStr;
-		if (Params->TryGetStringField(TEXT("value"), ValueStr) && !ValueStr.IsEmpty())
-		{
-			const FName NewVal(*ValueStr);
-			if (!bAnyChange && C.DefaultRowValue.Value != NewVal) { bAnyChange = true; }
-			C.DefaultRowValue.Value = NewVal;
-			bSetSomething = true;
-		}
-		if (!bSetSomething)
-		{
-			return mcp_common::MakeErrorReply(
-				TEXT("set_chooser_column_default(Name): provide at least one of comparison/value"));
-		}
-		bAlreadyExisted = !bAnyChange;
-	}
-#endif
-	else if (ColStruct == FOutputEnumColumn::StaticStruct())
-	{
-		FOutputEnumColumn& C = Col.GetMutable<FOutputEnumColumn>();
-		if (!Params->HasField(TEXT("value")))
-		{
-			return mcp_common::MakeErrorReply(
-				TEXT("set_chooser_column_default(OutputEnum): 'value' is required (int, 0-255)"));
-		}
-		int32 V = 0; Params->TryGetNumberField(TEXT("value"), V);
-		const uint8 NewVal = static_cast<uint8>(FMath::Clamp(V, 0, 255));
-		bAlreadyExisted = (C.DefaultRowValue.Value == NewVal);
-		C.DefaultRowValue.Value = NewVal;
-		bAnyChange = !bAlreadyExisted;
-	}
-	else if (ColStruct == FMultiEnumColumn::StaticStruct())
-	{
-		FMultiEnumColumn& C = Col.GetMutable<FMultiEnumColumn>();
-		if (!Params->HasField(TEXT("value")))
-		{
-			return mcp_common::MakeErrorReply(
-				TEXT("set_chooser_column_default(MultiEnum): 'value' is required (int, bitmask)"));
-		}
-		int64 V = 0; Params->TryGetNumberField(TEXT("value"), V);
-		const uint32 NewVal = static_cast<uint32>(V);
-		bAlreadyExisted = (C.DefaultRowValue.Value == NewVal);
-		C.DefaultRowValue.Value = NewVal;
-		bAnyChange = !bAlreadyExisted;
-	}
-	else if (ColStruct == FRandomizeColumn::StaticStruct())
-	{
-		FRandomizeColumn& C = Col.GetMutable<FRandomizeColumn>();
-		if (!Params->HasField(TEXT("default_value")))
-		{
-			return mcp_common::MakeErrorReply(
-				TEXT("set_chooser_column_default(Randomize): 'default_value' is required (number, probability weight)"));
-		}
-		double V = 0.0; Params->TryGetNumberField(TEXT("default_value"), V);
-		const float NewVal = static_cast<float>(V);
-		bAlreadyExisted = FMath::IsNearlyEqual(C.DefaultRowValue, NewVal);
-		C.DefaultRowValue = NewVal;
-		bAnyChange = !bAlreadyExisted;
-	}
-	else
-	{
-		return mcp_common::MakeErrorReply(
-			FString::Printf(TEXT("set_chooser_column_default: column type '%s' is not supported (FloatRange|Bool|Enum|Object|OutputObject|OutputFloat|OutputBool|OutputName|ObjectClass|Name|OutputEnum|MultiEnum|Randomize only)"), *ColumnType));
+		return Refused;
 	}
 
 	bool bSaved = false;
@@ -1617,6 +1667,87 @@ TSharedPtr<FJsonObject> HandleSetChooserColumnDefault(const TSharedPtr<FJsonObje
 		return mcp_common::MakeOkReply(Resp);
 	}
 	return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("set_chooser_column_default"), SaveError);
+}
+
+// MCP:set_chooser_cell - Set the cell of one existing row in one column of a UChooserTable -- a filter cell (FloatRange range, Bool match, Enum or Name comparison and value, Object or ObjectClass match) or an output cell -- as one undo step, then compile and save the table. It takes the same typed fields as set_chooser_column_default, which sets the value rows added LATER inherit; this one edits a row already there (set_chooser_row_outcome sets a row's result object). The fields that apply depend on the column type; default_value carries the cell of a Bool (MatchFalse|MatchTrue|MatchAny), OutputFloat, OutputBool, OutputName or Randomize column. A row or column index out of range, a missing or ill-typed field, or a column type no tool writes is an error and nothing changes; a cell already holding the value changes nothing (already_existed true, saved false). The reply re-reads the cell in the shape get_chooser_row_values gives; a failed save makes success false with save_error.
+//   @param table_path - Long package path of an existing UChooserTable.
+//   @param row_index [int] - 0-based row whose cell to set (get_chooser_table_info gives the row count).
+//   @param column_index - 0-based column of the cell.
+//   @param min - FloatRange column: lower bound of the row's float range.
+//   @param max - FloatRange column: upper bound of the row's float range.
+//   @param b_no_min - FloatRange column: when true, the range has no lower bound.
+//   @param b_no_max - FloatRange column: when true, the range has no upper bound.
+//   @param default_value - The cell value of a Bool column ("MatchFalse", "MatchTrue" or "MatchAny"), OutputFloat (a number), OutputBool (a bool), OutputName (a name string) or Randomize column (a probability weight).
+//   @param comparison - Enum and Name columns: "MatchEqual", "MatchNotEqual", "MatchAny" or "Modulus"; ObjectClass column: "Equal", "NotEqual", "SubClassOf" (default), "NotSubClassOf" or "Any". Case-insensitive.
+//   @param value - Enum and OutputEnum columns: enum ordinal (clamped to 0-255); Name column: the name string to compare; MultiEnum column: the bitmask as an integer.
+//   @param asset_path - Object/OutputObject column: long package path of the UObject the cell holds.
+//   @param class_path - ObjectClass column: path of the UClass to match, used with comparison (default SubClassOf).
+//   @returns { table_path, row_index, column_index, column_type, <typed cell fields as get_chooser_row_values>, already_existed, saved, save_error? }
+
+TSharedPtr<FJsonObject> HandleSetChooserCell(const TSharedPtr<FJsonObject>& Params)
+{
+	int32 RowIndex = INDEX_NONE;
+	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("row_index"), RowIndex)) { return Missing; }
+	UChooserTable* Table = nullptr;
+	int32 ColumnIndex = INDEX_NONE;
+	TSharedPtr<FJsonObject> LoadError;
+	FInstancedStruct* ColPtr = Chooser_LoadColumnParam(Params, TEXT("set_chooser_cell"), Table, ColumnIndex, LoadError);
+	if (!ColPtr)
+	{
+		return LoadError;
+	}
+	const UScriptStruct* ColStruct = ColPtr->GetScriptStruct();
+	const FString ColumnType = ColStruct->GetName();
+
+	// The row has to be there in this column (its own row array: RowValuesWithAny for a Bool column).
+	int32 RowCount = INDEX_NONE;
+	Chooser_VisitColumn(*ColPtr, [&RowCount](const auto& Column) { RowCount = Chooser_RowArray(Column).Num(); });
+	if (RowCount == INDEX_NONE)
+	{
+		return mcp_common::MakeErrorReply(FString::Printf(TEXT("set_chooser_cell: column type '%s' is not supported; nothing was changed"), *ColumnType));
+	}
+	if (RowIndex < 0 || RowIndex >= RowCount)
+	{
+		return mcp_common::MakeErrorReply(FString::Printf(
+			TEXT("set_chooser_cell: row_index %d out of range [0, %d) for column %d; nothing was changed"), RowIndex, RowCount, ColumnIndex));
+	}
+
+	// Written into a copy of the column; the table takes it only when the cell changes, as set_chooser_column_default does.
+	FInstancedStruct Col = *ColPtr;
+	bool bAlreadyExisted = false;
+	bool bAnyChange = false;
+	if (TSharedPtr<FJsonObject> Refused = Chooser_ApplyCellParams(Params, TEXT("set_chooser_cell"), Col, RowIndex, bAnyChange, bAlreadyExisted))
+	{
+		return Refused;
+	}
+
+	bool bSaved = false;
+	FString SaveError;
+	if (bAnyChange)
+	{
+		const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetChooserCell", "Set Chooser Cell (MCP)"));
+		Table->Modify();
+		*ColPtr = Col;
+		bSaved = Chooser_CompileAndSave(Table, SaveError);
+	}
+
+	// The re-read: the cell as the table holds it now.
+	TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+	Resp->SetStringField(TEXT("table_path"), Table->GetPathName());
+	Resp->SetNumberField(TEXT("row_index"), RowIndex);
+	Resp->SetNumberField(TEXT("column_index"), ColumnIndex);
+	Resp->SetStringField(TEXT("column_type"), ColumnType);
+	Chooser_VisitColumn(Table->ColumnsStructs[ColumnIndex], [&Resp, RowIndex](const auto& Column)
+	{
+		Chooser_WriteCell(Resp, Column, Chooser_RowArray(Column)[RowIndex]);
+	});
+	Resp->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
+	if (!bAnyChange)
+	{
+		Resp->SetBoolField(TEXT("saved"), false);
+		return mcp_common::MakeOkReply(Resp);
+	}
+	return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("set_chooser_cell"), SaveError);
 }
 
 // MCP:evaluate_chooser_table - Actually RUN a UChooserTable and get the SINGLE chosen result, or with all_results EVERY matching result (for a chooser meant to select a set) -- the way to test a chooser you just authored without opening the editor. Headless-safe: it is a pure runtime API, so it needs no PIE and no render. Pass context_object_path (any UObject in the editor world) to seed the evaluation context. A table with no columns, or one where no context property matches, falls through to the table's FallbackResult (reported as fallback_used); a table that matches nothing and has no fallback returns null (an empty results list with all_results). With all_results, null entries the engine interleaves in its array are skipped, so result_count is the count of REAL results, and result_object_path is the first of them.
@@ -1736,7 +1867,7 @@ namespace
 	}
 }
 
-// MCP:get_chooser_row_values - Read ONE ROW ACROSS ALL COLUMNS of a UChooserTable, as typed cells -- the row-wise counterpart of get_chooser_column_values (one column across all rows) and finer-grained than inspect_chooser_table. Cell shapes by column type: FloatRange {min,max,b_no_min,b_no_max}; Bool {cell_value}; Enum {comparison,value}; Object {comparison,asset_path}; OutputObject {asset_path}. row_index out of range is an honest error. Read-only -- no compile, no save -- and it works headless, since row data is not editor-only.
+// MCP:get_chooser_row_values - Read ONE ROW ACROSS ALL COLUMNS of a UChooserTable, as typed cells -- the row-wise counterpart of get_chooser_column_values (one column across all rows) and finer-grained than get_chooser_table_info. Cell shapes by column type: FloatRange {min,max,b_no_min,b_no_max}; Bool {cell_value}; Enum {comparison,value}; Object {comparison,asset_path}; OutputObject {asset_path}. row_index out of range is an honest error. Read-only -- no compile, no save -- and it works headless, since row data is not editor-only. A cell of a row is written with set_chooser_cell.
 //   @param table_path - Long package path of an existing UChooserTable.
 //   @param row_index - 0-based row index to read across all columns.
 //   @returns { table_path, row_index, row_count, cells: [{ column_index, column_type, <typed fields> }] }
@@ -1851,10 +1982,11 @@ const McpCommandFamilies::FRegistrar Registration =
 	{ TEXT("evaluate_chooser_table"), &HandleEvaluateChooserTable },
 	{ TEXT("get_chooser_column_values"), &HandleGetChooserColumnValues },
 	{ TEXT("get_chooser_row_values"), &HandleGetChooserRowValues },
-	{ TEXT("inspect_chooser_table"), &HandleInspectChooserTable },
+	{ TEXT("get_chooser_table_info"), &HandleInspectChooserTable },
 	{ TEXT("list_chooser_tables"), &HandleListChooserTables },
 	{ TEXT("remove_chooser_column"), &HandleRemoveChooserColumn },
 	{ TEXT("remove_chooser_row"), &HandleRemoveChooserRow },
+	{ TEXT("set_chooser_cell"), &HandleSetChooserCell },
 	{ TEXT("set_chooser_column_default"), &HandleSetChooserColumnDefault },
 	{ TEXT("set_chooser_row_outcome"), &HandleSetChooserRowOutcome },
 };

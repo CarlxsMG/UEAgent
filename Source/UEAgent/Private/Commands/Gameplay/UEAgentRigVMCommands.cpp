@@ -368,7 +368,7 @@ TSharedPtr<FJsonObject> HandleSetRigVMPinDefault(const TSharedPtr<FJsonObject>& 
 // ---------------------------------------------------------------------------
 // add_rigvm_link
 // ---------------------------------------------------------------------------
-// MCP:add_rigvm_link - Link an output pin to an input pin in the main RigVM graph of a Control Rig Blueprint (URigVMController::AddLink with its undo, as the editor links, so a new link is one undo step); a link already into that input pin, into a pin inside it or into the pin it is part of, or out of an execute output pin, is replaced. Pins are NodeName.PinName paths as get_rigvm_graph lists them. A new link is then compiled and saved; a failed link (pins missing, incompatible or already linked) is an error with linked and saved false, the graph is left as it was (links the attempt broke are restored), nothing is compiled or saved, and the package keeps the dirty flag it had; should the graph still differ from before, the error says so and the package stays dirty. Refused during PIE unless force. Add nodes with add_rigvm_node and set unlinked inputs with set_rigvm_pin_default; Blueprint graphs use connect_pins.
+// MCP:add_rigvm_link - Link an output pin to an input pin in the main RigVM graph of a Control Rig Blueprint (URigVMController::AddLink with its undo, as the editor links, so a new link is one undo step); a link already into that input pin, into a pin inside it or into the pin it is part of, or out of an execute output pin, is replaced. Pins are NodeName.PinName paths as get_rigvm_graph lists them. A new link is then compiled and saved; a failed link (pins missing, incompatible or already linked) is an error with linked and saved false, the graph is left as it was (links the attempt broke are restored), nothing is compiled or saved, and the package keeps the dirty flag it had; should the graph still differ from before, the error says so and the package stays dirty. Refused during PIE unless force. Add nodes with add_rigvm_node and set unlinked inputs with set_rigvm_pin_default; Blueprint graphs use connect_pins. Inverse: remove_rigvm_link.
 //   @param control_rig_path - Path to the UControlRigBlueprint asset
 //   @param source_pin - Output pin path NodeA.PinName
 //   @param target_pin - Input pin path NodeB.PinName
@@ -431,6 +431,94 @@ TSharedPtr<FJsonObject> HandleAddRigVMLink(const TSharedPtr<FJsonObject>& Params
     URigVMGraph* Model = CRBP->GetDefaultModel();
     Resp->SetNumberField(TEXT("link_count"), Model ? Model->GetLinks().Num() : 0);
     return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("add_rigvm_link"), SaveErr);
+}
+
+// MCP:remove_rigvm_link - Break links into an input pin in the main RigVM graph of a Control Rig Blueprint (URigVMController::BreakLink / BreakAllLinks with their undo, one undo step), then compile and save the rig. Inverse of add_rigvm_link: with source_pin only the link from that output pin goes; without it every link into target_pin goes. Pins are NodeName.PinName paths as get_rigvm_graph lists them. A pin that does not exist is an error; a pin with no such link is an honest no-op (removed=false, nothing compiled or saved). The reply re-reads the pin (links_left) and the graph's link_count. Refused during PIE unless force. The whole node: remove_rigvm_node.
+//   @param control_rig_path - Path to the UControlRigBlueprint asset
+//   @param target_pin - Input pin path NodeB.PinName whose incoming link(s) to break
+//   @param source_pin - Optional output pin path NodeA.PinName: only the link from it is broken
+//   @returns { asset_path: string, target_pin: string, source_pin?: string, removed: bool, links_removed: int, links_left: int, link_count: int, saved: bool, save_error: string }
+TSharedPtr<FJsonObject> HandleRemoveRigVMLink(const TSharedPtr<FJsonObject>& Params)
+{
+    FString RigPath, TargetPin, SourcePin;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("control_rig_path"), RigPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("target_pin"), TargetPin)) { return Missing; }
+    Params->TryGetStringField(TEXT("source_pin"), SourcePin);
+
+    UControlRigBlueprint* CRBP = nullptr;
+    URigVMController* Controller = nullptr;
+    if (TSharedPtr<FJsonObject> Error = RigVM_LoadController(RigPath, CRBP, Controller))
+    {
+        return Error;
+    }
+    URigVMGraph* Model = CRBP->GetDefaultModel();
+    if (!Model)
+    {
+        return mcp_common::MakeErrorReply(TEXT("Control rig blueprint has no default RigVM model"));
+    }
+    URigVMPin* Target = Model->FindPin(TargetPin);
+    if (!Target)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Pin '%s' not found in the RigVM graph (get_rigvm_graph lists the pin paths); nothing was changed"), *TargetPin));
+    }
+    URigVMPin* Source = nullptr;
+    if (!SourcePin.IsEmpty())
+    {
+        Source = Model->FindPin(SourcePin);
+        if (!Source)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(TEXT("Pin '%s' not found in the RigVM graph; nothing was changed"), *SourcePin));
+        }
+    }
+
+    const TArray<URigVMPin*> SourcesBefore = Target->GetLinkedSourcePins();
+    const int32 Matching = Source ? (SourcesBefore.Contains(Source) ? 1 : 0) : SourcesBefore.Num();
+
+    TSharedPtr<FJsonObject> Resp = RigVM_StartReply(CRBP);
+    Resp->SetStringField(TEXT("target_pin"), TargetPin);
+    if (Source)
+    {
+        Resp->SetStringField(TEXT("source_pin"), SourcePin);
+    }
+    if (Matching == 0)
+    {
+        Resp->SetBoolField(TEXT("removed"), false);
+        Resp->SetNumberField(TEXT("links_removed"), 0);
+        Resp->SetNumberField(TEXT("links_left"), SourcesBefore.Num());
+        Resp->SetNumberField(TEXT("link_count"), Model->GetLinks().Num());
+        Resp->SetBoolField(TEXT("saved"), false);
+        Resp->SetStringField(TEXT("note"), Source
+            ? TEXT("the target pin has no link from that source pin; nothing changed")
+            : TEXT("the target pin has no incoming link; nothing changed"));
+        return mcp_common::MakeOkReply(Resp);
+    }
+
+    const bool bBroken = Source
+        ? Controller->BreakLink(SourcePin, TargetPin, /*bSetupUndoRedo*/ true)
+        : Controller->BreakAllLinks(TargetPin, /*bAsInput*/ true, /*bSetupUndoRedo*/ true);
+
+    // The re-read: what still feeds the target pin.
+    URigVMPin* TargetAfter = Model->FindPin(TargetPin);
+    const TArray<URigVMPin*> SourcesAfter = TargetAfter ? TargetAfter->GetLinkedSourcePins() : TArray<URigVMPin*>();
+    const bool bGone = Source ? !SourcesAfter.Contains(Source) : SourcesAfter.Num() == 0;
+    if (!bBroken || !bGone)
+    {
+        Resp->SetBoolField(TEXT("removed"), false);
+        Resp->SetNumberField(TEXT("links_left"), SourcesAfter.Num());
+        Resp->SetBoolField(TEXT("saved"), false);
+        return mcp_common::MakeOutcomeReply(Resp, false, FString::Printf(
+            TEXT("%s did not break the link(s) into '%s'; the rig was not compiled or saved"),
+            Source ? TEXT("BreakLink") : TEXT("BreakAllLinks"), *TargetPin));
+    }
+
+    FString SaveErr;
+    const bool bSaved = RigVM_CompileAndSave(CRBP, SaveErr);
+    URigVMGraph* ModelAfter = CRBP->GetDefaultModel();
+    Resp->SetBoolField(TEXT("removed"), true);
+    Resp->SetNumberField(TEXT("links_removed"), SourcesBefore.Num() - SourcesAfter.Num());
+    Resp->SetNumberField(TEXT("links_left"), SourcesAfter.Num());
+    Resp->SetNumberField(TEXT("link_count"), ModelAfter ? ModelAfter->GetLinks().Num() : 0);
+    return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("remove_rigvm_link"), SaveErr);
 }
 
 // ---------------------------------------------------------------------------
@@ -524,6 +612,7 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("add_rigvm_link"), &HandleAddRigVMLink },
     { TEXT("add_rigvm_node"), &HandleAddRigVMNode },
     { TEXT("get_rigvm_graph"), &HandleGetRigVMGraph },
+    { TEXT("remove_rigvm_link"), &HandleRemoveRigVMLink },
     { TEXT("remove_rigvm_node"), &HandleRemoveRigVMNode },
     { TEXT("set_rigvm_pin_default"), &HandleSetRigVMPinDefault },
 };

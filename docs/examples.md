@@ -10,15 +10,15 @@ itself: the lists only show what each task touches. Every tool is described in t
 |---|---|
 | "Create BP_Door: a door mesh and a box trigger, and open the door with a timeline when the player overlaps the trigger." | `create_blueprint`, `add_component_to_blueprint`, `build_blueprint_graph`, `compile_blueprint` |
 | "Find every Blueprint under /Game that does not compile and tell me why." | `find_erroring_blueprints`, `get_graph_nodes`, `lint_blueprint_graph` |
-| "Make a main menu with Play, Options and Quit buttons." | `scaffold_menu_screen` |
+| "Make a main menu with Play, Options and Quit buttons." | `create_menu_screen_widget` |
 
 ## Levels, lighting and terrain
 
 | Ask | Tools |
 |---|---|
-| "Light this level as a sunny outdoor scene: sun, sky and a light fog." | `spawn_actor`, `set_light_intensity`, `spawn_sky_atmosphere`, `spawn_sky_light`, `spawn_exponential_height_fog` |
+| "Light this level as a sunny outdoor scene: sun, sky and a light fog." | `spawn_actor` (sun, sky atmosphere, sky light and fog, each with its properties), `call_function` (`RecaptureSky`) |
 | "Make a terrain from D:/Heightmaps/island.png." | `create_landscape`, `import_landscape_heightmap` |
-| "Place five BP_Crate in a row in front of the player start and take a high-resolution screenshot." | `spawn_blueprint_actor`, `capture_high_res_screenshot` |
+| "Place five BP_Crate in a row in front of the player start and take a high-resolution screenshot." | `spawn_actor` (with the Blueprint as `type`), `capture_high_res_screenshot` |
 
 ## Materials
 

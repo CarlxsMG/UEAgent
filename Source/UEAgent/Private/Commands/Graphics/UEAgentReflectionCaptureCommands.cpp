@@ -169,6 +169,7 @@ namespace
 }
 
 // MCP:spawn_sphere_reflection_capture - Spawn a SphereReflectionCapture actor into the editor world at location in one undo step, optionally set its InfluenceRadius (cm) and Brightness (read back), and mark it dirty for recapture; spawn_actor has no reflection-capture type, and spawn_box_reflection_capture places a box probe. Each call adds another actor; not saved (save_level). Tune it with set_reflection_capture_properties.
+//   @retired spawn_actor - type="SphereReflectionCapture", location, properties={"SphereReflectionCaptureComponent.InfluenceRadius":..,"SphereReflectionCaptureComponent.Brightness":..}; then rebuild_reflection_captures
 //   @param location - Optional [X, Y, Z] world location (defaults to origin)
 //   @param influence_radius - Optional InfluenceRadius (cm) for the sphere capture component
 //   @param brightness - Optional Brightness multiplier on the capture component
@@ -230,6 +231,7 @@ TSharedPtr<FJsonObject> HandleSpawnSphereReflectionCapture(const TSharedPtr<FJso
 }
 
 // MCP:spawn_box_reflection_capture - Spawn a BoxReflectionCapture actor into the editor world at location in one undo step, optionally set its Brightness (read back), and mark it dirty for recapture. spawn_actor has no reflection-capture type; spawn_sphere_reflection_capture places a sphere probe. Each call adds an actor; not saved (save_level). Tune: set_reflection_capture_properties.
+//   @retired spawn_actor - type="BoxReflectionCapture", location, scale, properties={"BoxReflectionCaptureComponent.Brightness":..}; then rebuild_reflection_captures
 //   @param location - Optional [X, Y, Z] world location (defaults to origin)
 //   @param brightness - Optional Brightness multiplier on the capture component
 //   @returns { actor_name: string, actor_internal_name: string, actor_class: string, has_component: bool, brightness_set: bool, brightness: number, spawned: bool }
@@ -268,6 +270,7 @@ TSharedPtr<FJsonObject> HandleSpawnBoxReflectionCapture(const TSharedPtr<FJsonOb
 }
 
 // MCP:spawn_scene_capture_2d - Spawn a SceneCapture2D actor in the editor world (also while PIE runs, never into PIE) at location and rotation, in one undo step; the level is marked dirty but not saved. spawn_actor has no scene-capture type. Each call spawns another actor (not idempotent) under the engine default label: actor_name is that label, actor_internal_name the object name to address it by later. A fresh capture has no render target, so has_render_target is false until one is assigned. Set its TextureTarget, capture source, projection and FOV with set_scene_capture_2d_properties (a target comes from create_render_target_2d), read them back with get_scene_capture_2d_properties. A reflection probe is spawn_sphere_reflection_capture or spawn_box_reflection_capture.
+//   @retired spawn_actor - type="SceneCapture2D", name, location, rotation, properties={"SceneCaptureComponent2D.TextureTarget":"/Game/RT_..."}
 //   @param location - Optional [X, Y, Z] world location; missing means the origin, and any other value is an error and nothing is spawned
 //   @param rotation - Optional world rotation in degrees, as [Pitch, Yaw, Roll] or {"pitch", "yaw", "roll"} by name (defaults to zero)
 //   @returns { actor_name: string, actor_internal_name: string, actor_class: string, has_component: bool, has_render_target: bool, spawned: bool }
@@ -305,7 +308,8 @@ TSharedPtr<FJsonObject> HandleSpawnSceneCapture2D(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:update_reflection_captures - Rebuilds reflection-capture contents for all captures in the editor world.  Marks every reflection capture dirty and runs the canonical editor rebuild path (UReflectionCaptureComponent::UpdateReflectionCaptureContents).
+// MCP:rebuild_reflection_captures - Rebuilds reflection-capture contents for all captures in the editor world.  Marks every reflection capture dirty and runs the canonical editor rebuild path (UReflectionCaptureComponent::UpdateReflectionCaptureContents).
+//   @renamed-from update_reflection_captures
 //   @returns { updated: bool, capture_count: number }
 
 TSharedPtr<FJsonObject> HandleUpdateReflectionCaptures(const TSharedPtr<FJsonObject>& Params)
@@ -339,6 +343,7 @@ TSharedPtr<FJsonObject> HandleUpdateReflectionCaptures(const TSharedPtr<FJsonObj
 }
 
 // MCP:set_lumen_gi_quality - Applies Lumen / global-illumination scene tuning via console variables.  Provide exactly one of:     quality: "Low" | "Medium" | "High" | "Epic" | "Cinematic"         -> sg.GlobalIlluminationQuality (scalability group 0..4), read back.     method:  "Lumen" | "ScreenSpace" | "None"         -> r.DynamicGlobalIlluminationMethod (0=None,1=Lumen,2=ScreenSpace), read back.
+//   @retired set_cvar - set_cvar(name="r.DynamicGlobalIlluminationMethod", value=1 Lumen / 2 ScreenSpace / 0 None) for the method; set_scalability_quality(category="GlobalIllumination", level=0..4) for the quality
 //   @param quality - One of "Low" | "Medium" | "High" | "Epic" | "Cinematic" (mutually exclusive with method)
 //   @param method - One of "Lumen" | "ScreenSpace" | "None" (mutually exclusive with quality)
 //   @returns { mode: string, cvar: string, requested_method: string?, requested_quality: string?, requested_value: number, value: number, applied: bool }
@@ -423,6 +428,7 @@ TSharedPtr<FJsonObject> HandleSetLumenGIQuality(const TSharedPtr<FJsonObject>& P
 }
 
 // MCP:set_reflection_capture_properties - Set influence radius (Sphere), transition distance and extent (Box), brightness or cubemap of a Sphere or Box reflection-capture actor found by label or name in the editor world, then mark it dirty for recapture and read each field back. Over set_properties: box_extent maps to the actor scale (the box capture has no extent property), brightness is clamped to [0.5, 4] and a cubemap also switches ReflectionSourceType to SpecifiedCubemap. A param for the other capture shape is a no-op reported as <prop>_set=false. A box_extent that is not exactly 3 numbers, or a cubemap path that does not load as a TextureCube, fails the call before anything is written. Nothing is saved (save_level).
+//   @retired set_properties - object_path="<capture>.ReflectionCaptureComponent", properties={"InfluenceRadius" or "BoxTransitionDistance":..,"Brightness":..,"Cubemap":"/Game/...","ReflectionSourceType":..}; the box extent is the actor's scale (set_actor_transform), then rebuild_reflection_captures
 //   @param actor_name [!] - Label or internal name of the reflection-capture actor
 //   @param influence_radius [number] - Sphere capture InfluenceRadius in cm (Sphere only)
 //   @param box_transition_distance [number] - Box capture BoxTransitionDistance (Box only)
@@ -559,7 +565,7 @@ TSharedPtr<FJsonObject> HandleSetReflectionCaptureProperties(const TSharedPtr<FJ
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:get_reflection_capture_properties - Read a Sphere or Box reflection-capture actor of the editor level, found by label or internal name: capture_type, InfluenceRadius (Sphere), BoxTransitionDistance (Box), Brightness, the actor scale reported as box_extent, the Cubemap path and ReflectionSourceType. A curated round-trip view for set_reflection_capture_properties, not every property; get_properties (internal names only) reads any other UPROPERTY. Pure reader, no recapture.
+// MCP:get_reflection_capture_properties - Read a Sphere or Box reflection-capture actor of the editor level, found by label or internal name: capture_type, InfluenceRadius (Sphere), BoxTransitionDistance (Box), Brightness, the actor scale reported as box_extent, the Cubemap path and ReflectionSourceType. A curated round-trip view for set_properties, not every property; get_properties (internal names only) reads any other UPROPERTY. Pure reader, no recapture.
 //   @param actor_name [!] - Label or internal name of the reflection-capture actor
 //   @returns { actor_name: string, actor_internal_name: string, capture_type: string, influence_radius: number, box_transition_distance: number, brightness: number, box_extent: [number], cubemap: string, reflection_source_type: string }
 TSharedPtr<FJsonObject> HandleGetReflectionCaptureProperties(const TSharedPtr<FJsonObject>& Params)
@@ -591,6 +597,7 @@ TSharedPtr<FJsonObject> HandleGetReflectionCaptureProperties(const TSharedPtr<FJ
 }
 
 // MCP:set_scene_capture_2d_properties - Set CaptureSource, ProjectionType, FOVAngle, TextureTarget and bCaptureEveryFrame of a SceneCapture2D actor's capture component, found by label or name in the editor world, without capturing or saving. Beyond set_properties it adds only the label lookup and lenient enum names (SCS_ prefix optional, case-insensitive); write any other field with set_properties. An unknown capture_source or projection_type, or a texture_target that does not load as a TextureRenderTarget2D, fails the call before anything is written. Returns each field read back with a *_set flag; get_scene_capture_2d_properties reads them.
+//   @retired set_properties - object_path="<actor>.SceneCaptureComponent2D", properties={"CaptureSource":"SCS_FinalColorLDR","FOVAngle":..,"TextureTarget":"/Game/RT_..."}
 //   @param actor_name [!] - Label or internal name of the SceneCapture2D actor
 //   @param capture_source [string] - ESceneCaptureSource (e.g. SceneColorHDR | FinalColorLDR | FinalColorHDR | SceneDepth); the SCS_ prefix is optional; any other value fails the call and nothing is changed
 //   @param projection_type [string] - Projection mode, "Perspective" or "Orthographic" (case-insensitive); any other value fails the call and nothing is changed; omit to keep the current one
@@ -718,6 +725,7 @@ TSharedPtr<FJsonObject> HandleSetSceneCapture2DProperties(const TSharedPtr<FJson
 }
 
 // MCP:get_scene_capture_2d_properties - Read a SceneCapture2D actor's USceneCaptureComponent2D, found by label or internal name in the editor world: CaptureSource, TextureTarget path, FOVAngle, ProjectionType, OrthoWidth and the bCaptureEveryFrame / bCaptureOnMovement bitfields. A curated round-trip view for set_scene_capture_2d_properties, not every property; get_properties (internal names only) reads any other UPROPERTY on the component. Pure reader -- no Modify, no capture, no save.
+//   @retired get_properties - object_path="<actor>.SceneCaptureComponent2D", property_names=["CaptureSource","TextureTarget","FOVAngle","ProjectionType","OrthoWidth","bCaptureEveryFrame","bCaptureOnMovement"]
 //   @param actor_name [!] - Label or internal name of the SceneCapture2D actor
 //   @returns { actor_name: string, component_name: string, texture_target: string, fov_angle: number, capture_source: string, capture_every_frame: bool, capture_on_movement: bool, projection_type: string, ortho_width: number }
 TSharedPtr<FJsonObject> HandleGetSceneCapture2DProperties(const TSharedPtr<FJsonObject>& Params)
@@ -753,7 +761,7 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("spawn_box_reflection_capture"), &HandleSpawnBoxReflectionCapture },
     { TEXT("spawn_scene_capture_2d"), &HandleSpawnSceneCapture2D },
     { TEXT("spawn_sphere_reflection_capture"), &HandleSpawnSphereReflectionCapture },
-    { TEXT("update_reflection_captures"), &HandleUpdateReflectionCaptures },
+    { TEXT("rebuild_reflection_captures"), &HandleUpdateReflectionCaptures },
 };
 } // namespace UEAgentReflectionCaptureCommands
 

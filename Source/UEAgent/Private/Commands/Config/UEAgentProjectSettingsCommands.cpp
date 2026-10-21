@@ -813,7 +813,7 @@ TSharedPtr<FJsonObject> HandleGetProjectInfo(
 //   fully public struct -- once reflection gets us the array, its elements'
 //   fields are plain public C++ member access, no further FProperty needed).
 // ---------------------------------------------------------------------------
-// MCP:add_collision_channel - Register a custom project collision channel (claims the first free ECC_GameTraceChannelN slot). Idempotent on channel_name.
+// MCP:add_collision_channel - Register a custom project collision channel (claims the first free ECC_GameTraceChannelN slot). Idempotent on channel_name. Inverse: remove_collision_channel.
 //   @param channel_name [string!] - Friendly name for the new channel, e.g. "Harvestable"
 //   @param default_response [string] - "Block" | "Ignore" | "Overlap". Defaults to "Block".
 //   @param trace_type [bool] - True for a trace channel, false for an object channel. Defaults to false.
@@ -912,8 +912,8 @@ TSharedPtr<FJsonObject> HandleAddCollisionChannel(
 //   game channels), its default response, and whether a custom game slot is
 //   in use. Pure public API, no reflection.
 // ---------------------------------------------------------------------------
-// MCP:list_collision_channels - List every collision channel (built-in + custom) with its default response.
-//   @returns { channels: [{channel: string, friendly_name: string, value: int, default_response: string, is_custom_game_slot: bool, in_use: bool}], count: int }
+// MCP:list_collision_channels - List every collision channel of the project, built-in and custom, with its friendly name and default response; each custom channel also says whether it is in use, whether it is a trace or an object channel, and the query it answers to (TraceTypeQueryN or ObjectTypeQueryN: the value a raycast or overlap passes), read from the project's config. Read-only. Add one with add_collision_channel; compare with another project's with diff_collision_channels.
+//   @returns { channels: [{channel: string, friendly_name: string, value: int, default_response: string, is_custom_game_slot: bool, in_use?: bool, is_trace_type?: bool, query_type?: string, query_index?: int, query_number?: int}], count: int }
 TSharedPtr<FJsonObject> HandleListCollisionChannels(
 	const TSharedPtr<FJsonObject>& /*Params*/)
 {
@@ -951,6 +951,38 @@ TSharedPtr<FJsonObject> HandleListCollisionChannels(
 		ChannelArr.Add(MakeShared<FJsonValueObject>(Entry));
 	}
 
+	// The query each custom channel answers to, from the project config, as the navigation family parses it.
+	const TSharedPtr<FJsonObject> Custom = McpCommandFamilies::Run(TEXT("dump_collision_channels"), MakeShared<FJsonObject>());
+	const TSharedPtr<FJsonObject>* CustomData = nullptr;
+	const TArray<TSharedPtr<FJsonValue>>* CustomChannels = nullptr;
+	if (Custom.IsValid() && Custom->TryGetObjectField(TEXT("data"), CustomData) && CustomData
+		&& (*CustomData)->TryGetArrayField(TEXT("channels"), CustomChannels) && CustomChannels)
+	{
+		for (const TSharedPtr<FJsonValue>& EntryValue : ChannelArr)
+		{
+			const TSharedPtr<FJsonObject> Entry = EntryValue->AsObject();
+			const FString Channel = Entry->GetStringField(TEXT("channel"));
+			for (const TSharedPtr<FJsonValue>& CustomValue : *CustomChannels)
+			{
+				const TSharedPtr<FJsonObject>* CustomEntry = nullptr;
+				FString CustomChannel;
+				if (!CustomValue->TryGetObject(CustomEntry) || !CustomEntry
+					|| !(*CustomEntry)->TryGetStringField(TEXT("channel"), CustomChannel) || CustomChannel != Channel)
+				{
+					continue;
+				}
+				for (const TCHAR* Key : { TEXT("is_trace_type"), TEXT("query_type"), TEXT("query_index"), TEXT("query_number") })
+				{
+					if (const TSharedPtr<FJsonValue> Value = (*CustomEntry)->TryGetField(Key))
+					{
+						Entry->SetField(Key, Value);
+					}
+				}
+				break;
+			}
+		}
+	}
+
 	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
 	Result->SetArrayField(TEXT("channels"), ChannelArr);
 	Result->SetNumberField(TEXT("count"), ChannelArr.Num());
@@ -967,7 +999,7 @@ TSharedPtr<FJsonObject> HandleListCollisionChannels(
 //   private Profiles array instead, since AddProfileTemplate no-ops on a
 //   name collision by design.
 // ---------------------------------------------------------------------------
-// MCP:add_collision_profile - Create a project collision profile, or replace an existing one of that name in full (omitted fields reset, custom responses cleared, can_modify not checked), then write Config/DefaultEngine.ini via TryUpdateDefaultConfigFile, unverified. Returns custom_response_count and already_existed; read it back with get_collision_profile.
+// MCP:add_collision_profile - Create a project collision profile, or replace an existing one of that name in full (omitted fields reset, custom responses cleared, can_modify not checked), then write Config/DefaultEngine.ini via TryUpdateDefaultConfigFile, unverified. Returns custom_response_count and already_existed; read it back with get_collision_profile; inverse: remove_collision_profile.
 //   @param profile_name [string!] - Name of the collision profile to create or replace, e.g. "MyPawnProfile"
 //   @param object_type_name [string!] - Channel this profile's object type resolves to, e.g. "WorldDynamic" or a custom channel's friendly name
 //   @param collision_enabled [string] - "NoCollision" | "QueryOnly" | "PhysicsOnly" | "QueryAndPhysics" | "ProbeOnly" | "QueryAndProbe". Defaults to "QueryAndPhysics".
@@ -1080,6 +1112,183 @@ TSharedPtr<FJsonObject> HandleAddCollisionProfile(
 }
 
 // ---------------------------------------------------------------------------
+// remove_collision_channel / remove_collision_profile: the inverses of add_collision_channel and
+// add_collision_profile. Both edit UCollisionProfile's config arrays by reflection, as the adds do, and write
+// Config/DefaultEngine.ini with TryUpdateDefaultConfigFile.
+// ---------------------------------------------------------------------------
+namespace
+{
+	/** UCollisionProfile::Profiles, reflected (it is private). */
+	FScriptArrayHelper ProjSettingsGetProfilesHelper(UCollisionProfile* Profile, FArrayProperty*& OutArrProp)
+	{
+		OutArrProp = CastField<FArrayProperty>(UCollisionProfile::StaticClass()->FindPropertyByName(TEXT("Profiles")));
+		check(OutArrProp);
+		return FScriptArrayHelper(OutArrProp, OutArrProp->ContainerPtrToValuePtr<void>(Profile));
+	}
+}
+
+// MCP:remove_collision_channel - Free a custom project collision channel that add_collision_channel registered (its ECC_GameTraceChannelN slot), as the Project Settings panel deletes one: the channel leaves DefaultChannelResponses and every collision profile drops its per-channel response to it (custom_responses_removed), then Config/DefaultEngine.ini is written via TryUpdateDefaultConfigFile. A channel that is still the object type of a profile is refused, naming the profiles, and nothing changes; a name no custom channel has is an honest no-op (removed=false). As with add_collision_channel, the engine's channel-name tables (and list_collision_channels, which reads them) keep the old name until the editor restarts; add_collision_channel sees the slot free at once. No undo step: the config file is written at once. Inverse of add_collision_channel.
+//   @param channel_name [string!] - Friendly name of the custom channel, as given to add_collision_channel
+//   @returns { channel_name: string, channel?: string, removed: bool, custom_responses_removed: int, profiles_updated: [string], note: string }
+TSharedPtr<FJsonObject> HandleRemoveCollisionChannel(
+	const TSharedPtr<FJsonObject>& Params)
+{
+	FString ChannelName;
+	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("channel_name"), ChannelName)) { return Missing; }
+	const FName ChannelFName(*ChannelName);
+
+	UCollisionProfile* Profile = nullptr;
+	if (TSharedPtr<FJsonObject> Error = ProjSettingsGetCollisionProfile(Profile)) { return Error; }
+
+	FArrayProperty* ChannelsProp = nullptr;
+	FScriptArrayHelper Channels = ProjSettingsGetChannelArrayHelper(Profile, ChannelsProp);
+	int32 ChannelIndex = INDEX_NONE;
+	FString ChannelSlot;
+	for (int32 i = 0; i < Channels.Num(); ++i)
+	{
+		const FCustomChannelSetup* Elem = reinterpret_cast<const FCustomChannelSetup*>(Channels.GetRawPtr(i));
+		if (Elem->Name == ChannelFName)
+		{
+			ChannelIndex = i;
+			ChannelSlot = StaticEnum<ECollisionChannel>()->GetNameStringByValue((int64)Elem->Channel.GetValue());
+			break;
+		}
+	}
+
+	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetStringField(TEXT("channel_name"), ChannelName);
+	if (ChannelIndex == INDEX_NONE)
+	{
+		Result->SetBoolField(TEXT("removed"), false);
+		Result->SetNumberField(TEXT("custom_responses_removed"), 0);
+		Result->SetArrayField(TEXT("profiles_updated"), TArray<TSharedPtr<FJsonValue>>());
+		Result->SetStringField(TEXT("note"), TEXT("No custom collision channel has that name; nothing changed."));
+		return mcp_common::MakeOkReply(Result);
+	}
+
+	// A profile whose object type IS this channel would be left pointing at nothing: refused, as the panel warns.
+	FArrayProperty* ProfilesProp = nullptr;
+	FScriptArrayHelper Profiles = ProjSettingsGetProfilesHelper(Profile, ProfilesProp);
+	TArray<FString> Users;
+	for (int32 i = 0; i < Profiles.Num(); ++i)
+	{
+		const FCollisionResponseTemplate* Elem = reinterpret_cast<const FCollisionResponseTemplate*>(Profiles.GetRawPtr(i));
+		if (Elem->ObjectTypeName == ChannelFName)
+		{
+			Users.Add(Elem->Name.ToString());
+		}
+	}
+	if (Users.Num() > 0)
+	{
+		return mcp_common::MakeErrorReply(FString::Printf(
+			TEXT("Channel '%s' is the object type of profile(s) %s; change their object_type_name (add_collision_profile) or remove them first. Nothing was changed."),
+			*ChannelName, *FString::Join(Users, TEXT(", "))));
+	}
+
+	Channels.RemoveValues(ChannelIndex, 1);
+
+	// Every profile, and every edit of an engine profile, drops its response to the channel.
+	int32 ResponsesRemoved = 0;
+	TArray<FString> Updated;
+	for (int32 i = 0; i < Profiles.Num(); ++i)
+	{
+		FCollisionResponseTemplate* Elem = reinterpret_cast<FCollisionResponseTemplate*>(Profiles.GetRawPtr(i));
+		const int32 Dropped = Elem->CustomResponses.RemoveAll([&ChannelFName](const FResponseChannel& R) { return R.Channel == ChannelFName; });
+		if (Dropped > 0)
+		{
+			ResponsesRemoved += Dropped;
+			Updated.AddUnique(Elem->Name.ToString());
+		}
+	}
+	if (FArrayProperty* EditProp = CastField<FArrayProperty>(UCollisionProfile::StaticClass()->FindPropertyByName(TEXT("EditProfiles"))))
+	{
+		FScriptArrayHelper Edits(EditProp, EditProp->ContainerPtrToValuePtr<void>(Profile));
+		for (int32 i = 0; i < Edits.Num(); ++i)
+		{
+			FCustomProfile* Elem = reinterpret_cast<FCustomProfile*>(Edits.GetRawPtr(i));
+			const int32 Dropped = Elem->CustomResponses.RemoveAll([&ChannelFName](const FResponseChannel& R) { return R.Channel == ChannelFName; });
+			if (Dropped > 0)
+			{
+				ResponsesRemoved += Dropped;
+				Updated.AddUnique(Elem->Name.ToString());
+			}
+		}
+	}
+
+	Profile->TryUpdateDefaultConfigFile();
+
+	// The re-read: no custom channel carries the name any more.
+	FScriptArrayHelper ChannelsAfter = ProjSettingsGetChannelArrayHelper(Profile, ChannelsProp);
+	for (int32 i = 0; i < ChannelsAfter.Num(); ++i)
+	{
+		if (reinterpret_cast<const FCustomChannelSetup*>(ChannelsAfter.GetRawPtr(i))->Name == ChannelFName)
+		{
+			return mcp_common::MakeErrorReply(FString::Printf(TEXT("Channel '%s' is still in DefaultChannelResponses after the removal"), *ChannelName));
+		}
+	}
+	Result->SetStringField(TEXT("channel"), ChannelSlot);
+	Result->SetBoolField(TEXT("removed"), true);
+	Result->SetNumberField(TEXT("custom_responses_removed"), ResponsesRemoved);
+	Result->SetArrayField(TEXT("profiles_updated"), mcp_common::StringsToJson(Updated));
+	Result->SetStringField(TEXT("note"), TEXT("Written to DefaultEngine.ini. The engine's channel-name tables are rebuilt only at editor start (UCollisionProfile::LoadProfileConfig is not exported), so the old name lingers there until a restart."));
+	return mcp_common::MakeOkReply(Result);
+}
+
+// MCP:remove_collision_profile - Delete a project collision profile by name, then write Config/DefaultEngine.ini via TryUpdateDefaultConfigFile. Inverse of add_collision_profile. An engine profile the editor marks not modifiable (can_modify false, like BlockAll or Pawn) is refused, and nothing changes; a name no profile has is an honest no-op (removed=false). Components and Blueprints that still name the profile keep the name and fall back to their own settings. No undo step: the config file is written at once. Read back: get_collision_profile, which then reports it not found.
+//   @param profile_name [string!] - Name of the collision profile to delete, e.g. "MyPawnProfile"
+//   @returns { profile_name: string, removed: bool, profile_count: int, note?: string }
+TSharedPtr<FJsonObject> HandleRemoveCollisionProfile(
+	const TSharedPtr<FJsonObject>& Params)
+{
+	FString ProfileName;
+	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("profile_name"), ProfileName)) { return Missing; }
+	const FName ProfileFName(*ProfileName);
+
+	UCollisionProfile* Profile = nullptr;
+	if (TSharedPtr<FJsonObject> Error = ProjSettingsGetCollisionProfile(Profile)) { return Error; }
+
+	FArrayProperty* ProfilesProp = nullptr;
+	FScriptArrayHelper Profiles = ProjSettingsGetProfilesHelper(Profile, ProfilesProp);
+	int32 Index = INDEX_NONE;
+	for (int32 i = 0; i < Profiles.Num(); ++i)
+	{
+		const FCollisionResponseTemplate* Elem = reinterpret_cast<const FCollisionResponseTemplate*>(Profiles.GetRawPtr(i));
+		if (Elem->Name == ProfileFName)
+		{
+			if (!Elem->bCanModify)
+			{
+				return mcp_common::MakeErrorReply(FString::Printf(
+					TEXT("Collision profile '%s' is an engine profile marked not modifiable; nothing was changed"), *ProfileName));
+			}
+			Index = i;
+			break;
+		}
+	}
+
+	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetStringField(TEXT("profile_name"), ProfileName);
+	if (Index == INDEX_NONE)
+	{
+		Result->SetBoolField(TEXT("removed"), false);
+		Result->SetNumberField(TEXT("profile_count"), Profiles.Num());
+		Result->SetStringField(TEXT("note"), TEXT("No collision profile has that name; nothing changed."));
+		return mcp_common::MakeOkReply(Result);
+	}
+
+	Profiles.RemoveValues(Index, 1);
+	Profile->TryUpdateDefaultConfigFile();
+
+	FCollisionResponseTemplate Check;
+	if (Profile->GetProfileTemplate(ProfileFName, Check))
+	{
+		return mcp_common::MakeErrorReply(FString::Printf(TEXT("Collision profile '%s' still resolves after the removal"), *ProfileName));
+	}
+	Result->SetBoolField(TEXT("removed"), true);
+	Result->SetNumberField(TEXT("profile_count"), Profiles.Num());
+	return mcp_common::MakeOkReply(Result);
+}
+
+// ---------------------------------------------------------------------------
 // get_collision_profile
 //   Pure public API read: UCollisionProfile::GetProfileTemplate.
 // ---------------------------------------------------------------------------
@@ -1125,6 +1334,8 @@ const McpCommandFamilies::FRegistrar Registration =
 	{ TEXT("add_collision_channel"), &HandleAddCollisionChannel },
 	{ TEXT("add_collision_profile"), &HandleAddCollisionProfile },
 	{ TEXT("get_collision_profile"), &HandleGetCollisionProfile },
+	{ TEXT("remove_collision_channel"), &HandleRemoveCollisionChannel },
+	{ TEXT("remove_collision_profile"), &HandleRemoveCollisionProfile },
 	{ TEXT("get_default_game_map"), &HandleGetDefaultGameMap },
 	{ TEXT("get_project_info"), &HandleGetProjectInfo },
 	{ TEXT("get_project_settings_value"), &HandleGetProjectSettingsValue },

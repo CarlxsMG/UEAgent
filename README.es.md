@@ -6,14 +6,14 @@
 
 <p align="center">
   <b>El servidor MCP para Unreal Engine 5, integrado en el editor.</b><br>
-  Más de 1.700 herramientas para que Claude Code, Cursor o cualquier cliente MCP construya en Unreal,<br>
+  Más de 1.600 herramientas para que Claude Code, Cursor o cualquier cliente MCP construya en Unreal,<br>
   con cada cambio comprobado antes de ejecutarse y releído después.
 </p>
 
 <p align="center">
   <img alt="Unreal Engine 5.7 | 5.8" src="https://img.shields.io/badge/Unreal%20Engine-5.7%20%7C%205.8-0E1128?logo=unrealengine&logoColor=white">
   <img alt="MCP: Streamable HTTP" src="https://img.shields.io/badge/MCP-Streamable%20HTTP-6E56CF">
-  <img alt="Más de 1.700 herramientas" src="https://img.shields.io/badge/tools-1%2C700%2B-2EA44F">
+  <img alt="Más de 1.600 herramientas" src="https://img.shields.io/badge/tools-1%2C600%2B-2EA44F">
   <a href="LICENSE"><img alt="Licencia: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
   <a href="https://github.com/CarlxsMG/UEAgent/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/CarlxsMG/UEAgent/actions/workflows/ci.yml/badge.svg"></a>
   <a href="https://carlxsmg.github.io/UEAgent/"><img alt="Documentación" src="https://img.shields.io/badge/docs-carlxsmg.github.io%2FUEAgent-6E56CF"></a>
@@ -55,7 +55,7 @@ sirve Streamable HTTP desde dentro del editor, sin ningún proceso de Python o N
 flowchart LR
     A["Agente de IA<br/>Claude Code, Cursor, ..."] -- "MCP sobre HTTP" --> P
     subgraph E["Unreal Editor + UEAgent"]
-        P["Precondiciones<br/>rechazan los cuelgues conocidos"] --> H["Herramienta<br/>más de 1.700"] --> R["Readback<br/>relee el estado"]
+        P["Precondiciones<br/>rechazan los cuelgues conocidos"] --> H["Herramienta<br/>más de 1.600"] --> R["Readback<br/>relee el estado"]
     end
     R -- "resultado verificado" --> A
 ```

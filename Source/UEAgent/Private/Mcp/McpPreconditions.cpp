@@ -113,7 +113,7 @@ namespace McpPreconditionsPrivate
 	// MsgCaptureUi  (args: -)
 	static const TCHAR* const MsgCaptureUi =
 		TEXT("capture_pie_screenshot with include_ui CRASHES THE EDITOR (access violation in D3D12/Slate). And without include_ui it does not serve ")
-		TEXT("the usual purpose either: it does NOT render UMG -- the UI is not in the image. To inspect the UI, use read_pie_widgets; for an image of ")
+		TEXT("the usual purpose either: it does NOT render UMG -- the UI is not in the image. To inspect the UI, use list_pie_widgets; for an image of ")
 		TEXT("the viewport, capture_viewport; to judge real gameplay, ask the user to play-test it in PIE.");
 
 	// MsgDeleteThenRename  (args: -)
@@ -667,11 +667,11 @@ namespace McpPreconditionsPrivate
 			return {}; // not in the crashing family: allowed, at no read cost
 		}
 
-		// inspect_object without the properties: identity and class only.
+		// get_object_info without the properties: identity and class only.
 		TSharedPtr<FJsonObject> ClassParams = MakeShared<FJsonObject>();
 		ClassParams->SetStringField(TEXT("object_path"), Object);
 		ClassParams->SetBoolField(TEXT("include_properties"), false);
-		const TSharedPtr<FJsonObject> Info = Ask(Probe, TEXT("inspect_object"), ClassParams);
+		const TSharedPtr<FJsonObject> Info = Ask(Probe, TEXT("get_object_info"), ClassParams);
 		const FString ClassPath = TextOf(Info, TEXT("class_path"));
 		const FString ClassName = TextOf(Info, TEXT("class_name"));
 		// get_event_dispatchers wants the ASSET, not the generated class:

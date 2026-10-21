@@ -650,7 +650,7 @@ TSharedPtr<FJsonObject> HandleRemoveAbility(const TSharedPtr<FJsonObject>& Param
 
 // --- Gameplay effects applied to a component -------------------------------------
 
-// MCP:apply_gameplay_effect - Apply a GameplayEffect class to an editor-world actor ability system component: an outgoing spec at the given level, with a fresh context from that component, applied to self. applied tells whether the engine returned a valid handle. apply_multiple_gameplay_effects applies a list.
+// MCP:apply_gameplay_effect - Apply a GameplayEffect class to an editor-world actor ability system component: an outgoing spec at the given level, with a fresh context from that component, applied to self. applied tells whether the engine returned a valid handle. execute_batch of apply_gameplay_effect calls applies a list.
 //   @param actor_name - Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names
 //   @param effect_class - Class path of a UGameplayEffect subclass; a Blueprint GE needs its _C class path, e.g. "/Game/Effects/GE_Burn.GE_Burn_C"
 //   @param level - Effect level for scalable magnitudes, fractions allowed; default 1.0
@@ -1130,6 +1130,7 @@ TSharedPtr<FJsonObject> HandleCreateGameplayEffectContainer(const TSharedPtr<FJs
 }
 
 // MCP:apply_multiple_gameplay_effects - Apply several GameplayEffect classes at one level to an editor-world actor ability system component; each entry is loaded and applied separately, so a bad path does not stop the rest. Returns requested, applied_count, failed_count and the per-entry applied and failed lists.
+//   @retired execute_batch - one apply_gameplay_effect per effect
 //   @param actor_name - Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names
 //   @param effect_classes - JSON array of UGameplayEffect class path strings, e.g. ["/Game/Effects/GE_Burn.GE_Burn_C"]; non-string entries go to failed
 //   @param level - GameplayEffect/ability level applied to all effects (default 1.0)

@@ -53,6 +53,7 @@
 #include "Perception/AIPerceptionComponent.h"
 #include "Perception/AISenseConfig_Sight.h"
 #include "Perception/AISenseConfig_Hearing.h"
+#include "Perception/AISense.h"           // remove_ai_perception_sense: the removed config's sense, against the dominant one
 #include "UObject/SavePackage.h"
 #include "Engine/CollisionProfile.h" // UCollisionProfile channel-name <-> index resolution
 #include "Editor.h"                                    // GEditor
@@ -812,6 +813,7 @@ TSharedPtr<FJsonObject> HandleAddComponentToBlueprint(const TSharedPtr<FJsonObje
 }
 
 // MCP:set_physics_properties - Set simulate-physics, mass override, linear and angular damping on ONE primitive component TEMPLATE of a Blueprint (an OWN SCS node only -- inherited components are not found here, and it is the template, not a placed actor). Only the fields present are touched. It does NOT compile and does NOT save. For any other property of a component template use set_blueprint_component_properties, which is ICH-aware and reaches inherited components.
+//   @retired set_blueprint_component_properties - blueprint_name, component_name, property_name="BodyInstance", property_value={"bSimulatePhysics":true,"bOverrideMass":true,"MassInKgOverride":50,"LinearDamping":..,"AngularDamping":..}
 //   @param blueprint_name - Name of the blueprint
 //   @param component_name - Name of an OWN SCS component; must resolve to a UPrimitiveComponent or the call errors
 //   @param simulate_physics - Optional bool to toggle physics simulation
@@ -956,6 +958,7 @@ TSharedPtr<FJsonObject> HandleCompileBlueprint(const TSharedPtr<FJsonObject>& Pa
 }
 
 // MCP:spawn_blueprint_actor - Spawn an instance of a Blueprint class as an actor and report WHICH world took it and whether the actor has AUTHORITY. Pick it for any Blueprint class; spawn_actor places the built-in engine types (StaticMeshActor, lights, CameraActor, Character), and the typed spawn_* tools place an engine class with its own fields. The default (world absent or 'editor') places it in the EDITOR level, not in play. For anything that must exist for every player during PIE use world='server'; world='pie' is ambiguous and can land on the CLIENT, where the actor has no authority, no AI controller and no server-side existence while looking identical in the payload. The actor is NOT saved into the map: save_level afterwards for an editor-world spawn.
+//   @retired spawn_actor - type=<Blueprint asset path>, name, location, rotation, world (has_authority is in the reply)
 //   @param blueprint_name - Name of the blueprint
 //   @param actor_name - Label applied to the spawned actor (SetActorLabel); it is not the object name and is not made unique
 //   @param location - Optional [x, y, z] world location
@@ -1087,6 +1090,7 @@ TSharedPtr<FJsonObject> HandleSpawnBlueprintActor(const TSharedPtr<FJsonObject>&
 }
 
 // MCP:set_static_mesh_properties - Assign a static mesh asset and/or a slot-0 material to a mesh component TEMPLATE of a Blueprint (an OWN SCS node, not a placed actor) through the component's SetStaticMesh/SetMaterial. Does NOT compile and does NOT save; the reply reads the template back (static_mesh, material and a *_set flag for each). A path that does not load as a mesh or material, or a call with neither, fails with nothing changed. Use apply_material_to_blueprint when only a material is changing or the slot is not 0, and set_blueprint_component_properties for any other template property or an inherited component.
+//   @retired set_blueprint_component_properties - blueprint_name, component_name, property_name="StaticMesh", property_value="/Game/SM_..."; the material with apply_material_to_blueprint
 //   @param blueprint_name - Name of the blueprint
 //   @param component_name - Name of an OWN SCS mesh component
 //   @param static_mesh - Optional asset path of the UStaticMesh to assign; a path that does not load as a StaticMesh fails the call and nothing is changed
@@ -1434,7 +1438,7 @@ TSharedPtr<FJsonObject> HandleGetActorMaterialInfo(const TSharedPtr<FJsonObject>
     return Reply;
 }
 
-// MCP:get_blueprint_material_info - Read the material slots of ONE StaticMeshComponent TEMPLATE in a Blueprint (an OWN SCS node), with the material assigned to each slot or "None". This is the verification step after apply_material_to_blueprint / set_static_mesh_properties. The slot count comes from the assigned static mesh's LOD 0 sections, so with no mesh assigned it returns ZERO slots and has_static_mesh:false -- which is a missing mesh, not a missing material. For a placed actor use get_actor_material_info.
+// MCP:get_blueprint_material_info - Read the material slots of ONE StaticMeshComponent TEMPLATE in a Blueprint (an OWN SCS node), with the material assigned to each slot or "None". This is the verification step after apply_material_to_blueprint / set_blueprint_component_properties. The slot count comes from the assigned static mesh's LOD 0 sections, so with no mesh assigned it returns ZERO slots and has_static_mesh:false -- which is a missing mesh, not a missing material. For a placed actor use get_actor_material_info.
 //   @param blueprint_name - Name of the blueprint
 //   @param component_name - Name of an OWN SCS component; it must be a UStaticMeshComponent (any other type is an error)
 //   @returns { blueprint_name: string, component_name: string, material_slots: [{ slot, component, material_name, material_path, material_class }], total_slots: int, has_static_mesh: bool } -- read has_static_mesh FIRST: total_slots:0 with has_static_mesh:false means no mesh was assigned, so the array says nothing about materials.
@@ -2180,7 +2184,7 @@ TSharedPtr<FJsonObject> HandleAddBlueprintFunction(const TSharedPtr<FJsonObject>
     return UEAgentBlueprintCommandsImpl::FunctionGraphReply(BlueprintName, FunctionName, *Created);
 }
 
-// MCP:remove_blueprint_function - Delete a function graph OWNED BY the Blueprint (Blueprint->FunctionGraphs) by name. WARNING: It resolves more graphs than it can delete: name lookup goes through FindGraph (all graphs, interface overrides and macros included) but the delete only touches FunctionGraphs and only when bAllowDeletion is true, so an INTERFACE OVERRIDE resolves and cannot be removed. That case is a hard error naming the reason -- to change an interface override, author the signature on the INTERFACE and re-create it (add_function_parameter on the BPI_ -> compile_blueprint -> add_blueprint_function with override=true). Not idempotent: a name that does not resolve is an error. TRAP when deleting to re-create: the class is NOT regenerated here, so an immediate add_blueprint_function with the same name fails with "is an inherited overridable function (declared on <this very class>)" because the stale UFunction is still in the generated class -- put a compile_blueprint BETWEEN the two calls. Callers of the removed function are left broken until the next compile.
+// MCP:remove_blueprint_function - Delete a function graph OWNED BY the Blueprint (Blueprint->FunctionGraphs) by name. WARNING: It resolves more graphs than it can delete: name lookup goes through FindGraph (all graphs, interface overrides and macros included) but the delete only touches FunctionGraphs and only when bAllowDeletion is true, so an INTERFACE OVERRIDE resolves and cannot be removed. That case is a hard error naming the reason -- to change an interface override, author the signature on the INTERFACE and re-create it (add_function_parameter on the BPI_ -> compile_blueprint -> add_blueprint_function with override=true). Not idempotent: a name that does not resolve is an error. TRAP when deleting to re-create: the class is NOT regenerated here, so an immediate add_blueprint_function with the same name fails with "is an inherited overridable function (declared on <this very class>)" because the stale UFunction is still in the generated class -- put a compile_blueprint BETWEEN the two calls. Callers of the removed function are left broken until the next compile. A macro graph: remove_blueprint_macro.
 //   @param blueprint_name - Name of the blueprint
 //   @param function_name - Name of the function graph to remove; must exist, be owned by this Blueprint and be deletable, or the call errors
 //   @returns { blueprint_name: string, removed_function: string, success: bool } -- success:true means the graph is gone from Blueprint->FunctionGraphs (re-read after the delete), not merely that the call ran.
@@ -3005,7 +3009,7 @@ namespace
 // Senses are authored on the AIPerceptionComponent SCS template: SensesConfig is EditDefaultsOnly +
 // Instanced, so a config created there as a subobject persists with the asset.
 
-// MCP:add_ai_perception_sense - Configure a sight or hearing sense on an AIPerceptionComponent TEMPLATE of a Blueprint, creating the config as an Instanced subobject of the template so it persists with the asset, and saving the package. Idempotent: ConfigureSense dedups by config class, so re-calling with the same sense_type UPDATES the existing config in place instead of stacking a second one. Only "sight" and "hearing" are supported (no damage, touch or team senses). It authors the TEMPLATE only -- whether the AI actually perceives anything is a live-PIE question this cannot answer; read the authored result back with get_ai_perception_senses.
+// MCP:add_ai_perception_sense - Configure a sight or hearing sense on an AIPerceptionComponent TEMPLATE of a Blueprint, creating the config as an Instanced subobject of the template so it persists with the asset, and saving the package. Idempotent: ConfigureSense dedups by config class, so re-calling with the same sense_type UPDATES the existing config in place instead of stacking a second one. Only "sight" and "hearing" are supported (no damage, touch or team senses). It authors the TEMPLATE only -- whether the AI actually perceives anything is a live-PIE question this cannot answer; read the authored result back with get_ai_perception_senses. Inverse: remove_ai_perception_sense.
 //   @param blueprint_name - Name of the blueprint owning the component
 //   @param component_name - Name of the AIPerceptionComponent SCS node
 //   @param sense_type - "sight" or "hearing"
@@ -3171,6 +3175,131 @@ TSharedPtr<FJsonObject> HandleGetAIPerceptionSenses(const TSharedPtr<FJsonObject
     Reply->SetArrayField(TEXT("senses"), Senses);
     Reply->SetNumberField(TEXT("sense_count"), Senses.Num());
     return Reply;
+}
+
+// MCP:remove_ai_perception_sense - Remove a sense (its config) from an AIPerceptionComponent TEMPLATE of a Blueprint, then compile the Blueprint and save the package, as add_ai_perception_sense does; no undo step. Inverse of add_ai_perception_sense: sense_type "sight" or "hearing", or any other configured sense by its config class name (AISenseConfig_Damage...). When it was the dominant sense, the dominant sense is cleared (dominant_cleared). A sense the template does not configure is an honest no-op (removed=false, nothing compiled or saved); a missing Blueprint or component, or a component that is not an AIPerceptionComponent, is an error. The reply re-reads the template's senses; read them with get_ai_perception_senses. Refused during PIE unless force=true.
+//   @param blueprint_name - Name of the blueprint owning the component
+//   @param component_name - Name of the AIPerceptionComponent SCS node
+//   @param sense_type - "sight", "hearing", or the short name / class name of another configured sense ("damage", "AISenseConfig_Damage")
+//   @returns { blueprint_name, component_name, sense_type, removed, removed_count, dominant_cleared, senses: [string], sense_count, saved, note? }
+
+TSharedPtr<FJsonObject> HandleRemoveAIPerceptionSense(const TSharedPtr<FJsonObject>& Params)
+{
+    FString BlueprintName, ComponentName, SenseType;
+    if (TSharedPtr<FJsonObject> Missing = UEAgentBlueprintCommandsImpl::ReadBlueprintComponentNames(
+            Params, &UEAgentBlueprintCommandsImpl::MissingQuotedParam, BlueprintName, ComponentName))
+    {
+        return Missing;
+    }
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("sense_type"), SenseType)) { return Missing; }
+
+    UBlueprint* Blueprint = mcp_common::ResolveBlueprint(BlueprintName);
+    if (!Blueprint)
+    {
+        return mcp_common::BlueprintNotFoundReply(BlueprintName);
+    }
+    FString FindErr;
+    UAIPerceptionComponent* Perc = FindPerceptionTemplate(Blueprint, ComponentName, FindErr);
+    if (!Perc)
+    {
+        return mcp_common::MakeErrorReply(FindErr);
+    }
+
+    // SensesConfig is protected and has no remover: reach it as the property it is (an Instanced UPROPERTY).
+    FArrayProperty* SensesProperty = FindFProperty<FArrayProperty>(UAIPerceptionComponent::StaticClass(), TEXT("SensesConfig"));
+    if (!SensesProperty || !CastField<FObjectPropertyBase>(SensesProperty->Inner))
+    {
+        return mcp_common::MakeErrorReply(TEXT("UAIPerceptionComponent has no SensesConfig object array in this engine; nothing was changed"));
+    }
+    const FString Wanted = SenseType.StartsWith(TEXT("AISenseConfig_"), ESearchCase::IgnoreCase) ? SenseType : TEXT("AISenseConfig_") + SenseType;
+    const auto Matches = [&Wanted](const UObject* Config)
+    {
+        return Config && Config->GetClass()->GetName().Equals(Wanted, ESearchCase::IgnoreCase);
+    };
+    const auto SenseNames = [Perc]()
+    {
+        TArray<FString> Names;
+        for (UAIPerceptionComponent::TAISenseConfigConstIterator It = Perc->GetSensesConfigIterator(); It; ++It)
+        {
+            if (*It)
+            {
+                Names.Add((*It)->GetClass()->GetName());
+            }
+        }
+        return Names;
+    };
+
+    TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
+    Reply->SetStringField(TEXT("blueprint_name"), BlueprintName);
+    Reply->SetStringField(TEXT("component_name"), ComponentName);
+    Reply->SetStringField(TEXT("sense_type"), SenseType);
+
+    FScriptArrayHelper Senses(SensesProperty, SensesProperty->ContainerPtrToValuePtr<void>(Perc));
+    const FObjectPropertyBase* Inner = CastField<FObjectPropertyBase>(SensesProperty->Inner);
+    TArray<int32> ToRemove;
+    TSubclassOf<UAISense> RemovedImplementation;
+    for (int32 Index = 0; Index < Senses.Num(); ++Index)
+    {
+        const UAISenseConfig* Config = Cast<UAISenseConfig>(Inner->GetObjectPropertyValue(Senses.GetRawPtr(Index)));
+        if (Matches(Config))
+        {
+            ToRemove.Add(Index);
+            RemovedImplementation = Config->GetSenseImplementation();
+        }
+    }
+    if (ToRemove.Num() == 0)
+    {
+        const TArray<FString> Names = SenseNames();
+        Reply->SetBoolField(TEXT("removed"), false);
+        Reply->SetNumberField(TEXT("removed_count"), 0);
+        Reply->SetBoolField(TEXT("dominant_cleared"), false);
+        Reply->SetArrayField(TEXT("senses"), mcp_common::StringsToJson(Names));
+        Reply->SetNumberField(TEXT("sense_count"), Names.Num());
+        Reply->SetBoolField(TEXT("saved"), false);
+        Reply->SetStringField(TEXT("note"), FString::Printf(TEXT("the template configures no %s; nothing changed"), *Wanted));
+        return Reply;
+    }
+
+    Perc->Modify();
+    for (int32 Index = ToRemove.Num() - 1; Index >= 0; --Index)
+    {
+        Senses.RemoveValues(ToRemove[Index], 1);
+    }
+    const bool bDominantCleared = RemovedImplementation && Perc->GetDominantSense() == RemovedImplementation;
+    if (bDominantCleared)
+    {
+        Perc->SetDominantSense(nullptr);
+    }
+
+    FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+    FKismetEditorUtilities::CompileBlueprint(Blueprint);
+
+    // The re-read, on the template the Blueprint holds after the compile.
+    UAIPerceptionComponent* After = FindPerceptionTemplate(Blueprint, ComponentName, FindErr);
+    TArray<FString> Left;
+    if (After)
+    {
+        for (UAIPerceptionComponent::TAISenseConfigConstIterator It = After->GetSensesConfigIterator(); It; ++It)
+        {
+            if (*It)
+            {
+                Left.Add((*It)->GetClass()->GetName());
+            }
+        }
+    }
+    if (!After || Left.ContainsByPredicate([&Wanted](const FString& Name) { return Name.Equals(Wanted, ESearchCase::IgnoreCase); }))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("%s is still configured on the template after the removal; nothing was saved"), *Wanted));
+    }
+
+    FString SaveErr;
+    const bool bSaved = SavePerceptionBlueprint(Blueprint, SaveErr);
+    Reply->SetBoolField(TEXT("removed"), true);
+    Reply->SetNumberField(TEXT("removed_count"), ToRemove.Num());
+    Reply->SetBoolField(TEXT("dominant_cleared"), bDominantCleared);
+    Reply->SetArrayField(TEXT("senses"), mcp_common::StringsToJson(Left));
+    Reply->SetNumberField(TEXT("sense_count"), Left.Num());
+    return mcp_common::MakeSavedReply(Reply, bSaved, TEXT("remove_ai_perception_sense"), SaveErr);
 }
 
 // ===========================================================================
@@ -5027,6 +5156,7 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("create_blueprint"), &HandleCreateBlueprint },
     { TEXT("get_actor_material_info"), &HandleGetActorMaterialInfo },
     { TEXT("get_ai_perception_senses"), &HandleGetAIPerceptionSenses },
+    { TEXT("remove_ai_perception_sense"), &HandleRemoveAIPerceptionSense },
     { TEXT("get_available_materials"), &HandleGetAvailableMaterials },
     { TEXT("get_blueprint_component_object_path"), &HandleGetBlueprintComponentObjectPath },
     { TEXT("get_blueprint_component_property"), &HandleGetBlueprintComponentProperty },

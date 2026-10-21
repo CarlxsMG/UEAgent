@@ -38,6 +38,8 @@
 #include "EditorAssetLibrary.h"
 #include "Misc/PackageName.h"
 #include "ScopedTransaction.h"
+#include "EdGraph/EdGraph.h"         // remove_sound_cue_node: the cue editor graph node goes with the sound node
+#include "EdGraph/EdGraphNode.h"
 
 #define LOCTEXT_NAMESPACE "UEAgentSoundCueCommands"
 
@@ -226,7 +228,7 @@ TSharedPtr<FJsonObject> HandleCreateSoundCue(const TSharedPtr<FJsonObject>& Para
 // ---------------------------------------------------------------------------
 // add_sound_cue_node
 // ---------------------------------------------------------------------------
-// MCP:add_sound_cue_node - Append a new node of node_type to the AllNodes of a USoundCue asset, in one undo step, and save the cue; node_id is its index there, the id the other sound cue tools take. node_type is matched without case, and an unknown type or a cue that does not load is an error. The node starts unconnected and is not the cue output: wire it with connect_sound_cue_nodes and make the root with set_sound_cue_first_node. For a WavePlayer, sound_wave_path sets its wave; a wave that does not load is not an error (sound_wave_set=false), and other types ignore it. Each call adds another node (not idempotent). A failed save, as during PIE, makes success false with save_error. Node settings: set_sound_cue_node_properties; read back: get_sound_cue_graph; a new cue: create_sound_cue.
+// MCP:add_sound_cue_node - Append a new node of node_type to the AllNodes of a USoundCue asset, in one undo step, and save the cue; node_id is its index there, the id the other sound cue tools take. node_type is matched without case, and an unknown type or a cue that does not load is an error. The node starts unconnected and is not the cue output: wire it with connect_sound_cue_nodes and make the root with set_sound_cue_first_node. For a WavePlayer, sound_wave_path sets its wave; a wave that does not load is not an error (sound_wave_set=false), and other types ignore it. Each call adds another node (not idempotent). A failed save, as during PIE, makes success false with save_error. Node settings: set_sound_cue_node_properties; read back: get_sound_cue_graph; a new cue: create_sound_cue. Inverse: remove_sound_cue_node.
 //   @param cue_path - Full asset path of the cue, e.g. /Game/SoundCues/SC_Foo
 //   @param node_type - One of WavePlayer|Mixer|Random|Looping|Modulator|Delay|Concatenator|Attenuation|Branch|DistanceCrossFade|Doppler|Enveloper|GroupControl|ModulatorContinuous|Oscillator|ParamCrossFade|QualityLevel|SoundClass|Switch|WaveParam (matched without case)
 //   @param sound_wave_path - Optional USoundWave path for WavePlayer nodes only; one that does not load leaves the node without a wave (sound_wave_set false)
@@ -543,6 +545,104 @@ TSharedPtr<FJsonObject> HandleDisconnectSoundCueNodes(const TSharedPtr<FJsonObje
 }
 
 // ---------------------------------------------------------------------------
+// remove_sound_cue_node: the inverse of add_sound_cue_node. node_id is an index into AllNodes, so every node after
+// the removed one moves down by one; the reply carries that remap.
+// ---------------------------------------------------------------------------
+// MCP:remove_sound_cue_node - Delete one node from a USoundCue asset, in one undo step, then save the cue. Inverse of add_sound_cue_node: every input slot that held the node is emptied (slots are kept, as disconnect_sound_cue_nodes keeps them), the cue output (FirstNode) is cleared when it was this node, the node leaves AllNodes, and its node in the cue editor's graph goes too when the cue has one. node_id is an index into AllNodes, so the nodes after it move down by one: id_remap lists {old_id, new_id} for each, and the ids from earlier calls are stale. A cue that does not load or a node_id out of range is an error and nothing changes. A failed save, as during PIE, makes success false with save_error. Read back: get_sound_cue_graph.
+//   @param cue_path - Full asset path of the cue
+//   @param node_id - node_id of the node to delete (its index in the cue AllNodes, from add_sound_cue_node or get_sound_cue_graph)
+//   @returns { cue_path: string, node_id: int, node_class: string, removed: bool, slots_cleared: int, first_node_cleared: bool, graph_node_removed: bool, id_remap: [{old_id, new_id}], node_count: int, saved: bool, save_error?: string }
+TSharedPtr<FJsonObject> HandleRemoveSoundCueNode(const TSharedPtr<FJsonObject>& Params)
+{
+    FString CuePath;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("cue_path"), CuePath)) { return Missing; }
+    double NodeIdD = 0.0;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("node_id"), NodeIdD)) { return Missing; }
+    const int32 NodeId = static_cast<int32>(NodeIdD);
+
+    USoundCue* Cue = nullptr;
+    if (TSharedPtr<FJsonObject> LoadError = SoundCue_Load(CuePath, Cue)) { return LoadError; }
+    USoundNode* Doomed = nullptr;
+    if (TSharedPtr<FJsonObject> NodeError = SoundCue_FindNode(Cue, NodeId, TEXT("node_id"), TEXT("node"), Doomed)) { return NodeError; }
+    const FString NodeClass = Doomed->GetClass()->GetName();
+
+    const FScopedTransaction Transaction(LOCTEXT("RemoveSoundCueNode", "Remove Sound Cue Node"));
+    Cue->Modify();
+
+    // Empty every slot that held it (set, never RemoveAt: an input_index stays the slot it was).
+    int32 SlotsCleared = 0;
+    for (USoundNode* Node : Cue->AllNodes)
+    {
+        if (!Node || Node == Doomed)
+        {
+            continue;
+        }
+        for (int32 Slot = 0; Slot < Node->ChildNodes.Num(); ++Slot)
+        {
+            if (Node->ChildNodes[Slot] == Doomed)
+            {
+                Node->Modify();
+                Node->ChildNodes[Slot] = nullptr;
+                ++SlotsCleared;
+            }
+        }
+    }
+    const bool bFirstNodeCleared = Cue->FirstNode == Doomed;
+    if (bFirstNodeCleared)
+    {
+        Cue->FirstNode = nullptr;
+    }
+
+    // A cue made in the Sound Cue editor also holds an editor graph node per sound node; it goes with the node, or
+    // the editor would rebuild AllNodes from the graph with the node back in it.
+    bool bGraphNodeRemoved = false;
+#if WITH_EDITORONLY_DATA
+    if (Cue->SoundCueGraph && Doomed->GraphNode)
+    {
+        Cue->SoundCueGraph->Modify();
+        bGraphNodeRemoved = Cue->SoundCueGraph->RemoveNode(Doomed->GraphNode);
+    }
+#endif
+
+    Cue->AllNodes.RemoveAt(NodeId);
+    Cue->CacheAggregateValues();
+
+    // The re-read: nothing in the cue still points at the node.
+    bool bStillReferenced = Cue->AllNodes.Contains(Doomed) || Cue->FirstNode == Doomed;
+    for (const USoundNode* Node : Cue->AllNodes)
+    {
+        bStillReferenced |= Node && Node->ChildNodes.Contains(Doomed);
+    }
+    if (bStillReferenced)
+    {
+        return mcp_common::MakeErrorReply(TEXT("The node is still referenced by the cue after the removal; nothing was saved"));
+    }
+
+    FString SaveError;
+    const bool bSaved = mcp_common::SaveAssetPackage(Cue->GetPackage(), Cue, SaveError);
+
+    TArray<TSharedPtr<FJsonValue>> Remap;
+    for (int32 NewId = NodeId; NewId < Cue->AllNodes.Num(); ++NewId)
+    {
+        TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+        Entry->SetNumberField(TEXT("old_id"), NewId + 1);
+        Entry->SetNumberField(TEXT("new_id"), NewId);
+        Remap.Add(MakeShared<FJsonValueObject>(Entry));
+    }
+    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+    Obj->SetStringField(TEXT("cue_path"), CuePath);
+    Obj->SetNumberField(TEXT("node_id"), NodeId);
+    Obj->SetStringField(TEXT("node_class"), NodeClass);
+    Obj->SetBoolField(TEXT("removed"), true);
+    Obj->SetNumberField(TEXT("slots_cleared"), SlotsCleared);
+    Obj->SetBoolField(TEXT("first_node_cleared"), bFirstNodeCleared);
+    Obj->SetBoolField(TEXT("graph_node_removed"), bGraphNodeRemoved);
+    Obj->SetArrayField(TEXT("id_remap"), Remap);
+    Obj->SetNumberField(TEXT("node_count"), Cue->AllNodes.Num());
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("remove_sound_cue_node"), SaveError);
+}
+
+// ---------------------------------------------------------------------------
 // set_sound_cue_first_node
 // ---------------------------------------------------------------------------
 // MCP:set_sound_cue_first_node - Make the node at node_id the root (FirstNode, the output) of a USoundCue graph, undoably, and save the asset. Returns first_node_class, first_node_set and saved; an out-of-range node_id is an error. Get node ids from add_sound_cue_node or get_sound_cue_graph.
@@ -714,6 +814,7 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("create_sound_cue"), &HandleCreateSoundCue },
     { TEXT("disconnect_sound_cue_nodes"), &HandleDisconnectSoundCueNodes },
     { TEXT("get_sound_cue_graph"), &HandleGetSoundCueGraph },
+    { TEXT("remove_sound_cue_node"), &HandleRemoveSoundCueNode },
     { TEXT("set_sound_cue_first_node"), &HandleSetSoundCueFirstNode },
     { TEXT("set_sound_cue_node_properties"), &HandleSetSoundCueNodeProperties },
 };

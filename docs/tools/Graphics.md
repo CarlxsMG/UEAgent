@@ -2,7 +2,7 @@
 
 # Graphics
 
-7 tools for decal actors: material, size, color, fade and sort order.
+2 tools for decal actors: material, size, color, fade and sort order.
 
 Back to the [index](README.md).
 
@@ -17,79 +17,6 @@ Read the full UDecalComponent state (size, sort order, fade screen size, fade-ou
 | `actor_label` | string | yes | Label of the ADecalActor in the editor world. |
 
 **Returns:** `{ actor_label: string, actor_name: string, decal_size_x: float, decal_size_y: float, decal_size_z: float, sort_order: int, fade_screen_size: float, fade_start_delay: float, fade_duration: float, fade_in_start_delay: float, fade_in_duration: float, destroy_owner_after_fade: bool, r: float, g: float, b: float, a: float, decal_material: string }`
-
-## `set_decal_color`
-
-*Destructive, idempotent.*
-
-Set DecalColor on an editor-world ADecalActor found by label; it only shows if the decal material uses a Decal Color node. A color that is not a 4-number array is ignored (current color kept). A change is one undo step that dirties the level; nothing is saved. Returns the resulting r, g, b, a. An unknown label is an error; read it back with get_decal_info.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actor_label` | string | yes | Label of the ADecalActor in the editor world. |
-| `color` | array | no | Array of exactly 4 numbers [r, g, b, a], a linear color such as [1, 0.5, 0, 1]; missing or another length keeps the current DecalColor. |
-
-**Returns:** `{ actor_label: string, r: float, g: float, b: float, a: float }`
-
-## `set_decal_fade`
-
-*Destructive, idempotent.*
-
-Set a UDecalComponent's fade fields on a named DecalActor: fade-out timing, fade-in timing, the destroy-owner-after-fade bit and the fade screen size (the screen-size fraction below which the decal fades out).  Writes the EditAnywhere fields directly (mirrors the details panel) so values round-trip exactly, avoiding SetFadeOut's global fade-scale CVar and SetLifeSpan side effect, so no lifespan timer starts in the editor.  Only provided fields change (partial, idempotent); a change is one undo step that dirties the level, nothing is saved. An unknown label, or a fade_screen_size that is not a number of at least 0, is an error before anything is written. Read the values back with get_decal_info.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actor_label` | string | yes | Label of the ADecalActor in the editor world. |
-| `fade_start_delay` | number | no | Optional seconds before fade-out begins (FadeStartDelay; 0 + fade_duration 0 = persistent). |
-| `fade_duration` | number | no | Optional fade-out duration in seconds (FadeDuration). |
-| `fade_in_start_delay` | number | no | Optional seconds before fade-in begins (FadeInStartDelay). |
-| `fade_in_duration` | number | no | Optional fade-in duration in seconds (FadeInDuration). |
-| `destroy_owner_after_fade` | boolean | no | Optional: destroy the owning actor after fully fading out (bDestroyOwnerAfterFade). |
-| `fade_screen_size` | number | no | Optional FadeScreenSize, a number >= 0 (typically 0..1; smaller fades the decal only when it gets very small on screen). |
-
-**Returns:** `{ actor_label: string, fade_start_delay: float, fade_duration: float, fade_in_start_delay: float, fade_in_duration: float, destroy_owner_after_fade: bool, fade_screen_size: float, applied_count: int }`
-
-## `set_decal_material`
-
-*Destructive, idempotent.*
-
-Assign a material to the UDecalComponent of an ADecalActor in the editor world, found by actor label (not object name), in place of its current one. material_path is loaded as a UMaterialInterface (it renders only with the Deferred Decal material domain) and echoed back as given, not read back. The change is one undo step and dirties the level; nothing is saved. Assigning the material it already has changes nothing and adds no undo step. An unknown label, an actor without a decal component, or a path that does not load as a material is an error. Read back with get_decal_info; spawn_decal_actor can set one at creation; tint: set_decal_color; projection box: set_decal_size.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actor_label` | string | yes | Actor label of the ADecalActor in the editor world (case-insensitive; the object name does not match). |
-| `material_path` | string | yes | Asset path of the UMaterialInterface, e.g. "/Game/Decals/M_Decal_Crack" (the object path form also works); echoed back as given. |
-
-**Returns:** `{ actor_label: string, material_path: string }`
-
-## `set_decal_size`
-
-*Destructive, idempotent.*
-
-Set the DecalSize half-extents (cm, in the decal's local space, before actor scale) of an ADecalActor's UDecalComponent in the editor world, found by actor label, and refresh its render state. A valid decal_size [x, y, z] wins over size_x, size_y and size_z; without it each given axis changes and the rest keep their value, and a call with none changes nothing. X is the projection depth, Y and Z the footprint. Values are not validated; a change is one undo step that dirties the level, and nothing is saved. An unknown label or an actor without a decal component is an error. Read back with get_decal_info; set it at spawn with spawn_decal_actor; draw order: set_decal_sort_order.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actor_label` | string | yes | Actor label of the ADecalActor in the editor world (case-insensitive; the object name does not match). |
-| `decal_size` | string | no | Optional array of exactly 3 numbers [x, y, z], the half-extents in cm; when valid it overrides size_x, size_y and size_z, and any other length is ignored. |
-| `size_x` | number | no | Optional X half-extent in cm (the projection depth); used only without a valid decal_size. |
-| `size_y` | number | no | Optional Y half-extent in cm; used only without a valid decal_size. |
-| `size_z` | number | no | Optional Z half-extent in cm; used only without a valid decal_size. |
-
-**Returns:** `{ actor_label: string, size_x: float, size_y: float, size_z: float }`
-
-## `set_decal_sort_order`
-
-*Destructive, idempotent.*
-
-Set the SortOrder of the UDecalComponent of an ADecalActor in the editor world, found by actor label: where decals overlap, a higher sort order draws later, on top of a lower one. sort_order is required; a missing one is an error and nothing is written. A change is one undo step that dirties the level; the order the decal already has changes nothing, and nothing is saved. An unknown label or an actor without a decal component is an error. Read it back with get_decal_info; set the material with set_decal_material and the projection box with set_decal_size.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actor_label` | string | yes | Label of the ADecalActor in the editor world. |
-| `sort_order` | number | yes | New sort order value, a whole number (a fraction is rounded); required. |
-
-**Returns:** `{ actor_label: string, sort_order: int }`
 
 ## `spawn_decal_actor`
 

@@ -2,7 +2,7 @@
 
 # Water
 
-18 tools for water bodies (ocean, lake and river), water zones, their splines and Gerstner waves.
+15 tools for water bodies (ocean, lake and river), water zones, their splines and Gerstner waves.
 
 Back to the [index](README.md).
 
@@ -19,67 +19,22 @@ Link an existing water body actor to an existing AWaterZone.
 
 **Returns:** `{ water_body_label: string, water_zone_label: string, linked: bool }`
 
-## `configure_water_zone`
+## `create_water_body`
 
-*Destructive, idempotent.*
+*Destructive.*
 
-Set an AWaterZone's planar extent and/or water-info render-target resolution, then RE-READ both from the actor (extent, world bounds, texel density) instead of echoing the request back.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `water_zone_label` | string | yes | Label of the AWaterZone actor |
-| `extent` | array | no | Optional [X, Y] planar zone extent. !!! THIS IS THE **COMPLETE** EXTENT, NOT THE HALF-EXTENT / SEMI-AXIS !!! The engine halves it itself (AWaterZone::GetZoneBounds2D: "GetZoneExtents returns the full extent of the zone but BoxSphereBounds expects a half-extent"), so passing 4000000 gives world bounds of [-2000000, +2000000] around the actor -- a 40 km sea, not 80 km. Reading it as a semi-axis gives a sea of DOUBLE the intended size with bounds off the map; the `world_bounds_extent` field in the response is what disambiguates it (half of `zone_extent_actual`). |
-| `render_target_resolution` | array | no | Optional [X, Y] water-info render target resolution. Read back by reflection as `render_target_resolution_actual` (the getter is not exported, so this is the raw UPROPERTY, i.e. BEFORE the r.Water.WaterInfo.RenderTargetResolutionMax clamp). |
-
-**Returns:** `{ water_zone_label: string, zone_extent: [x,y] (RE-READ, kept for compatibility), zone_extent_actual: [x,y] (RE-READ, COMPLETE extent), world_bounds_extent: [x,y,z] (HALF-extent of the real actor bounds), world_bounds_origin: [x,y,z], world_bounds_min: [x,y,z], world_bounds_max: [x,y,z], actor_scale: [x,y,z], render_target_resolution_actual: [x,y] (omitted if unreadable), render_target_resolution_verified: bool, water_info_texel_size_uu: number (zone_extent / render_target_resolution; omitted if the resolution is unreadable or zero), applied: bool (DERIVED from read-back == request), requested: { extent, render_target_resolution } }`
-
-## `create_lake_water_body`
-
-*Additive.*
-
-Spawn a Lake AWaterBody actor, optionally link to a WaterZone, and READ BACK the wave height the factory attached (a lake is born with the OCEAN's waves and nothing else reveals it).
+Spawn a water body actor -- a lake, an ocean or a river, by body_type -- through the Water plugin's own actor factory, optionally link it to a WaterZone, and READ BACK the wave height the factory attached (a lake is born with the ocean's waves and nothing else reveals it; disable_waves removes them and proves it). affects_landscape carves the landscape with the water brush (off by default). The actor exists in memory: save_level puts it on disk. Shape a river or lake with the spline tools; set_water_body_properties sets per-point velocity and audio, set_properties the rest.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `body_type` | string | yes | One of lake, ocean, river |
 | `actor_label` | string | yes | Label to assign to the new water body actor |
 | `location` | array | no | Optional [X, Y, Z] world location (defaults to origin) |
-| `water_zone_label` | string | no | Optional label of an existing AWaterZone to auto-link the body to. If given and the zone is not found, `success` is FALSE (the body is still spawned; `linked_to_zone` says so). |
-| `affects_landscape` | boolean | no | When true the body carves the existing landscape via the water landscape brush; defaults to FALSE (non-destructive) |
-| `disable_waves` | boolean | no | OPT-IN, default FALSE. Sets water_waves = None right after the spawn and RE-READS GetMaxWaveHeight() to prove it went to 0. Use it on any basin shallower than ~5 m: the engine's Lake factory attaches the ocean's wave asset (measured 508.125 uu = 5.08 m of crest), which on a pond a few meters deep breaks the water surface -- crest above the lip of the basin, trough below the bed -- with every property of the actor reading green. |
+| `water_zone_label` | string | no | Optional label of an existing AWaterZone to link the body to; if it is not found, success is false while the body is still spawned |
+| `affects_landscape` | boolean | no | When true the body carves the existing landscape via the water landscape brush; defaults to false (non-destructive) |
+| `disable_waves` | boolean | no | Opt-in, default false: sets the water waves to none right after the spawn and re-reads the max wave height to prove it is 0 |
 
-**Returns:** `{ actor_label: string, actor_name: string, body_type: string, water_zone_label: string, linked_to_zone: bool, affects_landscape: bool, max_wave_height: number (RE-READ from UWaterBodyComponent::GetMaxWaveHeight() AFTER any disable_waves), max_wave_height_on_spawn: number (RE-READ as the factory left it), has_waves: bool, waves_disabled: bool, warning?: string (emitted when a lake was born with waves), requested: { actor_label, location, water_zone_label, affects_landscape, disable_waves } }`
-
-## `create_ocean_water_body`
-
-*Additive.*
-
-Spawn an Ocean AWaterBody actor, optionally link to a WaterZone, and read back its wave height (on an ocean the factory's waves are CORRECT -- ~508 uu -- so no warning is emitted here).
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actor_label` | string | yes | Label to assign to the new water body actor |
-| `location` | array | no | Optional [X, Y, Z] world location (defaults to origin) |
-| `water_zone_label` | string | no | Optional label of an existing AWaterZone to auto-link the body to. If given and the zone is not found, `success` is FALSE (the body is still spawned; `linked_to_zone` says so). |
-| `affects_landscape` | boolean | no | When true the body carves the existing landscape via the water landscape brush; defaults to FALSE (non-destructive) |
-| `disable_waves` | boolean | no | OPT-IN, default FALSE. Sets water_waves = None right after the spawn and RE-READS GetMaxWaveHeight(). On an ocean you almost certainly do NOT want this. |
-
-**Returns:** `{ actor_label: string, actor_name: string, body_type: string, water_zone_label: string, linked_to_zone: bool, affects_landscape: bool, max_wave_height: number (RE-READ), max_wave_height_on_spawn: number (RE-READ), has_waves: bool, waves_disabled: bool, requested: { actor_label, location, water_zone_label, affects_landscape, disable_waves } }`
-
-## `create_river_water_body`
-
-*Additive.*
-
-Spawn a River AWaterBody actor, optionally link to a WaterZone, and read back its wave height (a river is born at 0.000 -- that is the control case for the lake defect).
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actor_label` | string | yes | Label to assign to the new water body actor |
-| `location` | array | no | Optional [X, Y, Z] world location (defaults to origin) |
-| `water_zone_label` | string | no | Optional label of an existing AWaterZone to auto-link the body to. If given and the zone is not found, `success` is FALSE (the body is still spawned; `linked_to_zone` says so). |
-| `affects_landscape` | boolean | no | When true the body carves the existing landscape via the water landscape brush; defaults to FALSE (non-destructive) |
-| `disable_waves` | boolean | no | OPT-IN, default FALSE. Sets water_waves = None right after the spawn and RE-READS GetMaxWaveHeight(). A river has no waves to begin with, so this is normally a no-op here. |
-
-**Returns:** `{ actor_label: string, actor_name: string, body_type: string, water_zone_label: string, linked_to_zone: bool, affects_landscape: bool, max_wave_height: number (RE-READ), max_wave_height_on_spawn: number (RE-READ), has_waves: bool, waves_disabled: bool, requested: { actor_label, location, water_zone_label, affects_landscape, disable_waves } }`
+**Returns:** `{ the reply of the body's creator: actor name and label, body type, zone link, wave height read back }`
 
 ## `create_water_body_exclusion_volume`
 
@@ -96,19 +51,6 @@ Spawn an AWaterBodyExclusionVolume (a brush volume that excludes water bodies), 
 | `water_body_labels` | array | no | Optional array of AWaterBody labels to bind into the volume's WaterBodies list |
 
 **Returns:** `{ actor_label: string, actor_name: string, exclusion_mode: string, water_body_count: int, brush_built: bool }`
-
-## `create_water_zone`
-
-*Additive.*
-
-Spawn a new AWaterZone actor in the editor world at location, unrotated, and label it. Not idempotent: every call adds another zone, even with a label already in use. Nothing is saved. Returns actor_label, actor_name and has_water_mesh; link bodies via water_zone_label of create_lake_water_body and its siblings.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actor_label` | string | yes | Label to assign to the new AWaterZone actor |
-| `location` | array | no | World location [X, Y, Z] in cm; anything but a 3-number array means the origin. |
-
-**Returns:** `{ actor_label: string, actor_name: string, has_water_mesh: bool }`
 
 ## `get_water_body_gerstner_wave_detail`
 
@@ -268,3 +210,17 @@ Set ANY water body's spline path from world points, then synchronize the water s
 | `points` | array | yes | Array of [X, Y, Z] WORLD points (>= 2) defining the spline. Entries that are not a >= 3-element numeric array are skipped silently; `requested_point_count` reports how many survived parsing. |
 
 **Returns:** `{ water_body_label: string, point_count: int (RE-READ), spline_point_count_actual: int (RE-READ, same value, unambiguously named), closed_loop_actual: bool (RE-READ), requested_point_count: int, applied: bool (DERIVED: read-back count == requested count) }`
+
+## `set_water_zone_settings`
+
+*Destructive, idempotent.*
+
+Set an AWaterZone's planar extent and/or water-info render-target resolution, then RE-READ both from the actor (extent, world bounds, texel density) instead of echoing the request back.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `water_zone_label` | string | yes | Label of the AWaterZone actor |
+| `extent` | array | no | Optional [X, Y] planar zone extent. !!! THIS IS THE **COMPLETE** EXTENT, NOT THE HALF-EXTENT / SEMI-AXIS !!! The engine halves it itself (AWaterZone::GetZoneBounds2D: "GetZoneExtents returns the full extent of the zone but BoxSphereBounds expects a half-extent"), so passing 4000000 gives world bounds of [-2000000, +2000000] around the actor -- a 40 km sea, not 80 km. Reading it as a semi-axis gives a sea of DOUBLE the intended size with bounds off the map; the `world_bounds_extent` field in the response is what disambiguates it (half of `zone_extent_actual`). |
+| `render_target_resolution` | array | no | Optional [X, Y] water-info render target resolution. Read back by reflection as `render_target_resolution_actual` (the getter is not exported, so this is the raw UPROPERTY, i.e. BEFORE the r.Water.WaterInfo.RenderTargetResolutionMax clamp). |
+
+**Returns:** `{ water_zone_label: string, zone_extent: [x,y] (RE-READ, kept for compatibility), zone_extent_actual: [x,y] (RE-READ, COMPLETE extent), world_bounds_extent: [x,y,z] (HALF-extent of the real actor bounds), world_bounds_origin: [x,y,z], world_bounds_min: [x,y,z], world_bounds_max: [x,y,z], actor_scale: [x,y,z], render_target_resolution_actual: [x,y] (omitted if unreadable), render_target_resolution_verified: bool, water_info_texel_size_uu: number (zone_extent / render_target_resolution; omitted if the resolution is unreadable or zero), applied: bool (DERIVED from read-back == request), requested: { extent, render_target_resolution } }`

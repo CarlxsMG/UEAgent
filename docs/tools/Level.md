@@ -2,7 +2,7 @@
 
 # Level
 
-115 tools for placing and transforming actors, landscapes, foliage and splines, World Partition and data layers, level instances and streaming, and Play-in-Editor.
+112 tools for placing and transforming actors, landscapes, foliage and splines, World Partition and data layers, level instances and streaming, and Play-in-Editor.
 
 Back to the [index](README.md).
 
@@ -275,7 +275,7 @@ Instances a UDataLayerAsset into the editor world's World Partition.  Uses UData
 
 *Additive.*
 
-Create and save a FoliageType asset (UFoliageType_InstancedStaticMesh) wrapping a static mesh, so it can be placed as foliage and tuned with set_foliage_type_properties. Creating the asset is safe; note that the tools that PLACE instances of it (add_foliage_instances, scatter_foliage_in_box, scatter_foliage_on_layer) can crash the editor, so plan to scatter via instanced-static-mesh components or PCG. For landscape GRASS driven by the terrain material use create_landscape_grass_type instead.
+Create and save a FoliageType asset (UFoliageType_InstancedStaticMesh) wrapping a static mesh, so it can be placed as foliage and tuned with set_properties. Creating the asset is safe; note that the tools that PLACE instances of it (add_foliage_instances, scatter_foliage_in_box, scatter_foliage_on_layer) can crash the editor, so plan to scatter via instanced-static-mesh components or PCG. For landscape GRASS driven by the terrain material use create_landscape_grass_type instead.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -430,7 +430,7 @@ Level the terrain under a footprint: snap every heightmap vertex inside a world-
 
 *Additive, idempotent.*
 
-Move the camera of every level editor viewport to frame one actor of the editor world, found by internal name or outliner label (first match), or, when actor_name is omitted, the actors currently selected. Only the viewport cameras change: nothing in the level, no undo entry, nothing saved, and the selection stays as it is. An actor_name that matches nothing, or no actor_name with an empty selection, is an error. The reply has focused_actor (the internal name) in actor mode or focused_count in selection mode, never both. To place the camera at an exact location and rotation use set_viewport_camera, read it back with get_viewport_state, and select actors first with select_actors.
+Move the camera of every level editor viewport to frame one actor of the editor world, found by internal name or outliner label (first match), or, when actor_name is omitted, the actors currently selected. Only the viewport cameras change: nothing in the level, no undo entry, nothing saved, and the selection stays as it is. An actor_name that matches nothing, or no actor_name with an empty selection, is an error. The reply has focused_actor (the internal name) in actor mode or focused_count in selection mode, never both. To place the camera at an exact location and rotation use set_viewport_settings, read it back with get_viewport_state, and select actors first with select_actors.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -591,23 +591,11 @@ Count how many instances of one FoliageType are placed across the level's Instan
 
 **Returns:** `{ foliage_type_path: string, foliage_type: string, has_instances: bool (instance_count > 0), instance_count: int, placed_instance_count: int, foliage_actor_count: int }`
 
-## `get_foliage_type_properties`
-
-*Read-only.*
-
-Read a FoliageType_InstancedStaticMesh asset's authored tunables in one call -- density, radius, scale and z-offset ranges, cull distances, mobility, align-to-normal, random yaw, world collision, shadow and indirect-lighting flags -- under the names set_foliage_type_properties takes. A curated view with nothing computed; get_properties reads any other UPROPERTY on the asset. Actor foliage types are not found. Describes the ASSET, not what is placed in the level: for that use get_foliage_instance_count / get_foliage_in_radius.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `foliage_path` | string | yes | Asset path of the UFoliageType |
-
-**Returns:** `{ asset_path, foliage_class, density, density_adjustment_factor, radius, scale_x:{min,max}, scale_y, scale_z, z_offset, cull_distance:{min,max}, mobility, align_to_normal, random_yaw, collision_with_world, cast_shadow, affect_dynamic_indirect_lighting }`
-
 ## `get_foliage_types`
 
 *Read-only.*
 
-List every FoliageType actually present in the level's InstancedFoliageActors, with the instance counts each carries. The level-side inventory ("what vegetation is in this map, and how much"), as opposed to get_foliage_type_properties which describes one asset. Nothing here means nothing has been placed, even if the FoliageType assets exist in Content.
+List every FoliageType actually present in the level's InstancedFoliageActors, with the instance counts each carries. The level-side inventory ("what vegetation is in this map, and how much"), as opposed to get_properties which describes one asset. Nothing here means nothing has been placed, even if the FoliageType assets exist in Content.
 
 No parameters.
 
@@ -892,7 +880,7 @@ Lists the editor world's World Partition actors by walking their DESCRIPTORS wit
 
 *Destructive.*
 
-Pins the World Partition cells intersecting an axis-aligned region [min,max] into memory for inspection (editor world).  Creates a UWorldPartitionEditorLoaderAdapter backed by FLoaderAdapterShape over the box and calls ILoaderAdapter::Load(); the adapter stays REGISTERED so the region remains resident (mirrors the editor's "Load Region from Here"), which then lets get_actors_by_class / actor tools see the now-loaded actors. Honest error on a non-WP (default) map or an uninitialized World Partition. Non-destructive: it loads (pins) actors, it never spawns/edits/saves.
+Pins the World Partition cells intersecting an axis-aligned region [min,max] into memory for inspection (editor world).  Creates a UWorldPartitionEditorLoaderAdapter backed by FLoaderAdapterShape over the box and calls ILoaderAdapter::Load(); the adapter stays REGISTERED so the region remains resident (mirrors the editor's "Load Region from Here"), which then lets get_actors_by_class / actor tools see the now-loaded actors. Honest error on a non-WP (default) map or an uninitialized World Partition. Non-destructive: it loads (pins) actors, it never spawns/edits/saves. Inverse: unload_world_partition_region with the same label.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1283,32 +1271,6 @@ Sets the EDataLayerType ("Editor" or "Runtime") of a UDataLayerAsset and saves i
 
 **Returns:** `{ data_layer_asset_path: string, asset_path: string, data_layer_type: string, is_runtime: bool, type_set: bool, saved: bool }`
 
-## `set_foliage_type_properties`
-
-*Destructive, idempotent.*
-
-Set tunables of a FoliageType_InstancedStaticMesh asset in one call, only the fields you pass, then save it. Over set_properties it takes the scale, z-offset and cull ranges as {"min","max"} objects and saves in the same call, but records no undo step. Returns the read-back values with applied_count and saved. An invalid mobility, or a range that is not such an object with a number bound, fails the call before anything is written. Edits the asset only: instances already placed keep their transforms. Read: get_foliage_type_properties.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `foliage_path` | string | yes | Asset path of a UFoliageType_InstancedStaticMesh, e.g. "/Game/Foliage/FT_Example"; actor foliage types are not found. |
-| `density` | number | no | Instances per 1000 x 1000 uu area (10 m by 10 m) when painting. |
-| `density_adjustment_factor` | number | no | Density multiplier used when reapplying: above 1 adds instances, below 1 removes them. |
-| `radius` | number | no | Minimum distance in cm between foliage instances. |
-| `scale_x` | object | no | X scale range as a JSON object {"min":0.8,"max":1.2}, either bound optional; anything else (not an object, no number bound, another key) fails the call and nothing is changed. |
-| `scale_y` | object | no | Y scale range as a JSON object {"min":0.8,"max":1.2}, either bound optional; anything else fails the call and nothing is changed. |
-| `scale_z` | object | no | Z scale range as a JSON object {"min":0.8,"max":1.2}, either bound optional; anything else fails the call and nothing is changed. |
-| `z_offset` | object | no | Z location offset range in cm as a JSON object {"min":-5,"max":0}; either bound may be left out; anything else fails the call and nothing is changed. |
-| `cull_distance` | object | no | Integer interval {"min":start,"max":end} in cm: instances fade from min (only with a PerInstanceFadeAmount material node) and clusters cull beyond max; 0 disables. Anything but such an object fails the call and nothing is changed. |
-| `mobility` | string | no | Component mobility: Static, Stationary or Movable, case-insensitive; any other value fails the call and nothing is changed. |
-| `align_to_normal` | boolean | no | Tilt instances to the normal of the surface they are placed on. |
-| `random_yaw` | boolean | no | Give each instance a random yaw around its vertical axis. |
-| `collision_with_world` | boolean | no | Test for overlap with world geometry before placing each instance. |
-| `cast_shadow` | boolean | no | Whether the foliage components cast shadows. |
-| `affect_dynamic_indirect_lighting` | boolean | no | Whether the foliage injects light into dynamic indirect lighting; used only when cast_shadow is true. |
-
-**Returns:** `{ asset_path, foliage_class, density, density_adjustment_factor, radius, scale_x:{min,max}, scale_y, scale_z, z_offset, cull_distance:{min,max}, mobility, align_to_normal, random_yaw, collision_with_world, cast_shadow, affect_dynamic_indirect_lighting, applied_count, saved, save_error? }`
-
 ## `set_kill_z`
 
 *Destructive, idempotent.*
@@ -1527,35 +1489,6 @@ Spawn an ALevelStreamingVolume in the editor world with a real box brush (half-e
 
 **Returns:** `{ actor_name, actor_label, actor_class, brush_built, streaming_level, usage, bound, already_bound, streaming_level_names: [string], success, note }`
 
-## `spawn_navmesh_bounds_volume`
-
-*Additive.*
-
-Spawn a NavMeshBoundsVolume in the editor world at location with a REAL cube brush of half-extent extent (default 1000,1000,500) -- an empty brush yields 0 navmesh tiles -- and report brush and bounds RE-READ off the actor in diagnose_navmesh's terms (brush_empty, brush_poly_count, bounds_valid). spawn_box_volume(volume_class='NavMeshBoundsVolume') builds the same brush plus a label, spatial-loading flag and scale normalization; this one differs by its larger default and report fields. One undo step; not saved (save_level); navigation is not rebuilt here.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `location` | array | no | Optional [X, Y, Z] world location (defaults to origin) |
-| `extent` | array | no | Optional [X, Y, Z] **SEMI-EXTENT** (half-extent) in cm (defaults to [1000, 1000, 500]). The built cube's FULL edge length is 2x this on every axis -- e.g. extent [1000, 1000, 500] yields a 2000 x 2000 x 1000 cube. Echoed back under `requested.extent`; what the actor ended up with is `bounds_extent_actual`. |
-
-**Returns:** `{ actor_name: string, actor_path: string, location_x: number, location_y: number, location_z: number, extent_x: number, extent_y: number, extent_z: number, brush_built: bool, has_brush_geometry: bool, brush_present: bool, brush_poly_count: number (-1 = no UModel/no editor-only Polys data), brush_empty: bool, bounds_valid: bool, bounds_extent_x: number, bounds_extent_y: number, bounds_extent_z: number, bounds_extent_actual: { x, y, z }, bounds_origin_actual: { x, y, z }, actor_scale: { x, y, z }, location_actual: { x, y, z }, requested: { extent }, success: bool }`
-
-## `spawn_text_render_actor`
-
-*Additive.*
-
-Spawn a TextRenderActor with its text, color (0..255, opaque) and world size set in the same call, into the ACTIVE world: the first PIE/game world when one runs (the actor then vanishes when play stops), otherwise the editor world. spawn_actor has no text-render type, and unlike it this has no world selector -- with several PIE instances it takes the first PIE context, not necessarily the server. world_size is read back. One undo step in the editor world; not saved (save_level).
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `text` | string | no | Optional text to assign to the text render component |
-| `location` | array | no | Optional [x, y, z] world location |
-| `rotation` | array | no | Optional [pitch, yaw, roll] world rotation |
-| `color` | array | no | Optional [r, g, b] 0..255 color (alpha forced opaque) |
-| `size` | number | no | Optional world size for the text render component |
-
-**Returns:** `{ actor_name: string, actor_internal_name: string, actor_class: string, has_component: bool, text_set: bool, color_set: bool, size_set: bool, world_size: number, spawned: bool }`
-
 ## `start_play_in_editor`
 
 *Destructive.*
@@ -1582,6 +1515,18 @@ Press Stop: requests the end of the Play-in-Editor session (EditorRequestEndPlay
 | `force` | boolean | no | Optional bool (default false). Override the PIE-ownership guard: stop even if another session (or a manually-started PIE) currently owns Play-in-Editor. Read by the server before the tool runs; without it, stopping a PIE your session does not own is refused with pie_owner/requester in the payload. |
 
 **Returns:** `{ pie_stopped: bool (hardcoded true when PIE was up -- not a measurement), was_in_pie: bool, still_in_pie: bool (read immediately, so usually still true: teardown is async), message: string }`
+
+## `unload_world_partition_region`
+
+*Destructive.*
+
+Release the region load_world_partition_region pinned under label in the editor world: its loader adapter unloads the cells it holds (the editor's Unload Region) and is unregistered, so the actors only it kept resident leave memory. Inverse of load_world_partition_region; every adapter registered under that label goes (adapters_released). A label no registered adapter has is an honest no-op (adapters_released=0, the labels in use listed); a world without World Partition, or one not initialized, is an error. Not an undo step: load_world_partition_region with the same box brings the region back. Unsaved edits on unloaded actors are the editor's to handle, as when the region is unloaded by hand: save_level first. num_loaded_actors is the world-wide loaded-descriptor count after the unload.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `label` | string | yes | Label the region was loaded under (load_world_partition_region's label, default "MCP Load Region"). |
+
+**Returns:** `{ world: string, label: string, adapters_released: int, unloaded: bool, num_loaded_actors: int, labels_in_use: [string] }`
 
 ## `wait_for_pie_completion`
 

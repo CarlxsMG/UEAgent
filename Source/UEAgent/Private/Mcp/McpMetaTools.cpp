@@ -378,7 +378,8 @@ namespace McpMetaToolsPrivate
 			bOutIsError = true;
 			return Failure(TEXT("describe_tool: missing required parameter 'name'"));
 		}
-		const FMcpToolCatalog::FTool* Tool = Catalog.FindTool(Name);
+		FString RetiredNote;
+		const FMcpToolCatalog::FTool* Tool = Catalog.FindTool(Catalog.ResolveName(Name, &RetiredNote));
 		if (!Tool)
 		{
 			bOutIsError = true;
@@ -395,6 +396,10 @@ namespace McpMetaToolsPrivate
 		if (Tool->Annotations.IsValid())
 		{
 			Result->SetObjectField(TEXT("annotations"), Tool->Annotations);
+		}
+		if (!RetiredNote.IsEmpty())
+		{
+			Result->SetStringField(TEXT("retired_name"), RetiredNote);
 		}
 		return Result;
 	}

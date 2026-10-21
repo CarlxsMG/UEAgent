@@ -17,11 +17,10 @@ inline constexpr const TCHAR* RB_check_bp_variable_default_0 =
 	TEXT("does write: set the value on the CDO from Python (get_default_object + set_editor_property), without recompiling afterwards.");
 
 inline constexpr const TCHAR* RB_check_collision_profile_0 =
-	TEXT("The per-channel responses did not reach the profile, which now means 'ignore every channel' -- the opposite of what was asked, with no ")
-	TEXT("error. The keys are read as Channel / Response; lowercase 'channel'/'response' (the form this tool's schema documents) are silently ")
-	TEXT("dropped. Retry with Channel/Response (custom_response_count should then be non-zero) or write them on the component ")
-	TEXT("(BodyInstance.CollisionResponses.ResponseArray), and confirm the profile line in Config/DefaultEngine.ini lists the channels inside ")
-	TEXT("CustomResponses=(...).");
+	TEXT("Some per-channel responses did not reach the profile, so for those channels it keeps the default response instead of the one asked, ")
+	TEXT("with no error. An entry is skipped when its channel is not a channel of the project or its response is not Block, Ignore or Overlap: ")
+	TEXT("take the channel names list_collision_channels shows (a custom channel by its friendly name), retry until custom_response_count ")
+	TEXT("matches the entries sent, and confirm the profile line in Config/DefaultEngine.ini lists the channels inside CustomResponses=(...).");
 
 inline constexpr const TCHAR* RB_check_compile_blueprint_0 =
 	TEXT("The Blueprint does not compile. A common cause is an unresolved wildcard pin on a CustomThunk array node ('The type of Target Array is ")
@@ -48,7 +47,7 @@ inline constexpr const TCHAR* RB_check_component_parameters_1 =
 inline constexpr const TCHAR* RB_check_component_parameters_2 =
 	TEXT("DefinitionAsset is deprecated: it is written and re-reads fine, but the SmartObject keeps using the old definition, and neither this tool ")
 	TEXT("nor get_properties warns. Write DefinitionRef instead (a StructProperty): {\"SmartObjectDefinition\": \"/Game/...\"}. ")
-	TEXT("inspect_object with include_property_metadata=true reports deprecated:true/false per property.");
+	TEXT("get_object_info with include_property_metadata=true reports deprecated:true/false per property.");
 
 inline constexpr const TCHAR* RB_check_comment_node_0 =
 	TEXT("The comment text was lost and the box shows the literal 'Comment': the tool sets NodeComment before the node is finalized and the ")
@@ -312,7 +311,7 @@ inline constexpr const TCHAR* RBK_LYING_APIS_30 =
 
 inline constexpr const TCHAR* RBK_LYING_APIS_31 =
 	TEXT("is not exposed, and the HitResult returned by line_trace_single cannot be read from Python (its fields are missing, protected or not ")
-	TEXT("found), so traces always look like misses. Use raycast_scene / query_scene_overlaps over MCP, which return real hit data and accept world='server'.");
+	TEXT("found), so traces always look like misses. Use raycast_scene / find_scene_overlaps over MCP, which return real hit data and accept world='server'.");
 
 inline constexpr const TCHAR* RBK_LYING_APIS_32 =
 	TEXT("on an AIPerceptionComponent says nothing about whether perception works: perception is driven by the central AIPerceptionSystem. Use ")
@@ -342,7 +341,7 @@ inline constexpr const TCHAR* RBK_LYING_APIS_37 =
 
 inline constexpr const TCHAR* RBK_LYING_APIS_38 =
 	TEXT("does not list every reflected property of an Unreal object, so a dir() sweep misses properties that exist (often inside structs). Use ")
-	TEXT("get_properties / inspect_object (include_property_metadata=true) over MCP, or try the CamelCase name directly with get_editor_property.");
+	TEXT("get_properties / get_object_info (include_property_metadata=true) over MCP, or try the CamelCase name directly with get_editor_property.");
 
 inline constexpr const TCHAR* RBK_LYING_APIS_40 =
 	TEXT("argument passing fails silently in several ways: arrays of structs of the wrong type arrive empty; a GameplayTag passed where a Blueprint ")
@@ -360,7 +359,7 @@ inline constexpr const TCHAR* RBK_LYING_APIS_42 =
 
 inline constexpr const TCHAR* RBK_LYING_APIS_43 =
 	TEXT("on a Blueprint struct returns {} because its fields carry GUID suffixes, which does not mean nothing was written. Read with ")
-	TEXT("inspect_object (include_property_metadata=true), get_editor_property using the GUID-suffixed name, or get_data_table_row with ")
+	TEXT("get_object_info (include_property_metadata=true), get_editor_property using the GUID-suffixed name, or get_data_table_row with ")
 	TEXT("include_export_text=true. Never compare structs with str() ")
 	TEXT("(it includes the pointer); compare fields.");
 
@@ -449,7 +448,7 @@ inline constexpr const TCHAR* RBK_LYING_APIS_63 =
 
 inline constexpr const TCHAR* RBK_LYING_APIS_64 =
 	TEXT("reflects the movement mode computed on the CMC's next tick, so reading it right after a teleport is unreliable. Check GetPhysicsVolume ")
-	TEXT("(immediate) or query_scene_overlaps instead, and read IsSwimming in a later call.");
+	TEXT("(immediate) or find_scene_overlaps instead, and read IsSwimming in a later call.");
 
 inline constexpr const TCHAR* RBK_LYING_APIS_65 =
 	TEXT("order is not possession order, so 'the first character' may be the wrong player; use PlayerController.get_controlled_pawn(). When comparing ")
@@ -488,13 +487,13 @@ inline constexpr const TCHAR* RBK_LYING_APIS_70 =
 inline constexpr const TCHAR* RBK_LYING_ARGUMENTS_0 =
 	TEXT("setting bDynamicObstacle with an AreaClass on a primitive component re-reads correctly but does not carve the navmesh, and ")
 	TEXT("bUseSystemDefaultObstacleAreaClass defaults to true, which replaces your AreaClass with the walkable NavArea_Obstacle. Use a ")
-	TEXT("NavModifierComponent or a NavModifierVolume (spawn_nav_modifier_volume) instead, and verify with the route ")
+	TEXT("NavModifierComponent or a NavModifierVolume (spawn_box_volume volume_class=NavModifierVolume, then its AreaClass with set_properties) instead, and verify with the route ")
 	TEXT("(find_path_to_location_synchronously before and after: path length and number of path points), not with the properties.");
 
 inline constexpr const TCHAR* RBK_LYING_ARGUMENTS_1 =
 	TEXT("setting bDynamicObstacle with an AreaClass on a primitive component re-reads correctly but does not carve the navmesh, and ")
 	TEXT("bUseSystemDefaultObstacleAreaClass defaults to true, which replaces your AreaClass with the walkable NavArea_Obstacle. Use a ")
-	TEXT("NavModifierComponent or a NavModifierVolume (spawn_nav_modifier_volume) instead, and verify with the route ")
+	TEXT("NavModifierComponent or a NavModifierVolume (spawn_box_volume volume_class=NavModifierVolume, then its AreaClass with set_properties) instead, and verify with the route ")
 	TEXT("(find_path_to_location_synchronously before and after: path length and number of path points), not with the properties.");
 
 inline constexpr const TCHAR* RBK_LYING_ARGUMENTS_5 =
@@ -615,7 +614,7 @@ inline constexpr const TCHAR* RB_check_python_code_8 =
 inline constexpr const TCHAR* RB_check_python_code_9 =
 	TEXT("a deprecated asset property can return an empty container without an error, so a loop over it silently does nothing (e.g. ")
 	TEXT("InputMappingContext.mappings is deprecated and empty in 5.8; the data lives in default_key_mappings.mappings). Count before writing, ")
-	TEXT("re-read from the asset afterwards, and use inspect_object with include_property_metadata=true to see which properties are deprecated.");
+	TEXT("re-read from the asset afterwards, and use get_object_info with include_property_metadata=true to see which properties are deprecated.");
 
 inline constexpr const TCHAR* RB_check_python_code_10 =
 	TEXT("this usually does not mean the property is missing: Blueprint variable names may contain spaces and capitals (ask for the exact authored ")
@@ -782,7 +781,7 @@ inline constexpr const TCHAR* RB_check_widget_preview_0 =
 	TEXT("This render is reliable for structure, not color: sRGB is applied twice, so dark colors come out much lighter, and pixel values will not ")
 	TEXT("match the hex you set (colors are stored linear). Judge colors from the asset (get_widget_blueprint_tree, audit_widget_accessibility). It ")
 	TEXT("is also a design-time render: anything that only exists at runtime (NativeConstruct text, bindings, view-model data) appears empty; for a ")
-	TEXT("live HUD use read_pie_widgets or capture_pie_screenshot. Without an RHI it returns rendered:false with a reason.");
+	TEXT("live HUD use list_pie_widgets or capture_pie_screenshot. Without an RHI it returns rendered:false with a reason.");
 
 inline constexpr const TCHAR* RB_check_game_mode_class_0 =
 	TEXT("This sets the class property on the CDO without recompiling, marking the package dirty or calling Modify, yet success is true, the re-read ")
@@ -966,7 +965,7 @@ inline constexpr const TCHAR* RB_check_water_material_0 =
 	TEXT("UWaterBodyComponent (readers: get_water_static_mesh_material_instance(), get_water_lod_material_instance()).");
 
 inline constexpr const TCHAR* RB_check_polygroup_paint_0 =
-	TEXT("Polygroup %s selected no triangle, so nothing was painted: with PolygroupMode = PerFace (the default of append_mesh_primitive) polygroups are ")
+	TEXT("Polygroup %s selected no triangle, so nothing was painted: with PolygroupMode = PerFace (the default of add_mesh_primitive) polygroups are ")
 	TEXT("numbered from 1, not 0. Check first with select_mesh_triangles(region='polygroup'), which returns triangles_selected.");
 
 inline constexpr const TCHAR* RB_check_polygroup_paint_1 =
@@ -1129,7 +1128,7 @@ inline constexpr const TCHAR* RB_check_composite_table_0 =
 
 inline constexpr const TCHAR* RB_check_visible_text_without_identity_0 =
 	TEXT("This writes player-facing text without localization identity, so it will not be gathered or translated, and audit_widget_text will not ")
-	TEXT("catch it (it only inspects Widget Blueprints). Write the value through set_properties / set_data_asset_property / set_data_table_cell ")
+	TEXT("catch it (it only inspects Widget Blueprints). Write the value through set_properties / set_data_table_cell ")
 	TEXT("as NSLOCTEXT(\"NS\",\"Key\",\"Source\") or LOCTABLE(\"/Game/ST\",\"key\"); bare text stays invariant. The same applies to create_enum and ")
 	TEXT("rename_enum_entry.");
 
@@ -1252,7 +1251,7 @@ inline constexpr const TCHAR* RB_warn_volume_collision_1 =
 inline constexpr const TCHAR* RB_warn_volume_collision_2 =
 	TEXT("(2) For water, the volume's top must match the water surface: the CMC measures immersion against the volume bounds, so a sloped surface ")
 	TEXT("makes pawns swim on dry land. (3) With the default Static mobility, moving the volume moves its transform but not its collision; set ")
-	TEXT("BrushComponent0.Mobility = Movable if it must move (volumes cannot be created at runtime). Verify with query_scene_overlaps, never with the ")
+	TEXT("BrushComponent0.Mobility = Movable if it must move (volumes cannot be created at runtime). Verify with find_scene_overlaps, never with the ")
 	TEXT("transform.");
 
 inline constexpr const TCHAR* RB_warn_undeformed_collision_0 =
@@ -1415,7 +1414,7 @@ inline constexpr const TCHAR* RB_apply_finding_0 =
 	TEXT("{0}: the call reported success but the state did not change (requested {1}, stored {2}).");
 
 inline constexpr const TCHAR* RB_annotate_offload_0 =
-	TEXT("The full payload is on disk: read it with read_mcp_audit_file(path='");
+	TEXT("The full payload is on disk: read it with get_mcp_audit_report(path='");
 
 inline constexpr const TCHAR* RB_annotate_offload_1 =
 	TEXT("'), or call again with a narrower query (max_results or a filter) to get it inline. Report file names use UTC, not local time; compare them ")

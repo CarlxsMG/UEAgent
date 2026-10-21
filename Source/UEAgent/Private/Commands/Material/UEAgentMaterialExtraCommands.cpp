@@ -99,6 +99,10 @@ namespace
         if (P == TEXT("refraction")) { Out = MP_Refraction; return true; }
         if (P == TEXT("pixeldepthoffset")) { Out = MP_PixelDepthOffset; return true; }
         if (P == TEXT("subsurfacecolor") || P == TEXT("subsurface")) { Out = MP_SubsurfaceColor; return true; }
+        // The Substrate front material (what connect_substrate_slab_to_material feeds) and the attributes input of a
+        // material that uses material attributes (what add_material_attribute_layers_node feeds).
+        if (P == TEXT("frontmaterial") || P == TEXT("front_material")) { Out = MP_FrontMaterial; return true; }
+        if (P == TEXT("materialattributes") || P == TEXT("material_attributes")) { Out = MP_MaterialAttributes; return true; }
         return false;
     }
 
@@ -257,7 +261,7 @@ namespace UEAgentMaterialExtraImpl
 // MCP:connect_to_material_output - Wire one output of an expression node into a main input of a UMaterial asset (BaseColor, Roughness, Normal...). The edit stays in memory: no recompile, no dirty flag, no save, so follow with compile_material and save_asset. Node-to-node wiring is connect_material_expressions.
 //   @param material_path - UMaterial asset path, e.g. "/Game/Materials/M_Rock"; a material instance path fails with Material not found.
 //   @param from_node_id - Id of the source expression (from create_material_expression / get_material_graph_info).
-//   @param output_property - Material input to feed, case-insensitive: BaseColor, Metallic, Specular, Roughness, Anisotropy, Normal, Tangent, EmissiveColor (or Emissive), Opacity, OpacityMask, WorldPositionOffset (WPO), AmbientOcclusion (AO), Refraction, PixelDepthOffset, SubsurfaceColor.
+//   @param output_property - Material input to feed, case-insensitive: BaseColor, Metallic, Specular, Roughness, Anisotropy, Normal, Tangent, EmissiveColor (or Emissive), Opacity, OpacityMask, WorldPositionOffset (WPO), AmbientOcclusion (AO), Refraction, PixelDepthOffset, SubsurfaceColor, FrontMaterial (Substrate), MaterialAttributes.
 //   @param from_pin - Output pin name on the source node, e.g. "RGB" or "R"; omitted or empty uses its first output.
 //   @returns { material: string, from_node_id: string, output_property: string, connected: bool }
 
@@ -294,7 +298,7 @@ TSharedPtr<FJsonObject> HandleConnectToMaterialOutput(const TSharedPtr<FJsonObje
 
 // MCP:disconnect_to_material_output - Disconnect a material output property (inverse of connect_to_material_output).  Idempotent: an already-disconnected property returns already_disconnected=true (still success — the output slot always resolves to a valid input, so false is unambiguously "nothing was connected", never an error).
 //   @param material_path - Material asset path.
-//   @param output_property - BaseColor, Metallic, Roughness, Normal, Emissive, Opacity, OpacityMask, Specular, ... (same strings as connect_to_material_output)
+//   @param output_property - BaseColor, Metallic, Roughness, Normal, Emissive, Opacity, OpacityMask, Specular, ... (same strings as connect_to_material_output), FrontMaterial (the Substrate slab wire connect_substrate_slab_to_material makes) and MaterialAttributes (the wire add_material_attribute_layers_node makes) included
 //   @returns { material: string, output_property: string, disconnected: bool, already_disconnected: bool }
 
 TSharedPtr<FJsonObject> HandleDisconnectToMaterialOutput(const TSharedPtr<FJsonObject>& Params)
@@ -509,11 +513,13 @@ namespace
     }
 }
 
-// MCP:set_material_instance_parameter - Set a scalar, vector, texture or static-switch global parameter on a Material Instance Constant asset and re-read it: set comes from the re-read (the engine setter always returns false), plus value_after and overridden_after. Malformed vectors are rejected. Marks the package dirty; does not save.
+// MCP:set_material_instance_parameter - Set a parameter override on a Material Instance Constant asset and re-read it: a scalar, vector or texture global parameter (set comes from the re-read, as the engine setter always returns false, plus value_after and overridden_after; the package is marked dirty, not saved), a static switch or static component mask (its static permutation rebuilt and the instance saved), or, with layer_index, a scalar, vector or texture parameter of one layer of a layered instance. Malformed vectors are rejected. set_material_instance_parameter_override toggles or clears overrides; set_material_instance_dynamic_parameter writes a transient MID.
 //   @param instance_path - Asset path of the UMaterialInstanceConstant, e.g. "/Game/Materials/MI_Rock".
 //   @param param_name - Parameter name as defined in the parent material, e.g. "BaseTint"; only global parameters are reached, not layer parameters.
 //   @param value - Value. Scalar: a number (JSON number or numeric string). Vector: '(R=..,G=..,B=..,A=..)', '[r,g,b,a]', '[r,g,b]', 'r,g,b,a', 'r,g,b', or a real JSON array of 3-4 numbers; anything else is REJECTED (never written as black). Texture: an asset path. Static switch: a bool or 'true'/'false'.
-//   @param param_type - "scalar" | "vector" | "texture" | "static_switch" (optional, inferred from the value: a JSON array => vector, a JSON bool => static_switch, a JSON number => scalar, a string starting with '/' => texture, with '(' or '[' => vector, else scalar. A bool passed AS A STRING still reads as scalar, so pass param_type explicitly in that case)
+//   @param association - Optional, static switch or component mask: GlobalParameter (default), LayerParameter or BlendParameter
+//   @param layer_index [integer] - Optional: the zero-based layer of a layered instance; with a scalar, vector or texture param_type it writes that layer's parameter
+//   @param param_type - "scalar" | "vector" | "texture" | "static_switch" | "static_component_mask" (a value [r, g, b, a] of bools) (optional, inferred from the value: a JSON array => vector, a JSON bool => static_switch, a JSON number => scalar, a string starting with '/' => texture, with '(' or '[' => vector, else scalar. A bool passed AS A STRING still reads as scalar, so pass param_type explicitly in that case)
 //   @returns { instance: string, instance_path: string, param_name: string, param_type: string, value_format?: string, set: bool, value_after: number|object|string|bool|null, overridden_after: bool, value_requested: number|object|string|bool, requested: {...} }
 
 TSharedPtr<FJsonObject> HandleSetMaterialInstanceParam(const TSharedPtr<FJsonObject>& Params)
@@ -522,6 +528,86 @@ TSharedPtr<FJsonObject> HandleSetMaterialInstanceParam(const TSharedPtr<FJsonObj
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("instance_path"), InstancePath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("param_name"), ParamName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
     Params->TryGetStringField(TEXT("param_type"), ParamType);
+
+    // A static switch or component mask needs its static permutation rebuilt and the instance saved, and a layer
+    // parameter needs its layer: the tool that does each runs the call.
+    {
+        const TSharedPtr<FJsonValue> Given = Params->TryGetField(TEXT("value"));
+        double LayerIndex = 0.0;
+        const bool bLayer = Params->TryGetNumberField(TEXT("layer_index"), LayerIndex);
+        auto Base = [&InstancePath, &ParamName, &Params]()
+        {
+            TSharedPtr<FJsonObject> StepParams = MakeShared<FJsonObject>();
+            StepParams->SetStringField(TEXT("material_instance_path"), InstancePath);
+            StepParams->SetStringField(TEXT("parameter_name"), ParamName);
+            for (const TCHAR* Key : { TEXT("association"), TEXT("layer_index") })
+            {
+                if (const TSharedPtr<FJsonValue> Value = Params->TryGetField(Key))
+                {
+                    StepParams->SetField(Key, Value);
+                }
+            }
+            return StepParams;
+        };
+        const bool bSwitch = ParamType.Equals(TEXT("static_switch"), ESearchCase::IgnoreCase)
+            || (ParamType.IsEmpty() && Given.IsValid() && Given->Type == EJson::Boolean);
+        if (bSwitch)
+        {
+            bool bOn = false;
+            FString AsText;
+            // A JSON string reads as a bool whatever it holds, so only a real bool or the text true/false is taken.
+            const bool bRealBool = Given.IsValid() && Given->Type == EJson::Boolean;
+            const bool bBoolText = Given.IsValid() && Given->Type == EJson::String && Given->TryGetString(AsText)
+                && (AsText.Equals(TEXT("true"), ESearchCase::IgnoreCase) || AsText.Equals(TEXT("false"), ESearchCase::IgnoreCase));
+            if (bRealBool)
+            {
+                bOn = Given->AsBool();
+            }
+            if (!bRealBool && !bBoolText)
+            {
+                return mcp_common::MakeErrorReply(TEXT("A static switch value is true or false; nothing was changed"));
+            }
+            if (!AsText.IsEmpty())
+            {
+                bOn = AsText.Equals(TEXT("true"), ESearchCase::IgnoreCase);
+            }
+            TSharedPtr<FJsonObject> StepParams = Base();
+            StepParams->SetBoolField(TEXT("value"), bOn);
+            return mcp_common::RunSubCommand(TEXT("set_material_instance_static_switch"), StepParams);
+        }
+        if (ParamType.Equals(TEXT("static_component_mask"), ESearchCase::IgnoreCase))
+        {
+            const TArray<TSharedPtr<FJsonValue>>* Channels = nullptr;
+            if (!Given.IsValid() || !Given->TryGetArray(Channels) || !Channels || Channels->Num() != 4)
+            {
+                return mcp_common::MakeErrorReply(TEXT("A static component mask value is [r, g, b, a] of bools; nothing was changed"));
+            }
+            TSharedPtr<FJsonObject> StepParams = Base();
+            const TCHAR* const Keys[] = { TEXT("r"), TEXT("g"), TEXT("b"), TEXT("a") };
+            for (int32 Index = 0; Index < 4; ++Index)
+            {
+                bool bChannel = false;
+                if (!(*Channels)[Index].IsValid() || (*Channels)[Index]->Type != EJson::Boolean || !(*Channels)[Index]->TryGetBool(bChannel))
+                {
+                    return mcp_common::MakeErrorReply(TEXT("A static component mask value is [r, g, b, a] of bools; nothing was changed"));
+                }
+                StepParams->SetBoolField(Keys[Index], bChannel);
+            }
+            return mcp_common::RunSubCommand(TEXT("set_material_instance_static_component_mask"), StepParams);
+        }
+        if (bLayer)
+        {
+            if (ParamType.IsEmpty() || !Given.IsValid())
+            {
+                return mcp_common::MakeErrorReply(TEXT("A layer parameter needs param_type (scalar, vector or texture) and value; nothing was changed"));
+            }
+            TSharedPtr<FJsonObject> StepParams = Base();
+            StepParams->RemoveField(TEXT("association"));
+            StepParams->SetStringField(TEXT("parameter_type"), ParamType);
+            StepParams->SetField(TEXT("value"), Given);
+            return mcp_common::RunSubCommand(TEXT("set_material_layer_parameter"), StepParams);
+        }
+    }
 
     // `value` may be a STRING or one of the natural JSON forms; a string is parsed
     // byte for byte as given.
@@ -990,7 +1076,9 @@ namespace UEAgentMaterialExtraImpl
         for (TObjectIterator<UMaterialExpression> NodeIt; NodeIt; ++NodeIt)
         {
             UMaterialExpression* Node = *NodeIt;
-            if (Node == nullptr || Node->GetOuter() != Owner)
+            // A deleted node (delete_material_expression) is marked garbage and lingers until the next GC: it is
+            // not live, so it neither counts nor reads as an orphan.
+            if (Node == nullptr || !IsValid(Node) || Node->GetOuter() != Owner)
             {
                 continue;
             }
@@ -1731,7 +1819,7 @@ TSharedPtr<FJsonObject> HandleRecompileMaterialFunction(const TSharedPtr<FJsonOb
     return mcp_common::MakeSavedReply(Result, bSaved, TEXT("recompile_material_function"));
 }
 
-// MCP:connect_material_function_pins - Wire two material expression nodes inside a UMaterialFunction graph by name.
+// MCP:connect_material_function_pins - Wire two material expression nodes inside a UMaterialFunction graph by name. Read back: get_material_graph_info on the function; inverse: disconnect_material_expressions with material_function_path.
 //   @param material_function_path - Asset path of the UMaterialFunction
 //   @param from_node_id - Name of the source expression
 //   @param to_node_id - Name of the destination expression

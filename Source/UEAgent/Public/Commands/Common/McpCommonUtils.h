@@ -14,7 +14,7 @@ class AActor; class FJsonObject; class FProperty; class UBlueprint; class UClass
 class UEdGraphNode; class UEdGraphPin; class UFactory; class UFunction; class UObject; class UPackage;
 class UStruct; class UWorld; struct FAssetData; struct FGameplayTagContainer; class IAssetRegistry;
 class UK2Node_CallFunction; class UK2Node_Event; class UK2Node_Self;
-class UK2Node_VariableGet; class UK2Node_VariableSet; class FTransaction;
+class UK2Node_VariableGet; class UK2Node_VariableSet; class FTransaction; class UActorComponent;
 
 // The Json module's headers one by one: the monolithic Json.h warns in every file that includes it,
 // and Fab requires a plugin to build without it (IWYU).
@@ -294,6 +294,28 @@ namespace mcp_common
      * object is included verbatim only when `Data.IsValid()`.
      */
     UEAGENT_API TSharedPtr<FJsonObject> MakeOkReply(const TSharedPtr<FJsonObject>& Data = nullptr);
+
+    /** One call of a tool made of other tools (RunSubCommands). */
+    struct FSubCommand
+    {
+        /** The parameter (or parameters) of the calling tool this call applies: its key in `applied`. */
+        FString Label;
+        FString Command;
+        TSharedPtr<FJsonObject> Params;
+    };
+
+    /**
+     * Runs Steps in order through the bridge's own dispatch -- PIE guard, preconditions and parameter aliases
+     * included, in this game-thread pass -- for a tool that applies several settings by calling the tool that owns
+     * each, and stops at the first step that fails. Reply gets `applied` (label -> that step's reply) and, on a
+     * failure, `failed` {label, command, error}; the steps before it stay applied, and the call's undo step reverts
+     * them. No step is an error: nothing was asked. Returns the reply to send.
+     */
+    UEAGENT_API TSharedPtr<FJsonObject> RunSubCommands(const TCHAR* Tool, const TArray<FSubCommand>& Steps, const TSharedPtr<FJsonObject>& Reply);
+
+    /** Runs Command with Params through the bridge's own dispatch, as RunSubCommands does one step, and returns that
+     *  command's reply as it is: for a tool that only picks which tool runs. */
+    UEAGENT_API TSharedPtr<FJsonObject> RunSubCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params);
 
     /**
      * Wraps Data like MakeOkReply (under "data") with a top-level "success" that is
@@ -1176,6 +1198,15 @@ namespace mcp_common
     /** The first actor of World whose object name is ObjectName (FString equality, so case is ignored); labels are
      *  not consulted. Null when World is null or no actor has that name. */
     UEAGENT_API AActor* FindActorByObjectName(UWorld* World, const FString& ObjectName);
+
+    /** The only actor of World whose editor label is Label, or null when none or several have it. OutMatches, when
+     *  given, receives how many actors have that label. */
+    UEAGENT_API AActor* FindActorByUniqueLabel(UWorld* World, const FString& Label, int32* OutMatches = nullptr);
+
+    /** The component of Actor named Name or, when no component has that name, the only one whose class is the class
+     *  named Name or derives from it ("SkyLightComponent"; a leading "U" is allowed). Null when there is none, or when
+     *  several components are of that class: OutAmbiguous, when given, then receives their names. */
+    UEAGENT_API UActorComponent* FindComponentByNameOrClass(AActor* Actor, const FString& Name, TArray<FString>* OutAmbiguous = nullptr);
 
     /** GetActiveWorld() when it is a game world (a -game process; PIE worlds are not), else null. */
     UEAGENT_API UWorld* ActiveGameWorld();

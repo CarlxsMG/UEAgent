@@ -2,7 +2,7 @@
 
 # Blueprint
 
-84 tools for Blueprint assets, components, variables, functions, events and dispatchers, graph nodes and pins, compiling, and Editor Utility Blueprints.
+88 tools for Blueprint assets, components, variables, functions, events and dispatchers, graph nodes and pins, compiling, and Editor Utility Blueprints.
 
 Back to the [index](README.md).
 
@@ -10,7 +10,7 @@ Back to the [index](README.md).
 
 *Additive, idempotent.*
 
-Configure a sight or hearing sense on an AIPerceptionComponent TEMPLATE of a Blueprint, creating the config as an Instanced subobject of the template so it persists with the asset, and saving the package. Idempotent: ConfigureSense dedups by config class, so re-calling with the same sense_type UPDATES the existing config in place instead of stacking a second one. Only "sight" and "hearing" are supported (no damage, touch or team senses). It authors the TEMPLATE only -- whether the AI actually perceives anything is a live-PIE question this cannot answer; read the authored result back with get_ai_perception_senses.
+Configure a sight or hearing sense on an AIPerceptionComponent TEMPLATE of a Blueprint, creating the config as an Instanced subobject of the template so it persists with the asset, and saving the package. Idempotent: ConfigureSense dedups by config class, so re-calling with the same sense_type UPDATES the existing config in place instead of stacking a second one. Only "sight" and "hearing" are supported (no damage, touch or team senses). It authors the TEMPLATE only -- whether the AI actually perceives anything is a live-PIE question this cannot answer; read the authored result back with get_ai_perception_senses. Inverse: remove_ai_perception_sense.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -42,6 +42,23 @@ Create a NEW function graph on a Blueprint, or with override=true a real OVERRID
 | `node_position` | array | no | Optional [x, y] canvas position for an event-override node that override=true CREATES (an existing one is not moved; a function graph has no single node to place). |
 
 **Returns:** `{ blueprint_name: string, function_name: string, graph_name: string, success: bool [, kind, already_existed, created, was_already_overridden, node_id, already_exists, is_interface_function, note] } -- with override=true: kind='function' (graph_name is an editable function-override graph, ready to wire with get_graph_nodes / connect_pins) or kind='event' (an event OVERRIDE node was created or reused in the event graph graph_name names, and node_id is that node); created is !already_existed, and was_already_overridden is already_existed. success:true can come back WITHOUT the graph actually appearing, so confirm with get_blueprint_functions before wiring it.`
+
+## `add_blueprint_timeline_track`
+
+*Additive.*
+
+Add a track to a Timeline of a Blueprint, with optional keys, as the Timeline editor's "+ Track" does: a float, vector, color or event track whose curve is made inside the Blueprint, then the timeline node is reconstructed (a float/vector/color track gets an output pin of its name, an event track an exec output) and the Blueprint compiled; one undo step (the compile is not undone). The reply re-reads the timeline (tracks, output_pins). keys is [[time, value], ...]: value a number for float, [x,y,z] for vector, [r,g,b] or [r,g,b,a] for color, nothing for event ([time] or a bare time). A track name already used on the timeline, a malformed key or an unknown track_type is an error and nothing changes; so is a missing Blueprint or timeline. Keys past the timeline length stay but play only if length grows. Refused during PIE unless force=true. Timelines come from add_timeline_to_blueprint; read: get_blueprint_timeline_info; inverse: remove_blueprint_timeline_track.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `blueprint_name` | string | yes | Name (or full object path) of an Actor Blueprint. |
+| `timeline_name` | string | yes | The timeline's variable name, as add_timeline_to_blueprint returned it. |
+| `track_type` | string | yes | float \| vector \| color \| event |
+| `track_name` | string | yes | Name of the new track, unique on this timeline; it names the node's output pin. |
+| `keys` | array | no | Optional keys, [[time, value], ...] (see the description for value by track type). |
+| `interpolation` | string | no | Optional key interpolation for float/vector/color: "linear" (default) \| "cubic" \| "constant". |
+
+**Returns:** `{ blueprint_name, timeline_name, track_name, track_type, added, keys_added, curve, length, length_mode, auto_play, loop, replicated, ignore_time_dilation, track_count, tracks: [{track_name, track_type, curve, external_curve, key_count, keys: [{time, value}]}], node_id, graph_name, output_pins: [string] }`
 
 ## `add_blueprint_variable`
 
@@ -80,12 +97,12 @@ Add the node that BROADCASTS (fires) an event dispatcher on self -- own or inher
 
 *Destructive.*
 
-Add a resizable comment box (UEdGraphNode_Comment) to a graph. KNOWN BUG: the 'text' parameter is LOST -- the comment is assigned before the node is finalized and the engine's PostPlacedNewNode then overwrites it, so every box created this way reads "Comment"; the returned "comment" field is the oracle and there is no MCP way to fix it (write the rationale in the system's docs instead, and delete the empty box). It also has NO pins, so a pin_defaults entry aimed at it breaks a whole build_blueprint_graph batch.
+Add a resizable comment box (UEdGraphNode_Comment) with text to a graph, in one undo step. The text is written after the engine places the node (its PostPlacedNewNode resets the box to "Comment"), and the returned "comment" field is the box's text read back; without text the box keeps the engine's "Comment". It has NO pins, so a pin_defaults entry aimed at it breaks a whole build_blueprint_graph batch. Read back: get_graph_nodes (compact=false: compact skips comment boxes); remove: delete_node.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `blueprint_name` | string | yes | Blueprint asset name or path |
-| `text` | string | no | Comment text; currently IGNORED (see the bug above), the box always ends up saying "Comment" |
+| `text` | string | no | Comment text shown in the box; omitted or empty leaves the engine default "Comment" |
 | `graph_name` | string | no | Target graph name; defaults to the Blueprint's event graph when omitted |
 | `width` | number | no | Comment box width in pixels; defaults to 400 |
 | `height` | number | no | Comment box height in pixels; defaults to 200 |
@@ -93,7 +110,7 @@ Add a resizable comment box (UEdGraphNode_Comment) to a graph. KNOWN BUG: the 't
 | `position_y` | number | no | Node Y position on the graph canvas (ignored when node_position is set) |
 | `node_position` | array | no | Node canvas position as [x, y]; takes precedence over position_x/position_y |
 
-**Returns:** `{ node_id, class, title, pos_x, pos_y, comment } -- no pins array. comment=="Comment" means the requested text was not written.`
+**Returns:** `{ node_id, class, title, pos_x, pos_y, comment } -- no pins array; comment is the text the box holds, read back after placement.`
 
 ## `add_component_bound_event`
 
@@ -167,7 +184,7 @@ Create an event dispatcher (multicast delegate) on a Blueprint: adds BOTH the de
 
 *Additive.*
 
-Add a variable scoped to ONE function graph (interface-override graphs included), instead of a class member like add_blueprint_variable -- use it for scratch state that no other graph should see. Reach it from the graph with add_graph_node node_type=variable_get/variable_set and scope="local" (the default scope="auto" already prefers a local over a member of the same name).
+Add a variable scoped to ONE function graph (interface-override graphs included), instead of a class member like add_blueprint_variable -- use it for scratch state that no other graph should see. Reach it from the graph with add_graph_node node_type=variable_get/variable_set and scope="local" (the default scope="auto" already prefers a local over a member of the same name). Inverse: remove_function_local_variable, whose reply lists the function's locals.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -183,17 +200,17 @@ Add a variable scoped to ONE function graph (interface-override graphs included)
 
 *Additive.*
 
-Add an input or output (return) parameter to an existing Blueprint FUNCTION graph -- interface-override graphs included -- and reconstruct its Entry/Result node. TWO HARD LIMITS, both silent-ish: it cannot create an ARRAY parameter (there is no is_array; the param comes out SCALAR with success), so redesign the signature to read the array where it lives; and it cannot reach a CUSTOM EVENT ("Function graph not found"), so a Server/Client RPC WITH arguments must be authored as a function plus set_blueprint_function_rpc. On a Blueprint just given a new function, compile_blueprint between creation and this call.
+Add an input or output (return) parameter to an existing Blueprint FUNCTION graph -- interface-override graphs included -- or to a MACRO graph (create_blueprint_macro), and reconstruct its Entry/Result node or the macro's input/output tunnel. A macro also takes param_type "exec", an execution pin, so it can get several exec inputs and outputs. TWO HARD LIMITS, both silent-ish: it cannot create an ARRAY parameter (there is no is_array; the param comes out SCALAR with success), so redesign the signature to read the array where it lives; and it cannot reach a CUSTOM EVENT ("Function graph not found"), so a Server/Client RPC WITH arguments must be authored as a function plus set_blueprint_function_rpc. On a Blueprint just given a new function, compile_blueprint between creation and this call. Inverse: remove_function_parameter.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `blueprint_name` | string | yes | Blueprint name or path. |
-| `function_name` | string | yes | Name of an existing function graph (FunctionGraphs or an interface-override graph). A custom event is NOT a function graph and is rejected here. |
+| `function_name` | string | yes | Name of an existing function graph (FunctionGraphs or an interface-override graph), or of a macro graph of this Blueprint when no function has that name. A custom event is NOT a function graph and is rejected here. |
 | `param_name` | string | yes | New parameter name; made unique, so the applied name is the one echoed back in the response. |
-| `param_type` | string | yes | Type string: bool, int, int64, float, string, name, text, byte, Vector, or a struct/enum/class/object name or path. Arrays are NOT expressible. |
+| `param_type` | string | yes | Type string: bool, int, int64, float, string, name, text, byte, Vector, or a struct/enum/class/object name or path; "exec" on a macro. Arrays are NOT expressible. |
 | `is_output` | boolean | no | When true, add an output/return param (an input pin on the Result node) instead of an input; defaults to false |
 
-**Returns:** `{ blueprint_name, function_name, param_name, param_type, is_output } -- param_name is the pin name actually created (uniquified). Verify with get_graph_nodes at compact=false: compact hides the new, still-unlinked pin and makes it look like nothing was created.`
+**Returns:** `{ blueprint_name, function_name, param_name, param_type, is_output, graph_kind? } -- param_name is the pin name actually created (uniquified); graph_kind is "macro" when the parameter went on a macro. Verify with get_graph_nodes at compact=false: compact hides the new, still-unlinked pin and makes it look like nothing was created.`
 
 ## `add_graph_node`
 
@@ -303,7 +320,7 @@ Add a reroute/knot node: pure layout, it re-emits whatever is wired into it and 
 
 *Additive.*
 
-Add a Timeline to an Actor Blueprint: creates BOTH the UTimelineTemplate variable and its UK2Node_Timeline node in one call, sets a fixed length in seconds, compiles, and verifies the template really registered (timeline_created). Actor-derived Blueprints only. It does NOT author curves or tracks -- the node comes with Play/Stop/Reverse inputs and Update/Finished outputs and nothing driven; a requested name already in use is silently uniquified, so wire the RETURNED timeline_name.
+Add a Timeline to an Actor Blueprint: creates BOTH the UTimelineTemplate variable and its UK2Node_Timeline node in one call, sets a fixed length in seconds, compiles, and verifies the template really registered (timeline_created). Actor-derived Blueprints only. It authors no curves or tracks itself -- the node comes with Play/Stop/Reverse inputs and Update/Finished outputs and nothing driven; add tracks with add_blueprint_timeline_track and read them with get_blueprint_timeline_info. A requested name already in use is silently uniquified, so wire the RETURNED timeline_name.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -414,7 +431,7 @@ Create a new Blueprint asset, optionally as a child of ANY parent class -- nativ
 
 *Additive, idempotent.*
 
-Create an EMPTY, Tunnel-terminated macro graph owned by this Blueprint's MacroGraphs (a reusable snippet, not a function: macros inline at compile time and can carry multiple exec outputs). Idempotent -- an existing macro of that name is returned with already_existed:true. Fill it with add_graph_node using graph_name=&lt;macro>, then instantiate it with add_graph_node node_type="macro_instance", which finds the Blueprint's own macros.
+Create an EMPTY, Tunnel-terminated macro graph owned by this Blueprint's MacroGraphs (a reusable snippet, not a function: macros inline at compile time and can carry multiple exec outputs). Idempotent -- an existing macro of that name is returned with already_existed:true. Fill it with add_graph_node using graph_name=&lt;macro>, then instantiate it with add_graph_node node_type="macro_instance", which finds the Blueprint's own macros. Give it inputs and outputs (exec included) with add_function_parameter function_name=&lt;macro>; inverse: remove_blueprint_macro.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -639,7 +656,7 @@ One cheap overview of a Blueprint: parent class, compile status, and the counts 
 
 *Read-only.*
 
-Read the material slots of ONE StaticMeshComponent TEMPLATE in a Blueprint (an OWN SCS node), with the material assigned to each slot or "None". This is the verification step after apply_material_to_blueprint / set_static_mesh_properties. The slot count comes from the assigned static mesh's LOD 0 sections, so with no mesh assigned it returns ZERO slots and has_static_mesh:false -- which is a missing mesh, not a missing material. For a placed actor use get_actor_material_info.
+Read the material slots of ONE StaticMeshComponent TEMPLATE in a Blueprint (an OWN SCS node), with the material assigned to each slot or "None". This is the verification step after apply_material_to_blueprint / set_blueprint_component_properties. The slot count comes from the assigned static mesh's LOD 0 sections, so with no mesh assigned it returns ZERO slots and has_static_mesh:false -- which is a missing mesh, not a missing material. For a placed actor use get_actor_material_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -647,6 +664,19 @@ Read the material slots of ONE StaticMeshComponent TEMPLATE in a Blueprint (an O
 | `component_name` | string | yes | Name of an OWN SCS component; it must be a UStaticMeshComponent (any other type is an error) |
 
 **Returns:** `{ blueprint_name: string, component_name: string, material_slots: [{ slot, component, material_name, material_path, material_class }], total_slots: int, has_static_mesh: bool } -- read has_static_mesh FIRST: total_slots:0 with has_static_mesh:false means no mesh was assigned, so the array says nothing about materials.`
+
+## `get_blueprint_timeline_info`
+
+*Read-only.*
+
+Read one Timeline of a Blueprint: its length and length mode, auto_play, loop, replicated and ignore_time_dilation, every track (float, vector, color, event) with its curve and keys ({time, value}; value an array for vector and color), and its node (node_id, graph_name, output_pins: Update, Finished, Direction and one pin per track). Read-only. Timelines are made by add_timeline_to_blueprint and their tracks by add_blueprint_timeline_track / remove_blueprint_timeline_track; get_timeline_info is about Level Sequences. A missing Blueprint or timeline is an error listing the timelines it has.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `blueprint_name` | string | yes | Name (or full object path) of the Blueprint. |
+| `timeline_name` | string | yes | The timeline's variable name, as add_timeline_to_blueprint returned it. |
+
+**Returns:** `{ blueprint_name, timeline_name, length, length_mode, auto_play, loop, replicated, ignore_time_dilation, track_count, tracks: [{track_name, track_type, curve, external_curve, key_count, keys: [{time, value}]}], node_id?, graph_name?, output_pins?: [string] }`
 
 ## `get_blueprint_variable_detailed_info`
 
@@ -857,11 +887,25 @@ Repair a LOCAL function graph's parameter pins so they match a parent UFUNCTION 
 
 **Returns:** `{ blueprint_name, function_name, parent_class, mode, added:[{name,direction}], removed:[{name,direction}], extra_pins:[{name,direction}], missing_pins:[{name,direction}], removal_performed, partially_implemented, note, success }`
 
+## `remove_ai_perception_sense`
+
+*Destructive.*
+
+Remove a sense (its config) from an AIPerceptionComponent TEMPLATE of a Blueprint, then compile the Blueprint and save the package, as add_ai_perception_sense does; no undo step. Inverse of add_ai_perception_sense: sense_type "sight" or "hearing", or any other configured sense by its config class name (AISenseConfig_Damage...). When it was the dominant sense, the dominant sense is cleared (dominant_cleared). A sense the template does not configure is an honest no-op (removed=false, nothing compiled or saved); a missing Blueprint or component, or a component that is not an AIPerceptionComponent, is an error. The reply re-reads the template's senses; read them with get_ai_perception_senses. Refused during PIE unless force=true.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `blueprint_name` | string | yes | Name of the blueprint owning the component |
+| `component_name` | string | yes | Name of the AIPerceptionComponent SCS node |
+| `sense_type` | string | yes | "sight", "hearing", or the short name / class name of another configured sense ("damage", "AISenseConfig_Damage") |
+
+**Returns:** `{ blueprint_name, component_name, sense_type, removed, removed_count, dominant_cleared, senses: [string], sense_count, saved, note? }`
+
 ## `remove_blueprint_function`
 
 *Destructive.*
 
-Delete a function graph OWNED BY the Blueprint (Blueprint->FunctionGraphs) by name. WARNING: It resolves more graphs than it can delete: name lookup goes through FindGraph (all graphs, interface overrides and macros included) but the delete only touches FunctionGraphs and only when bAllowDeletion is true, so an INTERFACE OVERRIDE resolves and cannot be removed. That case is a hard error naming the reason -- to change an interface override, author the signature on the INTERFACE and re-create it (add_function_parameter on the BPI_ -> compile_blueprint -> add_blueprint_function with override=true). Not idempotent: a name that does not resolve is an error. TRAP when deleting to re-create: the class is NOT regenerated here, so an immediate add_blueprint_function with the same name fails with "is an inherited overridable function (declared on &lt;this very class>)" because the stale UFunction is still in the generated class -- put a compile_blueprint BETWEEN the two calls. Callers of the removed function are left broken until the next compile.
+Delete a function graph OWNED BY the Blueprint (Blueprint->FunctionGraphs) by name. WARNING: It resolves more graphs than it can delete: name lookup goes through FindGraph (all graphs, interface overrides and macros included) but the delete only touches FunctionGraphs and only when bAllowDeletion is true, so an INTERFACE OVERRIDE resolves and cannot be removed. That case is a hard error naming the reason -- to change an interface override, author the signature on the INTERFACE and re-create it (add_function_parameter on the BPI_ -> compile_blueprint -> add_blueprint_function with override=true). Not idempotent: a name that does not resolve is an error. TRAP when deleting to re-create: the class is NOT regenerated here, so an immediate add_blueprint_function with the same name fails with "is an inherited overridable function (declared on &lt;this very class>)" because the stale UFunction is still in the generated class -- put a compile_blueprint BETWEEN the two calls. Callers of the removed function are left broken until the next compile. A macro graph: remove_blueprint_macro.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -869,6 +913,34 @@ Delete a function graph OWNED BY the Blueprint (Blueprint->FunctionGraphs) by na
 | `function_name` | string | yes | Name of the function graph to remove; must exist, be owned by this Blueprint and be deletable, or the call errors |
 
 **Returns:** `{ blueprint_name: string, removed_function: string, success: bool } -- success:true means the graph is gone from Blueprint->FunctionGraphs (re-read after the delete), not merely that the call ran.`
+
+## `remove_blueprint_macro`
+
+*Destructive.*
+
+Delete a macro graph owned by the Blueprint (Blueprint->MacroGraphs), in one undo step. Inverse of create_blueprint_macro; remove_blueprint_function deletes function graphs only. The macro's instances in the Blueprint's graphs go with it, so a macro still in use is refused (instance_count says how many) unless delete_instances=true. Nothing is compiled or saved. A macro that is not there is an honest no-op (removed=false); a missing Blueprint is an error. The reply re-reads MacroGraphs; list the graphs with get_blueprint_functions. Refused during PIE unless force=true.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `blueprint_name` | string | yes | Blueprint name or path. |
+| `macro_name` | string | yes | Name of the macro graph, as create_blueprint_macro returned it in graph_name. |
+| `delete_instances` | boolean | no | true to delete the macro even when nodes of this Blueprint instance it (they are deleted too); default false refuses. |
+
+**Returns:** `{ blueprint_name, macro_name, removed, instance_count, instances_removed, macro_count, note? }`
+
+## `remove_blueprint_timeline_track`
+
+*Destructive.*
+
+Remove a track (float, vector, color or event) from a Timeline of a Blueprint by its name, as the Timeline editor's Delete Track does, then reconstruct the timeline node (the track's output pin goes, and its links with it) and compile the Blueprint; one undo step (the compile is not undone). Inverse of add_blueprint_timeline_track. A track that is not there is an honest no-op (removed=false, nothing compiled); a missing Blueprint or timeline is an error. The reply re-reads the timeline (tracks, output_pins). Refused during PIE unless force=true. The whole timeline: delete_node on its node; read: get_blueprint_timeline_info.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `blueprint_name` | string | yes | Name (or full object path) of an Actor Blueprint. |
+| `timeline_name` | string | yes | The timeline's variable name. |
+| `track_name` | string | yes | Name of the track to remove (get_blueprint_timeline_info lists them). |
+
+**Returns:** `{ blueprint_name, timeline_name, track_name, track_type?, removed, length, length_mode, auto_play, loop, replicated, ignore_time_dilation, track_count, tracks: [...], node_id, graph_name, output_pins: [string], note? }`
 
 ## `remove_component_from_blueprint`
 
@@ -897,6 +969,35 @@ Remove an event dispatcher, dropping BOTH artifacts add_event_dispatcher created
 | `dispatcher_name` | string | yes | Name of the event dispatcher to remove (must be one this Blueprint owns; inherited ones have no local artifacts) |
 
 **Returns:** `{ blueprint_name, dispatcher_name, removed } -- removed:false means nothing was there (no-op), not a failure.`
+
+## `remove_function_local_variable`
+
+*Destructive.*
+
+Remove a local variable from one Blueprint function graph (interface-override graphs included), with the get/set nodes that read or write it in that function, in one undo step -- what deleting it from the My Blueprint panel does. Inverse of add_function_local_variable; delete_blueprint_variable removes MEMBER variables only. Nothing is compiled or saved. A local that is not there is an honest no-op (removed=false); a missing Blueprint or function is an error. The reply re-reads the function's locals (local_variables), the only reader of them: get_blueprint_variables lists members. Refused during PIE unless force=true.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `blueprint_name` | string | yes | Blueprint asset name or path |
+| `function_name` | string | yes | Name of the function graph (FunctionGraphs or an interface-override graph) |
+| `variable_name` | string | yes | Name of the local variable to remove |
+
+**Returns:** `{ blueprint_name, function_name, variable_name, removed, local_variables: [string], note? }`
+
+## `remove_function_parameter`
+
+*Destructive.*
+
+Remove an input or output parameter from a Blueprint function graph -- interface-override graphs included -- or from a macro graph, in one undo step: the user pin leaves the Entry node (inputs) or every Result node (outputs), or the macro's input or output tunnel, and the node is reconstructed, so links to that pin break. Inverse of add_function_parameter; for an override of a C++ or interface function, reconcile_function_signature fits the signature to the parent instead. Nothing is compiled or saved: call sites update at the next compile_blueprint. A parameter that is not there is an honest no-op (removed=false, the parameters it does have in params); a missing Blueprint or graph is an error. The reply re-reads the signature (params_left). Read the pins: get_graph_nodes at compact=false. Refused during PIE unless force=true.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `blueprint_name` | string | yes | Blueprint name or path. |
+| `function_name` | string | yes | Name of the function graph, or of a macro graph when no function has that name. |
+| `param_name` | string | yes | Name of the parameter to remove, as add_function_parameter returned it. |
+| `is_output` | boolean | no | true to remove an output/return parameter, false (default) an input. |
+
+**Returns:** `{ blueprint_name, function_name, param_name, is_output, graph_kind, removed, params_left: [string], params?: [string], note? }`
 
 ## `remove_interface`
 
@@ -1190,23 +1291,6 @@ Tint one material slot of a Blueprint component template by creating a DYNAMIC m
 
 **Returns:** `{ component: string, material_slot: int, parameter_name: string, color: [number, number, number, number], success: bool } -- success:true only means the MID was created and assigned; re-read with get_blueprint_material_info after a save/reload to see whether anything persisted.`
 
-## `set_physics_properties`
-
-*Destructive, idempotent.*
-
-Set simulate-physics, mass override, linear and angular damping on ONE primitive component TEMPLATE of a Blueprint (an OWN SCS node only -- inherited components are not found here, and it is the template, not a placed actor). Only the fields present are touched. It does NOT compile and does NOT save. For any other property of a component template use set_blueprint_component_properties, which is ICH-aware and reaches inherited components.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `blueprint_name` | string | yes | Name of the blueprint |
-| `component_name` | string | yes | Name of an OWN SCS component; must resolve to a UPrimitiveComponent or the call errors |
-| `simulate_physics` | boolean | no | Optional bool to toggle physics simulation |
-| `mass` | number | no | Optional mass override in kg (applied as SetMassOverrideInKg, not a scale) |
-| `linear_damping` | number | no | Optional linear damping coefficient |
-| `angular_damping` | number | no | Optional angular damping coefficient |
-
-**Returns:** `{ component: string } -- just the component name back. NOTHING is read back, so verify with get_blueprint_component_property on each property you set.`
-
 ## `set_pin_default_value`
 
 *Destructive, idempotent.*
@@ -1252,37 +1336,6 @@ Set the ELifetimeCondition (COND_OwnerOnly, COND_SkipOwner, COND_InitialOnly...)
 | `condition` | string | yes | ELifetimeCondition name, with or without the COND_ prefix (e.g. "OwnerOnly" or "COND_OwnerOnly"); an unknown name is an error. |
 
 **Returns:** `{ blueprint_name, variable_name, condition, is_replicated, note? } -- condition is the canonical COND_ name that was stored; is_replicated:false means the setting has no effect yet.`
-
-## `set_static_mesh_properties`
-
-*Destructive, idempotent.*
-
-Assign a static mesh asset and/or a slot-0 material to a mesh component TEMPLATE of a Blueprint (an OWN SCS node, not a placed actor) through the component's SetStaticMesh/SetMaterial. Does NOT compile and does NOT save; the reply reads the template back (static_mesh, material and a *_set flag for each). A path that does not load as a mesh or material, or a call with neither, fails with nothing changed. Use apply_material_to_blueprint when only a material is changing or the slot is not 0, and set_blueprint_component_properties for any other template property or an inherited component.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `blueprint_name` | string | yes | Name of the blueprint |
-| `component_name` | string | yes | Name of an OWN SCS mesh component |
-| `static_mesh` | string | no | Optional asset path of the UStaticMesh to assign; a path that does not load as a StaticMesh fails the call and nothing is changed |
-| `material` | string | no | Optional asset path of the UMaterialInterface for slot 0; a path that does not load as a material fails the call and nothing is changed. At least one of static_mesh and material is required. |
-
-**Returns:** `{ component: string, static_mesh: string, material: string, static_mesh_set: bool, material_set: bool } -- read back from the template: static_mesh is the mesh it holds and material its slot-0 material (the override, else the mesh's own), each an object path or "None"; <field>_set is true when that field was passed and the template now holds it. Nothing is compiled or saved.`
-
-## `spawn_blueprint_actor`
-
-*Additive.*
-
-Spawn an instance of a Blueprint class as an actor and report WHICH world took it and whether the actor has AUTHORITY. Pick it for any Blueprint class; spawn_actor places the built-in engine types (StaticMeshActor, lights, CameraActor, Character), and the typed spawn_* tools place an engine class with its own fields. The default (world absent or 'editor') places it in the EDITOR level, not in play. For anything that must exist for every player during PIE use world='server'; world='pie' is ambiguous and can land on the CLIENT, where the actor has no authority, no AI controller and no server-side existence while looking identical in the payload. The actor is NOT saved into the map: save_level afterwards for an editor-world spawn.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `blueprint_name` | string | yes | Name of the blueprint |
-| `actor_name` | string | yes | Label applied to the spawned actor (SetActorLabel); it is not the object name and is not made unique |
-| `location` | array | no | Optional [x, y, z] world location |
-| `rotation` | array | no | Optional [pitch, yaw, roll] world rotation |
-| `world` | string | no | Optional world selector: absent/'editor' (default) spawns into the editor level \| 'server' spawns into the PIE world WITH AUTHORITY (what you want for anything that must exist for every player: an actor spawned into the client world has no authority and no server-side existence) \| 'client' \| 'pie:N' \| 'pie' (ambiguous: PlayWorld, else the first PIE context -- can land on the CLIENT) \| 'game' (alias of 'pie') |
-
-**Returns:** `{ actor JSON via DescribeActorObject, world: string, has_authority: bool (AActor::HasAuthority() read off the spawned actor), local_role: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }`
 
 ## `split_blueprint_pin`
 
