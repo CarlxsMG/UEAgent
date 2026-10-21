@@ -2,6 +2,12 @@
 
 Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](https://semver.org).
 
+## Unreleased
+
+### Fixed
+
+- The plugin's description in **Edit > Plugins** said about 2,100 tools, the count before 2.0; there are 1,742.
+
 ## 2.2.0 - 2026-10-20
 
 UEAgent's skills come with the plugin and work in every client that reads the Agent Skills format,
