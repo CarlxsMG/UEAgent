@@ -36,6 +36,7 @@
 #include "NiagaraScriptSource.h"                            // UNiagaraScriptSource (NodeGraph)
 #include "NiagaraGraph.h"                                   // UNiagaraGraph::FindOutputNode
 #include "NiagaraNodeOutput.h"                              // UNiagaraNodeOutput
+#include "NiagaraNodeInput.h"                               // UNiagaraNodeInput (data-interface inputs of a stack)
 #include "NiagaraNodeFunctionCall.h"                        // UNiagaraNodeFunctionCall
 #include "ViewModels/Stack/NiagaraStackGraphUtilities.h"    // FNiagaraStackGraphUtilities::AddScriptModuleToStack
 
@@ -245,9 +246,9 @@ namespace
 // because the factory's ConfigureProperties() opens a modal asset-browser window
 // (NOT headless-safe). InitializeSystem sets up the system spawn/update scripts.
 // ---------------------------------------------------------------------------
-// MCP:create_niagara_system - Creates (or loads, idempotently) an empty UNiagaraSystem asset and saves it.  Uses NewObject + UNiagaraSystemFactoryNew::InitializeSystem (headless-safe); the new system has its system spawn/update scripts wired but no emitters.
-//   @param name - Name of the Niagara System asset to create.
-//   @param package_path - Target content folder; defaults to /Game/Niagara
+// MCP:create_niagara_system - Create an empty UNiagaraSystem asset at package_path/name and save it: its system spawn and update scripts are set up, but it has no emitters. Idempotent: a Niagara System already at that path is returned unchanged with created=false and already_exists=true, and nothing is saved; an asset of another class at that path is an error and nothing is written. Not an undo step. Next, add emitters with add_niagara_emitter_from_template, check the result with get_niagara_system_info or get_niagara_emitter_handles, and place it in a level with spawn_actor (type NiagaraActor). A failed save is an error, the new asset left in memory unsaved.
+//   @param name - Asset name, e.g. 'NS_Sparks'; package_path/name must form a valid long package name.
+//   @param package_path - Content folder as a long package path, e.g. '/Game/FX' (default /Game/Niagara); a trailing slash is ignored.
 //   @returns { system_name: string, asset_path: string, created: bool, already_exists?: bool, saved?: bool, save_error?: string, emitter_count: int }
 
 TSharedPtr<FJsonObject> HandleCreateNiagaraSystem(const TSharedPtr<FJsonObject>& Params)
@@ -1069,10 +1070,10 @@ TSharedPtr<FJsonObject> HandleSetNiagaraComponentBool(const TSharedPtr<FJsonObje
 // Sets the per-component fixed bounds via UNiagaraComponent::SetSystemFixedBounds
 // (FBox in local space). Reads back via GetSystemFixedBounds to verify.
 // ---------------------------------------------------------------------------
-// MCP:set_niagara_component_fixed_bounds - Sets fixed local-space bounds on a spawned Niagara component.  Resolves the UNiagaraComponent on the owner actor and calls UNiagaraComponent::SetSystemFixedBounds(FBox), then reads back via GetSystemFixedBounds.
-//   @param actor_name - Owner actor identifier (internal name or editor label).
-//   @param min [string!] - Local-space bounds minimum [X, Y, Z].
-//   @param max [string!] - Local-space bounds maximum [X, Y, Z].
+// MCP:set_niagara_component_fixed_bounds - Set the fixed-bounds override of the Niagara component on a placed actor in the editor world (the first UNiagaraComponent of the actor found by internal name or label) to the local-space box min..max, then read it back. The override is runtime state of that component (UNiagaraComponent::SetSystemFixedBounds): the engine stores it in a member that is not a saved property, in 5.7 and 5.8 alike, and a component has no fixed-bounds field in its details panel, so it is lost when the level reloads and is not carried into PIE; it makes no undo step and does not dirty the level. Repeating the call with the same box gives the same result. An actor that is missing or has no Niagara component is an error and nothing changes. For bounds that persist, write the System asset's Fixed Bounds (bFixedBounds and FixedBounds, with set_properties) or an emitter's with set_niagara_emitter_properties (bounds_mode Fixed); place a Niagara actor with spawn_actor (type NiagaraActor).
+//   @param actor_name - Internal name or editor label of an actor in the editor world that has a Niagara component, as get_actors_in_level lists it, e.g. 'NiagaraActor_0'.
+//   @param min [string!] - Box minimum corner in the component's local space, [x, y, z] in centimetres, e.g. [-500, -500, 0]; a missing or short array reads as [0, 0, 0], and it is not checked against max.
+//   @param max [string!] - Box maximum corner in the component's local space, [x, y, z] in centimetres, e.g. [500, 500, 800]; a missing or short array reads as [0, 0, 0].
 //   @returns { actor_name: string, applied: bool, bounds_valid: bool, min_read_back: [number, number, number], max_read_back: [number, number, number] }
 
 TSharedPtr<FJsonObject> HandleSetNiagaraSystemFixedBounds(const TSharedPtr<FJsonObject>& Params)
@@ -1102,6 +1103,9 @@ TSharedPtr<FJsonObject> HandleSetNiagaraSystemFixedBounds(const TSharedPtr<FJson
     Data->SetBoolField(TEXT("bounds_valid"), ReadBack.IsValid != 0);
     Data->SetArrayField(TEXT("min_read_back"), mcp_common::VectorToJsonArray(ReadBack.Min));
     Data->SetArrayField(TEXT("max_read_back"), mcp_common::VectorToJsonArray(ReadBack.Max));
+    // UNiagaraComponent keeps SystemFixedBounds in a plain member, not a UPROPERTY, in 5.7 and 5.8 alike, and the
+    // details panel has no fixed-bounds field for a component: there is no serialized property to write instead,
+    // so this stays runtime state (the description says so).
     return mcp_common::MakeOkReply(Data);
 }
 
@@ -4919,15 +4923,72 @@ TSharedPtr<FJsonObject> HandleSetNiagaraMeshRendererMesh(const TSharedPtr<FJsonO
 
 // ---------------------------------------------------------------------------
 // get_niagara_emitter_data_interfaces
-// Read-only enumeration of FNiagaraDataInterfaceEmitterBinding entries on the
-// emitter. The struct has only two fields (BindingMode + EmitterName) — see
-// NiagaraDataInterfaceEmitterBinding.h. We list those; there is no
-// public add path (view-model required), so we do NOT stub one.
+// The data interfaces an emitter's stacks use: every UNiagaraNodeInput of the emitter graph that holds a data
+// interface object -- what the stack creates when a module's data-interface input is set (a curve, a mesh, a
+// vector field...) -- with the stack(s) it feeds, found by walking the graph downstream to the output nodes.
+// The emitter's Emitter Dependencies (FNiagaraDataInterfaceEmitterBinding: BindingMode + EmitterName) are a
+// separate setting and come back as their own array.
 // ---------------------------------------------------------------------------
-// MCP:get_niagara_emitter_data_interfaces - List the data interface bindings on a Niagara emitter (read-only).  Reads the FVersionedNiagaraEmitterData::EmitterDependencies array (TArray<FNiagaraDataInterfaceEmitterBinding>). Each binding has a name, type, interface_class, interface_path, and instance_index.  Adding or removing data interface bindings on a script requires view-models (FNiagaraStackGraphUtilities AddDataInterface) and is editor-only -- this command lists them but does not mutate them.
-//   @param system_path - Asset path of the Niagara System.
-//   @param emitter_name - Name of the emitter handle.
-//   @returns { system_path: string, emitter_name: string, data_interface_count: int, data_interfaces: [{ emitter_name, binding_mode }] }
+namespace
+{
+    // The label of a stack's script usage, as the reply names it.
+    const TCHAR* Niagara_StackUsageLabel(ENiagaraScriptUsage Usage)
+    {
+        switch (Usage)
+        {
+        case ENiagaraScriptUsage::ParticleSpawnScript:
+        case ENiagaraScriptUsage::ParticleSpawnScriptInterpolated: return TEXT("particle_spawn");
+        case ENiagaraScriptUsage::ParticleUpdateScript:            return TEXT("particle_update");
+        case ENiagaraScriptUsage::EmitterSpawnScript:              return TEXT("emitter_spawn");
+        case ENiagaraScriptUsage::EmitterUpdateScript:             return TEXT("emitter_update");
+        case ENiagaraScriptUsage::ParticleEventScript:             return TEXT("particle_event");
+        case ENiagaraScriptUsage::ParticleSimulationStageScript:   return TEXT("simulation_stage");
+        default:                                                   return TEXT("other");
+        }
+    }
+
+    // The usages of the stacks Start feeds: a breadth-first walk over the links of its output pins, down to the
+    // output nodes it reaches. Empty when the node is connected to no stack.
+    TArray<FString> Niagara_DownstreamStackUsages(UEdGraphNode* Start)
+    {
+        TArray<FString> Usages;
+        TArray<UEdGraphNode*> Queue;
+        TSet<UEdGraphNode*> Visited;
+        Queue.Add(Start);
+        Visited.Add(Start);
+        for (int32 Index = 0; Index < Queue.Num(); ++Index)
+        {
+            UEdGraphNode* Node = Queue[Index];
+            if (const UNiagaraNodeOutput* Output = Cast<UNiagaraNodeOutput>(Node))
+            {
+                Usages.AddUnique(FString(Niagara_StackUsageLabel(Output->GetUsage())));
+                continue;
+            }
+            for (UEdGraphPin* Pin : Node->Pins)
+            {
+                if (!Pin || Pin->Direction != EGPD_Output)
+                {
+                    continue;
+                }
+                for (UEdGraphPin* Linked : Pin->LinkedTo)
+                {
+                    UEdGraphNode* Next = Linked ? Linked->GetOwningNode() : nullptr;
+                    if (Next && !Visited.Contains(Next))
+                    {
+                        Visited.Add(Next);
+                        Queue.Add(Next);
+                    }
+                }
+            }
+        }
+        return Usages;
+    }
+}
+
+// MCP:get_niagara_emitter_data_interfaces - List the data interfaces one emitter of a Niagara System asset uses in its stacks: every data-interface input set on a module (a curve, a color curve, a static mesh, a vector field...), each with its input name, data interface class and object path and the stack it feeds (script_usage: particle_spawn, particle_update, emitter_spawn, emitter_update, particle_event, simulation_stage, or unconnected). Read from the emitter graph, so nothing needs compiling; read-only, it changes nothing. Data interfaces used only inside a module's own script are not listed. The emitter's Emitter Dependencies setting comes back separately as emitter_dependencies (emitter_name, binding_mode Self or Other). For the system's user-parameter data interfaces use get_niagara_data_interfaces (add_niagara_data_interface adds one); list_niagara_modules lists the modules. An emitter with none gives empty lists; a missing system or emitter handle is an error.
+//   @param system_path - Content path of the UNiagaraSystem asset, package or object form, e.g. '/Game/FX/NS_Sparks'.
+//   @param emitter_name - Display name of the emitter handle, as get_niagara_emitter_handles lists it, e.g. 'Fountain'.
+//   @returns { system_path: string, emitter_name: string, data_interface_count: int, data_interfaces: [{ name, class, data_interface_path, script_usage, script_usages: [string] }], emitter_dependency_count: int, emitter_dependencies: [{ emitter_name, binding_mode }], note?: string }
 
 TSharedPtr<FJsonObject> HandleGetNiagaraEmitterDataInterfaces(const TSharedPtr<FJsonObject>& Params)
 {
@@ -4939,19 +5000,55 @@ TSharedPtr<FJsonObject> HandleGetNiagaraEmitterDataInterfaces(const TSharedPtr<F
         return Error;
     }
 
+    TSharedPtr<FJsonObject> Data = Niagara_StartEmitterReply(System, EmitterName);
+
+    // The data-interface inputs of the stacks. UNiagaraNodeInput::GetDataInterface is not exported (the class is
+    // MinimalAPI), so its DataInterface UPROPERTY is read through reflection.
     TArray<TSharedPtr<FJsonValue>> DIs;
+    UNiagaraScriptSource* GraphSource = Cast<UNiagaraScriptSource>(EmitterData->GraphSource);
+    UNiagaraGraph* EmitterGraph = GraphSource ? GraphSource->NodeGraph.Get() : nullptr;
+    const FObjectProperty* DataInterfaceProperty =
+        FindFProperty<FObjectProperty>(UNiagaraNodeInput::StaticClass(), TEXT("DataInterface"));
+    if (EmitterGraph && DataInterfaceProperty)
+    {
+        TArray<UNiagaraNodeInput*> Inputs;
+        EmitterGraph->GetNodesOfClass<UNiagaraNodeInput>(Inputs);
+        for (UNiagaraNodeInput* Input : Inputs)
+        {
+            const UObject* DataInterface = Input ? DataInterfaceProperty->GetObjectPropertyValue_InContainer(Input) : nullptr;
+            if (!DataInterface)
+            {
+                continue;
+            }
+            const TArray<FString> Usages = Niagara_DownstreamStackUsages(Input);
+            TSharedPtr<FJsonObject> DObj = MakeShared<FJsonObject>();
+            DObj->SetStringField(TEXT("name"), Input->Input.GetName().ToString());
+            DObj->SetStringField(TEXT("class"), DataInterface->GetClass()->GetName());
+            DObj->SetStringField(TEXT("data_interface_path"), DataInterface->GetPathName());
+            DObj->SetStringField(TEXT("script_usage"), Usages.Num() > 0 ? Usages[0] : FString(TEXT("unconnected")));
+            DObj->SetArrayField(TEXT("script_usages"), mcp_common::StringsToJson(Usages));
+            DIs.Add(MakeShared<FJsonValueObject>(DObj));
+        }
+    }
+    else if (!EmitterGraph)
+    {
+        Data->SetStringField(TEXT("note"), TEXT("The emitter has no editable script graph (a stateless emitter, or no GraphSource): no data interfaces can be read from it."));
+    }
+    Data->SetNumberField(TEXT("data_interface_count"), DIs.Num());
+    Data->SetArrayField(TEXT("data_interfaces"), DIs);
+
+    // The Emitter Dependencies setting: the emitters this one's particle scripts must run after.
+    TArray<TSharedPtr<FJsonValue>> Dependencies;
     for (const FNiagaraDataInterfaceEmitterBinding& B : EmitterData->EmitterDependencies)
     {
         TSharedPtr<FJsonObject> DObj = MakeShared<FJsonObject>();
         DObj->SetStringField(TEXT("emitter_name"), B.EmitterName.ToString());
         DObj->SetStringField(TEXT("binding_mode"),
             B.BindingMode == ENiagaraDataInterfaceEmitterBindingMode::Self ? TEXT("Self") : TEXT("Other"));
-        DIs.Add(MakeShared<FJsonValueObject>(DObj));
+        Dependencies.Add(MakeShared<FJsonValueObject>(DObj));
     }
-
-    TSharedPtr<FJsonObject> Data = Niagara_StartEmitterReply(System, EmitterName);
-    Data->SetNumberField(TEXT("data_interface_count"), EmitterData->EmitterDependencies.Num());
-    Data->SetArrayField(TEXT("data_interfaces"), DIs);
+    Data->SetNumberField(TEXT("emitter_dependency_count"), Dependencies.Num());
+    Data->SetArrayField(TEXT("emitter_dependencies"), Dependencies);
     return mcp_common::MakeOkReply(Data);
 }
 
@@ -6431,10 +6528,191 @@ TSharedPtr<FJsonObject> HandleSetNiagaraEmitterRequiresPersistentIds(const TShar
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_niagara_emitter_requires_persistent_ids"), SaveError);
 }
 
-// MCP:get_niagara_emitter_runtime_summary - Flat readback of a Niagara emitter's runtime knobs and counts.
-//   @param system_path - Asset path of the Niagara System.
-//   @param emitter_name - Name of the emitter handle.
-//   @returns { system_path: string, emitter_name: string, sim_target: string, bounds_mode: string, bounds_min: string, bounds_max: string, allocation_mode: string, pre_allocation_count: int, max_gpu_particles: int, local_space: bool, deterministic: bool, requires_persistent_ids: bool, update_module_count: int, spawn_module_count: int, emitter_spawn_module_count: int, emitter_update_module_count: int, renderer_count: int, event_handler_count: int, simulation_stage_count: int }
+// ---------------------------------------------------------------------------
+// Per-stack module walking. Every script of an emitter shares ONE graph, so a stack is not "the function-call nodes
+// of the graph": it is the parameter-map chain that ends at that stack's output node. These helpers re-implement,
+// with exported APIs only, what FNiagaraStackGraphUtilities::GetOrderedModuleNodes / GetStackNodeGroups /
+// DisconnectStackNodeGroup / ConnectStackNodeGroup do (NOT exported -> LNK2019).
+// ---------------------------------------------------------------------------
+namespace
+{
+    // The parameter-map pin of Node in Direction (a stack node: input, output, module call or override node), else
+    // null. A Niagara parameter-map pin carries FNiagaraTypeDefinition::GetParameterMapStruct() as its sub-category
+    // object -- what UEdGraphSchema_Niagara::PinToTypeDefinition compares with GetParameterMapDef().
+    UEdGraphPin* Niagara_ParameterMapPin(UEdGraphNode* Node, EEdGraphPinDirection Direction)
+    {
+        if (!Node)
+        {
+            return nullptr;
+        }
+        const UObject* ParameterMapStruct = FNiagaraTypeDefinition::GetParameterMapStruct();
+        for (UEdGraphPin* Pin : Node->Pins)
+        {
+            if (Pin && Pin->Direction == Direction && Pin->PinType.PinSubCategoryObject.Get() == ParameterMapStruct)
+            {
+                return Pin;
+            }
+        }
+        return nullptr;
+    }
+
+    UEdGraphPin* Niagara_ParameterMapInputPin(UEdGraphNode* Node)
+    {
+        return Niagara_ParameterMapPin(Node, EGPD_Input);
+    }
+
+    // The modules of the stack that ends at Output, in execution order (first module first): the
+    // UNiagaraNodeFunctionCall nodes (assignment nodes included) met walking the parameter-map chain back from the
+    // output node to the stack's input node, as GetOrderedModuleNodes walks it. A dynamic input feeds a module input
+    // pin, not the chain, so it is not a module; a disabled module stays on the chain and is. OutInputNode, when
+    // given, receives the node the chain starts at (the stack's input node).
+    TArray<UNiagaraNodeFunctionCall*> Niagara_OrderedStackModules(UNiagaraNodeOutput* Output, UEdGraphNode** OutInputNode = nullptr)
+    {
+        TArray<UNiagaraNodeFunctionCall*> Modules;
+        TSet<const UEdGraphNode*> Visited;
+        UEdGraphNode* Current = Output;
+        while (Current && !Visited.Contains(Current))
+        {
+            Visited.Add(Current);
+            UEdGraphPin* MapInput = Niagara_ParameterMapInputPin(Current);
+            if (!MapInput || MapInput->LinkedTo.Num() != 1 || !MapInput->LinkedTo[0])
+            {
+                break;
+            }
+            UEdGraphNode* Previous = MapInput->LinkedTo[0]->GetOwningNode();
+            if (UNiagaraNodeFunctionCall* Module = Cast<UNiagaraNodeFunctionCall>(Previous))
+            {
+                Modules.Insert(Module, 0);
+            }
+            Current = Previous;
+        }
+        if (OutInputNode)
+        {
+            *OutInputNode = Current;
+        }
+        return Modules;
+    }
+
+    int32 Niagara_CountStackModules(UNiagaraNodeOutput* Output)
+    {
+        return Niagara_OrderedStackModules(Output).Num();
+    }
+
+    // One group of a stack's parameter-map chain, as FNiagaraStackGraphUtilities::FStackNodeGroup: the nodes whose
+    // parameter-map input hangs off the previous group's end (a module's override node and the map-get nodes of its
+    // linked inputs, or the module itself) and the node the group ends at (the module; or the input / output node).
+    struct FUEAgentNiagaraStackGroup
+    {
+        TArray<UEdGraphNode*> StartNodes;
+        UEdGraphNode* EndNode = nullptr;
+    };
+
+    // The groups of the stack that ends at Output: the input group, one group per module in execution order, and
+    // the output group. False (OutGroups emptied) when the chain is malformed: a group end without a parameter-map
+    // output pin, or one that links to nothing.
+    bool Niagara_StackGroups(UNiagaraNodeOutput* Output, TArray<FUEAgentNiagaraStackGroup>& OutGroups)
+    {
+        OutGroups.Reset();
+        UEdGraphNode* InputNode = nullptr;
+        const TArray<UNiagaraNodeFunctionCall*> Modules = Niagara_OrderedStackModules(Output, &InputNode);
+        if (!InputNode || InputNode == Output)
+        {
+            return false;
+        }
+        FUEAgentNiagaraStackGroup InputGroup;
+        InputGroup.StartNodes.Add(InputNode);
+        InputGroup.EndNode = InputNode;
+        OutGroups.Add(InputGroup);
+
+        // The nodes whose parameter-map input is linked from End's parameter-map output.
+        auto StartsAfter = [](UEdGraphNode* End, TArray<UEdGraphNode*>& OutStarts) -> bool
+        {
+            UEdGraphPin* EndOutput = Niagara_ParameterMapPin(End, EGPD_Output);
+            if (!EndOutput)
+            {
+                return false;
+            }
+            for (UEdGraphPin* Linked : EndOutput->LinkedTo)
+            {
+                if (UEdGraphNode* Owner = Linked ? Linked->GetOwningNode() : nullptr)
+                {
+                    OutStarts.AddUnique(Owner);
+                }
+            }
+            return OutStarts.Num() > 0;
+        };
+        for (UNiagaraNodeFunctionCall* Module : Modules)
+        {
+            FUEAgentNiagaraStackGroup ModuleGroup;
+            if (!StartsAfter(OutGroups.Last().EndNode, ModuleGroup.StartNodes))
+            {
+                OutGroups.Reset();
+                return false;
+            }
+            ModuleGroup.EndNode = Module;
+            OutGroups.Add(ModuleGroup);
+        }
+        FUEAgentNiagaraStackGroup OutputGroup;
+        if (!StartsAfter(OutGroups.Last().EndNode, OutputGroup.StartNodes))
+        {
+            OutGroups.Reset();
+            return false;
+        }
+        OutputGroup.EndNode = Output;
+        OutGroups.Add(OutputGroup);
+        return true;
+    }
+
+    // Links From (a parameter-map output) to To (a parameter-map input) and notifies both nodes, as
+    // FNiagaraStackGraphUtilities::MakeLinkTo does; UNiagaraNode::PinConnectionListChanged marks the node for
+    // re-synchronization so the next compile sees the new order.
+    void Niagara_LinkMapPins(UEdGraphPin* From, UEdGraphPin* To)
+    {
+        if (!From || !To)
+        {
+            return;
+        }
+        From->MakeLinkTo(To);
+        From->GetOwningNode()->PinConnectionListChanged(From);
+        To->GetOwningNode()->PinConnectionListChanged(To);
+    }
+
+    // Takes Group out of the chain and closes the gap: Previous's end now feeds Next's start nodes.
+    void Niagara_DisconnectStackGroup(const FUEAgentNiagaraStackGroup& Group, const FUEAgentNiagaraStackGroup& Previous,
+                                      const FUEAgentNiagaraStackGroup& Next)
+    {
+        UEdGraphPin* PreviousOutput = Niagara_ParameterMapPin(Previous.EndNode, EGPD_Output);
+        UEdGraphPin* GroupOutput = Niagara_ParameterMapPin(Group.EndNode, EGPD_Output);
+        PreviousOutput->BreakAllPinLinks(true);
+        GroupOutput->BreakAllPinLinks(true);
+        for (UEdGraphNode* NextStart : Next.StartNodes)
+        {
+            Niagara_LinkMapPins(PreviousOutput, Niagara_ParameterMapInputPin(NextStart));
+        }
+    }
+
+    // Puts Group into the chain between NewPrevious and NewNext.
+    void Niagara_ConnectStackGroup(const FUEAgentNiagaraStackGroup& Group, const FUEAgentNiagaraStackGroup& NewPrevious,
+                                   const FUEAgentNiagaraStackGroup& NewNext)
+    {
+        UEdGraphPin* PreviousOutput = Niagara_ParameterMapPin(NewPrevious.EndNode, EGPD_Output);
+        PreviousOutput->BreakAllPinLinks(true);
+        for (UEdGraphNode* GroupStart : Group.StartNodes)
+        {
+            Niagara_LinkMapPins(PreviousOutput, Niagara_ParameterMapInputPin(GroupStart));
+        }
+        UEdGraphPin* GroupOutput = Niagara_ParameterMapPin(Group.EndNode, EGPD_Output);
+        for (UEdGraphNode* NextStart : NewNext.StartNodes)
+        {
+            Niagara_LinkMapPins(GroupOutput, Niagara_ParameterMapInputPin(NextStart));
+        }
+    }
+}
+
+// MCP:get_niagara_emitter_runtime_summary - Read one emitter of a Niagara System asset in a single flat reply: simulation target (CPUSim or GPUComputeSim), bounds mode (Dynamic, Fixed or Programmable) and its fixed box as 'X=.. Y=.. Z=..' strings, particle allocation mode and pre-allocation count, GPU spawn cap per frame (max_gpu_particles), local-space, determinism and persistent-ID flags, how many renderers, event handlers and simulation stages it has, and how many modules each stack holds. Read-only: it changes nothing and compiles nothing. Module counts are per stack, read from the chain that ends at each stack's output node: spawn_module_count and update_module_count for particle spawn and update, emitter_spawn_module_count and emitter_update_module_count, event_module_count over all event handlers and simulation_stage_module_count over all stages; dynamic inputs are not counted, disabled modules are, and graph_function_call_count counts every function-call node of the emitter graph. list_niagara_modules lists modules by name. A missing system or emitter handle is an error. Change these settings with set_niagara_emitter_properties.
+//   @param system_path - Content path of the UNiagaraSystem asset, package or object form, e.g. '/Game/FX/NS_Sparks'.
+//   @param emitter_name - Display name of the emitter handle, as get_niagara_emitter_handles lists it, e.g. 'Fountain'.
+//   @returns { system_path: string, emitter_name: string, sim_target: string, bounds_mode: string, bounds_min: string, bounds_max: string, allocation_mode: string, pre_allocation_count: int, max_gpu_particles: int, local_space: bool, deterministic: bool, requires_persistent_ids: bool, update_module_count: int, spawn_module_count: int, emitter_spawn_module_count: int, emitter_update_module_count: int, event_module_count: int, simulation_stage_module_count: int, graph_function_call_count: int, renderer_count: int, event_handler_count: int, simulation_stage_count: int, note?: string }
 
 TSharedPtr<FJsonObject> HandleGetNiagaraEmitterRuntimeSummary(const TSharedPtr<FJsonObject>& Params)
 {
@@ -6449,36 +6727,60 @@ TSharedPtr<FJsonObject> HandleGetNiagaraEmitterRuntimeSummary(const TSharedPtr<F
         return Error;
     }
 
-    // Count modules on each of the 4 standard scripts (Update/Spawn/EmitterSpawn/EmitterUpdate)
-    // by walking the UNiagaraGraph's UNiagaraNodeFunctionCall nodes. Skipping
-    // the graph walk keeps the readback cheap and headless-safe (no recompile).
-    auto CountFunctionCalls = [](UNiagaraScript* Script) -> int32
+    // Modules per script usage. Every script of an emitter shares ONE graph (its GraphSource), with one output node
+    // per stack: emitter spawn/update, particle spawn/update, one per event handler and one per simulation stage.
+    // Each stack's modules are the function-call nodes on the parameter-map chain that ends at its output node
+    // (Niagara_CountStackModules), so a dynamic input, which hangs off a module input, is not a module.
+    int32 SpawnModules = 0;
+    int32 UpdateModules = 0;
+    int32 EmitterSpawnModules = 0;
+    int32 EmitterUpdateModules = 0;
+    int32 EventModules = 0;
+    int32 SimulationStageModules = 0;
+    int32 GraphFunctionCalls = 0;
+    UNiagaraScriptSource* GraphSource = Cast<UNiagaraScriptSource>(EmitterData->GraphSource);
+    UNiagaraGraph* EmitterGraph = GraphSource ? GraphSource->NodeGraph.Get() : nullptr;
+    if (EmitterGraph)
     {
-        if (!Script) { return 0; }
-        // UNiagaraScript exposes GetLatestSource() (NiagaraScript.h)
-        // as the 0-arg editor-only overload; GetSource() requires a version
-        // FGuid. Downcast to the concrete UNiagaraScriptSource to access the
-        // NodeGraph TObjectPtr (the field is public on the derived class; no
-        // GetGraph() accessor exists).
-        UNiagaraScriptSourceBase* BaseSource = Script->GetLatestSource();
-        UNiagaraScriptSource* Source = Cast<UNiagaraScriptSource>(BaseSource);
-        if (!Source) { return 0; }
-        UNiagaraGraph* Graph = Source->NodeGraph;
-        if (!Graph) { return 0; }
-        int32 Count = 0;
-        for (UEdGraphNode* Node : Graph->Nodes)
+        TArray<UNiagaraNodeFunctionCall*> AllCalls;
+        EmitterGraph->GetNodesOfClass<UNiagaraNodeFunctionCall>(AllCalls);
+        GraphFunctionCalls = AllCalls.Num();
+
+        TArray<UNiagaraNodeOutput*> Outputs;
+        EmitterGraph->GetNodesOfClass<UNiagaraNodeOutput>(Outputs);
+        for (UNiagaraNodeOutput* Output : Outputs)
         {
-            if (Cast<UNiagaraNodeFunctionCall>(Node))
+            if (!Output)
             {
-                ++Count;
+                continue;
+            }
+            const int32 StackModules = Niagara_CountStackModules(Output);
+            switch (Output->GetUsage())
+            {
+            case ENiagaraScriptUsage::ParticleSpawnScript:
+            case ENiagaraScriptUsage::ParticleSpawnScriptInterpolated:
+                SpawnModules += StackModules;
+                break;
+            case ENiagaraScriptUsage::ParticleUpdateScript:
+                UpdateModules += StackModules;
+                break;
+            case ENiagaraScriptUsage::EmitterSpawnScript:
+                EmitterSpawnModules += StackModules;
+                break;
+            case ENiagaraScriptUsage::EmitterUpdateScript:
+                EmitterUpdateModules += StackModules;
+                break;
+            case ENiagaraScriptUsage::ParticleEventScript:
+                EventModules += StackModules;
+                break;
+            case ENiagaraScriptUsage::ParticleSimulationStageScript:
+                SimulationStageModules += StackModules;
+                break;
+            default:
+                break;
             }
         }
-        return Count;
-    };
-    const int32 UpdateModules = CountFunctionCalls(EmitterData->UpdateScriptProps.Script);
-    const int32 SpawnModules = CountFunctionCalls(EmitterData->SpawnScriptProps.Script);
-    const int32 EmitterSpawnModules = CountFunctionCalls(EmitterData->EmitterSpawnScriptProps.Script);
-    const int32 EmitterUpdateModules = CountFunctionCalls(EmitterData->EmitterUpdateScriptProps.Script);
+    }
     const int32 RendererCount = EmitterData->GetRenderers().Num();
 
     TSharedPtr<FJsonObject> Data = Niagara_StartEmitterReply(System, EmitterName);
@@ -6503,9 +6805,16 @@ TSharedPtr<FJsonObject> HandleGetNiagaraEmitterRuntimeSummary(const TSharedPtr<F
     Data->SetNumberField(TEXT("spawn_module_count"), SpawnModules);
     Data->SetNumberField(TEXT("emitter_spawn_module_count"), EmitterSpawnModules);
     Data->SetNumberField(TEXT("emitter_update_module_count"), EmitterUpdateModules);
+    Data->SetNumberField(TEXT("event_module_count"), EventModules);
+    Data->SetNumberField(TEXT("simulation_stage_module_count"), SimulationStageModules);
+    Data->SetNumberField(TEXT("graph_function_call_count"), GraphFunctionCalls);
     Data->SetNumberField(TEXT("renderer_count"), RendererCount);
     Data->SetNumberField(TEXT("event_handler_count"), EmitterData->EventHandlerScriptProps.Num());
     Data->SetNumberField(TEXT("simulation_stage_count"), EmitterData->GetSimulationStages().Num());
+    if (!EmitterGraph)
+    {
+        Data->SetStringField(TEXT("note"), TEXT("The emitter has no editable script graph (a stateless emitter, or no GraphSource): the module counts are 0."));
+    }
     return mcp_common::MakeOkReply(Data);
 }
 
@@ -6573,26 +6882,6 @@ namespace
         return Out;
     }
 
-    // Find a UNiagaraNodeFunctionCall by its display name (GetFunctionName) on the
-    // ordered module list of a group graph. Used by remove / duplicate / enable /
-    // info to locate a module by name without requiring a GUID.
-    UNiagaraNodeFunctionCall* FindModuleNodeByNameOnGraph(UNiagaraGraph* Graph, const FString& ModuleName)
-    {
-        if (!Graph || ModuleName.IsEmpty())
-        {
-            return nullptr;
-        }
-        for (UEdGraphNode* Node : Graph->Nodes)
-        {
-            UNiagaraNodeFunctionCall* Func = Cast<UNiagaraNodeFunctionCall>(Node);
-            if (Func && Func->GetFunctionName().Equals(ModuleName, ESearchCase::CaseSensitive))
-            {
-                return Func;
-            }
-        }
-        return nullptr;
-    }
-
     // The system, the emitter data and the output node of the emitter's Usage stack, resolved in that order.
     UNiagaraNodeOutput* Niagara_ResolveStackOutput(const FString& SystemPath, const FString& EmitterName,
         ENiagaraScriptUsage Usage, UNiagaraSystem*& OutSystem, FVersionedNiagaraEmitterData*& OutEmitterData, FString& OutError)
@@ -6606,7 +6895,9 @@ namespace
         return ResolveEmitterOutputNode(OutEmitterData, Usage, OutError);
     }
 
-    // Niagara_ResolveStackOutput for the ScriptGroup stack, then the module named ModuleName on that stack's graph.
+    // Niagara_ResolveStackOutput for the ScriptGroup stack, then the first module named ModuleName (GetFunctionName,
+    // case-sensitive) on THAT stack -- walked along its parameter-map chain, never searched over the emitter's whole
+    // shared graph, which also holds the other stacks and the dynamic inputs.
     UNiagaraNodeFunctionCall* Niagara_ResolveStackModule(const FString& SystemPath, const FString& EmitterName,
         const FString& ScriptGroup, const FString& ModuleName, UNiagaraSystem*& OutSystem,
         FVersionedNiagaraEmitterData*& OutEmitterData, UNiagaraNodeOutput*& OutOutput, FString& OutError)
@@ -6617,12 +6908,17 @@ namespace
         {
             return nullptr;
         }
-        UNiagaraNodeFunctionCall* Module = FindModuleNodeByNameOnGraph(Cast<UNiagaraGraph>(OutOutput->GetGraph()), ModuleName);
-        if (!Module)
+        for (UNiagaraNodeFunctionCall* Module : Niagara_OrderedStackModules(OutOutput))
         {
-            OutError = FString::Printf(TEXT("Module '%s' not found on %s graph"), *ModuleName, *ScriptGroup);
+            if (Module && Module->GetFunctionName().Equals(ModuleName, ESearchCase::CaseSensitive))
+            {
+                return Module;
+            }
         }
-        return Module;
+        OutError = FString::Printf(
+            TEXT("Module '%s' not found on the %s stack of emitter '%s' (list_niagara_modules lists that stack); nothing was changed"),
+            *ModuleName, *ScriptGroup, *EmitterName);
+        return nullptr;
     }
 
     // Calls Modify() on the emitter's script graph, when it has one.
@@ -6638,15 +6934,15 @@ namespace
 
 // ---------------------------------------------------------------------------
 // remove_niagara_module_from_stack
-// Removes a UNiagaraNodeFunctionCall module from the emitter's group graph.
-// Identifies the module by name (GetFunctionName) on the spawn OR update graph.
+// Removes one module, with its whole stack group, from the emitter's spawn OR
+// update stack, found by name (GetFunctionName) on that stack's chain only.
 // ---------------------------------------------------------------------------
-// MCP:remove_niagara_module_from_stack - Remove a UNiagaraNodeFunctionCall module from a Niagara emitter's spawn or update graph.
-//   @param system_path - Asset path of the Niagara System.
-//   @param emitter_name - Name of the emitter handle.
-//   @param module_name - Display name of the module function-call node to remove
-//   @param script_group - Optional "spawn" or "update"; defaults to "update"
-//   @returns { system_path: string, emitter_name: string, script_group: string, module_name: string, removed: bool, saved: bool, save_error?: string }
+// MCP:remove_niagara_module_from_stack - Remove one module from a Niagara emitter's particle spawn or update stack, in one undo step: the module and every node that feeds it (its input overrides, dynamic inputs and data-interface inputs) are taken out and the stack's chain is closed over the gap, then a system compile is requested and the system saved. The module is found by function name (case-sensitive) on the script_group stack only, the first one in execution order, as list_niagara_modules lists it. The result is read back: removed is true when the module is off the stack and the stack is one module shorter, chain_intact when the stack still runs from its input to its output node; either false fails the call. An unknown system, emitter or module (or a module only on the other stack) is an error and nothing changes; a failed save makes success false, with saved=false and save_error. The inverse is add_niagara_module_to_stack.
+//   @param system_path - Content path of the UNiagaraSystem asset, e.g. '/Game/FX/NS_Sparks'.
+//   @param emitter_name - Display name of the emitter handle, as get_niagara_emitter_handles lists it.
+//   @param module_name - Function name of the module to remove, case-sensitive, as list_niagara_modules gives module_name for that stack, e.g. 'GravityForce'.
+//   @param script_group - Optional "spawn" or "update" (any case), the stack the module is on; defaults to "update", and any other value reads as update.
+//   @returns { system_path: string, emitter_name: string, script_group: string, module_name: string, removed_index: int, removed_node_count: int, module_count: int, chain_intact: bool, removed: bool, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleRemoveNiagaraModuleFromStack(const TSharedPtr<FJsonObject>& Params)
 {
@@ -6671,56 +6967,107 @@ TSharedPtr<FJsonObject> HandleRemoveNiagaraModuleFromStack(const TSharedPtr<FJso
         return mcp_common::MakeErrorReply(Error);
     }
 
+    // FNiagaraStackGraphUtilities::RemoveModuleFromStack is NOT exported, so its path is replicated: take the module's
+    // whole group out of the stack's parameter-map chain and close the gap, then remove every node that fed the
+    // module (its override node, dynamic inputs, data-interface and linked-input nodes). Removing only the module
+    // node, as this command once did, left its override node in the chain and the stack cut in two.
+    UNiagaraGraph* NiagaraGraph = Cast<UNiagaraGraph>(Out->GetGraph());
+    TArray<FUEAgentNiagaraStackGroup> Groups;
+    if (!NiagaraGraph || !Niagara_StackGroups(Out, Groups))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("The %s stack of emitter '%s' has no well-formed parameter-map chain from its input to its output node; nothing was changed"),
+            *ScriptGroup, *EmitterName));
+    }
+    const int32 GroupIndex = Groups.IndexOfByPredicate(
+        [TargetModule](const FUEAgentNiagaraStackGroup& Group) { return Group.EndNode == TargetModule; });
+    if (GroupIndex <= 0 || GroupIndex >= Groups.Num() - 1)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Module '%s' is not a group of the %s stack's chain; nothing was changed"), *ModuleName, *ScriptGroup));
+    }
+    const int32 RemovedIndex = GroupIndex - 1;
+    const int32 ModulesBefore = Groups.Num() - 2;
+
     FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "RemoveNiagaraModuleFromStack", "Remove Niagara Module From Stack"));
     System->Modify();
     Niagara_ModifyEmitterGraph(EmitterData);
+    NiagaraGraph->Modify();
+    // The owning script keeps the module's rapid-iteration values; recording it lets an undo restore them.
+    if (UNiagaraScript* OwningScript = GetEmitterGroupScript(EmitterData, Niagara_ScriptGroupUsage(ScriptGroup)))
+    {
+        OwningScript->Modify();
+    }
+    Niagara_DisconnectStackGroup(Groups[GroupIndex], Groups[GroupIndex - 1], Groups[GroupIndex + 1]);
 
-    // FNiagaraStackGraphUtilities::RemoveModuleFromStack is NOT exported, so we
-    // replicate the editor's removal path directly: UEdGraph::RemoveNode (which
-    // breaks all links by default) + UEdGraphNode::DestroyNode + recompile. This
-    // is a single-module call (the user asked to remove one module by name), so
-    // the broader stack-group disassembly that the internal helper performs is
-    // not needed.
-    UNiagaraGraph* NiagaraGraph = Cast<UNiagaraGraph>(Out->GetGraph());
-    if (!NiagaraGraph)
+    // The group is now cut off the chain, so everything upstream of the module belongs to it.
+    TArray<UEdGraphNode*> NodesToRemove;
+    NodesToRemove.Add(TargetModule);
+    for (int32 Index = 0; Index < NodesToRemove.Num(); ++Index)
     {
-        return mcp_common::MakeErrorReply(
-            TEXT("Could not resolve UNiagaraGraph from output node"));
+        for (UEdGraphPin* Pin : NodesToRemove[Index]->Pins)
+        {
+            if (!Pin || Pin->Direction != EGPD_Input)
+            {
+                continue;
+            }
+            for (UEdGraphPin* Linked : Pin->LinkedTo)
+            {
+                if (UEdGraphNode* Upstream = Linked ? Linked->GetOwningNode() : nullptr)
+                {
+                    NodesToRemove.AddUnique(Upstream);
+                }
+            }
+        }
     }
-    TargetModule->Modify();
-    const bool bRemoved = NiagaraGraph->RemoveNode(TargetModule);
-    if (!bRemoved)
+    for (UEdGraphNode* Node : NodesToRemove)
     {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("RemoveNode refused to remove '%s' (module may be wired to required pins)"), *ModuleName));
+        Node->Modify();
+        NiagaraGraph->RemoveNode(Node);
     }
-    TargetModule->DestroyNode();
+    NiagaraGraph->NotifyGraphChanged();
     System->RequestCompile(true);
 
     FString SaveError;
     const bool bSaved = SaveModifiedNiagaraSystem(System, SaveError);
 
+    // Read back: the module is off the stack, and the stack is still one chain from input to output.
+    const TArray<UNiagaraNodeFunctionCall*> ModulesAfter = Niagara_OrderedStackModules(Out);
+    TArray<FUEAgentNiagaraStackGroup> GroupsAfter;
+    const bool bChainIntact = Niagara_StackGroups(Out, GroupsAfter);
+    const bool bRemoved = !ModulesAfter.Contains(TargetModule) && ModulesAfter.Num() == ModulesBefore - 1;
+
     TSharedPtr<FJsonObject> Data = Niagara_StartEmitterReply(System, EmitterName);
     Data->SetStringField(TEXT("script_group"), ScriptGroup);
     Data->SetStringField(TEXT("module_name"), ModuleName);
-    Data->SetBoolField(TEXT("removed"), true);
+    Data->SetNumberField(TEXT("removed_index"), RemovedIndex);
+    Data->SetNumberField(TEXT("removed_node_count"), NodesToRemove.Num());
+    Data->SetNumberField(TEXT("module_count"), ModulesAfter.Num());
+    Data->SetBoolField(TEXT("chain_intact"), bChainIntact);
+    Data->SetBoolField(TEXT("removed"), bRemoved);
+    if (!bRemoved || !bChainIntact)
+    {
+        mcp_common::AddSaveOutcome(Data, bSaved, SaveError);
+        return mcp_common::MakeOutcomeReply(Data, false, FString::Printf(
+            TEXT("remove_niagara_module_from_stack: read back after the removal, '%s' %s on the %s stack and its chain is %s"),
+            *ModuleName, bRemoved ? TEXT("is gone") : TEXT("is still"), *ScriptGroup, bChainIntact ? TEXT("intact") : TEXT("broken")));
+    }
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("remove_niagara_module_from_stack"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
 // duplicate_niagara_module_in_stack
 // Loads the source module UNiagaraScript by GetFunctionName's script reference,
-// then re-inserts it via AddScriptModuleToStack with an optional insertion
-// offset (relative to the original module's index, or absolute target_index
-// if target_index_override is set).
+// then re-inserts it via AddScriptModuleToStack at a STACK position (one past
+// the source on its own stack, or target_index_override).
 // ---------------------------------------------------------------------------
-// MCP:duplicate_niagara_module_in_stack - Add another instance of a module to one emitter of a Niagara System asset: the module node named module_name (its function name, case-sensitive, as list_niagara_modules gives it) is found anywhere in the emitter graph and its script is added again to the script_group stack (spawn or update, default update; any other value reads as update) through FNiagaraStackGraphUtilities::AddScriptModuleToStack, in one undo step, then a system compile is requested and the system saved. The new module starts with the default inputs of the script; the input overrides of the source are not copied. target_index_override, a JSON number, sets its position; without it the position is the source index plus one among the module nodes of the emitter graph. An unknown system, emitter or module is an error; a failed save makes success false, with saved=false and save_error. Inputs: set_niagara_module_input; move: reorder_niagara_modules.
-//   @param system_path - Asset path of the Niagara System.
-//   @param emitter_name - Name of the emitter handle.
-//   @param module_name - Function name of the module node to duplicate, case-sensitive, as list_niagara_modules gives module_name
+// MCP:duplicate_niagara_module_in_stack - Add another instance of a module to one emitter of a Niagara System asset: the module named module_name (its function name, case-sensitive, as list_niagara_modules gives it) is found on the script_group stack only (spawn or update, default update; any other value reads as update) and its script is added again to that stack through FNiagaraStackGraphUtilities::AddScriptModuleToStack, in one undo step, then a system compile is requested and the system saved. The new module starts with the default inputs of the script; the input overrides of the source are not copied. Positions are stack positions, as list_niagara_modules reports index: target_index_override sets it (clamped into the stack, -1 appends), else it goes right after the source. inserted_index is read back from the stack, and a module that did not land where asked fails the call. An unknown system, emitter or module (or a module only on the other stack) is an error and nothing changes; a failed save makes success false, with saved=false and save_error. Inputs: set_niagara_module_input; move: reorder_niagara_modules.
+//   @param system_path - Content path of the UNiagaraSystem asset, e.g. '/Game/FX/NS_Sparks'.
+//   @param emitter_name - Display name of the emitter handle, as get_niagara_emitter_handles lists it.
+//   @param module_name - Function name of the module to duplicate, case-sensitive, as list_niagara_modules gives module_name for that stack, e.g. 'GravityForce'.
 //   @param script_group - Optional "spawn" or "update"; defaults to "update"
-//   @param target_index_override - Optional position for the new module, a JSON number; defaults to the source index plus one among the module nodes of the emitter graph
-//   @returns { system_path: string, emitter_name: string, script_group: string, source_module_name: string, new_module_name: string, inserted_index: int, duplicated: bool, saved: bool, save_error?: string }
+//   @param target_index_override - Optional stack position for the new module, a JSON number (0 runs first; -1 appends; others are clamped into the stack); defaults to the source's stack index plus one.
+//   @returns { system_path: string, emitter_name: string, script_group: string, source_module_name: string, source_index: int, new_module_name: string, inserted_index: int, module_count: int, duplicated: bool, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleDuplicateNiagaraModuleInStack(const TSharedPtr<FJsonObject>& Params)
 {
@@ -6754,22 +7101,13 @@ TSharedPtr<FJsonObject> HandleDuplicateNiagaraModuleInStack(const TSharedPtr<FJs
             FString::Printf(TEXT("Module '%s' has no FunctionScript (cannot duplicate)"), *ModuleName));
     }
 
-    // Compute insertion index: explicit override > one-past-source > end.
-    // We use UNiagaraGraph::GetNodesOfClass (public, ENGINE_API) instead of the
-    // non-exported FNiagaraStackGraphUtilities::GetOrderedModuleNodes. Order
-    // matches the internal helper well enough for index computation; the actual
-    // insertion position is determined by AddScriptModuleToStack.
-    int32 InsertIndex = TargetIndexOverride;
-    if (InsertIndex == INDEX_NONE)
-    {
-        TArray<UNiagaraNodeFunctionCall*> Ordered;
-        if (UNiagaraGraph* NiagaraGraph = Cast<UNiagaraGraph>(Out->GetGraph()))
-        {
-            NiagaraGraph->GetNodesOfClass<UNiagaraNodeFunctionCall>(Ordered);
-        }
-        const int32 SourceIdx = Ordered.IndexOfByKey(Source);
-        InsertIndex = (SourceIdx != INDEX_NONE) ? SourceIdx + 1 : INDEX_NONE;
-    }
+    // Positions are stack positions, the index list_niagara_modules reports and AddScriptModuleToStack takes (it
+    // clamps to [0, module count]): the explicit override, else one past the source on its own stack.
+    const TArray<UNiagaraNodeFunctionCall*> ModulesBefore = Niagara_OrderedStackModules(Out);
+    const int32 SourceIndex = ModulesBefore.IndexOfByKey(Source);
+    const int32 InsertIndex = Params->HasField(TEXT("target_index_override")) ? TargetIndexOverride : SourceIndex + 1;
+    // Where AddScriptModuleToStack puts it: INDEX_NONE appends, any other index is clamped into the stack.
+    const int32 ExpectedIndex = InsertIndex == INDEX_NONE ? ModulesBefore.Num() : FMath::Clamp(InsertIndex, 0, ModulesBefore.Num());
 
     FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "DuplicateNiagaraModuleInStack", "Duplicate Niagara Module In Stack"));
     System->Modify();
@@ -6787,12 +7125,25 @@ TSharedPtr<FJsonObject> HandleDuplicateNiagaraModuleInStack(const TSharedPtr<FJs
     FString SaveError;
     const bool bSaved = SaveModifiedNiagaraSystem(System, SaveError);
 
+    // Read back from the stack's chain: where the new module really is.
+    const TArray<UNiagaraNodeFunctionCall*> ModulesAfter = Niagara_OrderedStackModules(Out);
+    const int32 InsertedIndex = ModulesAfter.IndexOfByKey(Duplicate);
+
     TSharedPtr<FJsonObject> Data = Niagara_StartEmitterReply(System, EmitterName);
     Data->SetStringField(TEXT("script_group"), ScriptGroup);
     Data->SetStringField(TEXT("source_module_name"), ModuleName);
+    Data->SetNumberField(TEXT("source_index"), SourceIndex);
     Data->SetStringField(TEXT("new_module_name"), Duplicate->GetFunctionName());
-    Data->SetNumberField(TEXT("inserted_index"), InsertIndex);
-    Data->SetBoolField(TEXT("duplicated"), true);
+    Data->SetNumberField(TEXT("inserted_index"), InsertedIndex);
+    Data->SetNumberField(TEXT("module_count"), ModulesAfter.Num());
+    Data->SetBoolField(TEXT("duplicated"), InsertedIndex != INDEX_NONE);
+    if (InsertedIndex != ExpectedIndex)
+    {
+        mcp_common::AddSaveOutcome(Data, bSaved, SaveError);
+        return mcp_common::MakeOutcomeReply(Data, false, FString::Printf(
+            TEXT("duplicate_niagara_module_in_stack: the new module reads at index %d of the %s stack, not %d"),
+            InsertedIndex, *ScriptGroup, ExpectedIndex));
+    }
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("duplicate_niagara_module_in_stack"), SaveError);
 }
 
@@ -6801,13 +7152,13 @@ TSharedPtr<FJsonObject> HandleDuplicateNiagaraModuleInStack(const TSharedPtr<FJs
 // Toggle bIsEnabled on a UNiagaraNodeFunctionCall via
 // FNiagaraStackGraphUtilities::SetModuleIsEnabled. Returns the pre/post state.
 // ---------------------------------------------------------------------------
-// MCP:set_niagara_module_enabled - Enable or disable a UNiagaraNodeFunctionCall module in a Niagara emitter's spawn or update graph.
-//   @param system_path - Asset path of the Niagara System.
-//   @param emitter_name - Name of the emitter handle.
-//   @param module_name - Display name of the module to toggle
-//   @param enabled - Optional bool; defaults to true
-//   @param script_group - Optional "spawn" or "update"; defaults to "update"
-//   @returns { system_path: string, emitter_name: string, script_group: string, module_name: string, previous_enabled?: bool, enabled: bool, saved: bool, save_error?: string }
+// MCP:set_niagara_module_enabled - Enable or disable one module of a Niagara emitter's particle spawn or update stack (FNiagaraStackGraphUtilities::SetModuleIsEnabled), in one undo step, then request a system compile and save the system; a disabled module stays on the stack but does not run. The module is found by function name (case-sensitive) on the script_group stack only, the first one in execution order. previous_enabled and enabled are read from the node before and after; an enabled state that did not take fails the call. A module already in that state changes nothing: changed false, saved false and a note. An unknown system, emitter or module (or a module only on the other stack) is an error and nothing changes; a failed save makes success false, with saved=false and save_error. list_niagara_modules shows each module's is_enabled.
+//   @param system_path - Content path of the UNiagaraSystem asset, e.g. '/Game/FX/NS_Sparks'.
+//   @param emitter_name - Display name of the emitter handle, as get_niagara_emitter_handles lists it.
+//   @param module_name - Function name of the module to toggle, case-sensitive, as list_niagara_modules gives module_name for that stack, e.g. 'GravityForce'.
+//   @param enabled - Optional bool, the state to set; defaults to true
+//   @param script_group - Optional "spawn" or "update"; defaults to "update", and any other value reads as update.
+//   @returns { system_path: string, emitter_name: string, script_group: string, module_name: string, module_index: int, previous_enabled: bool, enabled: bool, changed: bool, saved: bool, save_error?: string, note?: string }
 
 TSharedPtr<FJsonObject> HandleSetNiagaraModuleEnabled(const TSharedPtr<FJsonObject>& Params)
 {
@@ -6838,7 +7189,24 @@ TSharedPtr<FJsonObject> HandleSetNiagaraModuleEnabled(const TSharedPtr<FJsonObje
     // call the public UEdGraphNode::IsNodeEnabled() (which UNiagaraNode inherits
     // unchanged) directly. For a single module node this is identical to the
     // pre-state that the internal helper would have returned.
-    const TOptional<bool> OldState = TOptional<bool>(Target->IsNodeEnabled());
+    const bool bPreviousEnabled = Target->IsNodeEnabled();
+
+    TSharedPtr<FJsonObject> Data = Niagara_StartEmitterReply(System, EmitterName);
+    Data->SetStringField(TEXT("script_group"), ScriptGroup);
+    Data->SetStringField(TEXT("module_name"), ModuleName);
+    Data->SetNumberField(TEXT("module_index"), Niagara_OrderedStackModules(Out).IndexOfByKey(Target));
+    Data->SetBoolField(TEXT("previous_enabled"), bPreviousEnabled);
+
+    // Already in that state: nothing is touched, nothing saved.
+    if (bPreviousEnabled == bEnabled)
+    {
+        Data->SetBoolField(TEXT("enabled"), bPreviousEnabled);
+        Data->SetBoolField(TEXT("changed"), false);
+        Data->SetBoolField(TEXT("saved"), false);
+        Data->SetStringField(TEXT("note"), TEXT("The module already had that enabled state; nothing was changed or saved."));
+        return mcp_common::MakeOkReply(Data);
+    }
+
     FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetNiagaraModuleEnabled", "Set Niagara Module Enabled"));
     System->Modify();
     Niagara_ModifyEmitterGraph(EmitterData);
@@ -6848,30 +7216,31 @@ TSharedPtr<FJsonObject> HandleSetNiagaraModuleEnabled(const TSharedPtr<FJsonObje
     FString SaveError;
     const bool bSaved = SaveModifiedNiagaraSystem(System, SaveError);
 
-    TSharedPtr<FJsonObject> Data = Niagara_StartEmitterReply(System, EmitterName);
-    Data->SetStringField(TEXT("script_group"), ScriptGroup);
-    Data->SetStringField(TEXT("module_name"), ModuleName);
-    if (OldState.IsSet())
+    // Read back from the node, not echoed from the request.
+    const bool bNowEnabled = Target->IsNodeEnabled();
+    Data->SetBoolField(TEXT("enabled"), bNowEnabled);
+    Data->SetBoolField(TEXT("changed"), bNowEnabled != bPreviousEnabled);
+    if (bNowEnabled != bEnabled)
     {
-        Data->SetBoolField(TEXT("previous_enabled"), OldState.GetValue());
+        mcp_common::AddSaveOutcome(Data, bSaved, SaveError);
+        return mcp_common::MakeOutcomeReply(Data, false, FString::Printf(
+            TEXT("set_niagara_module_enabled: '%s' reads %s after the write"), *ModuleName, bNowEnabled ? TEXT("enabled") : TEXT("disabled")));
     }
-    Data->SetBoolField(TEXT("enabled"), bEnabled);
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_niagara_module_enabled"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
 // reorder_niagara_modules
-// Move a module to a new index within its group stack, in place (see the
-// handler). This gives full positional control without depending on MoveModule
-// (which moves across scripts, not within a single stack).
+// Move a module to a new position within its own stack by rewiring the stack's parameter-map chain, the way the
+// stack editor's MoveModule does within one stack (that function is not exported).
 // ---------------------------------------------------------------------------
-// MCP:reorder_niagara_modules - Move a module node, found by function name (case-sensitive, as list_niagara_modules gives it) anywhere in the graph of one emitter of a Niagara System asset, to target_index by reordering the graph node array in place (pins and inputs kept), in one undo step, then request a system compile and save. target_index, old_index and new_index count all module nodes of the emitter graph in node order, as list_niagara_modules reports index; target_index is required, a JSON number of 0 or more, and one past the last is clamped to it. A module already in place is still saved and reordered is always true, so compare old_index with new_index. An unknown system, emitter or module is an error; a failed save makes success false, with saved=false and save_error. Insert at a position: add_niagara_module_to_stack with target_index.
-//   @param system_path - Asset path of the Niagara System.
-//   @param emitter_name - Name of the emitter handle.
-//   @param module_name - Function name of the module node to move, case-sensitive, as list_niagara_modules gives module_name
-//   @param target_index - Target position, a JSON number of 0 or more, counted over the module nodes of the emitter graph; clamped to the last; the call fails without it
-//   @param script_group - Optional "spawn" or "update"; defaults to "update"
-//   @returns { system_path: string, emitter_name: string, script_group: string, module_name: string, old_index: int, new_index: int, target_index: int, reordered: bool, saved: bool, save_error?: string }
+// MCP:reorder_niagara_modules - Move one module of a Niagara emitter's particle spawn or update stack to another position in that same stack, changing its execution order: the module, with its input overrides and linked inputs, is taken out of the stack's parameter-map chain and put back at target_index, in one undo step, then a system compile is requested and the system saved. The module is found by function name (case-sensitive) on the script_group stack only; positions count that stack's modules in execution order, exactly as list_niagara_modules reports index. target_index past the last is clamped to it. new_index is read back from the rewired chain. A module already at that position changes nothing: reordered false, saved false and a note. An unknown system, emitter, script_group or module (or a module only on the other stack) is an error and nothing changes; a failed save makes success false, with saved=false and save_error. Insert a new module at a position: add_niagara_module_to_stack with target_index.
+//   @param system_path - Content path of the UNiagaraSystem asset, e.g. '/Game/FX/NS_Sparks'.
+//   @param emitter_name - Display name of the emitter handle, as get_niagara_emitter_handles lists it.
+//   @param module_name - Function name of the module to move, case-sensitive, as list_niagara_modules gives module_name for that stack, e.g. 'GravityForce'.
+//   @param target_index - New position in the stack, a JSON number of 0 or more (0 runs first), counted as list_niagara_modules counts index; clamped to the last; the call fails without it.
+//   @param script_group - Optional "spawn" or "update" (any case), the stack the module is on; defaults to "update"; any other value is an error.
+//   @returns { system_path: string, emitter_name: string, script_group: string, module_name: string, old_index: int, new_index: int, target_index: int, module_count: int, reordered: bool, saved: bool, save_error?: string, note?: string }
 
 TSharedPtr<FJsonObject> HandleReorderNiagaraModules(const TSharedPtr<FJsonObject>& Params)
 {
@@ -6891,145 +7260,112 @@ TSharedPtr<FJsonObject> HandleReorderNiagaraModules(const TSharedPtr<FJsonObject
         return mcp_common::MakeErrorReply(
             TEXT("Missing or non-negative 'target_index' required"));
     }
-    const FString ScriptGroup = Niagara_ReadScriptGroup(Params);
-
-    UNiagaraSystem* System = nullptr;
-    FVersionedNiagaraEmitterData* EmitterData = nullptr;
-    UNiagaraNodeOutput* Out = nullptr;
-    UNiagaraNodeFunctionCall* Target =
-        Niagara_ResolveStackModule(SystemPath, EmitterName, ScriptGroup, ModuleName, System, EmitterData, Out, Error);
-    if (!Target)
+    FString ScriptGroup;
+    ENiagaraScriptUsage Usage = ENiagaraScriptUsage::ParticleUpdateScript;
+    if (!Niagara_ReadStrictScriptGroup(Params, ScriptGroup, Usage, Error))
     {
         return mcp_common::MakeErrorReply(Error);
     }
-    UNiagaraScript* SourceScript = Target->FunctionScript;
-    if (!SourceScript)
+
+    // The stack's output node, then the stack itself: its parameter-map chain cut into groups (input, one per
+    // module in execution order, output). The module is looked for on THIS stack only.
+    UNiagaraSystem* System = nullptr;
+    FVersionedNiagaraEmitterData* EmitterData = nullptr;
+    UNiagaraNodeOutput* Out = Niagara_ResolveStackOutput(SystemPath, EmitterName, Usage, System, EmitterData, Error);
+    if (!Out)
     {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Module '%s' has no FunctionScript (cannot reorder)"), *ModuleName));
+        return mcp_common::MakeErrorReply(Error);
     }
-
-    FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "ReorderNiagaraModules", "Reorder Niagara Modules"));
-    System->Modify();
-    Niagara_ModifyEmitterGraph(EmitterData);
-
-    // Capture old position for the response. UNiagaraGraph::GetNodesOfClass
-    // (inherited from UEdGraph, ENGINE_API) replaces the non-exported
-    // FNiagaraStackGraphUtilities::GetOrderedModuleNodes.
     UNiagaraGraph* NiagaraGraph = Cast<UNiagaraGraph>(Out->GetGraph());
-    if (!NiagaraGraph)
+    TArray<FUEAgentNiagaraStackGroup> Groups;
+    if (!NiagaraGraph || !Niagara_StackGroups(Out, Groups))
     {
-        return mcp_common::MakeErrorReply(
-            TEXT("Could not resolve UNiagaraGraph from output node"));
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("The %s stack of emitter '%s' has no well-formed parameter-map chain from its input to its output node; nothing was changed"),
+            *ScriptGroup, *EmitterName));
     }
-    TArray<UNiagaraNodeFunctionCall*> Before;
-    NiagaraGraph->GetNodesOfClass<UNiagaraNodeFunctionCall>(Before);
-    const int32 OldIndex = Before.IndexOfByKey(Target);
-
-    // In-place reorder within UEdGraph::Nodes (UEdGraph ENGINE_API). A
-    // RemoveNode+DestroyNode+AddScriptModuleToStack path crashes
-    // deterministically: destroying the node orphans cached links inside the bound
-    // script and the subsequent AddScriptModuleToStack walks those stale
-    // links on the second invocation (UAF). Reordering the same UObject in
-    // place preserves the SourceScript binding and pin wiring. NotifyGraphChanged
-    // (UEdGraph ENGINE_API) replaces the non-exported
-    // FNiagaraStackGraphUtilities::RelayoutGraph — the editor refreshes
-    // visual layout on next view, which is sufficient for a one-shot CLI
-    // reordering. list_niagara_modules measures each module's index
-    // via UNiagaraGraph::GetNodesOfClass (array iteration), so swapping the
-    // filtered position in Nodes is the source of truth the rest of the
-    // subsystem reads.
-    Target->Modify();
-    NiagaraGraph->Modify();
-    TArray<UNiagaraNodeFunctionCall*> Ordered;
-    NiagaraGraph->GetNodesOfClass<UNiagaraNodeFunctionCall>(Ordered);
-    const int32 OldOrderedIndex = Ordered.IndexOfByKey(Target);
-    if (OldOrderedIndex == INDEX_NONE)
+    const int32 ModuleCount = Groups.Num() - 2;
+    int32 OldIndex = INDEX_NONE;
+    for (int32 ModuleIndex = 0; ModuleIndex < ModuleCount; ++ModuleIndex)
     {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Module '%s' not present in graph FunctionCall nodes"), *ModuleName));
+        const UNiagaraNodeFunctionCall* Module = Cast<UNiagaraNodeFunctionCall>(Groups[ModuleIndex + 1].EndNode);
+        if (Module && Module->GetFunctionName().Equals(ModuleName, ESearchCase::CaseSensitive))
+        {
+            OldIndex = ModuleIndex;
+            break;
+        }
     }
-    const int32 MaxOrderedIndex = Ordered.Num() > 0 ? Ordered.Num() - 1 : 0;
-    const int32 ClampedTargetIndex = FMath::Clamp(TargetIndex, 0, MaxOrderedIndex);
-    UNiagaraNodeFunctionCall* Reinserted = nullptr;
-    // UEdGraph::Nodes is TArray<TObjectPtr<UEdGraphNode>>. Bind by
-    // reference to that exact type; TObjectPtr<T> converts implicitly to T*
-    // in expressions so RemoveAt/Insert + the raw pointer use below are
-    // well-formed.
-    TArray<TObjectPtr<UEdGraphNode>>& GraphNodes = NiagaraGraph->Nodes;
-    auto FindGraphIndexOf = [&GraphNodes](UEdGraphNode* Needle) -> int32
+    if (OldIndex == INDEX_NONE)
     {
-        for (int32 i = 0; i < GraphNodes.Num(); ++i)
-        {
-            if (GraphNodes[i].Get() == Needle)
-            {
-                return i;
-            }
-        }
-        return INDEX_NONE;
-    };
-    if (OldOrderedIndex == ClampedTargetIndex)
-    {
-        Reinserted = Target;
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Module '%s' not found on the %s stack of emitter '%s' (list_niagara_modules lists that stack); nothing was changed"),
+            *ModuleName, *ScriptGroup, *EmitterName));
     }
-    else
-    {
-        const int32 OldGraphIndex = FindGraphIndexOf(Target);
-        if (OldGraphIndex == INDEX_NONE)
-        {
-            return mcp_common::MakeErrorReply(
-                FString::Printf(TEXT("Module '%s' not present in graph node array (old_index=%d)"), *ModuleName, OldIndex));
-        }
-        GraphNodes.RemoveAt(OldGraphIndex);
-        // Re-resolve the destination module's graph position AFTER removal so
-        // the insert lands at the right slot in the post-removal array.
-        UNiagaraNodeFunctionCall* InsertBefore = (ClampedTargetIndex < Ordered.Num())
-            ? Ordered[ClampedTargetIndex]
-            : nullptr;
-        int32 InsertAt;
-        if (!InsertBefore || InsertBefore == Target)
-        {
-            InsertAt = GraphNodes.Num();
-        }
-        else
-        {
-            InsertAt = FindGraphIndexOf(InsertBefore);
-            if (InsertAt == INDEX_NONE)
-            {
-                InsertAt = GraphNodes.Num();
-            }
-        }
-        GraphNodes.Insert(Target, InsertAt);
-        Reinserted = Target;
-        NiagaraGraph->NotifyGraphChanged();
-    }
-    System->RequestCompile(true);
-
-    FString SaveError;
-    const bool bSaved = SaveModifiedNiagaraSystem(System, SaveError);
-
-    TArray<UNiagaraNodeFunctionCall*> After;
-    NiagaraGraph->GetNodesOfClass<UNiagaraNodeFunctionCall>(After);
-    const int32 NewIndex = After.IndexOfByKey(Reinserted);
+    UNiagaraNodeFunctionCall* Target = CastChecked<UNiagaraNodeFunctionCall>(Groups[OldIndex + 1].EndNode);
+    const int32 ClampedTargetIndex = FMath::Clamp(TargetIndex, 0, ModuleCount - 1);
 
     TSharedPtr<FJsonObject> Data = Niagara_StartEmitterReply(System, EmitterName);
     Data->SetStringField(TEXT("script_group"), ScriptGroup);
     Data->SetStringField(TEXT("module_name"), ModuleName);
     Data->SetNumberField(TEXT("old_index"), OldIndex);
-    Data->SetNumberField(TEXT("new_index"), NewIndex);
     Data->SetNumberField(TEXT("target_index"), TargetIndex);
-    Data->SetBoolField(TEXT("reordered"), true);
+    Data->SetNumberField(TEXT("module_count"), ModuleCount);
+
+    // Already at that position: nothing is touched, nothing saved.
+    if (ClampedTargetIndex == OldIndex)
+    {
+        Data->SetNumberField(TEXT("new_index"), OldIndex);
+        Data->SetBoolField(TEXT("reordered"), false);
+        Data->SetBoolField(TEXT("saved"), false);
+        Data->SetStringField(TEXT("note"), TEXT("The module is already at that position of its stack; nothing was changed or saved."));
+        return mcp_common::MakeOkReply(Data);
+    }
+
+    // Move the module's whole group (its override node, the map-get nodes of its linked inputs and the module) along
+    // the chain, the way the stack editor's MoveModule does inside one stack: take it out and close the gap, then
+    // put it between the groups now at the target position. Execution order IS this chain; the order of the graph's
+    // node array means nothing to Niagara.
+    FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "ReorderNiagaraModules", "Reorder Niagara Modules"));
+    System->Modify();
+    Niagara_ModifyEmitterGraph(EmitterData);
+    NiagaraGraph->Modify();
+    const int32 SourceGroupIndex = OldIndex + 1;
+    const FUEAgentNiagaraStackGroup SourceGroup = Groups[SourceGroupIndex];
+    Niagara_DisconnectStackGroup(SourceGroup, Groups[SourceGroupIndex - 1], Groups[SourceGroupIndex + 1]);
+    // The chain without the moved group: input, the other modules, output. Inserting at module position
+    // ClampedTargetIndex puts it between Remaining[ClampedTargetIndex] and Remaining[ClampedTargetIndex + 1].
+    TArray<FUEAgentNiagaraStackGroup> Remaining = Groups;
+    Remaining.RemoveAt(SourceGroupIndex);
+    Niagara_ConnectStackGroup(SourceGroup, Remaining[ClampedTargetIndex], Remaining[ClampedTargetIndex + 1]);
+    NiagaraGraph->NotifyGraphChanged();
+    System->RequestCompile(true);
+
+    FString SaveError;
+    const bool bSaved = SaveModifiedNiagaraSystem(System, SaveError);
+
+    // Read back from the chain, not computed from the request.
+    const int32 NewIndex = Niagara_OrderedStackModules(Out).IndexOfByKey(Target);
+    Data->SetNumberField(TEXT("new_index"), NewIndex);
+    Data->SetBoolField(TEXT("reordered"), NewIndex != OldIndex);
+    if (NewIndex != ClampedTargetIndex)
+    {
+        mcp_common::AddSaveOutcome(Data, bSaved, SaveError);
+        return mcp_common::MakeOutcomeReply(Data, false, FString::Printf(
+            TEXT("reorder_niagara_modules: after the rewiring '%s' reads at index %d of the %s stack, not %d"),
+            *ModuleName, NewIndex, *ScriptGroup, ClampedTargetIndex));
+    }
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("reorder_niagara_modules"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
 // list_niagara_modules
 // Read-only enumeration of the UNiagaraNodeFunctionCall modules
-// on an emitter's spawn/update stack, through the export-SAFE ordered-node path
-// (ResolveEmitterOutputNode + UNiagaraGraph::GetNodesOfClass). It deliberately AVOIDS
-// FNiagaraStackGraphUtilities::GetOrderedModuleNodes / GetAllModuleNodes /
-// GetModuleIsEnabled (NOT exported -> LNK2019). Honest-empty arrays when a group
-// has no modules. script_group "all" reads BOTH stacks, grouped as spawn:[]/update:[].
+// on an emitter's spawn/update stack, in execution order: ResolveEmitterOutputNode, then
+// Niagara_OrderedStackModules walks that stack's parameter-map chain back from its output
+// node (the export-safe twin of FNiagaraStackGraphUtilities::GetOrderedModuleNodes, which,
+// like GetAllModuleNodes and GetModuleIsEnabled, is NOT exported -> LNK2019). Honest-empty
+// arrays when a group has no modules. script_group "all" reads BOTH stacks, grouped as
+// spawn:[]/update:[].
 // ---------------------------------------------------------------------------
 namespace
 {
@@ -7048,13 +7384,10 @@ namespace
         {
             return ModuleArray;
         }
-        TArray<UNiagaraNodeFunctionCall*> Ordered;
-        if (UNiagaraGraph* NiagaraGraph = Cast<UNiagaraGraph>(Out->GetGraph()))
-        {
-            // Public UNiagaraGraph::GetNodesOfClass (ENGINE_API, inherited from
-            // UEdGraph) — the export-safe substitute for GetOrderedModuleNodes.
-            NiagaraGraph->GetNodesOfClass<UNiagaraNodeFunctionCall>(Ordered);
-        }
+        // The modules of THIS stack in execution order, walked back along its parameter-map chain from its output
+        // node -- not every function-call node of the emitter's one shared graph, which mixes every stack with the
+        // dynamic inputs.
+        const TArray<UNiagaraNodeFunctionCall*> Ordered = Niagara_OrderedStackModules(Out);
         OutTotalModules = Ordered.Num();
         for (int32 i = 0; i < Ordered.Num(); ++i)
         {
@@ -7103,7 +7436,7 @@ namespace
     }
 }
 
-// MCP:list_niagara_modules - List the module function-call nodes on one stack, or both stacks, of a Niagara emitter (read-only), optionally just the module with a given name. Resolves the emitter's spawn or update group graph (script_group, default "update"; "all" reads both and also groups them as spawn[] and update[]) via the export-safe ResolveEmitterOutputNode + UNiagaraGraph::GetNodesOfClass path, then reports each UNiagaraNodeFunctionCall: index (its position in its stack), module_name (GetFunctionName), node_guid, function_script(+class), is_enabled (IsNodeEnabled), is_deprecated, input/output pin counts. Honest-empty modules:[] when the stack has no modules or the graph is not resolvable (a note is returned); a module_name that matches no module is an error.
+// MCP:list_niagara_modules - List the modules of one stack, or both stacks, of a Niagara emitter in execution order (read-only), optionally just the module with a given name. script_group picks the particle spawn or update stack (default "update"; "all" reads both and also groups them as spawn[] and update[]); a stack's modules are the function-call nodes on its parameter-map chain from its input to its output node, so the other stack's modules and the dynamic inputs feeding module inputs are not listed, while disabled modules are. Each entry: index (its position in its stack, 0 runs first, the index reorder_niagara_modules and add_niagara_module_to_stack take), module_name (GetFunctionName), node_guid, function_script(+class), is_enabled (IsNodeEnabled), is_deprecated, input/output pin counts. Honest-empty modules:[] when the stack has no modules or the graph is not resolvable (a note is returned); a module_name that matches no module is an error.
 //   @param system_path - Asset path of the Niagara System.
 //   @param emitter_name - Name of the emitter handle.
 //   @param script_group - Optional "spawn", "update" or "all" (both stacks); defaults to "update".

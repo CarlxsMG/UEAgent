@@ -306,8 +306,8 @@ static bool TestingIsPinlessByDesign(const UEdGraphNode* Node)
     return false;
 }
 
-// MCP:check_blueprint_errors - Check a blueprint for compilation errors, warnings, structural issues, and orphaned nodes. Read-only: it does NOT recompile the Blueprint (it reports the cached Status).
-//   @param blueprint_path - Object path, package path, or bare short name of the blueprint (resolved via mcp_common::ResolveAssetFlexible; ambiguity errors out listing candidates)
+// MCP:check_blueprint_errors - Quick static check of one Blueprint without compiling it: the cached status of its last compile (an error status adds one generic line, never the compiler messages; a never-compiled Blueprint reads Unknown) plus structural findings: no parent class, a component template without a class, a variable without a name or type, an empty function or one without an entry node, and pin-less nodes. Read-only: it compiles, saves and changes nothing, so its answer can be stale after edits. error_status is Clean, Warnings Only or Errors Found. For the real compiler errors and their nodes use compile_blueprint (it recompiles); for graph bugs that compile clean, lint_blueprint_graph; for a whole folder, audit_blueprint_health. A name matching no Blueprint, or several, is an error.
+//   @param blueprint_path - Object path, package path or bare short name of the Blueprint, e.g. '/Game/Blueprints/BP_Door' or 'BP_Door'; a short name several Blueprints share is an error listing the candidates.
 //   @returns { blueprint_path: string, resolved_object_path: string, blueprint_class: string, is_blueprint: bool, error_status: string, error_message: string, errors: [string], warnings: [string], error_count: int, warning_count: int, blueprint_compiled: bool, compilation_status: string, is_static_analysis: bool, recompiled_blueprint: bool, orphaned_node_heuristic: string }
 
 TSharedPtr<FJsonObject> HandleCheckBlueprintErrors(const TSharedPtr<FJsonObject>& Params)

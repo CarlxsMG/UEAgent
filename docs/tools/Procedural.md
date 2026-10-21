@@ -105,13 +105,13 @@ Create an empty UPCGGraph asset at package_path/name and save it, or return the 
 
 *Destructive, idempotent.*
 
-Removes the directed edge between two PCG nodes' pins.  Pin labels default to the node's "Out"/"In" pin (else its first pin) and the resolved labels are echoed. Idempotent: if no such edge exists it reports already_disconnected without error. The graph is re-saved after an edge is removed.
+Remove the one directed edge from an output pin of one node to an input pin of another in a PCG graph asset, in one undo step, then save the graph; both nodes and every other edge stay. Pin labels default to the node's "Out" or "In" pin (else its first pin), and the labels used are echoed back. Inverse of connect_pcg_nodes; to drop a node with all its edges use remove_pcg_node; to see nodes, pins and edges first use get_pcg_graph_info. Components already generated from the graph keep their old output until cleanup_pcg_component and generate_pcg_component run. Idempotent: when no such edge exists nothing is changed or saved and already_disconnected is true; disconnected is read back after the call. A graph, node or pin that cannot be resolved is an error before anything changes. A failed save (for example while PIE runs) makes success false, with saved false and save_error, the edge gone only in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `pcg_graph_path` | string | yes | Asset path of the PCG Graph (e.g. "/Game/PCG/PCG_Example"). |
-| `from_node` | string | yes | Upstream node name, or the token "Input". |
-| `to_node` | string | yes | Downstream node name, or the token "Output". |
+| `pcg_graph_path` | string | yes | Asset path of the PCG Graph, e.g. "/Game/PCG/PCG_Example", as create_pcg_graph returns it. |
+| `from_node` | string | yes | Upstream node name as get_pcg_graph_info lists it (node_name, case-insensitive), or the token "Input" for the graph's input node. |
+| `to_node` | string | yes | Downstream node name as get_pcg_graph_info lists it (node_name, case-insensitive), or the token "Output" for the graph's output node. |
 | `from_pin` | string | no | Optional output-pin label on from_node (default the node's "Out" pin, else its first output pin). |
 | `to_pin` | string | no | Optional input-pin label on to_node (default the node's "In" pin, else its first input pin). |
 

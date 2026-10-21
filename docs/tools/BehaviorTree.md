@@ -126,13 +126,13 @@ Read the settings of one node of a BehaviorTree asset -- a composite, a task, a 
 
 *Read-only.*
 
-Reader: runtime BT status + active task name (if any) on an AI pawn.
+Read the live state of the behavior tree component driving one actor: has_bt (whether a UBehaviorTreeComponent was found, through the actor's AIController brain or on the actor itself), is_running, is_paused, bt_asset_name (the tree it is running) and active_node_name (the node it is executing, empty when none). The actor is looked up in a running PIE world first, where possessed AI pawns run their trees, then in the editor world (where a tree started with run_behavior_tree runs); world says which answered (pie or editor) and world_name names it. Read-only. An actor without a tree is a success with has_bt false; an actor found in neither world is an error. Inspect the tree asset itself with get_behavior_tree_info and blackboard values with get_blackboard_value; change the run state with pause_behavior_tree, resume_behavior_tree, restart_behavior_tree or stop_behavior_tree (editor world only).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Name or label of the AI-possessed pawn (or AIController) whose UBehaviorTreeComponent to query. |
+| `actor_name` | string | yes | Object name or label of the AI-possessed pawn, or of its AIController, e.g. 'BP_Guard_C_0'; searched in the PIE world first, then the editor world. |
 
-**Returns:** `{ actor_name, run_status, run_status_name, active_task_name, bt_asset_name }`
+**Returns:** `{ actor_name, world: "pie"|"editor", world_name: string, has_bt: bool, is_running?: bool, is_paused?: bool, bt_asset_name?: string, active_node_name?: string }`
 
 ## `get_blackboard_data`
 

@@ -548,9 +548,9 @@ TSharedPtr<FJsonObject> HandleFindClassesImplementingInterface(const TSharedPtr<
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:list_modules - Enumerate known engine/game/plugin modules (loaded or not), optionally filtered by name substring.
-//   @param name_pattern - Optional module name substring filter (case-insensitive)
-//   @param loaded_only - Only include currently-loaded modules (default false)
+// MCP:list_modules - List the C++ modules the editor's module manager knows (FModuleManager::QueryModules) -- engine, editor, project and plugin modules, loaded or not -- each with name, file_path (its binary on disk), is_loaded and is_game_module, plus count; optionally only names containing name_pattern, or only loaded ones. Use it to check that a module's code is present and loaded before relying on its classes; for a plugin's enabled state use get_plugin_status, and for the types a module defines list_derived_classes, list_structs or list_enums (Niagara stack modules are list_niagara_modules, a different thing). Read-only and idempotent: it loads or unloads nothing. No match gives count 0, not an error.
+//   @param name_pattern - Optional plain substring of the module name, case-insensitive, no wildcards, e.g. "Niagara"; omitted or empty lists every module
+//   @param loaded_only - true keeps only the modules loaded right now (default false)
 //   @returns { modules: [{name, file_path, is_loaded, is_game_module}], count: int }
 
 TSharedPtr<FJsonObject> HandleListModules(const TSharedPtr<FJsonObject>& Params)

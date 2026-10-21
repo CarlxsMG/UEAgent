@@ -10,11 +10,11 @@ Back to the [index](README.md).
 
 *Read-only.*
 
-Check a blueprint for compilation errors, warnings, structural issues, and orphaned nodes. Read-only: it does NOT recompile the Blueprint (it reports the cached Status).
+Quick static check of one Blueprint without compiling it: the cached status of its last compile (an error status adds one generic line, never the compiler messages; a never-compiled Blueprint reads Unknown) plus structural findings: no parent class, a component template without a class, a variable without a name or type, an empty function or one without an entry node, and pin-less nodes. Read-only: it compiles, saves and changes nothing, so its answer can be stale after edits. error_status is Clean, Warnings Only or Errors Found. For the real compiler errors and their nodes use compile_blueprint (it recompiles); for graph bugs that compile clean, lint_blueprint_graph; for a whole folder, audit_blueprint_health. A name matching no Blueprint, or several, is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `blueprint_path` | string | yes | Object path, package path, or bare short name of the blueprint (resolved via mcp_common::ResolveAssetFlexible; ambiguity errors out listing candidates) |
+| `blueprint_path` | string | yes | Object path, package path or bare short name of the Blueprint, e.g. '/Game/Blueprints/BP_Door' or 'BP_Door'; a short name several Blueprints share is an error listing the candidates. |
 
 **Returns:** `{ blueprint_path: string, resolved_object_path: string, blueprint_class: string, is_blueprint: bool, error_status: string, error_message: string, errors: [string], warnings: [string], error_count: int, warning_count: int, blueprint_compiled: bool, compilation_status: string, is_static_analysis: bool, recompiled_blueprint: bool, orphaned_node_heuristic: string }`
 
@@ -60,12 +60,12 @@ Remove a debugging breakpoint from a specific node within a blueprint graph via 
 
 *Destructive.*
 
-Run editor Map Check on the current level and report message counts, each message resolved back to the actor/component the engine attached to it.
+Run the editor's Map Check (the MAP CHECK console command) on the level open in the editor and report error, warning and info counts plus up to 200 messages, each resolved back to the actor or component the engine attached to it. Use it to find level problems such as missing meshes, actors with invalid settings or lighting that needs a rebuild; for assets use validate_asset or validate_assets_in_path, for Blueprints check_blueprint_errors. It changes no actor or asset and saves nothing, but it replaces the contents of the editor's Map Check message log (no window opens); get_message_log_entries rereads it. Severity numbers: 1 error, 2 performance warning, 3 warning, 4 info. The counts cover every message and messages_truncated says when the list was capped. Editor world only, not a PIE session; success is false when the editor did not run the command, and the counts are then stale.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `check_deprecated_only` | boolean | no | When true, only run deprecated-asset checks (optional, default false) |
-| `base_libraries` | array | no | Package roots to classify each message's class against (optional, default: the project's Read Only Content Roots). An explicit [] disables the classification. Reported as data in class_root/class_root_is_base_library; the tool never judges which root is "upstream". |
+| `check_deprecated_only` | boolean | no | When true, runs MAP CHECKDEP: only the deprecated-class checks (optional, default false) |
+| `base_libraries` | array | no | Package roots, e.g. ["/Game/Marketplace"], to classify each message's class against (optional, default: the project's Read Only Content Roots). An explicit [] disables the classification. Reported as data in class_root/class_root_is_base_library; the tool never judges which root is "upstream". |
 
 **Returns:** `{ world: string, map_check_ran: bool, check_deprecated_only: bool, base_libraries: [string], error_count: number, warning_count: number, info_count: number, total_messages: number, messages_truncated: bool, messages: [{ severity: number, text: string, token_source: string, object_path: string, object_resolved: bool, actor_name: string, actor_label: string, actor_path: string, actor_class: string, actor_guid: string, component_name: string, class_asset_path: string, class_root: string, class_root_is_base_library: bool }] }`
 

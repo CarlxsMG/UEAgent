@@ -2,6 +2,84 @@
 
 Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](https://semver.org).
 
+## 2.4.1 - 2026-10-21
+
+The 146 tool definitions Glama scored lowest now say when to use the tool and what it does. Each one was rewritten
+against its code, and that review found about 40 tools that reported success for work they had not done, or did
+something other than what they said. Those tools are fixed.
+
+### Changed
+
+- **146 tool definitions explain their use.** Each one says:
+  - when to use it, and which sibling to use instead (its inverse, the reader that checks it, its prerequisite);
+  - what each parameter takes, and where a valid value comes from;
+  - what is undone, saved or refused, and what it answers when there is nothing to do.
+- `get_uv_health_report` replaces `approx_overlap_count` with `overlapping_triangle_count`, a real UV-space overlap
+  test. The old field counted every shared corner. A new `overlap_test_complete` field says whether the test ran in
+  full.
+- `set_render_job_output` refuses an unknown format, and a resolution with only one side, instead of quietly using
+  png or ignoring the resolution. `image_outputs` lists every image format the job will write.
+- `list_usd_stage_layers` and `set_usd_edit_target` number the layers the same way. The default edit target is the
+  root layer; index 0 used to be the session layer. The list marks the root, session and edit-target layers.
+  `save_usd_stage` saves every dirty layer of the stack, not only the root, and reports each one.
+- `register_input_key_mapping` and `unregister_input_key_mapping` act on the PIE player's controller and honour
+  `player_controller_name`. Without PIE they refuse and say why.
+- `remove_state` with `with_descendants` false moves the state's children to its parent; the parameter used to be
+  ignored.
+- `get_niagara_emitter_data_interfaces` lists the data interfaces the emitter's stacks use, as its name says. The
+  emitter dependencies it used to list are a second array.
+- `get_component_events` lists the class's real multicast delegates, inherited ones included; it used to return a
+  fixed list.
+- `list_niagara_modules`, `reorder_niagara_modules`, `remove_niagara_module_from_stack`,
+  `duplicate_niagara_module_in_stack` and `set_niagara_module_enabled` work on the chosen stack, with stack
+  positions, and read their result back.
+  - `reorder_niagara_modules` changes the execution order now; before, it only shuffled the graph's nodes.
+  - `remove_niagara_module_from_stack` removes the module's whole group and closes the gap.
+- `get_behavior_tree_status` looks in the PIE world first, and says which world answered.
+- `get_consideration_info` includes the consideration's instance data.
+
+### Fixed
+
+- **These tools reported success when the save failed:**
+  - the StateTree removals: `remove_state`, `remove_task`, `remove_evaluator`, `remove_consideration`,
+    `remove_state_transition`, `remove_state_tree_global_task`, `remove_state_enter_condition`,
+    `remove_state_transition_condition`;
+  - `disconnect_pcg_nodes`, `set_material_usage_flag`, `add_pose_search_channel_to_schema`;
+  - `set_submix_effect_settings`, which now also saves a preset that is its own asset;
+  - `set_skeletal_mesh_socket_transform`, which now saves the skeleton when the socket lives there.
+- **Undo restores these changes**, because `Modify()` now runs before the change instead of after:
+  - `set_modulation_patch_bypass`, `add_modulation_input_to_patch`, `remove_modulation_input_from_patch`;
+  - `set_modulation_patch_output_parameter`, `set_modulation_parameter_settings`,
+    `set_modulation_generator_settings`;
+  - `set_static_mesh_socket_transform`.
+- **These tools reported a result they had not measured:**
+  - `apply_gameplay_effect` said an Instant effect was not applied; `applied` is now the engine's verdict, and a
+    new `active` field says whether an effect stays active.
+  - `send_gameplay_event_to_actor` hard-coded `sent` and `asc_resolved` and ignored labels. It now finds the actor
+    by name or by a label only one actor has, and reports `sent` as measured.
+  - `remove_bone` said it had removed a root or virtual bone the engine refused to remove.
+  - `create_camera_rig_asset` and `create_camera_asset` said `saved: true` for an asset that already existed.
+  - `reimport_asset` answered success when nothing was reimported. A missing source file is now refused before the
+    reimport, which could crash the editor.
+- **Pose Search:**
+  - `build_pose_search_database_index` without waiting answered failure for a build it had started.
+  - A database with no animations fails with a message that says so; the engine fails an empty index while its log
+    says the build succeeded.
+  - `create_pose_search_schema` and `add_pose_search_channel_to_schema` say when the schema does not finalize, and
+    why. The default Pose channel needs mannequin bones.
+  - `add_pose_search_channel_to_schema` no longer adds a second channel of a type the schema already has.
+- **Other fixes:**
+  - `create_usd_stage_actor` spawned the actor at scale 0.
+  - `add_usd_reference`, `add_usd_payload` and `clear_usd_payloads` sent "/" for an empty target path instead of
+    the default prim.
+  - `add_water_body_to_zone` and `create_water_body`'s `water_zone_label` made a link that did not persist; they
+    now go through the water body's zone override, and `remove_water_body_from_zone` clears it.
+  - `get_level_sequences` reported as `total_count` the number it returned, not the number it found;
+    `returned_count` is the new field.
+  - `get_niagara_emitter_runtime_summary` gave the same module count for every stack.
+- `run_eqs_query` and `save_game_to_memory` are marked read-only; they change nothing.
+- `Tools/codegen_command_catalog.py` writes the catalog in LF on Windows too.
+
 ## 2.4.0 - 2026-10-21
 
 UEAgent updates itself: the editor checks GitHub for a new release, downloads and verifies it, and installs it

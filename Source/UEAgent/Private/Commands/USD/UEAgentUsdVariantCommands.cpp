@@ -360,11 +360,11 @@ TSharedPtr<FJsonObject> HandleAddUsdVariant(const TSharedPtr<FJsonObject>& Param
 // ---------------------------------------------------------------------------
 // set_usd_variant_selection
 // ---------------------------------------------------------------------------
-// MCP:set_usd_variant_selection - Set the active variant for a variant set; HasVariantSet guard prevents the FUsdVariantSet from going invalid when the set is missing
-//   @param stage_name [string!] - Stage cache key
-//   @param prim_path [string!] - SdfPath of the prim that authors the variant set
-//   @param variant_set_name [string!] - Variant set to select a variant from
-//   @param variant_name [string!] - Variant to activate (must already be present — use add_usd_variant first)
+// MCP:set_usd_variant_selection - Select the active variant of one variant set on a prim of a cached USD stage, so the prim composes that variant's opinions; set is the engine's answer. Read the sets, their variants and current selections with list_usd_variant_sets first; create them with add_usd_variant_set and add_usd_variant; clear_usd_variant_selection removes the selection instead. The selection is authored on the stage's current edit target layer (set_usd_edit_target) and stays in memory until save_usd_stage; no undo step. Idempotent: selecting the selected variant again changes nothing. The variant name is not checked against the set's variants, so name one list_usd_variant_sets reports. An unknown stage, a prim that does not exist, or a variant set the prim does not author is an error, checked before anything is written (the guard also keeps the engine's variant-set handle from going invalid).
+//   @param stage_name [string!] - Name the stage was registered under by open_usd_stage or create_usd_stage (list_usd_stages shows it), or the end of a cached stage's root layer identifier, case-insensitive, e.g. "Shot010"
+//   @param prim_path [string!] - Absolute SdfPath of the existing prim that authors the variant set, e.g. "/World/Car"
+//   @param variant_set_name [string!] - Variant set to select a variant from, as list_usd_variant_sets reports it, e.g. "color"
+//   @param variant_name [string!] - Variant to activate, e.g. "red" (must already be present — use add_usd_variant first)
 //   @returns { prim_path: string, variant_set_name: string, variant_name: string, set: bool }
 
 TSharedPtr<FJsonObject> HandleSetUsdVariantSelection(const TSharedPtr<FJsonObject>& Params)

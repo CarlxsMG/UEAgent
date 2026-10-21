@@ -1245,11 +1245,11 @@ TSharedPtr<FJsonObject> HandleGetSoundWaveProperties(const TSharedPtr<FJsonObjec
 // the preset's typed AUDIOMIXER_API SetSettings; we discover the struct purely
 // through reflection. Mirrors the sound-concurrency merge+clamp+save flow.
 // ---------------------------------------------------------------------------- //
-// MCP:set_submix_effect_settings - Configure a submix effect preset's Settings struct (by chain index) via reflection (partial merge + clamp).
-//   @param submix_path - Full content path of the target USoundSubmix
+// MCP:set_submix_effect_settings - Change the Settings struct of one effect preset in a USoundSubmix's effect chain, picked by chain index, through reflection: only the keys given are written, each clamped to its ClampMin/ClampMax, and settings echoes the whole struct read back. Read the chain first with get_submix_effect_chain; add_submix_effect_to_chain appends a preset and remove_submix_effect_from_chain takes one out. One undo step, then the submix package is saved, and so is the preset's own package when the preset is a separate asset appended by path (preset_in_submix_package=false) -- that asset is shared, so every submix that uses it hears the change. submix_saved and preset_saved report each save, and saved is both; a failed save of either makes success false with save_error. Repeating the same values changes nothing more. An index out of range, an empty slot, a preset class with no Settings struct or a value that does not convert is an error.
+//   @param submix_path - Full content path of the target USoundSubmix, e.g. "/Game/Audio/Submix_Music"
 //   @param effect_index - 0-based index into SubmixEffectChain (same order add_submix_effect_to_chain appended / get_submix_effect_chain reports)
-//   @param settings - Object of fields to merge into the preset's Settings struct; absent keys untouched
-//   @returns { submix_path: string, effect_index: int, preset_class: string, settings: object, saved: bool }
+//   @param settings - Object of fields to merge into the preset's Settings struct, keyed by property name (case-insensitive), e.g. {"ThresholdDb": -12, "Ratio": 4} for a dynamics processor; absent keys untouched, unknown keys ignored
+//   @returns { submix_path: string, effect_index: int, preset_class: string, preset_path: string, preset_in_submix_package: bool, submix_saved: bool, preset_saved: bool, settings: object, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleSetSubmixEffectSettings(const TSharedPtr<FJsonObject>& Params)
 {
     FString SubmixPath;
@@ -1320,7 +1320,24 @@ TSharedPtr<FJsonObject> HandleSetSubmixEffectSettings(const TSharedPtr<FJsonObje
     }
 
     FString SaveError;
-    const bool bSaved = mcp_common::SaveAssetPackage(Submix->GetOutermost(), Submix, SaveError);
+    const bool bSubmixSaved = mcp_common::SaveAssetPackage(Submix->GetOutermost(), Submix, SaveError);
+
+    // A preset appended by path is its own asset in its own package, which the submix save does not write: it
+    // is saved too, or the change would sit dirty in memory while the reply said saved.
+    UPackage* const PresetPackage = Preset->GetOutermost();
+    const bool bPresetInSubmixPackage = (PresetPackage == Submix->GetOutermost());
+    bool bPresetSaved = bSubmixSaved;
+    if (!bPresetInSubmixPackage)
+    {
+        FString PresetSaveError;
+        bPresetSaved = mcp_common::SaveAssetPackage(PresetPackage, Preset, PresetSaveError);
+        if (!bPresetSaved)
+        {
+            SaveError = SaveError.IsEmpty()
+                ? FString::Printf(TEXT("preset %s: %s"), *Preset->GetPathName(), *PresetSaveError)
+                : FString::Printf(TEXT("%s; preset %s: %s"), *SaveError, *Preset->GetPathName(), *PresetSaveError);
+        }
+    }
 
     // Read-back the persisted Settings via reflection.
     TSharedPtr<FJsonObject> SettingsOut = mcp_common::StructToJson(
@@ -1330,9 +1347,13 @@ TSharedPtr<FJsonObject> HandleSetSubmixEffectSettings(const TSharedPtr<FJsonObje
     ResultObj->SetStringField(TEXT("submix_path"), Submix->GetPathName());
     ResultObj->SetNumberField(TEXT("effect_index"), EffectIndex);
     ResultObj->SetStringField(TEXT("preset_class"), Preset->GetClass()->GetName());
+    ResultObj->SetStringField(TEXT("preset_path"), Preset->GetPathName());
+    ResultObj->SetBoolField(TEXT("preset_in_submix_package"), bPresetInSubmixPackage);
+    ResultObj->SetBoolField(TEXT("submix_saved"), bSubmixSaved);
+    ResultObj->SetBoolField(TEXT("preset_saved"), bPresetSaved);
     ResultObj->SetObjectField(TEXT("settings"), SettingsOut);
 
-    return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("set_submix_effect_settings"), SaveError);
+    return mcp_common::MakeSavedReply(ResultObj, bSubmixSaved && bPresetSaved, TEXT("set_submix_effect_settings"), SaveError);
 }
 
 // ---------------------------------------------------------------------------- //

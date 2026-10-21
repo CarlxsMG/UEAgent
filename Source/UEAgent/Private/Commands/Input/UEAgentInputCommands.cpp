@@ -4,6 +4,7 @@
 #include "Commands/Common/McpCommonUtils.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
+#include "Editor.h" // GEditor->PlayWorld: register/unregister_input_key_mapping look for the player in the running PIE world
 #include "Containers/Ticker.h" // trigger_input_action hold_seconds: FTSTicker sustain across PIE ticks
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/InputSettings.h"
@@ -1670,22 +1671,87 @@ TSharedPtr<FJsonObject> HandleRemoveInputModifier(const TSharedPtr<FJsonObject>&
 
 // Enhanced Input user settings (runtime key remap)
 
-// MCP:register_input_key_mapping - Remaps a player input mapping to a new key at runtime via UEnhancedInputUserSettings::MapPlayerKey (EnhancedInputUserSettings.h). Wraps FMapPlayerKeyArgs with the supplied mapping name + new key + slot. The call fails when the engine refuses the remap, with its reasons in failure_tags.
-//   @param player_controller_name - Optional editor-world APlayerController actor name (defaults to first local player)
-//   @param player_index - Optional local player index used to resolve the PlayerController (default 0).
-//   @param mapping_name - FName of the source mapping inside an already-mapped IMC (required)
-//   @param new_key - FKey name (e.g. "Gamepad_FaceButton_Bottom") (required)
-//   @param slot - "First" | "Second" | "Third" | "Fourth" (default "First"); EPlayerMappableKeySlot enum
-//   @returns { applied: bool, mapping_name: string, new_key: string, slot: string, failure_tags: [string] }
+/**
+ * The local PlayerController that register_input_key_mapping and unregister_input_key_mapping act on, in a running PIE
+ * or game world -- never the editor world, which has no player. With player_controller_name, the controller of any
+ * such world whose object name or actor label matches it (case-insensitive); otherwise the one player_index addresses
+ * in the play world (the editor's PlayWorld first, then the PIE and game contexts in order). Null, with the refusal in
+ * OutError, when no PIE or game session runs or nothing matches.
+ */
+static APlayerController* InputRemap_ResolveController(const TSharedPtr<FJsonObject>& Params, const TCHAR* Tool, FString& OutError)
+{
+    TArray<UWorld*> PlayingWorlds;
+    if (GEditor && GEditor->PlayWorld)
+    {
+        PlayingWorlds.Add(GEditor->PlayWorld.Get());
+    }
+    if (GEngine)
+    {
+        for (const FWorldContext& Context : GEngine->GetWorldContexts())
+        {
+            UWorld* World = Context.World();
+            if (World && (Context.WorldType == EWorldType::PIE || Context.WorldType == EWorldType::Game))
+            {
+                PlayingWorlds.AddUnique(World);
+            }
+        }
+    }
+    if (PlayingWorlds.Num() == 0)
+    {
+        OutError = FString::Printf(TEXT("%s: no Play-in-Editor or game session is running. Player key mappings live on a playing ")
+            TEXT("local player, so start PIE first (start_play_in_editor). Nothing was changed."), Tool);
+        return nullptr;
+    }
+
+    FString ControllerName;
+    Params->TryGetStringField(TEXT("player_controller_name"), ControllerName);
+    ControllerName.TrimStartAndEndInline();
+    if (!ControllerName.IsEmpty())
+    {
+        TArray<FString> Present;
+        for (UWorld* World : PlayingWorlds)
+        {
+            for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+            {
+                APlayerController* Candidate = It->Get();
+                if (!Candidate)
+                {
+                    continue;
+                }
+                if (Candidate->GetName().Equals(ControllerName, ESearchCase::IgnoreCase)
+                    || Candidate->GetActorLabel().Equals(ControllerName, ESearchCase::IgnoreCase))
+                {
+                    return Candidate;
+                }
+                Present.Add(Candidate->GetName());
+            }
+        }
+        OutError = FString::Printf(TEXT("%s: no PlayerController named '%s' in the running game (controllers there: %s). Nothing was changed."),
+            Tool, *ControllerName, Present.Num() > 0 ? *FString::Join(Present, TEXT(", ")) : TEXT("none"));
+        return nullptr;
+    }
+
+    int32 PlayerIndex = 0;
+    Params->TryGetNumberField(TEXT("player_index"), PlayerIndex);
+    APlayerController* Controller = UEAgentInputCommandsImpl::FindLocalController(PlayingWorlds[0], PlayerIndex);
+    if (!Controller)
+    {
+        OutError = FString::Printf(TEXT("%s: no local PlayerController with player_index %d in the running game world '%s'. Nothing was changed."),
+            Tool, PlayerIndex, *PlayingWorlds[0]->GetName());
+    }
+    return Controller;
+}
+
+// MCP:register_input_key_mapping - Rebind a player-mappable Enhanced Input mapping to another key for one local player of a running PIE or game session, the way a key-rebinding options menu does (UEnhancedInputUserSettings::MapPlayerKey). It changes that player's user settings in memory only: no asset is edited, nothing is saved, no undo step. To change the key a mapping context asset declares use add_mapping_to_context and remove_mapping_from_context; back to the default key: unregister_input_key_mapping; taken keys: list_all_input_mappings or find_free_input_key. Start PIE first (start_play_in_editor): without a running PIE or game world the call is refused and nothing changes. It also needs Enhanced Input user settings enabled in the project (EnhancedInputDeveloperSettings bEnableUserSettings, before PIE starts) and a context with player-mappable keys applied to that player. A missing mapping_name or an invalid key name is an error before anything changes; when the engine refuses the remap, applied is false, success is false and failure_tags gives its reasons. player_controller and the world fields name the controller and world that were used.
+//   @param player_controller_name - Optional object name or actor label of the PlayerController to remap, e.g. "PlayerController_0" (case-insensitive), searched in every running PIE or game world; when given, player_index is ignored.
+//   @param player_index - Local player whose binding changes, in the play world: 0 (default) is the first player controller, any other value matches a local player's controller id.
+//   @param mapping_name - Name of the player-mappable key mapping to rebind, as set in its Player Mappable Key Settings, e.g. "Jump" (required).
+//   @param new_key - Unreal key name to bind, e.g. "SpaceBar", "Gamepad_FaceButton_Bottom" or "LeftMouseButton"; must be a valid FKey (required).
+//   @param slot - Which of the player's key slots to set: "First" (default), "Second", "Third" or "Fourth"; an unknown name silently means "First".
+//   @returns { applied: bool, mapping_name: string, new_key: string, slot: string, failure_tags: [string], player_controller: string, world_name: string, world_package: string, world_type: string, net_mode: string, pie_instance: int }
 TSharedPtr<FJsonObject> HandleRegisterInputKeyMapping(const TSharedPtr<FJsonObject>& Params)
 {
     namespace Impl = UEAgentInputCommandsImpl;
-
-    UEnhancedInputUserSettings* UserSettings = nullptr;
-    if (TSharedPtr<FJsonObject> Failure = Impl::ResolveUserSettings(ResolvePlayerController(Params), UserSettings))
-    {
-        return Failure;
-    }
 
     FString MappingNameStr;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("mapping_name"), MappingNameStr)) { return Missing; }
@@ -1695,6 +1761,18 @@ TSharedPtr<FJsonObject> HandleRegisterInputKeyMapping(const TSharedPtr<FJsonObje
     const FKey NewKey(*NewKeyStr);
     if (!NewKey.IsValid())
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("'new_key' '%s' is not a valid FKey"), *NewKeyStr));
+
+    FString ControllerError;
+    APlayerController* Controller = InputRemap_ResolveController(Params, TEXT("register_input_key_mapping"), ControllerError);
+    if (!Controller)
+    {
+        return mcp_common::MakeErrorReply(ControllerError);
+    }
+    UEnhancedInputUserSettings* UserSettings = nullptr;
+    if (TSharedPtr<FJsonObject> Failure = Impl::ResolveUserSettings(Controller, UserSettings))
+    {
+        return Failure;
+    }
 
     FString SlotStr;
     const EPlayerMappableKeySlot Slot = Impl::ReadMappableKeySlot(Params, SlotStr);
@@ -1714,28 +1792,36 @@ TSharedPtr<FJsonObject> HandleRegisterInputKeyMapping(const TSharedPtr<FJsonObje
     Result->SetStringField(TEXT("new_key"), NewKeyStr);
     Result->SetStringField(TEXT("slot"), SlotStr);
     Result->SetArrayField(TEXT("failure_tags"), mcp_common::GameplayTagsToJson(FailureReason));
+    Result->SetStringField(TEXT("player_controller"), Controller->GetName());
+    mcp_common::AddWorldEvidence(Result, Controller->GetWorld());
     return mcp_common::MakeOutcomeReply(Result, bApplied, bApplied ? FString() : FString::Printf(
         TEXT("register_input_key_mapping: the engine refused the remap (%s)."), *FailureReason.ToStringSimple()));
 }
 
-// MCP:unregister_input_key_mapping - Resets a player input mapping back to its default key at runtime via UEnhancedInputUserSettings::UnMapPlayerKey (EnhancedInputUserSettings.h). Inverse of register_input_key_mapping; locates the mapping by name + slot and clears the player override (does not need new_key, does not delete the row). The call fails when the engine refuses it, with its reasons in failure_tags.
-//   @param player_controller_name - Optional editor-world APlayerController actor name (defaults to first local player)
-//   @param player_index - Optional local player index used to resolve the PlayerController (default 0).
-//   @param mapping_name - FName of the source mapping inside an already-mapped IMC (required)
-//   @param slot - "First" | "Second" | "Third" | "Fourth" (default "First"); EPlayerMappableKeySlot enum
-//   @returns { applied: bool, mapping_name: string, slot: string, failure_tags: [string] }
+// MCP:unregister_input_key_mapping - Reset a player-mappable Enhanced Input mapping of one local player of a running PIE or game session back to its default key (UEnhancedInputUserSettings::UnMapPlayerKey), clearing the override register_input_key_mapping made for that slot; the mapping itself stays. It changes that player's user settings in memory only: no asset is edited, nothing is saved, no undo step. Start PIE first (start_play_in_editor): without a running PIE or game world the call is refused and nothing changes. It also needs Enhanced Input user settings enabled in the project (EnhancedInputDeveloperSettings bEnableUserSettings, before PIE starts). To unbind a key in a mapping context asset use remove_mapping_from_context; to see the bound keys use list_all_input_mappings. A missing mapping_name is an error before anything changes; when the engine refuses the reset, applied is false, success is false and failure_tags gives its reasons. player_controller and the world fields name the controller and world that were used.
+//   @param player_controller_name - Optional object name or actor label of the PlayerController to reset, e.g. "PlayerController_0" (case-insensitive), searched in every running PIE or game world; when given, player_index is ignored.
+//   @param player_index - Local player whose binding is reset, in the play world: 0 (default) is the first player controller, any other value matches a local player's controller id.
+//   @param mapping_name - Name of the player-mappable key mapping to reset, as set in its Player Mappable Key Settings, e.g. "Jump" (required).
+//   @param slot - Which of the player's key slots to reset: "First" (default), "Second", "Third" or "Fourth"; an unknown name silently means "First".
+//   @returns { applied: bool, mapping_name: string, slot: string, failure_tags: [string], player_controller: string, world_name: string, world_package: string, world_type: string, net_mode: string, pie_instance: int }
 TSharedPtr<FJsonObject> HandleUnregisterInputKeyMapping(const TSharedPtr<FJsonObject>& Params)
 {
     namespace Impl = UEAgentInputCommandsImpl;
 
+    FString MappingNameStr;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("mapping_name"), MappingNameStr)) { return Missing; }
+
+    FString ControllerError;
+    APlayerController* Controller = InputRemap_ResolveController(Params, TEXT("unregister_input_key_mapping"), ControllerError);
+    if (!Controller)
+    {
+        return mcp_common::MakeErrorReply(ControllerError);
+    }
     UEnhancedInputUserSettings* UserSettings = nullptr;
-    if (TSharedPtr<FJsonObject> Failure = Impl::ResolveUserSettings(ResolvePlayerController(Params), UserSettings))
+    if (TSharedPtr<FJsonObject> Failure = Impl::ResolveUserSettings(Controller, UserSettings))
     {
         return Failure;
     }
-
-    FString MappingNameStr;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("mapping_name"), MappingNameStr)) { return Missing; }
 
     FString SlotStr;
     const EPlayerMappableKeySlot Slot = Impl::ReadMappableKeySlot(Params, SlotStr);
@@ -1753,6 +1839,8 @@ TSharedPtr<FJsonObject> HandleUnregisterInputKeyMapping(const TSharedPtr<FJsonOb
     Result->SetStringField(TEXT("mapping_name"), MappingNameStr);
     Result->SetStringField(TEXT("slot"), SlotStr);
     Result->SetArrayField(TEXT("failure_tags"), mcp_common::GameplayTagsToJson(FailureReason));
+    Result->SetStringField(TEXT("player_controller"), Controller->GetName());
+    mcp_common::AddWorldEvidence(Result, Controller->GetWorld());
     return mcp_common::MakeOutcomeReply(Result, bApplied, bApplied ? FString() : FString::Printf(
         TEXT("unregister_input_key_mapping: the engine refused to reset the mapping (%s)."), *FailureReason.ToStringSimple()));
 }

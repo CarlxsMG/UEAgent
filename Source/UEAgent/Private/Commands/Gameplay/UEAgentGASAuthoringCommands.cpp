@@ -2880,8 +2880,8 @@ TSharedPtr<FJsonObject> HandleAddGameplayEffectComponent(const TSharedPtr<FJsonO
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:get_gameplay_effect_components - Read the GEComponents array from a GameplayEffect CDO, round-tripping each component's configured values (granted/asset/blocked tags, chance-to-apply, tag requirements, granted-ability configs)
-//   @param gameplay_effect_path - Full asset path of the GE Blueprint
+// MCP:get_gameplay_effect_components - List the GameplayEffectComponents (the GEComponents array) on the class default object of a GameplayEffect Blueprint without changing it, in array order, each with its class and, for the standard ones, its configured values: target, asset and blocked-ability tags (with their combined tags), chance to apply (read at level 0), application, ongoing and removal require and ignore tags, and granted abilities (class, path, input_id); any other component class comes back with its class only. Use it to check what add_gameplay_effect_component, set_gameplay_effect_component or the set_gameplay_effect_component_* tools wrote, and to find the index remove_gameplay_effect_component takes; for duration, period, stacking and modifiers use get_gameplay_effect_info and get_gameplay_effect_modifiers. A GE with no components gives component_count 0. A path that does not load as a Blueprint, has no generated class, or is not a GameplayEffect Blueprint is an error; a native GameplayEffect asset (create_gameplay_effect_asset) is not read here.
+//   @param gameplay_effect_path - Asset path of the GameplayEffect Blueprint, e.g. "/Game/GAS/GE_Burning", as create_gameplay_effect_blueprint returns it (asset_path).
 //   @returns { gameplay_effect_path: string, components: [object], component_count: int }
 TSharedPtr<FJsonObject> HandleGetGameplayEffectComponents(const TSharedPtr<FJsonObject>& Params)
 {

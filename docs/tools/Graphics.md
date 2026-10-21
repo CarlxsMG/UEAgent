@@ -10,11 +10,11 @@ Back to the [index](README.md).
 
 *Read-only.*
 
-Read the full UDecalComponent state (size, sort order, fade screen size, fade-out/in timing, color, material) of a named DecalActor.
+Read the decal settings of one ADecalActor in the editor world (not PIE), found by its editor label, without changing anything: DecalSize half-extents in cm (local space, before actor scale), sort order, fade screen size, fade-out and fade-in delays and durations in seconds, destroy-owner-after-fade, DecalColor as r, g, b, a and the decal material's path (empty when none). Use it to check a decal after spawn_decal_actor, or after changing its component with set_properties (object_path "&lt;decal actor path>.DecalComponent", e.g. properties {"SortOrder":2}); for the actor's location and rotation use the actor transform tools. A label with no decal actor (the match is on the label, not the object name), or no editor world, is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_label` | string | yes | Label of the ADecalActor in the editor world. |
+| `actor_label` | string | yes | Editor label of the ADecalActor, e.g. "Decal_Blood_01", as spawn_decal_actor set it or the Outliner shows it (case-insensitive, first match). |
 
 **Returns:** `{ actor_label: string, actor_name: string, decal_size_x: float, decal_size_y: float, decal_size_z: float, sort_order: int, fade_screen_size: float, fade_start_delay: float, fade_duration: float, fade_in_start_delay: float, fade_in_duration: float, destroy_owner_after_fade: bool, r: float, g: float, b: float, a: float, decal_material: string }`
 

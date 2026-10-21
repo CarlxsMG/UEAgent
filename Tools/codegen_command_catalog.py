@@ -1608,7 +1608,7 @@ def build(args) -> int:
 
     # 6) Write
     if args.write:
-        with open(OUT_JSON, "w", encoding="utf-8") as f:
+        with open(OUT_JSON, "w", encoding="utf-8", newline="\n") as f:  # LF on every OS, as the repository keeps it
             f.write(text)
         print(f"WROTE   : {OUT_JSON}  (the plugin's MCP server reads it at startup; mcp.http.restart reloads it)")
         # Diff report

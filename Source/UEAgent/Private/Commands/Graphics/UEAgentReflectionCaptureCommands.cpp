@@ -308,7 +308,7 @@ TSharedPtr<FJsonObject> HandleSpawnSceneCapture2D(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:rebuild_reflection_captures - Rebuilds reflection-capture contents for all captures in the editor world.  Marks every reflection capture dirty and runs the canonical editor rebuild path (UReflectionCaptureComponent::UpdateReflectionCaptureContents).
+// MCP:rebuild_reflection_captures - Recapture every Sphere and Box reflection capture of the editor world now, as the editor does after a capture moves, so reflections show changes made to the scene (new meshes, lights, materials). Use it after placing a capture with spawn_actor (type SphereReflectionCapture or BoxReflectionCapture) or changing one with set_properties (its ReflectionCaptureComponent), or after editing the scene around a capture; read one back with get_reflection_capture_properties; a full static lighting build is build_lighting, which also rebuilds captures. Every capture of the world is redone, which takes longer the more captures there are; there is no per-capture option. It saves nothing and is no undo step: save_level keeps the result. Under -NullRHI (headless) nothing is rendered, so the captures do not change. updated is always true; capture_count is how many captures it found (0 when the world has none, which is not an error).
 //   @renamed-from update_reflection_captures
 //   @returns { updated: bool, capture_count: number }
 

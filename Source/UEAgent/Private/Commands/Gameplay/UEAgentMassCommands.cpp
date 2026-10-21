@@ -336,10 +336,10 @@ TSharedPtr<FJsonObject> HandleAddMassTrait(
 // ---------------------------------------------------------------------------
 // remove_mass_trait
 // ---------------------------------------------------------------------------
-// MCP:remove_mass_trait - Remove a trait from a Mass entity config (inverse of add_mass_trait)
-//   @param config_path - Asset path to the UMassEntityConfig
-//   @param trait_index - Index of the trait to remove (mutually exclusive with trait_class)
-//   @param trait_class - Trait class name to remove; removes the first trait whose class is a child of it (mutually exclusive with trait_index)
+// MCP:remove_mass_trait - Remove one trait from the trait list of a Mass entity config asset (UMassEntityConfigAsset), picked by index or by class, then save the asset; there is no undo step. Inverse of add_mass_trait. It only reaches traits the config holds itself, as list_mass_traits shows them: a trait inherited from the parent config (set_mass_config_parent) stays. Not idempotent: once the trait is gone, a repeat call is an error (no matching class, or index out of range), and so are both or neither selector, a config that does not load and an unknown or non-trait class; nothing changes then. Later traits shift down one index. A failed save (for example while PIE runs) makes success false with the removal only in memory. To untag one live entity instead use remove_mass_tag_from_entity.
+//   @param config_path - Asset path of the Mass entity config, e.g. "/Game/Mass/DA_CrowdAgent", as create_mass_entity_config returns it (config_path).
+//   @param trait_index - 0-based position in the config's own trait list, as list_mass_traits reports it (traits[] order); give this or trait_class, not both.
+//   @param trait_class - Trait class name, with or without its U prefix, or a /Script path, e.g. "MassMovementTrait"; removes the first own trait whose class is that class or a subclass of it. Give this or trait_index, not both.
 //   @returns { config_path, removed, removed_trait_class, removed_index, trait_count, saved }
 TSharedPtr<FJsonObject> HandleRemoveMassTrait(
 	const TSharedPtr<FJsonObject>& Params)
@@ -653,9 +653,9 @@ TSharedPtr<FJsonObject> HandleGetMassSpawnerInfo(
 // Config parent + trait property reflection + spawner entity types/count
 // ---------------------------------------------------------------------------
 
-// MCP:set_mass_config_parent - Set the parent (base) config of a UMassEntityConfigAsset for trait inheritance.
-//   @param config_path - Asset path to the child UMassEntityConfigAsset
-//   @param parent_config_path - Asset path to the parent UMassEntityConfigAsset
+// MCP:set_mass_config_parent - Set the parent config of a Mass entity config asset (UMassEntityConfigAsset), so the child inherits every trait of the parent chain on top of its own, replacing any parent it had, then save the child; there is no undo step. Use it to share a base trait set between configs instead of repeating add_mass_trait on each. Read it back with get_mass_config_parent; the child's own traits stay as list_mass_traits shows them. A repeat call with the same parent sets and saves again (set stays true). There is no way to clear the parent here. A config or parent that does not load, or a config given as its own parent, is an error and nothing changes; longer cycles (A under B under A) are not checked. A failed save (for example while PIE runs) makes success false with the change only in memory.
+//   @param config_path - Asset path of the child config to change, e.g. "/Game/Mass/DA_Soldier", as create_mass_entity_config returns it (config_path).
+//   @param parent_config_path - Asset path of the config to inherit from, e.g. "/Game/Mass/DA_BaseAgent"; must be a different UMassEntityConfigAsset.
 //   @returns { config_path, parent_config_path, parent, set, saved }
 TSharedPtr<FJsonObject> HandleSetMassConfigParent(
 	const TSharedPtr<FJsonObject>& Params)
@@ -775,9 +775,9 @@ TSharedPtr<FJsonObject> HandleGetMassTraitProperty(
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:set_mass_spawner_entity_types - Link Mass entity configs to a spawner's EntityTypes (written by reflection: the array is protected).
-//   @param actor_label - Editor label of the AMassSpawner
-//   @param config_paths - Array of UMassEntityConfigAsset asset paths to set as the spawner's entity types
+// MCP:set_mass_spawner_entity_types - Replace the entity types of an AMassSpawner actor in the editor world (its protected EntityTypes list, written by reflection) with the given Mass entity configs, each at proportion 1.0. It replaces, never appends: the old list is cleared first, and an empty array leaves the spawner with no types. Paths that do not load as a UMassEntityConfigAsset are skipped silently, so compare linked with the number you passed. No undo step, and the level is neither marked dirty nor saved (save_level). Place the spawner first with spawn_actor (type "MassSpawner"); set how many it spawns with set_mass_spawner_count; read back with get_mass_spawner_info; spawn with spawn_mass_entities. A missing actor_label or config_paths, or no spawner with that label, is an error and nothing changes. Idempotent: the same list gives the same result.
+//   @param actor_label - Editor label of the AMassSpawner actor, e.g. "CrowdSpawner"; matched case-insensitively, first match in the editor world (not PIE).
+//   @param config_paths - Array of Mass entity config asset paths, e.g. ["/Game/Mass/DA_CrowdAgent"], as create_mass_entity_config returns them (config_path); [] clears the list.
 //   @returns { actor_label, entity_type_count, linked, set }
 TSharedPtr<FJsonObject> HandleSetMassSpawnerEntityTypes(
 	const TSharedPtr<FJsonObject>& Params)
@@ -834,9 +834,9 @@ TSharedPtr<FJsonObject> HandleSetMassSpawnerEntityTypes(
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:set_mass_spawner_count - Set the spawn count on an AMassSpawner (reflection over its protected Count property).
-//   @param actor_label - Editor label of the AMassSpawner
-//   @param count - New spawn count
+// MCP:set_mass_spawner_count - Set how many entities an AMassSpawner actor in the editor world spawns (its protected Count property, written by reflection); spawn_mass_entities spawns this count, scaled by the spawner's SpawningCountScale and the scalability spawn density. No undo step, and the level is neither marked dirty nor saved (save_level). Use it before spawn_mass_entities; set the types with set_mass_spawner_entity_types; read the current count with get_mass_spawner_info. Idempotent: the same count again gives the same result. set is true when the count read back equals the requested one. A missing actor_label or count, or no spawner with that label, is an error and nothing changes; the count is not range-checked.
+//   @param actor_label - Editor label of the AMassSpawner actor, e.g. "CrowdSpawner"; matched case-insensitively, first match in the editor world (not PIE).
+//   @param count - Number of entities to spawn, an integer such as 100 (a fraction is truncated).
 //   @returns { actor_label, count, set }
 TSharedPtr<FJsonObject> HandleSetMassSpawnerCount(
 	const TSharedPtr<FJsonObject>& Params)
@@ -1253,9 +1253,9 @@ TSharedPtr<FJsonObject> HandleListMassTraitTypes(const TSharedPtr<FJsonObject>& 
 // ---------------------------------------------------------------------------
 // fire_mass_signal
 // ---------------------------------------------------------------------------
-// MCP:fire_mass_signal - Broadcast a signal to a single entity or to all entities (when entity_handle omitted). The tool does NOT validate the signal name — UMassSignalSubsystem::SignalEntity silently no-ops on unknown names, which is the documented engine behavior.
-//   @param signal - Signal name (FName).
-//   @param entity_handle - Optional. "{Index}:{SerialNumber}". If omitted, broadcasts to all live entities.
+// MCP:fire_mass_signal - Raise a named Mass signal through the UMassSignalSubsystem of the editor world (not a PIE world) for one entity, or for every live entity when entity_handle is left out; the signal processors subscribed to that name react the next time Mass processing runs in that world, which is the only side effect (nothing is saved and there is no undo step). Use it to trigger signal-driven logic (for example StateTree re-evaluation) without waiting for gameplay. The signal name is NOT validated: a name no processor listens to is accepted and does nothing, and dispatched_count still counts the entities signalled. An entity_handle that does not parse or names no live entity (check it with get_mass_entity_info) is an error and nothing is signalled; so is a world without the Mass signal or entity subsystem. Count the live entities with list_mass_archetypes or get_mass_entity_count.
+//   @param signal - Signal name, as the receiving processors subscribe to it, e.g. "StateTreeActivate" (case-insensitive FName); any name is accepted.
+//   @param entity_handle - Optional handle "Index:SerialNumber" of one live entity, e.g. "12:3" (Index above 0, SerialNumber not 0). Leave it out to signal every live entity of the editor world.
 //   @returns { signal, dispatched_count: int, broadcast: bool }
 TSharedPtr<FJsonObject> HandleFireMassSignal(const TSharedPtr<FJsonObject>& Params)
 {

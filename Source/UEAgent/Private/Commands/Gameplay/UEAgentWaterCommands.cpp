@@ -21,6 +21,7 @@
 #include "WaterBodyRiverActor.h"
 #include "WaterBodyTypes.h"
 #include "WaterZoneActor.h"
+#include "WaterSubsystem.h"          // UWaterSubsystem::FindWaterZone: the zone overlap would give a body
 // Gerstner waves + exclusion volumes.
 #include "GerstnerWaterWaves.h"
 #include "WaterWaves.h"
@@ -216,6 +217,41 @@ namespace
 			OutError = mcp_common::MakeErrorReply(TEXT("Body has no UWaterBodyComponent"));
 		}
 		return BodyComp;
+	}
+
+	/**
+	 * The zone UWaterBodyComponent::WaterZoneOverride names (a protected UPROPERTY, so it is read by reflection): the
+	 * saved link that UpdateWaterZones prefers over spatial overlap. Null when unset or not loaded; OutPath, when
+	 * given, receives the soft path ("" when unset).
+	 */
+	AWaterZone* Water_ReadZoneOverride(const UWaterBodyComponent* Comp, FString* OutPath = nullptr)
+	{
+		const FSoftObjectProperty* Prop = CastField<FSoftObjectProperty>(
+			UWaterBodyComponent::StaticClass()->FindPropertyByName(TEXT("WaterZoneOverride")));
+		const FSoftObjectPtr* Value = Prop ? Prop->ContainerPtrToValuePtr<FSoftObjectPtr>(Comp) : nullptr;
+		if (OutPath)
+		{
+			*OutPath = Value ? Value->ToSoftObjectPath().ToString() : FString();
+		}
+		return Value ? Cast<AWaterZone>(Value->Get()) : nullptr;
+	}
+
+	/**
+	 * The zone UWaterBodyComponent::UpdateWaterZones gives the body when it has no override: the engine's own
+	 * spatial lookup (UWaterSubsystem::FindWaterZone over the component bounds, its level preferred).
+	 */
+	AWaterZone* Water_ZoneByOverlap(const UWaterBodyComponent* Comp)
+	{
+		const UWorld* World = Comp->GetWorld();
+		if (!World)
+		{
+			return nullptr;
+		}
+		const FBox Bounds3D = Comp->CalcBounds(Comp->GetComponentToWorld()).GetBox();
+		const AActor* Owner = Comp->GetTypedOuter<AActor>();
+		const ULevel* Level = Owner ? Owner->GetLevel() : nullptr;
+		return UWaterSubsystem::FindWaterZone(World, FBox2D(FVector2D(Bounds3D.Min), FVector2D(Bounds3D.Max)),
+			TSoftObjectPtr<const ULevel>(Level)).Get();
 	}
 
 	/**
@@ -421,17 +457,23 @@ static TSharedPtr<FJsonObject> SpawnWaterBodyAndLink(
 	UWaterBodyComponent* WaterComp = Body->GetWaterBodyComponent();
 
 	bool bLinkedToZone = false;
+	FString ZoneOverridePath;
 	if (!ZoneLabel.IsEmpty())
 	{
 		if (AWaterZone* Zone = Cast<AWaterZone>(mcp_common::FindActorByLabel(World, ZoneLabel)))
 		{
 			if (UWaterBodyComponent* BodyComp = Body->GetWaterBodyComponent())
 			{
-				Zone->AddWaterBodyComponent(BodyComp);
-				bLinkedToZone = true;
+				// Linked through the component's WaterZoneOverride, the saved link add_water_body_to_zone writes:
+				// AWaterZone::AddWaterBodyComponent alone only fills the zone's transient list, which is neither
+				// saved nor what the body reports as its zone. Read back from the body.
+				BodyComp->Modify();
+				BodyComp->SetWaterZoneOverride(TSoftObjectPtr<AWaterZone>(Zone));
+				bLinkedToZone = Water_ReadZoneOverride(BodyComp, &ZoneOverridePath) == Zone && BodyComp->GetWaterZone() == Zone;
 			}
 		}
 	}
+	const AWaterZone* const OwningZone = WaterComp ? WaterComp->GetWaterZone() : nullptr;
 
 	// --- waves: read what the factory actually attached, never assume -------
 	const float SpawnMaxWaveHeight = WaterComp ? WaterComp->GetMaxWaveHeight() : 0.0f;
@@ -454,6 +496,8 @@ static TSharedPtr<FJsonObject> SpawnWaterBodyAndLink(
 	Data->SetStringField(TEXT("body_type"), BodyTypeLabel);
 	Data->SetStringField(TEXT("water_zone_label"), ZoneLabel);
 	Data->SetBoolField(TEXT("linked_to_zone"), bLinkedToZone);
+	Data->SetStringField(TEXT("water_zone_override"), ZoneOverridePath);
+	Data->SetStringField(TEXT("owning_zone_label"), OwningZone ? OwningZone->GetActorLabel() : FString());
 	Data->SetBoolField(TEXT("affects_landscape"), WaterComp ? WaterComp->AffectsLandscape() : bAffectsLandscape);
 	Data->SetNumberField(TEXT("max_wave_height"), MaxWaveHeight);
 	Data->SetNumberField(TEXT("max_wave_height_on_spawn"), SpawnMaxWaveHeight);
@@ -484,7 +528,7 @@ static TSharedPtr<FJsonObject> SpawnWaterBodyAndLink(
 	if (!bZoneOk)
 	{
 		Error = FString::Printf(
-			TEXT("Water body '%s' was spawned but NOT linked: water zone '%s' was not found in the editor world (or the body has no UWaterBodyComponent)."),
+			TEXT("Water body '%s' was spawned but NOT linked: water zone '%s' was not found in the editor world, the body has no UWaterBodyComponent, or its zone did not read back as that zone."),
 			*ActorLabel, *ZoneLabel);
 	}
 
@@ -546,10 +590,10 @@ TSharedPtr<FJsonObject> HandleCreateOceanWaterBody(
 // ---------------------------------------------------------------------------
 // add_water_body_to_zone  — link an existing water body to an existing zone
 // ---------------------------------------------------------------------------
-// MCP:add_water_body_to_zone - Link an existing water body actor to an existing AWaterZone.
-//   @param water_body_label - Label of the existing AWaterBody actor to link
-//   @param water_zone_label - Label of the existing AWaterZone actor to link into
-//   @returns { water_body_label: string, water_zone_label: string, linked: bool }
+// MCP:add_water_body_to_zone - Link a water body to a water zone for good by pointing the body's WaterZoneOverride at it (UWaterBodyComponent::SetWaterZoneOverride), replacing any override it had: a saved property the engine prefers over spatial overlap, so the body stays in that zone wherever it lies, and the zone rebuilds its water info and mesh around it; both are found by editor label in the editor world. linked is read back: the override and the body's owning zone both name the zone, which is what get_water_body_info (water_zone_label) and get_water_zone_info (linked_body_count) then report; owning_zone_label and previous_zone_label say where it is and was. One undo step; the level is marked dirty, not saved (save_level). Idempotent: a body already linked this way changes nothing (changed=false). Inverse: remove_water_body_from_zone. An unknown body or zone label, or a body without a UWaterBodyComponent, is an error.
+//   @param water_body_label - Editor label (not the object name) of the AWaterBody actor -- lake, river, ocean or custom -- e.g. "Lake_Main", as create_water_body set it; whole label, case-insensitive, first match
+//   @param water_zone_label - Editor label of the AWaterZone actor, e.g. "WaterZone_1"; spawn_actor with type="WaterZone" places one
+//   @returns { water_body_label: string, water_zone_label: string, linked: bool, changed: bool, water_zone_override: string (the override's object path, read back), owning_zone_label: string, previous_zone_label: string }
 TSharedPtr<FJsonObject> HandleAddWaterBodyToZone(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -563,22 +607,43 @@ TSharedPtr<FJsonObject> HandleAddWaterBodyToZone(
 		return Error;
 	}
 
-	Zone->AddWaterBodyComponent(BodyComp);
+	// The link that lasts is the component's WaterZoneOverride: a saved property that UpdateWaterZones prefers over
+	// spatial overlap. SetWaterZoneOverride writes it and runs UpdateWaterZones, which sets the owning zone (what
+	// get_water_body_info and get_water_zone_info read) and registers the body with the zone.
+	AWaterZone* const PreviousZone = BodyComp->GetWaterZone();
+	const bool bAlreadyLinked = Water_ReadZoneOverride(BodyComp) == Zone && PreviousZone == Zone;
+	if (!bAlreadyLinked)
+	{
+		// Recorded before the write, so the call is one undo step and the level is marked dirty.
+		BodyComp->Modify();
+		BodyComp->SetWaterZoneOverride(TSoftObjectPtr<AWaterZone>(Zone));
+	}
+
+	FString OverridePath;
+	AWaterZone* const OverrideZone = Water_ReadZoneOverride(BodyComp, &OverridePath);
+	AWaterZone* const OwningZone = BodyComp->GetWaterZone();
+	const bool bLinked = OverrideZone == Zone && OwningZone == Zone;
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("water_body_label"), BodyLabel);
 	Data->SetStringField(TEXT("water_zone_label"), ZoneLabel);
-	Data->SetBoolField(TEXT("linked"), true);
-	return mcp_common::MakeOkReply(Data);
+	Data->SetBoolField(TEXT("linked"), bLinked);
+	Data->SetBoolField(TEXT("changed"), !bAlreadyLinked);
+	Data->SetStringField(TEXT("water_zone_override"), OverridePath);
+	Data->SetStringField(TEXT("owning_zone_label"), OwningZone ? OwningZone->GetActorLabel() : FString());
+	Data->SetStringField(TEXT("previous_zone_label"), PreviousZone ? PreviousZone->GetActorLabel() : FString());
+	return mcp_common::MakeOutcomeReply(Data, bLinked, bLinked ? FString()
+		: FString::Printf(TEXT("add_water_body_to_zone: after SetWaterZoneOverride the body's owning zone is '%s', not '%s'"),
+			OwningZone ? *OwningZone->GetActorLabel() : TEXT(""), *ZoneLabel));
 }
 
 // ---------------------------------------------------------------------------
 // remove_water_body_from_zone  — inverse of add_water_body_to_zone
 // ---------------------------------------------------------------------------
-// MCP:remove_water_body_from_zone - Unlink an existing water body actor from an existing AWaterZone (inverse of add_water_body_to_zone).
-//   @param water_body_label - Label of the existing AWaterBody actor to unlink
-//   @param water_zone_label - Label of the existing AWaterZone actor to unlink from
-//   @returns { water_body_label: string, water_zone_label: string, removed: bool, note: string }
+// MCP:remove_water_body_from_zone - Unlink a water body from a water zone (inverse of add_water_body_to_zone): a WaterZoneOverride naming that zone is cleared, in one undo step that marks the level dirty, so the body falls back to the zone its bounds overlap, if any; owning_zone_label reads that back. A body inside the zone's bounds belongs to it by overlap whatever its override says, so that case is refused before anything changes. Idempotent: a body not linked to the zone is a success with already_unlinked=true and nothing changed. Read the result with get_water_body_info (water_zone_label). An unknown body or zone label is an error.
+//   @param water_body_label - Editor label of the AWaterBody actor to unlink, e.g. "Lake_Main"
+//   @param water_zone_label - Editor label of the AWaterZone actor to unlink from, e.g. "WaterZone_1"
+//   @returns { water_body_label: string, water_zone_label: string, removed: bool, override_cleared: bool, already_unlinked: bool, owning_zone_label: string }
 TSharedPtr<FJsonObject> HandleRemoveWaterBodyFromZone(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -592,32 +657,50 @@ TSharedPtr<FJsonObject> HandleRemoveWaterBodyFromZone(
 		return Error;
 	}
 
-	// AWaterZone::RemoveWaterBodyComponent removes the component from the zone's private
-	// OwnedWaterBodies list; it silently no-ops when the body is not in the list, so the
-	// call is idempotent by construction (already_absent needs no explicit pre-check, and
-	// there is no public getter for OwnedWaterBodies to read it back — the add twin has the
-	// same limitation and reports linked=true unconditionally). This detaches only the
-	// zone->body ownership entry; the body's OwningWaterZone pointer is managed separately by
-	// UWaterBodyComponent::UpdateWaterZones (spatial overlap / WaterZoneOverride), so a body
-	// still spatially inside the zone may be re-added to the list on the next zone update.
-	Zone->RemoveWaterBodyComponent(BodyComp);
+	// The body's zone is its WaterZoneOverride when one is set (what add_water_body_to_zone writes), else the zone
+	// its bounds overlap. Clearing an override that names this zone hands the body back to overlap, so when overlap
+	// would give it this very zone again the call is refused before anything changes.
+	AWaterZone* const PreviousZone = BodyComp->GetWaterZone();
+	const bool bOverrideNamesZone = Water_ReadZoneOverride(BodyComp) == Zone;
+	if (bOverrideNamesZone ? Water_ZoneByOverlap(BodyComp) == Zone : PreviousZone == Zone)
+	{
+		return mcp_common::MakeErrorReply(FString::Printf(
+			TEXT("The body belongs to '%s' by overlap of its bounds, which no override change undoes; move it out of the zone, or point it at another zone with add_water_body_to_zone. Nothing was changed."),
+			*ZoneLabel));
+	}
+
+	if (bOverrideNamesZone)
+	{
+		// Recorded before the write, so the call is one undo step and the level is marked dirty.
+		BodyComp->Modify();
+		BodyComp->SetWaterZoneOverride(TSoftObjectPtr<AWaterZone>());
+	}
+	// A list entry left over without the body belonging to the zone (the zone's transient OwnedWaterBodies) goes
+	// too; it is a no-op when there is none.
+	if (BodyComp->GetWaterZone() != Zone)
+	{
+		Zone->RemoveWaterBodyComponent(BodyComp);
+	}
+
+	AWaterZone* const OwningZone = BodyComp->GetWaterZone();
+	const bool bRemoved = OwningZone != Zone && Water_ReadZoneOverride(BodyComp) != Zone;
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("water_body_label"), BodyLabel);
 	Data->SetStringField(TEXT("water_zone_label"), ZoneLabel);
-	Data->SetBoolField(TEXT("removed"), true);
-	Data->SetStringField(TEXT("note"),
-		TEXT("Removed from the zone's owned-bodies list (idempotent; no-ops if it was not linked). ")
-		TEXT("OwnedWaterBodies has no public getter so this is not read-back-verified (the add twin has the same limitation). ")
-		TEXT("This detaches only the zone->body ownership entry; the body's OwningWaterZone is managed by UpdateWaterZones (spatial overlap), so a body still inside the zone may be re-added on the next zone update."));
-	return mcp_common::MakeOkReply(Data);
+	Data->SetBoolField(TEXT("removed"), bRemoved);
+	Data->SetBoolField(TEXT("override_cleared"), bOverrideNamesZone);
+	Data->SetBoolField(TEXT("already_unlinked"), !bOverrideNamesZone && PreviousZone != Zone);
+	Data->SetStringField(TEXT("owning_zone_label"), OwningZone ? OwningZone->GetActorLabel() : FString());
+	return mcp_common::MakeOutcomeReply(Data, bRemoved, bRemoved ? FString()
+		: FString::Printf(TEXT("remove_water_body_from_zone: the body still belongs to '%s' after the override was cleared"), *ZoneLabel));
 }
 
 // ---------------------------------------------------------------------------
 // get_water_zone_info
 // ---------------------------------------------------------------------------
-// MCP:get_water_zone_info - Read info about an existing AWaterZone and count its linked water bodies.
-//   @param water_zone_label - Label of the existing AWaterZone actor
+// MCP:get_water_zone_info - Read a water zone of the editor world, found by editor label: actor_label, actor_name, has_water_mesh, zone_extent [X, Y] in cm (the complete extent times the actor scale, not a half-extent), overlap_priority, and linked_body_count, the number of water bodies whose own owning zone is this one (by spatial overlap, or by the WaterZoneOverride add_water_body_to_zone sets). Use it before and after set_water_zone_settings, which also reports render-target resolution, world bounds and texel size; for one body's zone, type and waves use get_water_body_info. Read-only and idempotent. A label no AWaterZone has is an error.
+//   @param water_zone_label - Editor label (not the object name) of the AWaterZone actor, e.g. "WaterZone_1"; whole label, case-insensitive, first match. find_actors_by_name with match='label' lists labels
 //   @returns { actor_label: string, actor_name: string, has_water_mesh: bool, linked_body_count: number, zone_extent: [number, number], overlap_priority: int }
 TSharedPtr<FJsonObject> HandleGetWaterZoneInfo(
 	const TSharedPtr<FJsonObject>& Params)
@@ -736,11 +819,11 @@ TSharedPtr<FJsonObject> HandleSetWaterBodyMaterial(
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:set_water_zone_settings - Set an AWaterZone's planar extent and/or water-info render-target resolution, then RE-READ both from the actor (extent, world bounds, texel density) instead of echoing the request back.
+// MCP:set_water_zone_settings - Set a water zone's planar extent and/or its water-info render-target resolution, then RE-READ both from the actor (extent, world bounds, texel density) instead of echoing the request back. For a read without changing anything use get_water_zone_info; place a zone with spawn_actor (type="WaterZone"). Only the values passed are written, and one the zone already holds is skipped, so a repeat call changes nothing. One undo step; the level is marked dirty, not saved (save_level). applied is derived from the read-back: false, with an error, when the extent read back differs (GetZoneExtent multiplies by the actor scale; see actor_scale) or the resolution does. water_info_texel_size_uu (extent / resolution) tells whether shorelines can resolve. A label no AWaterZone has is an error.
 //   @renamed-from configure_water_zone
-//   @param water_zone_label - Label of the AWaterZone actor
+//   @param water_zone_label - Editor label (not the object name) of the AWaterZone actor in the editor world, e.g. "WaterZone_1"; whole label, case-insensitive, first match
 //   @param extent - Optional [X, Y] planar zone extent. !!! THIS IS THE **COMPLETE** EXTENT, NOT THE HALF-EXTENT / SEMI-AXIS !!! The engine halves it itself (AWaterZone::GetZoneBounds2D: "GetZoneExtents returns the full extent of the zone but BoxSphereBounds expects a half-extent"), so passing 4000000 gives world bounds of [-2000000, +2000000] around the actor -- a 40 km sea, not 80 km. Reading it as a semi-axis gives a sea of DOUBLE the intended size with bounds off the map; the `world_bounds_extent` field in the response is what disambiguates it (half of `zone_extent_actual`).
-//   @param render_target_resolution - Optional [X, Y] water-info render target resolution. Read back by reflection as `render_target_resolution_actual` (the getter is not exported, so this is the raw UPROPERTY, i.e. BEFORE the r.Water.WaterInfo.RenderTargetResolutionMax clamp).
+//   @param render_target_resolution - Optional [X, Y] water-info render target resolution in texels, whole numbers, e.g. [2048, 2048]. Read back by reflection as `render_target_resolution_actual` (the getter is not exported, so this is the raw UPROPERTY, i.e. BEFORE the r.Water.WaterInfo.RenderTargetResolutionMax clamp).
 //   @returns { water_zone_label: string, zone_extent: [x,y] (RE-READ, kept for compatibility), zone_extent_actual: [x,y] (RE-READ, COMPLETE extent), world_bounds_extent: [x,y,z] (HALF-extent of the real actor bounds), world_bounds_origin: [x,y,z], world_bounds_min: [x,y,z], world_bounds_max: [x,y,z], actor_scale: [x,y,z], render_target_resolution_actual: [x,y] (omitted if unreadable), render_target_resolution_verified: bool, water_info_texel_size_uu: number (zone_extent / render_target_resolution; omitted if the resolution is unreadable or zero), applied: bool (DERIVED from read-back == request), requested: { extent, render_target_resolution } }
 //
 // WHY. A hardcoded `applied` and an extent that agrees with the request by construction
@@ -1688,10 +1771,10 @@ TSharedPtr<FJsonObject> HandleSetWaterBodyProperties(
 //   @param body_type - One of lake, ocean, river
 //   @param actor_label - Label to assign to the new water body actor
 //   @param location [array] - Optional [X, Y, Z] world location (defaults to origin)
-//   @param water_zone_label - Optional label of an existing AWaterZone to link the body to; if it is not found, success is false while the body is still spawned
+//   @param water_zone_label - Optional editor label of an existing AWaterZone to link the body to, through its WaterZoneOverride as add_water_body_to_zone does (saved with the level, kept wherever the body lies); linked_to_zone and owning_zone_label are read back from the body. If the zone is not found, success is false while the body is still spawned
 //   @param affects_landscape [bool] - When true the body carves the existing landscape via the water landscape brush; defaults to false (non-destructive)
 //   @param disable_waves [bool] - Opt-in, default false: sets the water waves to none right after the spawn and re-reads the max wave height to prove it is 0
-//   @returns { the reply of the body's creator: actor name and label, body type, zone link, wave height read back }
+//   @returns { actor_label: string, actor_name: string, body_type: string, water_zone_label: string, linked_to_zone: bool, water_zone_override: string, owning_zone_label: string, affects_landscape: bool, max_wave_height: number, max_wave_height_on_spawn: number, has_waves: bool, waves_disabled: bool, warning?: string, requested: object }
 TSharedPtr<FJsonObject> HandleCreateWaterBody(const TSharedPtr<FJsonObject>& Params)
 {
     FString BodyType;

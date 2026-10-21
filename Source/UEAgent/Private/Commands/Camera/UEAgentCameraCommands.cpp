@@ -65,10 +65,15 @@ namespace
 {
     // Reads name (required) and package_path (default "/Game/Cameras"), then creates the AssetClass asset there and
     // saves it, or finds the one already there. Returns the reply data, or nullptr with OutError set; ClassLabel
-    // names the class in the error of a failed creation.
+    // names the class in the error of a failed creation. bOutCreated says whether THIS call created the asset;
+    // bOutSaved (with OutSaveError) whether this call saved it -- never true for an asset that was already there,
+    // which this call does not write.
     TSharedPtr<FJsonObject> GC_CreateAsset(const TSharedPtr<FJsonObject>& Params, UClass* AssetClass, const TCHAR* ClassLabel,
-                                           bool& bOutSaved, FString& OutError)
+                                           bool& bOutCreated, bool& bOutSaved, FString& OutSaveError, FString& OutError)
     {
+        bOutCreated = false;
+        bOutSaved = false;
+        OutSaveError.Reset();
         FString Name;
         if (!Params->TryGetStringField(TEXT("name"), Name) || Name.IsEmpty())
         {
@@ -93,11 +98,7 @@ namespace
         }
         UObject* Asset = mcp_common::ResolveObjectByPath(PkgPath, AssetClass);
         const bool bAlreadyExisted = Asset != nullptr && Asset->IsA(AssetClass);
-        if (bAlreadyExisted)
-        {
-            bOutSaved = true;
-        }
-        else
+        if (!bAlreadyExisted)
         {
             const FString Conflict = mcp_common::AssetNameConflict(PkgPath, Name, AssetClass);
             if (!Conflict.IsEmpty())
@@ -115,16 +116,31 @@ namespace
                 return CreationFailed(TEXT("NewObject failed"));
             }
             FAssetRegistryModule::AssetCreated(Asset);
-            FString SaveError;
-            bOutSaved = mcp_common::SaveAssetPackage(Package, Asset, SaveError);
+            bOutCreated = true;
+            bOutSaved = mcp_common::SaveAssetPackage(Package, Asset, OutSaveError);
         }
 
         TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
         Data->SetStringField(TEXT("name"), Name);
         Data->SetStringField(TEXT("asset_path"), Asset->GetPathName());
         Data->SetStringField(TEXT("asset_class"), Asset->GetClass()->GetName());
+        Data->SetBoolField(TEXT("created"), bOutCreated);
         Data->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
         return Data;
+    }
+
+    // The reply of a GC_CreateAsset call: a created asset answers by its save (success false, with save_error,
+    // when the save failed); one already there is a success with saved=false, since this call wrote nothing.
+    TSharedPtr<FJsonObject> GC_CreateAssetReply(const TSharedPtr<FJsonObject>& Data, bool bCreated, bool bSaved,
+                                                const FString& SaveError, const TCHAR* Command)
+    {
+        if (!bCreated)
+        {
+            Data->SetBoolField(TEXT("saved"), false);
+            Data->SetStringField(TEXT("note"), TEXT("An asset of this class was already at that path; it was returned unchanged and nothing was saved."));
+            return mcp_common::MakeOkReply(Data);
+        }
+        return mcp_common::MakeSavedReply(Data, bSaved, Command, SaveError);
     }
 
     // Marks Asset's package dirty and saves it: false, with OutSaveError saying why, when the
@@ -142,38 +158,42 @@ namespace
     }
 }
 
-// MCP:create_camera_rig_asset - Creates a UCameraRigAsset (Gameplay Camera System, Experimental). Idempotent (returns the existing asset).
-//   @param name - Asset name (required)
-//   @param package_path - Target content folder (default "/Game/Cameras")
-//   @returns { name, asset_path, asset_class, already_existed, saved }
+// MCP:create_camera_rig_asset - Create an empty camera rig asset (UCameraRigAsset, from the Experimental Gameplay Cameras plugin) at package_path/name and save it; it has no root node yet. Idempotent: a camera rig already at that path is returned unchanged with created=false, already_existed=true and saved=false, since nothing is written; an asset of another class there is an error. Not an undo step. Then give it a root node with set_camera_rig_root_node, tune it with set_camera_node_parameters or add_camera_node_child, build it with build_camera_rig, and run it from a camera asset (create_camera_asset) through set_camera_asset_director; get_camera_rig_nodes reads it back. A failed save of a new rig makes success false, with saved=false and save_error, and the rig left in memory.
+//   @param name - Asset name, e.g. 'CR_Player'; package_path/name must form a valid long package name.
+//   @param package_path - Content folder as a long package path, e.g. '/Game/Cameras/Rigs' (default "/Game/Cameras").
+//   @returns { name, asset_path, asset_class, created, already_existed, saved, save_error?, note? }
 TSharedPtr<FJsonObject> HandleCreateCameraRigAsset(const TSharedPtr<FJsonObject>& Params)
 {
+    bool bCreated = false;
     bool bSaved = false;
+    FString SaveError;
     FString Error;
     const TSharedPtr<FJsonObject> Data =
-        GC_CreateAsset(Params, UCameraRigAsset::StaticClass(), TEXT("UCameraRigAsset"), bSaved, Error);
+        GC_CreateAsset(Params, UCameraRigAsset::StaticClass(), TEXT("UCameraRigAsset"), bCreated, bSaved, SaveError, Error);
     if (!Data.IsValid())
     {
         return mcp_common::MakeErrorReply(Error);
     }
-    return mcp_common::MakeSavedReply(Data, bSaved, TEXT("create_camera_rig_asset"));
+    return GC_CreateAssetReply(Data, bCreated, bSaved, SaveError, TEXT("create_camera_rig_asset"));
 }
 
-// MCP:create_camera_asset - Create a UCameraAsset (Gameplay Camera System, Experimental plugin) at package_path/name and save it; one already there is returned unchanged (already_existed:true), another asset class there is an error. Returns asset_path and saved. Next: set_camera_asset_director, then add_gameplay_camera_component.
+// MCP:create_camera_asset - Create a UCameraAsset (Gameplay Camera System, Experimental plugin) at package_path/name and save it; one already there is returned unchanged with created=false, already_existed=true and saved=false (nothing is written), another asset class there is an error. A failed save of a new asset makes success false, with saved=false and save_error. Returns asset_path and saved. Next: set_camera_asset_director, then add_gameplay_camera_component.
 //   @param name - Name of the UCameraAsset to create, e.g. "CA_Player"; also the last segment of its path
 //   @param package_path - Target content folder (default "/Game/Cameras")
-//   @returns { name, asset_path, asset_class, already_existed, saved }
+//   @returns { name, asset_path, asset_class, created, already_existed, saved, save_error?, note? }
 TSharedPtr<FJsonObject> HandleCreateCameraAsset(const TSharedPtr<FJsonObject>& Params)
 {
+    bool bCreated = false;
     bool bSaved = false;
+    FString SaveError;
     FString Error;
     const TSharedPtr<FJsonObject> Data =
-        GC_CreateAsset(Params, UCameraAsset::StaticClass(), TEXT("UCameraAsset"), bSaved, Error);
+        GC_CreateAsset(Params, UCameraAsset::StaticClass(), TEXT("UCameraAsset"), bCreated, bSaved, SaveError, Error);
     if (!Data.IsValid())
     {
         return mcp_common::MakeErrorReply(Error);
     }
-    return mcp_common::MakeSavedReply(Data, bSaved, TEXT("create_camera_asset"));
+    return GC_CreateAssetReply(Data, bCreated, bSaved, SaveError, TEXT("create_camera_asset"));
 }
 
 // MCP:set_camera_asset_director - Wires a new USingleCameraDirector on a UCameraAsset, pointing it at a UCameraRigAsset (the "one rig" director) and replacing any director it had, then saves the asset. One undo step. director_set is the GetCameraDirector read-back; a failed save fails the call, with saved false and save_error, and leaves the change in memory.

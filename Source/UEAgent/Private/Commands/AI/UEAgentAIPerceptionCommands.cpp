@@ -313,9 +313,9 @@ namespace
     }
 }
 
-// MCP:set_actor_team - Assigns a native FGenericTeamId to an actor via IGenericTeamAgentInterface, falling back to the actor's Controller when the actor itself doesn't implement the interface (e.g. an ACharacter possessed by an AAIController — the only class implementing it in vanilla UE 5.8). Refreshes any UAIPerceptionComponent listeners on the resolved agent so Sight/Hearing/Touch affiliation filtering (cached at listener-update time) reflects the new team immediately.
-//   @param actor_name - Display label or internal name (required)
-//   @param team_id - Required int in [0, 254] (255 is the engine-reserved NoTeam id)
+// MCP:set_actor_team - Set the native team id (FGenericTeamId) of an actor in the editor world through IGenericTeamAgentInterface, falling back to its Controller when the actor does not implement it (an ACharacter possessed by an AAIController, the only implementer in vanilla UE 5.8), then refresh that agent's AI Perception listeners so Sight, Hearing and Touch affiliation filtering sees the new team at once. The previous team is overwritten in memory only: no undo step, nothing dirtied or saved, and on an AAIController it is gone when the level reloads. The same id again gives the same result. Read it with get_actor_team; set_native_team_attitude decides whether two teams are friendly, neutral or hostile. An unknown actor, a team_id outside 0-254, or no team interface on the actor or its controller is an error and nothing changes.
+//   @param actor_name - Object name or label of the actor in the editor world (a pawn, or the AIController itself), e.g. 'BP_Guard_C_0'.
+//   @param team_id - Team number, an integer in [0, 254], e.g. 1; 255 is the engine-reserved NoTeam id and is refused.
 //   @returns { actor_name, team_id, applied, resolved_on: "actor"|"controller", perception_listeners_refreshed }
 TSharedPtr<FJsonObject> HandleSetActorTeam(const TSharedPtr<FJsonObject>& Params)
 {

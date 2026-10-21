@@ -85,6 +85,49 @@ namespace
 		return Stage.GetPrimAtPath(UE::FSdfPath(*PrimPath));
 	}
 
+	// The layer stack as list_usd_stage_layers lists it and set_usd_edit_target indexes it -- one enumeration, so
+	// an index read from the one is the index the other takes: GetLayerStack(true), which puts the session layer
+	// and its sublayers first and the root layer and its sublayers after them (every stage the USD wrapper opens or
+	// creates has an anonymous session layer, so the root layer is not at 0).
+	struct FUsdLayerStackView
+	{
+		TArray<UE::FSdfLayer> Layers;
+		int32 SessionCount = 0;               // the leading entries, which are session layers
+		int32 RootIndex = INDEX_NONE;         // the stage's root layer
+		int32 EditTargetIndex = INDEX_NONE;   // the layer the stage's edit target writes to, when it is in the stack
+	};
+
+	FUsdLayerStackView UsdLayer_StackView(const UE::FUsdStage& Stage)
+	{
+		FUsdLayerStackView View;
+		View.Layers = Stage.GetLayerStack(/*bIncludeSessionLayers=*/true);
+		// GetLayerStack(false) is the same list without the session part, which comes first.
+		const int32 PersistentCount = Stage.GetLayerStack(/*bIncludeSessionLayers=*/false).Num();
+		View.SessionCount = FMath::Clamp(View.Layers.Num() - PersistentCount, 0, View.Layers.Num());
+
+		const UE::FSdfLayer RootLayer = Stage.GetRootLayer();
+		const FString RootId = RootLayer ? RootLayer.GetIdentifier() : FString();
+		const UE::FSdfLayer EditTarget = Stage.GetEditTarget();
+		const FString EditTargetId = EditTarget ? EditTarget.GetIdentifier() : FString();
+		for (int32 Index = 0; Index < View.Layers.Num(); ++Index)
+		{
+			if (!View.Layers[Index])
+			{
+				continue;
+			}
+			const FString Id = View.Layers[Index].GetIdentifier();
+			if (View.RootIndex == INDEX_NONE && Index >= View.SessionCount && !RootId.IsEmpty() && Id.Equals(RootId, ESearchCase::CaseSensitive))
+			{
+				View.RootIndex = Index;
+			}
+			if (View.EditTargetIndex == INDEX_NONE && !EditTargetId.IsEmpty() && Id.Equals(EditTargetId, ESearchCase::CaseSensitive))
+			{
+				View.EditTargetIndex = Index;
+			}
+		}
+		return View;
+	}
+
 	// stage_name and prim_path of the prim-editing commands, both required and non-empty: the error
 	// reply for the first one missing, or null.
 	TSharedPtr<FJsonObject> UsdLayer_ReadStageAndPrim(const TSharedPtr<FJsonObject>& Params, FString& OutStageName, FString& OutPrimPath)
@@ -92,6 +135,13 @@ namespace
 		if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("stage_name"), OutStageName)) { return Missing; }
 		if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("prim_path"), OutPrimPath)) { return Missing; }
 		return nullptr;
+	}
+
+	// The target prim of a reference or payload arc: the given path, or an empty SdfPath -- the target layer's
+	// defaultPrim -- when none is given.
+	UE::FSdfPath UsdLayer_ArcTargetPath(const FString& PrimPathForTarget)
+	{
+		return PrimPathForTarget.IsEmpty() ? UE::FSdfPath() : UE::FSdfPath(*PrimPathForTarget);
 	}
 
 	// What add_usd_reference and add_usd_payload read: stage, prim and asset (required), then the
@@ -113,15 +163,17 @@ namespace
 			Result->SetStringField(TEXT("prim_path"), PrimPath);
 			Result->SetStringField(TEXT("asset_path"), AssetPath);
 			Result->SetStringField(TEXT("position"), PositionStr.IsEmpty() ? TEXT("BackOfPrependList") : PositionStr);
+			Result->SetStringField(TEXT("prim_path_for_target"), PrimPathForTarget);
+			Result->SetBoolField(TEXT("uses_default_prim"), PrimPathForTarget.IsEmpty());
 			return Result;
 		}
 
-		// The prim of the target layer to import: prim_path_for_target, or the layer's pseudo-root '/' when it
-		// is empty (the wrapper has no overload without a target SdfPath).
+		// The prim of the target layer to import: prim_path_for_target, or an EMPTY path when it is empty, which
+		// USD reads as "the target layer's defaultPrim". The absolute root '/' is not a prim path, and USD's
+		// reference and payload validation refuse it.
 		UE::FSdfPath TargetPath() const
 		{
-			const FString Target = PrimPathForTarget.IsEmpty() ? TEXT("/") : PrimPathForTarget;
-			return UE::FSdfPath(*Target);
+			return UsdLayer_ArcTargetPath(PrimPathForTarget);
 		}
 	};
 
@@ -169,11 +221,11 @@ namespace
 // ---------------------------------------------------------------------------
 // list_usd_stage_layers
 // ---------------------------------------------------------------------------
-// MCP:list_usd_stage_layers - List the layer stack of a USD stage opened with open_usd_stage or create_usd_stage, read-only: each layer's index in the stack, identifier, real_path, is_muted, dirty and sublayer paths, plus count and any captured USD errors; with layer_index only that layer. An unregistered stage_name, a layer_index outside the stack or an invalid layer at it is an error.
+// MCP:list_usd_stage_layers - List the layer stack of a USD stage opened with open_usd_stage or create_usd_stage, read-only: each layer's index, identifier, real_path, is_root, is_session, is_edit_target, is_muted, dirty and sublayer paths, plus root_layer_index, session_layer_count, edit_target_index, count and any captured USD errors; with layer_index only that layer. The indices are the ones set_usd_edit_target takes: the full stack, the stage's session layer and its sublayers first (every stage these tools open or create has an anonymous session layer), then the root layer and its sublayers, so the root is usually index 1. An unregistered stage_name, a layer_index outside the stack or an invalid layer at it is an error.
 //   @param stage_name [string!] - Name the stage was registered under via open_usd_stage or create_usd_stage.
-//   @param include_session_layers [bool] - When true (default) the returned stack also includes the stage's session/auto-generated layers; pass false to get only the persistent root + sublayers. layer_index counts in this stack.
-//   @param layer_index - Optional 0-based index into the layer stack (the root layer is 0); report only that layer
-//   @returns { stage_name: string, include_session_layers: bool, count: int, layers: [{ index: int, identifier: string, real_path: string, is_muted: bool, dirty: bool, sub_layer_paths: [string], sub_layer_count: int }], layer_index?: int, errors: [string]? }
+//   @param include_session_layers [bool] - When true (default) the session layers are listed too; false leaves them out of layers without renumbering the rest, so the root keeps its index. layer_index ignores it.
+//   @param layer_index - Optional 0-based index into the full stack, as set_usd_edit_target counts it (root_layer_index gives the root); report only that layer
+//   @returns { stage_name: string, include_session_layers: bool, root_layer_index: int, session_layer_count: int, edit_target_index: int (-1 when the edit target is outside the stack), count: int, layers: [{ index: int, identifier: string, real_path: string, is_root: bool, is_session: bool, is_edit_target: bool, is_muted: bool, dirty: bool, sub_layer_paths: [string], sub_layer_count: int }], layer_index?: int, errors: [string]? }
 
 TSharedPtr<FJsonObject> HandleListUsdStageLayers(const TSharedPtr<FJsonObject>& Params)
 {
@@ -194,29 +246,28 @@ TSharedPtr<FJsonObject> HandleListUsdStageLayers(const TSharedPtr<FJsonObject>& 
 	Result->SetStringField(TEXT("stage_name"), StageName);
 	Result->SetBoolField(TEXT("include_session_layers"), bIncludeSession);
 
-	TArray<UE::FSdfLayer> Stack;
+	// One enumeration for every index this tool reports and set_usd_edit_target takes: the full stack, session
+	// layers included. include_session_layers only decides whether the session entries are listed.
+	FUsdLayerStackView View;
+	bool bStageFound = false;
 	UEAgent::UsdCommon::CaptureUsdErrors(
-		[&Stack, &StageName, bIncludeSession]()
+		[&View, &bStageFound, &StageName]()
 		{
 			if (UE::FUsdStage Stage = UsdLayer_FindStage(StageName))
 			{
-				Stack = Stage.GetLayerStack(bIncludeSession);
+				View = UsdLayer_StackView(Stage);
+				bStageFound = true;
 			}
 		},
 		Result);
 
-	if (Stack.Num() == 0)
+	if (!bStageFound)
 	{
-		// Stack could be empty either because the stage wasn't found OR because
-		// GetLayerStack genuinely returned an empty array (rare; a stage with no
-		// root layer is malformed). Distinguish via the registry lookup.
-		if (!UsdLayer_FindStage(StageName))
-		{
-			return UEAgent::UsdCommon::FailReply(Result,
-				FString::Printf(TEXT("Stage '%s' could not be resolved (not in GStageNameCache)"), *StageName));
-		}
+		return UEAgent::UsdCommon::FailReply(Result,
+			FString::Printf(TEXT("Stage '%s' could not be resolved (not in GStageNameCache)"), *StageName));
 	}
 
+	const TArray<UE::FSdfLayer>& Stack = View.Layers;
 	if (bOneLayer)
 	{
 		Result->SetNumberField(TEXT("layer_index"), OnlyIndex);
@@ -231,17 +282,25 @@ TSharedPtr<FJsonObject> HandleListUsdStageLayers(const TSharedPtr<FJsonObject>& 
 		}
 	}
 
-	// index is the position in GetLayerStack(include_session_layers), so an invalid layer leaves a gap.
+	Result->SetNumberField(TEXT("root_layer_index"), View.RootIndex);
+	Result->SetNumberField(TEXT("session_layer_count"), View.SessionCount);
+	Result->SetNumberField(TEXT("edit_target_index"), View.EditTargetIndex);
+
+	// index is the position in the full stack, so an invalid layer, or a session layer left out, leaves a gap.
 	TArray<TSharedPtr<FJsonValue>> LayerArr;
 	for (int32 Index = 0; Index < Stack.Num(); ++Index)
 	{
 		const UE::FSdfLayer& Layer = Stack[Index];
-		if (!Layer || (bOneLayer && Index != OnlyIndex)) { continue; }
+		const bool bSession = Index < View.SessionCount;
+		if (!Layer || (bOneLayer && Index != OnlyIndex) || (!bOneLayer && bSession && !bIncludeSession)) { continue; }
 
 		TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
 		Entry->SetNumberField(TEXT("index"), Index);
 		Entry->SetStringField(TEXT("identifier"), Layer.GetIdentifier());
 		Entry->SetStringField(TEXT("real_path"),  Layer.GetRealPath());
+		Entry->SetBoolField(TEXT("is_root"),     Index == View.RootIndex);
+		Entry->SetBoolField(TEXT("is_session"),  bSession);
+		Entry->SetBoolField(TEXT("is_edit_target"), Index == View.EditTargetIndex);
 		Entry->SetBoolField(TEXT("is_muted"),    Layer.IsMuted());
 		Entry->SetBoolField(TEXT("dirty"),       Layer.IsDirty());
 		const TArray<TSharedPtr<FJsonValue>> SubArr = mcp_common::StringsToJson(Layer.GetSubLayerPaths());
@@ -386,13 +445,13 @@ TSharedPtr<FJsonObject> HandleRemoveUsdSublayer(const TSharedPtr<FJsonObject>& P
 // ---------------------------------------------------------------------------
 // add_usd_reference
 // ---------------------------------------------------------------------------
-// MCP:add_usd_reference - Add an external reference composition arc to a prim (asset_path -> target prim, optionally re-targeted by prim_path_for_target).
-//   @param stage_name [string!] - Name the stage was registered under.
-//   @param prim_path [string!] - Prim that owns the reference (target of the composition op on the consumer side).
-//   @param asset_path [string!] - Identifier of the layer to reference (absolute file path or USD-style relative identifier).
-//   @param prim_path_for_target [string] - Prim inside the referenced layer to import. Empty (default) means the referenced layer's pseudo-root '/'. The default matches the common "import the whole layer" use case.
-//   @param position [string] - One of "FrontOfPrependList" / "BackOfPrependList" / "FrontOfAppendList" / "BackOfAppendList" (default BackOfPrependList — pxr::'s default for the strongest-anonymous opinion).
-//   @returns { stage_name: string, prim_path: string, asset_path: string, added: bool, position: string, errors: [string]? }
+// MCP:add_usd_reference - Add an external reference arc to a prim of a registered USD stage, so prim_path composes the prim prim_path_for_target of the layer file at asset_path, or that layer's defaultPrim when prim_path_for_target is empty (uses_default_prim). For a prim of the same stage use add_usd_internal_reference, for a load-on-demand arc add_usd_payload; clear_usd_references is the inverse, and get_usd_prim_info or list_usd_prims shows the composed result. The arc is authored on the stage's current edit target layer (set_usd_edit_target; list_usd_stage_layers shows the stack) and stays in memory until save_usd_stage. No undo step. added=false, with the USD messages in errors, when USD rejects the arc; an unregistered stage_name or a prim that does not exist is an error (success=false) and nothing is authored.
+//   @param stage_name [string!] - Name the stage was registered under by open_usd_stage or create_usd_stage (list_usd_stages shows it), e.g. "Shot010".
+//   @param prim_path [string!] - Absolute SdfPath of the existing prim that receives the reference, e.g. "/World/Chair"; define_usd_prim creates one.
+//   @param asset_path [string!] - Identifier of the layer to reference: an absolute file path such as "C:/Assets/chair.usda", or a path relative to the layer being edited such as "./chair.usda".
+//   @param prim_path_for_target [string] - Absolute path of the prim inside the referenced layer to compose, e.g. "/Chair". Empty (default) authors an empty target path, which USD resolves to the referenced layer's defaultPrim; a layer without one composes nothing there.
+//   @param position [string] - "FrontOfPrependList" | "BackOfPrependList" | "FrontOfAppendList" | "BackOfAppendList", case-insensitive; prepended arcs are stronger than appended ones. Default BackOfPrependList, which is also what any other string means (the reply then echoes the string sent).
+//   @returns { stage_name: string, prim_path: string, asset_path: string, prim_path_for_target: string, uses_default_prim: bool, added: bool, position: string, errors: [string]? }
 
 TSharedPtr<FJsonObject> HandleAddUsdReference(const TSharedPtr<FJsonObject>& Params)
 {
@@ -488,9 +547,9 @@ TSharedPtr<FJsonObject> HandleAddUsdInternalReference(const TSharedPtr<FJsonObje
 // ---------------------------------------------------------------------------
 // clear_usd_references
 // ---------------------------------------------------------------------------
-// MCP:clear_usd_references - Remove every reference from a prim's reference list (irreversible — there is no "undo" in USD composition authoring).
-//   @param stage_name [string!] - Name the stage was registered under.
-//   @param prim_path [string!] - Prim whose references should be cleared.
+// MCP:clear_usd_references - Remove every reference arc of a prim of a registered USD stage, external and internal alike (UsdReferences::ClearReferences); payloads stay (clear_usd_payloads removes those). The inverse of add_usd_reference and add_usd_internal_reference; no tool removes a single reference. Only the edits on the stage's current edit target layer go, so references authored on other layers still compose (switch layers with set_usd_edit_target; list_usd_stage_layers shows the stack); check the result with get_usd_prim_info. Irreversible: no undo step. The change stays in memory until save_usd_stage. A repeat call leaves the list empty again. An unregistered stage_name or a prim that does not exist is an error (success=false); USD complaints come back in errors.
+//   @param stage_name [string!] - Name the stage was registered under by open_usd_stage or create_usd_stage (list_usd_stages shows it), e.g. "Shot010".
+//   @param prim_path [string!] - Absolute SdfPath of the existing prim whose references are cleared, e.g. "/World/Chair"; list_usd_prims lists prim paths.
 //   @returns { stage_name: string, prim_path: string, cleared: bool, errors: [string]? }
 
 TSharedPtr<FJsonObject> HandleClearUsdReferences(const TSharedPtr<FJsonObject>& Params)
@@ -530,13 +589,13 @@ TSharedPtr<FJsonObject> HandleClearUsdReferences(const TSharedPtr<FJsonObject>& 
 // ---------------------------------------------------------------------------
 // add_usd_payload
 // ---------------------------------------------------------------------------
-// MCP:add_usd_payload - Add a payload composition arc to a prim (load-on-demand; payloads are NOT loaded by the stage unless an explicit Load rule says so). Inverse: clear_usd_payloads (one payload with asset_path).
+// MCP:add_usd_payload - Add a payload composition arc to a prim (load-on-demand; payloads are NOT loaded by the stage unless an explicit Load rule says so), composing the prim prim_path_for_target of the layer at asset_path, or that layer's defaultPrim when prim_path_for_target is empty (uses_default_prim). The arc is authored on the stage's current edit target layer and stays in memory until save_usd_stage; no undo step. added=false, with the USD messages in errors, when USD rejects the arc; an unregistered stage or a missing prim is an error. Read it back with get_usd_prim_metadata (key "payload"). Inverse: clear_usd_payloads (one payload with asset_path).
 //   @param stage_name [string!] - Name the stage was registered under.
 //   @param prim_path [string!] - Prim that owns the payload.
 //   @param asset_path [string!] - Identifier of the layer containing the payload.
-//   @param prim_path_for_target [string] - Prim inside the referenced layer to import. Empty (default) means '/'.
+//   @param prim_path_for_target [string] - Absolute path of the prim inside the payload layer to compose, e.g. "/Chair". Empty (default) authors an empty target path, which USD resolves to that layer's defaultPrim.
 //   @param position [string] - List position (same vocabulary as add_usd_reference). Default "BackOfPrependList".
-//   @returns { stage_name: string, prim_path: string, asset_path: string, added: bool, position: string, errors: [string]? }
+//   @returns { stage_name: string, prim_path: string, asset_path: string, prim_path_for_target: string, uses_default_prim: bool, added: bool, position: string, errors: [string]? }
 
 TSharedPtr<FJsonObject> HandleAddUsdPayload(const TSharedPtr<FJsonObject>& Params)
 {
@@ -578,7 +637,7 @@ TSharedPtr<FJsonObject> HandleAddUsdPayload(const TSharedPtr<FJsonObject>& Param
 //   @param stage_name [string!] - Name the stage was registered under.
 //   @param prim_path [string!] - Prim whose payloads should be removed.
 //   @param asset_path [string] - Optional identifier of the payload's layer: only the payload to that layer (and prim_path_for_target) goes.
-//   @param prim_path_for_target [string] - With asset_path, the prim inside that layer the payload targets, as given to add_usd_payload. Empty (default) means '/', as for add_usd_payload.
+//   @param prim_path_for_target [string] - With asset_path, the prim inside that layer the payload targets, as given to add_usd_payload. Empty (default) means the default-prim payload add_usd_payload authors when it is given none.
 //   @returns { stage_name: string, prim_path: string, asset_path?: string, had_payloads: bool, cleared: bool, has_payloads: bool, errors: [string]? }
 
 TSharedPtr<FJsonObject> HandleClearUsdPayloads(const TSharedPtr<FJsonObject>& Params)
@@ -620,7 +679,8 @@ TSharedPtr<FJsonObject> HandleClearUsdPayloads(const TSharedPtr<FJsonObject>& Pa
 			}
 			else
 			{
-				const UE::FSdfPayload Payload(AssetPath, UE::FSdfPath(PrimPathForTarget.IsEmpty() ? TEXT("/") : *PrimPathForTarget));
+				// The same target add_usd_payload authors: an empty prim_path_for_target is the default prim.
+				const UE::FSdfPayload Payload(AssetPath, UsdLayer_ArcTargetPath(PrimPathForTarget));
 				bCleared = Prim.GetPayloads().RemovePayload(Payload);
 			}
 			bHasPayloads = Prim.HasAuthoredPayloads();
@@ -645,10 +705,10 @@ TSharedPtr<FJsonObject> HandleClearUsdPayloads(const TSharedPtr<FJsonObject>& Pa
 // ---------------------------------------------------------------------------
 // mute_usd_layer
 // ---------------------------------------------------------------------------
-// MCP:mute_usd_layer - Toggle mute state on a set of layers by their identifiers (mute + unmute are passed in the same call — pxr:: applies them atomically).
-//   @param stage_name [string!] - Name the stage was registered under.
-//   @param mute_paths [array] - Identifiers of layers to mute. Empty/missing is allowed (no-op on the mute side).
-//   @param unmute_paths [array] - Identifiers of layers to unmute. Empty/missing is allowed (no-op on the unmute side).
+// MCP:mute_usd_layer - Mute and unmute layers of a registered USD stage in one atomic call (UsdStage::MuteAndUnmuteLayers): a muted layer's opinions drop out of composition until it is unmuted. Muting is stage state held in memory: no layer file changes and save_usd_stage does not record it. Read layer identifiers, and confirm is_muted afterwards, with list_usd_stage_layers; to send edits to a layer use set_usd_edit_target instead, and to show one layer alone on a stage actor isolate_usd_layer. muted and unmuted echo the identifiers sent, not a read-back. Muting a layer already muted changes nothing, so a repeat call is harmless. An unregistered stage_name is an error (success=false); USD complaints come back in errors. No undo step.
+//   @param stage_name [string!] - Name the stage was registered under by open_usd_stage or create_usd_stage (list_usd_stages shows it), e.g. "Shot010".
+//   @param mute_paths [array] - Layer identifiers to mute, as list_usd_stage_layers reports them, e.g. ["C:/Shots/lighting.usda"]; non-string or empty entries are skipped. Empty/missing is allowed (no-op on the mute side).
+//   @param unmute_paths [array] - Layer identifiers to unmute, same form as mute_paths. Empty/missing is allowed (no-op on the unmute side).
 //   @returns { stage_name: string, muted: [string], unmuted: [string], errors: [string]? }
 
 TSharedPtr<FJsonObject> HandleMuteUsdLayer(const TSharedPtr<FJsonObject>& Params)
@@ -690,66 +750,69 @@ TSharedPtr<FJsonObject> HandleMuteUsdLayer(const TSharedPtr<FJsonObject>& Params
 // ---------------------------------------------------------------------------
 // set_usd_edit_target
 // ---------------------------------------------------------------------------
-// MCP:set_usd_edit_target - Point the stage's edit target at a specific layer in the stack (mutations after this call land on the chosen layer, not the root).
-//   @param stage_name [string!] - Name the stage was registered under.
-//   @param layer_index [integer] - 0-based index into GetLayerStack(true) of the new edit target. Defaults to 0 (the root layer).
-//   @returns { stage_name: string, layer_index: int, edit_target: string, edit_target_real_path: string, errors: [string]? }
+// MCP:set_usd_edit_target - Choose the layer of a registered USD stage that later authoring writes to (its edit target): define_usd_prim, set_usd_attribute_value, add_usd_reference and the other USD edit tools then land on that layer. Without layer_index it targets the stage's root layer. Indices are the ones list_usd_stage_layers reports (its root_layer_index, is_root and is_session say which is which): the session layer and its sublayers come first, so the root is usually 1, and a session layer is in-memory only. edit_target is read back from the stage and the call fails if it is not the chosen layer. The choice is stage state held in memory, written to no file; save_usd_stage writes the root layer and its dirty sublayers but never a session layer, so edits aimed at a session layer are lost with the stage. Idempotent; no undo step. An unregistered stage_name, a layer_index that is not an integer or is outside the stack is an error (success=false) and the target stays as it was.
+//   @param stage_name [string!] - Name the stage was registered under by open_usd_stage or create_usd_stage (list_usd_stages shows it), e.g. "Shot010".
+//   @param layer_index [integer] - Optional 0-based index into the stage's full layer stack, as list_usd_stage_layers lists it: the session layer and its sublayers first, then the root layer and its sublayers. Omitted: the root layer (root_layer_index), usually 1.
+//   @returns { stage_name: string, layer_index: int, layer_index_defaulted: bool, edit_target: string, edit_target_real_path: string, is_root: bool, is_session: bool, errors: [string]? } -- edit_target is read back from the stage
 
 TSharedPtr<FJsonObject> HandleSetUsdEditTarget(const TSharedPtr<FJsonObject>& Params)
 {
 	FString StageName;
 	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("stage_name"), StageName)) { return Missing; }
 
-	int32 LayerIndex = 0;
-	Params->TryGetNumberField(TEXT("layer_index"), LayerIndex);
+	// layer_index counts in the same enumeration list_usd_stage_layers reports; omitted, the root layer.
+	int32 LayerIndex = INDEX_NONE;
+	const bool bIndexIsNumber = Params->TryGetNumberField(TEXT("layer_index"), LayerIndex);
+	const bool bIndexGiven = Params->HasField(TEXT("layer_index"));
+	if (bIndexGiven && !bIndexIsNumber)
+	{
+		return mcp_common::MakeErrorReply(TEXT("layer_index must be an integer"));
+	}
 
 	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
 	Result->SetStringField(TEXT("stage_name"), StageName);
+
+	UE::FUsdStage Stage = UsdLayer_FindStage(StageName);
+	if (!Stage)
+	{
+		return UEAgent::UsdCommon::FailReply(Result, FString::Printf(TEXT("Stage '%s' could not be resolved"), *StageName));
+	}
+
+	// Every check runs before SetEditTarget, so a refused call leaves the edit target as it was.
+	const FUsdLayerStackView View = UsdLayer_StackView(Stage);
+	if (!bIndexGiven)
+	{
+		LayerIndex = View.RootIndex;
+	}
 	Result->SetNumberField(TEXT("layer_index"), LayerIndex);
+	Result->SetBoolField(TEXT("layer_index_defaulted"), !bIndexGiven);
+	if (LayerIndex < 0 || LayerIndex >= View.Layers.Num())
+	{
+		return UEAgent::UsdCommon::FailReply(Result, bIndexGiven
+			? FString::Printf(TEXT("layer_index %d out of range [0, %d)"), LayerIndex, View.Layers.Num())
+			: FString(TEXT("the stage's root layer is not in its layer stack; pass layer_index")));
+	}
+	const UE::FSdfLayer Layer = View.Layers[LayerIndex];
+	if (!Layer)
+	{
+		return UEAgent::UsdCommon::FailReply(Result, FString::Printf(TEXT("layer at index %d is invalid"), LayerIndex));
+	}
 
-	bool bApplied = false;
+	UEAgent::UsdCommon::CaptureUsdErrors([&Stage, &Layer]() { Stage.SetEditTarget(Layer); }, Result);
 
-	UEAgent::UsdCommon::CaptureUsdErrors(
-		[&StageName, LayerIndex, &bApplied]()
-		{
-			UE::FUsdStage Stage = UsdLayer_FindStage(StageName);
-			if (!Stage) { return; }
-
-			const TArray<UE::FSdfLayer> Stack = Stage.GetLayerStack(true);
-			if (LayerIndex < 0 || LayerIndex >= Stack.Num()) { return; }
-
-			const UE::FSdfLayer Layer = Stack[LayerIndex];
-			if (!Layer) { return; }
-
-			Stage.SetEditTarget(Layer);
-			bApplied = true;
-		},
-		Result);
-
+	// Read back from the stage: the edit target it now has, not the layer that was asked for.
+	const UE::FSdfLayer NowTarget = Stage.GetEditTarget();
+	const FString WantedId = Layer.GetIdentifier();
+	const bool bApplied = NowTarget && NowTarget.GetIdentifier().Equals(WantedId, ESearchCase::CaseSensitive);
+	Result->SetStringField(TEXT("edit_target"), NowTarget ? NowTarget.GetIdentifier() : FString());
+	Result->SetStringField(TEXT("edit_target_real_path"), NowTarget ? NowTarget.GetRealPath() : FString());
+	Result->SetBoolField(TEXT("is_root"), LayerIndex == View.RootIndex);
+	Result->SetBoolField(TEXT("is_session"), LayerIndex < View.SessionCount);
 	if (!bApplied)
 	{
-		UE::FUsdStage Stage = UsdLayer_FindStage(StageName);
-		if (!Stage)
-		{
-			return UEAgent::UsdCommon::FailReply(Result, FString::Printf(TEXT("Stage '%s' could not be resolved"), *StageName));
-		}
-		const TArray<UE::FSdfLayer> Stack = Stage.GetLayerStack(true);
 		return UEAgent::UsdCommon::FailReply(Result,
-			FString::Printf(TEXT("layer_index %d out of range [0, %d)"), LayerIndex, Stack.Num()));
+			FString::Printf(TEXT("the stage's edit target is not the layer at index %d after SetEditTarget"), LayerIndex));
 	}
-
-	// Report the chosen target — re-resolve so the LLM can pivot on the new
-	// edit target's identifier without a follow-up call.
-	if (UE::FUsdStage Stage = UsdLayer_FindStage(StageName))
-	{
-		const TArray<UE::FSdfLayer> Stack = Stage.GetLayerStack(true);
-		if (LayerIndex >= 0 && LayerIndex < Stack.Num() && Stack[LayerIndex])
-		{
-			Result->SetStringField(TEXT("edit_target"),           Stack[LayerIndex].GetIdentifier());
-			Result->SetStringField(TEXT("edit_target_real_path"), Stack[LayerIndex].GetRealPath());
-		}
-	}
-
 	return mcp_common::MakeOkReply(Result);
 }
 

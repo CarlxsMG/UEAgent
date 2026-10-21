@@ -5,6 +5,7 @@
 #include "Commands/Gameplay/GameplayActorLookup.h"
 #include "Commands/Common/McpJsonPropertyApply.h"   // set/get_behavior_tree_node_property: dotted paths and the honest JSON applier
 #include "Engine/World.h"
+#include "Engine/Engine.h"                                 // GEngine, FWorldContext (get_behavior_tree_status: PIE first)
 #include "EngineUtils.h"
 #include "Editor.h"
 #include "GameFramework/Actor.h"
@@ -2329,9 +2330,9 @@ TSharedPtr<FJsonObject> HandleRestartBehaviorTree(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeOkReply(R);
 }
 
-// MCP:get_behavior_tree_status - Reader: runtime BT status + active task name (if any) on an AI pawn.
-//   @param actor_name - Name or label of the AI-possessed pawn (or AIController) whose UBehaviorTreeComponent to query.
-//   @returns { actor_name, run_status, run_status_name, active_task_name, bt_asset_name }
+// MCP:get_behavior_tree_status - Read the live state of the behavior tree component driving one actor: has_bt (whether a UBehaviorTreeComponent was found, through the actor's AIController brain or on the actor itself), is_running, is_paused, bt_asset_name (the tree it is running) and active_node_name (the node it is executing, empty when none). The actor is looked up in a running PIE world first, where possessed AI pawns run their trees, then in the editor world (where a tree started with run_behavior_tree runs); world says which answered (pie or editor) and world_name names it. Read-only. An actor without a tree is a success with has_bt false; an actor found in neither world is an error. Inspect the tree asset itself with get_behavior_tree_info and blackboard values with get_blackboard_value; change the run state with pause_behavior_tree, resume_behavior_tree, restart_behavior_tree or stop_behavior_tree (editor world only).
+//   @param actor_name - Object name or label of the AI-possessed pawn, or of its AIController, e.g. 'BP_Guard_C_0'; searched in the PIE world first, then the editor world.
+//   @returns { actor_name, world: "pie"|"editor", world_name: string, has_bt: bool, is_running?: bool, is_paused?: bool, bt_asset_name?: string, active_node_name?: string }
 TSharedPtr<FJsonObject> HandleGetBehaviorTreeStatus(const TSharedPtr<FJsonObject>& Params)
 {
     FString ActorName;
@@ -2339,13 +2340,37 @@ TSharedPtr<FJsonObject> HandleGetBehaviorTreeStatus(const TSharedPtr<FJsonObject
     {
         return mcp_common::MakeErrorReply(TEXT("Missing required parameter 'actor_name'"));
     }
-    AActor* Actor = FindActorByName(ActorName);
+    // A running PIE world first -- where a possessed AI pawn really runs its tree -- then the editor world.
+    AActor* Actor = nullptr;
+    UWorld* AnsweringWorld = nullptr;
+    const TCHAR* WorldLabel = TEXT("editor");
+    if (GEngine)
+    {
+        for (const FWorldContext& Context : GEngine->GetWorldContexts())
+        {
+            UWorld* PieWorld = Context.WorldType == EWorldType::PIE ? Context.World() : nullptr;
+            if (AActor* Found = PieWorld ? mcp_common::FindActorByName(PieWorld, ActorName) : nullptr)
+            {
+                Actor = Found;
+                AnsweringWorld = PieWorld;
+                WorldLabel = TEXT("pie");
+                break;
+            }
+        }
+    }
     if (!Actor)
     {
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Actor not found: %s"), *ActorName));
+        Actor = FindActorByName(ActorName);
+        AnsweringWorld = Actor ? Actor->GetWorld() : nullptr;
+    }
+    if (!Actor)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Actor not found in a PIE world or the editor world: %s"), *ActorName));
     }
     TSharedPtr<FJsonObject> R = MakeShared<FJsonObject>();
     R->SetStringField(TEXT("actor_name"), ActorName);
+    R->SetStringField(TEXT("world"), WorldLabel);
+    R->SetStringField(TEXT("world_name"), AnsweringWorld ? AnsweringWorld->GetName() : FString());
     UBehaviorTreeComponent* BTC = ResolveBehaviorTreeComponent(Actor);
     if (!BTC)
     {
@@ -2356,6 +2381,8 @@ TSharedPtr<FJsonObject> HandleGetBehaviorTreeStatus(const TSharedPtr<FJsonObject
     R->SetBoolField(TEXT("is_running"), BTC->IsRunning());
     R->SetBoolField(TEXT("is_paused"), BTC->IsPaused());
     R->SetStringField(TEXT("bt_asset_name"), BTC->GetCurrentTree() ? BTC->GetCurrentTree()->GetName() : FString());
+    const UBTNode* ActiveNode = BTC->GetActiveNode();
+    R->SetStringField(TEXT("active_node_name"), ActiveNode ? ActiveNode->GetNodeName() : FString());
     return mcp_common::MakeOkReply(R);
 }
 

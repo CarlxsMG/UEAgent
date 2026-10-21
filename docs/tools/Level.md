@@ -878,15 +878,15 @@ Lists the editor world's World Partition actors by walking their DESCRIPTORS wit
 
 ## `load_world_partition_region`
 
-*Destructive.*
+*Additive.*
 
-Pins the World Partition cells intersecting an axis-aligned region [min,max] into memory for inspection (editor world).  Creates a UWorldPartitionEditorLoaderAdapter backed by FLoaderAdapterShape over the box and calls ILoaderAdapter::Load(); the adapter stays REGISTERED so the region remains resident (mirrors the editor's "Load Region from Here"), which then lets get_actors_by_class / actor tools see the now-loaded actors. Honest error on a non-WP (default) map or an uninitialized World Partition. Non-destructive: it loads (pins) actors, it never spawns/edits/saves. Inverse: unload_world_partition_region with the same label.
+Load the World Partition actors inside a box of the editor world into memory and keep them there, as the editor's Load Region does, so get_actors_by_class, get_properties and the other actor tools can see actors that were unloaded. Use it on a World Partition map before reading or editing actors far from what is loaded; release them with unload_world_partition_region and the same label. It edits, spawns and saves nothing, but it is not idempotent: each call registers one more region under its label (unload releases them all). A map without World Partition, or one not initialized, and a zero-volume box are errors and nothing loads; a box that touches no cell answers loaded false. num_loaded_actors counts the loaded actors of the whole world, not only this box.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `min` | array | yes | [x,y,z] minimum corner of the region box in world units. |
-| `max` | array | yes | [x,y,z] maximum corner of the region box in world units. |
-| `label` | string | no | Optional label for the loader adapter (default "MCP Load Region"). |
+| `min` | array | yes | [x,y,z] one corner of the box, in centimetres (world units); min and max may come in either order, they are sorted per axis. |
+| `max` | array | yes | [x,y,z] the opposite corner of the box, in centimetres; it must differ from min so the box has volume. |
+| `label` | string | no | Name for the region, used later by unload_world_partition_region (default "MCP Load Region"); use one label per region to release them separately. |
 
 **Returns:** `{ world: string, is_world_partition: bool, loaded: bool, region_min: [x,y,z], region_max: [x,y,z], label: string, num_loaded_actors: int, note: string }`
 
@@ -1208,12 +1208,12 @@ Set a Controller's control rotation (AController::SetControlRotation) in the act
 
 *Destructive, idempotent.*
 
-Sets the debug color of a UDataLayerAsset and saves it.
+Set the debug color of a World Partition data layer asset (UDataLayerAsset), the color the Data Layers outliner and the World Partition debug views show for that layer, in one undo step, then save the asset and read the color back (color_set). Setting the color it already has writes and saves it again with the same result. A path that does not load as a data layer asset or a color that is not an array of 3 or 4 numbers is an error and nothing changes; a failed save is an error, the change kept in memory. Find layer assets with get_data_layer_assets; create one with its color in one call with create_data_layer_asset; change its Editor or Runtime type with set_data_layer_type.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `data_layer_asset_path` | string | yes | Full /Game path to the data layer asset. |
-| `color` | array | yes | [r, g, b] or [r, g, b, a] integers 0-255. |
+| `data_layer_asset_path` | string | yes | Object or package path of the data layer asset, e.g. '/Game/DataLayers/DL_Interiors'. |
+| `color` | array | yes | [r, g, b] or [r, g, b, a] in 0-255, e.g. [255, 128, 0]; values are rounded and clamped to 0-255, and alpha defaults to 255. |
 
 **Returns:** `{ data_layer_asset_path: string, asset_path: string, debug_color: [number, number, number, number], data_layer_type: string, color_set: bool, saved: bool }`
 

@@ -204,9 +204,9 @@ TSharedPtr<FJsonObject> HandleImportSoundFile(const TSharedPtr<FJsonObject>& Par
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:reimport_asset - Reimport an asset from its recorded source file via FReimportManager (legacy).  Works on any asset that carries UAssetImportData (e.g. a texture or sound that was imported from a file on disk). Runs fully automated (no dialogs). Returns can_reimport, reimported, and the recorded source_files.
-//   @param asset_path - Object path of the asset, e.g. /Game/Imported/MyTex.MyTex.
-//   @returns { asset_path: string, can_reimport: bool, reimported: bool, source_files: [string] }
+// MCP:reimport_asset - Reimport an asset from the source file it was imported from (texture, sound, mesh or anything with UAssetImportData), through the legacy FReimportManager handlers, fully automated with no dialogs, overwriting the asset's content in memory with the file's current content. The asset is marked dirty but not saved: save it with save_asset. It cannot be undone. Use it after the source file changed on disk; for assets imported through Interchange pipelines use reimport_interchange_asset; to see the recorded source file first use get_asset_import_data; to bring in a new file use import_texture_file or import_sound_file. success is true only when the asset was reimported. It is false, with reimported false and the reason, when no legacy handler accepts the asset (can_reimport false), when no source file is recorded, when a recorded file is missing on disk (missing_files; refused before the reimport, which can crash the editor then, so nothing changes), or when the handler reports a failure. source_validated says the recorded files were found. Repeating it reimports again. An asset that does not load is an error.
+//   @param asset_path - Asset path in object form, e.g. "/Game/Imported/T_Rock.T_Rock" (package form "/Game/Imported/T_Rock" also loads).
+//   @returns { asset_path: string, can_reimport: bool, reimported: bool, source_validated: bool, source_files: [string], missing_files?: [string] }
 
 TSharedPtr<FJsonObject> HandleReimportAsset(const TSharedPtr<FJsonObject>& Params)
 {
@@ -224,29 +224,68 @@ TSharedPtr<FJsonObject> HandleReimportAsset(const TSharedPtr<FJsonObject>& Param
     TArray<FString> SourceFilenames;
     const bool bCanReimport = ReimportManager->CanReimport(Asset, &SourceFilenames);
 
-    // Legacy reimport: bAskForNewFileIfMissing=false, bShowNotification=false,
-    // bAutomated=true so no dialogs ever appear headless. This routes through the
-    // registered legacy reimport handlers (no Interchange sync wait).
-    bool bReimported = false;
-    if (bCanReimport)
-    {
-        bReimported = ReimportManager->Reimport(
-            Asset,
-            /*bAskForNewFileIfMissing=*/false,
-            /*bShowNotification=*/false,
-            /*PreferredReimportFile=*/TEXT(""),
-            /*SpecifiedReimportHandler=*/nullptr,
-            /*SourceFileIndex=*/INDEX_NONE,
-            /*bForceNewFile=*/false,
-            /*bAutomated=*/true);
-    }
-
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("asset_path"), AssetPath);
     Data->SetBoolField(TEXT("can_reimport"), bCanReimport);
-    Data->SetBoolField(TEXT("reimported"), bReimported);
+    Data->SetBoolField(TEXT("reimported"), false);
+    Data->SetBoolField(TEXT("source_validated"), false);
     Data->SetArrayField(TEXT("source_files"), mcp_common::StringsToJson(SourceFilenames));
-    return mcp_common::MakeOkReply(Data);
+
+    // Nothing reimported is a failure that says why, as reimport_anim_sequence and reimport_interchange_asset answer.
+    if (!bCanReimport)
+    {
+        return mcp_common::MakeOutcomeReply(Data, false, FString::Printf(
+            TEXT("reimport_asset: no legacy reimport handler accepts %s (an asset made in the editor has no source file; one ")
+            TEXT("imported through Interchange is reimported with reimport_interchange_asset). Nothing was changed."), *AssetPath));
+    }
+
+    // FReimportManager::Reimport can crash the editor when the handler accepts the asset but its recorded source file
+    // is gone (the case reimport_anim_sequence documents), so every recorded file is checked on disk first.
+    TArray<FString> MissingFiles;
+    int32 RecordedFiles = 0;
+    for (const FString& SourceFile : SourceFilenames)
+    {
+        if (SourceFile.IsEmpty())
+        {
+            continue;
+        }
+        ++RecordedFiles;
+        if (!FPaths::FileExists(SourceFile))
+        {
+            MissingFiles.Add(SourceFile);
+        }
+    }
+    if (RecordedFiles == 0)
+    {
+        return mcp_common::MakeOutcomeReply(Data, false, FString::Printf(
+            TEXT("reimport_asset: %s records no source file to reimport from. Nothing was changed."), *AssetPath));
+    }
+    if (MissingFiles.Num() > 0)
+    {
+        Data->SetArrayField(TEXT("missing_files"), mcp_common::StringsToJson(MissingFiles));
+        return mcp_common::MakeOutcomeReply(Data, false, FString::Printf(
+            TEXT("reimport_asset: the recorded source file does not exist on disk: %s. Refused before reimporting, which ")
+            TEXT("can crash the editor on a missing source; restore the file (get_asset_import_data shows where it was). ")
+            TEXT("Nothing was changed."), *FString::Join(MissingFiles, TEXT(", "))));
+    }
+    Data->SetBoolField(TEXT("source_validated"), true);
+
+    // Legacy reimport: bAskForNewFileIfMissing=false, bShowNotification=false,
+    // bAutomated=true so no dialogs ever appear headless. This routes through the
+    // registered legacy reimport handlers (no Interchange sync wait).
+    const bool bReimported = ReimportManager->Reimport(
+        Asset,
+        /*bAskForNewFileIfMissing=*/false,
+        /*bShowNotification=*/false,
+        /*PreferredReimportFile=*/TEXT(""),
+        /*SpecifiedReimportHandler=*/nullptr,
+        /*SourceFileIndex=*/INDEX_NONE,
+        /*bForceNewFile=*/false,
+        /*bAutomated=*/true);
+    Data->SetBoolField(TEXT("reimported"), bReimported);
+    return mcp_common::MakeOutcomeReply(Data, bReimported, bReimported ? FString() : FString::Printf(
+        TEXT("reimport_asset: the reimport handler reported a failure for %s (see the Output Log). The asset may be partly changed in memory; it was not saved."),
+        *AssetPath));
 }
 
 // MCP:get_asset_import_data - Read the source-file record (UAssetImportData) of an asset loaded by path: the file(s) it was imported from, as stored and resolved to absolute paths, with each file's import timestamp. Works for textures, sound waves and any class with an AssetImportData property (static and skeletal meshes, animation sequences). An asset that has none is a success with has_import_data=false, empty source_file and source_files, source_file_count 0 and no import_time. source_file is the first resolved file and import_time the first file's timestamp. Read-only: the asset is loaded if needed, not changed. An asset that does not load is an error. Interchange pipelines and node data: get_interchange_asset_import_data; reimport from the recorded file: reimport_asset or reimport_interchange_asset.

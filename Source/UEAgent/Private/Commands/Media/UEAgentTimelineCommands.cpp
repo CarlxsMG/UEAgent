@@ -380,10 +380,10 @@ TSharedPtr<FJsonObject> HandleCreateLevelSequence(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeSavedReply(Report, bSaved, TEXT("create_level_sequence"));
 }
 
-// MCP:get_level_sequences - List all Level Sequences in the project, optionally filtered by package path
-//   @param package_path - Filter to a long package path, defaults to /Game
-//   @param max_results - Maximum number of sequences to return, 1 to 10000, default 1000
-//   @returns { sequences: [object], total_count: int, max_results: int, truncated: bool }
+// MCP:get_level_sequences - List the Level Sequence assets under a content folder and its subfolders (default /Game) from the asset registry, without loading or changing anything: per sequence its name, package_path, asset_path and class. Use it to find the sequence_name or path that get_timeline_info, get_sequence_tracks, play_timeline, set_timeline_time and play_level_sequence_runtime take; for any asset type use find_assets_by_name; to make one use create_level_sequence. At most max_results entries come back, in registry order: total_count is the number of sequences found, returned_count the number listed, and truncated is true when total_count is larger, so narrow package_path or raise max_results. A folder with none gives an empty list; a max_results outside 1 to 10000 is an error.
+//   @param package_path - Long package path of the folder to search, subfolders included, e.g. "/Game/Cinematics" (default "/Game"; plugin content needs its own root such as "/MyPlugin").
+//   @param max_results - Maximum number of sequences to return, an integer from 1 to 10000 (default 1000).
+//   @returns { sequences: [object], total_count: int (found under package_path), returned_count: int (listed, at most max_results), max_results: int, truncated: bool }
 TSharedPtr<FJsonObject> HandleGetLevelSequences(const TSharedPtr<FJsonObject>& Params)
 {
     // The cap is checked as soon as it is read; the folder filter cannot make it valid.
@@ -420,7 +420,8 @@ TSharedPtr<FJsonObject> HandleGetLevelSequences(const TSharedPtr<FJsonObject>& P
 
     TSharedPtr<FJsonObject> Report = MakeShared<FJsonObject>();
     Report->SetArrayField(TEXT("sequences"), Listed);
-    Report->SetNumberField(TEXT("total_count"), Reported);
+    Report->SetNumberField(TEXT("total_count"), Found.Num());
+    Report->SetNumberField(TEXT("returned_count"), Reported);
     Report->SetNumberField(TEXT("max_results"), MaxResults);
     Report->SetBoolField(TEXT("truncated"), Found.Num() > Reported);
     return mcp_common::MakeOkReply(Report);
@@ -705,8 +706,8 @@ TSharedPtr<FJsonObject> HandleSetLevelSequenceTimeRuntime(const TSharedPtr<FJson
     return mcp_common::MakeOkReply(Report);
 }
 
-// MCP:get_level_sequence_status_runtime - Retrieve the current playback status of an active Level Sequence player
-//   @param player_key - Player key returned from play_level_sequence_runtime
+// MCP:get_level_sequence_status_runtime - Read the playback state of a runtime Level Sequence player in a PIE or game world, found by the player_key play_level_sequence_runtime returned, without changing it: status (Playing, Paused or Stopped), the playing, paused and reversed flags, current_time and duration in seconds, frame_rate in frames per second and playback_progress as a percentage (0 to 100; 0 for a zero-length sequence). Use it to check the effect of pause_level_sequence_runtime, resume_level_sequence_runtime or set_level_sequence_time_runtime; for a sequence asset's length and frame rates without any player use get_timeline_info instead. A key that was never issued, was released by stop_level_sequence_runtime, or whose player was destroyed (ending PIE destroys them all) is an error saying to call play_level_sequence_runtime first.
+//   @param player_key - The player_key string play_level_sequence_runtime returned in this editor session; keys do not survive the end of PIE.
 //   @returns { player_key: string, status: string, is_playing: bool, is_paused: bool, is_reversed: bool, current_time: number, duration: number, frame_rate: number, playback_progress: number }
 TSharedPtr<FJsonObject> HandleGetLevelSequenceStatusRuntime(const TSharedPtr<FJsonObject>& Params)
 {
@@ -917,9 +918,9 @@ TSharedPtr<FJsonObject> HandleGetSequenceTracks(const TSharedPtr<FJsonObject>& P
     return mcp_common::MakeOkReply(Report);
 }
 
-// MCP:set_timeline_time - Set the playhead time of the open Sequencer editor on a target sequence
-//   @param sequence_name - Name of the target level sequence
-//   @param time - Playback time in seconds, must be >= 0
+// MCP:set_timeline_time - Move the editor Sequencer's playhead on a Level Sequence, found by asset name under /Game, to a time in seconds (a jump: nothing plays in between), first opening that sequence in the Sequencer when another one (or none) is shown. Editor preview only: to seek a sequence playing in PIE or a game use set_level_sequence_time_runtime. Changes no asset: the actors the sequence binds are only previewed at that time, as the Sequencer does. The same time again lands on the same frame. actual_frame is where the playhead landed, in display-rate frames, read back after the jump; time_set only says the jump was issued. A negative time, a sequence that is not found, or no Sequencer that can show it is an error and nothing moves. See the sequence length first with get_timeline_info; play or pause with play_timeline and pause_timeline.
+//   @param sequence_name - Asset name of the Level Sequence, not its path, e.g. "LS_Intro" (case-insensitive; the first match under /Game is used), as get_level_sequences returns it (sequences[].name).
+//   @param time - Playhead position in seconds from the sequence start, e.g. 2.5; must be 0 or more (a time past the end is not refused).
 //   @returns { sequence_name: string, requested_time: number, actual_frame: int, time_set: bool }
 TSharedPtr<FJsonObject> HandleSetTimelineTime(const TSharedPtr<FJsonObject>& Params)
 {
@@ -971,8 +972,8 @@ TSharedPtr<FJsonObject> HandlePlayTimeline(const TSharedPtr<FJsonObject>& Params
     return mcp_common::MakeOkReply(Report);
 }
 
-// MCP:pause_timeline - Pause playback in the open Sequencer editor on a target sequence
-//   @param sequence_name - Name of the target level sequence
+// MCP:pause_timeline - Pause the editor Sequencer's preview playback on a Level Sequence found by asset name under /Game, first opening that sequence in the Sequencer when another one (or none) is shown; the playhead stays where it is. Editor preview only: to pause a sequence playing in PIE or a game use pause_level_sequence_runtime. Changes no asset; pausing a sequence that is not playing does nothing and still succeeds. playing and paused are read right after the call (paused is simply not playing). A sequence that is not found, or no Sequencer that can show it, is an error. Start again with play_timeline; move the playhead with set_timeline_time.
+//   @param sequence_name - Asset name of the Level Sequence, not its path, e.g. "LS_Intro" (case-insensitive; the first match under /Game is used), as get_level_sequences returns it (sequences[].name).
 //   @returns { sequence_name: string, playing: bool, paused: bool }
 TSharedPtr<FJsonObject> HandlePauseTimeline(const TSharedPtr<FJsonObject>& Params)
 {

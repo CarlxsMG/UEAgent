@@ -56,7 +56,7 @@ Read a Sphere or Box reflection-capture actor of the editor level, found by labe
 
 *Read-only.*
 
-Retrieve current rendering settings including quality levels, rendering mode, world settings, engine version, and rendering feature states.
+Read a one-call summary of how the editor renders right now: the RHI in use (rendering_api), forward or deferred mode (r.ForwardShading), a quality bucket of r.ScreenPercentage (rendering_quality), a quality verdict from r.MaterialQualityLevel and r.ViewDistanceScale, shadow resolutions, renderer feature switches each from its console variable (left out when the build lacks it), display settings from the game user settings (the ? fields, left out without them), engine version, and a census of the engine's first world context, normally the editor level (world_* fields, left out with no world). Use it for an overview; for exact values read one variable with get_cvar, scalability groups with get_scalability_levels, lights with get_lighting_quality, shading and materials with get_shader_info; change them with set_cvar or set_scalability_quality. Read-only and idempotent. rendering_settings_found is always true; platform_architecture and platform_os are fixed strings, and rendering_recommendations is a heuristic of actor counts.
 
 No parameters.
 
@@ -76,7 +76,7 @@ No parameters.
 
 *Destructive.*
 
-Rebuilds reflection-capture contents for all captures in the editor world.  Marks every reflection capture dirty and runs the canonical editor rebuild path (UReflectionCaptureComponent::UpdateReflectionCaptureContents).
+Recapture every Sphere and Box reflection capture of the editor world now, as the editor does after a capture moves, so reflections show changes made to the scene (new meshes, lights, materials). Use it after placing a capture with spawn_actor (type SphereReflectionCapture or BoxReflectionCapture) or changing one with set_properties (its ReflectionCaptureComponent), or after editing the scene around a capture; read one back with get_reflection_capture_properties; a full static lighting build is build_lighting, which also rebuilds captures. Every capture of the world is redone, which takes longer the more captures there are; there is no per-capture option. It saves nothing and is no undo step: save_level keeps the result. Under -NullRHI (headless) nothing is rendered, so the captures do not change. updated is always true; capture_count is how many captures it found (0 when the world has none, which is not an error).
 
 No parameters.
 

@@ -10,12 +10,12 @@ Back to the [index](README.md).
 
 *Read-only.*
 
-Read the AGameModeBase CDO's class slots (DefaultPawnClass, HUDClass, PlayerStateClass, GameStateClass, SpectatorClass, PlayerControllerClass) and the world settings' DefaultGameMode override.
+Read which classes a game mode spawns: DefaultPawnClass, HUDClass, PlayerStateClass, GameStateClass, SpectatorClass and PlayerControllerClass from the class default object of an AGameModeBase subclass, native or Blueprint, plus its parent class, is_multiplayer (true when it derives from AGameMode, the match-state subclass) and the GameMode override in the open editor level's World Settings. Read-only. An empty string means that slot or override is unset; a class that does not resolve or is not a game mode is an error. Change the slots with set_game_mode_classes and the level override with set_game_mode_override; the project-wide default is the GlobalDefaultGameMode of GameMapsSettings (get_project_settings_value), and get_world_settings reads the rest of World Settings.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `game_mode_class` | string | no | Optional AGameModeBase class name (short or /Script/ path) |
-| `game_mode_class_path` | string | no | Optional long /Script/Engine.GameModeBase path (takes precedence) |
+| `game_mode_class` | string | no | Game mode class by name or path: a native short name with or without the A prefix ('GameModeBase'), a /Script path, or a Blueprint asset or class path, e.g. '/Game/Core/BP_MyGameMode'. One of the two class params is required. |
+| `game_mode_class_path` | string | no | Full class path, e.g. '/Script/Engine.GameModeBase' or '/Game/Core/BP_MyGameMode.BP_MyGameMode_C'; tried before game_mode_class. |
 
 **Returns:** `{ game_mode_class: string, parent_class: string, is_multiplayer: bool, default_pawn_class: string, hud_class: string, player_state_class: string, game_state_class: string, spectator_class: string, player_controller_class: string, world_settings_default_game_mode?: string }`
 
@@ -67,13 +67,13 @@ Set -- or, with game_mode_class "" or "None", clear -- the GameMode override in 
 
 *Additive.*
 
-Spawn an APlayerStart actor in the editor world at the given location with optional rotation + player-start tag. Location AND rotation are RE-READ from the actor after writing them, so a mismatch is visible instead of echoed back.
+Place a Player Start (where the game mode spawns players) in the editor's current level, with an optional rotation and team tag; when name matches the label or object name of an existing Player Start, that one is moved and retagged instead of adding another. Use it to set where players appear; spawn_actor can also place one (type PlayerStart) but without the tag or the rotation check; to make an actor already in the level a tagged spawn point use register_spawn_point; which pawn spawns there is set_game_mode_classes. Location and rotation are read back from the actor: a mismatch, usually a [Pitch, Yaw, Roll] array sent with the yaw last, answers success false with both values. One undo step; the level is marked dirty but not saved (save_level). Without name every call adds a new Player Start.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `location` | array | no | [X, Y, Z] world location for the spawn point. |
+| `location` | array | no | [X, Y, Z] world location in centimetres; put it a little above the floor so the pawn's capsule does not start inside it. |
 | `rotation` | array | no | Optional world rotation. TWO forms: the unambiguous OBJECT form {"roll":R,"pitch":P,"yaw":Y} (RECOMMENDED) or the ambiguous ARRAY form [Pitch, Yaw, Roll] -- note the array order, index 2 is ROLL, not yaw. Default identity. |
-| `player_start_tag` | string | no | Optional FName for the PlayerStart.Tag UPROPERTY (e.g. "Red", "Spectator", "DM"). Used by AGameModeBase to filter start points by team. |
-| `name` | string | no | Optional label for the new actor. Defaults to "PlayerStart_N". |
+| `player_start_tag` | string | no | Optional PlayerStartTag, e.g. "Red", "Blue", "Spectator": the game mode's FindPlayerStart picks starts by this tag (the Portal argument); empty leaves the current tag unchanged. |
+| `name` | string | no | Optional actor label, e.g. "PS_RedBase"; an existing Player Start with this label or object name is reused. Without it the engine names the new actor (PlayerStart_N) and every call adds one. |
 
 **Returns:** `{ actor_name, location: [x,y,z] (RE-READ from the actor), rotation: {roll,pitch,yaw} (RE-READ from the actor, axes NAMED), is_spatially_loaded: bool, location_matches_request: bool, rotation_matches_request: bool, player_start_tag, spawned: bool, already_existed: bool, requested: { location, rotation, player_start_tag, name } }`

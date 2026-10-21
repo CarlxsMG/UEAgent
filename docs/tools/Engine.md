@@ -103,14 +103,14 @@ Add a generic simulation stage (UNiagaraSimulationStageGeneric) to one emitter o
 
 ## `create_niagara_system`
 
-*Additive.*
+*Additive, idempotent.*
 
-Creates (or loads, idempotently) an empty UNiagaraSystem asset and saves it.  Uses NewObject + UNiagaraSystemFactoryNew::InitializeSystem (headless-safe); the new system has its system spawn/update scripts wired but no emitters.
+Create an empty UNiagaraSystem asset at package_path/name and save it: its system spawn and update scripts are set up, but it has no emitters. Idempotent: a Niagara System already at that path is returned unchanged with created=false and already_exists=true, and nothing is saved; an asset of another class at that path is an error and nothing is written. Not an undo step. Next, add emitters with add_niagara_emitter_from_template, check the result with get_niagara_system_info or get_niagara_emitter_handles, and place it in a level with spawn_actor (type NiagaraActor). A failed save is an error, the new asset left in memory unsaved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `name` | string | yes | Name of the Niagara System asset to create. |
-| `package_path` | string | no | Target content folder; defaults to /Game/Niagara |
+| `name` | string | yes | Asset name, e.g. 'NS_Sparks'; package_path/name must form a valid long package name. |
+| `package_path` | string | no | Content folder as a long package path, e.g. '/Game/FX' (default /Game/Niagara); a trailing slash is ignored. |
 
 **Returns:** `{ system_name: string, asset_path: string, created: bool, already_exists?: bool, saved?: bool, save_error?: string, emitter_count: int }`
 
@@ -132,17 +132,17 @@ Duplicate an emitter handle of a Niagara System asset under a new name, keeping 
 
 *Additive.*
 
-Add another instance of a module to one emitter of a Niagara System asset: the module node named module_name (its function name, case-sensitive, as list_niagara_modules gives it) is found anywhere in the emitter graph and its script is added again to the script_group stack (spawn or update, default update; any other value reads as update) through FNiagaraStackGraphUtilities::AddScriptModuleToStack, in one undo step, then a system compile is requested and the system saved. The new module starts with the default inputs of the script; the input overrides of the source are not copied. target_index_override, a JSON number, sets its position; without it the position is the source index plus one among the module nodes of the emitter graph. An unknown system, emitter or module is an error; a failed save makes success false, with saved=false and save_error. Inputs: set_niagara_module_input; move: reorder_niagara_modules.
+Add another instance of a module to one emitter of a Niagara System asset: the module named module_name (its function name, case-sensitive, as list_niagara_modules gives it) is found on the script_group stack only (spawn or update, default update; any other value reads as update) and its script is added again to that stack through FNiagaraStackGraphUtilities::AddScriptModuleToStack, in one undo step, then a system compile is requested and the system saved. The new module starts with the default inputs of the script; the input overrides of the source are not copied. Positions are stack positions, as list_niagara_modules reports index: target_index_override sets it (clamped into the stack, -1 appends), else it goes right after the source. inserted_index is read back from the stack, and a module that did not land where asked fails the call. An unknown system, emitter or module (or a module only on the other stack) is an error and nothing changes; a failed save makes success false, with saved=false and save_error. Inputs: set_niagara_module_input; move: reorder_niagara_modules.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `system_path` | string | yes | Asset path of the Niagara System. |
-| `emitter_name` | string | yes | Name of the emitter handle. |
-| `module_name` | string | yes | Function name of the module node to duplicate, case-sensitive, as list_niagara_modules gives module_name |
+| `system_path` | string | yes | Content path of the UNiagaraSystem asset, e.g. '/Game/FX/NS_Sparks'. |
+| `emitter_name` | string | yes | Display name of the emitter handle, as get_niagara_emitter_handles lists it. |
+| `module_name` | string | yes | Function name of the module to duplicate, case-sensitive, as list_niagara_modules gives module_name for that stack, e.g. 'GravityForce'. |
 | `script_group` | string | no | Optional "spawn" or "update"; defaults to "update" |
-| `target_index_override` | number | no | Optional position for the new module, a JSON number; defaults to the source index plus one among the module nodes of the emitter graph |
+| `target_index_override` | number | no | Optional stack position for the new module, a JSON number (0 runs first; -1 appends; others are clamped into the stack); defaults to the source's stack index plus one. |
 
-**Returns:** `{ system_path: string, emitter_name: string, script_group: string, source_module_name: string, new_module_name: string, inserted_index: int, duplicated: bool, saved: bool, save_error?: string }`
+**Returns:** `{ system_path: string, emitter_name: string, script_group: string, source_module_name: string, source_index: int, new_module_name: string, inserted_index: int, module_count: int, duplicated: bool, saved: bool, save_error?: string }`
 
 ## `get_editor_status`
 
@@ -206,14 +206,14 @@ Read which Niagara Effect Type asset a Niagara System asset uses, plus that effe
 
 *Read-only.*
 
-List the data interface bindings on a Niagara emitter (read-only).  Reads the FVersionedNiagaraEmitterData::EmitterDependencies array (TArray&lt;FNiagaraDataInterfaceEmitterBinding>). Each binding has a name, type, interface_class, interface_path, and instance_index.  Adding or removing data interface bindings on a script requires view-models (FNiagaraStackGraphUtilities AddDataInterface) and is editor-only -- this command lists them but does not mutate them.
+List the data interfaces one emitter of a Niagara System asset uses in its stacks: every data-interface input set on a module (a curve, a color curve, a static mesh, a vector field...), each with its input name, data interface class and object path and the stack it feeds (script_usage: particle_spawn, particle_update, emitter_spawn, emitter_update, particle_event, simulation_stage, or unconnected). Read from the emitter graph, so nothing needs compiling; read-only, it changes nothing. Data interfaces used only inside a module's own script are not listed. The emitter's Emitter Dependencies setting comes back separately as emitter_dependencies (emitter_name, binding_mode Self or Other). For the system's user-parameter data interfaces use get_niagara_data_interfaces (add_niagara_data_interface adds one); list_niagara_modules lists the modules. An emitter with none gives empty lists; a missing system or emitter handle is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `system_path` | string | yes | Asset path of the Niagara System. |
-| `emitter_name` | string | yes | Name of the emitter handle. |
+| `system_path` | string | yes | Content path of the UNiagaraSystem asset, package or object form, e.g. '/Game/FX/NS_Sparks'. |
+| `emitter_name` | string | yes | Display name of the emitter handle, as get_niagara_emitter_handles lists it, e.g. 'Fountain'. |
 
-**Returns:** `{ system_path: string, emitter_name: string, data_interface_count: int, data_interfaces: [{ emitter_name, binding_mode }] }`
+**Returns:** `{ system_path: string, emitter_name: string, data_interface_count: int, data_interfaces: [{ name, class, data_interface_path, script_usage, script_usages: [string] }], emitter_dependency_count: int, emitter_dependencies: [{ emitter_name, binding_mode }], note?: string }`
 
 ## `get_niagara_emitter_handles`
 
@@ -246,14 +246,14 @@ List all renderers on a Niagara emitter (read-only).  Each entry also dumps the 
 
 *Read-only.*
 
-Flat readback of a Niagara emitter's runtime knobs and counts.
+Read one emitter of a Niagara System asset in a single flat reply: simulation target (CPUSim or GPUComputeSim), bounds mode (Dynamic, Fixed or Programmable) and its fixed box as 'X=.. Y=.. Z=..' strings, particle allocation mode and pre-allocation count, GPU spawn cap per frame (max_gpu_particles), local-space, determinism and persistent-ID flags, how many renderers, event handlers and simulation stages it has, and how many modules each stack holds. Read-only: it changes nothing and compiles nothing. Module counts are per stack, read from the chain that ends at each stack's output node: spawn_module_count and update_module_count for particle spawn and update, emitter_spawn_module_count and emitter_update_module_count, event_module_count over all event handlers and simulation_stage_module_count over all stages; dynamic inputs are not counted, disabled modules are, and graph_function_call_count counts every function-call node of the emitter graph. list_niagara_modules lists modules by name. A missing system or emitter handle is an error. Change these settings with set_niagara_emitter_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `system_path` | string | yes | Asset path of the Niagara System. |
-| `emitter_name` | string | yes | Name of the emitter handle. |
+| `system_path` | string | yes | Content path of the UNiagaraSystem asset, package or object form, e.g. '/Game/FX/NS_Sparks'. |
+| `emitter_name` | string | yes | Display name of the emitter handle, as get_niagara_emitter_handles lists it, e.g. 'Fountain'. |
 
-**Returns:** `{ system_path: string, emitter_name: string, sim_target: string, bounds_mode: string, bounds_min: string, bounds_max: string, allocation_mode: string, pre_allocation_count: int, max_gpu_particles: int, local_space: bool, deterministic: bool, requires_persistent_ids: bool, update_module_count: int, spawn_module_count: int, emitter_spawn_module_count: int, emitter_update_module_count: int, renderer_count: int, event_handler_count: int, simulation_stage_count: int }`
+**Returns:** `{ system_path: string, emitter_name: string, sim_target: string, bounds_mode: string, bounds_min: string, bounds_max: string, allocation_mode: string, pre_allocation_count: int, max_gpu_particles: int, local_space: bool, deterministic: bool, requires_persistent_ids: bool, update_module_count: int, spawn_module_count: int, emitter_spawn_module_count: int, emitter_update_module_count: int, event_module_count: int, simulation_stage_module_count: int, graph_function_call_count: int, renderer_count: int, event_handler_count: int, simulation_stage_count: int, note?: string }`
 
 ## `get_niagara_event_handlers`
 
@@ -353,7 +353,7 @@ No parameters.
 
 *Read-only.*
 
-List the module function-call nodes on one stack, or both stacks, of a Niagara emitter (read-only), optionally just the module with a given name. Resolves the emitter's spawn or update group graph (script_group, default "update"; "all" reads both and also groups them as spawn[] and update[]) via the export-safe ResolveEmitterOutputNode + UNiagaraGraph::GetNodesOfClass path, then reports each UNiagaraNodeFunctionCall: index (its position in its stack), module_name (GetFunctionName), node_guid, function_script(+class), is_enabled (IsNodeEnabled), is_deprecated, input/output pin counts. Honest-empty modules:[] when the stack has no modules or the graph is not resolvable (a note is returned); a module_name that matches no module is an error.
+List the modules of one stack, or both stacks, of a Niagara emitter in execution order (read-only), optionally just the module with a given name. script_group picks the particle spawn or update stack (default "update"; "all" reads both and also groups them as spawn[] and update[]); a stack's modules are the function-call nodes on its parameter-map chain from its input to its output node, so the other stack's modules and the dynamic inputs feeding module inputs are not listed, while disabled modules are. Each entry: index (its position in its stack, 0 runs first, the index reorder_niagara_modules and add_niagara_module_to_stack take), module_name (GetFunctionName), node_guid, function_script(+class), is_enabled (IsNodeEnabled), is_deprecated, input/output pin counts. Honest-empty modules:[] when the stack has no modules or the graph is not resolvable (a note is returned); a module_name that matches no module is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -435,16 +435,16 @@ Remove an event handler from a Niagara emitter by its usage_id.  Calls UNiagaraE
 
 *Destructive.*
 
-Remove a UNiagaraNodeFunctionCall module from a Niagara emitter's spawn or update graph.
+Remove one module from a Niagara emitter's particle spawn or update stack, in one undo step: the module and every node that feeds it (its input overrides, dynamic inputs and data-interface inputs) are taken out and the stack's chain is closed over the gap, then a system compile is requested and the system saved. The module is found by function name (case-sensitive) on the script_group stack only, the first one in execution order, as list_niagara_modules lists it. The result is read back: removed is true when the module is off the stack and the stack is one module shorter, chain_intact when the stack still runs from its input to its output node; either false fails the call. An unknown system, emitter or module (or a module only on the other stack) is an error and nothing changes; a failed save makes success false, with saved=false and save_error. The inverse is add_niagara_module_to_stack.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `system_path` | string | yes | Asset path of the Niagara System. |
-| `emitter_name` | string | yes | Name of the emitter handle. |
-| `module_name` | string | yes | Display name of the module function-call node to remove |
-| `script_group` | string | no | Optional "spawn" or "update"; defaults to "update" |
+| `system_path` | string | yes | Content path of the UNiagaraSystem asset, e.g. '/Game/FX/NS_Sparks'. |
+| `emitter_name` | string | yes | Display name of the emitter handle, as get_niagara_emitter_handles lists it. |
+| `module_name` | string | yes | Function name of the module to remove, case-sensitive, as list_niagara_modules gives module_name for that stack, e.g. 'GravityForce'. |
+| `script_group` | string | no | Optional "spawn" or "update" (any case), the stack the module is on; defaults to "update", and any other value reads as update. |
 
-**Returns:** `{ system_path: string, emitter_name: string, script_group: string, module_name: string, removed: bool, saved: bool, save_error?: string }`
+**Returns:** `{ system_path: string, emitter_name: string, script_group: string, module_name: string, removed_index: int, removed_node_count: int, module_count: int, chain_intact: bool, removed: bool, saved: bool, save_error?: string }`
 
 ## `remove_niagara_renderer`
 
@@ -506,29 +506,29 @@ Rename an emitter handle of a Niagara System asset in one undo step, then save t
 
 *Destructive.*
 
-Move a module node, found by function name (case-sensitive, as list_niagara_modules gives it) anywhere in the graph of one emitter of a Niagara System asset, to target_index by reordering the graph node array in place (pins and inputs kept), in one undo step, then request a system compile and save. target_index, old_index and new_index count all module nodes of the emitter graph in node order, as list_niagara_modules reports index; target_index is required, a JSON number of 0 or more, and one past the last is clamped to it. A module already in place is still saved and reordered is always true, so compare old_index with new_index. An unknown system, emitter or module is an error; a failed save makes success false, with saved=false and save_error. Insert at a position: add_niagara_module_to_stack with target_index.
+Move one module of a Niagara emitter's particle spawn or update stack to another position in that same stack, changing its execution order: the module, with its input overrides and linked inputs, is taken out of the stack's parameter-map chain and put back at target_index, in one undo step, then a system compile is requested and the system saved. The module is found by function name (case-sensitive) on the script_group stack only; positions count that stack's modules in execution order, exactly as list_niagara_modules reports index. target_index past the last is clamped to it. new_index is read back from the rewired chain. A module already at that position changes nothing: reordered false, saved false and a note. An unknown system, emitter, script_group or module (or a module only on the other stack) is an error and nothing changes; a failed save makes success false, with saved=false and save_error. Insert a new module at a position: add_niagara_module_to_stack with target_index.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `system_path` | string | yes | Asset path of the Niagara System. |
-| `emitter_name` | string | yes | Name of the emitter handle. |
-| `module_name` | string | yes | Function name of the module node to move, case-sensitive, as list_niagara_modules gives module_name |
-| `target_index` | number | yes | Target position, a JSON number of 0 or more, counted over the module nodes of the emitter graph; clamped to the last; the call fails without it |
-| `script_group` | string | no | Optional "spawn" or "update"; defaults to "update" |
+| `system_path` | string | yes | Content path of the UNiagaraSystem asset, e.g. '/Game/FX/NS_Sparks'. |
+| `emitter_name` | string | yes | Display name of the emitter handle, as get_niagara_emitter_handles lists it. |
+| `module_name` | string | yes | Function name of the module to move, case-sensitive, as list_niagara_modules gives module_name for that stack, e.g. 'GravityForce'. |
+| `target_index` | number | yes | New position in the stack, a JSON number of 0 or more (0 runs first), counted as list_niagara_modules counts index; clamped to the last; the call fails without it. |
+| `script_group` | string | no | Optional "spawn" or "update" (any case), the stack the module is on; defaults to "update"; any other value is an error. |
 
-**Returns:** `{ system_path: string, emitter_name: string, script_group: string, module_name: string, old_index: int, new_index: int, target_index: int, reordered: bool, saved: bool, save_error?: string }`
+**Returns:** `{ system_path: string, emitter_name: string, script_group: string, module_name: string, old_index: int, new_index: int, target_index: int, module_count: int, reordered: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_niagara_component_fixed_bounds`
 
 *Destructive, idempotent.*
 
-Sets fixed local-space bounds on a spawned Niagara component.  Resolves the UNiagaraComponent on the owner actor and calls UNiagaraComponent::SetSystemFixedBounds(FBox), then reads back via GetSystemFixedBounds.
+Set the fixed-bounds override of the Niagara component on a placed actor in the editor world (the first UNiagaraComponent of the actor found by internal name or label) to the local-space box min..max, then read it back. The override is runtime state of that component (UNiagaraComponent::SetSystemFixedBounds): the engine stores it in a member that is not a saved property, in 5.7 and 5.8 alike, and a component has no fixed-bounds field in its details panel, so it is lost when the level reloads and is not carried into PIE; it makes no undo step and does not dirty the level. Repeating the call with the same box gives the same result. An actor that is missing or has no Niagara component is an error and nothing changes. For bounds that persist, write the System asset's Fixed Bounds (bFixedBounds and FixedBounds, with set_properties) or an emitter's with set_niagara_emitter_properties (bounds_mode Fixed); place a Niagara actor with spawn_actor (type NiagaraActor).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Owner actor identifier (internal name or editor label). |
-| `min` | array | no | Local-space bounds minimum [X, Y, Z]. |
-| `max` | array | no | Local-space bounds maximum [X, Y, Z]. |
+| `actor_name` | string | yes | Internal name or editor label of an actor in the editor world that has a Niagara component, as get_actors_in_level lists it, e.g. 'NiagaraActor_0'. |
+| `min` | array | no | Box minimum corner in the component's local space, [x, y, z] in centimetres, e.g. [-500, -500, 0]; a missing or short array reads as [0, 0, 0], and it is not checked against max. |
+| `max` | array | no | Box maximum corner in the component's local space, [x, y, z] in centimetres, e.g. [500, 500, 800]; a missing or short array reads as [0, 0, 0]. |
 
 **Returns:** `{ actor_name: string, applied: bool, bounds_valid: bool, min_read_back: [number, number, number], max_read_back: [number, number, number] }`
 
@@ -651,17 +651,17 @@ Assign a static mesh into a Niagara Mesh renderer's Meshes[] slot.  Resolves (or
 
 *Destructive, idempotent.*
 
-Enable or disable a UNiagaraNodeFunctionCall module in a Niagara emitter's spawn or update graph.
+Enable or disable one module of a Niagara emitter's particle spawn or update stack (FNiagaraStackGraphUtilities::SetModuleIsEnabled), in one undo step, then request a system compile and save the system; a disabled module stays on the stack but does not run. The module is found by function name (case-sensitive) on the script_group stack only, the first one in execution order. previous_enabled and enabled are read from the node before and after; an enabled state that did not take fails the call. A module already in that state changes nothing: changed false, saved false and a note. An unknown system, emitter or module (or a module only on the other stack) is an error and nothing changes; a failed save makes success false, with saved=false and save_error. list_niagara_modules shows each module's is_enabled.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `system_path` | string | yes | Asset path of the Niagara System. |
-| `emitter_name` | string | yes | Name of the emitter handle. |
-| `module_name` | string | yes | Display name of the module to toggle |
-| `enabled` | boolean | no | Optional bool; defaults to true |
-| `script_group` | string | no | Optional "spawn" or "update"; defaults to "update" |
+| `system_path` | string | yes | Content path of the UNiagaraSystem asset, e.g. '/Game/FX/NS_Sparks'. |
+| `emitter_name` | string | yes | Display name of the emitter handle, as get_niagara_emitter_handles lists it. |
+| `module_name` | string | yes | Function name of the module to toggle, case-sensitive, as list_niagara_modules gives module_name for that stack, e.g. 'GravityForce'. |
+| `enabled` | boolean | no | Optional bool, the state to set; defaults to true |
+| `script_group` | string | no | Optional "spawn" or "update"; defaults to "update", and any other value reads as update. |
 
-**Returns:** `{ system_path: string, emitter_name: string, script_group: string, module_name: string, previous_enabled?: bool, enabled: bool, saved: bool, save_error?: string }`
+**Returns:** `{ system_path: string, emitter_name: string, script_group: string, module_name: string, module_index: int, previous_enabled: bool, enabled: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_niagara_module_input`
 

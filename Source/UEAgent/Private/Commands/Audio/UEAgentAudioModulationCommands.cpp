@@ -617,7 +617,7 @@ TSharedPtr<FJsonObject> HandleCreateSoundModulationPatch(
 // ---------------------------------------------------------------------------
 // add_modulation_input_to_patch
 // ---------------------------------------------------------------------------
-// MCP:add_modulation_input_to_patch - Appends a USoundControlBus as an input of a USoundModulationPatch asset and saves the patch. A bus whose asset name is already among the inputs is skipped (added false, already_present true, not saved). input_name is not stored. Returns patch_path, bus_path, input_count, added, already_present, saved.
+// MCP:add_modulation_input_to_patch - Appends a USoundControlBus as an input of a USoundModulationPatch asset, in one undo step (undo removes it again), and saves the patch. A bus whose asset name is already among the inputs is skipped (added false, already_present true, not saved). input_name is not stored. Returns patch_path, bus_path, input_count, added, already_present, saved.
 //   @param patch_path - Asset path to the USoundModulationPatch
 //   @param bus_path - Asset path to the USoundControlBus to add as an input
 //   @param input_name - Ignored: the engine input struct has no name field, so the value is only written to the log (default empty)
@@ -670,6 +670,8 @@ TSharedPtr<FJsonObject> HandleAddModulationInputToPatch(
 		UE_LOG(LogTemp, Verbose, TEXT("add_modulation_input_to_patch: input_name='%s' requested but not stored (FSoundControlModulationInput has no Name UPROPERTY)"),
 			*InputName);
 	}
+	// Recorded (Modify) BEFORE the input is added, so undo removes it again.
+	Patch->Modify();
 	Patch->PatchSettings.Inputs.Add(NewInput);
 	const bool bSaved = AudioMod_ModifyDirtyAndSave(Patch);
 
@@ -685,9 +687,9 @@ TSharedPtr<FJsonObject> HandleAddModulationInputToPatch(
 // ---------------------------------------------------------------------------
 // remove_modulation_input_from_patch
 // ---------------------------------------------------------------------------
-// MCP:remove_modulation_input_from_patch - Removes every input of a USoundModulationPatch asset whose bus has the same asset name as bus_path, then saves the patch; a removal succeeds only when the patch reaches disk. When no input matches, the patch is already the state asked for: the call succeeds with removed false and already_removed true, and saves nothing. Returns patch_path, bus_path, removed, already_removed, input_count, saved.
-//   @param patch_path - Asset path to the USoundModulationPatch
-//   @param bus_path - Asset path to the USoundControlBus whose input is removed
+// MCP:remove_modulation_input_from_patch - Remove every input of a USoundModulationPatch asset whose control bus has the same asset name as the bus at bus_path (so a same-named bus in another folder matches too), in one undo step (undo restores the inputs), then save the patch. Inverse of add_modulation_input_to_patch; list the inputs first with get_sound_modulation_patch_info. Idempotent: when no input matches, nothing is changed or saved and the call succeeds with removed false and already_removed true. A patch or bus that does not load is an error and nothing changes; a removal succeeds only when the patch reaches disk, so a failed save (for example while PIE runs) makes success false with the inputs gone only in memory. input_count is the number of inputs left.
+//   @param patch_path - Asset path of the USoundModulationPatch, e.g. "/Game/Audio/Mod/MP_Volume", as create_sound_modulation_patch returns it.
+//   @param bus_path - Asset path of an existing USoundControlBus, e.g. "/Game/Audio/Mod/CB_Music"; it must load, and only its asset name is compared with the inputs' buses.
 //   @returns { patch_path, bus_path, removed, already_removed, input_count, saved }
 TSharedPtr<FJsonObject> HandleRemoveModulationInputFromPatch(
 	const TSharedPtr<FJsonObject>& Params)
@@ -708,10 +710,18 @@ TSharedPtr<FJsonObject> HandleRemoveModulationInputFromPatch(
 	}
 
 	const FName BusName = Bus->GetFName();
-	const int32 Removed = Patch->PatchSettings.Inputs.RemoveAll(
-		[&](const FSoundControlModulationInput& In) {
-			return In.Bus && In.Bus->GetFName() == BusName;
-		});
+	auto UsesBus = [&BusName](const FSoundControlModulationInput& In)
+	{
+		return In.Bus && In.Bus->GetFName() == BusName;
+	};
+	// The patch is recorded (Modify) BEFORE the inputs change, so undo restores them; with no match nothing is
+	// recorded, changed or saved.
+	int32 Removed = 0;
+	if (Patch->PatchSettings.Inputs.ContainsByPredicate(UsesBus))
+	{
+		Patch->Modify();
+		Removed = Patch->PatchSettings.Inputs.RemoveAll(UsesBus);
+	}
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("patch_path"), Patch->GetPathName());
@@ -734,9 +744,9 @@ TSharedPtr<FJsonObject> HandleRemoveModulationInputFromPatch(
 // ---------------------------------------------------------------------------
 // set_modulation_patch_bypass
 // ---------------------------------------------------------------------------
-// MCP:set_modulation_patch_bypass - Sets the bBypass flag of a USoundModulationPatch asset and saves it. A bypassed patch stays active but outputs the default value of its output parameter; new patches start bypassed. Returns patch_path, bBypass as stored, updated, saved.
-//   @param patch_path - Asset path to the USoundModulationPatch
-//   @param bypass - New bypass value (required bool)
+// MCP:set_modulation_patch_bypass - Set the bBypass flag of a USoundModulationPatch asset, in one undo step (undo restores the old value), and save it. A bypassed patch stays active but outputs the default value of its output parameter, so a patch made by create_sound_modulation_patch (which starts bypassed) does nothing until this sets bypass false. Typical order: add_modulation_input_to_patch, set_modulation_patch_output_parameter, then this; read the result with get_sound_modulation_patch_info. It always writes and saves, even when the flag already had that value (updated is always true); bBypass is read back after the write. A patch that does not load or a missing bypass is an error and nothing changes; a failed save (for example while PIE runs) makes success false with the change only in memory.
+//   @param patch_path - Asset path of the USoundModulationPatch, e.g. "/Game/Audio/Mod/MP_Volume", as create_sound_modulation_patch returns it.
+//   @param bypass - true bypasses the patch (it outputs its parameter's default); false makes it apply its inputs. Required.
 //   @returns { patch_path, bBypass, updated, saved }
 TSharedPtr<FJsonObject> HandleSetModulationPatchBypass(
 	const TSharedPtr<FJsonObject>& Params)
@@ -755,6 +765,8 @@ TSharedPtr<FJsonObject> HandleSetModulationPatchBypass(
 		return AudioMod_CannotLoadReply(TEXT("modulation patch"), PatchPath);
 	}
 
+	// Recorded (Modify) BEFORE the write, so undo restores the old flag.
+	Patch->Modify();
 	Patch->PatchSettings.bBypass = Bypass;
 	const bool bSaved = AudioMod_ModifyDirtyAndSave(Patch);
 
@@ -768,7 +780,7 @@ TSharedPtr<FJsonObject> HandleSetModulationPatchBypass(
 // ---------------------------------------------------------------------------
 // set_modulation_patch_output_parameter
 // ---------------------------------------------------------------------------
-// MCP:set_modulation_patch_output_parameter - Sets the output USoundModulationParameter of a USoundModulationPatch asset, or clears it when parameter_path is an empty string, and saves the patch. Returns patch_path, parameter_path and parameter_class as stored (empty after a clear), updated, cleared, saved. Create a parameter with create_modulation_parameter.
+// MCP:set_modulation_patch_output_parameter - Sets the output USoundModulationParameter of a USoundModulationPatch asset, or clears it when parameter_path is an empty string, in one undo step (undo restores the previous one), and saves the patch. Returns patch_path, parameter_path and parameter_class as stored (empty after a clear), updated, cleared, saved. Create a parameter with create_modulation_parameter.
 //   @param patch_path - Asset path to the USoundModulationPatch
 //   @param parameter_path - Asset path to the USoundModulationParameter (or empty string to clear)
 //   @returns { patch_path, parameter_path, parameter_class, updated, cleared, saved }
@@ -797,6 +809,8 @@ TSharedPtr<FJsonObject> HandleSetModulationPatchOutputParameter(
 		}
 	}
 
+	// Recorded (Modify) BEFORE the write, so undo restores the previous output parameter.
+	Patch->Modify();
 	Patch->PatchSettings.OutputParameter = Param;
 	const bool bSaved = AudioMod_ModifyDirtyAndSave(Patch);
 
@@ -937,7 +951,7 @@ TSharedPtr<FJsonObject> HandleCreateModulationParameter(
 // ---------------------------------------------------------------------------
 // set_modulation_parameter_settings
 // ---------------------------------------------------------------------------
-// MCP:set_modulation_parameter_settings - Writes the given Settings fields (value_normalized, clamp_to_normalized_range, value_unit) of a USoundModulationParameter asset and saves it; omitted fields keep their value, and the asset is saved even when none is given. Returns parameter_path, the three settings as stored, updated, saved.
+// MCP:set_modulation_parameter_settings - Writes the given Settings fields (value_normalized, clamp_to_normalized_range, value_unit) of a USoundModulationParameter asset, in one undo step (undo restores the previous settings), and saves it; omitted fields keep their value, and the asset is saved even when none is given. Returns parameter_path, the three settings as stored, updated, saved.
 //   @param parameter_path - Asset path to the USoundModulationParameter
 //   @param value_normalized - Optional float in [0,1]; sets Settings.ValueNormalized
 //   @param clamp_to_normalized_range - Optional bool; sets Settings.bClampToNormalizedRange. Needs UE 5.8.
@@ -965,6 +979,8 @@ TSharedPtr<FJsonObject> HandleSetModulationParameterSettings(
 	}
 
 #endif
+	// Recorded (Modify) BEFORE any setting is written, so undo restores the previous settings.
+	Param->Modify();
 	// Each setter is independent. We do not require a particular field —
 	// passing only the field you want to change is a valid call (matches the
 	// set_control_bus_mix_stage_value pattern in this same file).
@@ -1151,7 +1167,7 @@ TSharedPtr<FJsonObject> HandleCreateModulationGenerator(
 // ---------------------------------------------------------------------------
 // set_modulation_generator_settings
 // ---------------------------------------------------------------------------
-// MCP:set_modulation_generator_settings - Writes the settings that match the class of a USoundModulationGenerator asset (LFO, ADEnvelope or EnvelopeFollower) and saves it; params of another class are ignored and other generator classes are refused. The LFO shape (waveform) is set with create_modulation_generator. Returns generator_path, generator_class, settings as stored, updated, saved.
+// MCP:set_modulation_generator_settings - Writes the settings that match the class of a USoundModulationGenerator asset (LFO, ADEnvelope or EnvelopeFollower), in one undo step (undo restores the previous settings), and saves it; params of another class are ignored, and other generator classes and an audio_bus_path that does not load are refused with nothing changed. The LFO shape (waveform) is set with create_modulation_generator. Returns generator_path, generator_class, settings as stored, updated, saved.
 //   @param generator_path - Asset path to the USoundModulationGenerator
 //   @param frequency - LFO only: oscillation frequency in Hz (optional float)
 //   @param amplitude - LFO only: output amplitude/gain multiplier (optional float)
@@ -1179,39 +1195,49 @@ TSharedPtr<FJsonObject> HandleSetModulationGeneratorSettings(
 	// so a wrong-class assignment produces an honest error (no silent skip).
 	const FString ClassName = Gen->GetClass()->GetName();
 
-	if (USoundModulationGeneratorLFO* LFO = Cast<USoundModulationGeneratorLFO>(Gen))
+	// Refusals first, so a refused call changes nothing: an unsupported class, and (for an envelope follower) an
+	// audio_bus_path that does not load.
+	USoundModulationGeneratorLFO* LFO = Cast<USoundModulationGeneratorLFO>(Gen);
+	USoundModulationGeneratorADEnvelope* AD = Cast<USoundModulationGeneratorADEnvelope>(Gen);
+	USoundModulationGeneratorEnvelopeFollower* EF = Cast<USoundModulationGeneratorEnvelopeFollower>(Gen);
+	if (!LFO && !AD && !EF)
+	{
+		return mcp_common::MakeErrorReply(
+			FString::Printf(TEXT("Unsupported generator class: %s"), *ClassName));
+	}
+	UAudioBus* FollowedBus = nullptr;
+	FString AudioBusPath;
+	if (EF && Params->TryGetStringField(TEXT("audio_bus_path"), AudioBusPath) && !AudioBusPath.IsEmpty())
+	{
+		FollowedBus = LoadObject<UAudioBus>(nullptr, *AudioBusPath);
+		if (!FollowedBus)
+		{
+			return AudioMod_CannotLoadReply(TEXT("UAudioBus"), AudioBusPath);
+		}
+	}
+
+	// Recorded (Modify) BEFORE any setting is written, so undo restores the previous settings.
+	Gen->Modify();
+	if (LFO)
 	{
 		AudioMod_WriteLFONumbers(Params, LFO);
 	}
-	else if (USoundModulationGeneratorADEnvelope* AD = Cast<USoundModulationGeneratorADEnvelope>(Gen))
+	else if (AD)
 	{
 		double AttackTime = 0.0, DecayTime = 0.0;
 		if (Params->TryGetNumberField(TEXT("attack_time"), AttackTime)) { AD->Params.AttackTime = (float)AttackTime; }
 		if (Params->TryGetNumberField(TEXT("decay_time"),  DecayTime))  { AD->Params.DecayTime  = (float)DecayTime; }
 	}
-	else if (USoundModulationGeneratorEnvelopeFollower* EF = Cast<USoundModulationGeneratorEnvelopeFollower>(Gen))
+	else
 	{
 		double AttackTime = 0.0, ReleaseTime = 0.0, Gain = 0.0;
 		if (Params->TryGetNumberField(TEXT("attack_time"),  AttackTime))  { EF->Params.AttackTime  = (float)AttackTime; }
 		if (Params->TryGetNumberField(TEXT("release_time"), ReleaseTime)) { EF->Params.ReleaseTime = (float)ReleaseTime; }
 		if (Params->TryGetNumberField(TEXT("gain"),         Gain))        { EF->Params.Gain        = (float)Gain; }
-		FString AudioBusPath;
-		if (Params->TryGetStringField(TEXT("audio_bus_path"), AudioBusPath) && !AudioBusPath.IsEmpty())
+		if (FollowedBus)
 		{
-			if (UAudioBus* Bus = LoadObject<UAudioBus>(nullptr, *AudioBusPath))
-			{
-				EF->Params.AudioBus = Bus;
-			}
-			else
-			{
-				return AudioMod_CannotLoadReply(TEXT("UAudioBus"), AudioBusPath);
-			}
+			EF->Params.AudioBus = FollowedBus;
 		}
-	}
-	else
-	{
-		return mcp_common::MakeErrorReply(
-			FString::Printf(TEXT("Unsupported generator class: %s"), *ClassName));
 	}
 	const TSharedPtr<FJsonObject> SettingsObj = AudioMod_GeneratorSettingsJson(Gen, /*bWithShape=*/false);
 
@@ -1228,8 +1254,8 @@ TSharedPtr<FJsonObject> HandleSetModulationGeneratorSettings(
 // ---------------------------------------------------------------------------
 // get_modulation_generator_info
 // ---------------------------------------------------------------------------
-// MCP:get_modulation_generator_info - Reads a USoundModulationGenerator asset without changing it. Returns generator_path, generator_class and settings by class: LFO shape, frequency, amplitude, offset, phase; ADEnvelope attack_time, decay_time; EnvelopeFollower attack_time, release_time, gain, audio_bus_path; empty for any other class.
-//   @param generator_path - Asset path to the USoundModulationGenerator
+// MCP:get_modulation_generator_info - Read the class and settings of a USoundModulationGenerator asset without changing it. settings depend on the class: LFO gives shape, frequency, amplitude, offset and phase; ADEnvelope gives attack_time and decay_time; EnvelopeFollower gives attack_time, release_time, gain and audio_bus_path (empty when no audio bus is set); any other generator class gives an empty settings object. Use it to check create_modulation_generator or set_modulation_generator_settings; for a modulation parameter use get_modulation_parameter_info, for a control bus get_control_bus_info, for a patch get_sound_modulation_patch_info. A path that does not load as a modulation generator is an error.
+//   @param generator_path - Asset path of the generator, e.g. "/Game/Audio/Mod/LFO_Wobble", as create_modulation_generator returns it.
 //   @returns { generator_path, generator_class, settings: {...} }
 TSharedPtr<FJsonObject> HandleGetModulationGeneratorInfo(
 	const TSharedPtr<FJsonObject>& Params)
