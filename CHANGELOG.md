@@ -2,7 +2,10 @@
 
 Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](https://semver.org).
 
-## Unreleased
+## 2.4.2 - 2026-10-21
+
+The review behind 2.4.1 left eight known defects. This release fixes them, and your agent can now install UEAgent
+for you.
 
 ### Added
 
@@ -12,8 +15,45 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
   before changing anything and leaves a git clone alone. See the README's Quick start and
   [Install with your agent](docs/agent-install.md).
 
+### Changed
+
+- **The audio component tools see every audio component**, not only each actor's first one. This covers
+  `set_audio_volume`, `set_audio_3d_settings`, `play_sound`, `stop_sound`, `set_audio_sound` and the census in
+  `get_audio_settings`.
+  - A new optional `actor_name` picks the owner when several actors have a component of that name; that ambiguity is
+    refused, with the owners listed.
+  - The replies name the component they used (`audio_component_path`, `audio_owner_name`).
+- **`get_audio_settings` reads every value from the engine.** The device values (sample rate, buffer size, channels,
+  mixer) come from the main audio device, or are `null` with a note when there is none. `audio_api` is the module
+  that created the device: it always said "XAudio2", and 5.8's Windows default is WASAPI. The fixed values it
+  reported as readings (frame rate, bit depth, reverb, occlusion, Doppler…) are gone.
+- **The tools that act on a running behavior tree or blackboard look in the PIE world first**, where an AI
+  controller runs its tree, and say which world answered (`world`, `world_name`). This covers `run_behavior_tree`,
+  `stop_behavior_tree`, `pause_behavior_tree`, `resume_behavior_tree`, `restart_behavior_tree`,
+  `set_blackboard_value`, `get_blackboard_value` and `get_blackboard_data` given an actor. Before, only
+  `get_behavior_tree_status` did.
+- `set_morph_target_deltas` reports the deltas of every LOD it touched (`total_deltas`, `deltas_per_lod`), not only
+  LOD 0.
+
 ### Fixed
 
+- **`play_sound` and `play_sound_at_location` answered success when nothing played**, for example in an editor
+  started with `-NoSound`. They now refuse with the reason. With a device, success means a new active sound was
+  measured.
+- **`add_blend_space_sample` saved a sample the engine rejected** (another skeleton, a position already taken), with
+  the axis already widened. It now refuses before changing anything, and reads the sample back. It also refuses a
+  position so far outside the axis that the engine's widening loop would never end.
+- **`set_morph_target_deltas` made no undo step.** The engine creates morph targets without the transactional flag;
+  the tool now sets it, so undo restores the old deltas. The step records the morph target only. Undoing a step that
+  holds the mesh rebuilds the mesh, and the rebuild drops every morph target `create_skeletal_mesh_morph_target`
+  added.
+- **`remove_niagara_module_from_stack`, `duplicate_niagara_module_in_stack` and `set_niagara_module_enabled` read any
+  `script_group` other than "spawn" as "update".** An unknown value is now refused, as `reorder_niagara_modules`
+  already did.
+- **`save_usd_stage` failed when no layer needed saving.** It now answers success with `layers_saved: 0`. A dirty
+  in-memory layer, which has no file to save to, is a failure.
+- `add_modulation_input_to_patch` is marked idempotent, as it is: a bus already among the inputs is not added again.
+  Its definition and `set_modulation_parameter_settings`'s say when to use them.
 - On the documentation site, a pipe inside code in a table showed with a backslash, as in
   `mcp.clients.connect cursor\|vscode\|antigravity` in the console commands. It reads as on GitHub now.
 

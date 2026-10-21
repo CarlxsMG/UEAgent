@@ -132,14 +132,14 @@ Duplicate an emitter handle of a Niagara System asset under a new name, keeping 
 
 *Additive.*
 
-Add another instance of a module to one emitter of a Niagara System asset: the module named module_name (its function name, case-sensitive, as list_niagara_modules gives it) is found on the script_group stack only (spawn or update, default update; any other value reads as update) and its script is added again to that stack through FNiagaraStackGraphUtilities::AddScriptModuleToStack, in one undo step, then a system compile is requested and the system saved. The new module starts with the default inputs of the script; the input overrides of the source are not copied. Positions are stack positions, as list_niagara_modules reports index: target_index_override sets it (clamped into the stack, -1 appends), else it goes right after the source. inserted_index is read back from the stack, and a module that did not land where asked fails the call. An unknown system, emitter or module (or a module only on the other stack) is an error and nothing changes; a failed save makes success false, with saved=false and save_error. Inputs: set_niagara_module_input; move: reorder_niagara_modules.
+Add another instance of a module to one emitter of a Niagara System asset: the module named module_name (its function name, case-sensitive, as list_niagara_modules gives it) is found on the script_group stack only (spawn or update, any case, default update) and its script is added again to that stack through FNiagaraStackGraphUtilities::AddScriptModuleToStack, in one undo step, then a system compile is requested and the system saved. The new module starts with the default inputs of the script; the input overrides of the source are not copied. Positions are stack positions, as list_niagara_modules reports index: target_index_override sets it (clamped into the stack, -1 appends), else it goes right after the source. inserted_index is read back from the stack, and a module that did not land where asked fails the call. An unknown system, emitter, script_group or module (or a module only on the other stack) is an error and nothing changes; a failed save makes success false, with saved=false and save_error. Inputs: set_niagara_module_input; move: reorder_niagara_modules.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `system_path` | string | yes | Content path of the UNiagaraSystem asset, e.g. '/Game/FX/NS_Sparks'. |
 | `emitter_name` | string | yes | Display name of the emitter handle, as get_niagara_emitter_handles lists it. |
 | `module_name` | string | yes | Function name of the module to duplicate, case-sensitive, as list_niagara_modules gives module_name for that stack, e.g. 'GravityForce'. |
-| `script_group` | string | no | Optional "spawn" or "update"; defaults to "update" |
+| `script_group` | string | no | Optional "spawn" or "update" (any case), the stack the module is on; defaults to "update"; any other value is an error and nothing changes. |
 | `target_index_override` | number | no | Optional stack position for the new module, a JSON number (0 runs first; -1 appends; others are clamped into the stack); defaults to the source's stack index plus one. |
 
 **Returns:** `{ system_path: string, emitter_name: string, script_group: string, source_module_name: string, source_index: int, new_module_name: string, inserted_index: int, module_count: int, duplicated: bool, saved: bool, save_error?: string }`
@@ -435,14 +435,14 @@ Remove an event handler from a Niagara emitter by its usage_id.  Calls UNiagaraE
 
 *Destructive.*
 
-Remove one module from a Niagara emitter's particle spawn or update stack, in one undo step: the module and every node that feeds it (its input overrides, dynamic inputs and data-interface inputs) are taken out and the stack's chain is closed over the gap, then a system compile is requested and the system saved. The module is found by function name (case-sensitive) on the script_group stack only, the first one in execution order, as list_niagara_modules lists it. The result is read back: removed is true when the module is off the stack and the stack is one module shorter, chain_intact when the stack still runs from its input to its output node; either false fails the call. An unknown system, emitter or module (or a module only on the other stack) is an error and nothing changes; a failed save makes success false, with saved=false and save_error. The inverse is add_niagara_module_to_stack.
+Remove one module from a Niagara emitter's particle spawn or update stack, in one undo step: the module and every node that feeds it (its input overrides, dynamic inputs and data-interface inputs) are taken out and the stack's chain is closed over the gap, then a system compile is requested and the system saved. The module is found by function name (case-sensitive) on the script_group stack only, the first one in execution order, as list_niagara_modules lists it. The result is read back: removed is true when the module is off the stack and the stack is one module shorter, chain_intact when the stack still runs from its input to its output node; either false fails the call. An unknown system, emitter, script_group or module (or a module only on the other stack) is an error and nothing changes; a failed save makes success false, with saved=false and save_error. The inverse is add_niagara_module_to_stack.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `system_path` | string | yes | Content path of the UNiagaraSystem asset, e.g. '/Game/FX/NS_Sparks'. |
 | `emitter_name` | string | yes | Display name of the emitter handle, as get_niagara_emitter_handles lists it. |
 | `module_name` | string | yes | Function name of the module to remove, case-sensitive, as list_niagara_modules gives module_name for that stack, e.g. 'GravityForce'. |
-| `script_group` | string | no | Optional "spawn" or "update" (any case), the stack the module is on; defaults to "update", and any other value reads as update. |
+| `script_group` | string | no | Optional "spawn" or "update" (any case), the stack the module is on; defaults to "update"; any other value is an error and nothing changes. |
 
 **Returns:** `{ system_path: string, emitter_name: string, script_group: string, module_name: string, removed_index: int, removed_node_count: int, module_count: int, chain_intact: bool, removed: bool, saved: bool, save_error?: string }`
 
@@ -651,7 +651,7 @@ Assign a static mesh into a Niagara Mesh renderer's Meshes[] slot.  Resolves (or
 
 *Destructive, idempotent.*
 
-Enable or disable one module of a Niagara emitter's particle spawn or update stack (FNiagaraStackGraphUtilities::SetModuleIsEnabled), in one undo step, then request a system compile and save the system; a disabled module stays on the stack but does not run. The module is found by function name (case-sensitive) on the script_group stack only, the first one in execution order. previous_enabled and enabled are read from the node before and after; an enabled state that did not take fails the call. A module already in that state changes nothing: changed false, saved false and a note. An unknown system, emitter or module (or a module only on the other stack) is an error and nothing changes; a failed save makes success false, with saved=false and save_error. list_niagara_modules shows each module's is_enabled.
+Enable or disable one module of a Niagara emitter's particle spawn or update stack (FNiagaraStackGraphUtilities::SetModuleIsEnabled), in one undo step, then request a system compile and save the system; a disabled module stays on the stack but does not run. The module is found by function name (case-sensitive) on the script_group stack only, the first one in execution order. previous_enabled and enabled are read from the node before and after; an enabled state that did not take fails the call. A module already in that state changes nothing: changed false, saved false and a note. An unknown system, emitter, script_group or module (or a module only on the other stack) is an error and nothing changes; a failed save makes success false, with saved=false and save_error. list_niagara_modules shows each module's is_enabled.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -659,7 +659,7 @@ Enable or disable one module of a Niagara emitter's particle spawn or update sta
 | `emitter_name` | string | yes | Display name of the emitter handle, as get_niagara_emitter_handles lists it. |
 | `module_name` | string | yes | Function name of the module to toggle, case-sensitive, as list_niagara_modules gives module_name for that stack, e.g. 'GravityForce'. |
 | `enabled` | boolean | no | Optional bool, the state to set; defaults to true |
-| `script_group` | string | no | Optional "spawn" or "update"; defaults to "update", and any other value reads as update. |
+| `script_group` | string | no | Optional "spawn" or "update" (any case), the stack the module is on; defaults to "update"; any other value is an error and nothing changes. |
 
 **Returns:** `{ system_path: string, emitter_name: string, script_group: string, module_name: string, module_index: int, previous_enabled: bool, enabled: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 

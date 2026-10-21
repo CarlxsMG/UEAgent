@@ -561,10 +561,10 @@ TSharedPtr<FJsonObject> HandleSetUsdStageTimeRange(const TSharedPtr<FJsonObject>
 // ---------------------------------------------------------------------------
 // save_usd_stage
 // ---------------------------------------------------------------------------
-// MCP:save_usd_stage - Save a USD stage's file layers to disk: the root layer and every sublayer of its stack (UE::FSdfLayer::Save on each), each one only when it is dirty unless force is set. layers reports every layer with was_dirty, saved, dirty after and, for one left alone, skipped ("clean", or "anonymous" for an in-memory layer, which has no file); layers_saved counts the writes. Session layers are never saved (they are in-memory by design); a memory-only stage is exported with flatten_usd_stage instead. saved is true when at least one layer was written and none failed; when every layer is clean or anonymous nothing is written and the call fails with saved:false, and a layer whose Save returns false is named in the error. Use force=true to re-write clean file layers (rare — typically only when a downstream tool requires a specific mtime). list_usd_stage_layers shows which layers are dirty first.
+// MCP:save_usd_stage - Save a USD stage's file layers to disk: the root layer and every sublayer of its stack (UE::FSdfLayer::Save on each), each one only when it is dirty unless force is set. layers reports every layer with was_dirty, saved, dirty after and, for one left alone, skipped ("clean", or "anonymous" for an in-memory layer, which has no file); layers_saved counts the writes. Session layers are never saved (they are in-memory by design); a memory-only stage is exported with flatten_usd_stage instead. When nothing needs saving (every layer clean) nothing is written and the call succeeds with layers_saved 0, saved false and a note. saved is true when at least one layer was written and every dirty layer was; a dirty layer left unsaved -- its Save returned false, or it is anonymous, with no file to write -- fails the call with saved false and a save_error naming it. Use force=true to re-write clean file layers (rare — typically only when a downstream tool requires a specific mtime). list_usd_stage_layers shows which layers are dirty first.
 //   @param stage_name [string!] - Name the stage was registered under, OR an absolute file path to auto-open.
 //   @param force [bool] - Re-save every file layer of the stack even when it is clean (default false: only dirty layers are written).
-//   @returns { stage_name: string, resolution: string, saved: bool, layers_saved: int, layers: [{ identifier: string, real_path: string, is_root: bool, was_dirty: bool, saved: bool, dirty: bool, skipped?: string }], dirty: bool (the root layer after the save), force: bool, real_path: string (the root layer's), errors: [string]? }
+//   @returns { stage_name: string, resolution: string, saved: bool, layers_saved: int, layers: [{ identifier: string, real_path: string, is_root: bool, was_dirty: bool, saved: bool, dirty: bool, skipped?: string }], dirty: bool (the root layer after the save), force: bool, real_path: string (the root layer's), note?: string (nothing needed saving), save_error?: string (the dirty layers left unsaved), errors: [string]? }
 
 TSharedPtr<FJsonObject> HandleSaveUsdStage(const TSharedPtr<FJsonObject>& Params)
 {
@@ -593,11 +593,12 @@ TSharedPtr<FJsonObject> HandleSaveUsdStage(const TSharedPtr<FJsonObject>& Params
 
     // The root layer and every sublayer it brings in (GetLayerStack without the session layers, which are
     // in-memory by design): each one is saved when it is dirty, or always with force. An anonymous layer has no
-    // file to write and is reported skipped.
+    // file to write and is reported skipped; a dirty one is an edit this call cannot keep.
     const TArray<UE::FSdfLayer> Layers = Stage.GetLayerStack(/*bIncludeSessionLayers=*/false);
     TArray<TSharedPtr<FJsonValue>> LayerReports;
     int32 LayersWritten = 0;
     TArray<FString> LayersFailed;
+    TArray<FString> LayersDirtyAnonymous;
     for (const UE::FSdfLayer& Layer : Layers)
     {
         if (!Layer)
@@ -615,6 +616,10 @@ TSharedPtr<FJsonObject> HandleSaveUsdStage(const TSharedPtr<FJsonObject>& Params
         if (Layer.IsAnonymous())
         {
             Entry->SetStringField(TEXT("skipped"), TEXT("anonymous: an in-memory layer has no file to save to"));
+            if (bWasDirty)
+            {
+                LayersDirtyAnonymous.Add(Id);
+            }
         }
         else if (!bWasDirty && !bForce)
         {
@@ -637,22 +642,35 @@ TSharedPtr<FJsonObject> HandleSaveUsdStage(const TSharedPtr<FJsonObject>& Params
         LayerReports.Add(MakeShared<FJsonValueObject>(Entry));
     }
 
-    const bool bSaved = LayersWritten > 0 && LayersFailed.Num() == 0;
     Result->SetArrayField(TEXT("layers"), LayerReports);
     Result->SetNumberField(TEXT("layers_saved"), LayersWritten);
-    Result->SetBoolField(TEXT("saved"), bSaved);
     Result->SetBoolField(TEXT("dirty"), RootLayer ? RootLayer.IsDirty() : false);
-    FString Failure;
+
+    // A dirty layer left unsaved fails the call: a Save that returned false, or an anonymous layer with no file.
+    TArray<FString> Unsaved;
     if (LayersFailed.Num() > 0)
     {
-        Failure = FString::Printf(TEXT("save_usd_stage: Save(force=%s) returned false for %s"), bForce ? TEXT("true") : TEXT("false"),
-            *FString::Join(LayersFailed, TEXT(", ")));
+        Unsaved.Add(FString::Printf(TEXT("Save(force=%s) returned false for %s"), bForce ? TEXT("true") : TEXT("false"),
+            *FString::Join(LayersFailed, TEXT(", "))));
     }
-    else if (LayersWritten == 0)
+    if (LayersDirtyAnonymous.Num() > 0)
     {
-        Failure = FString::Printf(TEXT("save_usd_stage: nothing was written for stage '%s': every layer of its stack is clean or anonymous (force=true re-writes clean file layers; flatten_usd_stage exports a memory-only stage)"), *StageName);
+        Unsaved.Add(FString::Printf(TEXT("dirty anonymous layer(s) with no file to save to: %s (flatten_usd_stage exports a memory-only stage)"),
+            *FString::Join(LayersDirtyAnonymous, TEXT(", "))));
     }
-    return mcp_common::MakeOutcomeReply(Result, bSaved, Failure);
+    if (Unsaved.Num() > 0)
+    {
+        return mcp_common::MakeSavedReply(Result, false, TEXT("save_usd_stage"), FString::Join(Unsaved, TEXT("; ")));
+    }
+
+    // Every dirty layer was written. None dirty is not an error: nothing needed saving, so nothing was.
+    Result->SetBoolField(TEXT("saved"), LayersWritten > 0);
+    if (LayersWritten == 0)
+    {
+        Result->SetStringField(TEXT("note"), FString::Printf(
+            TEXT("Nothing to save: every layer of the stack of '%s' is clean, so no file was written (force=true re-writes clean file layers)."), *StageName));
+    }
+    return mcp_common::MakeOkReply(Result);
 }
 
 // ---------------------------------------------------------------------------

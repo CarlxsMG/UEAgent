@@ -1767,14 +1767,96 @@ namespace
     }
 }
 
+namespace
+{
+    // Defined with the additive settings commands further down.
+    const TCHAR* AdditiveAnimTypeToString(EAdditiveAnimationType T);
+
+    // The most grid steps add_blend_space_sample lets UBlendSpace::ExpandRangeForSample add to one axis.
+    constexpr int32 AnimAuthoring_MaxAxisWidenSteps = 1000;
+
+    // UBlendSpace::ExpandRangeForSample (BlendSpace.cpp) run on a copy of one axis, with the engine's float math:
+    // true when Value fits the axis after at most MaxSteps steps of widening. False when the engine's loop would
+    // never end (a step that is not positive, or one a float can no longer add) or would add more steps than that.
+    bool AnimAuthoring_AxisCanWiden(const FBlendParameter& Axis, double Value, int32 MaxSteps)
+    {
+        const float Delta = Axis.GridNum != 0 ? (Axis.Max - Axis.Min) / Axis.GridNum : 0.0f;
+        float Max = Axis.Max;
+        float Min = Axis.Min;
+        int32 Steps = 0;
+        while (Value > Max)
+        {
+            const float Widened = Max + Delta;
+            if (!FMath::IsFinite(Widened) || !(Widened > Max) || ++Steps > MaxSteps)
+            {
+                return false;
+            }
+            Max = Widened;
+        }
+        while (Value < Min)
+        {
+            const float Widened = Min - Delta;
+            if (!FMath::IsFinite(Widened) || !(Widened < Min) || ++Steps > MaxSteps)
+            {
+                return false;
+            }
+            Min = Widened;
+        }
+        return true;
+    }
+
+    // Why UBlendSpace::AddSample would reject Animation at Position, asked with the engine's own checks
+    // (ValidateAnimationSequence, ValidateSampleValue) BEFORE anything changes; empty when it would take it.
+    // AddSample widens an axis before it validates, so a sample it rejects would still have changed the asset.
+    FString AnimAuthoring_BlendSampleRefusal(const UBlendSpace* BlendSpace, const UAnimSequence* Animation, const FVector& Position)
+    {
+        if (!BlendSpace->IsAnimationCompatibleWithSkeleton(Animation))
+        {
+            const USkeleton* BlendSpaceSkeleton = BlendSpace->GetSkeleton();
+            const USkeleton* AnimationSkeleton = Animation->GetSkeleton();
+            return FString::Printf(TEXT("the animation's skeleton (%s) is neither the blend space's skeleton (%s) nor compatible with it"),
+                AnimationSkeleton ? *AnimationSkeleton->GetPathName() : TEXT("none"),
+                BlendSpaceSkeleton ? *BlendSpaceSkeleton->GetPathName() : TEXT("none"));
+        }
+        const EAdditiveAnimationType AdditiveType = Animation->AdditiveAnimType.GetValue();
+        if (!BlendSpace->IsAnimationCompatible(Animation))
+        {
+            return FString::Printf(TEXT("a %s takes no animation of additive type %s"),
+                *BlendSpace->GetClass()->GetName(), AdditiveAnimTypeToString(AdditiveType));
+        }
+        if (BlendSpace->GetNumberOfBlendSamples() > 0 && !BlendSpace->DoesAnimationMatchExistingSamples(Animation))
+        {
+            return FString::Printf(TEXT("the animation's additive type %s differs from the existing samples'"),
+                AdditiveAnimTypeToString(AdditiveType));
+        }
+        if (BlendSpace->IsTooCloseToExistingSamplePoint(Position, INDEX_NONE))
+        {
+            const int32 TakenBy = BlendSpace->GetBlendSamples().IndexOfByPredicate([&Position](const FBlendSample& Sample)
+                { return Sample.SampleValue.Equals(Position, UE_KINDA_SMALL_NUMBER); });
+            return FString::Printf(TEXT("position (%g, %g, %g) is already taken by sample %d"), Position.X, Position.Y, Position.Z, TakenBy);
+        }
+        static const TCHAR* const AxisNames[3] = { TEXT("x"), TEXT("y"), TEXT("z") };
+        for (int32 AxisIndex = 0; AxisIndex < 3; ++AxisIndex)
+        {
+            const FBlendParameter& Axis = BlendSpace->GetBlendParameter(AxisIndex);
+            if (!AnimAuthoring_AxisCanWiden(Axis, Position[AxisIndex], AnimAuthoring_MaxAxisWidenSteps))
+            {
+                return FString::Printf(TEXT("blend_%s %g is outside the %s axis range [%g, %g] (grid %d), which cannot widen to it in %d grid steps or fewer"),
+                    AxisNames[AxisIndex], Position[AxisIndex], AxisNames[AxisIndex], Axis.Min, Axis.Max, Axis.GridNum, AnimAuthoring_MaxAxisWidenSteps);
+            }
+        }
+        return FString();
+    }
+}
+
 // ---------------------------------------------------------------------------
 // add_blend_space_sample
 // ---------------------------------------------------------------------------
-// MCP:add_blend_space_sample - Add one sample (an animation placed at a blend position) to a UBlendSpace or UBlendSpace1D in one undo step, rebuild its runtime data and save the asset. Every call appends a new sample, so it is not a retry-safe call: a position too close to an existing sample, an animation on another skeleton or one whose additive type differs from the existing samples is rejected by the engine with sample_index -1 and success=false, and no sample is added. A position past an axis range widens that axis. Create the asset with create_blend_space and list its samples with get_blend_space_samples; move or swap an existing sample with set_blend_space_sample, and take one out with remove_blend_space_sample. A failed save makes success false, with saved=false and save_error.
+// MCP:add_blend_space_sample - Add one sample (an animation placed at a blend position) to a UBlendSpace or UBlendSpace1D in one undo step, rebuild its runtime data and save the asset. Every call appends a new sample, so it is not a retry-safe call. A sample the engine would reject is refused before anything changes, with success=false, added=false, sample_index -1, saved=false and the reason in the error: an animation whose skeleton is neither the blend space's nor compatible with it, an additive type the blend space does not take or that differs from the existing samples', a position already taken by a sample, or a position an axis cannot widen to in 1000 grid steps or fewer. Otherwise a position past an axis range widens that axis. The sample is read back after the rebuild: animation and blend_x, blend_y, blend_z are what the asset holds at sample_index. Create the asset with create_blend_space and list its samples with get_blend_space_samples; move or swap an existing sample with set_blend_space_sample, and take one out with remove_blend_space_sample. A failed save makes success false, with saved=false and save_error.
 //   @param blendspace_path - Object path of the UBlendSpace or UBlendSpace1D asset, e.g. '/Game/Animation/BS_Locomotion' (create_blend_space makes one).
-//   @param animation_path - Object path of the UAnimSequence played at this position, on the blend space's skeleton, e.g. '/Game/Animation/Run_Fwd'.
+//   @param animation_path - Object path of the UAnimSequence played at this position, on the blend space's skeleton or one compatible with it, e.g. '/Game/Animation/Run_Fwd'.
 //   @param blend_value - Blend position in the axis units: one number for a 1D blend space, or [x, y] (up to 3 numbers) for a 2D one, e.g. [0, 300]; default 0 on every axis.
-//   @returns { blendspace_path, sample_index, num_samples, success, saved, save_error, message }
+//   @returns { blendspace_path: string, sample_index: int, num_samples: int, added: bool, animation?: string, blend_x?: number, blend_y?: number, blend_z?: number, saved: bool, save_error?: string, message?: string }
 TSharedPtr<FJsonObject> HandleAddBlendspaceSample(const TSharedPtr<FJsonObject>& Params)
 {
     FString BlendSpacePath;
@@ -1792,27 +1874,81 @@ TSharedPtr<FJsonObject> HandleAddBlendspaceSample(const TSharedPtr<FJsonObject>&
     FVector BlendValue(0.0f);
     AnimAuthoring_ReadBlendValue(Params, BlendValue);
 
+    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+    Obj->SetStringField(TEXT("blendspace_path"), BlendSpace->GetPathName());
+
+    // A sample the engine would reject is refused here, before anything is added, widened, dirtied or saved.
+    const FString Refusal = AnimAuthoring_BlendSampleRefusal(BlendSpace, AnimSeq, BlendValue);
+    if (!Refusal.IsEmpty())
+    {
+        Obj->SetNumberField(TEXT("sample_index"), INDEX_NONE);
+        Obj->SetNumberField(TEXT("num_samples"), BlendSpace->GetBlendSamples().Num());
+        Obj->SetBoolField(TEXT("added"), false);
+        Obj->SetBoolField(TEXT("saved"), false);
+        return mcp_common::MakeOutcomeReply(Obj, false, FString::Printf(
+            TEXT("add_blend_space_sample: the engine rejects this sample: %s; nothing was added or saved"), *Refusal));
+    }
+
+    // AddSample widens the axes before it validates: kept to put them back if it still rejects the sample.
+    FBlendParameter AxesBefore[3];
+    for (int32 AxisIndex = 0; AxisIndex < 3; ++AxisIndex)
+    {
+        AxesBefore[AxisIndex] = BlendSpace->GetBlendParameter(AxisIndex);
+    }
+
     const FScopedTransaction Transaction(LOCTEXT("AddBlendspaceSample", "Add Blendspace Sample"));
     BlendSpace->Modify();
 
     const int32 SampleIndex = BlendSpace->AddSample(AnimSeq, BlendValue);
-    const int32 NumSamples = BlendSpace->GetBlendSamples().Num();
+    if (SampleIndex == INDEX_NONE)
+    {
+        // A rejection the checks above did not foresee: the axes go back, the call leaves no undo step, nothing is saved.
+        if (FStructProperty* BlendParamsProp = FindFProperty<FStructProperty>(UBlendSpace::StaticClass(), TEXT("BlendParameters")))
+        {
+            for (int32 AxisIndex = 0; AxisIndex < 3; ++AxisIndex)
+            {
+                if (FBlendParameter* Axis = BlendParamsProp->ContainerPtrToValuePtr<FBlendParameter>(BlendSpace, AxisIndex))
+                {
+                    *Axis = AxesBefore[AxisIndex];
+                }
+            }
+        }
+        mcp_common::DiscardUndoStepOfThisCall();
+        Obj->SetNumberField(TEXT("sample_index"), INDEX_NONE);
+        Obj->SetNumberField(TEXT("num_samples"), BlendSpace->GetBlendSamples().Num());
+        Obj->SetBoolField(TEXT("added"), false);
+        Obj->SetBoolField(TEXT("saved"), false);
+        return mcp_common::MakeOutcomeReply(Obj, false,
+            TEXT("add_blend_space_sample: the engine rejected the sample (UBlendSpace::AddSample returned -1); nothing was added or saved"));
+    }
 
     // Without this the RUNTIME does not see the blend space.
     RebuildBlendSpaceRuntimeData(BlendSpace);
+
+    // Read back after the rebuild, which snaps samples on an axis that snaps to its grid and drops duplicates: the
+    // sample is added only if sample_index still holds this animation.
+    const TArray<FBlendSample>& Samples = BlendSpace->GetBlendSamples();
+    const bool bAdded = Samples.IsValidIndex(SampleIndex) && Samples[SampleIndex].Animation == AnimSeq;
+    Obj->SetNumberField(TEXT("sample_index"), bAdded ? SampleIndex : INDEX_NONE);
+    Obj->SetNumberField(TEXT("num_samples"), Samples.Num());
+    Obj->SetBoolField(TEXT("added"), bAdded);
+    if (!bAdded)
+    {
+        Obj->SetBoolField(TEXT("saved"), false);
+        return mcp_common::MakeOutcomeReply(Obj, false, FString::Printf(
+            TEXT("add_blend_space_sample: after the runtime data rebuild, sample %d does not hold the animation (a grid-snapping axis can merge it into an existing sample); nothing was saved, and undo reverts the call"),
+            SampleIndex));
+    }
+    const FBlendSample& Added = Samples[SampleIndex];
+    Obj->SetStringField(TEXT("animation"), Added.Animation ? Added.Animation->GetPathName() : FString());
+    Obj->SetNumberField(TEXT("blend_x"), Added.SampleValue.X);
+    Obj->SetNumberField(TEXT("blend_y"), Added.SampleValue.Y);
+    Obj->SetNumberField(TEXT("blend_z"), Added.SampleValue.Z);
+
     FString SaveError;
     const bool bSaved = AnimAuthoring_SavePackageOf(BlendSpace, SaveError);
-
-    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-    Obj->SetStringField(TEXT("blendspace_path"), BlendSpace->GetPathName());
-    Obj->SetNumberField(TEXT("sample_index"), SampleIndex);
-    Obj->SetNumberField(TEXT("num_samples"), NumSamples);
-    Obj->SetBoolField(TEXT("success"), SampleIndex != INDEX_NONE);
-    mcp_common::AddSaveOutcome(Obj, bSaved, SaveError);
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Sample added to blendspace"), bSaved, SaveError));
-    // Success is BOTH things: the operation succeeded AND it persisted.
-    return mcp_common::MakeOutcomeReply(Obj, (SampleIndex != INDEX_NONE) && bSaved,
-        ((SampleIndex != INDEX_NONE) && bSaved) ? FString() : mcp_common::SavedOutcomeError(TEXT("add_blend_space_sample")));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("add_blend_space_sample"), SaveError);
 }
 
 namespace

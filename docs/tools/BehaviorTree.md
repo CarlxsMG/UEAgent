@@ -126,7 +126,7 @@ Read the settings of one node of a BehaviorTree asset -- a composite, a task, a 
 
 *Read-only.*
 
-Read the live state of the behavior tree component driving one actor: has_bt (whether a UBehaviorTreeComponent was found, through the actor's AIController brain or on the actor itself), is_running, is_paused, bt_asset_name (the tree it is running) and active_node_name (the node it is executing, empty when none). The actor is looked up in a running PIE world first, where possessed AI pawns run their trees, then in the editor world (where a tree started with run_behavior_tree runs); world says which answered (pie or editor) and world_name names it. Read-only. An actor without a tree is a success with has_bt false; an actor found in neither world is an error. Inspect the tree asset itself with get_behavior_tree_info and blackboard values with get_blackboard_value; change the run state with pause_behavior_tree, resume_behavior_tree, restart_behavior_tree or stop_behavior_tree (editor world only).
+Read the live state of the behavior tree component driving one actor: has_bt (whether a UBehaviorTreeComponent was found, through the actor's AIController brain or on the actor itself), is_running, is_paused, bt_asset_name (the tree it is running) and active_node_name (the node it is executing, empty when none). The actor is looked up in a running PIE world first, where possessed AI pawns run their trees, then in the editor world; world says which answered (pie or editor) and world_name names it. Read-only. An actor without a tree is a success with has_bt false; an actor found in neither world is an error. Inspect the tree asset itself with get_behavior_tree_info and blackboard values with get_blackboard_value; change the run state with run_behavior_tree, pause_behavior_tree, resume_behavior_tree, restart_behavior_tree or stop_behavior_tree, which look the actor up the same way.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -138,39 +138,39 @@ Read the live state of the behavior tree component driving one actor: has_bt (wh
 
 *Read-only.*
 
-Dump a blackboard from its asset or from a running component. With blackboard_path, which wins when both are given, it reads the UBlackboardData asset: name, parent and key definitions (name, type, instance_synced, base class or enum subsettings). With actor_name, it reads the running UBlackboardComponent of that actor in the editor world, never PIE (its AIController blackboard, else one on the actor): the component's name, has_valid_asset and num_keys, the key definitions of its blackboard asset as keys, and entries with each key's name, type and current value as text; a component with no asset gives empty lists. Either way every key is listed in key-ID order, those inherited from parent blackboards first, each with inherited and defined_in naming the asset that declares it. Nothing is written. No parameter, an asset that does not load, an actor not found by object name or label, or no running blackboard is an error. One key: get_blackboard_value; write a value: set_blackboard_value; add a key: add_blackboard_key.
+Dump a blackboard from its asset or from a running component. With blackboard_path, which wins when both are given, it reads the UBlackboardData asset: name, parent and key definitions (name, type, instance_synced, base class or enum subsettings). With actor_name, it reads the running UBlackboardComponent of that actor (its AIController blackboard, else one on the actor), the actor looked up in a running PIE world first, then in the editor world, with world (pie or editor) and world_name saying which answered: the component's name, has_valid_asset and num_keys, the key definitions of its blackboard asset as keys, and entries with each key's name, type and current value as text; a component with no asset gives empty lists. Either way every key is listed in key-ID order, those inherited from parent blackboards first, each with inherited and defined_in naming the asset that declares it. Nothing is written. No parameter, an asset that does not load, an actor found by object name or label in neither world, or no running blackboard is an error. One key: get_blackboard_value; write a value: set_blackboard_value; add a key: add_blackboard_key.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | no | Object name or label of the editor-world pawn, its AIController, or an actor with its own UBlackboardComponent, whose running blackboard to dump (first match); ignored when blackboard_path is given |
+| `actor_name` | string | no | Object name or label of the pawn, its AIController, or an actor with its own UBlackboardComponent, whose running blackboard to dump, searched in the PIE world first, then the editor world (first match); ignored when blackboard_path is given |
 | `blackboard_path` | string | no | Content path of a UBlackboardData asset to read instead, e.g. "/Game/AI/BB_Enemy"; takes precedence over actor_name |
 
-**Returns:** `{ actor_name: string?, blackboard_asset: string?, name: string?, parent: string?, component_name: string? (actor mode), has_valid_asset: bool? (actor mode), num_keys: number? (actor mode), keys: [{ name, type, instance_synced, base_class?, enum_type?, enum_name?, inherited, defined_in }], entries: [{ name, type, value, inherited, defined_in }]? (actor mode), key_count: number }`
+**Returns:** `{ actor_name: string?, world: "pie"|"editor"? (actor mode), world_name: string? (actor mode), blackboard_asset: string?, name: string?, parent: string?, component_name: string? (actor mode), has_valid_asset: bool? (actor mode), num_keys: number? (actor mode), keys: [{ name, type, instance_synced, base_class?, enum_type?, enum_name?, inherited, defined_in }], entries: [{ name, type, value, inherited, defined_in }]? (actor mode), key_count: number }`
 
 ## `get_blackboard_value`
 
 *Read-only.*
 
-Read one key of the running blackboard of an editor-world actor (its AIController blackboard, else one on the actor). value is a number for Int, Float and Enum keys, a bool for Bool, else a string (objects as paths). Read-only; editor world only, never PIE.
+Read one key of the running blackboard of an actor (its AIController blackboard, else one on the actor). The actor is looked up in a running PIE world first, then in the editor world; world says which answered (pie or editor) and world_name names it. value is a number for Int, Float and Enum keys, a bool for Bool, else a string (objects as paths). Read-only.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Name of the actor whose blackboard to query |
+| `actor_name` | string | yes | Object name or label of the actor whose blackboard to query, searched in the PIE world first, then the editor world (first match) |
 | `key_name` | string | yes | Name of the blackboard key to retrieve |
 
-**Returns:** `{ actor_name: string, key_name: string, key_type: string, value: number|string|bool }`
+**Returns:** `{ actor_name: string, world: "pie"|"editor", world_name: string, key_name: string, key_type: string, value: number|string|bool }`
 
 ## `pause_behavior_tree`
 
 *Destructive.*
 
-Pause the behavior tree of an editor-world actor (its AIController brain component, else a UBehaviorTreeComponent on the actor) with PauseLogic. paused is always true, not read back; was_running is measured. Editor world only, never PIE. Continue it with resume_behavior_tree.
+Pause the behavior tree of an actor (its AIController brain component, else a UBehaviorTreeComponent on the actor) with PauseLogic. The actor is looked up in a running PIE world first, then in the editor world; world says which answered (pie or editor) and world_name names it. paused is always true, not read back; was_running is measured. Runtime state only, nothing saved. An actor found in neither world, or one with no behavior tree component, is an error. Continue it with resume_behavior_tree.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Object name or label of the pawn, its AIController, or an actor with a UBehaviorTreeComponent, in the editor world (first match). |
+| `actor_name` | string | yes | Object name or label of the pawn, its AIController, or an actor with a UBehaviorTreeComponent, searched in the PIE world first, then the editor world (first match). |
 
-**Returns:** `{ actor_name, paused, was_running }`
+**Returns:** `{ actor_name, world: "pie"|"editor", world_name: string, paused, was_running }`
 
 ## `remove_behavior_tree_child`
 
@@ -237,34 +237,38 @@ Remove a key from a UBlackboardData asset and save it.  Inverse of add_blackboar
 
 *Destructive.*
 
-Restart the current behavior tree of an editor-world actor from its root (RestartTree), through its AIController brain component or a UBehaviorTreeComponent on the actor. restarted is always true, not measured: check get_behavior_tree_status. Editor world only, never PIE.
+Restart the current behavior tree of an actor from its root (RestartTree), through its AIController brain component or a UBehaviorTreeComponent on the actor; a stopped tree starts again from the last tree it ran. The actor is looked up in a running PIE world first, then in the editor world; world says which answered (pie or editor) and world_name names it. restarted is always true, not measured: check get_behavior_tree_status. Runtime state only, nothing saved. An actor found in neither world, or one with no behavior tree component, is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Name or label of the AI-possessed pawn (or AIController) whose UBehaviorTreeComponent to restart. |
+| `actor_name` | string | yes | Name or label of the AI-possessed pawn (or AIController) whose UBehaviorTreeComponent to restart, searched in the PIE world first, then the editor world. |
+
+**Returns:** `{ actor_name, world: "pie"|"editor", world_name: string, restarted: bool }`
 
 ## `resume_behavior_tree`
 
 *Destructive.*
 
-Resume a behavior tree paused by pause_behavior_tree (ResumeLogic) on an editor-world actor, through its AIController brain component or a UBehaviorTreeComponent on the actor. Returns was_paused and is_paused, both read from the component. Editor world only, never PIE.
+Resume a behavior tree paused by pause_behavior_tree (ResumeLogic), through the actor's AIController brain component or a UBehaviorTreeComponent on the actor. The actor is looked up in a running PIE world first, then in the editor world; world says which answered (pie or editor) and world_name names it. Returns was_paused and is_paused, both read from the component. Runtime state only, nothing saved. An actor found in neither world, or one with no behavior tree component, is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Name or label of the AI-possessed pawn (or AIController) whose UBehaviorTreeComponent to resume. |
+| `actor_name` | string | yes | Name or label of the AI-possessed pawn (or AIController) whose UBehaviorTreeComponent to resume, searched in the PIE world first, then the editor world. |
+
+**Returns:** `{ actor_name, world: "pie"|"editor", world_name: string, was_paused: bool, is_paused: bool }`
 
 ## `run_behavior_tree`
 
 *Destructive.*
 
-Start a BehaviorTree asset with AAIController::RunBehaviorTree on an AIController or the pawn it possesses. The actor is searched in the editor world only, never PIE, where pawns are not auto-possessed, so it usually errors with no AIController. Returns started and ai_controller; nothing is saved.
+Start a BehaviorTree asset with AAIController::RunBehaviorTree on an AIController or the pawn it possesses. The actor is looked up in a running PIE world first, where a placed pawn is possessed by its AI controller, then in the editor world, where no pawn is possessed (so an editor-world pawn errors with no AIController); world says which answered (pie or editor) and world_name names it. Returns started and ai_controller; runtime state only, nothing is saved. An actor found in neither world, a tree that does not load, or no AIController is an error. Read the run with get_behavior_tree_status; stop it with stop_behavior_tree.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Object name or label of the pawn or AIController in the editor world (first match). |
+| `actor_name` | string | yes | Object name or label of the pawn or AIController, searched in the PIE world first, then the editor world (first match). |
 | `behavior_tree_path` | string | yes | Asset path of the UBehaviorTree, e.g. "/Game/AI/BT_Enemy"; a bare asset name is not resolved. |
 
-**Returns:** `{ actor_name: string, behavior_tree_path: string, started: bool, ai_controller: string }`
+**Returns:** `{ actor_name: string, world: "pie"|"editor", world_name: string, behavior_tree_path: string, started: bool, ai_controller: string }`
 
 ## `set_behavior_tree_node_property`
 
@@ -314,24 +318,24 @@ Constrain an existing blackboard key's subsettings on a UBlackboardData asset an
 
 *Destructive, idempotent.*
 
-Write one key of the running blackboard of an editor-world actor, converting the value string by key type. Not read back: set is always true, and an unparsable number or vector is written as 0. Runtime state only, nothing saved; editor world only, never PIE. Verify with get_blackboard_value.
+Write one key of the running blackboard of an actor (its AIController blackboard, else one on the actor), converting the value string by key type. The actor is looked up in a running PIE world first, then in the editor world; world says which answered (pie or editor) and world_name names it. Not read back: set is always true, and an unparsable number or vector is written as 0. Runtime state only, nothing saved. Verify with get_blackboard_value.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Name of the actor whose blackboard to modify |
+| `actor_name` | string | yes | Object name or label of the actor whose blackboard to modify, searched in the PIE world first, then the editor world (first match) |
 | `key_name` | string | yes | Name of the blackboard key to set |
 | `value` | string | no | Value as a string, converted by key type: "42", "0.5", "true" or "1", a name, an enum index, a vector "X=1 Y=2 Z=3", a rotator "P=0 Y=90 R=0", an object or class path. Omitted means empty (0, false, none). |
 
-**Returns:** `{ actor_name: string, key_name: string, key_type: string, value: string, set: bool }`
+**Returns:** `{ actor_name: string, world: "pie"|"editor", world_name: string, key_name: string, key_type: string, value: string, set: bool }`
 
 ## `stop_behavior_tree`
 
 *Destructive.*
 
-Stop the behavior tree of an editor-world actor with StopTree (Safe mode), through its AIController brain component or else a UBehaviorTreeComponent on the actor. Runtime state only, nothing saved; editor world only, never PIE. was_running is read before the stop (running and not paused); stopped is true when a started tree, running or paused, is no longer started afterwards. A tree that was not started is not an error: success with stopped false and a note. A tree still started after the call (a task still aborting) is an error. An unknown actor, or one with no behavior tree component, is an error. Unlike pause_behavior_tree it cannot be continued with resume_behavior_tree: start again with restart_behavior_tree (the last tree) or run_behavior_tree.
+Stop the behavior tree of an actor with StopTree (Safe mode), through its AIController brain component or else a UBehaviorTreeComponent on the actor. The actor is looked up in a running PIE world first, then in the editor world; world says which answered (pie or editor) and world_name names it. Runtime state only, nothing saved. was_running is read before the stop (running and not paused); stopped is true when a started tree, running or paused, is no longer started afterwards. A tree that was not started is not an error: success with stopped false and a note. A tree still started after the call (a task still aborting) is an error. An actor found in neither world, or one with no behavior tree component, is an error. Unlike pause_behavior_tree it cannot be continued with resume_behavior_tree: start again with restart_behavior_tree (the last tree) or run_behavior_tree.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Object name or label of the pawn or AIController in the editor world (first match) |
+| `actor_name` | string | yes | Object name or label of the pawn or AIController, searched in the PIE world first, then the editor world (first match) |
 
-**Returns:** `{ actor_name: string, was_running: bool, stopped: bool, note?: string }`
+**Returns:** `{ actor_name: string, world: "pie"|"editor", world_name: string, was_running: bool, stopped: bool, note?: string }`

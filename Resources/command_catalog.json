@@ -1540,7 +1540,7 @@
         },
         {
           "name": "add_blend_space_sample",
-          "description": "Add one sample (an animation placed at a blend position) to a UBlendSpace or UBlendSpace1D in one undo step, rebuild its runtime data and save the asset. Every call appends a new sample, so it is not a retry-safe call: a position too close to an existing sample, an animation on another skeleton or one whose additive type differs from the existing samples is rejected by the engine with sample_index -1 and success=false, and no sample is added. A position past an axis range widens that axis. Create the asset with create_blend_space and list its samples with get_blend_space_samples; move or swap an existing sample with set_blend_space_sample, and take one out with remove_blend_space_sample. A failed save makes success false, with saved=false and save_error.",
+          "description": "Add one sample (an animation placed at a blend position) to a UBlendSpace or UBlendSpace1D in one undo step, rebuild its runtime data and save the asset. Every call appends a new sample, so it is not a retry-safe call. A sample the engine would reject is refused before anything changes, with success=false, added=false, sample_index -1, saved=false and the reason in the error: an animation whose skeleton is neither the blend space's nor compatible with it, an additive type the blend space does not take or that differs from the existing samples', a position already taken by a sample, or a position an axis cannot widen to in 1000 grid steps or fewer. Otherwise a position past an axis range widens that axis. The sample is read back after the rebuild: animation and blend_x, blend_y, blend_z are what the asset holds at sample_index. Create the asset with create_blend_space and list its samples with get_blend_space_samples; move or swap an existing sample with set_blend_space_sample, and take one out with remove_blend_space_sample. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "blendspace_path",
@@ -1554,7 +1554,7 @@
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Object path of the UAnimSequence played at this position, on the blend space's skeleton, e.g. '/Game/Animation/Run_Fwd'."
+              "description": "Object path of the UAnimSequence played at this position, on the blend space's skeleton or one compatible with it, e.g. '/Game/Animation/Run_Fwd'."
             },
             {
               "name": "blend_value",
@@ -1563,7 +1563,7 @@
               "description": "Blend position in the axis units: one number for a 1D blend space, or [x, y] (up to 3 numbers) for a 2D one, e.g. [0, 300]; default 0 on every axis."
             }
           ],
-          "returns": "{ blendspace_path, sample_index, num_samples, success, saved, save_error, message }",
+          "returns": "{ blendspace_path: string, sample_index: int, num_samples: int, added: bool, animation?: string, blend_x?: number, blend_y?: number, blend_z?: number, saved: bool, save_error?: string, message?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
@@ -3531,7 +3531,7 @@
         },
         {
           "name": "create_skeletal_mesh_morph_target",
-          "description": "Register a new morph target on a skeletal mesh asset in memory only, for the rest of the editor session: it is never saved (persisted_to_disk is always false), and a mesh rebuild or reload drops any morph the mesh's imported source data does not contain. Each LOD gets one tiny seed delta on vertex 0 so the morph counts as valid; write real deltas with set_morph_target_deltas. Marks the mesh dirty. Idempotent: an existing name returns created=false and already_exists=true.",
+          "description": "Register a new morph target on a skeletal mesh asset in memory only, for the rest of the editor session: it is never saved (persisted_to_disk is always false), and a mesh rebuild or reload drops any morph the mesh's imported source data does not contain. Each LOD gets one tiny seed delta on vertex 0 so the morph counts as valid; write real deltas with set_morph_target_deltas. Marks the mesh dirty; it is not an undo step. Idempotent: an existing name returns created=false and already_exists=true.",
           "params": [
             {
               "name": "skeletal_mesh_path",
@@ -7760,7 +7760,7 @@
         },
         {
           "name": "set_morph_target_deltas",
-          "description": "Overwrite all vertex deltas of an existing morph target on one LOD of a skeletal mesh asset with the deltas passed, then save the mesh. The LOD's old deltas are discarded; deltas whose position offset is 0.015 units or less are dropped (normal-only deltas included) and entries that are not objects are skipped, so deltas_set counts what was sent, not what was kept. Not an undo step; repeating the same call writes the same data again. A missing morph target or a lod_index outside the mesh's LODs is an error and nothing changes; a failed save is an error. Find the morph with get_skeletal_mesh_morph_targets (create_skeletal_mesh_morph_target adds one) and read the result back with get_morph_target_deltas, since total_deltas_lod0 only reports LOD 0.",
+          "description": "Overwrite all vertex deltas of an existing morph target on one LOD of a skeletal mesh asset with the deltas passed, in one undo step that restores the old deltas, then save the mesh. The undo step records the morph target only, not the mesh: undoing a step that holds the mesh rebuilds it, and the rebuild drops every morph target its imported data does not hold, those of create_skeletal_mesh_morph_target included. The LOD's old deltas are discarded; deltas whose position offset is 0.015 units or less are dropped (normal-only deltas included) and entries that are not objects are skipped, so deltas_set counts what was sent and total_deltas what that LOD kept. When the morph target had no data for a LOD below lod_index, the engine adds an empty one for it (created=true in deltas_per_lod). Every count is read back from the morph target after the save: total_deltas for lod_index, total_deltas_lod0 for LOD 0, deltas_per_lod for each LOD the morph target has, and total_deltas_all_lods. Repeating the same call writes the same data again. A missing morph target or a lod_index outside the mesh's LODs is an error and nothing changes; a failed save makes success false, with saved=false and save_error. Find the morph with get_skeletal_mesh_morph_targets (create_skeletal_mesh_morph_target adds one) and read the deltas themselves back with get_morph_target_deltas.",
           "params": [
             {
               "name": "skeletal_mesh_path",
@@ -7793,7 +7793,7 @@
               "description": "0-based LOD index whose deltas are overwritten (default 0); it must be below num_lods from get_skeletal_mesh_info."
             }
           ],
-          "returns": "{ morph_target_name: string, lod_index: int, deltas_set: int, total_deltas_lod0: int, saved: bool }",
+          "returns": "{ morph_target_name: string, lod_index: int, deltas_set: int, total_deltas: int, total_deltas_lod0: int, deltas_per_lod: [{ lod_index: int, total_deltas: int, written: bool, created: bool }], total_deltas_all_lods: int, saved: bool, save_error?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -11416,21 +11416,21 @@
         },
         {
           "name": "add_modulation_input_to_patch",
-          "description": "Appends a USoundControlBus as an input of a USoundModulationPatch asset, in one undo step (undo removes it again), and saves the patch. A bus whose asset name is already among the inputs is skipped (added false, already_present true, not saved). input_name is not stored. Returns patch_path, bus_path, input_count, added, already_present, saved.",
+          "description": "Add a control bus as an input of a sound modulation patch asset, so the patch's output follows that bus, then save the patch. Use it after create_sound_modulation_patch and create_control_bus, which make the two assets; see the inputs with get_sound_modulation_patch_info, take one out with remove_modulation_input_from_patch, and set what the patch drives with set_modulation_patch_output_parameter. Idempotent per bus: a bus whose asset name is already an input is not added again (added false, already_present true) and nothing is saved. A patch or bus path that does not load is an error and nothing changes. One undo step that removes the input again; a failed save answers success false with the change kept in memory.",
           "params": [
             {
               "name": "patch_path",
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Asset path to the USoundModulationPatch"
+              "description": "Asset path of the sound modulation patch, e.g. \"/Game/Audio/Mod/SMP_Ducking\", as create_sound_modulation_patch returns it."
             },
             {
               "name": "bus_path",
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Asset path to the USoundControlBus to add as an input"
+              "description": "Asset path of the control bus to add, e.g. \"/Game/Audio/Mod/CB_Music\", as create_control_bus returns it."
             },
             {
               "name": "input_name",
@@ -11443,8 +11443,8 @@
           "returns": "{ patch_path, bus_path, input_count, added, already_present, saved }",
           "annotations": {
             "readOnlyHint": false,
-            "destructiveHint": true,
-            "idempotentHint": false,
+            "destructiveHint": false,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },
@@ -12634,9 +12634,9 @@
         },
         {
           "name": "get_audio_settings",
-          "description": "Survey audio in the editor: a census of the first audio component of every actor in the editor world (even while PIE runs), with each one's volume, pitch and playing, looping and spatialized state, the counts and volume and pitch statistics, and the main audio device's state (audio_enabled, max channels, mixer loaded). Read-only; no parameters. Several fields are not measured: audio_quality comes from the channel count (64+ High, under 32 Low), audio_api is the platform's default backend, reverb and occlusion always read true, sample rate and buffer size are fixed defaults, and the recommendations and complexity score are heuristics. For the project's audio settings use get_project_settings_value; for one component in depth, get_audio_component_properties.",
+          "description": "Survey audio in the editor, every value read from the engine: a census of EVERY audio component of every actor in the editor world (even while PIE runs; an actor with several is counted once per component), each entry naming its owner and object path, with its volume, pitch and playing, looping and spatialized state, plus the counts and volume and pitch statistics; the main audio device's live state (audio_api is the module that created the device, then sample rate, buffer size, max channels, mixer and which audio plugins are on), all null with audio_device_note when there is no device (audio off: an editor started with -NoSound, or no device could be created); the audio quality level the engine applies (the user's quality level within the project's Audio settings levels); and the platform audio config the project sets (audio_platform_config, only the keys the config sets). Read-only; no parameters. audio_quality_score (the share of active components, null with none), the recommendations and the complexity score are heuristics. For other project audio settings use get_project_settings_value; for one component in depth, get_audio_component_properties.",
           "params": [],
-          "returns": "{ audio_settings_found: bool, audio_quality: string, audio_api: string, audio_enabled: bool, audio_mode: string, world_name?: string, audio_component_count: int, active_audio_component_count: int, spatialized_audio_component_count: int, average_volume: number, max_volume: number, max_pitch: number, engine_version: string, platform_name: string, audio_max_channels: int, audio_3d_enabled: bool, audio_reverb_enabled: bool, audio_occlusion_enabled: bool, audio_recommendations: [string], audio_complexity_score: number, audio_complexity_rating: string }",
+          "returns": "{ audio_settings_found: bool, audio_settings_message: string, world_name?: string, audio_component_count: int, active_audio_component_count: int, playing_audio_component_count: int, looping_audio_component_count: int, spatialized_audio_component_count: int, sound_wave_count: int, sound_cue_count: int, total_volume: number, average_volume: number, max_volume: number, min_volume: number, total_pitch: number, average_pitch: number, max_pitch: number, min_pitch: number, audio_component_details: [{ audio_component_name: string, audio_component_path: string, audio_owner_name: string, audio_component_class: string, audio_volume: number, audio_pitch: number, audio_enabled: bool, audio_playing: bool, audio_looping: bool, audio_spatialized: bool, audio_mobility: string, audio_sound_name: string, audio_sound_class: string, audio_sound_duration: number, audio_sound_is_sound_wave: bool, audio_sound_is_sound_cue: bool, audio_position: { x, y, z } }], engine_version: string, platform_name: string, platform_architecture: string, platform_os: string, audio_enabled: bool, audio_api: string|null, audio_mixer_loaded: bool|null, audio_max_channels: int|null, audio_sample_rate: number|null, audio_buffer_size: int|null, audio_num_buffers: int|null, audio_spatialization_plugin_enabled: bool|null, audio_reverb_plugin_enabled: bool|null, audio_occlusion_plugin_enabled: bool|null, audio_modulation_plugin_enabled: bool|null, audio_device_note?: string, audio_quality: string|null, audio_quality_level: int|null, audio_quality_max_channels: int|null, audio_quality_level_count: int, audio_platform_config: { section: string, sample_rate?: int, callback_buffer_frame_size?: int, num_buffers?: int, max_channels?: int, num_source_workers?: int }, audio_quality_score: number|null, audio_recommendations: [string], audio_complexity_score: number, audio_complexity_rating: string }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -13091,23 +13091,30 @@
         },
         {
           "name": "play_sound",
-          "description": "Starts the sound already assigned to an audio component of the editor world, matched by object name (case-insensitive) against the first audio component of each actor; components in a running PIE world are not reached. start_time is an offset in seconds into the sound. A component without a sound is an error: assign one with set_audio_sound. Transient: nothing is saved, marked dirty or undoable. was_playing and playing are read just before and just after the call. Stop with stop_sound; to play an asset at a location without a component use play_sound_at_location.",
+          "description": "Starts the sound already assigned to an audio component of the editor world, found by object name (case-insensitive) among EVERY audio component of every actor, so an actor's second or third audio component is reached too; a name that components of several actors carry is an error listing the owners unless actor_name (object name, not label) picks one. Components in a running PIE world are not reached. start_time is an offset in seconds into the sound. A component without a sound is an error: assign one with set_audio_sound. Transient: nothing is saved, marked dirty or undoable. success is true only when the audio device holds a new active sound for this component afterwards, read on the audio thread before and after the call (active_sounds_before/after, sounds of the component not being stopped). No audio device (an editor started with -NoSound, or no device could be created), a world that does not allow audio playback, or a sound the device did not start (not playable, out of range, a concurrency limit, a looping sound parked as a virtual loop until a listener comes in range) is an error saying which and naming the component. was_playing and playing (UAudioComponent::IsPlaying) are read just before and just after the call; audio_component_path and audio_owner_name name the component used. Stop with stop_sound; to play an asset at a location without a component use play_sound_at_location.",
           "params": [
             {
               "name": "audio_component_name",
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Name of the audio component to play sound on"
+              "description": "Object name of the audio component to play (e.g. \"AudioComponent0\"), compared without case against every audio component of every actor in the editor world."
             },
             {
               "name": "start_time",
               "jsonType": "number",
               "required": false,
               "description": "Optional offset in seconds to start playback at"
+            },
+            {
+              "name": "actor_name",
+              "jsonType": "string",
+              "required": false,
+              "nameLike": true,
+              "description": "Optional object name (not label) of the actor that owns the component, compared without case. Needed when several actors own an audio component of that name (every AmbientSound's is AudioComponent0); an empty one, one that names no actor, or one whose actor has no such component is an error."
             }
           ],
-          "returns": "{ audio_component_name: string, playing: bool, was_playing: bool, sound_name: string, start_time: number, success: bool }",
+          "returns": "{ audio_component_name: string, audio_component_path: string, audio_owner_name: string, playing: bool, was_playing: bool, sound_name: string, start_time: number, active_sounds_before: int, active_sounds_after: int (active sounds of this component on the device, those being stopped left out), active_sound_started: bool, success: bool }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
@@ -13117,7 +13124,7 @@
         },
         {
           "name": "play_sound_at_location",
-          "description": "Play a sound asset (sound wave, sound cue or MetaSound source) once at a world location in the editor world, as a fire-and-forget one-shot with no audio component (UGameplayStatics::PlaySoundAtLocation) and only the sound's own attenuation. Nothing is saved, dirtied or undoable, and no handle comes back: the sound plays to its end, a looping one keeps looping with no way to stop it from here, and one out of the listener's earshot is skipped by the engine. Each call starts another instance. success is true once the request is made, even with no audio device. A sound that does not load or a location that is not an array of 3 numbers is an error. For playback you can stop or inspect, use play_sound and stop_sound on an audio component (set_audio_sound assigns its sound).",
+          "description": "Play a sound asset (sound wave, sound cue or MetaSound source) once at a world location in the editor world, as a fire-and-forget one-shot with no audio component (UGameplayStatics::PlaySoundAtLocation) and only the sound's own attenuation. Nothing is saved, dirtied or undoable, and no handle comes back: the sound plays to its end, and a looping one keeps looping with no way to stop it from here. Each call starts another instance. success is true only when the audio device holds a new active sound of that asset afterwards, counted on the audio thread before and after the call (active_sounds_before/after). No audio device (an editor started with -NoSound, or no device could be created), a world that does not allow audio playback, a one-shot out of earshot of every listener (the engine's own audibility test), or a sound the device did not start (not playable, a concurrency limit, a looping sound parked as a virtual loop) is an error saying which. A sound that does not load or a location that is not an array of 3 numbers is an error too. For playback you can stop or inspect, use play_sound and stop_sound on an audio component (set_audio_sound assigns its sound).",
           "params": [
             {
               "name": "sound_path",
@@ -13152,7 +13159,7 @@
               "description": "Optional [pitch, yaw, roll] in degrees, the facing of the sound (it matters to a directional attenuation); default [0, 0, 0]."
             }
           ],
-          "returns": "{ sound_path: string, sound_name: string, location: { x, y, z }, rotation: { pitch, yaw, roll }, volume: number, pitch: number, success: bool }",
+          "returns": "{ sound_path: string, sound_name: string, location: { x, y, z }, rotation: { pitch, yaw, roll }, volume: number, pitch: number, audio_device_id: int, audible: bool (the engine's audibility test at that location), max_distance: number, looping: bool, active_sounds_before: int, active_sounds_after: int (active sounds of this asset on the device), active_sound_created: bool, success: bool }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
@@ -13463,23 +13470,30 @@
         },
         {
           "name": "set_audio_3d_settings",
-          "description": "Apply a 3D audio preset to one audio component of a placed actor in the editor world, in one undo step that dirties the level without saving it: spatialization (bAllowSpatialization) plus, for every preset but Disabled, an attenuation override sphere with the preset's inner radius and falloff distance (High 1000/2000 cm, Enabled and Medium 500/1000, Low 250/500); Disabled turns both off. audio_3d_configured is read back from the component; attenuation_falloff and the cone numbers only describe the preset. The same preset again gives the same result. Only the first audio component of each actor is searched, by object name; a missing component or unknown preset is an error and nothing changes. Read the result with get_audio_component_properties; set_audio_volume and set_audio_sound change the rest.",
+          "description": "Apply a 3D audio preset to one audio component of a placed actor in the editor world, in one undo step that dirties the level without saving it: spatialization (bAllowSpatialization) plus, for every preset but Disabled, an attenuation override sphere with the preset's inner radius and falloff distance (High 1000/2000 cm, Enabled and Medium 500/1000, Low 250/500); Disabled turns both off. audio_3d_configured is read back from the component; attenuation_falloff and the cone numbers only describe the preset. The same preset again gives the same result. The component is found by object name (case-insensitive) among EVERY audio component of every actor, so an actor's second or third audio component is reached too; a name that components of several actors carry is an error listing the owners unless actor_name (object name, not label) picks one, and the reply names the component changed (audio_component_path, audio_owner_name). A missing component or unknown preset is an error and nothing changes. Read the result with get_audio_component_properties; set_audio_volume and set_audio_sound change the rest.",
           "params": [
             {
               "name": "audio_component_name",
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Object name of the audio component, compared without case against the first audio component of each actor, e.g. 'AudioComponent0' (get_audio_settings lists them)."
+              "description": "Object name of the audio component, compared without case against every audio component of every actor, e.g. 'AudioComponent0' (get_audio_settings lists them with their owners)."
             },
             {
               "name": "audio_3d_settings",
               "jsonType": "string",
               "required": true,
               "description": "Preset name: 'Enabled', 'Disabled', 'High', 'Medium' or 'Low' (case-insensitive); any other name is an error."
+            },
+            {
+              "name": "actor_name",
+              "jsonType": "string",
+              "required": false,
+              "nameLike": true,
+              "description": "Optional object name (not label) of the actor that owns the component, compared without case. Needed when several actors own an audio component of that name (every AmbientSound's is AudioComponent0); an empty one, one that names no actor, or one whose actor has no such component is an error."
             }
           ],
-          "returns": "{ audio_component_name: string, audio_3d_settings: string, audio_3d_configured: bool, audio_3d_message: string, old_3d_enabled: bool, new_3d_enabled: bool, attenuation_override: bool, applied_attenuation_radius?: number, applied_falloff_distance?: number, 3d_enabled: bool, spatialization_enabled: bool, attenuation_distance: number, attenuation_radius: number, attenuation_falloff: number, attenuation_cone_angle: number, attenuation_cone_feather: number, audio_3d_recommendations: [string] }",
+          "returns": "{ audio_component_name: string, audio_component_path: string, audio_owner_name: string, audio_3d_settings: string, audio_3d_configured: bool, audio_3d_message: string, old_3d_enabled: bool, new_3d_enabled: bool, attenuation_override: bool, applied_attenuation_radius?: number, applied_falloff_distance?: number, 3d_enabled: bool, spatialization_enabled: bool, attenuation_distance: number, attenuation_radius: number, attenuation_falloff: number, attenuation_cone_angle: number, attenuation_cone_feather: number, audio_3d_recommendations: [string] }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -13515,14 +13529,14 @@
         },
         {
           "name": "set_audio_sound",
-          "description": "Sets the sound asset of an audio component of the editor world, matched by object name (case-insensitive) against the first audio component of each actor; components in a running PIE world are not reached. A component that is playing restarts with the new sound unless it allows multiple instances. The change is not saved, marked dirty or undoable. A missing component or a sound that does not load is an error. previous_sound_name names the sound it replaced (None when there was none). Start playback with play_sound.",
+          "description": "Sets the sound asset of an audio component of the editor world, found by object name (case-insensitive) among EVERY audio component of every actor, so an actor's second or third audio component is reached too; a name that components of several actors carry is an error listing the owners unless actor_name (object name, not label) picks one. Components in a running PIE world are not reached. A component that is playing restarts with the new sound unless it allows multiple instances. The change is not saved, marked dirty or undoable. A missing component or a sound that does not load is an error. previous_sound_name names the sound it replaced (None when there was none); audio_component_path and audio_owner_name name the component changed. Start playback with play_sound.",
           "params": [
             {
               "name": "audio_component_name",
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Name of the audio component to modify"
+              "description": "Object name of the audio component to modify (e.g. \"AudioComponent0\"), compared without case against every audio component of every actor in the editor world."
             },
             {
               "name": "sound_path",
@@ -13530,9 +13544,16 @@
               "required": true,
               "nameLike": true,
               "description": "Full asset path to the sound (e.g. '/Game/Audio/MySound.MySound')"
+            },
+            {
+              "name": "actor_name",
+              "jsonType": "string",
+              "required": false,
+              "nameLike": true,
+              "description": "Optional object name (not label) of the actor that owns the component, compared without case. Needed when several actors own an audio component of that name (every AmbientSound's is AudioComponent0); an empty one, one that names no actor, or one whose actor has no such component is an error."
             }
           ],
-          "returns": "{ audio_component_name: string, sound_path: string, sound_name: string, previous_sound_name: string, sound_duration: number, success: bool }",
+          "returns": "{ audio_component_name: string, audio_component_path: string, audio_owner_name: string, sound_path: string, sound_name: string, previous_sound_name: string, sound_duration: number, success: bool }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -13542,23 +13563,30 @@
         },
         {
           "name": "set_audio_volume",
-          "description": "Set VolumeMultiplier (0 to 10, else an error; also resets VolumeModulationMin/Max to 1) on an audio component of the editor world, matched by object name against the first audio component of each actor. No undo, no dirty mark. Returns old_volume, new_volume and volume_set.",
+          "description": "Set VolumeMultiplier (0 to 10, else an error; also resets VolumeModulationMin/Max to 1) on one audio component of the editor world, found by object name (case-insensitive) among EVERY audio component of every actor, so an actor's second or third audio component is reached too. A name that components of several actors carry is an error listing the owners, nothing changed, unless actor_name (object name, not label) picks one. No undo, no dirty mark. Returns old_volume, new_volume and volume_set, and which component it changed: audio_component_path and audio_owner_name.",
           "params": [
             {
               "name": "audio_component_name",
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Object name of the audio component to modify (e.g. \"AudioComponent0\"), compared without case; only the first audio component of each actor is searched."
+              "description": "Object name of the audio component to modify (e.g. \"AudioComponent0\"), compared without case against every audio component of every actor in the editor world."
             },
             {
               "name": "volume",
               "jsonType": "number",
               "required": true,
               "description": "Volume multiplier between 0.0 and 10.0"
+            },
+            {
+              "name": "actor_name",
+              "jsonType": "string",
+              "required": false,
+              "nameLike": true,
+              "description": "Optional object name (not label) of the actor that owns the component, compared without case. Needed when several actors own an audio component of that name (every AmbientSound's is AudioComponent0); an empty one, one that names no actor, or one whose actor has no such component is an error."
             }
           ],
-          "returns": "{ audio_component_name: string, old_volume: number, new_volume: number, requested_volume: number, volume_set: bool, volume_message: string, audio_enabled: bool, audio_pitch: number, audio_mobility: string, audio_sound_name: string, audio_3d_attenuation_radius: number, audio_position: { x, y, z }, audio_owner_name: string }",
+          "returns": "{ audio_component_name: string, audio_component_path: string, audio_owner_name: string, old_volume: number, new_volume: number, requested_volume: number, volume_set: bool, volume_message: string, audio_enabled: bool, audio_pitch: number, audio_mobility: string, audio_sound_name: string, audio_3d_attenuation_radius: number, audio_position: { x, y, z } }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -13900,7 +13928,7 @@
         },
         {
           "name": "set_modulation_parameter_settings",
-          "description": "Writes the given Settings fields (value_normalized, clamp_to_normalized_range, value_unit) of a USoundModulationParameter asset, in one undo step (undo restores the previous settings), and saves it; omitted fields keep their value, and the asset is saved even when none is given. Returns parameter_path, the three settings as stored, updated, saved.",
+          "description": "Change the default value and range settings of a sound modulation parameter asset (the value a modulator starts from, and whether it is clamped to 0-1), then save it. Use it after create_modulation_parameter, which makes the asset; read the settings back with get_modulation_parameter_info. Only the fields you pass change; the others keep their value, and a call with none of them still saves the asset. A path that does not load as a modulation parameter is an error, and so is clamp_to_normalized_range on Unreal Engine 5.7, which lacks that setting; nothing changes then. Idempotent: the same values give the same asset. One undo step that restores the previous settings; a failed save answers success false with the change kept in memory.",
           "params": [
             {
               "name": "parameter_path",
@@ -13913,19 +13941,19 @@
               "name": "value_normalized",
               "jsonType": "number",
               "required": false,
-              "description": "Optional float in [0,1]; sets Settings.ValueNormalized"
+              "description": "Default value in normalized units, from 0 to 1 (e.g. 0.5); written as given, without clamping."
             },
             {
               "name": "clamp_to_normalized_range",
               "jsonType": "boolean",
               "required": false,
-              "description": "Optional bool; sets Settings.bClampToNormalizedRange. Needs UE 5.8."
+              "description": "true to keep the parameter's value within 0-1, false to let it go outside; Unreal Engine 5.8 only (refused on 5.7)."
             },
             {
               "name": "value_unit",
               "jsonType": "number",
               "required": false,
-              "description": "Optional float (editor-only); sets Settings.ValueUnit"
+              "description": "Default value in the parameter's own unit (for example decibels or hertz), shown in the editor; editor-only."
             }
           ],
           "returns": "{ parameter_path, value_normalized, clamp_to_normalized_range, value_unit, updated, saved }",
@@ -14535,17 +14563,24 @@
         },
         {
           "name": "stop_sound",
-          "description": "Stop playback on an audio component of the editor world (UAudioComponent::Stop), matched by object name against the first audio component of each actor; components in a running PIE world are not reached. Returns was_playing and playing; success is always true. Start playback with play_sound.",
+          "description": "Stop playback on an audio component of the editor world (UAudioComponent::Stop), found by object name (case-insensitive) among EVERY audio component of every actor, so an actor's second or third audio component is reached too; a name that components of several actors carry is an error listing the owners unless actor_name (object name, not label) picks one. Components in a running PIE world are not reached. Returns was_playing and playing, and audio_component_path and audio_owner_name naming the component stopped; success is always true once the component is found. Start playback with play_sound.",
           "params": [
             {
               "name": "audio_component_name",
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Object name of the audio component to stop (e.g. \"AudioComponent0\"), compared without case; only the first audio component of each actor is searched."
+              "description": "Object name of the audio component to stop (e.g. \"AudioComponent0\"), compared without case against every audio component of every actor in the editor world."
+            },
+            {
+              "name": "actor_name",
+              "jsonType": "string",
+              "required": false,
+              "nameLike": true,
+              "description": "Optional object name (not label) of the actor that owns the component, compared without case. Needed when several actors own an audio component of that name (every AmbientSound's is AudioComponent0); an empty one, one that names no actor, or one whose actor has no such component is an error."
             }
           ],
-          "returns": "{ audio_component_name: string, playing: bool, was_playing: bool, success: bool }",
+          "returns": "{ audio_component_name: string, audio_component_path: string, audio_owner_name: string, playing: bool, was_playing: bool, success: bool }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -15196,7 +15231,7 @@
         },
         {
           "name": "get_behavior_tree_status",
-          "description": "Read the live state of the behavior tree component driving one actor: has_bt (whether a UBehaviorTreeComponent was found, through the actor's AIController brain or on the actor itself), is_running, is_paused, bt_asset_name (the tree it is running) and active_node_name (the node it is executing, empty when none). The actor is looked up in a running PIE world first, where possessed AI pawns run their trees, then in the editor world (where a tree started with run_behavior_tree runs); world says which answered (pie or editor) and world_name names it. Read-only. An actor without a tree is a success with has_bt false; an actor found in neither world is an error. Inspect the tree asset itself with get_behavior_tree_info and blackboard values with get_blackboard_value; change the run state with pause_behavior_tree, resume_behavior_tree, restart_behavior_tree or stop_behavior_tree (editor world only).",
+          "description": "Read the live state of the behavior tree component driving one actor: has_bt (whether a UBehaviorTreeComponent was found, through the actor's AIController brain or on the actor itself), is_running, is_paused, bt_asset_name (the tree it is running) and active_node_name (the node it is executing, empty when none). The actor is looked up in a running PIE world first, where possessed AI pawns run their trees, then in the editor world; world says which answered (pie or editor) and world_name names it. Read-only. An actor without a tree is a success with has_bt false; an actor found in neither world is an error. Inspect the tree asset itself with get_behavior_tree_info and blackboard values with get_blackboard_value; change the run state with run_behavior_tree, pause_behavior_tree, resume_behavior_tree, restart_behavior_tree or stop_behavior_tree, which look the actor up the same way.",
           "params": [
             {
               "name": "actor_name",
@@ -15216,14 +15251,14 @@
         },
         {
           "name": "get_blackboard_data",
-          "description": "Dump a blackboard from its asset or from a running component. With blackboard_path, which wins when both are given, it reads the UBlackboardData asset: name, parent and key definitions (name, type, instance_synced, base class or enum subsettings). With actor_name, it reads the running UBlackboardComponent of that actor in the editor world, never PIE (its AIController blackboard, else one on the actor): the component's name, has_valid_asset and num_keys, the key definitions of its blackboard asset as keys, and entries with each key's name, type and current value as text; a component with no asset gives empty lists. Either way every key is listed in key-ID order, those inherited from parent blackboards first, each with inherited and defined_in naming the asset that declares it. Nothing is written. No parameter, an asset that does not load, an actor not found by object name or label, or no running blackboard is an error. One key: get_blackboard_value; write a value: set_blackboard_value; add a key: add_blackboard_key.",
+          "description": "Dump a blackboard from its asset or from a running component. With blackboard_path, which wins when both are given, it reads the UBlackboardData asset: name, parent and key definitions (name, type, instance_synced, base class or enum subsettings). With actor_name, it reads the running UBlackboardComponent of that actor (its AIController blackboard, else one on the actor), the actor looked up in a running PIE world first, then in the editor world, with world (pie or editor) and world_name saying which answered: the component's name, has_valid_asset and num_keys, the key definitions of its blackboard asset as keys, and entries with each key's name, type and current value as text; a component with no asset gives empty lists. Either way every key is listed in key-ID order, those inherited from parent blackboards first, each with inherited and defined_in naming the asset that declares it. Nothing is written. No parameter, an asset that does not load, an actor found by object name or label in neither world, or no running blackboard is an error. One key: get_blackboard_value; write a value: set_blackboard_value; add a key: add_blackboard_key.",
           "params": [
             {
               "name": "actor_name",
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "description": "Object name or label of the editor-world pawn, its AIController, or an actor with its own UBlackboardComponent, whose running blackboard to dump (first match); ignored when blackboard_path is given"
+              "description": "Object name or label of the pawn, its AIController, or an actor with its own UBlackboardComponent, whose running blackboard to dump, searched in the PIE world first, then the editor world (first match); ignored when blackboard_path is given"
             },
             {
               "name": "blackboard_path",
@@ -15233,7 +15268,7 @@
               "description": "Content path of a UBlackboardData asset to read instead, e.g. \"/Game/AI/BB_Enemy\"; takes precedence over actor_name"
             }
           ],
-          "returns": "{ actor_name: string?, blackboard_asset: string?, name: string?, parent: string?, component_name: string? (actor mode), has_valid_asset: bool? (actor mode), num_keys: number? (actor mode), keys: [{ name, type, instance_synced, base_class?, enum_type?, enum_name?, inherited, defined_in }], entries: [{ name, type, value, inherited, defined_in }]? (actor mode), key_count: number }",
+          "returns": "{ actor_name: string?, world: \"pie\"|\"editor\"? (actor mode), world_name: string? (actor mode), blackboard_asset: string?, name: string?, parent: string?, component_name: string? (actor mode), has_valid_asset: bool? (actor mode), num_keys: number? (actor mode), keys: [{ name, type, instance_synced, base_class?, enum_type?, enum_name?, inherited, defined_in }], entries: [{ name, type, value, inherited, defined_in }]? (actor mode), key_count: number }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -15243,14 +15278,14 @@
         },
         {
           "name": "get_blackboard_value",
-          "description": "Read one key of the running blackboard of an editor-world actor (its AIController blackboard, else one on the actor). value is a number for Int, Float and Enum keys, a bool for Bool, else a string (objects as paths). Read-only; editor world only, never PIE.",
+          "description": "Read one key of the running blackboard of an actor (its AIController blackboard, else one on the actor). The actor is looked up in a running PIE world first, then in the editor world; world says which answered (pie or editor) and world_name names it. value is a number for Int, Float and Enum keys, a bool for Bool, else a string (objects as paths). Read-only.",
           "params": [
             {
               "name": "actor_name",
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Name of the actor whose blackboard to query"
+              "description": "Object name or label of the actor whose blackboard to query, searched in the PIE world first, then the editor world (first match)"
             },
             {
               "name": "key_name",
@@ -15260,7 +15295,7 @@
               "description": "Name of the blackboard key to retrieve"
             }
           ],
-          "returns": "{ actor_name: string, key_name: string, key_type: string, value: number|string|bool }",
+          "returns": "{ actor_name: string, world: \"pie\"|\"editor\", world_name: string, key_name: string, key_type: string, value: number|string|bool }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -15270,17 +15305,17 @@
         },
         {
           "name": "pause_behavior_tree",
-          "description": "Pause the behavior tree of an editor-world actor (its AIController brain component, else a UBehaviorTreeComponent on the actor) with PauseLogic. paused is always true, not read back; was_running is measured. Editor world only, never PIE. Continue it with resume_behavior_tree.",
+          "description": "Pause the behavior tree of an actor (its AIController brain component, else a UBehaviorTreeComponent on the actor) with PauseLogic. The actor is looked up in a running PIE world first, then in the editor world; world says which answered (pie or editor) and world_name names it. paused is always true, not read back; was_running is measured. Runtime state only, nothing saved. An actor found in neither world, or one with no behavior tree component, is an error. Continue it with resume_behavior_tree.",
           "params": [
             {
               "name": "actor_name",
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Object name or label of the pawn, its AIController, or an actor with a UBehaviorTreeComponent, in the editor world (first match)."
+              "description": "Object name or label of the pawn, its AIController, or an actor with a UBehaviorTreeComponent, searched in the PIE world first, then the editor world (first match)."
             }
           ],
-          "returns": "{ actor_name, paused, was_running }",
+          "returns": "{ actor_name, world: \"pie\"|\"editor\", world_name: string, paused, was_running }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -15456,17 +15491,17 @@
         },
         {
           "name": "restart_behavior_tree",
-          "description": "Restart the current behavior tree of an editor-world actor from its root (RestartTree), through its AIController brain component or a UBehaviorTreeComponent on the actor. restarted is always true, not measured: check get_behavior_tree_status. Editor world only, never PIE.",
+          "description": "Restart the current behavior tree of an actor from its root (RestartTree), through its AIController brain component or a UBehaviorTreeComponent on the actor; a stopped tree starts again from the last tree it ran. The actor is looked up in a running PIE world first, then in the editor world; world says which answered (pie or editor) and world_name names it. restarted is always true, not measured: check get_behavior_tree_status. Runtime state only, nothing saved. An actor found in neither world, or one with no behavior tree component, is an error.",
           "params": [
             {
               "name": "actor_name",
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Name or label of the AI-possessed pawn (or AIController) whose UBehaviorTreeComponent to restart."
+              "description": "Name or label of the AI-possessed pawn (or AIController) whose UBehaviorTreeComponent to restart, searched in the PIE world first, then the editor world."
             }
           ],
-          "returns": "",
+          "returns": "{ actor_name, world: \"pie\"|\"editor\", world_name: string, restarted: bool }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -15476,17 +15511,17 @@
         },
         {
           "name": "resume_behavior_tree",
-          "description": "Resume a behavior tree paused by pause_behavior_tree (ResumeLogic) on an editor-world actor, through its AIController brain component or a UBehaviorTreeComponent on the actor. Returns was_paused and is_paused, both read from the component. Editor world only, never PIE.",
+          "description": "Resume a behavior tree paused by pause_behavior_tree (ResumeLogic), through the actor's AIController brain component or a UBehaviorTreeComponent on the actor. The actor is looked up in a running PIE world first, then in the editor world; world says which answered (pie or editor) and world_name names it. Returns was_paused and is_paused, both read from the component. Runtime state only, nothing saved. An actor found in neither world, or one with no behavior tree component, is an error.",
           "params": [
             {
               "name": "actor_name",
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Name or label of the AI-possessed pawn (or AIController) whose UBehaviorTreeComponent to resume."
+              "description": "Name or label of the AI-possessed pawn (or AIController) whose UBehaviorTreeComponent to resume, searched in the PIE world first, then the editor world."
             }
           ],
-          "returns": "",
+          "returns": "{ actor_name, world: \"pie\"|\"editor\", world_name: string, was_paused: bool, is_paused: bool }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -15496,14 +15531,14 @@
         },
         {
           "name": "run_behavior_tree",
-          "description": "Start a BehaviorTree asset with AAIController::RunBehaviorTree on an AIController or the pawn it possesses. The actor is searched in the editor world only, never PIE, where pawns are not auto-possessed, so it usually errors with no AIController. Returns started and ai_controller; nothing is saved.",
+          "description": "Start a BehaviorTree asset with AAIController::RunBehaviorTree on an AIController or the pawn it possesses. The actor is looked up in a running PIE world first, where a placed pawn is possessed by its AI controller, then in the editor world, where no pawn is possessed (so an editor-world pawn errors with no AIController); world says which answered (pie or editor) and world_name names it. Returns started and ai_controller; runtime state only, nothing is saved. An actor found in neither world, a tree that does not load, or no AIController is an error. Read the run with get_behavior_tree_status; stop it with stop_behavior_tree.",
           "params": [
             {
               "name": "actor_name",
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Object name or label of the pawn or AIController in the editor world (first match)."
+              "description": "Object name or label of the pawn or AIController, searched in the PIE world first, then the editor world (first match)."
             },
             {
               "name": "behavior_tree_path",
@@ -15513,7 +15548,7 @@
               "description": "Asset path of the UBehaviorTree, e.g. \"/Game/AI/BT_Enemy\"; a bare asset name is not resolved."
             }
           ],
-          "returns": "{ actor_name: string, behavior_tree_path: string, started: bool, ai_controller: string }",
+          "returns": "{ actor_name: string, world: \"pie\"|\"editor\", world_name: string, behavior_tree_path: string, started: bool, ai_controller: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -15638,14 +15673,14 @@
         },
         {
           "name": "set_blackboard_value",
-          "description": "Write one key of the running blackboard of an editor-world actor, converting the value string by key type. Not read back: set is always true, and an unparsable number or vector is written as 0. Runtime state only, nothing saved; editor world only, never PIE. Verify with get_blackboard_value.",
+          "description": "Write one key of the running blackboard of an actor (its AIController blackboard, else one on the actor), converting the value string by key type. The actor is looked up in a running PIE world first, then in the editor world; world says which answered (pie or editor) and world_name names it. Not read back: set is always true, and an unparsable number or vector is written as 0. Runtime state only, nothing saved. Verify with get_blackboard_value.",
           "params": [
             {
               "name": "actor_name",
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Name of the actor whose blackboard to modify"
+              "description": "Object name or label of the actor whose blackboard to modify, searched in the PIE world first, then the editor world (first match)"
             },
             {
               "name": "key_name",
@@ -15661,7 +15696,7 @@
               "description": "Value as a string, converted by key type: \"42\", \"0.5\", \"true\" or \"1\", a name, an enum index, a vector \"X=1 Y=2 Z=3\", a rotator \"P=0 Y=90 R=0\", an object or class path. Omitted means empty (0, false, none)."
             }
           ],
-          "returns": "{ actor_name: string, key_name: string, key_type: string, value: string, set: bool }",
+          "returns": "{ actor_name: string, world: \"pie\"|\"editor\", world_name: string, key_name: string, key_type: string, value: string, set: bool }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -15671,17 +15706,17 @@
         },
         {
           "name": "stop_behavior_tree",
-          "description": "Stop the behavior tree of an editor-world actor with StopTree (Safe mode), through its AIController brain component or else a UBehaviorTreeComponent on the actor. Runtime state only, nothing saved; editor world only, never PIE. was_running is read before the stop (running and not paused); stopped is true when a started tree, running or paused, is no longer started afterwards. A tree that was not started is not an error: success with stopped false and a note. A tree still started after the call (a task still aborting) is an error. An unknown actor, or one with no behavior tree component, is an error. Unlike pause_behavior_tree it cannot be continued with resume_behavior_tree: start again with restart_behavior_tree (the last tree) or run_behavior_tree.",
+          "description": "Stop the behavior tree of an actor with StopTree (Safe mode), through its AIController brain component or else a UBehaviorTreeComponent on the actor. The actor is looked up in a running PIE world first, then in the editor world; world says which answered (pie or editor) and world_name names it. Runtime state only, nothing saved. was_running is read before the stop (running and not paused); stopped is true when a started tree, running or paused, is no longer started afterwards. A tree that was not started is not an error: success with stopped false and a note. A tree still started after the call (a task still aborting) is an error. An actor found in neither world, or one with no behavior tree component, is an error. Unlike pause_behavior_tree it cannot be continued with resume_behavior_tree: start again with restart_behavior_tree (the last tree) or run_behavior_tree.",
           "params": [
             {
               "name": "actor_name",
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Object name or label of the pawn or AIController in the editor world (first match)"
+              "description": "Object name or label of the pawn or AIController, searched in the PIE world first, then the editor world (first match)"
             }
           ],
-          "returns": "{ actor_name: string, was_running: bool, stopped: bool, note?: string }",
+          "returns": "{ actor_name: string, world: \"pie\"|\"editor\", world_name: string, was_running: bool, stopped: bool, note?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -27119,7 +27154,7 @@
         },
         {
           "name": "duplicate_niagara_module_in_stack",
-          "description": "Add another instance of a module to one emitter of a Niagara System asset: the module named module_name (its function name, case-sensitive, as list_niagara_modules gives it) is found on the script_group stack only (spawn or update, default update; any other value reads as update) and its script is added again to that stack through FNiagaraStackGraphUtilities::AddScriptModuleToStack, in one undo step, then a system compile is requested and the system saved. The new module starts with the default inputs of the script; the input overrides of the source are not copied. Positions are stack positions, as list_niagara_modules reports index: target_index_override sets it (clamped into the stack, -1 appends), else it goes right after the source. inserted_index is read back from the stack, and a module that did not land where asked fails the call. An unknown system, emitter or module (or a module only on the other stack) is an error and nothing changes; a failed save makes success false, with saved=false and save_error. Inputs: set_niagara_module_input; move: reorder_niagara_modules.",
+          "description": "Add another instance of a module to one emitter of a Niagara System asset: the module named module_name (its function name, case-sensitive, as list_niagara_modules gives it) is found on the script_group stack only (spawn or update, any case, default update) and its script is added again to that stack through FNiagaraStackGraphUtilities::AddScriptModuleToStack, in one undo step, then a system compile is requested and the system saved. The new module starts with the default inputs of the script; the input overrides of the source are not copied. Positions are stack positions, as list_niagara_modules reports index: target_index_override sets it (clamped into the stack, -1 appends), else it goes right after the source. inserted_index is read back from the stack, and a module that did not land where asked fails the call. An unknown system, emitter, script_group or module (or a module only on the other stack) is an error and nothing changes; a failed save makes success false, with saved=false and save_error. Inputs: set_niagara_module_input; move: reorder_niagara_modules.",
           "params": [
             {
               "name": "system_path",
@@ -27147,7 +27182,7 @@
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "description": "Optional \"spawn\" or \"update\"; defaults to \"update\""
+              "description": "Optional \"spawn\" or \"update\" (any case), the stack the module is on; defaults to \"update\"; any other value is an error and nothing changes."
             },
             {
               "name": "target_index_override",
@@ -27840,7 +27875,7 @@
         },
         {
           "name": "remove_niagara_module_from_stack",
-          "description": "Remove one module from a Niagara emitter's particle spawn or update stack, in one undo step: the module and every node that feeds it (its input overrides, dynamic inputs and data-interface inputs) are taken out and the stack's chain is closed over the gap, then a system compile is requested and the system saved. The module is found by function name (case-sensitive) on the script_group stack only, the first one in execution order, as list_niagara_modules lists it. The result is read back: removed is true when the module is off the stack and the stack is one module shorter, chain_intact when the stack still runs from its input to its output node; either false fails the call. An unknown system, emitter or module (or a module only on the other stack) is an error and nothing changes; a failed save makes success false, with saved=false and save_error. The inverse is add_niagara_module_to_stack.",
+          "description": "Remove one module from a Niagara emitter's particle spawn or update stack, in one undo step: the module and every node that feeds it (its input overrides, dynamic inputs and data-interface inputs) are taken out and the stack's chain is closed over the gap, then a system compile is requested and the system saved. The module is found by function name (case-sensitive) on the script_group stack only, the first one in execution order, as list_niagara_modules lists it. The result is read back: removed is true when the module is off the stack and the stack is one module shorter, chain_intact when the stack still runs from its input to its output node; either false fails the call. An unknown system, emitter, script_group or module (or a module only on the other stack) is an error and nothing changes; a failed save makes success false, with saved=false and save_error. The inverse is add_niagara_module_to_stack.",
           "params": [
             {
               "name": "system_path",
@@ -27868,7 +27903,7 @@
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "description": "Optional \"spawn\" or \"update\" (any case), the stack the module is on; defaults to \"update\", and any other value reads as update."
+              "description": "Optional \"spawn\" or \"update\" (any case), the stack the module is on; defaults to \"update\"; any other value is an error and nothing changes."
             }
           ],
           "returns": "{ system_path: string, emitter_name: string, script_group: string, module_name: string, removed_index: int, removed_node_count: int, module_count: int, chain_intact: bool, removed: bool, saved: bool, save_error?: string }",
@@ -29237,7 +29272,7 @@
         },
         {
           "name": "set_niagara_module_enabled",
-          "description": "Enable or disable one module of a Niagara emitter's particle spawn or update stack (FNiagaraStackGraphUtilities::SetModuleIsEnabled), in one undo step, then request a system compile and save the system; a disabled module stays on the stack but does not run. The module is found by function name (case-sensitive) on the script_group stack only, the first one in execution order. previous_enabled and enabled are read from the node before and after; an enabled state that did not take fails the call. A module already in that state changes nothing: changed false, saved false and a note. An unknown system, emitter or module (or a module only on the other stack) is an error and nothing changes; a failed save makes success false, with saved=false and save_error. list_niagara_modules shows each module's is_enabled.",
+          "description": "Enable or disable one module of a Niagara emitter's particle spawn or update stack (FNiagaraStackGraphUtilities::SetModuleIsEnabled), in one undo step, then request a system compile and save the system; a disabled module stays on the stack but does not run. The module is found by function name (case-sensitive) on the script_group stack only, the first one in execution order. previous_enabled and enabled are read from the node before and after; an enabled state that did not take fails the call. A module already in that state changes nothing: changed false, saved false and a note. An unknown system, emitter, script_group or module (or a module only on the other stack) is an error and nothing changes; a failed save makes success false, with saved=false and save_error. list_niagara_modules shows each module's is_enabled.",
           "params": [
             {
               "name": "system_path",
@@ -29271,7 +29306,7 @@
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "description": "Optional \"spawn\" or \"update\"; defaults to \"update\", and any other value reads as update."
+              "description": "Optional \"spawn\" or \"update\" (any case), the stack the module is on; defaults to \"update\"; any other value is an error and nothing changes."
             }
           ],
           "returns": "{ system_path: string, emitter_name: string, script_group: string, module_name: string, module_index: int, previous_enabled: bool, enabled: bool, changed: bool, saved: bool, save_error?: string, note?: string }",
@@ -64042,7 +64077,7 @@
         },
         {
           "name": "save_usd_stage",
-          "description": "Save a USD stage's file layers to disk: the root layer and every sublayer of its stack (UE::FSdfLayer::Save on each), each one only when it is dirty unless force is set. layers reports every layer with was_dirty, saved, dirty after and, for one left alone, skipped (\"clean\", or \"anonymous\" for an in-memory layer, which has no file); layers_saved counts the writes. Session layers are never saved (they are in-memory by design); a memory-only stage is exported with flatten_usd_stage instead. saved is true when at least one layer was written and none failed; when every layer is clean or anonymous nothing is written and the call fails with saved:false, and a layer whose Save returns false is named in the error. Use force=true to re-write clean file layers (rare — typically only when a downstream tool requires a specific mtime). list_usd_stage_layers shows which layers are dirty first.",
+          "description": "Save a USD stage's file layers to disk: the root layer and every sublayer of its stack (UE::FSdfLayer::Save on each), each one only when it is dirty unless force is set. layers reports every layer with was_dirty, saved, dirty after and, for one left alone, skipped (\"clean\", or \"anonymous\" for an in-memory layer, which has no file); layers_saved counts the writes. Session layers are never saved (they are in-memory by design); a memory-only stage is exported with flatten_usd_stage instead. When nothing needs saving (every layer clean) nothing is written and the call succeeds with layers_saved 0, saved false and a note. saved is true when at least one layer was written and every dirty layer was; a dirty layer left unsaved -- its Save returned false, or it is anonymous, with no file to write -- fails the call with saved false and a save_error naming it. Use force=true to re-write clean file layers (rare — typically only when a downstream tool requires a specific mtime). list_usd_stage_layers shows which layers are dirty first.",
           "params": [
             {
               "name": "stage_name",
@@ -64057,7 +64092,7 @@
               "description": "Re-save every file layer of the stack even when it is clean (default false: only dirty layers are written)."
             }
           ],
-          "returns": "{ stage_name: string, resolution: string, saved: bool, layers_saved: int, layers: [{ identifier: string, real_path: string, is_root: bool, was_dirty: bool, saved: bool, dirty: bool, skipped?: string }], dirty: bool (the root layer after the save), force: bool, real_path: string (the root layer's), errors: [string]? }",
+          "returns": "{ stage_name: string, resolution: string, saved: bool, layers_saved: int, layers: [{ identifier: string, real_path: string, is_root: bool, was_dirty: bool, saved: bool, dirty: bool, skipped?: string }], dirty: bool (the root layer after the save), force: bool, real_path: string (the root layer's), note?: string (nothing needed saving), save_error?: string (the dirty layers left unsaved), errors: [string]? }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
