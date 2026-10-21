@@ -530,8 +530,38 @@ TSharedPtr<FJsonObject> HandleSetMaterialInstanceParam(const TSharedPtr<FJsonObj
     Params->TryGetStringField(TEXT("param_type"), ParamType);
 
     // A static switch or component mask needs its static permutation rebuilt and the instance saved, and a layer
-    // parameter needs its layer: the tool that does each runs the call.
+    // parameter needs its layer: the tool that does each runs the call. Its reply also carries the fields this tool
+    // answers with (instance_path, param_name, param_type, set, value_after, overridden_after), so a caller that reads
+    // them is not broken.
     {
+        auto WithOwnFields = [&InstancePath, &ParamName](TSharedPtr<FJsonObject> Reply, const TCHAR* Type)
+        {
+            const TSharedPtr<FJsonObject>* Data = nullptr;
+            if (Reply.IsValid() && Reply->TryGetObjectField(TEXT("data"), Data) && Data && Data->IsValid())
+            {
+                (*Data)->SetStringField(TEXT("instance_path"), InstancePath);
+                (*Data)->SetStringField(TEXT("param_name"), ParamName);
+                (*Data)->SetStringField(TEXT("param_type"), Type);
+                const TSharedPtr<FJsonValue> After = (*Data)->TryGetField(TEXT("value"));
+                const TSharedPtr<FJsonValue> Asked = (*Data)->TryGetField(TEXT("requested_value")).IsValid()
+                    ? (*Data)->TryGetField(TEXT("requested_value")) : (*Data)->TryGetField(TEXT("requested"));
+                if (After.IsValid())
+                {
+                    (*Data)->SetField(TEXT("value_after"), After);
+                }
+                if (Asked.IsValid())
+                {
+                    (*Data)->SetField(TEXT("value_requested"), Asked);
+                }
+                bool bFound = false;
+                if ((*Data)->TryGetBoolField(TEXT("found"), bFound))
+                {
+                    (*Data)->SetBoolField(TEXT("overridden_after"), bFound);
+                }
+                (*Data)->SetBoolField(TEXT("set"), After.IsValid() && Asked.IsValid() && FJsonValue::CompareEqual(*After, *Asked));
+            }
+            return Reply;
+        };
         const TSharedPtr<FJsonValue> Given = Params->TryGetField(TEXT("value"));
         double LayerIndex = 0.0;
         const bool bLayer = Params->TryGetNumberField(TEXT("layer_index"), LayerIndex);
@@ -573,7 +603,7 @@ TSharedPtr<FJsonObject> HandleSetMaterialInstanceParam(const TSharedPtr<FJsonObj
             }
             TSharedPtr<FJsonObject> StepParams = Base();
             StepParams->SetBoolField(TEXT("value"), bOn);
-            return mcp_common::RunSubCommand(TEXT("set_material_instance_static_switch"), StepParams);
+            return WithOwnFields(mcp_common::RunSubCommand(TEXT("set_material_instance_static_switch"), StepParams), TEXT("static_switch"));
         }
         if (ParamType.Equals(TEXT("static_component_mask"), ESearchCase::IgnoreCase))
         {
@@ -593,7 +623,7 @@ TSharedPtr<FJsonObject> HandleSetMaterialInstanceParam(const TSharedPtr<FJsonObj
                 }
                 StepParams->SetBoolField(Keys[Index], bChannel);
             }
-            return mcp_common::RunSubCommand(TEXT("set_material_instance_static_component_mask"), StepParams);
+            return WithOwnFields(mcp_common::RunSubCommand(TEXT("set_material_instance_static_component_mask"), StepParams), TEXT("static_component_mask"));
         }
         if (bLayer)
         {
