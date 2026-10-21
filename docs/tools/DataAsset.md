@@ -2,7 +2,7 @@
 
 # DataAsset
 
-52 tools for Data Tables, Curve Tables and curves, Data Assets, Data Registries, String Tables and localization.
+51 tools for Data Tables, Curve Tables and curves, Data Assets, Data Registries, String Tables and localization.
 
 Back to the [index](README.md).
 
@@ -140,7 +140,7 @@ Create an empty UCurveTable asset (a table of named curve rows) at package_path/
 
 *Additive.*
 
-Create a DataAsset instance of a given parent class -- the single-record alternative to a DataTable row, for configuration that wants its own asset and its own reference (a biome definition, a lock profile, a weapon config). Pick a DataAsset when things point AT it individually; pick a DataTable when you want many rows edited together. Fill it with set_data_asset_property and read it back with get_data_asset_info.
+Create a DataAsset instance of a given parent class -- the single-record alternative to a DataTable row, for configuration that wants its own asset and its own reference (a biome definition, a lock profile, a weapon config). Pick a DataAsset when things point AT it individually; pick a DataTable when you want many rows edited together. Fill it with set_properties and read it back with get_data_asset_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -319,7 +319,7 @@ Read a UCurveTable or UCompositeCurveTable asset found by content path: its clas
 
 *Read-only.*
 
-Read a DataAsset's class and ALL of its reflected properties with their current values -- the read-back oracle for set_data_asset_property, and better than inspecting it from Python, where StructBase.to_dict() on a user-defined struct returns an empty dict and a GameplayTag prints as {} whether it holds a tag or not, both of which read as "nothing was written" when the values are actually there.
+Read a DataAsset's class and ALL of its reflected properties with their current values -- the read-back oracle for set_properties, and better than inspecting it from Python, where StructBase.to_dict() on a user-defined struct returns an empty dict and a GameplayTag prints as {} whether it holds a tag or not, both of which read as "nothing was written" when the values are actually there.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -365,6 +365,22 @@ Read one column across every row of a DataTable as ExportText strings, so TMaps,
 | `data_table` | string | no | Alias of table_path: pass one of the two. |
 
 **Returns:** `{ table_path, column, row_struct, row_count, values:{ rowName: exporttext-string } }`
+
+## `get_data_table_from_package_file`
+
+*Destructive.*
+
+Read a DataTable from any .uasset file on disk (e.g. a backup) through a throwaway copy loaded under /Temp/, so a live asset with the same /Game name is untouched; then deletes the copy and, by default, garbage-collects. Returns table_name, row_struct, row_count and rows as native JSON, or one row via row_name.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `package_file` | string | yes | Absolute filesystem path to the external .uasset (alias: file_path) |
+| `object_name` | string | no | Optional name of the DataTable object inside the package (defaults to the first UDataTable / the package's primary asset) |
+| `row_name` | string | no | Optional single row to return; when omitted every row is returned |
+| `collect_garbage` | boolean | no | When true (default) force a GC purge of the throwaway load after reading |
+| `file_path` | string | no | Alias of package_file (OS path to the .uasset, e.g. "D:/Backup/DT_Items.uasset"); package_file wins when both are given |
+
+**Returns:** `{ package_file, mount_root, package_name, table_name, row_struct, row_count, rows:[{row_name,row_data}] } (or, for a single row_name, { ..., row_name, row_json, row_data })`
 
 ## `get_data_table_info`
 
@@ -465,22 +481,6 @@ List localization targets configured in the Localization Dashboard (ULocalizatio
 | `scope` | string | no | Optional: "engine" \| "game" \| "all". Defaults to "all". |
 
 **Returns:** `{ scope: string, targets: [{ name: string, scope: string, native_culture: string, supported_cultures: string[] }], targets_count: int }`
-
-## `read_data_table_from_package_file`
-
-*Destructive.*
-
-Read a DataTable from any .uasset file on disk (e.g. a backup) through a throwaway copy loaded under /Temp/, so a live asset with the same /Game name is untouched; then deletes the copy and, by default, garbage-collects. Returns table_name, row_struct, row_count and rows as native JSON, or one row via row_name.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `package_file` | string | yes | Absolute filesystem path to the external .uasset (alias: file_path) |
-| `object_name` | string | no | Optional name of the DataTable object inside the package (defaults to the first UDataTable / the package's primary asset) |
-| `row_name` | string | no | Optional single row to return; when omitted every row is returned |
-| `collect_garbage` | boolean | no | When true (default) force a GC purge of the throwaway load after reading |
-| `file_path` | string | no | Alias of package_file (OS path to the .uasset, e.g. "D:/Backup/DT_Items.uasset"); package_file wins when both are given |
-
-**Returns:** `{ package_file, mount_root, package_name, table_name, row_struct, row_count, rows:[{row_name,row_data}] } (or, for a single row_name, { ..., row_name, row_json, row_data })`
 
 ## `refresh_data_registry_map`
 
@@ -605,20 +605,6 @@ Set the editor's active culture/locale (FInternationalization::SetCurrentCulture
 | `culture_name` | string | yes | Required culture identifier, e.g. "en", "es-ES", "ja". |
 
 **Returns:** `{ culture_name: string, success: bool }`
-
-## `set_data_asset_property`
-
-*Destructive, idempotent.*
-
-Write ONE reflected property on a DataAsset, save the asset, and return old_value and new_value read back. Pick it over set_properties when you want the save in the same call or the before/after proof; set_properties writes several properties at once, undoably, without saving. It runs PreEditChange/PostEditChangeProperty but records no undo step and does not check that the property is editable. A text value uses UE text form: structs as "(X=1,Y=2,Z=3)", object references as a full asset path, GameplayTags as (TagName="A.B"); a JSON object or array goes through the JSON importer instead (a struct as an object, an array as an array). A value that does not import is refused. get_data_asset_info dumps them all.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `data_asset_path` | string | yes | Full asset path of the DataAsset. |
-| `property_name` | string | yes | Name of the UPROPERTY to set (class property name). |
-| `value` | any | yes | New value: a string in UE text form (structs "(X=1,Y=2,Z=3)", object refs as a full asset path), a number or a bool; or a JSON object/array, written through the JSON importer (a struct as an object, an array or set as an array, a map as an object). null is refused. |
-
-**Returns:** `{ data_asset_path: string, property_name: string, property_type: string, old_value: string, new_value: string, applied: bool, saved: bool, save_error?: string }`
 
 ## `set_data_table_cell`
 

@@ -306,7 +306,7 @@ TSharedPtr<FJsonObject> HandleCreateNiagaraSystem(const TSharedPtr<FJsonObject>&
 // get_niagara_system_info
 // Reads emitter count, system name, warmup time and the number of user-exposed parameters.
 // ---------------------------------------------------------------------------
-// MCP:get_niagara_system_info - Reads metadata for a UNiagaraSystem: emitter count, exposed user parameters, and its warmup and determinism settings (warmup_time in seconds, warmup_tick_count, warmup_tick_delta, needs_warmup, deterministic). Read-only; change the warmup with set_niagara_system_warmup_time, set_niagara_system_warmup_tick_count and set_niagara_system_warmup_tick_delta, determinism with set_niagara_system_deterministic.
+// MCP:get_niagara_system_info - Reads metadata for a UNiagaraSystem: emitter count, exposed user parameters, and its warmup and determinism settings (warmup_time in seconds, warmup_tick_count, warmup_tick_delta, needs_warmup, deterministic). Read-only; change the warmup with set_properties, determinism with set_properties.
 //   @param system_path - Asset path of the Niagara System (e.g. /Game/Niagara/NS_Example or /Game/Niagara/NS_Example.NS_Example)
 //   @returns { system_name: string, system_path: string, emitter_count: int, num_user_parameters: int, warmup_time: number, warmup_tick_count: int, warmup_tick_delta: number, needs_warmup: bool, deterministic: bool, user_parameters: [{ name, type }] }
 
@@ -466,7 +466,7 @@ namespace
 // dispatched on an explicit "type" hint (back-compat:
 // "vector" key => Vector, otherwise => Float).
 // ---------------------------------------------------------------------------
-// MCP:set_niagara_user_parameter - Set the default value of one user parameter (the User. namespace) of a Niagara System asset in one undo step, adding the parameter when the system has none of that name and type; the asset is marked dirty, not saved (save_asset keeps it). type picks Float, Vector, Vec2, Vec4, Color, Bool or Int; without it a vector, vec2, vec4 or color key picks that type, else Float. A missing value, or one not of the JSON type the parameter takes, is an error with nothing written. A parameter already holding the value is a success with changed=false and value_set=false, nothing written. verified means the value reads back as sent. Read it with get_niagara_user_parameter.
+// MCP:set_niagara_user_parameter - Set the default value of one user parameter (the User. namespace) of a Niagara System asset in one undo step, adding the parameter when the system has none of that name and type; the asset is marked dirty, not saved (save_asset keeps it). type picks Float, Vector, Vec2, Vec4, Color, Bool or Int; without it a vector, vec2, vec4 or color key picks that type, else Float. A missing value, or one not of the JSON type the parameter takes, is an error with nothing written. A parameter already holding the value is a success with changed=false and value_set=false, nothing written. verified means the value reads back as sent. Read it with get_niagara_user_parameter; inverse: remove_niagara_user_parameter.
 //   @param system_path - Asset path of the Niagara System.
 //   @param parameter_name - User parameter name (without the "User." prefix).
 //   @param type - Optional type token: Float|Vector|Vec2|Vec4|Color|Bool|Int (case-insensitive); when omitted a vector, vec2, vec4 or color key picks that type, else Float
@@ -825,6 +825,7 @@ namespace
 // (FindNiagaraComponentByOwner), so the label is refused when another actor already answers to it.
 // ---------------------------------------------------------------------------
 // MCP:spawn_niagara_component - Place a Niagara System in the editor level as a new ANiagaraActor (the actor a drag of the system into the viewport makes, through the editor's Niagara actor factory) whose root UNiagaraComponent runs the system, at an optional location and rotation, for previews and set_niagara_component_* calls. For a Niagara component on an actor that already exists use add_component_to_actor (NiagaraComponent) and set its Asset with set_properties. actor_label labels the new actor (default: the system's name, made unique); a label that is "None" or blank, or that another editor-world actor already has as label or internal name, is an error and nothing is spawned, so set_niagara_component_* (actor_name = owner_actor_name or the label) reach this actor. A system the factory refuses (settings requiring an effect type) is an error too. One undo step; the level is marked dirty, not saved (save_level keeps it). Editor world only, PIE or not. location and rotation are read back.
+//   @retired spawn_actor - type="NiagaraActor", name, location, rotation, properties={"NiagaraComponent.Asset":"/Game/FX/NS_..."}
 //   @param system_path - Asset path of the Niagara System to place (e.g. /Game/MyGame/NS_Example); one that does not load is an error and nothing is spawned.
 //   @param location - Optional world location [X, Y, Z]; the origin when omitted.
 //   @param rotation - Optional world rotation, the object {"pitch":..,"yaw":..,"roll":..} or the array [pitch, yaw, roll] (index 2 is ROLL); zero when omitted.
@@ -928,6 +929,7 @@ TSharedPtr<FJsonObject> HandleSpawnNiagaraComponent(const TSharedPtr<FJsonObject
 // set_niagara_component_float
 // ---------------------------------------------------------------------------
 // MCP:set_niagara_component_float - Set a float override (a user parameter value) on the Niagara component of an actor in the editor world, the actor found by internal name or editor label and the first UNiagaraComponent on it used, through UNiagaraComponent::SetVariableFloat, which adds the override when the component has none of that name. value is required and must be a JSON number; a missing or mistyped value, a missing actor_name or variable_name, or an actor without a Niagara component is an error and nothing changes. The value is set on the component in memory with no undo step; the level is neither marked dirty nor saved. verified is whether GetVariableFloat finds the variable, and value_read_back is what it reads. Spawn a component with spawn_niagara_component; whole numbers: set_niagara_component_int; the asset default: set_niagara_user_parameter.
+//   @retired set_niagara_component_variable - type="float", value
 //   @param actor_name - Owner actor identifier (internal name or editor label).
 //   @param variable_name - Niagara variable name (override is added locally if needed).
 //   @param value - Float value to set, a JSON number; the call fails without it.
@@ -962,6 +964,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraComponentFloat(const TSharedPtr<FJsonObj
 // set_niagara_component_vector
 // ---------------------------------------------------------------------------
 // MCP:set_niagara_component_vector - Sets a Vector3 override parameter on a spawned Niagara component.  Resolves the UNiagaraComponent on the owner actor and calls SetVariableVec3, then reads it back.
+//   @retired set_niagara_component_variable - type="vector", value=[x, y, z]
 //   @param actor_name - Owner actor identifier (internal name or editor label).
 //   @param variable_name - Niagara variable name (override is added locally if needed).
 //   @param vector [string!] - Vector value [X, Y, Z].
@@ -993,6 +996,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraComponentVector(const TSharedPtr<FJsonOb
 // set_niagara_component_color
 // ---------------------------------------------------------------------------
 // MCP:set_niagara_component_color - Set a LinearColor override (a user parameter value) on the Niagara component of an actor in the editor world, the actor found by internal name or editor label and the first UNiagaraComponent on it used, through UNiagaraComponent::SetVariableLinearColor, which adds the override when needed. color is [r, g, b] or [r, g, b, a] in numbers within the float range; an omitted alpha is 1 and an omitted color is opaque black. Any other color, a missing actor_name or variable_name, or an actor without a Niagara component is an error and nothing changes. The value is set on the component in memory with no undo step; the level is neither marked dirty nor saved. verified is whether GetVariableColor finds the variable, and value_read_back is what it reads. Four plain components: set_niagara_component_vec4; the asset default: set_niagara_user_parameter.
+//   @retired set_niagara_component_variable - type="color", value=[r, g, b, a]
 //   @param actor_name - Owner actor identifier (internal name or editor label).
 //   @param variable_name - Niagara variable name (override is added locally if needed).
 //   @param color - Color as [R, G, B] or [R, G, B, A], numbers within the float range; A is 1.0 when omitted, and an omitted color is opaque black. Any other value is an error.
@@ -1031,6 +1035,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraComponentColor(const TSharedPtr<FJsonObj
 // set_niagara_component_bool
 // ---------------------------------------------------------------------------
 // MCP:set_niagara_component_bool - Sets a bool override parameter on a spawned Niagara component.  Resolves the UNiagaraComponent on the owner actor and calls SetVariableBool, then reads it back.
+//   @retired set_niagara_component_variable - type="bool", value
 //   @param actor_name - Owner actor identifier (internal name or editor label).
 //   @param variable_name - Niagara variable name (override is added locally if needed).
 //   @param value - Bool value to set.
@@ -1105,6 +1110,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraSystemFixedBounds(const TSharedPtr<FJson
 // ---------------------------------------------------------------------------
 
 // MCP:set_niagara_component_vec2 - Set a Vec2 override (a user parameter value) on the Niagara component of an actor in the editor world, the actor found by internal name or editor label and the first UNiagaraComponent on it used, through UNiagaraComponent::SetVariableVec2 with x and y. An omitted component is 0; a component that is not a JSON number, a missing actor_name or variable_name, or an actor without a Niagara component is an error and nothing changes. The value is set on the component in memory with no undo step; the level is neither marked dirty nor saved. The component has no public getter for this type, so nothing is read back: verified is always true and note says so. Four components: set_niagara_component_vec4; three: set_niagara_component_vector.
+//   @retired set_niagara_component_variable - type="vec2", value=[x, y]
 //   @param actor_name - Owner actor identifier (internal name or editor label).
 //   @param variable_name - Niagara variable name (override is added locally if needed).
 //   @param x - X component of the Vec2, a JSON number; 0 when omitted.
@@ -1139,6 +1145,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraComponentVec2(const TSharedPtr<FJsonObje
 }
 
 // MCP:set_niagara_component_vec4 - Set a Vec4 override (a user parameter value) on the Niagara component of an actor in the editor world, the actor found by internal name or editor label and the first UNiagaraComponent on it used, through UNiagaraComponent::SetVariableVec4 with x, y, z and w. An omitted component is 0; a component that is not a JSON number, a missing actor_name or variable_name, or an actor without a Niagara component is an error and nothing changes. The value is set on the component in memory with no undo step; the level is neither marked dirty nor saved. The component has no public getter for this type, so nothing is read back: verified is always true and note says so. Two components: set_niagara_component_vec2; a color: set_niagara_component_color.
+//   @retired set_niagara_component_variable - type="vec4", value=[x, y, z, w]
 //   @param actor_name - Owner actor identifier (internal name or editor label).
 //   @param variable_name - Niagara variable name (override is added locally if needed).
 //   @param x - X component of the Vec4, a JSON number; 0 when omitted.
@@ -1179,6 +1186,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraComponentVec4(const TSharedPtr<FJsonObje
 }
 
 // MCP:set_niagara_component_int - Set an int32 override (a user parameter value) on the Niagara component of an actor in the editor world, the actor found by internal name or editor label and the first UNiagaraComponent on it used, through UNiagaraComponent::SetVariableInt, which adds the override when needed. value is required and must be a JSON number; a missing or mistyped value, a missing actor_name or variable_name, or an actor without a Niagara component is an error and nothing changes. The value is set on the component in memory with no undo step; the level is neither marked dirty nor saved. The component has no public getter for this type, so nothing is read back: verified is always true and note says so. Floats: set_niagara_component_float; the asset default: set_niagara_user_parameter.
+//   @retired set_niagara_component_variable - type="int", value
 //   @param actor_name - Owner actor identifier (internal name or editor label).
 //   @param variable_name - Niagara variable name (override is added locally if needed).
 //   @param value - Integer value to set, a JSON number; the call fails without it.
@@ -1207,6 +1215,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraComponentInt(const TSharedPtr<FJsonObjec
 }
 
 // MCP:set_niagara_component_position - Sets a Position (FVector) override parameter on a spawned Niagara component.  Resolves the UNiagaraComponent on the owner actor and calls SetVariablePosition, then reads it back via GetNiagaraVariablePosition.
+//   @retired set_niagara_component_variable - type="position", value=[x, y, z]
 //   @param actor_name - Owner actor identifier (internal name or editor label).
 //   @param variable_name - Niagara variable name (override is added locally if needed).
 //   @param position - World-space position override as [x, y, z].
@@ -1232,6 +1241,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraComponentPosition(const TSharedPtr<FJson
 }
 
 // MCP:set_niagara_component_quat - Set a Quat override (a user parameter value) on the Niagara component of an actor in the editor world, the actor found by internal name or editor label and the first UNiagaraComponent on it used, through UNiagaraComponent::SetVariableQuat with w, x, y and z, not normalized. An omitted component is the identity one (w 1, x, y and z 0); a component that is not a JSON number, a missing actor_name or variable_name, or an actor without a Niagara component is an error and nothing changes. The value is set on the component in memory with no undo step; the level is neither marked dirty nor saved. The component has no public getter for this type, so nothing is read back: verified is always true and note says so. Four plain components: set_niagara_component_vec4.
+//   @retired set_niagara_component_variable - type="quat", value=[x, y, z, w]
 //   @param actor_name - Owner actor identifier (internal name or editor label).
 //   @param variable_name - Niagara variable name (override is added locally if needed).
 //   @param w - W (scalar) component of the quaternion, a JSON number; 1 when omitted.
@@ -1272,6 +1282,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraComponentQuat(const TSharedPtr<FJsonObje
 }
 
 // MCP:set_niagara_component_object - Sets an Object (UObject*) override parameter on a spawned Niagara component by loading the UObject at the given object_path.  Resolves the UNiagaraComponent on the owner actor and calls SetVariableObject, then reads it back via GetNiagaraVariableObject and returns its GetPathName() as a string.
+//   @retired set_niagara_component_variable - type="object", value=<asset path>
 //   @param actor_name - Owner actor identifier (internal name or editor label).
 //   @param variable_name - Niagara variable name (override is added locally if needed).
 //   @param object_path - Asset path of the UObject to bind (e.g. "/Game/Materials/M_Heat.M_Heat").
@@ -1313,6 +1324,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraComponentObject(const TSharedPtr<FJsonOb
 }
 
 // MCP:set_niagara_component_matrix - Sets a Matrix (FMatrix) override parameter on a spawned Niagara component. Resolves the UNiagaraComponent on the owner actor and calls SetVariableMatrix with a 4x4 row-major matrix built from 16 floats. UNiagaraComponent does NOT expose GetNiagaraVariableMatrix as public API, so round-trip readback is not available; verified:true means the set call succeeded.
+//   @retired set_niagara_component_variable - type="matrix", value=[16 numbers, row-major]
 //   @param actor_name - Owner actor identifier (internal name or editor label).
 //   @param variable_name - Niagara variable name (override is added locally if needed).
 //   @param matrix - Array of 16 numbers in 4x4 row-major order (M00, M01, ..., M33).
@@ -1361,7 +1373,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraComponentMatrix(const TSharedPtr<FJsonOb
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_niagara_component_matrix - Reads a Matrix (FMatrix4f) override parameter back off a spawned Niagara component — the round-trip reader for set_niagara_component_matrix. UNiagaraComponent exposes no GetNiagaraVariableMatrix, so this reads the value straight out of the component's OverrideParameters store (FNiagaraParameterStore) by looking up the Matrix4 FNiagaraVariable; the override is stored as FMatrix44f. Returns found:false with an empty matrix (never a faked identity) when the variable has no local override on the component.
+// MCP:get_niagara_component_matrix - Reads a Matrix (FMatrix4f) override parameter back off a spawned Niagara component — the round-trip reader for set_niagara_component_variable. UNiagaraComponent exposes no GetNiagaraVariableMatrix, so this reads the value straight out of the component's OverrideParameters store (FNiagaraParameterStore) by looking up the Matrix4 FNiagaraVariable; the override is stored as FMatrix44f. Returns found:false with an empty matrix (never a faked identity) when the variable has no local override on the component.
 //   @param actor_name - Owner actor identifier (internal name or editor label).
 //   @param variable_name - Niagara variable name to read.
 //   @returns { actor_name: string, variable_name: string, variable_type: string, found: bool, matrix: [number x 16] }
@@ -1634,7 +1646,7 @@ namespace
 // remove_niagara_emitter_handle
 // Removes an emitter handle by name or index from a Niagara system.
 // ---------------------------------------------------------------------------
-// MCP:remove_niagara_emitter_handle - Remove one emitter handle from a Niagara System asset in one undo step, then save the system. The handle is chosen by display name (case-insensitive) or, when emitter_name is absent or empty, by 0-based emitter_index. An unknown system, name or index, or an emitter_index that is not a JSON number, is an error and nothing changes. A failed save makes success false, with saved=false and save_error, the removal kept in memory. Returns the removed name and id and the emitter counts before and after. List handles with get_niagara_emitter_handles; to keep an emitter but stop it, use set_niagara_emitter_enabled.
+// MCP:remove_niagara_emitter_handle - Remove one emitter handle from a Niagara System asset in one undo step, then save the system. The handle is chosen by display name (case-insensitive) or, when emitter_name is absent or empty, by 0-based emitter_index. An unknown system, name or index, or an emitter_index that is not a JSON number, is an error and nothing changes. A failed save makes success false, with saved=false and save_error, the removal kept in memory. Returns the removed name and id and the emitter counts before and after. List handles with get_niagara_emitter_handles; to keep an emitter but stop it, use set_niagara_emitter_properties.
 //   @param system_path - Asset path of the Niagara System.
 //   @param emitter_name - Optional display name of the emitter handle to remove
 //   @param emitter_index - Optional zero-based index; used if emitter_name not provided
@@ -1812,6 +1824,7 @@ TSharedPtr<FJsonObject> HandleGetNiagaraEmitterHandles(const TSharedPtr<FJsonObj
 // Enable or disable an emitter handle by name.
 // ---------------------------------------------------------------------------
 // MCP:set_niagara_emitter_enabled - Enable or disable one emitter handle of a Niagara System asset, found by display name (case-insensitive), in one undo step, then save the system. enabled defaults to true. A handle already in that state is a success with state_changed=false and saved=false, and nothing is written. An unknown system or emitter is an error. A failed save makes success false, with saved=false and save_error, the change kept in memory. verified compares the state read back with the request. List handles and their states with get_niagara_emitter_handles; take an emitter out for good with remove_niagara_emitter_handle.
+//   @retired set_niagara_emitter_properties - enabled
 //   @param system_path - Asset path of the Niagara System.
 //   @param emitter_name - Display name of the emitter handle.
 //   @param enabled - Optional bool; defaults to true
@@ -2006,6 +2019,7 @@ namespace
 // FVersionedNiagaraEmitterData. Saves the system after modification.
 // ---------------------------------------------------------------------------
 // MCP:set_niagara_emitter_sim_target - Set the simulation target (CPUSim or GPUComputeSim, case-insensitive), the local-space flag (bLocalSpace: particles in the emitter's space, or world space) and the deterministic flag of one emitter of a Niagara System asset, found by handle name, in one undo step, then save the system. Each of the three is optional and only the supplied ones are written, but at least one is required. Values already in place are a success with changed=false and saved=false, and nothing is written. An unknown sim_target, system or emitter, or a call with none of the three, is an error and nothing changes. A failed save makes success false, with saved=false and save_error, the change kept in memory. Returns the three as read back. Read them back with get_niagara_emitter_runtime_summary; GPU spawn limit: set_niagara_emitter_max_gpu_particles.
+//   @retired set_niagara_emitter_properties - sim_target, local_space, deterministic
 //   @param system_path - Asset path of the Niagara System.
 //   @param emitter_name - Display name of the emitter handle.
 //   @param sim_target - Optional target type, "CPUSim" or "GPUComputeSim"; omitted keeps the current one.
@@ -2103,7 +2117,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraEmitterSimTarget(const TSharedPtr<FJsonO
 // Reads the UNiagaraEffectType associated with a UNiagaraSystem and returns
 // its key properties: UpdateFrequency, CullReaction, bAllowCullingForLocalPlayers.
 // ---------------------------------------------------------------------------
-// MCP:get_niagara_effect_type - Read which Niagara Effect Type asset a Niagara System asset uses, plus that effect type's settings: update_frequency and cull_reaction (as enum value names), allows_culling (bAllowCullingForLocalPlayers), and the scalability limits of its first system and emitter scalability entries: max_distance and max_instances (system), cull_by_distance (max_distance above 0) and scale_spawn_count (emitter SpawnCountScale). A system with no effect type, or an effect type without those entries, is a success with the defaults: an empty effect_type_path, None for both enums, allows_culling false, max_distance 0, max_instances 0, cull_by_distance false and scale_spawn_count 1. Read-only; an unknown system path is an error. Assign one with set_niagara_effect_type; the system's own flags and fixed bounds: get_niagara_system_properties.
+// MCP:get_niagara_effect_type - Read which Niagara Effect Type asset a Niagara System asset uses, plus that effect type's settings: update_frequency and cull_reaction (as enum value names), allows_culling (bAllowCullingForLocalPlayers), and the scalability limits of its first system and emitter scalability entries: max_distance and max_instances (system), cull_by_distance (max_distance above 0) and scale_spawn_count (emitter SpawnCountScale). A system with no effect type, or an effect type without those entries, is a success with the defaults: an empty effect_type_path, None for both enums, allows_culling false, max_distance 0, max_instances 0, cull_by_distance false and scale_spawn_count 1. Read-only; an unknown system path is an error. Assign one with set_properties; the system's own flags and fixed bounds: get_properties.
 //   @param system_path - Niagara System asset path, e.g. "/Game/FX/NS_Fire" (the object path form also works).
 //   @returns { system_path: string, effect_type_path: string, update_frequency: string, cull_reaction: string, allows_culling: bool, max_distance: number, max_instances: int, cull_by_distance: bool, scale_spawn_count: number }
 
@@ -2173,6 +2187,7 @@ TSharedPtr<FJsonObject> HandleGetNiagaraEffectType(const TSharedPtr<FJsonObject>
 // (editor-only API). Saves the system after modification.
 // ---------------------------------------------------------------------------
 // MCP:set_niagara_effect_type - Assign a Niagara Effect Type asset (the scalability and culling settings) to a Niagara System asset in one undo step, then save the system. effect_type_path is loaded as a UNiagaraEffectType; an unknown system or effect type is an error and nothing changes. A system that already uses that effect type is a success with changed=false and saved=false, and nothing is written. A failed save makes success false, with saved=false and save_error, the change kept in memory. Read it back, with the effect type's limits, with get_niagara_effect_type.
+//   @retired set_properties - object_path=<system>, properties={"EffectType":"/Game/..."}, save=true
 //   @param system_path - Asset path of the Niagara System.
 //   @param effect_type_path - Asset path of the UNiagaraEffectType to assign.
 //   @returns { system_path: string, effect_type_path: string, success: bool, changed: bool, saved: bool, save_error?: string, note?: string }
@@ -5189,6 +5204,58 @@ TSharedPtr<FJsonObject> HandleRemoveNiagaraDataInterface(const TSharedPtr<FJsonO
     return mcp_common::MakeSavedReply(Result, bSaved, TEXT("remove_niagara_data_interface"), SaveError);
 }
 
+// MCP:remove_niagara_user_parameter - Remove one plain user parameter (the User. namespace: a float, int, bool, vector, color...) from a Niagara System asset, in one undo step; the asset is marked dirty, not saved, as set_niagara_user_parameter leaves it (save_asset keeps it). Inverse of set_niagara_user_parameter, which adds the parameter when it is missing. A data interface user parameter is refused (remove_niagara_data_interface removes those), and so is a name the system has no user parameter for, with nothing changed. The reply re-reads the store (still_present). Read: get_niagara_user_parameter.
+//   @param system_path - Asset path of the Niagara System.
+//   @param parameter_name - User parameter name (without the "User." prefix).
+//   @returns { system_path: string, parameter_name: string, parameter_type: string, removed: bool, still_present: bool }
+
+TSharedPtr<FJsonObject> HandleRemoveNiagaraUserParameter(const TSharedPtr<FJsonObject>& Params)
+{
+    FString ParameterName;
+    UNiagaraSystem* System = nullptr;
+    if (TSharedPtr<FJsonObject> Error = Niagara_LoadParameterSystem(Params, ParameterName, System))
+    {
+        return Error;
+    }
+    ParameterName.RemoveFromStart(TEXT("User."));
+
+    FNiagaraUserRedirectionParameterStore& Exposed = System->GetExposedParameters();
+    // The store keys its parameters by the full User. name with their type; a name-only lookup finds the entry
+    // whatever its type, and the variable rebuilt from it is the exact signature RemoveParameter needs.
+    const FNiagaraVariableWithOffset* Found =
+        Exposed.FindParameterVariable(FNiagaraVariable(FNiagaraTypeDefinition::GetFloatDef(), FName(*ParameterName)), /*IgnoreType=*/true);
+    if (!Found)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("The system has no user parameter '%s'; nothing was removed"), *ParameterName));
+    }
+    if (Found->IsDataInterface())
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("User parameter '%s' is a data interface (%s); remove it with remove_niagara_data_interface. Nothing was removed."),
+            *ParameterName, *Found->GetType().GetName()));
+    }
+    const FNiagaraVariable VarToRemove(Found->GetType(), Found->GetName());
+    const FString TypeName = Found->GetType().GetName();
+
+    FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "RemoveNiagaraUserParameter", "Remove Niagara User Parameter"));
+    System->Modify();
+    const bool bRemoved = Exposed.RemoveParameter(VarToRemove);
+    if (!bRemoved)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Failed to remove user parameter '%s' of type '%s'"), *ParameterName, *TypeName));
+    }
+    System->MarkPackageDirty();
+
+    const bool bStillPresent = Exposed.FindParameterVariable(VarToRemove, /*IgnoreType=*/true) != nullptr;
+    TSharedPtr<FJsonObject> Result = Niagara_StartParameterReply(System, ParameterName);
+    Result->SetStringField(TEXT("parameter_type"), TypeName);
+    Result->SetBoolField(TEXT("removed"), !bStillPresent);
+    Result->SetBoolField(TEXT("still_present"), bStillPresent);
+    return mcp_common::MakeOutcomeReply(Result, !bStillPresent,
+        bStillPresent ? mcp_common::MeasuredOutcomeError(TEXT("remove_niagara_user_parameter"), TEXT("removed")) : FString());
+}
+
 // ---------------------------------------------------------------------------
 // get_niagara_data_interfaces  - list all user-param DIs on the system.
 // ---------------------------------------------------------------------------
@@ -5698,6 +5765,7 @@ namespace
 }
 
 // MCP:set_niagara_system_warmup_time - Set the warmup time in seconds (simulated ahead when the system activates; 0 turns warmup off) of a Niagara System asset in one undo step, then save the asset. The engine re-derives warmup_tick_count as floor(warmup_time / warmup_tick_delta) and rounds the time down to whole ticks, so a time that is not a multiple of the delta comes back shorter in new_warmup_time; with a delta of 0 no warmup runs. A time that is not a finite JSON number of 0 or more, a missing param or an unknown system is an error and nothing changes. A time that leaves the warmup settings as they are is a success with changed=false and saved=false, nothing written. A failed save makes success false with saved=false and save_error, the change kept in memory. Set the delta first with set_niagara_system_warmup_tick_delta; read back with get_niagara_system_info.
+//   @retired set_properties - object_path=<system>, properties={"WarmupTime":..}, save=true (the engine recomputes WarmupTickCount)
 //   @param system_path - Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it.
 //   @param warmup_time - Warmup time in seconds (>= 0; 0 disables warmup); the call fails without it.
 //   @returns { system_path: string, old_warmup_time: number, new_warmup_time: number, warmup_tick_count: int, applied: bool, changed: bool, saved: bool, save_error?: string, note?: string }
@@ -5759,6 +5827,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraSystemWarmupTime(const TSharedPtr<FJsonO
 }
 
 // MCP:set_niagara_system_warmup_tick_count - Recompute the warmup tick count of a Niagara System asset, found by asset path, from its current warmup time and tick delta, in one undo step, then save the asset; it takes no count. The engine stores floor(warmup_time / warmup_tick_delta) and rounds warmup_time down to whole ticks; a delta near zero is reset to 0 with a count of 0, so no warmup runs. Settings that are already consistent are a success with changed=false and saved=false, nothing written. An unknown system is an error; a failed save makes success false with saved=false and save_error, the change kept in memory. For N ticks, set the delta with set_niagara_system_warmup_tick_delta, then N times it with set_niagara_system_warmup_time and check warmup_tick_count; read back with get_niagara_system_info.
+//   @retired set_properties - object_path=<system>, properties={"WarmupTime":..} or {"WarmupTickDelta":..}, save=true: the engine recomputes WarmupTickCount from them
 //   @param system_path - Asset path of the Niagara System.
 //   @returns { system_path: string, old_warmup_tick_count: int, new_warmup_tick_count: int, warmup_time: number, warmup_tick_delta: number, applied: bool, changed: bool, saved: bool, save_error?: string, note?: string }
 
@@ -5810,6 +5879,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraSystemWarmupTickCount(const TSharedPtr<F
 }
 
 // MCP:set_niagara_system_warmup_tick_delta - Set the warmup tick delta (seconds simulated per warmup tick) of a Niagara System asset in one undo step, then save it. The engine re-derives the tick count as floor(warmup_time / delta) and rounds warmup_time down to a whole number of ticks, so a delta that does not divide the warmup time shortens it and one larger than it zeroes the warmup; the reply does not show this, so read warmup_time and warmup_tick_count back with get_niagara_system_info. A delta that leaves the warmup settings as they are is a success with changed=false and saved=false, nothing written. A missing delta, one that is not a finite JSON number above 0, or an unknown system, is an error and nothing changes; a failed save makes success false with saved=false and save_error. Set the delta before calling set_niagara_system_warmup_time.
+//   @retired set_properties - object_path=<system>, properties={"WarmupTickDelta":..}, save=true (the engine recomputes WarmupTickCount)
 //   @param system_path - Niagara System asset path, e.g. "/Game/FX/NS_Fire" (the object path form also works).
 //   @param warmup_tick_delta - Seconds per warmup tick, > 0, e.g. 0.0333 for 30 ticks per second; the call fails without it.
 //   @returns { system_path: string, old_warmup_tick_delta: number, new_warmup_tick_delta: number, applied: bool, changed: bool, saved: bool, save_error?: string, note?: string }
@@ -5867,6 +5937,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraSystemWarmupTickDelta(const TSharedPtr<F
 }
 
 // MCP:set_niagara_system_deterministic - Set the system-wide determinism flag (bDeterminism, written by reflection) of a Niagara System asset, found by asset path, in one undo step, then save the asset. When true, every instance seeds its random numbers from the system's RandomSeed plus the component's RandomSeedOffset, so runs are repeatable; when false, each instance draws a new seed on reset. deterministic is required. A value the system already holds is a success with changed=false and saved=false, nothing written. A missing param or unknown system is an error; a failed save (for example while PIE runs) makes success false with saved=false and save_error, the change kept in memory. Read it back with get_niagara_system_info; one emitter's determinism: set_niagara_emitter_sim_target.
+//   @retired set_properties - object_path=<system>, properties={"bDeterminism":true,"RandomSeed":..}, save=true
 //   @param system_path - Asset path of the Niagara System.
 //   @param deterministic - Boolean to assign to bDeterminism
 //   @returns { system_path: string, old_deterministic: bool, new_deterministic: bool, applied: bool, changed: bool, saved: bool, save_error?: string, note?: string }
@@ -5930,6 +6001,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraSystemDeterministic(const TSharedPtr<FJs
 }
 
 // MCP:set_niagara_emitter_template_description - Set the TemplateAssetDescription text (shown when the emitter is picked as a template) of a standalone Niagara Emitter asset, not an emitter inside a system, in one undo step, then save the asset. description is stored as FText; an empty string clears it. A description the property system already finds identical is a success with changed=false and saved=false, nothing written. An unknown emitter asset or a missing param is an error. A failed save makes success false, with saved=false and save_error, the change kept in memory. Returns old_description and new_description as read back. Emitters inside a system: get_niagara_emitter_handles; add one from an emitter asset with add_niagara_emitter_from_template.
+//   @retired set_properties - object_path=<emitter asset>, properties={"TemplateAssetDescription":"..."}, save=true
 //   @param emitter_asset_path - Asset path of the UNiagaraEmitter, e.g. "/Game/FX/NE_Sparks" (an emitter asset, not a system path).
 //   @param description - New description text, stored as FText; an empty string clears it.
 //   @returns { emitter_asset_path: string, old_description: string, new_description: string, applied: bool, changed: bool, saved: bool, save_error?: string, note?: string }
@@ -6013,6 +6085,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraEmitterTemplateDescription(const TShared
 // ========================================================================== //
 
 // MCP:set_niagara_emitter_bounds - Set how one emitter of a Niagara System asset, found by handle name, computes its bounds (bounds_mode Dynamic, Fixed or Programmable, case-insensitive, default Fixed) and optionally its fixed box, in one undo step, then save the system. bounds_min and bounds_max are FVector strings like "X=-50 Y=-50 Z=0", not arrays; one alone keeps the other corner. With neither, Fixed resets the box to the engine default (-100 to 100 per axis) and the other modes keep it; min <= max is not checked. An unknown mode, system or emitter, or a corner without X=, Y= and Z=, is an error and nothing changes. A mode and box already in place are a success with changed=false and saved=false, nothing written. A failed save makes success false, with saved=false and save_error. Read back with get_niagara_emitter_runtime_summary; for a placed Niagara component use set_niagara_component_fixed_bounds.
+//   @retired set_niagara_emitter_properties - bounds_mode, bounds_min, bounds_max
 //   @param system_path - Niagara System asset path, e.g. "/Game/FX/NS_Fire" (the object path form also works).
 //   @param emitter_name - Emitter handle name as shown in the system, e.g. "Sparks" (case-insensitive).
 //   @param bounds_mode - One of "Dynamic", "Fixed", or "Programmable"; defaults to "Fixed"
@@ -6141,6 +6214,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraEmitterBounds(const TSharedPtr<FJsonObje
 }
 
 // MCP:set_niagara_emitter_allocation_mode - Set how one emitter of a Niagara System asset, found by handle name, sizes its particle buffers (EParticleAllocationMode AutomaticEstimate, ManualEstimate or FixedCount; Automatic, Manual and Fixed also work, case-insensitive) and optionally its PreAllocationCount, in one undo step, then save the system. A negative pre_allocation_count is stored as 0. An unknown mode, a pre_allocation_count that is not a JSON number, or an unknown system or emitter is an error and nothing changes. Values already in place are a success with changed=false and saved=false, nothing written. A failed save makes success false, with saved=false and save_error, the change kept in memory. Read back with get_niagara_emitter_runtime_summary; the GPU spawn limit: set_niagara_emitter_max_gpu_particles.
+//   @retired set_niagara_emitter_properties - allocation_mode, pre_allocation_count
 //   @param system_path - Asset path of the Niagara System.
 //   @param emitter_name - Name of the emitter handle.
 //   @param allocation_mode - One of "AutomaticEstimate", "ManualEstimate", or "FixedCount" (case-insensitive; "Automatic" and "Manual" and "Fixed" also accepted)
@@ -6231,6 +6305,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraEmitterAllocationMode(const TSharedPtr<F
 }
 
 // MCP:set_niagara_emitter_max_gpu_particles - Set the MaxGPUParticlesSpawnPerFrame override of one emitter of a Niagara System asset, found by handle name, in one undo step, then save the system; it limits the particles a GPU emitter spawns per frame and only takes effect when the sim target is GPUComputeSim (effective_for_current_sim says whether it is now). max_gpu_particles is required and must be a JSON number of 0 or more; a negative count, or an unknown system or emitter, is an error and nothing changes. A count already in place is a success with changed=false and saved=false, nothing written. A failed save makes success false, with saved=false and save_error, the change kept in memory. Read back with get_niagara_emitter_runtime_summary; switch the sim target with set_niagara_emitter_sim_target.
+//   @retired set_niagara_emitter_properties - max_gpu_particles
 //   @param system_path - Asset path of the Niagara System.
 //   @param emitter_name - Name of the emitter handle.
 //   @param max_gpu_particles - Particles the emitter may spawn per frame on the GPU, an integer >= 0; the call fails without it
@@ -6301,6 +6376,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraEmitterMaxGPUParticles(const TSharedPtr<
 }
 
 // MCP:set_niagara_emitter_requires_persistent_ids - Set whether one emitter of a Niagara System asset, found by handle name, gives its particles persistent IDs (bRequiresPersistentIDs: a Particles.ID stable across frames, at a small cost), in one undo step, then save the system. requires_persistent_ids is required. A value already in place is a success with changed=false and saved=false, nothing written. A missing param or an unknown system or emitter is an error. A failed save makes success false, with saved=false and save_error, the change kept in memory. Returns the flag as read back; read it later with get_niagara_emitter_runtime_summary; local space: set_niagara_emitter_sim_target with local_space.
+//   @retired set_niagara_emitter_properties - requires_persistent_ids
 //   @param system_path - Asset path of the Niagara System.
 //   @param emitter_name - Name of the emitter handle.
 //   @param requires_persistent_ids - true to give every particle a persistent ID, false to drop them; the call fails without it
@@ -7512,6 +7588,7 @@ namespace
 }
 
 // MCP:set_niagara_system_properties - Set the render and system flags of a Niagara System asset (cast shadow, decals, custom depth/stencil, translucency sort, large world coordinates, current-frame data, fixed bounds) and save it. Use it instead of set_properties for these fields: a render value also turns its bOverride companion on unless that override_ key is sent, the asset is saved, and PostEditChangeProperty is skipped (no scalability refresh); set_properties writes any other UPROPERTY and leaves it unsaved. Only supplied fields are written, in one undo step. Every field and fixed_bounds is checked before the first write: a corner that is not 3 numbers, a number field that is not a JSON number, or a property the engine lacks is an error and nothing changes. Values the system already holds are a success with changed=false and saved=false. A failed save makes success false with save_error. Read back with get_niagara_system_properties.
+//   @retired set_properties - object_path=<system>, properties with the engine names and their "bOverride..." flags, save=true
 //   @param system_path - Asset path of the Niagara System (e.g. "/Game/Niagara/NS_Example").
 //   @param cast_shadow - Optional bool: default CastShadow for spawned components (sets bCastShadow + bOverrideCastShadow).
 //   @param override_cast_shadow - Optional bool: explicitly set bOverrideCastShadow (auto-set when cast_shadow is given).
@@ -7724,6 +7801,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraSystemProperties(const TSharedPtr<FJsonO
 }
 
 // MCP:get_niagara_system_properties - Read the render flags (cast shadow, decals, custom depth/stencil, translucency sort, each with its bOverride companion), the large-world/current-frame flags and the fixed bounds of a Niagara System asset, under the names set_niagara_system_properties takes. A curated view; get_properties reads any other UPROPERTY on the system. Read-only, no recompile.
+//   @retired get_properties - object_path=<system>, property_names=[engine names with their "bOverride..." flags]
 //   @param system_path - Asset path of the Niagara System.
 //   @returns { system_path, cast_shadow, override_cast_shadow, receives_decals, override_receives_decals, render_custom_depth, override_render_custom_depth, custom_depth_stencil_value, override_custom_depth_stencil_value, translucency_sort_priority, override_translucency_sort_priority, translucency_sort_distance_offset, override_translucency_sort_distance_offset, support_large_world_coordinates, require_current_frame_data, b_fixed_bounds, fixed_bounds:{min,max}, fixed_bounds_valid }
 TSharedPtr<FJsonObject> HandleGetNiagaraSystemProperties(const TSharedPtr<FJsonObject>& Params)
@@ -7917,6 +7995,7 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("list_niagara_renderer_classes"), &HandleListNiagaraRendererClasses },
     { TEXT("move_niagara_simulation_stage"), &HandleMoveNiagaraSimulationStage },
     { TEXT("remove_niagara_data_interface"), &HandleRemoveNiagaraDataInterface },
+    { TEXT("remove_niagara_user_parameter"), &HandleRemoveNiagaraUserParameter },
     { TEXT("remove_niagara_emitter_handle"), &HandleRemoveNiagaraEmitterHandle },
     { TEXT("remove_niagara_event_handler"), &HandleRemoveNiagaraEventHandler },
     { TEXT("remove_niagara_module_from_stack"), &HandleRemoveNiagaraModuleFromStack },

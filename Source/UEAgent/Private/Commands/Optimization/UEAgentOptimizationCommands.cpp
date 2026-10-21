@@ -580,7 +580,7 @@ namespace UEAgentOptimizationImpl
 
 // Cost analysis
 
-// MCP:analyze_asset_performance - Grade one asset Good, Fair or Poor against fixed thresholds, without changing it: the path is looked up in the asset registry and the asset loaded synchronously. Static meshes are graded on triangles summed over all render LODs (above 50k Fair, above 100k Poor), Texture2D on resolution (above 2K, above 4K), materials and instances on parameter count (above 25, above 50); fewer than 2 LODs or mips, a mesh or texture package over 50 MB and over 10 texture parameters only add performance_issues. Other classes get performance_rating Unknown. suggestions is fixed advice per class, not derived from the numbers; texture_sample_count counts texture parameters and instruction_count is always 0. A path missing from the registry or failing to load is an error. Many assets: analyze_assets_performance_batch; a verdict: check_asset_optimization; shader stats: get_material_stats; memory: get_asset_memory_usage.
+// MCP:analyze_asset_performance - Grade one asset Good, Fair or Poor against fixed thresholds, without changing it: the path is looked up in the asset registry and the asset loaded synchronously. Static meshes are graded on triangles summed over all render LODs (above 50k Fair, above 100k Poor), Texture2D on resolution (above 2K, above 4K), materials and instances on parameter count (above 25, above 50); fewer than 2 LODs or mips, a mesh or texture package over 50 MB and over 10 texture parameters only add performance_issues. Other classes get performance_rating Unknown. suggestions is fixed advice per class, not derived from the numbers; texture_sample_count counts texture parameters and instruction_count is always 0. A path missing from the registry or failing to load is an error. Many assets: execute_batch; a verdict: check_asset_optimization; shader stats: get_material_stats; memory: get_asset_memory_usage.
 //   @param asset_path - Object path ("/Game/Meshes/SM_Rock.SM_Rock") or package path ("/Game/Meshes/SM_Rock") of an asset the asset registry knows
 //   @returns { asset_path: string, asset_class: string, file_size_bytes: number, file_size_mb: number, optimization_type: string, lod_count?: number, triangle_count?: number, vertex_count?: number, section_count?: number, performance_rating: string, performance_issues: [string], suggestions: [string], width?: number, height?: number, mip_count?: number, compression_settings?: string, pixel_format?: string, parameter_count?: number, texture_sample_count?: number, instruction_count?: number }
 
@@ -602,6 +602,7 @@ TSharedPtr<FJsonObject> HandleAnalyzeAssetPerformance(const TSharedPtr<FJsonObje
 }
 
 // MCP:analyze_assets_performance_batch - Batch version of analyze_asset_performance. Resolves and analyzes multiple assets by path in one call (avoids callers looping analyze_asset_performance one-by-one). Forces a synchronous load per asset, so max_results defaults conservatively.
+//   @retired execute_batch - one analyze_asset_performance per asset
 //   @param asset_paths - Required array of asset paths to analyze.
 //   @param max_results - Optional cap on how many of asset_paths to process (default 200, clamped 1..2000). Entries beyond the cap are not processed.
 //   @returns { requested_count: number, processed_count: number, results_truncated: bool, results: [{ asset_path: string, found: bool, asset_class?: string, file_size_bytes?: number, file_size_mb?: number, optimization_type?: string, performance_rating?: string, performance_issues?: [string], suggestions?: [string], ...same per-asset fields as analyze_asset_performance's data payload, error?: string }] }
@@ -1175,7 +1176,8 @@ TSharedPtr<FJsonObject> HandleSetAssetLodSettings(const TSharedPtr<FJsonObject>&
     return Outcome;
 }
 
-// MCP:configure_asset_streaming - Sets the REAL NeverStream flag (UStreamableRenderAsset::NeverStream) on a texture or static mesh and saves it to disk. enable_streaming=true clears NeverStream (asset streams on demand); enable_streaming=false sets it (asset stays fully resident). Assets with no such knob (e.g. Material) fail honestly with success:false.
+// MCP:set_asset_streaming_config - Sets the REAL NeverStream flag (UStreamableRenderAsset::NeverStream) on a texture or static mesh and saves it to disk. enable_streaming=true clears NeverStream (asset streams on demand); enable_streaming=false sets it (asset stays fully resident). Assets with no such knob (e.g. Material) fail honestly with success:false.
+//   @renamed-from configure_asset_streaming
 //   @param asset_path - The path to the asset in the asset registry.
 //   @param enable_streaming - Whether to enable streaming for the asset (maps to NeverStream = !enable_streaming).
 //   @returns { asset_path: string, enable_streaming: bool, asset_type: string, file_size_bytes: number, file_size_mb: number, is_streamable: bool, never_stream?: bool, saved?: bool, success: bool, message: string, error?: string }
@@ -1370,7 +1372,7 @@ TSharedPtr<FJsonObject> HandleGetAssetLodSettings(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_asset_streaming_config - Read the streaming knobs (inverse of configure_asset_streaming). Works at two levels: with NO asset_path it reports the GLOBAL texture-streaming pool size (only when the editor runs a render-asset streaming manager -- an editor started with -nullrhi has none, and then streaming_manager_available is false and the pool size is omitted); with one, it adds that asset's NeverStream flag (which applies to any UStreamableRenderAsset -- textures AND static meshes) plus the texture-only LODGroup and VirtualTextureStreamingPriority. There is NO `streaming_priority` field -- see the note below.
+// MCP:get_asset_streaming_config - Read the streaming knobs (inverse of set_asset_streaming_config). Works at two levels: with NO asset_path it reports the GLOBAL texture-streaming pool size (only when the editor runs a render-asset streaming manager -- an editor started with -nullrhi has none, and then streaming_manager_available is false and the pool size is omitted); with one, it adds that asset's NeverStream flag (which applies to any UStreamableRenderAsset -- textures AND static meshes) plus the texture-only LODGroup and VirtualTextureStreamingPriority. There is NO `streaming_priority` field -- see the note below.
 //   @param asset_path - Optional /Game/... asset path; if omitted, returns global streaming config only
 //   @returns { streaming_manager_available: bool, global_pool_size?: int, asset_path?, asset_class?, is_streamable?: bool, never_stream?: bool, lod_group?: string, lod_group_int?: number, use_virtual_texture_streaming_priority?: bool, note? }
 //   NOTE: there is no `streaming_priority` field -- UTexture::StreamingPriority does not exist
@@ -1409,7 +1411,7 @@ TSharedPtr<FJsonObject> HandleGetAssetStreamingConfig(const TSharedPtr<FJsonObje
     Data->SetStringField(TEXT("asset_class"), Asset->GetClass()->GetName());
 
     // never_stream (UStreamableRenderAsset::NeverStream) is the real inverse of
-    // configure_asset_streaming's mutation -- it applies to both UTexture AND UStaticMesh.
+    // set_asset_streaming_config's mutation -- it applies to both UTexture AND UStaticMesh.
     UStreamableRenderAsset* Streamable = Cast<UStreamableRenderAsset>(Asset);
     if (Streamable)
     {
@@ -1445,7 +1447,7 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("analyze_asset_performance"), &HandleAnalyzeAssetPerformance },
     { TEXT("analyze_assets_performance_batch"), &HandleAnalyzeAssetsPerformanceBatch },
     { TEXT("check_asset_optimization"), &HandleCheckAssetOptimization },
-    { TEXT("configure_asset_streaming"), &HandleConfigureAssetStreaming },
+    { TEXT("set_asset_streaming_config"), &HandleConfigureAssetStreaming },
     { TEXT("get_asset_compression"), &HandleGetAssetCompression },
     { TEXT("get_asset_lod_settings"), &HandleGetAssetLodSettings },
     { TEXT("get_asset_memory_usage"), &HandleGetAssetMemoryUsage },

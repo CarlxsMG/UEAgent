@@ -11,6 +11,7 @@
 #include "Misc/Paths.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "GameFramework/Actor.h"
+#include "Components/ActorComponent.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "EngineUtils.h"
@@ -40,6 +41,7 @@
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraph.h" // FGraphNodeCreator
 #include "Editor.h"                                    // GEditor
+#include "UEAgentBridge.h"                             // RunSubCommands dispatches through the bridge
 #include "Editor/Transactor.h"                         // FTransaction::GetTransactionObjects -- the PIE-session check of a transaction
 #include "Engine/GameInstance.h"                       // UGameInstance::GetWorldContext -- the same check
 #include "FileHelpers.h"                               // UEditorLoadingAndSavingUtils::SavePackages -- the editor's map save
@@ -513,6 +515,80 @@ namespace mcp_common
 
     // The honest sibling of MakeOkReply (see the header): the flag comes from the
     // caller, so a payload that describes a failure is not wrapped in `success: true`.
+    TSharedPtr<FJsonObject> RunSubCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params)
+    {
+        UUEAgentBridge* Bridge = GEditor ? GEditor->GetEditorSubsystem<UUEAgentBridge>() : nullptr;
+        if (!Bridge)
+        {
+            return MakeErrorReply(FString::Printf(TEXT("%s: the MCP bridge is not running"), *Command));
+        }
+        TGuardValue<int32> InnerCall(Bridge->SubCommandDepth, Bridge->SubCommandDepth + 1);
+        const TSharedPtr<FJsonObject> Envelope = Bridge->DispatchSingleCommand(Command, Params.IsValid() ? Params : MakeShared<FJsonObject>());
+        const TSharedPtr<FJsonObject>* Result = nullptr;
+        if (Envelope.IsValid() && Envelope->TryGetObjectField(TEXT("result"), Result) && Result && Result->IsValid())
+        {
+            return *Result;
+        }
+        FString Error = TEXT("the command failed with no message");
+        if (Envelope.IsValid())
+        {
+            Envelope->TryGetStringField(TEXT("error"), Error);
+        }
+        return MakeErrorReply(Error);
+    }
+
+    TSharedPtr<FJsonObject> RunSubCommands(const TCHAR* Tool, const TArray<FSubCommand>& Steps, const TSharedPtr<FJsonObject>& Reply)
+    {
+        if (Steps.Num() == 0)
+        {
+            return MakeErrorReply(FString::Printf(TEXT("%s: no setting was given, so nothing changed"), Tool));
+        }
+        UUEAgentBridge* Bridge = GEditor ? GEditor->GetEditorSubsystem<UUEAgentBridge>() : nullptr;
+        if (!Bridge)
+        {
+            return MakeErrorReply(FString::Printf(TEXT("%s: the MCP bridge is not running"), Tool));
+        }
+        TSharedPtr<FJsonObject> Applied = MakeShared<FJsonObject>();
+        Reply->SetObjectField(TEXT("applied"), Applied);
+        for (const FSubCommand& Step : Steps)
+        {
+            TGuardValue<int32> InnerCall(Bridge->SubCommandDepth, Bridge->SubCommandDepth + 1);
+            const TSharedPtr<FJsonObject> Envelope = Bridge->DispatchSingleCommand(Step.Command, Step.Params.IsValid() ? Step.Params : MakeShared<FJsonObject>());
+            FString Status;
+            const bool bOk = Envelope.IsValid() && Envelope->TryGetStringField(TEXT("status"), Status) && Status == TEXT("success");
+            const TSharedPtr<FJsonObject>* Result = nullptr;
+            TSharedPtr<FJsonObject> Payload;
+            if (Envelope.IsValid() && Envelope->TryGetObjectField(TEXT("result"), Result) && Result && Result->IsValid())
+            {
+                const TSharedPtr<FJsonObject>* Data = nullptr;
+                Payload = (*Result)->TryGetObjectField(TEXT("data"), Data) && Data ? *Data : *Result;
+            }
+            if (bOk)
+            {
+                Applied->SetObjectField(Step.Label, Payload.IsValid() ? Payload : MakeShared<FJsonObject>());
+                continue;
+            }
+            FString Error = TEXT("the step failed with no message");
+            if (Envelope.IsValid())
+            {
+                Envelope->TryGetStringField(TEXT("error"), Error);
+            }
+            TSharedPtr<FJsonObject> Failed = MakeShared<FJsonObject>();
+            Failed->SetStringField(TEXT("label"), Step.Label);
+            Failed->SetStringField(TEXT("command"), Step.Command);
+            Failed->SetStringField(TEXT("error"), Error);
+            if (Payload.IsValid())
+            {
+                Failed->SetObjectField(TEXT("reply"), Payload);
+            }
+            Reply->SetObjectField(TEXT("failed"), Failed);
+            return MakeOutcomeReply(Reply, false, FString::Printf(
+                TEXT("%s stopped at %s (%s): %s. %s"), Tool, *Step.Label, *Step.Command, *Error,
+                Applied->Values.Num() > 0 ? TEXT("The settings listed in applied were changed before it.") : TEXT("Nothing was changed.")));
+        }
+        return MakeOutcomeReply(Reply, true, FString());
+    }
+
     TSharedPtr<FJsonObject> MakeOutcomeReply(const TSharedPtr<FJsonObject>& Data, bool bSuccess, const FString& ErrorMessage)
     {
         if (bSuccess)
@@ -3546,6 +3622,79 @@ namespace mcp_common
             if (Candidate != nullptr && Candidate->GetName() == ObjectName)
             {
                 return Candidate;
+            }
+        }
+        return nullptr;
+    }
+
+    AActor* FindActorByUniqueLabel(UWorld* World, const FString& Label, int32* OutMatches)
+    {
+        int32 Matches = 0;
+        AActor* Found = nullptr;
+        if (World != nullptr && !Label.IsEmpty())
+        {
+            for (TActorIterator<AActor> It(World); It; ++It)
+            {
+                if (*It != nullptr && It->GetActorLabel() == Label)
+                {
+                    Found = *It;
+                    ++Matches;
+                }
+            }
+        }
+        if (OutMatches)
+        {
+            *OutMatches = Matches;
+        }
+        return Matches == 1 ? Found : nullptr;
+    }
+
+    UActorComponent* FindComponentByNameOrClass(AActor* Actor, const FString& Name, TArray<FString>* OutAmbiguous)
+    {
+        if (OutAmbiguous)
+        {
+            OutAmbiguous->Reset();
+        }
+        if (Actor == nullptr || Name.IsEmpty())
+        {
+            return nullptr;
+        }
+        TArray<UActorComponent*> Components;
+        Actor->GetComponents(Components);
+        for (UActorComponent* Component : Components)
+        {
+            if (Component != nullptr && Component->GetName() == Name)
+            {
+                return Component;
+            }
+        }
+        // By class: "USkyLightComponent" and "SkyLightComponent" name the same class.
+        const FString ClassName = Name.Len() > 1 && Name[0] == TEXT('U') && FChar::IsUpper(Name[1]) ? Name.RightChop(1) : Name;
+        TArray<UActorComponent*> OfClass;
+        for (UActorComponent* Component : Components)
+        {
+            for (const UClass* Class = Component ? Component->GetClass() : nullptr; Class != nullptr; Class = Class->GetSuperClass())
+            {
+                if (Class->GetName() == ClassName)
+                {
+                    OfClass.Add(Component);
+                    break;
+                }
+                if (Class == UActorComponent::StaticClass())
+                {
+                    break;
+                }
+            }
+        }
+        if (OfClass.Num() == 1)
+        {
+            return OfClass[0];
+        }
+        if (OutAmbiguous)
+        {
+            for (const UActorComponent* Component : OfClass)
+            {
+                OutAmbiguous->Add(Component->GetName());
             }
         }
         return nullptr;

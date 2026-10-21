@@ -1526,7 +1526,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectStacking(const TSharedPtr<FJsonOb
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:add_gameplay_effect_modifier - Append one modifier with a constant magnitude to the Modifiers array on the class default object of a GameplayEffect Blueprint, then save it without recompiling and without an undo entry. attribute_name is looked up across every loaded AttributeSet class; an unknown attribute or modifier_op, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. Each call appends a new entry, even an identical one; modifier_index says where it went. Change its magnitude type with set_gameplay_effect_modifier_set_by_caller, set_gameplay_effect_modifier_attribute_based or set_gameplay_effect_modifier_custom; remove_gameplay_effect_modifier drops it; get_gameplay_effect_modifiers lists them.
+// MCP:add_gameplay_effect_modifier - Append one modifier with a constant magnitude to the Modifiers array on the class default object of a GameplayEffect Blueprint, then save it without recompiling and without an undo entry. attribute_name is looked up across every loaded AttributeSet class; an unknown attribute or modifier_op, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. Each call appends a new entry, even an identical one; modifier_index says where it went. Change its magnitude type with set_gameplay_effect_modifier; remove_gameplay_effect_modifier drops it; get_gameplay_effect_modifiers lists them.
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param attribute_name - Attribute to modify, Health or MySet.Health: the bare name or AttributeSetClass.Attribute, case-insensitive, first match among the loaded AttributeSet classes
 //   @param modifier_op - Add, Multiply, Divide, or Override (case-insensitive)
@@ -1689,6 +1689,7 @@ TSharedPtr<FJsonObject> HandleRemoveGameplayEffectModifier(const TSharedPtr<FJso
 //   Read-back: GetMagnitudeCalculationType()/GetSetByCallerFloat() (inline), GetAttributeCaptureDefinitions() (UE_API)
 
 // MCP:set_gameplay_effect_modifier_set_by_caller - Switch an existing GE modifier's magnitude to SetByCaller (resolved at runtime by tag/name). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
+//   @retired set_gameplay_effect_modifier - magnitude_type="set_by_caller", data_tag or data_name
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param modifier_index - Index into the GE CDO Modifiers array (add_gameplay_effect_modifier appends; 0 = first)
 //   @param data_tag - Optional gameplay tag the caller uses to set the magnitude (modern path; must be a registered tag)
@@ -1770,6 +1771,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierSetByCaller(const TShared
 }
 
 // MCP:set_gameplay_effect_modifier_attribute_based - Replace the magnitude of the modifier at modifier_index on the class default object of a GameplayEffect Blueprint with an AttributeBased one: backing_attribute, captured from attribute_source, scaled as (value + pre_multiply_add) * coefficient + post_multiply_add, under one of the four calculation policies (with AttributeMagnitudeEvaluatedUpToChannel, only through mod channel final_channel), then save the asset without recompiling. The modifier keeps its attribute and operation, but its previous magnitude is discarded whole, attribute curve and tag filters included. The policy and channel are read back. An unknown attribute, a bad attribute_source, calculation_type or final_channel, an out-of-range modifier_index, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. Refine afterwards with set_gameplay_effect_modifier_attribute_curve or set_gameplay_effect_modifier_attribute_tag_filters.
+//   @retired set_gameplay_effect_modifier - magnitude_type="attribute_based", backing_attribute, attribute_source, coefficient, pre_multiply_add, post_multiply_add, calculation_type, final_channel, snapshot
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param modifier_index - Index into the GE CDO Modifiers array (0 = first)
 //   @param backing_attribute - Attribute to capture, e.g. Health or MySet.Health (must exist on some AttributeSet)
@@ -1939,6 +1941,7 @@ TSharedPtr<FJsonObject> HandleCreateGameplayModMagnitudeCalculationBlueprint(con
 }
 
 // MCP:set_gameplay_effect_modifier_custom - Replace the magnitude of the modifier at modifier_index on the class default object of a GameplayEffect Blueprint with a CustomCalculationClass one: calculation_class computes the base value, scaled as (value + pre_multiply_add) * coefficient + post_multiply_add, and the asset is saved without recompiling. The modifier keeps its attribute and operation, but its previous magnitude is discarded whole (a FinalLookupCurve included), and omitted coefficients take their defaults, not the old values. An unknown, abstract or non-UGameplayModMagnitudeCalculation class, an out-of-range modifier_index, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. Make the class with create_gameplay_mod_magnitude_calculation_blueprint, add a lookup curve with set_gameplay_effect_modifier_custom_curve; other magnitudes: set_gameplay_effect_modifier_attribute_based, set_gameplay_effect_modifier_set_by_caller.
+//   @retired set_gameplay_effect_modifier - magnitude_type="custom", calculation_class, coefficient, pre_multiply_add, post_multiply_add
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param modifier_index - Index into the GE CDO Modifiers array (0 = first)
 //   @param calculation_class - BP asset path (/Game/...) or class name of a CONCRETE UGameplayModMagnitudeCalculation subclass
@@ -2024,6 +2027,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierCustom(const TSharedPtr<F
 //   write/read (FinalLookupCurve is a public member once the struct is reached).
 
 // MCP:set_gameplay_effect_modifier_custom_curve - Set the FinalLookupCurve (a CurveTable row) on a GE modifier whose magnitude is already CustomCalculationClass; the custom calc output is remapped through the curve. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
+//   @retired set_gameplay_effect_modifier - curve_table_path, row_name, magnitude_curve_for="custom"
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param modifier_index - Index into the GE CDO Modifiers array; the modifier's magnitude must already be CustomCalculationClass (call set_gameplay_effect_modifier_custom first)
 //   @param curve_table_path - Full asset path of the UCurveTable holding the lookup row
@@ -2097,6 +2101,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierCustomCurve(const TShared
 //   and write its public members.
 
 // MCP:set_gameplay_effect_modifier_attribute_curve - Set the AttributeCurve (a CurveTable row) on a GE modifier whose magnitude is already AttributeBased; the captured attribute is remapped through the curve instead of used directly. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
+//   @retired set_gameplay_effect_modifier - curve_table_path, row_name, magnitude_curve_for="attribute_based"
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param modifier_index - Index into the GE CDO Modifiers array; the modifier's magnitude must already be AttributeBased (call set_gameplay_effect_modifier_attribute_based first)
 //   @param curve_table_path - Full asset path of the UCurveTable holding the lookup row
@@ -2163,6 +2168,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierAttributeCurve(const TSha
 }
 
 // MCP:set_gameplay_effect_modifier_attribute_tag_filters - Set the Source/Target tag filters on a GE modifier whose magnitude is already AttributeBased; only modifiers carrying all of a filter's tags factor into the captured attribute's evaluation. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
+//   @retired set_gameplay_effect_modifier - source_tags, target_tags
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param modifier_index - Index into the GE CDO Modifiers array; the modifier's magnitude must already be AttributeBased (call set_gameplay_effect_modifier_attribute_based first)
 //   @param source_tags - Optional list of gameplay tag strings; replaces SourceTagFilter. Omit to leave the source filter unchanged
@@ -2271,7 +2277,7 @@ TSharedPtr<FJsonObject> HandleSetAbilityCost(const TSharedPtr<FJsonObject>& Para
     return SetAbilityGameplayEffectClass(Params, TEXT("CostGameplayEffectClass"), TEXT("cost_effect_path"), TEXT("cost_effect_class"));
 }
 
-// MCP:set_ability_cooldown - Point CooldownGameplayEffectClass on the class default object of a GameplayAbility Blueprint at the generated class of a GameplayEffect Blueprint, both loaded by asset path, then save the ability without recompiling. That effect is applied when the ability commits and the tags it grants block re-activation while it lasts, so give it a duration with set_gameplay_effect_duration and a cooldown tag with set_gameplay_effect_component_target_tags. Any cooldown class already set is overwritten, and every call writes and saves, even with the same class; there is no way to clear it here. A path that is not a GameplayAbility or GameplayEffect Blueprint, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. The cost effect: set_ability_cost; a new effect: create_gameplay_effect_blueprint.
+// MCP:set_ability_cooldown - Point CooldownGameplayEffectClass on the class default object of a GameplayAbility Blueprint at the generated class of a GameplayEffect Blueprint, both loaded by asset path, then save the ability without recompiling. That effect is applied when the ability commits and the tags it grants block re-activation while it lasts, so give it a duration with set_gameplay_effect_duration and a cooldown tag with set_gameplay_effect_component. Any cooldown class already set is overwritten, and every call writes and saves, even with the same class; there is no way to clear it here. A path that is not a GameplayAbility or GameplayEffect Blueprint, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. The cost effect: set_ability_cost; a new effect: create_gameplay_effect_blueprint.
 //   @param ability_blueprint_path - Asset path of the GameplayAbility Blueprint, e.g. "/Game/GAS/Abilities/GA_Fireball".
 //   @param cooldown_effect_path - Asset path of the GameplayEffect Blueprint used as the cooldown, e.g. "/Game/GAS/Effects/GE_Cooldown_Fireball"; typically a HasDuration effect.
 //   @returns { ability_blueprint_path: string, cooldown_effect_path: string, cooldown_effect_class: string, cooldown_effect_class_matches: bool, set: bool }
@@ -2280,7 +2286,7 @@ TSharedPtr<FJsonObject> HandleSetAbilityCooldown(const TSharedPtr<FJsonObject>& 
     return SetAbilityGameplayEffectClass(Params, TEXT("CooldownGameplayEffectClass"), TEXT("cooldown_effect_path"), TEXT("cooldown_effect_class"));
 }
 
-// MCP:set_ability_asset_tags - Replace the asset tags on the class default object of a GameplayAbility Blueprint, loaded by asset path, with the registered tags in asset_tags, then save the asset without recompiling. The list is the whole new set: tags already there and not listed are dropped, an empty list clears them all, and a string that is not a registered tag is skipped and listed in unknown_tags instead of failing the call. Every call writes and saves, even when the tags are unchanged. A path that is not a GameplayAbility Blueprint, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. Read back: get_ability_asset_tags; register a tag first: create_gameplay_tag; tags a GameplayEffect owns: set_gameplay_effect_component_asset_tags.
+// MCP:set_ability_asset_tags - Replace the asset tags on the class default object of a GameplayAbility Blueprint, loaded by asset path, with the registered tags in asset_tags, then save the asset without recompiling. The list is the whole new set: tags already there and not listed are dropped, an empty list clears them all, and a string that is not a registered tag is skipped and listed in unknown_tags instead of failing the call. Every call writes and saves, even when the tags are unchanged. A path that is not a GameplayAbility Blueprint, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. Read back: get_ability_asset_tags; register a tag first: create_gameplay_tag; tags a GameplayEffect owns: set_gameplay_effect_component.
 //   @param ability_blueprint_path - Asset path of the GameplayAbility Blueprint, e.g. "/Game/GAS/Abilities/GA_Fireball".
 //   @param asset_tags - Array of gameplay tag strings that becomes the whole asset-tag set, e.g. ["Ability.Fire", "Ability.Type.Magic"]; an empty array clears every asset tag.
 //   @returns { ability_blueprint_path: string, resolved_tags: [string], unknown_tags: [string], ability_tags: [string], tag_count: int, configured: bool }
@@ -2559,7 +2565,7 @@ namespace
 
 // GameplayCueNotify authoring
 
-// MCP:create_gameplay_cue_notify - Create a GameplayCueNotify Blueprint of the kind notify_type names -- Static (UGameplayCueNotify_Static, non-instanced one-shot, the default), Burst (UGameplayCueNotify_Burst, modern non-instanced one-shot), Actor (AGameplayCueNotify_Actor, a spawned, instanced cue actor) or Looping (AGameplayCueNotify_Looping, modern instanced looping notify) -- at package_path/name, compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there, or an unknown notify_type, is an error. A registered gameplay_cue_tag is written to the CDO and saved: a read-only root or a .uasset read-only on disk refuses that write and a failed save undoes it; an unregistered tag only yields cue_tag_set=false. Refused during PIE. Edit it with set_gameplay_cue_notify_static_properties (Static, Burst) or set_gameplay_cue_notify_actor_properties (Actor, Looping).
+// MCP:create_gameplay_cue_notify - Create a GameplayCueNotify Blueprint of the kind notify_type names -- Static (UGameplayCueNotify_Static, non-instanced one-shot, the default), Burst (UGameplayCueNotify_Burst, modern non-instanced one-shot), Actor (AGameplayCueNotify_Actor, a spawned, instanced cue actor) or Looping (AGameplayCueNotify_Looping, modern instanced looping notify) -- at package_path/name, compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there, or an unknown notify_type, is an error. A registered gameplay_cue_tag is written to the CDO and saved: a read-only root or a .uasset read-only on disk refuses that write and a failed save undoes it; an unregistered tag only yields cue_tag_set=false. Refused during PIE. Edit it with set_properties (Static, Burst) or set_properties (Actor, Looping).
 //   @param name - Asset name without a path, e.g. "GCN_Hit".
 //   @param package_path - Content folder for the new asset, e.g. "/Game/GAS/Cues"; defaults to /Game/Blueprints.
 //   @param notify_type - Optional kind of notify, any case: Static (default), Burst, Actor or Looping.
@@ -2620,6 +2626,7 @@ TSharedPtr<FJsonObject> HandleCreateGameplayCueNotify(const TSharedPtr<FJsonObje
 //     NumPreallocatedInstances  (GameplayCueNotify_Actor.h, all public data members -> no reflection)
 
 // MCP:set_gameplay_cue_notify_actor_properties - Write the GameplayCueTag (mirrored into GameplayCueName) and the lifetime, instancing and override properties you pass on the class default object of an AGameplayCueNotify_Actor Blueprint (Looping ones included), then save it without recompiling and without an undo entry. Prefer it to set_properties on the CDO: the tag is checked against the registry, GameplayCueName stays in sync, and the edit is saved, or undone if the save fails. Properties left out keep their values; every call writes and saves even when nothing differs. Passing none, an unregistered tag, or a Blueprint of another class is an error and nothing is written. Looping and application effects (particles, sounds) are not authored. A running PIE session, a read-only root or a read-only .uasset fails before any edit. Static or Burst notifies: set_gameplay_cue_notify_static_properties; read back: get_gameplay_cue_notify_info.
+//   @retired set_properties - object_path="/Game/Path/GC_X.Default__GC_X_C", properties={"GameplayCueTag":{"TagName":".."},...}, save=true
 //   @param cue_notify_path - Full asset path of the GameplayCueNotify_Actor/_Looping Blueprint
 //   @param gameplay_cue_tag - Optional registered GameplayCue tag (sets GameplayCueTag + mirrors GameplayCueName); unregistered -> clean error
 //   @param auto_destroy_on_remove - Optional bool: auto recycle/destroy when OnRemove fires
@@ -2702,7 +2709,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayCueNotifyActorProperties(const TSharedP
 //   UGameplayCueNotify_Static: GameplayCueTag/GameplayCueName/IsOverride (public; GameplayCueNotify_Static.h)
 //   AGameplayCueNotify_Actor public lifetime props (GameplayCueNotify_Actor.h)
 
-// MCP:get_gameplay_cue_notify_info - Read the class default object of a GameplayCueNotify Blueprint, loaded by asset path: notify_type (Static, Burst, Actor or Looping), its direct parent_class, GameplayCueTag, GameplayCueName and IsOverride. The lifetime and instancing fields come back only for Actor and Looping notifies; a Static or Burst reply leaves them out. Read-only and editor-time: it writes nothing and needs no PIE or actor. A missing asset or a Blueprint that is not a GameplayCueNotify is an error. Use it to check a notify before or after editing it with set_gameplay_cue_notify_static_properties (Static, Burst) or set_gameplay_cue_notify_actor_properties (Actor, Looping); a new one: create_gameplay_cue_notify.
+// MCP:get_gameplay_cue_notify_info - Read the class default object of a GameplayCueNotify Blueprint, loaded by asset path: notify_type (Static, Burst, Actor or Looping), its direct parent_class, GameplayCueTag, GameplayCueName and IsOverride. The lifetime and instancing fields come back only for Actor and Looping notifies; a Static or Burst reply leaves them out. Read-only and editor-time: it writes nothing and needs no PIE or actor. A missing asset or a Blueprint that is not a GameplayCueNotify is an error. Use it to check a notify before or after editing it with set_properties (Static, Burst) or set_properties (Actor, Looping); a new one: create_gameplay_cue_notify.
 //   @param cue_notify_path - Full asset path of the GameplayCueNotify Blueprint (Static/Burst/Actor/Looping), e.g. "/Game/GAS/Cues/GCN_Hit".
 //   @returns { cue_notify_path: string, parent_class: string, notify_type: string, gameplay_cue_tag: string, gameplay_cue_name: string, is_override: bool, auto_destroy_on_remove?: bool, auto_destroy_delay?: number, auto_attach_to_owner?: bool, unique_instance_per_instigator?: bool, unique_instance_per_source_object?: bool, allow_multiple_on_active_events?: bool, allow_multiple_while_active_events?: bool, num_preallocated_instances?: int }
 TSharedPtr<FJsonObject> HandleGetGameplayCueNotifyInfo(const TSharedPtr<FJsonObject>& Params)
@@ -2761,6 +2768,7 @@ TSharedPtr<FJsonObject> HandleGetGameplayCueNotifyInfo(const TSharedPtr<FJsonObj
 }
 
 // MCP:set_gameplay_cue_notify_static_properties - Set GameplayCueTag (mirrored into GameplayCueName) and/or IsOverride on the CDO of a UGameplayCueNotify_Static Blueprint (UGameplayCueNotify_Burst ones included), then save it without recompiling. Prefer it to set_properties on the CDO: the tag is checked against the registry, GameplayCueName stays in sync, and the edit is saved, or undone if the save fails. Needs at least one of the two; an unregistered tag fails before anything is written. Returns properties_set and the values read back; a Burst notify's burst effects (particles, sounds) are not authored, as its note says. A running PIE session, a read-only root or a read-only .uasset fails before any edit. Actor or Looping notifies: set_gameplay_cue_notify_actor_properties.
+//   @retired set_properties - object_path="/Game/Path/GC_X.Default__GC_X_C", properties={"GameplayCueTag":{"TagName":".."},...}, save=true
 //   @param cue_notify_path - Asset path of the GameplayCueNotify_Static or _Burst Blueprint, e.g. "/Game/GAS/Cues/GCN_Hit".
 //   @param gameplay_cue_tag - Optional registered GameplayCue tag (sets GameplayCueTag + mirrors GameplayCueName); unregistered -> clean error
 //   @param is_override - Optional bool: this cue overrides parent-tag cues instead of running in addition
@@ -3222,6 +3230,7 @@ namespace
 //   set_..._granted_abilities  -> UAbilitiesGameplayEffectComponent::AddGrantedAbilityConfig (AddUnique dedup)
 
 // MCP:set_gameplay_effect_component_target_tags - Set the gameplay tags a GameplayEffect grants its target actor while active: the Added tags of the TargetTagsGameplayEffectComponent on the class default object of a GE Blueprint loaded by asset path, adding the component when missing (already_existed says which), then save without recompiling. tags becomes the whole Added list and the Removed list is emptied (tags inherited from a parent GE remain); unregistered strings are skipped into unknown_tags and the call still succeeds, with granted_tags read back. A running PIE session, an enforced read-only root or a read-only .uasset is refused before any edit; no undo step, and a failed save rolls the edit back. Repeat calls write the same tags (idempotent). Owned asset tags: set_gameplay_effect_component_asset_tags; blocked abilities: set_gameplay_effect_component_block_ability_tags; require/ignore tags: set_gameplay_effect_component_target_tag_requirements; read back: get_gameplay_effect_components.
+//   @retired set_gameplay_effect_component - component="target_tags", tags
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param tags - List of gameplay tag strings to grant to the target (replaces the component's Added tags)
 //   @returns { ge_blueprint_path: string, component_class: string, resolved_tags: [string], unknown_tags: [string], granted_tags: [string], tag_count: int, already_existed: bool, set: bool }
@@ -3257,6 +3266,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectComponentTargetTags(const TShared
 }
 
 // MCP:set_gameplay_effect_component_asset_tags - Set the gameplay tags a GameplayEffect asset owns (they describe the GE and are not given to its target): the Added tags of the AssetTagsGameplayEffectComponent on the class default object of a GE Blueprint loaded by asset path, adding the component when missing (already_existed says which), then save without recompiling. tags becomes the whole Added list and the Removed list is emptied (tags inherited from a parent GE remain); unregistered strings are skipped into unknown_tags and the call still succeeds, with asset_tags read back. A running PIE session, an enforced read-only root or a read-only .uasset is refused before any edit; no undo step, and a failed save rolls the edit back. Repeat calls write the same tags (idempotent). Tags granted to the target: set_gameplay_effect_component_target_tags; blocked abilities: set_gameplay_effect_component_block_ability_tags; read back: get_gameplay_effect_components.
+//   @retired set_gameplay_effect_component - component="asset_tags", tags
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param tags - List of gameplay tag strings the GE asset owns (replaces the component's Added tags)
 //   @returns { ge_blueprint_path: string, component_class: string, resolved_tags: [string], unknown_tags: [string], asset_tags: [string], tag_count: int, already_existed: bool, set: bool }
@@ -3288,6 +3298,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectComponentAssetTags(const TSharedP
 }
 
 // MCP:set_gameplay_effect_component_block_ability_tags - Set which abilities, by ability tag, a GameplayEffect blocks on its target while active: the Added tags of the BlockAbilityTagsGameplayEffectComponent on the class default object of a GE Blueprint loaded by asset path, adding the component when missing (already_existed says which), then save without recompiling. tags becomes the whole Added list and the Removed list is emptied (tags inherited from a parent GE remain); unregistered strings are skipped into unknown_tags and the call still succeeds, with block_ability_tags read back. A running PIE session, an enforced read-only root or a read-only .uasset is refused before any edit; no undo step, and a failed save rolls the edit back. Repeat calls write the same tags (idempotent). Tags granted to the target: set_gameplay_effect_component_target_tags; owned tags: set_gameplay_effect_component_asset_tags; read back: get_gameplay_effect_components.
+//   @retired set_gameplay_effect_component - component="block_ability_tags", tags
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param tags - List of gameplay tag strings of abilities to block (replaces the component's Added tags)
 //   @returns { ge_blueprint_path: string, component_class: string, resolved_tags: [string], unknown_tags: [string], block_ability_tags: [string], tag_count: int, already_existed: bool, set: bool }
@@ -3319,6 +3330,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectComponentBlockAbilityTags(const T
 }
 
 // MCP:set_gameplay_effect_component_chance_to_apply - Configure a ChanceToApplyGameplayEffectComponent with the probability (0.0..1.0) that the GE applies to its target (creates the component if absent; idempotent via FindOrAddComponent + set-to-fixed-value). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
+//   @retired set_gameplay_effect_component - component="chance_to_apply", chance
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param chance - Probability the GE applies (0.0 = never, 1.0 = always)
 //   @returns { ge_blueprint_path: string, component_class: string, chance: float, chance_readback: float, chance_matches: bool, already_existed: bool, set: bool }
@@ -3372,6 +3384,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectComponentChanceToApply(const TSha
 }
 
 // MCP:set_gameplay_effect_component_target_tag_requirements - Configure a TargetTagRequirementsGameplayEffectComponent's Application/Ongoing/Removal require & ignore tags (creates the component if absent; idempotent via FindOrAddComponent + set-to-fixed-value). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
+//   @retired set_gameplay_effect_component - component="target_tag_requirements" and its six require/ignore tag lists
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param application_require_tags [array] - Optional array of gameplay tag strings: the target must have for the GE to apply
 //   @param application_ignore_tags [array] - Optional array of gameplay tag strings: that, if present, block application
@@ -3468,6 +3481,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectComponentTargetTagRequirements(co
 }
 
 // MCP:set_gameplay_effect_component_granted_abilities - Configure an AbilitiesGameplayEffectComponent to grant a GameplayAbility (by BP path/class name) to the target while the GE is active (creates the component if absent; AddGrantedAbilityConfig dedups via AddUnique). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
+//   @retired set_gameplay_effect_component - component="granted_abilities", ability_path, input_id
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param ability_path - GameplayAbility Blueprint asset path or bare class name to grant
 //   @param input_id - Optional input ID to bind the granted ability to (default -1 = none)
@@ -3593,8 +3607,162 @@ TSharedPtr<FJsonObject> HandleGetAbilityActivationInfo(const TSharedPtr<FJsonObj
     return mcp_common::MakeOkReply(Result);
 }
 
+namespace
+{
+    // Copies the given keys of Params, when present, into a new step's params with the GE path.
+    TSharedPtr<FJsonObject> GeStepParams(const TSharedPtr<FJsonObject>& Params, const FString& GePath, std::initializer_list<const TCHAR*> Keys)
+    {
+        TSharedPtr<FJsonObject> StepParams = MakeShared<FJsonObject>();
+        StepParams->SetStringField(TEXT("ge_blueprint_path"), GePath);
+        for (const TCHAR* Key : Keys)
+        {
+            if (const TSharedPtr<FJsonValue> Value = Params->TryGetField(Key))
+            {
+                StepParams->SetField(Key, Value);
+            }
+        }
+        return StepParams;
+    }
+}
+
+// MCP:set_gameplay_effect_modifier - Set how the modifier at modifier_index of a GameplayEffect Blueprint computes its magnitude, in one call: magnitude_type attribute_based (a captured backing_attribute, scaled as (value + pre_multiply_add) * coefficient + post_multiply_add, optionally remapped through a curve-table row and filtered by source/target tags), custom (a calculation_class, optionally remapped through a curve-table row) or set_by_caller (a data_tag or data_name resolved at runtime). Without magnitude_type, the curve or the tag filters apply to the modifier's current attribute-based or custom magnitude, as magnitude_curve_for says. Each part is validated and applied by its own step on the class default object and saved; a running PIE session, a read-only root or file fails before any edit, and the call stops at the first part refused, with applied listing those already changed. Add a modifier first with add_gameplay_effect_modifier; read it with get_gameplay_effect_info.
+//   @param ge_blueprint_path - Asset path of the GameplayEffect Blueprint
+//   @param modifier_index [integer] - Index of the modifier in the effect's Modifiers
+//   @param magnitude_type - Optional: attribute_based, custom or set_by_caller (replaces the magnitude); omitted keeps it
+//   @param backing_attribute - attribute_based: the captured attribute, e.g. "MyAttributeSet.Health"
+//   @param attribute_source - Optional, attribute_based: Source or Target (default Source)
+//   @param calculation_type - Optional, attribute_based: AttributeMagnitude, AttributeBaseValue, AttributeBonusMagnitude or AttributeMagnitudeEvaluatedUpToChannel
+//   @param final_channel [integer] - Optional, attribute_based: the evaluation channel for AttributeMagnitudeEvaluatedUpToChannel
+//   @param snapshot [bool] - Optional, attribute_based: capture the attribute when the spec is created (true) or when applied
+//   @param calculation_class - custom: the UGameplayModMagnitudeCalculation class (Blueprint path or class name)
+//   @param coefficient - Optional, attribute_based or custom: multiplier (default 1)
+//   @param pre_multiply_add - Optional, attribute_based or custom: added before the coefficient (default 0)
+//   @param post_multiply_add - Optional, attribute_based or custom: added after the coefficient (default 0)
+//   @param data_tag - set_by_caller: the gameplay tag the caller sets the magnitude under
+//   @param data_name - set_by_caller: the name the caller sets the magnitude under, instead of data_tag
+//   @param curve_table_path - Optional: a CurveTable whose row_name remaps the magnitude (needs row_name)
+//   @param row_name - Optional: the row of curve_table_path
+//   @param magnitude_curve_for - With curve_table_path and no magnitude_type: attribute_based (the AttributeCurve) or custom (the FinalLookupCurve)
+//   @param source_tags [array] - Optional, attribute-based: only modifiers carrying all these tags on the source count
+//   @param target_tags [array] - Optional, attribute-based: only modifiers carrying all these tags on the target count
+//   @returns { ge_blueprint_path: string, modifier_index: int, applied: { part: that part's reply }, failed?: { label, command, error } (when a part is refused) }
+TSharedPtr<FJsonObject> HandleSetGameplayEffectModifier(const TSharedPtr<FJsonObject>& Params)
+{
+    FString GePath;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("ge_blueprint_path"), GePath)) { return Missing; }
+    double ModifierIndex = 0.0;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("modifier_index"), ModifierIndex)) { return Missing; }
+    FString MagnitudeType;
+    Params->TryGetStringField(TEXT("magnitude_type"), MagnitudeType);
+    MagnitudeType = MagnitudeType.ToLower();
+    FString CurveFor;
+    Params->TryGetStringField(TEXT("magnitude_curve_for"), CurveFor);
+    CurveFor = MagnitudeType.IsEmpty() ? CurveFor.ToLower() : MagnitudeType;
+
+    TArray<mcp_common::FSubCommand> Steps;
+    auto WithIndex = [&](TSharedPtr<FJsonObject> StepParams)
+    {
+        StepParams->SetNumberField(TEXT("modifier_index"), ModifierIndex);
+        return StepParams;
+    };
+    if (MagnitudeType == TEXT("attribute_based"))
+    {
+        Steps.Add({ TEXT("attribute_based"), TEXT("set_gameplay_effect_modifier_attribute_based"), WithIndex(GeStepParams(Params, GePath,
+            { TEXT("backing_attribute"), TEXT("attribute_source"), TEXT("coefficient"), TEXT("pre_multiply_add"), TEXT("post_multiply_add"),
+              TEXT("calculation_type"), TEXT("final_channel"), TEXT("snapshot") })) });
+    }
+    else if (MagnitudeType == TEXT("custom"))
+    {
+        Steps.Add({ TEXT("custom"), TEXT("set_gameplay_effect_modifier_custom"), WithIndex(GeStepParams(Params, GePath,
+            { TEXT("calculation_class"), TEXT("coefficient"), TEXT("pre_multiply_add"), TEXT("post_multiply_add") })) });
+    }
+    else if (MagnitudeType == TEXT("set_by_caller"))
+    {
+        Steps.Add({ TEXT("set_by_caller"), TEXT("set_gameplay_effect_modifier_set_by_caller"), WithIndex(GeStepParams(Params, GePath,
+            { TEXT("data_tag"), TEXT("data_name") })) });
+    }
+    else if (!MagnitudeType.IsEmpty())
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Unknown magnitude_type '%s': one of attribute_based, custom, set_by_caller. Nothing was changed"), *MagnitudeType));
+    }
+
+    if (Params->HasField(TEXT("curve_table_path")) || Params->HasField(TEXT("row_name")))
+    {
+        if (CurveFor == TEXT("attribute_based"))
+        {
+            Steps.Add({ TEXT("curve"), TEXT("set_gameplay_effect_modifier_attribute_curve"), WithIndex(GeStepParams(Params, GePath,
+                { TEXT("curve_table_path"), TEXT("row_name") })) });
+        }
+        else if (CurveFor == TEXT("custom"))
+        {
+            Steps.Add({ TEXT("curve"), TEXT("set_gameplay_effect_modifier_custom_curve"), WithIndex(GeStepParams(Params, GePath,
+                { TEXT("curve_table_path"), TEXT("row_name") })) });
+        }
+        else
+        {
+            return mcp_common::MakeErrorReply(TEXT("A curve needs magnitude_type (attribute_based or custom) or, without it, magnitude_curve_for; nothing was changed"));
+        }
+    }
+    if (Params->HasField(TEXT("source_tags")) || Params->HasField(TEXT("target_tags")))
+    {
+        Steps.Add({ TEXT("tag_filters"), TEXT("set_gameplay_effect_modifier_attribute_tag_filters"), WithIndex(GeStepParams(Params, GePath,
+            { TEXT("source_tags"), TEXT("target_tags") })) });
+    }
+    TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
+    Reply->SetStringField(TEXT("ge_blueprint_path"), GePath);
+    Reply->SetNumberField(TEXT("modifier_index"), ModifierIndex);
+    return mcp_common::RunSubCommands(TEXT("set_gameplay_effect_modifier"), Steps, Reply);
+}
+
+// MCP:set_gameplay_effect_component - Configure one GameplayEffectComponent of a GameplayEffect Blueprint, adding it to the class default object when missing: component says which -- asset_tags (tags the GE owns), target_tags (tags granted to the target while active), block_ability_tags (abilities blocked while active), target_tag_requirements (application/ongoing/removal require and ignore tags), chance_to_apply (a probability) or granted_abilities (an ability granted while active) -- and the matching parameters set it. Validated, written and saved by the tool that owns that component; a running PIE session, a read-only root or file fails before any edit. Read it back with get_gameplay_effect_info.
+//   @param ge_blueprint_path - Asset path of the GameplayEffect Blueprint
+//   @param component - asset_tags, target_tags, block_ability_tags, target_tag_requirements, chance_to_apply or granted_abilities
+//   @param tags [array] - asset_tags, target_tags, block_ability_tags: the gameplay tags, which replace the component's Added tags
+//   @param application_require_tags [array] - Optional, target_tag_requirements
+//   @param application_ignore_tags [array] - Optional, target_tag_requirements
+//   @param ongoing_require_tags [array] - Optional, target_tag_requirements
+//   @param ongoing_ignore_tags [array] - Optional, target_tag_requirements
+//   @param removal_require_tags [array] - Optional, target_tag_requirements
+//   @param removal_ignore_tags [array] - Optional, target_tag_requirements
+//   @param chance - chance_to_apply: probability from 0.0 to 1.0
+//   @param ability_path - granted_abilities: the GameplayAbility Blueprint path or class name
+//   @param input_id [integer] - Optional, granted_abilities: the input ID bound to the ability
+//   @returns { the reply of the tool that owns the component: the values read back, already_existed, saved }
+TSharedPtr<FJsonObject> HandleSetGameplayEffectComponent(const TSharedPtr<FJsonObject>& Params)
+{
+    FString GePath;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("ge_blueprint_path"), GePath)) { return Missing; }
+    FString Component;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("component"), Component)) { return Missing; }
+    Component = Component.ToLower();
+    if (Component == TEXT("asset_tags") || Component == TEXT("target_tags") || Component == TEXT("block_ability_tags"))
+    {
+        return mcp_common::RunSubCommand(FString::Printf(TEXT("set_gameplay_effect_component_%s"), *Component), GeStepParams(Params, GePath, { TEXT("tags") }));
+    }
+    if (Component == TEXT("target_tag_requirements"))
+    {
+        return mcp_common::RunSubCommand(TEXT("set_gameplay_effect_component_target_tag_requirements"), GeStepParams(Params, GePath,
+            { TEXT("application_require_tags"), TEXT("application_ignore_tags"), TEXT("ongoing_require_tags"), TEXT("ongoing_ignore_tags"),
+              TEXT("removal_require_tags"), TEXT("removal_ignore_tags") }));
+    }
+    if (Component == TEXT("chance_to_apply"))
+    {
+        return mcp_common::RunSubCommand(TEXT("set_gameplay_effect_component_chance_to_apply"), GeStepParams(Params, GePath, { TEXT("chance") }));
+    }
+    if (Component == TEXT("granted_abilities"))
+    {
+        return mcp_common::RunSubCommand(TEXT("set_gameplay_effect_component_granted_abilities"), GeStepParams(Params, GePath, { TEXT("ability_path"), TEXT("input_id") }));
+    }
+    return mcp_common::MakeErrorReply(FString::Printf(
+        TEXT("Unknown component '%s': one of asset_tags, target_tags, block_ability_tags, target_tag_requirements, chance_to_apply, granted_abilities. Nothing was changed"),
+        *Component));
+}
+
 const McpCommandFamilies::FRegistrar Registration =
 {
+    { TEXT("set_gameplay_effect_modifier"), &HandleSetGameplayEffectModifier },
+    { TEXT("set_gameplay_effect_component"), &HandleSetGameplayEffectComponent },
     { TEXT("add_attribute_to_set"), &HandleAddAttributeToSet },
     { TEXT("add_gameplay_effect_component"), &HandleAddGameplayEffectComponent },
     { TEXT("add_gameplay_effect_modifier"), &HandleAddGameplayEffectModifier },

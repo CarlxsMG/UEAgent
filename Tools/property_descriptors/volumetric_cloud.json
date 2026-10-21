@@ -10,6 +10,8 @@
   "header_comment": ["SetReflectionViewSampleCountScale and SetShadowReflectionViewSampleCountScale are left out: the fields", "they write are Value-suffixed, next to deprecated fields of the plain name."],
   "set_desc": "Set layer and planet geometry, ground albedo, tracing distances and sample counts of a VolumetricCloud actor found by label or name, through the component's setters, which refresh its render state; set_properties writes any other field. Only supplied fields change, in one undo step (applied_count counts them), and the reply reads every property back. ground_albedo is [R,G,B(,A)] in whole 0-255 bytes. A malformed field, or a component of Static mobility (its setters change nothing; make it Movable first), is an error and nothing changes. Not saved.",
   "get_desc": "Read the layer and tracing settings of a VolumetricCloud actor's component, found by label or name in the editor world, under the snake_case names set_volumetric_cloud_properties takes. A curated view; get_properties (internal names only) reads any other UPROPERTY on the component.",
+  "set_retired": "set_properties - object_path=\"<actor>.VolumetricCloudComponent\", properties with the engine names (LayerBottomAltitude, LayerHeight...)",
+  "get_retired": "get_properties - object_path=\"<actor>.VolumetricCloudComponent\", property_names=[engine names], or get_component_properties for all of them",
   "fields": [
     { "json": "layer_bottom_altitude", "setter": "SetLayerBottomAltitude", "readback": "LayerBottomAltitude", "type": "float", "desc": "Optional layer bottom altitude (km)." },
     { "json": "layer_height", "setter": "SetLayerHeight", "readback": "LayerHeight", "type": "float", "desc": "Optional layer height (km)." },

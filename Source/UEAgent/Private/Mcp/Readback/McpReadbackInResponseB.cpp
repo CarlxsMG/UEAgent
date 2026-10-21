@@ -1221,7 +1221,7 @@ void McpReadbackChecks::RegisterInResponseB(McpReadback::FTables& Tables)
 	T.Add(TEXT("create_runtime_virtual_texture"), &CheckRvtExponents);
 	T.Add(TEXT("create_data_layer_asset"), &CheckDataLayerColor);
 	T.Add(TEXT("set_water_body_gerstner_waves"), &CheckGerstnerSteepness);
-	T.Add(TEXT("configure_water_zone"), &CheckWaterInfoDensity);
+	T.Add(TEXT("set_water_zone_settings"), &CheckWaterInfoDensity);
 	T.Add(TEXT("get_water_zone_info"), &CheckZoneLinkedBodies);
 	T.Add(TEXT("set_water_body_material"), &CheckWaterMaterial);
 	T.Add(TEXT("copy_dynamic_mesh_to_static_mesh"), &CheckBakeWithoutMaterials);

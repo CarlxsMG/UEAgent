@@ -27,6 +27,12 @@ change has to pass. How a call travels through the editor is in
 
 ## Adding a tool
 
+Name it with its verb first, one verb per operation: `get_` reads one thing (`get_<x>_info` all of it),
+`list_` enumerates, `find_` searches by name or condition, `is_`/`has_` answer yes or no; `create_` makes an
+asset, `add_` puts a part into an asset or actor, `spawn_` places an actor in a world; `set_` writes;
+`remove_` takes a part out, `delete_` deletes an asset or actor, `clear_` empties a list. The generator refuses
+the synonyms (`read_`, `inspect_`, `query_`, `configure_`, `update_`...).
+
 1. Write the handler in its family's `.cpp`:
    `TSharedPtr<FJsonObject> HandleDoThing(const TSharedPtr<FJsonObject>& Params)`. Read required
    params with `mcp_common::ReadRequiredString` / `ReadRequiredNumber` / `ReadRequiredBool`, and
@@ -67,6 +73,19 @@ A new family is a new `.cpp` with its namespace, a `// MCP-DOMAIN: <Domain>` mar
 notice: `python Tools/check_copyright.py --write` adds it. A new domain also gets a phrase in `DOMAIN_SUMMARY`
 (`Tools/codegen_tool_docs.py`), which the reference uses to say what the domain covers. The server reads the
 catalog at editor startup and on `mcp.http.restart`.
+
+## Renaming or retiring a tool
+
+A call to an old name keeps working until the next major version, so a rename or a retirement does not
+break anyone:
+
+- **Renamed:** give the tool its new name and add `//   @renamed-from old_name` to its block. A call to the
+  old name runs the tool.
+- **Retired**, because another tool does the same: keep it and add
+  `//   @retired other_tool - how to make the same call with other_tool`. It still runs under its own name.
+
+Both leave `tools/list`, `find_tools` and the reference, and a call answers as before plus
+`data.retired_name`, which says what to call instead. `docs/tools/retired.md` lists them.
 
 ## Before a pull request
 

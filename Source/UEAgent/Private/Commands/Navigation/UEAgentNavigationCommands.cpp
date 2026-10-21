@@ -199,6 +199,7 @@ namespace UEAgentNavigationCommandsImpl
 // NAVIGATIONSYSTEM_API).
 // ----------------------------------------------------------------------------
 // MCP:spawn_nav_modifier_volume - Spawn an ANavModifierVolume in the editor world at location, give it a real box brush of half-extent extent (a spawned volume has none) and optionally set its nav area class, in one undo step, then label it with its internal name so label lookups find it. Over spawn_box_volume(volume_class='NavModifierVolume') it sets the area class in the same call; spawn_box_volume instead re-reads the bounds against the request. area_class names a UNavArea subclass already loaded (e.g. NavArea_Null or NavArea_Obstacle; a Blueprint area by its _C name); a name that does not resolve is not an error: area_class_applied comes back false and the default area stays. An extent axis of 0 or less becomes 100. Each call adds a new actor. Not saved (save_level); this call does not rebuild navigation (rebuild_navigation). Refused during PIE. Navmesh bounds: spawn_navmesh_bounds_volume; links: spawn_nav_link_proxy.
+//   @retired spawn_box_volume - volume_class="NavModifierVolume", location, extent; then set_properties(object_path=<label>, properties={"AreaClass":"/Script/NavigationSystem.NavArea_Null"})
 //   @param location - [x, y, z] world location for the volume in cm; missing spawns at the origin, and any other value is an error and nothing is spawned
 //   @param area_class - Optional UNavArea subclass name to apply via SetAreaClass, e.g. NavArea_Null; unresolved names are ignored with area_class_applied false
 //   @param extent - Optional [x, y, z] box half-extent in cm (default 100,100,100, a 200 cm box); a component of 0 or less becomes 100
@@ -277,6 +278,7 @@ TSharedPtr<FJsonObject> HandleSpawnNavModifierVolume(const TSharedPtr<FJsonObjec
 // so a straight editor-actor spawn is all that's needed.
 // ----------------------------------------------------------------------------
 // MCP:spawn_nav_link_proxy - Spawn an ANavLinkProxy actor (with its class-default point link) in the editor world at location through the editor actor subsystem, in one undo step, and label it with its internal name so label lookups find it. spawn_actor has no nav-link type. Each call adds a new actor (not idempotent); the link endpoints are not set here -- write its PointLinks with set_properties. The level is not saved (save_level) and this call does not rebuild navigation (rebuild_navigation). During PIE the editor refuses the spawn and the call is an error, as it is without an editor world. Move it with set_actor_transform; inverse: delete_actor. An area that changes path cost or blocks: spawn_nav_modifier_volume; the navmesh bounds: spawn_navmesh_bounds_volume.
+//   @retired spawn_actor - type="NavLinkProxy", name, location
 //   @param location - [x, y, z] world location for the nav link proxy in cm; missing spawns at the origin, and any other value is an error and nothing is spawned
 //   @returns { actor_name, actor_label, actor_path, actor_class, success }
 TSharedPtr<FJsonObject> HandleSpawnNavLinkProxy(const TSharedPtr<FJsonObject>& Params)
@@ -1833,7 +1835,7 @@ TSharedPtr<FJsonObject> HandleDiagnoseNavmesh(const TSharedPtr<FJsonObject>& Par
         if (bBrushEmpty)
         {
             VObj->SetStringField(TEXT("note"),
-                TEXT("EMPTY/degenerate brush -> contributes no navigable region (0 bounds). The spawn_navmesh_bounds_volume MCP tool creates an empty brush; place/scale a real box brush via the editor UI (Landscape/Volume brush) or spawn_box_volume, then rebuild_navigation."));
+                TEXT("EMPTY/degenerate brush -> contributes no navigable region (0 bounds). spawn_box_volume volume_class=\"NavMeshBoundsVolume\" with an extent builds a real box brush; then rebuild_navigation."));
         }
         VolumesArr.Add(MakeShared<FJsonValueObject>(VObj));
     }
@@ -1991,6 +1993,7 @@ TSharedPtr<FJsonObject> HandleDiagnoseNavmesh(const TSharedPtr<FJsonObject>& Par
 // UCollisionProfile::LoadProfileConfig assigns them.
 // ----------------------------------------------------------------------------
 // MCP:dump_collision_channels - Dumps this project's custom collision channels (from config): each ECC_GameTraceChannelN / object channel -> friendly name, whether it's a trace or object channel, and its TraceTypeQueryN / ObjectTypeQueryN index (the value a raycast/overlap passes). Read-only. Read from GConfig [/Script/Engine.CollisionProfile] DefaultChannelResponses.
+//   @retired list_collision_channels - each custom channel carries is_trace_type, query_type, query_index and query_number
 //   @returns { source, builtin_trace_count, builtin_object_count, count, channels:[{channel, channel_value, name, is_trace_type, is_static_object, is_custom_game_slot, default_response, query_type, query_index, query_number}], success }
 TSharedPtr<FJsonObject> HandleDumpCollisionChannels(const TSharedPtr<FJsonObject>& /*Params*/)
 {

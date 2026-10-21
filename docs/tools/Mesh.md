@@ -120,6 +120,21 @@ Assign a material to one slot of the first UProceduralMeshComponent on an editor
 
 **Returns:** `{ actor_label, material_path, element_index, material_set, previous_material_path?, note? }`
 
+## `set_procedural_mesh_section_vertices`
+
+*Destructive, idempotent.*
+
+Move the vertices of an existing section of a UProceduralMeshComponent on an editor-world actor found by label: vertices sets every position in order, while triangles, normals, UVs, colors and tangents stay as they were (normals are not recomputed). When the section has collision its collision vertices follow, and the component bounds are rebuilt. Sending the same positions again leaves the section as it was, so the call is idempotent. A missing actor or component, a negative or nonexistent section, an empty vertices array or a count different from the section's is an error before anything changes. Transient: nothing is marked dirty, saved or undoable. New geometry or topology: create_procedural_box_mesh, create_procedural_grid_mesh; read the section back: get_procedural_mesh_section_data; counts: get_procedural_mesh_info.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `actor_label` | string | yes | Editor label of the actor carrying the PMC |
+| `vertices` | array | yes | Required [[x, y, z], ...] array in component space with the same vertex count as the existing section; an entry that is not a 3-element array is skipped before the count is compared |
+| `component_index` | number | no | Optional 0-based PMC index on the actor; defaults to 0 |
+| `section_index` | number | no | Optional target section index (>= 0); defaults to 0 |
+
+**Returns:** `{ actor_label: string, section_index: int, vertex_count: int }`
+
 ## `set_procedural_mesh_section_visible`
 
 *Destructive, idempotent.*
@@ -152,18 +167,3 @@ Slice a procedural mesh in place with a plane, optionally spawning the other hal
 | `cap_material_path` | string | no | Optional /Game path to a UMaterialInterface for the cap |
 
 **Returns:** `{ actor_label, sliced, total_sections, other_half_created, other_half_component_name?, other_half_sections? }`
-
-## `update_procedural_mesh_section`
-
-*Destructive, idempotent.*
-
-Move the vertices of an existing section of a UProceduralMeshComponent on an editor-world actor found by label: vertices sets every position in order, while triangles, normals, UVs, colors and tangents stay as they were (normals are not recomputed). When the section has collision its collision vertices follow, and the component bounds are rebuilt. Sending the same positions again leaves the section as it was, so the call is idempotent. A missing actor or component, a negative or nonexistent section, an empty vertices array or a count different from the section's is an error before anything changes. Transient: nothing is marked dirty, saved or undoable. New geometry or topology: create_procedural_box_mesh, create_procedural_grid_mesh; read the section back: get_procedural_mesh_section_data; counts: get_procedural_mesh_info.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actor_label` | string | yes | Editor label of the actor carrying the PMC |
-| `vertices` | array | yes | Required [[x, y, z], ...] array in component space with the same vertex count as the existing section; an entry that is not a 3-element array is skipped before the count is compared |
-| `component_index` | number | no | Optional 0-based PMC index on the actor; defaults to 0 |
-| `section_index` | number | no | Optional target section index (>= 0); defaults to 0 |
-
-**Returns:** `{ actor_label: string, section_index: int, vertex_count: int }`

@@ -180,7 +180,7 @@ def domain_page(domain: str, commands: list[dict]) -> str:
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
-def index_page(domains: list[dict]) -> str:
+def index_page(domains: list[dict], has_retired: bool = False) -> str:
     total = sum(len(d["commands"]) for d in domains)
     lines = [HEADER, "", "# Tool reference", "",
              f"{total} tools in {len(domains)} domains. Every tool also describes itself over MCP "
@@ -191,15 +191,48 @@ def index_page(domains: list[dict]) -> str:
         covers = summary(d["domain"], d["commands"])
         lines.append(f"| [{d['domain']}]({d['domain']}.md) | {len(d['commands'])} | "
                      f"{cell(covers[:1].upper() + covers[1:])} |")
+    if has_retired:
+        lines += ["", "Old and retired names that still run are in [Retired names](retired.md)."]
     return "\n".join(lines) + "\n"
+
+
+def retired_page(renamed: dict[str, str], retired: list[dict]) -> str:
+    """The names that still run but are not listed: renamed tools' old names, and retired tools."""
+    lines = [HEADER, "", "# Retired names", "",
+             "These names are not in the tool list, and a call to them still works until UEAgent 3.0: the reply's "
+             "`data.retired_name` says what to call instead.", "",
+             "Back to the [index](README.md).", ""]
+    if renamed:
+        lines += ["## Renamed", "", "The old name runs the new tool: same parameters, same reply.", "",
+                  "| Old name | New name |", "|---|---|"]
+        retired_use = {c["name"]: c["retired"]["use"] for c in retired}
+        lines += [f"| `{old}` | `{new}`" + (f" (retired: `{retired_use[new]}` does the same)" if new in retired_use else "") + " |"
+                  for old, new in sorted(renamed.items())]
+        lines.append("")
+    if retired:
+        lines += ["## Retired", "", "The tool still runs under its own name; the listed tool does the same.", "",
+                  "| Retired | Use | How |", "|---|---|---|"]
+        lines += [f"| `{c['name']}` | `{c['retired']['use']}` | {cell(c['retired'].get('how') or '')} |"
+                  for c in sorted(retired, key=lambda c: c["name"])]
+        lines.append("")
+    return "\n".join(lines).rstrip("\n") + "\n"
 
 
 def render() -> dict[str, str]:
     with open(_paths.CATALOG_JSON, encoding="utf-8") as f:
-        domains = sorted(json.load(f)["domains"], key=lambda d: d["domain"])
-    pages = {"README.md": index_page(domains)}
+        catalog = json.load(f)
+    retired = [c for d in catalog["domains"] for c in d["commands"] if c.get("retired")]
+    renamed = catalog.get("renamed") or {}
+    domains = []
+    for d in sorted(catalog["domains"], key=lambda d: d["domain"]):
+        listed = [c for c in d["commands"] if not c.get("retired")]
+        if listed:
+            domains.append({"domain": d["domain"], "commands": listed})
+    pages = {"README.md": index_page(domains, bool(retired or renamed))}
     for d in domains:
         pages[f"{d['domain']}.md"] = domain_page(d["domain"], d["commands"])
+    if retired or renamed:
+        pages["retired.md"] = retired_page(renamed, retired)
     return pages
 
 

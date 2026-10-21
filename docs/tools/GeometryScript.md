@@ -2,15 +2,15 @@
 
 # GeometryScript
 
-44 tools for dynamic meshes with Geometry Script: primitives, booleans, remeshing, UVs, normals, material IDs and spatial queries.
+43 tools for dynamic meshes with Geometry Script: primitives, booleans, remeshing, UVs, normals, material IDs and spatial queries.
 
 Back to the [index](README.md).
 
-## `append_mesh_primitive`
+## `add_mesh_primitive`
 
 *Additive.*
 
-Append a Box, Sphere, Cylinder or Cone to the live dynamic mesh of a DynamicMeshActor in the editor world, keeping the geometry already there: size is the box edge or the diameter and height of the round shapes, centred at location in mesh-local space. Each call adds another copy as one undo step: undo puts the mesh back as it was. Nothing is saved to an asset. An unknown actor or primitive is an error that leaves the mesh as it was; appended is true when the triangle count grew. To merge another actor's mesh use append_mesh_to_dynamic_mesh; to persist the result, copy_dynamic_mesh_to_static_mesh.
+Append a Box, Sphere, Cylinder or Cone to the live dynamic mesh of a DynamicMeshActor in the editor world, keeping the geometry already there: size is the box edge or the diameter and height of the round shapes, centred at location in mesh-local space. Each call adds another copy as one undo step: undo puts the mesh back as it was. Nothing is saved to an asset. An unknown actor or primitive is an error that leaves the mesh as it was; appended is true when the triangle count grew. To merge another actor's mesh use add_mesh_to_dynamic_mesh; to persist the result, copy_dynamic_mesh_to_static_mesh.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -23,7 +23,7 @@ Append a Box, Sphere, Cylinder or Cone to the live dynamic mesh of a DynamicMesh
 
 **Returns:** `{ actor_name: string, primitive: string, size: number, material_id: int, triangle_count: int, triangles_added: int, vertex_count: int, appended: bool }`
 
-## `append_mesh_to_dynamic_mesh`
+## `add_mesh_to_dynamic_mesh`
 
 *Additive.*
 
@@ -380,7 +380,7 @@ Renumber MaterialIDs on a DynamicMeshActor's live dynamic mesh. Two modes: pass 
 
 *Destructive.*
 
-Destroy a DynamicMeshActor in the editor world, found by label or object name, inside an undoable transaction. Returns the label, internal name and triangle_count_before of the destroyed actor; fails if the name matches no DynamicMeshActor. Create one with spawn_dynamic_mesh_actor.
+Destroy a DynamicMeshActor in the editor world, found by label or object name, inside an undoable transaction. Returns the label, internal name and triangle_count_before of the destroyed actor; fails if the name matches no DynamicMeshActor. Create one with spawn_actor.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -617,19 +617,6 @@ QEM-simplify a DynamicMeshActor's dynamic mesh to a target triangle count. One u
 
 **Returns:** `{ actor_name: string, target_triangle_count: int, triangle_count_before: int, triangle_count_after: int, vertex_count: int, simplified: bool }`
 
-## `spawn_dynamic_mesh_actor`
-
-*Destructive.*
-
-Spawn an empty ADynamicMeshActor into the editor world (not PIE) at an optional location and rotation, ignoring collisions, in one undo step -- the editable-mesh actor the GeometryScript tools (append_mesh_primitive, apply_mesh_boolean...) work on; spawn_actor has no such type. Each call adds another actor. Returns its label as actor_name, its internal name and triangle_count (0). Keep a result with copy_dynamic_mesh_to_static_mesh; remove it with remove_dynamic_mesh_actor.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `location` | array | no | World location [x, y, z] in cm (default the world origin). |
-| `rotation` | array | no | World rotation in degrees as [pitch, yaw, roll] (default no rotation). |
-
-**Returns:** `{ actor_name: string, actor_internal_name: string, actor_class: string, has_dynamic_mesh_component: bool, has_dynamic_mesh: bool, triangle_count: int, spawned: bool }`
-
 ## `transform_dynamic_mesh`
 
 *Destructive.*
@@ -676,7 +663,7 @@ Compute a real UV UNWRAP for the whole mesh via UGeometryScriptLibrary_MeshUVFun
 | `min_patch_size` | number | no | patch_builder: minimum triangles per patch (default 2). |
 | `merging_threshold` | number | no | patch_builder: patch merging metric threshold (default 1.5). Higher merges more aggressively, giving fewer islands. |
 | `max_angle_deg` | number | no | patch_builder: max angle in degrees between merged patches (default 45). |
-| `respect_polygroups` | boolean | no | patch_builder: seed patches from the existing polygroups instead of curvature (default false). Useful right after append_mesh_primitive, where each appended face is already its own group. |
+| `respect_polygroups` | boolean | no | patch_builder: seed patches from the existing polygroups instead of curvature (default false). Useful right after add_mesh_primitive, where each appended face is already its own group. |
 | `auto_pack` | boolean | no | Pack the resulting islands into standard UV space (default true). |
 | `max_iterations` | number | no | xatlas: solver iterations (default 2). Higher is slower and slightly tighter. |
 

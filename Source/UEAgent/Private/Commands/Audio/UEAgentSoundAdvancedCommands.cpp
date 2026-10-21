@@ -243,6 +243,7 @@ TSharedPtr<FJsonObject> HandleCreateMetasoundPreset(
 // attenuation_distance_scale) on a USoundClass asset.
 // ---------------------------------------------------------------------------
 // MCP:set_sound_class_properties - Write the given FSoundClassProperties fields of a SoundClass asset (volume, pitch, filters, routing and loading flags) as flat named params, then save it. Use it over set_properties, which would need the nested Properties struct and leaves it unsaved; the parent link is set_sound_class_parent. Only fields you pass change; values are not range-checked and an unknown output_target or loading_behavior name is skipped (applied_<field> false). Returns every current value plus saved; get_sound_class_properties reads them.
+//   @retired set_properties - object_path=<sound class>, properties={"Properties":{"Volume":..,"Pitch":..,"bIsUISound":..}}, save=true
 //   @param sound_class_path - Content path of the USoundClass asset.
 //   @param volume - Volume multiplier for sounds of this class (Properties.Volume), e.g. 0.5 for half
 //   @param pitch - Pitch multiplier for sounds of this class (Properties.Pitch), e.g. 1.2
@@ -461,7 +462,7 @@ TSharedPtr<FJsonObject> HandleSetSoundClassProperties(
 // get_sound_class_properties
 // Reads sound class properties and hierarchy info from a USoundClass asset.
 // ---------------------------------------------------------------------------
-// MCP:get_sound_class_properties - Read a USoundClass asset: every FSoundClassProperties field that set_sound_class_properties writes (volume, pitch, filters, reverb and routing flags, output_target, loading_behavior) plus its name and its direct parent and direct children by name and path. A flattened view under the snake_case keys that tool takes; get_properties reads the raw Properties struct or any other UPROPERTY. parent_class is "None" for a root class, and child_count is the number of children listed (null references are skipped). One level only: walk further by calling it again on a parent or child. Read-only; it loads the asset by object or package path, and one that does not load as a USoundClass is an error.
+// MCP:get_sound_class_properties - Read a USoundClass asset: every FSoundClassProperties field that set_properties writes (volume, pitch, filters, reverb and routing flags, output_target, loading_behavior) plus its name and its direct parent and direct children by name and path. A flattened view under the snake_case keys that tool takes; get_properties reads the raw Properties struct or any other UPROPERTY. parent_class is "None" for a root class, and child_count is the number of children listed (null references are skipped). One level only: walk further by calling it again on a parent or child. Read-only; it loads the asset by object or package path, and one that does not load as a USoundClass is an error.
 //   @param sound_class_path - Content path of the USoundClass asset.
 //   @returns { name: string, sound_class_path: string, volume: float, pitch: float, low_pass_frequency: float, attenuation_distance_scale: float, lfe_bleed: float, voice_center_channel_volume: float, radio_filter_volume: float, radio_filter_volume_threshold: float, default_2d_reverb_send_amount: float, apply_effects: bool, always_play: bool, is_ui_sound: bool, is_music: bool, center_channel_only: bool, apply_ambient_volumes: bool, reverb: bool, output_target: string, loading_behavior: string, parent_class: string, parent_class_path: string, child_classes: [{name, path}], child_count: int }
 
@@ -514,7 +515,7 @@ TSharedPtr<FJsonObject> HandleGetSoundClassProperties(
 // Sets a sound class adjuster in a USoundMix. Loads the USoundMix and
 // USoundClass, adds or updates an FSoundClassAdjuster in SoundClassEffects.
 // ---------------------------------------------------------------------------
-// MCP:set_sound_mix_class_override - Sets a sound class adjuster override in a USoundMix.  Loads the USoundMix and USoundClass, adds or updates an FSoundClassAdjuster in the mix's SoundClassEffects array, then saves.
+// MCP:set_sound_mix_class_override - Sets a sound class adjuster override in a USoundMix.  Loads the USoundMix and USoundClass, adds or updates an FSoundClassAdjuster in the mix's SoundClassEffects array, then saves. Inverse: remove_sound_mix_class_override.
 //   @param sound_mix_path - Content path of the USoundMix asset.
 //   @param sound_class_path - Content path of the USoundClass to adjust.
 //   @param volume_adjuster - Adjuster.VolumeAdjuster (default 1.0).
@@ -595,11 +596,69 @@ TSharedPtr<FJsonObject> HandleSetSoundMixClassOverride(
     return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("set_sound_mix_class_override"), SaveError);
 }
 
+// MCP:remove_sound_mix_class_override - Remove the sound class adjuster for one sound class from a USoundMix, in one undo step, then save the mix. Inverse of set_sound_mix_class_override, which adds or updates that adjuster. A mix with no adjuster for the class is an honest no-op (removed=false, nothing saved); a mix or class that does not load is an error. The reply re-reads the mix's adjusters (remaining_classes). A failed save makes success false with save_error.
+//   @param sound_mix_path - Content path of the USoundMix asset.
+//   @param sound_class_path - Content path of the USoundClass whose adjuster to remove.
+//   @returns { sound_mix_path: string, sound_class_path: string, removed: bool, removed_count: int, total_adjusters: int, remaining_classes: [string], saved: bool, save_error?: string }
+
+TSharedPtr<FJsonObject> HandleRemoveSoundMixClassOverride(const TSharedPtr<FJsonObject>& Params)
+{
+    FString SoundMixPath;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("sound_mix_path"), SoundMixPath)) { return Missing; }
+    FString SoundClassPath;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("sound_class_path"), SoundClassPath)) { return Missing; }
+
+    USoundMix* SoundMix = nullptr;
+    if (TSharedPtr<FJsonObject> LoadError = SoundAdvanced_LoadAsset(SoundMixPath, TEXT("USoundMix"), SoundMix)) { return LoadError; }
+    USoundClass* SoundClass = nullptr;
+    if (TSharedPtr<FJsonObject> LoadError = SoundAdvanced_LoadAsset(SoundClassPath, TEXT("USoundClass"), SoundClass)) { return LoadError; }
+
+    const auto RemainingClasses = [SoundMix]()
+    {
+        TArray<FString> Names;
+        for (const FSoundClassAdjuster& Adjuster : SoundMix->SoundClassEffects)
+        {
+            Names.Add(Adjuster.SoundClassObject ? Adjuster.SoundClassObject->GetPathName() : FString(TEXT("None")));
+        }
+        return Names;
+    };
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("sound_mix_path"), SoundMix->GetPathName());
+    ResultObj->SetStringField(TEXT("sound_class_path"), SoundClass->GetPathName());
+    const int32 Matching = SoundMix->SoundClassEffects.FilterByPredicate(
+        [SoundClass](const FSoundClassAdjuster& Adjuster) { return Adjuster.SoundClassObject == SoundClass; }).Num();
+    if (Matching == 0)
+    {
+        ResultObj->SetBoolField(TEXT("removed"), false);
+        ResultObj->SetNumberField(TEXT("removed_count"), 0);
+        ResultObj->SetNumberField(TEXT("total_adjusters"), SoundMix->SoundClassEffects.Num());
+        ResultObj->SetArrayField(TEXT("remaining_classes"), mcp_common::StringsToJson(RemainingClasses()));
+        ResultObj->SetBoolField(TEXT("saved"), false);
+        return mcp_common::MakeOkReply(ResultObj);
+    }
+
+    FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "RemoveSoundMixOverride", "Remove Sound Mix Class Override"));
+    SoundMix->Modify();
+    const int32 RemovedCount = SoundMix->SoundClassEffects.RemoveAll(
+        [SoundClass](const FSoundClassAdjuster& Adjuster) { return Adjuster.SoundClassObject == SoundClass; });
+
+    FString SaveError;
+    const bool bSaved = mcp_common::SaveAssetPackage(SoundMix->GetOutermost(), SoundMix, SaveError);
+
+    ResultObj->SetBoolField(TEXT("removed"), RemovedCount > 0);
+    ResultObj->SetNumberField(TEXT("removed_count"), RemovedCount);
+    ResultObj->SetNumberField(TEXT("total_adjusters"), SoundMix->SoundClassEffects.Num());
+    ResultObj->SetArrayField(TEXT("remaining_classes"), mcp_common::StringsToJson(RemainingClasses()));
+    return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("remove_sound_mix_class_override"), SaveError);
+}
+
 const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("create_metasound_preset"), &HandleCreateMetasoundPreset },
     { TEXT("get_sound_class_properties"), &HandleGetSoundClassProperties },
     { TEXT("set_sound_class_properties"), &HandleSetSoundClassProperties },
     { TEXT("set_sound_mix_class_override"), &HandleSetSoundMixClassOverride },
+    { TEXT("remove_sound_mix_class_override"), &HandleRemoveSoundMixClassOverride },
 };
 } // namespace UEAgentSoundAdvancedCommands

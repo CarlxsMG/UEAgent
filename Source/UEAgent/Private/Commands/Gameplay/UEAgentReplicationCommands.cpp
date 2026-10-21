@@ -15,7 +15,7 @@
  * Multiplayer / Replication commands.
  *
  * Wraps the public AActor replication setter API (SetReplicates / SetReplicateMovement are
- * configure_replication's, in the Networking domain):
+ * set_actor_replication's, in the Networking domain):
  *  - SetNetDormancy
  *  - SetNetUpdateFrequency / SetMinNetUpdateFrequency
  *  - SetNetCullDistanceSquared
@@ -108,6 +108,7 @@ namespace
 // set_actor_net_dormancy
 // ---------------------------------------------------------------------------
 // MCP:set_actor_net_dormancy - Set NetDormancy on an editor-world actor found by label (AActor::SetNetDormancy). Only that placed instance changes; it is not marked dirty and nothing is saved. dormancy in the reply is the parsed enum name (e.g. DORM_DormantAll), not a read-back: use get_actor_replication_info.
+//   @retired set_properties - object_path=<actor>, properties={"NetDormancy":"DORM_DormantAll"}
 //   @param actor_label - Label of the actor in the editor world.
 //   @param dormancy - ENetDormancy value, case-insensitive, with or without a DORM_ or DORMANT_ prefix: Never, Awake, DormantAll (or All), DormantPartial (or Partial), Initial; e.g. "DORM_DormantAll".
 //   @returns { actor_label: string, dormancy: string }
@@ -142,6 +143,7 @@ TSharedPtr<FJsonObject> HandleSetActorNetDormancy(
 // set_actor_net_update_frequency
 // ---------------------------------------------------------------------------
 // MCP:set_actor_net_update_frequency - Set how often an actor placed in the editor world is considered for replication: frequency goes to NetUpdateFrequency and, when given, min_frequency to MinNetUpdateFrequency, both in updates per second, through the AActor setters. The actor is found by label (first match); only that placed instance changes, not its class defaults, with no undo step, no dirty mark and no save, and a PIE copy is never touched. Leaving out min_frequency keeps the current minimum. The reply echoes the requested numbers (min_frequency only when given), not a read-back: read them with get_actor_replication_info. A missing label or frequency is an error; neither value is range-checked. Culling by distance: set_actor_net_cull_distance; priority when bandwidth is short: set_actor_net_priority; dormancy: set_actor_net_dormancy.
+//   @retired set_properties - object_path=<actor>, properties={"NetUpdateFrequency":..,"MinNetUpdateFrequency":..}
 //   @param actor_label - Label of the actor in the editor world (first match).
 //   @param frequency - Net update frequency in Hz (updates per second), written as given; required.
 //   @param min_frequency - Optional minimum net update frequency in Hz, the floor adaptive net update frequency may drop to; omitted leaves it unchanged.
@@ -177,6 +179,7 @@ TSharedPtr<FJsonObject> HandleSetActorNetUpdateFrequency(
 // set_actor_net_cull_distance
 // ---------------------------------------------------------------------------
 // MCP:set_actor_net_cull_distance - Set the net cull distance of an actor placed in the editor world, found by label (first match): distance is the linear radius in cm, squared before AActor::SetNetCullDistanceSquared stores it (15000, the engine default, stores 225000000). Past that distance from a client's viewer the actor is no longer relevant for replication to that client, unless it is always relevant. Only that placed instance changes, not its class defaults, with no undo step, no dirty mark and no save, and a PIE copy is never touched. distance echoes the request, not a read-back: get_actor_replication_info returns both stored forms (net_cull_distance_squared, net_cull_distance_cm). A missing label or distance is an error; no range check is made. Update rate: set_actor_net_update_frequency; every replication setting at once: get_actor_replication_info.
+//   @retired set_properties - object_path=<actor>, properties={"NetCullDistanceSquared": distance*distance}
 //   @param actor_label - Label of the actor in the editor world (first match).
 //   @param distance - Net cull distance in cm (will be squared before being set); a negative value squares to the same distance.
 //   @returns { actor_label: string, distance: float }
@@ -206,7 +209,7 @@ TSharedPtr<FJsonObject> HandleSetActorNetCullDistance(
 // ---------------------------------------------------------------------------
 // get_actor_replication_info
 // ---------------------------------------------------------------------------
-// MCP:get_actor_replication_info - Read every replication setting of an actor placed in the editor world, found by object name or label (first match): replicates, replicate_movement, replicate_physics (whether the root simulates physics, whose state travels with movement), net_load_on_client, net_use_owner_relevancy, always_relevant, both net update frequencies, the net cull distance (squared as stored, and in cm), dormancy, net priority and the local and remote roles (name and number). Read-only; it reads the placed instance, not a PIE server or client copy, so the roles are the authoring-time ones. Writers: configure_replication (replicates, movement), set_actor_net_dormancy, set_actor_net_update_frequency, set_actor_net_cull_distance, set_actor_net_priority, set_network_authority (local role).
+// MCP:get_actor_replication_info - Read every replication setting of an actor placed in the editor world, found by object name or label (first match): replicates, replicate_movement, replicate_physics (whether the root simulates physics, whose state travels with movement), net_load_on_client, net_use_owner_relevancy, always_relevant, both net update frequencies, the net cull distance (squared as stored, and in cm), dormancy, net priority and the local and remote roles (name and number). Read-only; it reads the placed instance, not a PIE server or client copy, so the roles are the authoring-time ones. Writers: set_properties (replicates, movement), set_properties, set_network_authority (local role).
 //   @param actor_name - Object name or label of the actor in the editor world (first match).
 //   @param actor_label - Alias of actor_name.
 //   @returns { actor_label: string, actor_name: string, class_name: string, replicates: bool, replicate_movement: bool, replicate_physics: bool, net_load_on_client: bool, net_use_owner_relevancy: bool, always_relevant: bool, net_update_frequency: float, min_net_update_frequency: float, net_cull_distance_squared: float, net_cull_distance_cm: float, net_dormancy: string, net_dormancy_int: int, net_priority: float, role: string, local_role: int, local_role_name: string, remote_role: int, remote_role_name: string }
@@ -284,6 +287,7 @@ TSharedPtr<FJsonObject> HandleGetActorReplicationInfo(
 // ============================================================================
 
 // MCP:set_actor_net_priority - Write NetPriority, the relative replication priority when bandwidth is short, on an editor-world actor found by label. Only that placed instance changes; it is not marked dirty or saved. priority is read back after the write; get_actor_replication_info reads it as net_priority. Engine defaults: 1.0 for actors, 3.0 for pawns.
+//   @retired set_properties - object_path=<actor>, properties={"NetPriority":..}
 //   @param actor_name - Label of the actor in the editor world (matched against labels, not object names); first match.
 //   @param priority - New NetPriority as a float, written as given with no clamping; higher makes the actor more likely to replicate when bandwidth is saturated.
 //   @returns { actor_name, priority }

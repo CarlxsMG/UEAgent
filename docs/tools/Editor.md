@@ -2,7 +2,7 @@
 
 # Editor
 
-109 tools for actors and the selection, the viewport and screenshots, undo and transactions, Python and console commands, logs, enums and structs, media and automation tests.
+96 tools for actors and the selection, the viewport and screenshots, undo and transactions, Python and console commands, logs, enums and structs, media and automation tests.
 
 Back to the [index](README.md).
 
@@ -69,7 +69,7 @@ Add a field to a Blueprint (user-defined) struct: the way to grow a data shape -
 
 *Destructive.*
 
-Snap two or more editor-world actors onto a shared location, rotation and/or scale taken from a reference (the first, the last, their average, or a named actor). Use it to straighten a hand-placed row or make a set of props share an orientation, in one undoable step; set_actor_transforms is the tool when each actor needs a DIFFERENT transform. WARNING: aligning "location" collapses them onto the same point -- for a row, align only rotation/scale and set positions yourself.
+Snap two or more editor-world actors onto a shared location, rotation and/or scale taken from a reference (the first, the last, their average, or a named actor). Use it to straighten a hand-placed row or make a set of props share an orientation, in one undoable step; execute_batch of set_actor_transform calls, with transaction=true, is the tool when each actor needs a DIFFERENT transform. WARNING: aligning "location" collapses them onto the same point -- for a row, align only rotation/scale and set positions yourself.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -680,7 +680,7 @@ No parameters.
 
 *Read-only.*
 
-Read the active level editor viewport (the focused one, else the first) without changing it: realtime (the effective value, an override such as the background throttle included), view mode name and index, camera speed, camera location [x, y, z] and rotation [pitch, yaw, roll], and the Grid, Bounds, Collision, Wireframe and Lighting show flags, a flag this engine lacks left out. view_mode names every engine view mode by its display name without spaces (Lit, CSGWireframe, PlayerCollision...), or ViewMode_&lt;index> for a value the engine does not name; set_viewport_view_mode takes that name back, but refuses the modes that need a choice made with them. It also reads the perspective FOV, the near clip plane and far clip override, the exposure, the view type (perspective or an orthographic view) and whether cinematic tools may possess the viewport. No viewport is an error; nothing is saved or recorded for undo. Setters: set_viewport_view_mode, set_viewport_realtime, set_camera_speed, set_viewport_camera, set_show_flag, set_viewport_fov, set_near_clip_plane, set_far_clip_plane, set_viewport_exposure, set_view_type, set_allow_cinematic_control.
+Read the active level editor viewport (the focused one, else the first) without changing it: realtime (the effective value, an override such as the background throttle included), view mode name and index, camera speed, camera location [x, y, z] and rotation [pitch, yaw, roll], and the Grid, Bounds, Collision, Wireframe and Lighting show flags, a flag this engine lacks left out. view_mode names every engine view mode by its display name without spaces (Lit, CSGWireframe, PlayerCollision...), or ViewMode_&lt;index> for a value the engine does not name; set_viewport_settings takes that name back, but refuses the modes that need a choice made with them. It also reads the perspective FOV, the near clip plane and far clip override, the exposure, the view type (perspective or an orthographic view) and whether cinematic tools may possess the viewport. No viewport is an error; nothing is saved or recorded for undo. Setters: set_viewport_settings.
 
 No parameters.
 
@@ -835,34 +835,6 @@ Drop whatever copy_actors left on the editor clipboard into the current level (e
 | `location` | array | no | Optional world point to centre the pasted group on, ARRAY form only [x, y, z] (the group's average is moved there, each actor's offset preserved). Omit to paste where the originals were; any other value (an object, another length) is an error and nothing is pasted. |
 
 **Returns:** `{ pasted_actors: [actor JSON with the new auto-assigned names], pasted_count: int, success: bool }`
-
-## `place_actor_on_terrain`
-
-*Additive.*
-
-Ground an actor on the landscape by sampling the heightmap at its XY (no line trace; traces miss the landscape headless). Sets the actor's Z so either its mesh bbox bottom or its origin sits at the sampled height + z_offset.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actor_name` | string | yes | Internal name of the actor to place (Actor->GetName()) |
-| `align` | string | no | Optional 'mesh_bbox_bottom' (default; drops the lowest mesh-geometry point onto the ground) or 'actor_origin' (puts the actor origin at the ground) |
-| `z_offset` | number | no | Optional extra world-Z added above the sampled ground height; defaults to 0 |
-
-**Returns:** `{ actor: actor JSON, landed_z: number (sampled ground world-Z), previous_z: number, new_z: number, sampled_from: 'heightmap', in_bounds: bool, align: string, align_used: string, z_offset: number, landscape_actor_name: string }`
-
-## `place_actors_on_terrain`
-
-*Additive.*
-
-Ground many actors on the landscape in one call by sampling the heightmap at each actor's XY (no line trace; scatter without per-point python). Same grounding math as place_actor_on_terrain, applied per actor.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actors` | array | yes | Array of { name (Actor->GetName()) OR label (Actor->GetActorLabel()), z_offset? (per-actor override), align? ('mesh_bbox_bottom'\|'actor_origin', per-actor override) } |
-| `align` | string | no | Optional default align for entries without their own; 'mesh_bbox_bottom' (default; drops the lowest mesh point) or 'actor_origin' |
-| `z_offset` | number | no | Optional default extra world-Z above the sampled ground for entries without their own; defaults to 0 |
-
-**Returns:** `{ placed: [ { name, label, previous_z, new_z, landed_z, in_bounds, align, align_used, z_offset } ], failed: [ { name?, label?, error } ], placed_count: int, failed_count: int, requested_count: int, landscape_actor_name: string, world_name: string }`
 
 ## `print_to_output_log`
 
@@ -1087,7 +1059,7 @@ Select actors by name in the editor viewport/outliner, appending to or replacing
 
 *Destructive, idempotent.*
 
-Move, rotate and/or scale ONE actor (omitted components are left as they are) and return the actor's re-read transform plus the identity of the world that was written. Undoable, and it calls Modify() first -- which matters, because moving an actor from Python does NOT dirty its OFPA package and then save_level reports success while writing nothing. Takes a `world` selector, so it also reaches a LIVE PIE pawn (an editor-only lookup would answer "Actor not found" for an actor that exists in another world). Use set_actor_transforms for many actors, place_actor_on_terrain to drop one onto the landscape.
+Move, rotate and/or scale ONE actor (omitted components are left as they are) and return the actor's re-read transform plus the identity of the world that was written. Undoable, and it calls Modify() first -- which matters, because moving an actor from Python does NOT dirty its OFPA package and then save_level reports success while writing nothing. Takes a `world` selector, so it also reaches a LIVE PIE pawn (an editor-only lookup would answer "Actor not found" for an actor that exists in another world). Use execute_batch for many actors, snap_actor_to_landscape to drop one onto the landscape.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1098,43 +1070,6 @@ Move, rotate and/or scale ONE actor (omitted components are left as they are) an
 | `scale` | array | no | Optional new WORLD scale, ARRAY form only: [x, y, z]. Any other value (an object, another length) is an error and the actor is not touched. |
 
 **Returns:** `{ actor JSON via DescribeActorObject, transform RE-READ off the actor after the write }`
-
-## `set_actor_transforms`
-
-*Destructive, idempotent.*
-
-Move/rotate/scale MANY actors in a single undoable transaction, each with its own optional location/rotation/scale, reporting success_count, failure_count and the names that did not resolve. Cheaper and atomically undoable versus N set_actor_transform calls. Calls Modify() per actor so their OFPA packages dirty and save_level actually writes them. Takes the same `world` selector as set_actor_transform, so it reaches a live PIE world too. WARNING: resolves the INTERNAL name only (no editor labels, unlike set_actor_transform); a name it cannot find is counted in failure_count, not raised as an error -- read that number.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actor_transforms` | array | yes | Array of objects {actor_name: internal GetName; location?: [x,y,z] array only; rotation?: [pitch,yaw,roll] or the safer {pitch,yaw,roll}; scale?: [x,y,z] array only}. Omitted components keep their current value; an entry with no actor_name just increments failure_count, and a malformed vector silently reads as zero. |
-| `world` | string | no | Optional: "editor" (default) \| "pie" \| "server" \| "client" \| "pie:N". The response stamps which world answered. |
-
-**Returns:** `{ success_count: int, failure_count: int (unresolved or malformed entries -- check it), updated_actors: [actor JSON re-read after the write], failed_actors?: [string], world_name, world_package, ... }`
-
-## `set_allow_cinematic_control`
-
-*Destructive, idempotent.*
-
-Set whether the active level editor viewport (the focused one, else the first) may be possessed by cinematic tools such as Sequencer to preview sequences (FEditorViewportClient::SetAllowCinematicControl). It sets the given value rather than toggling; it lasts for this editor session, nothing is saved or undoable, and no viewport is an error. allows_cinematic_control is read back from the viewport. Read the flag without changing it with get_viewport_state (allows_cinematic_control).
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `allow` | boolean | yes | True to allow cinematic control, false to block it |
-
-**Returns:** `{ applied: bool, requested: bool, allows_cinematic_control: bool }`
-
-## `set_camera_speed`
-
-*Destructive, idempotent.*
-
-Set the camera movement speed of the active level editor viewport (the focused one, else the first). Affects this editor session only and saves nothing. Returns requested and camera_speed, the value read back from the viewport afterwards.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `speed` | number | yes | Camera speed as a positive float; 0 or less is an error. Compare camera_speed in the reply to see what the viewport kept. |
-
-**Returns:** `{ applied: bool, requested: number, camera_speed: number }`
 
 ## `set_current_level`
 
@@ -1202,42 +1137,6 @@ Toggle the "bitflags" meta on a Blueprint Enum (UUserDefinedEnum) so its enumera
 
 **Returns:** `{ enum_path: string, bitflags: bool, already_set: bool, applied: bool }`
 
-## `set_far_clip_plane`
-
-*Destructive, idempotent.*
-
-Override the far clip plane distance, in cm, of the active level editor viewport, the focused one or else the first, so objects beyond it are culled from the view; no viewport is an error. 0 or a negative distance drops the override and the default far plane applies again. It lasts for this editor session with no undo step and no save, and the previous value is not returned. far_clip_plane is the stored override read back, which is the distance sent, and override_active is true only for a distance above 0. get_viewport_state reads the near plane together with this override (far_clip_plane_override); the near plane is set_near_clip_plane.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `distance` | number | yes | Far clip distance in cm; 0 or any negative value clears the override and the default far plane applies |
-
-**Returns:** `{ applied: bool, requested: number, far_clip_plane: number, override_active: bool }`
-
-## `set_game_view`
-
-*Destructive, idempotent.*
-
-Turn Game View on or off on the active level editor viewport, the focused one or else the first (the view the editor's G key toggles); no viewport is an error. Turning it on swaps the viewport's show flags for the game set, hiding editor-only chrome such as sprites, the transform widget and selection outlines, and keeps the editor set to put back when it is turned off. It sets the given state, so a repeat call changes nothing; it lasts for this editor session with no undo step and nothing saved. in_game_view is read back. Single flags are set_show_flag, render modes set_viewport_view_mode; to run the game use start_play_in_editor.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `enabled` | boolean | yes | True to enable game view, false to revert to editor view |
-
-**Returns:** `{ applied: bool, requested: bool, in_game_view: bool }`
-
-## `set_near_clip_plane`
-
-*Destructive, idempotent.*
-
-Override the near clip plane distance, in cm, of the active level editor viewport, the focused one or else the first; no viewport is an error. A negative distance (-1 by convention) drops the override so the engine near plane, GNearClippingPlane, applies again; a distance of at least 0.001, the smallest the editor's Near View Plane control allows, becomes the override. 0 (a degenerate projection), anything else below 0.001 and a value too large for a float are errors before anything changes. It lasts for this editor session with no undo step and no save, and the previous value is not returned. near_clip_plane is the effective near plane read back and override_active says whether an override is now set. get_viewport_state reads both clip planes (near_clip_plane, far_clip_plane_override); the far plane is set_far_clip_plane.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `distance` | number | yes | Near clip distance in cm, at least 0.001; any negative value (-1 by convention) clears the override and falls back to GNearClippingPlane |
-
-**Returns:** `{ applied: bool, requested: number, near_clip_plane: number, override_active: bool }`
-
 ## `set_plugin_enabled`
 
 *Destructive, idempotent.*
@@ -1264,19 +1163,6 @@ Sets engine scalability quality via the Scalability API and reads it back.  Modi
 
 **Returns:** `{ set: bool, requested_level: int, category: string, ResolutionQuality: int, ViewDistanceQuality: int, AntiAliasingQuality: int, ShadowQuality: int, GlobalIlluminationQuality: int, ReflectionQuality: int, PostProcessQuality: int, TextureQuality: int, EffectsQuality: int, FoliageQuality: int, ShadingQuality: int, LandscapeQuality: int }`
 
-## `set_show_flag`
-
-*Destructive, idempotent.*
-
-Set one engine show flag (Grid, Bounds, Collision, Wireframe, Lighting...) on the active level editor viewport, the focused one or else the first; no viewport is an error. It sets the given state rather than toggling: enabled true turns the flag on, false turns it off, and a repeat call changes nothing. flag_name is matched without case against the engine's show flags and registered custom flags; an unknown name is an error before anything changes. It lasts for this editor session, with no undo step, nothing saved and the earlier value not returned. value is the flag read back and flag_index its engine index. get_viewport_state reads Grid, Bounds, Collision, Wireframe and Lighting back; set_game_view swaps the whole flag set; set_viewport_view_mode changes the render mode.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `flag_name` | string | yes | Engine show flag name as FEngineShowFlags spells it, e.g. Grid, Bounds, Collision, Wireframe, Lighting; matched without case |
-| `enabled` | boolean | yes | True to set the flag, false to clear it |
-
-**Returns:** `{ applied: bool, flag_name: string, flag_index: int, requested: bool, value: bool }`
-
 ## `set_struct_member_default`
 
 *Destructive, idempotent.*
@@ -1301,79 +1187,30 @@ No parameters.
 
 **Returns:** `{ success: bool (hardcoded), already_existed: bool (true = nothing new was pushed), undo_barrier: int (cursor it sits at), undo_count: int, queue_length: int }`
 
-## `set_view_type`
+## `set_viewport_settings`
 
 *Destructive, idempotent.*
 
-Switch the active level editor viewport, the focused one or else the first, to the perspective camera or one of the six orthographic views; no viewport is an error. type is matched without case, and any other name is an error before anything changes. Switching to an orthographic view unlocks an actor the viewport was piloting, and each projection re-applies the view mode it keeps for itself. It sets the given type, so a repeat call changes nothing; it lasts for this editor session with no undo step and no save. view_type and view_type_index are read back. Read it with get_viewport_state (view_type); render modes are set_viewport_view_mode, the camera position set_viewport_camera.
+Change any settings of the active level editor viewport (the focused one, else the first) in one call: camera location and rotation, field of view, near and far clip planes, exposure, realtime, view mode, show flags, camera speed, perspective or orthographic view type, game view and cinematic control. Pass only the settings to change; each is validated and applied as its own step, in the order listed here, and the call stops at the first one refused (applied lists those already changed). Editor view only: not undoable, nothing saved. get_viewport_state reads every one of them back.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `type` | string | yes | View type name. One of: Perspective, Top, Bottom, Left, Right, Front, Back. Matched without case. |
+| `location` | string | no | Optional camera [x, y, z] world location |
+| `rotation` | string | no | Optional camera world rotation, [pitch, yaw, roll] or {"pitch","yaw","roll"} |
+| `fov` | number | no | Optional perspective field of view in degrees |
+| `near_clip` | number | no | Optional near clip plane distance in cm |
+| `far_clip` | number | no | Optional far clip plane distance in cm; 0 means no far plane |
+| `exposure_fixed` | boolean | no | Optional: true for a fixed exposure at exposure_ev100, false for automatic eye adaptation |
+| `exposure_ev100` | number | no | Optional EV100 used when exposure_fixed is true (typical range -3..20); needs exposure_fixed |
+| `realtime` | boolean | no | Optional: realtime rendering on or off |
+| `view_mode` | string | no | Optional engine view mode name, e.g. Lit, Unlit, Wireframe, DetailLighting, LightingOnly, ShaderComplexity, Clay |
+| `show_flags` | object | no | Optional {flag_name: bool} of engine show flags (Grid, Bounds, Collision, Fog...) set to that state |
+| `camera_speed` | number | no | Optional camera movement speed, above 0 |
+| `view_type` | string | no | Optional: Perspective, Top, Bottom, Left, Right, Front or Back |
+| `game_view` | boolean | no | Optional: game view on (editor-only icons and gizmos hidden) or off |
+| `allow_cinematic_control` | boolean | no | Optional: whether Sequencer may drive this viewport's camera |
 
-**Returns:** `{ applied: bool, requested: string, view_type: string, view_type_index: int }`
-
-## `set_viewport_camera`
-
-*Destructive, idempotent.*
-
-Place the camera of the active level editor viewport (the focused one, else the first) at an absolute world location and/or rotation; at least one is required and no viewport is an error. Editor view only, not undoable or saved: a PIE player camera (set_view_target) or a camera actor (set_camera_transform) does not move. location must be an [x, y, z] array of three numbers in cm and rotation three numbers or a roll/pitch/yaw object; anything else is refused before the camera moves. The reply reads location and rotation back, rotation as [pitch, yaw, roll]. Frame an actor with focus_viewport.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `location` | array | no | Optional [x, y, z] world location |
-| `rotation` | array | no | Optional [pitch, yaw, roll] world rotation |
-
-**Returns:** `{ applied: bool, location_set: bool, rotation_set: bool, location: [number], rotation: [number] }`
-
-## `set_viewport_exposure`
-
-*Destructive, idempotent.*
-
-Set the exposure of the active level editor viewport: fixed at ev100 when fixed is true, automatic eye adaptation when false. Affects the viewport only and saves nothing. Returns applied, fixed and ev100 as read back; get_viewport_state reads them (exposure).
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `fixed` | boolean | yes | True for fixed exposure (use FixedEV100), false for automatic eye-adaptation |
-| `ev100` | number | yes | EV100 value to use when fixed=true (any float; typical range -3..20) |
-
-**Returns:** `{ applied: bool, fixed: bool, ev100: number }`
-
-## `set_viewport_fov`
-
-*Destructive, idempotent.*
-
-Set the perspective field of view, in degrees, of the active level editor viewport, the focused one or else the first; no viewport is an error. fov must lie in 5..170, the range of the editor's Field of View control, and a value outside it is an error before anything changes. Like that control it sets both the current view FOV and the stored one that a camera reset or the end of a PIE session restores; fov and stored_fov are read back, and an orthographic view ignores them. There is no undo step and no asset is saved, and the previous FOV is not returned. A viewport piloting a camera actor keeps showing that camera's FOV until it stops piloting it. Read it with get_viewport_state (fov); a camera actor's own FOV is set_camera_fov.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `fov` | number | yes | Field of view in degrees, from 5 to 170 (the range of the editor's FOV slider) |
-
-**Returns:** `{ applied: bool, requested: number, fov: number, stored_fov: number }`
-
-## `set_viewport_realtime`
-
-*Destructive, idempotent.*
-
-Enable or disable realtime rendering on the active editor viewport
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `enabled` | boolean | yes | True to turn on realtime updates, false to turn them off |
-
-**Returns:** `{ applied: bool, requested: bool, realtime: bool, effective_realtime: bool, override_active: bool, override_source: string }`
-
-## `set_viewport_view_mode`
-
-*Destructive, idempotent.*
-
-Set the rendering view mode (Lit, Unlit, Wireframe, ShaderComplexity...) of the active level editor viewport, the focused one or else the first; no viewport is an error. view_mode is matched without case. An unknown name is an error before anything changes, and so is a mode the editor only enters with a choice of what to show (a buffer, a visualization, texture streaming data, a zebra direction): the error says which. The mode is stored for the viewport's current projection only (perspective and orthographic keep separate modes) and lasts for this editor session: no undo step, nothing saved. view_mode and view_mode_index are read back, view_mode as the name get_viewport_state reports and this tool takes back. Show flags: set_show_flag; projection: set_view_type; game view: set_game_view.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `view_mode` | string | yes | Engine view mode name, matched without case, e.g. Lit, Unlit, Wireframe, CSGWireframe, DetailLighting, LightingOnly, LightComplexity, ShaderComplexity, LightmapDensity, Reflections, PlayerCollision, MeshLODColoration, QuadOverdraw, Clay; each is the engine display name without spaces. BrushWireframe is accepted for Wireframe, ReflectionOverride for Reflections, RandomColor for Random; PathTracing only where ray tracing is allowed. |
-
-**Returns:** `{ applied: bool, requested: string, view_mode_index: int, view_mode: string }`
+**Returns:** `{ applied: { setting: that setting's reply }, failed?: { label, command, error } (when a setting is refused) }`
 
 ## `show_notification`
 
@@ -1393,26 +1230,40 @@ Show a transient toast in the editor through the Slate notification manager: mes
 
 *Destructive.*
 
-Drop ONE editor-world actor straight down until its bounds bottom rests on whatever is below -- meshes, BSP or the landscape. It line-traces first and, because headless traces routinely MISS the landscape, falls back to sampling the heightmap so the actor still lands; sampled_from tells you which path answered. Use place_actor_on_terrain when the ground is definitely the landscape and you want no trace at all, place_actors_on_terrain for many actors.
+Drop ONE editor-world actor straight down until its bounds bottom rests on whatever is below -- meshes, BSP or the landscape. It line-traces first and, because headless traces routinely MISS the landscape, falls back to sampling the heightmap so the actor still lands; sampled_from tells you which path answered. Use snap_actor_to_landscape when the ground is definitely the landscape and you want no trace at all, execute_batch for many actors.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Name of the actor to snap (editor world). |
 | `trace_distance` | number | no | Optional downward trace distance in cm; defaults to 10000 |
 | `align_to_surface` | boolean | no | When true, rotate actor to match the surface normal (trace hits only; the heightmap fallback has no normal); defaults to false |
-| `fallback_heightmap` | boolean | no | When true (default) and the downward line trace misses (headless traces routinely miss the landscape), fall back to sampling the landscape heightmap at the actor's XY (same sampler as place_actor_on_terrain) so the actor still lands. Set false to require a real trace hit. |
+| `fallback_heightmap` | boolean | no | When true (default) and the downward line trace misses (headless traces routinely miss the landscape), fall back to sampling the landscape heightmap at the actor's XY (same sampler as snap_actor_to_landscape) so the actor still lands. Set false to require a real trace hit. |
 
 **Returns:** `{ actor: actor JSON, hit: bool, landed: bool, sampled_from: 'trace'|'heightmap', hit_actor?: string, hit_distance?: number }`
 
-## `spawn_actor`
+## `snap_actor_to_landscape`
 
-*Additive.*
+*Destructive.*
 
-Place a BUILT-IN engine actor -- StaticMeshActor, PointLight, SpotLight, DirectionalLight, RectLight, SkyLight, CameraActor or Character -- into the editor level or a live PIE world, at an optional location/rotation/scale, optionally seeding a light's intensity and color, and return the created actor's JSON. Only these types: spawn_blueprint_actor places a Blueprint class, and the typed spawn_* tools (spawn_post_process_volume, spawn_decal_actor, spawn_sky_atmosphere...) place their class and set its own fields in the same call. Refuses a name an actor already has (omit name to let the engine pick a unique one); the spawn is undoable. It creates the actor in MEMORY only -- save_level (with the .umap writable) puts it on disk. WARNING: with 2+ PIE clients world='pie' can land in the CLIENT world, producing an actor the authority never sees -- ask for world='server' instead, and check the reply's world_package/net_mode to see where the actor went.
+Ground an actor on the landscape by sampling the heightmap at its XY (no line trace; traces miss the landscape headless). Sets the actor's Z so either its mesh bbox bottom or its origin sits at the sampled height + z_offset.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `type` | string | yes | One of StaticMeshActor, PointLight, SpotLight, DirectionalLight, RectLight, SkyLight, CameraActor, Character (case-insensitive); a light also by its short name Point, Spot, Directional, Rect or Sky. Anything else is a clean error; Blueprints go through spawn_blueprint_actor. |
+| `actor_name` | string | yes | Internal name of the actor to place (Actor->GetName()) |
+| `align` | string | no | Optional 'mesh_bbox_bottom' (default; drops the lowest mesh-geometry point onto the ground) or 'actor_origin' (puts the actor origin at the ground) |
+| `z_offset` | number | no | Optional extra world-Z added above the sampled ground height; defaults to 0 |
+
+**Returns:** `{ actor: actor JSON, landed_z: number (sampled ground world-Z), previous_z: number, new_z: number, sampled_from: 'heightmap', in_bounds: bool, align: string, align_used: string, z_offset: number, landscape_actor_name: string }`
+
+## `spawn_actor`
+
+*Destructive.*
+
+Place an actor of ANY placeable class -- a built-in short name (StaticMeshActor, PointLight, SpotLight, DirectionalLight, RectLight, SkyLight, CameraActor, Character), another engine or plugin class by name or path (SkyAtmosphere, ExponentialHeightFog, VolumetricCloud, SceneCapture2D, TextRenderActor, NiagaraActor, /Script/Engine.DecalActor...) or a Blueprint asset path -- into the editor level or a live PIE world, at an optional location/rotation/scale, and set its properties in the same call: properties={"Prop": v} on the actor, {"Component.Prop": v} on a component named so or of a class only one component has (e.g. {"ExponentialHeightFogComponent.FogDensity": 0.05}), written as set_properties writes them. A volume needs a brush: spawn_box_volume places one; an abstract or non-placeable class is refused. Refuses a name an actor already has (omit name to let the engine pick a unique one); the spawn is undoable. A property that cannot be written makes the call fail with properties_failed while the actor stays, so fix it with set_properties or remove it with delete_actor. It creates the actor in MEMORY only -- save_level (with the .umap writable) puts it on disk. WARNING: with 2+ PIE clients world='pie' can land in the CLIENT world, producing an actor the authority never sees -- ask for world='server' instead, and check has_authority and world_package in the reply.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `type` | string | yes | The actor class: a built-in short name (StaticMeshActor, PointLight, SpotLight, DirectionalLight, RectLight, SkyLight, CameraActor, Character; a light also as Point, Spot, Directional, Rect or Sky), any other actor class by name or /Script path, or a Blueprint asset path (/Game/BP_Door). Volumes go through spawn_box_volume. |
 | `name` | string | no | Optional internal name (and label) for the new actor; must be unused in the target world or the call is refused. When omitted the engine names the actor uniquely and the label is the class default. |
 | `location` | array | no | Optional world location, ARRAY form only: [x, y, z]; the origin when omitted. Any other value (an object, another length) is an error and nothing is spawned. |
 | `rotation` | array | no | Optional world rotation as the array [pitch, yaw, roll] -- note index 2 is ROLL, not yaw -- or, unambiguously, the object {"pitch":..,"yaw":..,"roll":..}, which is the recommended form. Defaults to zero. Directional, spot and rect lights shine along its forward axis. |
@@ -1420,9 +1271,10 @@ Place a BUILT-IN engine actor -- StaticMeshActor, PointLight, SpotLight, Directi
 | `static_mesh` | string | no | Optional UStaticMesh asset path, only honoured for type=StaticMeshActor (e.g. /Engine/BasicShapes/Cube). |
 | `intensity` | number | no | Optional, light types only: the light component's Intensity in the light's units (Directional: lux; Sky: a multiplier); engine default when omitted. Sent for a non-light type it is refused and nothing is spawned. |
 | `color` | array | no | Optional, light types only: [r, g, b] linear color, usually 0..1; engine default (white) when omitted. Sent for a non-light type it is refused and nothing is spawned. |
+| `properties` | object | no | Optional {"Prop": value, "Component.Prop": value} written after the spawn with set_properties' writer: engine property names, a struct as a JSON object of the fields to change. |
 | `world` | string | no | Optional world selector for WHERE the actor is spawned: absent/'editor' (default) \| 'pie' (ambiguous: PlayWorld, else the first PIE context) \| 'game' (alias of 'pie') \| 'server' (the PIE world with authority -- what you want for anything replicated) \| 'client' \| 'pie:N'. Case-insensitive; an unrecognised value is a clean error listing the worlds present, never a silent spawn into the editor world. |
 
-**Returns:** `{ actor JSON via DescribeActorObject: name, class, location, rotation, scale, plus world: string (the normalized selector that resolved), world_name: string, world_package: string (the UEDPIE_N prefix lives HERE), world_type: string, net_mode: string, pie_instance: int, light_intensity?: number (light types: the intensity now on the component), light_color?: [r, g, b] (light types: the color now on the component) }`
+**Returns:** `{ actor JSON via DescribeActorObject: name, class, location, rotation, scale, plus world: string (the normalized selector that resolved), world_name: string, world_package: string (the UEDPIE_N prefix lives HERE), world_type: string, net_mode: string, pie_instance: int, has_authority: bool, local_role: string, light_intensity?: number (light types: the intensity now on the component), light_color?: [r, g, b] (light types: the color now on the component), properties_set?: [string], properties_failed?: [{property, error}] (with properties) }`
 
 ## `undo`
 

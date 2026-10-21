@@ -172,9 +172,10 @@ TSharedPtr<FJsonObject> HandleCreateRenderJob(const TSharedPtr<FJsonObject>& Par
 }
 
 // ---------------------------------------------------------------------------
-// configure_render_output
+// set_render_job_output
 // ---------------------------------------------------------------------------
-// MCP:configure_render_output - Configures output resolution / directory / image format on a render job's config.  Finds (or adds) a UMoviePipelineOutputSetting on the job's primary configuration to set resolution + output directory, and adds the matching image-sequence output container for the requested format (png/jpg/exr/bmp).
+// MCP:set_render_job_output - Configures output resolution / directory / image format on a render job's config.  Finds (or adds) a UMoviePipelineOutputSetting on the job's primary configuration to set resolution + output directory, and adds the matching image-sequence output container for the requested format (png/jpg/exr/bmp).
+//   @renamed-from configure_render_output
 //   @param job_name - Name of an existing render job in the queue (from create_render_job).
 //   @param resolution_x - Output width in pixels (optional, must be paired with resolution_y)
 //   @param resolution_y - Output height in pixels (optional, must be paired with resolution_x)
@@ -502,7 +503,7 @@ TSharedPtr<FJsonObject> HandleCancelRenderJob(const TSharedPtr<FJsonObject>& Par
 const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("cancel_render_job"), &HandleCancelRenderJob },
-    { TEXT("configure_render_output"), &HandleConfigureRenderOutput },
+    { TEXT("set_render_job_output"), &HandleConfigureRenderOutput },
     { TEXT("create_render_job"), &HandleCreateRenderJob },
     { TEXT("delete_render_job"), &HandleDeleteRenderJob },
     { TEXT("get_render_queue"), &HandleGetRenderQueue },

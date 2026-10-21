@@ -309,7 +309,7 @@ TSharedPtr<FJsonObject> HandleConfigureAnimationEvents(const TSharedPtr<FJsonObj
     return Report;
 }
 
-// MCP:set_animation_speed - Set the play rate of a skeletal mesh component, found by object name in the editor world (or the world the world param selects), and switch its component tick on. Only a component in Use Animation Asset (single node) mode takes it: in Animation Blueprint mode nothing changes and actual_speed reads 0, so check speed_set_successfully. Transient: nothing is saved or undoable. A speed outside 0-10 or no such component is an error. For montages use play_animation with play_rate, or set_montage_properties (rate_scale) on the asset.
+// MCP:set_animation_speed - Set the play rate of a skeletal mesh component, found by object name in the editor world (or the world the world param selects), and switch its component tick on. Only a component in Use Animation Asset (single node) mode takes it: in Animation Blueprint mode nothing changes and actual_speed reads 0, so check speed_set_successfully. Transient: nothing is saved or undoable. A speed outside 0-10 or no such component is an error. For montages use play_animation with play_rate, or set_properties (rate_scale) on the asset.
 //   @param component_name - Object name of the USkeletalMeshComponent, e.g. "CharacterMesh0", case-insensitive; the first actor in the world that has one with that name wins
 //   @param speed - Playback speed multiplier; must be between 0.0 and 10.0
 //   @param world - Optional world selector: absent/'editor' (default) | 'pie' (ambiguous: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie').

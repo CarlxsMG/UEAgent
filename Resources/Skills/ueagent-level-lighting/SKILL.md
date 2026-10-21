@@ -17,15 +17,18 @@ from the editor's **MCP** menu). Your client may show them with a prefix, such a
 
 1. **See what is there**: `get_actors_in_level`. If the level already has a DirectionalLight, a
    SkyAtmosphere, a SkyLight or an ExponentialHeightFog, reuse it instead of adding a second one.
-2. **The sun**: `spawn_actor` with `type: DirectionalLight`, `name: Sun` and `rotation` in the object
+2. **The sun**: `spawn_actor` with `type: DirectionalLight`, `name: Sun`, `rotation` in the object
    form, `{"pitch": -40, "yaw": 30, "roll": 0}` for noon or `{"pitch": -8, "yaw": 30, "roll": 0}` for
-   a sunset.
-3. **Its strength**: `set_light_intensity` with `light_name: Sun` and `intensity` (in lux; around 10
-   for full daylight, lower for a sunset or an overcast sky).
-4. **The sky**: `spawn_sky_atmosphere`.
-5. **Sky light**: `spawn_sky_light` with `recapture: true`, so it picks up the new sky.
-6. **Fog**: `spawn_exponential_height_fog` with `fog_density` (0.02 for clear air, around 0.05 for
-   overcast).
+   a sunset, and `intensity` (in lux; around 10 for full daylight, lower for a sunset or an overcast
+   sky).
+3. **The sky**: `spawn_actor` with `type: SkyAtmosphere` and `name: Sky`.
+4. **Sky light**: `spawn_actor` with `type: SkyLight` and `name: SkyLight`, then `call_function` with
+   `object_path: SkyLight.SkyLightComponent` and `function_name: RecaptureSky`, so it picks up the new
+   sky.
+5. **Fog**: `spawn_actor` with `type: ExponentialHeightFog`, `name: Fog` and `properties`
+   `{"ExponentialHeightFogComponent.FogDensity": 0.02}` (0.02 for clear air, around 0.05 for overcast).
+6. **Tune it later**: `set_properties` on `Sun.DirectionalLightComponent`, `Fog.ExponentialHeightFogComponent`
+   or `SkyLight.SkyLightComponent`, with the engine's property names (`Intensity`, `FogDensity`...).
 7. **Show it**: `capture_high_res_screenshot`, and tell the user the file it wrote.
 
 ## Verify

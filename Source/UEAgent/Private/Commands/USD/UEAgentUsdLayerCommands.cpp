@@ -530,7 +530,7 @@ TSharedPtr<FJsonObject> HandleClearUsdReferences(const TSharedPtr<FJsonObject>& 
 // ---------------------------------------------------------------------------
 // add_usd_payload
 // ---------------------------------------------------------------------------
-// MCP:add_usd_payload - Add a payload composition arc to a prim (load-on-demand; payloads are NOT loaded by the stage unless an explicit Load rule says so).
+// MCP:add_usd_payload - Add a payload composition arc to a prim (load-on-demand; payloads are NOT loaded by the stage unless an explicit Load rule says so). Inverse: clear_usd_payloads (one payload with asset_path).
 //   @param stage_name [string!] - Name the stage was registered under.
 //   @param prim_path [string!] - Prim that owns the payload.
 //   @param asset_path [string!] - Identifier of the layer containing the payload.
@@ -568,6 +568,77 @@ TSharedPtr<FJsonObject> HandleAddUsdPayload(const TSharedPtr<FJsonObject>& Param
 	}
 
 	Result->SetBoolField(TEXT("added"), bAdded);
+	return mcp_common::MakeOkReply(Result);
+}
+
+// ---------------------------------------------------------------------------
+// clear_usd_payloads
+// ---------------------------------------------------------------------------
+// MCP:clear_usd_payloads - Remove the payload arcs of a prim: every payload (UsdPayloads::ClearPayloads), or with asset_path the one payload to that layer and target prim (RemovePayload). Inverse of add_usd_payload, which clear_usd_references does not touch; the edit lands on the stage's current edit target layer, as the add did. Irreversible, like every USD composition edit here (no undo). had_payloads and has_payloads are the prim read before and after (UsdPrim::HasAuthoredPayloads). A stage or prim that does not resolve is an error; a prim with no payload is an honest no-op (cleared=false). Save the layer with save_usd_stage.
+//   @param stage_name [string!] - Name the stage was registered under.
+//   @param prim_path [string!] - Prim whose payloads should be removed.
+//   @param asset_path [string] - Optional identifier of the payload's layer: only the payload to that layer (and prim_path_for_target) goes.
+//   @param prim_path_for_target [string] - With asset_path, the prim inside that layer the payload targets, as given to add_usd_payload. Empty (default) means '/', as for add_usd_payload.
+//   @returns { stage_name: string, prim_path: string, asset_path?: string, had_payloads: bool, cleared: bool, has_payloads: bool, errors: [string]? }
+
+TSharedPtr<FJsonObject> HandleClearUsdPayloads(const TSharedPtr<FJsonObject>& Params)
+{
+	FString StageName;
+	FString PrimPath;
+	if (TSharedPtr<FJsonObject> Missing = UsdLayer_ReadStageAndPrim(Params, StageName, PrimPath))
+	{
+		return Missing;
+	}
+	FString AssetPath;
+	Params->TryGetStringField(TEXT("asset_path"), AssetPath);
+	FString PrimPathForTarget;
+	Params->TryGetStringField(TEXT("prim_path_for_target"), PrimPathForTarget);
+
+	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetStringField(TEXT("stage_name"), StageName);
+	Result->SetStringField(TEXT("prim_path"), PrimPath);
+	if (!AssetPath.IsEmpty())
+	{
+		Result->SetStringField(TEXT("asset_path"), AssetPath);
+	}
+
+	bool bFound = false;
+	bool bHadPayloads = false;
+	bool bCleared = false;
+	bool bHasPayloads = false;
+	UEAgent::UsdCommon::CaptureUsdErrors(
+		[&]()
+		{
+			UE::FUsdPrim Prim = UsdLayer_FindPrim(StageName, PrimPath);
+			if (!Prim) { return; }
+			bFound = true;
+			bHadPayloads = Prim.HasAuthoredPayloads();
+			if (!bHadPayloads) { return; }
+			if (AssetPath.IsEmpty())
+			{
+				bCleared = Prim.GetPayloads().ClearPayloads();
+			}
+			else
+			{
+				const UE::FSdfPayload Payload(AssetPath, UE::FSdfPath(PrimPathForTarget.IsEmpty() ? TEXT("/") : *PrimPathForTarget));
+				bCleared = Prim.GetPayloads().RemovePayload(Payload);
+			}
+			bHasPayloads = Prim.HasAuthoredPayloads();
+		},
+		Result);
+
+	if (!bFound)
+	{
+		UsdLayer_PrimEditFailed(false, StageName, PrimPath, Result);
+		return Result;
+	}
+	if (Result->HasField(TEXT("errors")))
+	{
+		return Result;
+	}
+	Result->SetBoolField(TEXT("had_payloads"), bHadPayloads);
+	Result->SetBoolField(TEXT("cleared"), bCleared && bHadPayloads);
+	Result->SetBoolField(TEXT("has_payloads"), bHasPayloads);
 	return mcp_common::MakeOkReply(Result);
 }
 
@@ -687,6 +758,7 @@ const McpCommandFamilies::FRegistrar Registration =
 	{ TEXT("add_usd_internal_reference"), &HandleAddUsdInternalReference },
 	{ TEXT("add_usd_payload"), &HandleAddUsdPayload },
 	{ TEXT("add_usd_reference"), &HandleAddUsdReference },
+	{ TEXT("clear_usd_payloads"), &HandleClearUsdPayloads },
 	{ TEXT("clear_usd_references"), &HandleClearUsdReferences },
 	{ TEXT("insert_usd_sublayer"), &HandleInsertUsdSublayer },
 	{ TEXT("list_usd_stage_layers"), &HandleListUsdStageLayers },

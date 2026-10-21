@@ -500,10 +500,11 @@ TSharedPtr<FJsonObject> HandleSetCameraRigRootNode(const TSharedPtr<FJsonObject>
     return mcp_common::MakeOutcomeReply(Data, bSet && bSaved, mcp_common::SavedOutcomeError(TEXT("set_camera_rig_root_node")));
 }
 
-// MCP:set_camera_node_parameters - Sets parameters on a camera rig's RootNode by reflection, all or nothing: every property is parsed first, and an unknown property or a value that does not fit fails the call, naming each one in failed, with nothing written or saved. FXxxCameraParameter props take the raw value, a bool or a number (a whole one for an integer), written to the nested .Value; other props set directly. Otherwise all of them are written in one undo step and the rig is saved; applied reads the stored values back. Values the root node already holds are a success with changed false, saved false and a note, and nothing is written or saved. A failed save fails the call, with saved false and save_error, and leaves the change in memory.
+// MCP:set_camera_node_parameters - Sets parameters on a camera rig's RootNode by reflection, all or nothing: every property is parsed first, and an unknown property or a value that does not fit fails the call, naming each one in failed, with nothing written or saved. FXxxCameraParameter props take the raw value, a bool or a number (a whole one for an integer), written to the nested .Value; other props set directly. Otherwise all of them are written in one undo step and the rig is saved; applied reads the stored values back. Values the node already holds are a success with changed false, saved false and a note, and nothing is written or saved. A failed save fails the call, with saved false and save_error, and leaves the change in memory. With child_index the node edited is that child of a composite ArrayCameraNode root (add_camera_node_child); an index out of range, or a root that is not an ArrayCameraNode, is an error. Read the values back with get_camera_rig_nodes.
 //   @param camera_rig_path - /Game/... path to the UCameraRigAsset whose RootNode is edited (required)
 //   @param properties - JSON object { PropertyName: value, ... } (e.g. {"FieldOfView": 90})
-//   @returns { camera_rig_path, node_class, changed, set:[name], failed:[{name, error}], applied:{name: stored_value_text}, saved, save_error, note }
+//   @param child_index [int] - Optional index of a child of the composite ArrayCameraNode root to edit instead of the root node itself
+//   @returns { camera_rig_path, node_class, child_index?, changed, set:[name], failed:[{name, error}], applied:{name: stored_value_text}, saved, save_error, note }
 TSharedPtr<FJsonObject> HandleSetCameraNodeParameters(const TSharedPtr<FJsonObject>& Params)
 {
     FString RigPath;
@@ -518,6 +519,19 @@ TSharedPtr<FJsonObject> HandleSetCameraNodeParameters(const TSharedPtr<FJsonObje
     UCameraNode* Node = Rig->RootNode;
     if (!Node)
         return mcp_common::MakeErrorReply(TEXT("The rig has no RootNode (call set_camera_rig_root_node first)"));
+    // child_index: a child of the composite root instead of the root itself.
+    int32 ChildIndex = INDEX_NONE;
+    const bool bChild = Params->TryGetNumberField(TEXT("child_index"), ChildIndex);
+    if (bChild)
+    {
+        UArrayCameraNode* ArrayRoot = Cast<UArrayCameraNode>(Node);
+        if (!ArrayRoot)
+            return mcp_common::MakeErrorReply(TEXT("child_index needs a composite ArrayCameraNode root; this rig's root has no children. Nothing was written."));
+        if (!ArrayRoot->Children.IsValidIndex(ChildIndex) || !ArrayRoot->Children[ChildIndex])
+            return mcp_common::MakeErrorReply(FString::Printf(TEXT("child_index %d is out of range: the root has %d children (get_camera_rig_nodes lists them). Nothing was written."),
+                ChildIndex, ArrayRoot->Children.Num()));
+        Node = ArrayRoot->Children[ChildIndex];
+    }
 
     // All or nothing: every property is parsed first into a transient scratch node of the same
     // class, seeded with the value the root node holds (so a camera parameter keeps its Variable and
@@ -559,6 +573,10 @@ TSharedPtr<FJsonObject> HandleSetCameraNodeParameters(const TSharedPtr<FJsonObje
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("camera_rig_path"), Rig->GetPathName());
     Data->SetStringField(TEXT("node_class"), NodeClass->GetName());
+    if (bChild)
+    {
+        Data->SetNumberField(TEXT("child_index"), ChildIndex);
+    }
     Data->SetArrayField(TEXT("failed"), Failed);
     if (Failed.Num() > 0)
     {
@@ -597,7 +615,7 @@ TSharedPtr<FJsonObject> HandleSetCameraNodeParameters(const TSharedPtr<FJsonObje
         Data->SetBoolField(TEXT("saved"), false);
         Data->SetStringField(TEXT("note"), Parsed.Num() == 0
             ? TEXT("properties is empty; nothing was written or saved")
-            : TEXT("The root node already holds every requested value; nothing was written or saved"));
+            : TEXT("The node already holds every requested value; nothing was written or saved"));
         return mcp_common::MakeOkReply(Data);
     }
 
@@ -619,7 +637,7 @@ TSharedPtr<FJsonObject> HandleSetCameraNodeParameters(const TSharedPtr<FJsonObje
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_camera_node_parameters"), SaveError);
 }
 
-// MCP:add_camera_node_child - Populates the Children of a composite rig node (the rig RootNode must be a UArrayCameraNode ("Sequence"); set it via set_camera_rig_root_node node_type=ArrayCameraNode). Creates a new UCameraNode of child_node_type outered to the rig and appends it, in one undo step, then saves the rig. Idempotent via optional index: index<Children.Num() REPLACES that slot instead of appending. added is the read-back of the new child in its slot; a failed save fails the call, with saved false and save_error, and leaves the change in memory. Gameplay Camera System is EXPERIMENTAL (plugin GameplayCameras).
+// MCP:add_camera_node_child - Populates the Children of a composite rig node (the rig RootNode must be a UArrayCameraNode ("Sequence"); set it via set_camera_rig_root_node node_type=ArrayCameraNode). Creates a new UCameraNode of child_node_type outered to the rig and appends it, in one undo step, then saves the rig. Idempotent via optional index: index<Children.Num() REPLACES that slot instead of appending. added is the read-back of the new child in its slot; a failed save fails the call, with saved false and save_error, and leaves the change in memory. Gameplay Camera System is EXPERIMENTAL (plugin GameplayCameras). Set its parameters with set_camera_node_parameters child_index; inverse: remove_camera_node_child.
 //   @param camera_rig_path - /Game/... path to the UCameraRigAsset whose composite RootNode is edited (required)
 //   @param child_node_type - A concrete UCameraNode subclass name for the new child, e.g. "OffsetCameraNode", "FieldOfViewCameraNode" (required)
 //   @param index - Optional child slot. If given and < current child count, REPLACES that slot (deterministic re-runs); otherwise appends.
@@ -703,9 +721,57 @@ TSharedPtr<FJsonObject> HandleAddCameraNodeChild(const TSharedPtr<FJsonObject>& 
     return mcp_common::MakeOutcomeReply(Data, bAdded && bSaved, mcp_common::SavedOutcomeError(TEXT("add_camera_node_child")));
 }
 
-// MCP:get_camera_rig_nodes - Reports a camera rig's RootNode class and its camera-parameter fields (name + value), plus, for a composite ArrayCameraNode root, its Children (index + class). Read-only.
+// MCP:remove_camera_node_child - Remove the child at index from the composite ArrayCameraNode root of a camera rig, in one undo step, then save the rig. Inverse of add_camera_node_child; the children after it move down one index. A root that is not an ArrayCameraNode or an index out of range is an error and nothing changes; a failed save fails the call, with saved false and save_error, and leaves the change in memory. The reply re-reads the children (children). Gameplay Camera System is EXPERIMENTAL (plugin GameplayCameras). Read: get_camera_rig_nodes.
+//   @param camera_rig_path - /Game/... path to the UCameraRigAsset whose composite RootNode is edited (required)
+//   @param index [int] - Index of the child to remove (get_camera_rig_nodes lists them) (required)
+//   @returns { camera_rig_path, index, removed_class, removed, children_count, children:[string], saved, save_error }
+TSharedPtr<FJsonObject> HandleRemoveCameraNodeChild(const TSharedPtr<FJsonObject>& Params)
+{
+    FString RigPath;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("camera_rig_path"), RigPath)) { return Missing; }
+    int32 Index = 0;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("index"), Index)) { return Missing; }
+
+    UCameraRigAsset* Rig = mcp_common::ResolveAsset<UCameraRigAsset>(RigPath);
+    if (!Rig)
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("UCameraRigAsset not found: %s"), *RigPath));
+    UArrayCameraNode* ArrayNode = Cast<UArrayCameraNode>(Rig->RootNode);
+    if (!ArrayNode)
+        return mcp_common::MakeErrorReply(TEXT("rig root is not a composite ArrayCameraNode, so it has no children; nothing was changed"));
+    if (!ArrayNode->Children.IsValidIndex(Index))
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("index %d is out of range: the root has %d children; nothing was changed"),
+            Index, ArrayNode->Children.Num()));
+
+    const UCameraNode* Removed = ArrayNode->Children[Index];
+    const FString RemovedClass = Removed ? Removed->GetClass()->GetName() : FString(TEXT("None"));
+
+    const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "RemoveCameraNodeChild", "Remove Camera Node Child (MCP)"));
+    ArrayNode->Modify();
+    Rig->Modify();
+    ArrayNode->Children.RemoveAt(Index);
+
+    FString SaveError;
+    const bool bSaved = GC_MarkDirtyAndSave(Rig, SaveError);
+
+    TArray<FString> Children;
+    for (const TObjectPtr<UCameraNode>& Child : ArrayNode->Children)
+    {
+        Children.Add(Child ? Child->GetClass()->GetName() : FString(TEXT("None")));
+    }
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("camera_rig_path"), Rig->GetPathName());
+    Data->SetNumberField(TEXT("index"), Index);
+    Data->SetStringField(TEXT("removed_class"), RemovedClass);
+    Data->SetBoolField(TEXT("removed"), true);
+    Data->SetNumberField(TEXT("children_count"), ArrayNode->Children.Num());
+    Data->SetArrayField(TEXT("children"), mcp_common::StringsToJson(Children));
+    mcp_common::AddSaveOutcome(Data, bSaved, SaveError);
+    return mcp_common::MakeOutcomeReply(Data, bSaved, mcp_common::SavedOutcomeError(TEXT("remove_camera_node_child")));
+}
+
+// MCP:get_camera_rig_nodes - Reports a camera rig's RootNode class and its camera-parameter fields (name + value), plus, for a composite ArrayCameraNode root, its Children (index, class and their own camera-parameter fields). Read-only. It reads what set_camera_node_parameters writes (child_index for a child), add_camera_node_child adds and remove_camera_node_child removes.
 //   @param camera_rig_path - /Game/... path to the UCameraRigAsset (required)
-//   @returns { camera_rig_path, has_root_node, root_node_class, parameters:[{name, value}], children:[{index, class}] }
+//   @returns { camera_rig_path, has_root_node, root_node_class, parameters:[{name, value}], children:[{index, class, parameters:[{name, value}]}] }
 TSharedPtr<FJsonObject> HandleGetCameraRigNodes(const TSharedPtr<FJsonObject>& Params)
 {
     FString RigPath;
@@ -720,23 +786,29 @@ TSharedPtr<FJsonObject> HandleGetCameraRigNodes(const TSharedPtr<FJsonObject>& P
     Data->SetBoolField(TEXT("has_root_node"), Node != nullptr);
     Data->SetStringField(TEXT("root_node_class"), Node ? Node->GetClass()->GetName() : TEXT("None"));
 
-    TArray<TSharedPtr<FJsonValue>> ParamArr;
-    if (Node)
+    // The camera-parameter fields (FXxxCameraParameter) of a node, as {name, value} export text.
+    const auto CameraParameters = [](UCameraNode* InNode)
     {
-        for (TFieldIterator<FProperty> It(Node->GetClass()); It; ++It)
+        TArray<TSharedPtr<FJsonValue>> Out;
+        if (!InNode)
+        {
+            return Out;
+        }
+        for (TFieldIterator<FProperty> It(InNode->GetClass()); It; ++It)
         {
             FStructProperty* SP = CastField<FStructProperty>(*It);
             if (!SP || !SP->Struct || !SP->Struct->GetName().EndsWith(TEXT("CameraParameter")))
                 continue;
             FString ValStr;
-            It->ExportTextItem_Direct(ValStr, It->ContainerPtrToValuePtr<void>(Node), nullptr, Node, PPF_None);
+            It->ExportTextItem_Direct(ValStr, It->ContainerPtrToValuePtr<void>(InNode), nullptr, InNode, PPF_None);
             TSharedPtr<FJsonObject> P = MakeShared<FJsonObject>();
             P->SetStringField(TEXT("name"), It->GetName());
             P->SetStringField(TEXT("value"), ValStr);
-            ParamArr.Add(MakeShared<FJsonValueObject>(P));
+            Out.Add(MakeShared<FJsonValueObject>(P));
         }
-    }
-    Data->SetArrayField(TEXT("parameters"), ParamArr);
+        return Out;
+    };
+    Data->SetArrayField(TEXT("parameters"), CameraParameters(Node));
 
     // Enumerate composite children so add_camera_node_child writes can be verified.
     // Read the persistent Children UPROPERTY directly (not GetChildren(), whose by-value view is transient).
@@ -749,6 +821,7 @@ TSharedPtr<FJsonObject> HandleGetCameraRigNodes(const TSharedPtr<FJsonObject>& P
             TSharedPtr<FJsonObject> C = MakeShared<FJsonObject>();
             C->SetNumberField(TEXT("index"), i);
             C->SetStringField(TEXT("class"), Child ? Child->GetClass()->GetName() : TEXT("None"));
+            C->SetArrayField(TEXT("parameters"), CameraParameters(Child));
             ChildArr.Add(MakeShared<FJsonValueObject>(C));
         }
     }
@@ -872,6 +945,7 @@ namespace UEAgentCameraImpl
 }
 
 // MCP:create_camera - Spawn a new ACameraActor in the editor world (never in PIE) at an optional location and rotation, with camera_name as its outliner label. Labels need not be unique, so address the camera later by the returned actor_name. Each location axis must be within +-100000, otherwise an error. The level is marked dirty, not saved. location_set, rotation_set and label_set compare what the spawned actor reports with the request. Move or re-aim it with set_camera_transform; spawn_actor places a CameraActor in PIE too; add_camera_component puts a camera on an existing actor.
+//   @retired spawn_actor - type="CameraActor", name, location, rotation
 //   @param camera_name - Name to assign to the new camera actor.
 //   @param location - Optional [X, Y, Z] world location for the new camera (defaults to origin)
 //   @param rotation - Optional [Pitch, Yaw, Roll] world rotation for the new camera (defaults to zero)
@@ -950,7 +1024,7 @@ ACameraActor* FindCameraByName(const FString& CameraName)
     return nullptr;
 }
 
-// MCP:get_cameras - List the camera actors (ACameraActor or CineCameraActor) in the editor world with their world location [X, Y, Z], rotation [Pitch, Yaw, Roll] in degrees and FOV, or with camera_name only the one camera found by object name or label (case-insensitive, first match; an unknown name is an error). set_camera_transform is the writer of the transform.
+// MCP:get_cameras - List the camera actors (ACameraActor or CineCameraActor) in the editor world with their world location [X, Y, Z], rotation [Pitch, Yaw, Roll] in degrees and FOV, or with camera_name only the one camera found by object name or label (case-insensitive, first match; an unknown name is an error). set_actor_transform is the writer of the transform.
 //   @param max_results - Maximum number of cameras to return (optional, default 1000, valid 1-10000)
 //   @param camera_name - Optional camera to report alone, matched by actor name or label; a camera without a camera component reports fov 90
 //   @returns { cameras: [{ name: string, label: string, is_valid: bool, location: [number, number, number], rotation: [number, number, number], fov: number? }], total_count: number, max_results: number, truncated: bool, camera_name?: string }
@@ -1023,6 +1097,7 @@ TSharedPtr<FJsonObject> HandleGetCameras(const TSharedPtr<FJsonObject>& Params)
 }
 
 // MCP:set_camera_transform - Update the location and/or rotation of an existing camera.
+//   @retired set_actor_transform - actor_name=<camera>, location, rotation
 //   @param camera_name - Name of the camera to modify (matches actor name or label).
 //   @param location - Optional new [X, Y, Z] world location; if omitted, location is preserved
 //   @param rotation - Optional new [Pitch, Yaw, Roll] world rotation; if omitted, rotation is preserved
@@ -1073,6 +1148,7 @@ TSharedPtr<FJsonObject> HandleSetCameraTransform(const TSharedPtr<FJsonObject>& 
 }
 
 // MCP:set_camera_fov - Set the field of view (degrees, above 0 up to 180) of the camera component of an ACameraActor or CineCameraActor in the editor world, found by object name or label. No undo transaction and nothing is saved. Returns previous_fov, actual_fov and fov_set; get_cameras with camera_name reads it.
+//   @retired set_properties - object_path="<camera>.CameraComponent", properties={"FieldOfView":..}
 //   @param camera_name - Name of the camera to modify (matches actor name or label).
 //   @param fov - Field of view in degrees. Must be between 0.0 and 180.0.
 //   @returns { camera_name: string, requested_fov: number, previous_fov: number, actual_fov: number, fov_set: bool, camera_valid: bool }
@@ -1164,6 +1240,7 @@ static UCineCameraComponent* FindCineCameraComponent(const FString& ActorName, F
 // 1. set_cine_camera_focal_length
 // ---------------------------------------------------------------------------
 // MCP:set_cine_camera_focal_length - Set CurrentFocalLength (mm) on the CineCameraComponent of an editor-world actor found by object name or label (case-insensitive, first match): a CineCameraActor, or any actor carrying that component. The component clamps the value to its lens MinFocalLength and MaxFocalLength, so it is read back with the resulting horizontal and vertical FOV, and success is false (an outcome error) when the read-back differs from the request. No undo step, the level is not marked dirty, nothing is saved. A focal_length outside 0 to 1000, an empty name, or an actor without the component is an error. Widen the lens limits with set_cine_camera_lens; aperture: set_cine_camera_aperture; focus: set_cine_camera_focus; read all of it back with get_cine_camera_settings.
+//   @retired set_properties - object_path="<camera>.CineCameraComponent", properties={"CurrentFocalLength":..}
 //   @param camera_actor_name - Object name or label of the CineCameraActor (or other actor with a CineCameraComponent) to modify.
 //   @param focal_length - Focal length in millimetres. Must be between 0.0 and 1000.0.
 //   @returns { camera_actor_name: string, focal_length: number, horizontal_fov: number, vertical_fov: number, success: bool }
@@ -1211,6 +1288,7 @@ TSharedPtr<FJsonObject> HandleSetCineCameraFocalLength(const TSharedPtr<FJsonObj
 // 2. set_cine_camera_aperture
 // ---------------------------------------------------------------------------
 // MCP:set_cine_camera_aperture - Set CurrentAperture, the f-stop that drives depth of field, on the CineCameraComponent of an editor-world actor found by object name or label (case-insensitive, first match): a CineCameraActor, or any actor carrying that component. The component clamps it to its lens MinFStop and MaxFStop, so the value is read back and success is false (an outcome error) when it differs from the request. No undo step, the level is not marked dirty, nothing is saved. An aperture outside 0.01 to 512, an empty name, or an actor without the component is an error. Widen the f-stop range with set_cine_camera_lens; focal length: set_cine_camera_focal_length; focus distance: set_cine_camera_focus; read back with get_cine_camera_settings.
+//   @retired set_properties - object_path="<camera>.CineCameraComponent", properties={"CurrentAperture":..}
 //   @param camera_actor_name - Object name or label of the CineCameraActor (or other actor with a CineCameraComponent) to modify.
 //   @param aperture - F-stop value. Must be between 0.01 and 512.0.
 //   @returns { camera_actor_name: string, aperture: number, success: bool }
@@ -1254,6 +1332,7 @@ TSharedPtr<FJsonObject> HandleSetCineCameraAperture(const TSharedPtr<FJsonObject
 // 3. set_cine_camera_focus
 // ---------------------------------------------------------------------------
 // MCP:set_cine_camera_focus - Replace the focus settings of the CineCameraComponent on an editor-world actor found by name or label: method, manual focus distance and smoothing; other focus fields, including the tracked actor, reset to defaults. Returns the read-back focus_method and focus_distance; no undo, nothing saved.
+//   @retired set_properties - object_path="<camera>.CineCameraComponent", properties={"FocusSettings":{"FocusMethod":"Manual","ManualFocusDistance":..,"bSmoothFocusChanges":..,"FocusSmoothingInterpSpeed":..}}
 //   @param camera_actor_name - Name or label of the CineCameraActor to modify.
 //   @param focus_method - Focus method — one of "Manual", "Tracking", or "Disable".
 //   @param focus_distance - Manual focus distance in cm (optional, default 1000.0)
@@ -1329,6 +1408,7 @@ TSharedPtr<FJsonObject> HandleSetCineCameraFocus(const TSharedPtr<FJsonObject>& 
 // 4. set_cine_camera_filmback
 // ---------------------------------------------------------------------------
 // MCP:set_cine_camera_filmback - Set the sensor size (filmback, in mm) of the CineCameraComponent on an editor-world actor found by name or label; sensor offsets are reset to 0. No undo transaction, nothing saved. Returns the read-back sensor_width, sensor_height and aspect_ratio; success is false when they do not match.
+//   @retired set_properties - object_path="<camera>.CineCameraComponent", properties={"Filmback":{"SensorWidth":..,"SensorHeight":..}}
 //   @param camera_actor_name - Name or label of the CineCameraActor to modify.
 //   @param sensor_width - Sensor width in mm. Must be positive and <= 200.
 //   @param sensor_height - Sensor height in mm. Must be positive and <= 200.
@@ -1390,6 +1470,7 @@ TSharedPtr<FJsonObject> HandleSetCineCameraFilmback(const TSharedPtr<FJsonObject
 // 5. set_cine_camera_lens
 // ---------------------------------------------------------------------------
 // MCP:set_cine_camera_lens - Replace the lens limits of the CineCameraComponent on an editor-world actor found by name or label: focal length and f-stop ranges plus blade count; minimum focus distance resets to 0 and squeeze factor to 1. Returns the read-back focal range; no undo, nothing saved.
+//   @retired set_properties - object_path="<camera>.CineCameraComponent", properties={"LensSettings":{"MinFocalLength":..,"MaxFocalLength":..,"MinFStop":..,"MaxFStop":..}}
 //   @param camera_actor_name - Name or label of the CineCameraActor to modify.
 //   @param min_focal_length - Minimum focal length in mm. Must be positive.
 //   @param max_focal_length - Maximum focal length in mm. Must be >= min_focal_length.
@@ -1477,6 +1558,7 @@ TSharedPtr<FJsonObject> HandleSetCineCameraLens(const TSharedPtr<FJsonObject>& P
 // 6. create_camera_rig_rail
 // ---------------------------------------------------------------------------
 // MCP:create_camera_rig_rail - Spawn an unrotated CameraRig_Rail actor in the editor world; with more than 2 points the rail is rebuilt as a straight 500-unit line along local X. Always labelled "CameraRigRail_MCP", so address it by the returned internal_name, e.g. in set_camera_rig_rail_position. Not saved.
+//   @retired spawn_actor - type="CameraRig_Rail", name, location; reshape the rail with set_spline_points
 //   @param location - Optional [X, Y, Z] world location (defaults to origin; each axis within -100000 to 100000)
 //   @param num_spline_points - Number of spline points on the rail (optional, default 2, valid 2-100)
 //   @returns { actor_name: string, internal_name: string, location: [number, number, number], num_spline_points: number, success: bool }
@@ -1546,6 +1628,7 @@ TSharedPtr<FJsonObject> HandleCreateCameraRigRail(const TSharedPtr<FJsonObject>&
 // 7. set_camera_rig_rail_position
 // ---------------------------------------------------------------------------
 // MCP:set_camera_rig_rail_position - Set CurrentPositionOnRail of a CameraRig_Rail actor in the editor world, found by object name or label (case-insensitive, first match): 0.0 is the start of the rail spline and 1.0 its end, and the rig moves its camera mount there on its next tick. The property is written directly and read back: no undo step, the level is not marked dirty and nothing is saved. A position outside 0 to 1, an empty name or no such rail is an error; success is false (an outcome error) only when the read-back differs. Spawn a rail with create_camera_rig_rail and pass its internal_name here; a crane rig is create_camera_rig_crane; a plain camera moves with set_camera_transform.
+//   @retired set_properties - object_path=<rail actor>, properties={"CurrentPositionOnRail":0.5} (0 = start, 1 = end)
 //   @param rig_actor_name - Object name or label of the CameraRig_Rail actor, e.g. the internal_name create_camera_rig_rail returns.
 //   @param position - Normalised position on the rail, 0.0 to 1.0, as a fraction of the spline length.
 //   @returns { rig_actor_name: string, position: number, success: bool }
@@ -1600,6 +1683,7 @@ TSharedPtr<FJsonObject> HandleSetCameraRigRailPosition(const TSharedPtr<FJsonObj
 // 8. create_camera_rig_crane
 // ---------------------------------------------------------------------------
 // MCP:create_camera_rig_crane - Spawn an unrotated CameraRig_Crane actor in the editor world with the given pitch, yaw and arm length; it is always labelled "CameraRigCrane_MCP", so address it later by the returned internal_name. Returns location and the read-back crane values; the level is not saved.
+//   @retired spawn_actor - type="CameraRig_Crane", name, location, properties={"CranePitch":..,"CraneYaw":..,"CraneArmLength":..}
 //   @param location - Optional [X, Y, Z] world location (defaults to origin; each axis within -100000 to 100000)
 //   @param crane_pitch - Crane pitch angle in degrees (optional, default 0)
 //   @param crane_yaw - Crane yaw angle in degrees (optional, default 0)
@@ -1940,6 +2024,7 @@ TSharedPtr<FJsonObject> HandleGetCineCameraSettings(const TSharedPtr<FJsonObject
 }
 
 // MCP:set_camera_post_process - Write PostProcessSettings on a camera actor's camera component (plain or cine) by field presence, turning on each field's bOverride_* companion so it takes effect (like a PostProcess Volume). Supplied fields only; scalars are numbers, color-grading wheels are [R,G,B,master] arrays, scene_color_tint is [R,G,B,A]. Absolute + idempotent. Forces PostProcessBlendWeight>0 and marks the render state dirty.
+//   @retired set_properties - object_path="<camera>.CameraComponent", properties={"PostProcessSettings":{"bOverride_<Name>":true,"<Name>":..},"PostProcessBlendWeight":1}
 //   @param actor_name - Name or label of the camera actor to modify.
 //   @param bloom_intensity - Optional bloom intensity (number).
 //   @param bloom_threshold - Optional bloom threshold (number).
@@ -2037,7 +2122,7 @@ TSharedPtr<FJsonObject> HandleSetCameraPostProcess(const TSharedPtr<FJsonObject>
     return mcp_common::MakeOkReply(Response);
 }
 
-// MCP:get_camera_post_process - Read the overridden PostProcessSettings off a camera actor's camera component: only the fields whose bOverride_* companion is on are returned (those actually contributing). Mirrors set_camera_post_process's field set. Pure reader.
+// MCP:get_camera_post_process - Read the overridden PostProcessSettings off a camera actor's camera component: only the fields whose bOverride_* companion is on are returned (those actually contributing). set_properties writes them (PostProcessSettings with its bOverride_* flags). Pure reader.
 //   @param actor_name - Name or label of the camera actor to query.
 //   @returns { actor_name: string, post_process_blend_weight: number, overridden_count: int, settings: object (overridden field -> value; scalars as numbers, wheels as [R,G,B,master], scene_color_tint as [R,G,B,A]) }
 TSharedPtr<FJsonObject> HandleGetCameraPostProcess(const TSharedPtr<FJsonObject>& Params)
@@ -2709,6 +2794,7 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("get_cameras"), &HandleGetCameras },
     { TEXT("get_cine_camera_settings"), &HandleGetCineCameraSettings },
     { TEXT("list_camera_node_types"), &HandleListCameraNodeTypes },
+    { TEXT("remove_camera_node_child"), &HandleRemoveCameraNodeChild },
     { TEXT("set_camera_asset_director"), &HandleSetCameraAssetDirector },
     { TEXT("set_camera_fov"), &HandleSetCameraFOV },
     { TEXT("set_camera_node_parameters"), &HandleSetCameraNodeParameters },

@@ -28,7 +28,8 @@ Modes (the descriptor's "mode"):
                       settings_desc              the description of the settings param
                     Every settings key must name a field and hold a value of its kind, and the merge runs
                     on a copy of the struct: a call that fails changes nothing.
-Both modes take cmd_base (the <x>), set_desc and get_desc.
+Both modes take cmd_base (the <x>), set_desc and get_desc, and optionally set_retired / get_retired: "<listed tool> -
+<how>", which retires that command from the tool list (its @retired line) while it keeps running.
 
 Every helper name carries the PropertyHandlers_ prefix and a unit's helpers carry its <X>, so they never
 collide with the hand-written code of the file; each region sits in its family's namespace, so every
@@ -47,6 +48,12 @@ import sys
 
 PREFIX = "PropertyHandlers_"
 
+
+
+
+def retired_lines(d: dict, key: str) -> list[str]:
+    """The `@retired` line of a command the descriptor retires (set_retired / get_retired), or none."""
+    return [f"//   @retired {d[key]}"] if d.get(key) else []
 
 def camel_case(snake: str) -> str:
     """sky_atmosphere -> SkyAtmosphere."""
@@ -389,6 +396,7 @@ def typed_setter_unit(d: dict) -> list[str]:
     out += ["        return Properties;", "    }", "}", ""]
 
     out.append(f"// MCP:set_{base}_properties - {d['set_desc']}")
+    out += retired_lines(d, "set_retired")
     out.append(f"//   @param actor_name - Label/name of the target {kind} actor.")
     out += [f"//   @param {f['json']} [{FIELD_TYPES[f['type']]['hint']}] - {f['desc']}" for f in fields]
     out.append("//   @returns { actor_name: string, properties: object, applied_count: int, applied: bool }")
@@ -439,6 +447,7 @@ def typed_setter_unit(d: dict) -> list[str]:
 
     returned = ", ".join(f["json"] + (":[R,G,B,A]" if f["type"] in COLOR_TYPES else "") for f in fields)
     out.append(f"// MCP:get_{base}_properties - {d['get_desc']}")
+    out += retired_lines(d, "get_retired")
     out.append(f"//   @param actor_name - Label/name of the target {kind} actor.")
     out.append(f"//   @returns {{ actor_name: string, properties: {{ {returned} }} }}")
     out.append(f"TSharedPtr<FJsonObject> HandleGet{camel}Properties(const TSharedPtr<FJsonObject>& Params)")
@@ -649,6 +658,7 @@ def reflection_merge_unit(d: dict) -> list[str]:
         "}",
         "",
         f"// MCP:set_{base}_properties - {d['set_desc']}",
+        *retired_lines(d, "set_retired"),
         f"//   @param {path_param} - Full content path of the target {asset}.",
         f"//   @param settings - {d['settings_desc']}",
         f"//   @returns {{ {path_param}: string, asset_class: string, settings: object, applied_keys: [string], saved: bool }}",
@@ -661,6 +671,7 @@ def reflection_merge_unit(d: dict) -> list[str]:
         "}",
         "",
         f"// MCP:get_{base}_properties - {d['get_desc']}",
+        *retired_lines(d, "get_retired"),
         f"//   @param {path_param} - Full content path of the target {asset}.",
         f"//   @returns {{ {path_param}: string, asset_class: string, settings: object }}",
         f"TSharedPtr<FJsonObject> HandleGet{camel}Properties(const TSharedPtr<FJsonObject>& Params)",

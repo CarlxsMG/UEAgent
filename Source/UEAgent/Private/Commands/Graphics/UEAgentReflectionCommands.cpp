@@ -33,6 +33,7 @@
 #include "Engine/UserDefinedEnum.h" // UUserDefinedEnum (get_enum_info BP display names)
 #include "Components/ActorComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Animation/BlendSpace.h" // set_properties resamples a blend space after a write, as its editor does
 #include "Animation/AnimInstance.h" // FindSubobjectByName's "AnimInstance" alias returns one as UObject* — needs the complete type, which only the unity blob would supply
 #include "Misc/PackageName.h"
 #include "HAL/PlatformFilemanager.h"
@@ -571,7 +572,10 @@ UObject* FindActorByName(const FString& ActorName)
     {
         return Settings;
     }
-    return nullptr;
+
+    // The label the Outliner shows, when exactly one actor has it: most actor tools take a label, and an agent
+    // that placed "Sun" should not need its internal name to reach it.
+    return mcp_common::FindActorByUniqueLabel(EditorWorld, ActorName);
 }
 
 // Resolves one further segment of a dotted path: a named component on an actor, the "AnimInstance" alias on a
@@ -583,10 +587,11 @@ UObject* FindSubobjectByName(UObject* Owner, const FString& SubobjectName)
         return nullptr;
     }
 
-    // Actor -> component, matched by its instance name.
+    // Actor -> component, matched by its instance name, or by a class only one of its components has
+    // ("Sun.DirectionalLightComponent"): the instance names (LightComponent0, HeightFogComponent0) are not guessable.
     if (AActor* OwnerActor = Cast<AActor>(Owner))
     {
-        return UEAgentReflectionCommandsImpl::FindComponentNamed(OwnerActor, SubobjectName);
+        return mcp_common::FindComponentByNameOrClass(OwnerActor, SubobjectName);
     }
 
     // Component -> its running AnimInstance. UAnimInstance is a transient subobject
@@ -638,6 +643,49 @@ UObject* ResolveObjectByName(const FString& ObjectPath)
         Resolved = FindSubobjectByName(Resolved, Segments[i]);
     }
     return Resolved;
+}
+
+// Why ResolveObjectByName found nothing for ObjectPath, as an error message: which segment of a dotted path missed,
+// and for a component, the names and classes the actor does have.
+FString DescribeUnresolvedPath(const FString& ObjectPath)
+{
+    TArray<FString> Segments;
+    ObjectPath.ParseIntoArray(Segments, TEXT("."), /*InCullEmpty=*/true);
+    if (ObjectPath.StartsWith(TEXT("/")) || Segments.Num() == 0)
+    {
+        return FString::Printf(TEXT("Object not found: %s"), *ObjectPath);
+    }
+    AActor* Actor = Cast<AActor>(FindActorByName(Segments[0]));
+    if (!Actor)
+    {
+        int32 LabelMatches = 0;
+        mcp_common::FindActorByUniqueLabel(mcp_common::GetEditorWorld(), Segments[0], &LabelMatches);
+        return LabelMatches > 1
+            ? FString::Printf(TEXT("Object not found: %d actors are labelled '%s'; name one by its internal name (find_actors_by_name)"), LabelMatches, *Segments[0])
+            : FString::Printf(TEXT("Object not found: no editor-world actor is named or labelled '%s'"), *Segments[0]);
+    }
+    if (Segments.Num() < 2)
+    {
+        return FString::Printf(TEXT("Object not found: %s"), *ObjectPath);
+    }
+    TArray<FString> Ambiguous;
+    if (!mcp_common::FindComponentByNameOrClass(Actor, Segments[1], &Ambiguous) && Ambiguous.Num() > 0)
+    {
+        return FString::Printf(TEXT("Object not found: '%s' has %d components of class %s (%s); name one"),
+            *Segments[0], Ambiguous.Num(), *Segments[1], *FString::Join(Ambiguous, TEXT(", ")));
+    }
+    TArray<UActorComponent*> Components;
+    Actor->GetComponents(Components);
+    TArray<FString> Listed;
+    for (const UActorComponent* Component : Components)
+    {
+        if (Component && Listed.Num() < 40)
+        {
+            Listed.Add(FString::Printf(TEXT("%s (%s)"), *Component->GetName(), *Component->GetClass()->GetName()));
+        }
+    }
+    return FString::Printf(TEXT("Object not found: %s. Actor '%s' has these components, by name or by a class only one of them has: %s"),
+        *ObjectPath, *Segments[0], *FString::Join(Listed, TEXT(", ")));
 }
 
 FString GetPropertyValueAsString(FProperty* Property, void* ValuePtr)
@@ -884,7 +932,7 @@ TSharedPtr<FJsonObject> BuildPropertyDescriptor(FProperty* Property, int32 Depth
 // set (walks GetSuperClass() since UClass::Interfaces only lists the ones declared at that exact
 // level -- ImplementsInterface() walks the hierarchy internally too, but only as a single-interface
 // predicate, not an enumerator), class_group (WITH_EDITOR), and metadata (WITH_METADATA). Shared by
-// inspect_object, get_class_hierarchy, get_class_properties.
+// get_object_info, get_class_hierarchy, get_class_properties.
 TSharedPtr<FJsonObject> BuildClassDescriptor(UClass* Class)
 {
     TSharedPtr<FJsonObject> Desc = MakeShared<FJsonObject>();
@@ -952,12 +1000,150 @@ TSharedPtr<FJsonObject> BuildClassDescriptor(UClass* Class)
     return Desc;
 }
 
+namespace UEAgentReflectionWriteImpl
+{
+    void CollectUnknownValueKeys(const FProperty* Property, const TSharedPtr<FJsonValue>& Value, const FString& Name, TArray<FString>& OutUnknown);
+
+    // One element of Property (a C-array element, an array's inner element, or the value itself).
+    void CollectUnknownElementKeys(const FProperty* Property, const TSharedPtr<FJsonValue>& Value, const FString& Name, TArray<FString>& OutUnknown)
+    {
+        if (!Value.IsValid())
+        {
+            return;
+        }
+        if (const FStructProperty* StructProperty = CastField<FStructProperty>(Property))
+        {
+            const TSharedPtr<FJsonObject>* Object = nullptr;
+            if (!Value->TryGetObject(Object) || !Object || !Object->IsValid())
+            {
+                return; // a string is imported as text, an array by the struct's own importer
+            }
+            for (const auto& Pair : (*Object)->Values)
+            {
+                const FString Key(*Pair.Key);
+                const FProperty* Field = nullptr;
+                for (TFieldIterator<FProperty> It(StructProperty->Struct); It; ++It)
+                {
+                    // The engine's importer looks each field up by its authored name, without case.
+                    if (StructProperty->Struct->GetAuthoredNameForField(*It).Equals(Key, ESearchCase::IgnoreCase)
+                        || It->GetName().Equals(Key, ESearchCase::IgnoreCase))
+                    {
+                        Field = *It;
+                        break;
+                    }
+                }
+                if (!Field)
+                {
+                    OutUnknown.Add(FString::Printf(TEXT("%s.%s"), *Name, *Key));
+                    continue;
+                }
+                CollectUnknownValueKeys(Field, Pair.Value, FString::Printf(TEXT("%s.%s"), *Name, *Key), OutUnknown);
+            }
+        }
+        else if (const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property))
+        {
+            const TArray<TSharedPtr<FJsonValue>>* Elements = nullptr;
+            if (Value->TryGetArray(Elements) && Elements)
+            {
+                for (int32 Index = 0; Index < Elements->Num(); ++Index)
+                {
+                    CollectUnknownValueKeys(ArrayProperty->Inner, (*Elements)[Index], FString::Printf(TEXT("%s[%d]"), *Name, Index), OutUnknown);
+                }
+            }
+        }
+    }
+
+    // Keys of a JSON object written into a struct that name no field of it, as dotted names. The engine's importer
+    // skips such a key without a word, so a misspelled field would read as written while nothing changed.
+    void CollectUnknownValueKeys(const FProperty* Property, const TSharedPtr<FJsonValue>& Value, const FString& Name, TArray<FString>& OutUnknown)
+    {
+        const TArray<TSharedPtr<FJsonValue>>* Elements = nullptr;
+        if (Property->ArrayDim > 1 && Value.IsValid() && Value->TryGetArray(Elements) && Elements)
+        {
+            for (int32 Index = 0; Index < Elements->Num(); ++Index)
+            {
+                CollectUnknownElementKeys(Property, (*Elements)[Index], FString::Printf(TEXT("%s[%d]"), *Name, Index), OutUnknown);
+            }
+            return;
+        }
+        CollectUnknownElementKeys(Property, Value, Name, OutUnknown);
+    }
+
+    void ClampValue(const FProperty* Property, void* ValuePtr, const FString& Name, TArray<FString>& OutClamped);
+
+    void ClampElement(const FProperty* Property, void* Element, const FString& Name, TArray<FString>& OutClamped)
+    {
+        if (const FNumericProperty* Numeric = CastField<FNumericProperty>(Property))
+        {
+            const bool bHasMin = Property->HasMetaData(TEXT("ClampMin"));
+            const bool bHasMax = Property->HasMetaData(TEXT("ClampMax"));
+            if (!bHasMin && !bHasMax)
+            {
+                return;
+            }
+            if (Numeric->IsFloatingPoint())
+            {
+                const double Before = Numeric->GetFloatingPointPropertyValue(Element);
+                double After = Before;
+                if (bHasMin) { After = FMath::Max(After, FCString::Atod(*Property->GetMetaData(TEXT("ClampMin")))); }
+                if (bHasMax) { After = FMath::Min(After, FCString::Atod(*Property->GetMetaData(TEXT("ClampMax")))); }
+                if (After != Before)
+                {
+                    Numeric->SetFloatingPointPropertyValue(Element, After);
+                    OutClamped.Add(FString::Printf(TEXT("%s=%s"), *Name, *FString::SanitizeFloat(After)));
+                }
+            }
+            else if (Numeric->IsInteger() && !Numeric->IsEnum())
+            {
+                const int64 Before = Numeric->GetSignedIntPropertyValue(Element);
+                int64 After = Before;
+                if (bHasMin) { After = FMath::Max<int64>(After, FCString::Atoi64(*Property->GetMetaData(TEXT("ClampMin")))); }
+                if (bHasMax) { After = FMath::Min<int64>(After, FCString::Atoi64(*Property->GetMetaData(TEXT("ClampMax")))); }
+                if (After != Before)
+                {
+                    Numeric->SetIntPropertyValue(Element, After);
+                    OutClamped.Add(FString::Printf(TEXT("%s=%lld"), *Name, After));
+                }
+            }
+        }
+        else if (const FStructProperty* StructProperty = CastField<FStructProperty>(Property))
+        {
+            for (TFieldIterator<FProperty> It(StructProperty->Struct); It; ++It)
+            {
+                ClampValue(*It, It->ContainerPtrToValuePtr<void>(Element), FString::Printf(TEXT("%s.%s"), *Name, *It->GetName()), OutClamped);
+            }
+        }
+        else if (const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property))
+        {
+            FScriptArrayHelper Helper(ArrayProperty, Element);
+            for (int32 Index = 0; Index < Helper.Num(); ++Index)
+            {
+                ClampElement(ArrayProperty->Inner, Helper.GetRawPtr(Index), FString::Printf(TEXT("%s[%d]"), *Name, Index), OutClamped);
+            }
+        }
+    }
+
+    // Clamps the value to the ClampMin/ClampMax metadata of each numeric property in it, nested structs and array
+    // elements included, as the Details panel's number boxes do. Adds "name=value" for each value it changed.
+    void ClampValue(const FProperty* Property, void* ValuePtr, const FString& Name, TArray<FString>& OutClamped)
+    {
+        for (int32 Index = 0; Index < Property->ArrayDim; ++Index)
+        {
+            ClampElement(Property, static_cast<uint8*>(ValuePtr) + Index * Property->GetElementSize(),
+                Property->ArrayDim > 1 ? FString::Printf(TEXT("%s[%d]"), *Name, Index) : Name, OutClamped);
+        }
+    }
+}
+
 // Apply a single property write through the honest editable gate + editor change notification.
 // Every write of set_properties goes through here. The gate accepts a property that is editable in
 // the editor (EditAnywhere/EditDefaultsOnly and not EditConst) OR writable from Blueprint
 // (BlueprintReadWrite); the Modify/PreEditChange/PostEditChangeProperty sequence is what makes the
 // change take effect and persist. All notify calls are WITH_EDITOR (our harness runs an editor target).
-bool ApplyCheckedPropertySet(UObject* Object, const FString& PropertyName, const TSharedPtr<FJsonValue>& Value, FString& OutError)
+// A JSON key that names no field of a struct is refused before anything is written. With OutClamped, the value is
+// clamped to the property's ClampMin/ClampMax metadata before PostEditChange, and each value changed is listed.
+bool ApplyCheckedPropertySet(UObject* Object, const FString& PropertyName, const TSharedPtr<FJsonValue>& Value, FString& OutError,
+    TArray<FString>* OutClamped = nullptr)
 {
     if (!Object)
     {
@@ -985,10 +1171,23 @@ bool ApplyCheckedPropertySet(UObject* Object, const FString& PropertyName, const
         return false;
     }
 
+    TArray<FString> Unknown;
+    UEAgentReflectionWriteImpl::CollectUnknownValueKeys(Property, Value, PropertyName, Unknown);
+    if (Unknown.Num() > 0)
+    {
+        OutError = FString::Printf(TEXT("%s names no field of its struct: %s. Nothing was written to %s; get_properties shows its fields."),
+            Unknown.Num() == 1 ? TEXT("This key") : TEXT("These keys"), *FString::Join(Unknown, TEXT(", ")), *PropertyName);
+        return false;
+    }
+
     Object->Modify();
     Object->PreEditChange(Property);
 
     const bool bSet = mcp_common::SetObjectProperty(Object, PropertyName, Value, OutError);
+    if (bSet && OutClamped)
+    {
+        UEAgentReflectionWriteImpl::ClampValue(Property, Property->ContainerPtrToValuePtr<void>(Object), PropertyName, *OutClamped);
+    }
 
     // Always close the edit cycle so the object re-validates its current state.
     FPropertyChangedEvent ChangeEvent(Property, bSet ? EPropertyChangeType::ValueSet : EPropertyChangeType::Unspecified);
@@ -999,7 +1198,7 @@ bool ApplyCheckedPropertySet(UObject* Object, const FString& PropertyName, const
 
 // Types and instances: classes, their members and the inheritance chain.
 
-// MCP:get_class_properties - List every property VISIBLE on a class — the ones it DECLARES plus every inherited one, each tagged with owner_class and is_inherited so "does this class add anything of its own?" is a FIELD (declared_property_count) and not an eyeball diff against a remembered list of engine members. declared_only=true returns just this class's own. WARNING: a component or data class usually exposes its Blueprint API as PROPERTIES, not functions: get_class_functions coming back with nothing of its own does NOT mean the class has no API — ask here too (e.g. MetaHumanComponentBase: 0 own functions, 12 own properties). Full typed descriptor per property — kind, cpp_type, editable, edit_const, blueprint_visible, replicated, save_game, config, clamp min/max, enum entries, struct fields, tooltip, edit_condition — plus the class's own flags, config name and implemented interfaces. Schema only: NO instance values. Use inspect_object (include_property_metadata=true) for the same descriptors WITH the current values of a live object, get_properties when you already know the names, and get_blueprint_variables for just the variables a Blueprint itself authored.
+// MCP:get_class_properties - List every property VISIBLE on a class — the ones it DECLARES plus every inherited one, each tagged with owner_class and is_inherited so "does this class add anything of its own?" is a FIELD (declared_property_count) and not an eyeball diff against a remembered list of engine members. declared_only=true returns just this class's own. WARNING: a component or data class usually exposes its Blueprint API as PROPERTIES, not functions: get_class_functions coming back with nothing of its own does NOT mean the class has no API — ask here too (e.g. MetaHumanComponentBase: 0 own functions, 12 own properties). Full typed descriptor per property — kind, cpp_type, editable, edit_const, blueprint_visible, replicated, save_game, config, clamp min/max, enum entries, struct fields, tooltip, edit_condition — plus the class's own flags, config name and implemented interfaces. Schema only: NO instance values. Use get_object_info (include_property_metadata=true) for the same descriptors WITH the current values of a live object, get_properties when you already know the names, and get_blueprint_variables for just the variables a Blueprint itself authored.
 //   @param class_name - UClass identifier, resolved with ResolveClass: bare FName ("Character"), /Script/Module.Class, a Blueprint asset path, or a generated class ("BP_MyActor_C"). WARNING: the REGISTERED FName can differ from the C++ type name and from the name the Python bindings expose — UMetaHumanCharacterInstance is registered as "MetaHumanInstance" — so a failure here is NOT evidence the class is absent; the error names the near misses instead. The response echoes what it resolved to in resolved_class_name / resolved_class_path.
 //   @param declared_only - Optional bool (default false). true = ONLY the properties this class declares, skipping every inherited one. The cheap way to ask "what does this class add?", and what keeps a big class's response from being offloaded for size (get_class_properties("MetaHumanComponentBase") is 44 KB inherited-heavy, 12 properties declared).
 //   @returns { class_name: string, resolved_class_name: string, resolved_class_path: string, declared_only: bool, declared_property_count: int, inherited_property_count: int, is_abstract, is_deprecated, is_placeable, is_native, config_name, implemented_interfaces: [{interface, implemented_by_k2}], class_group?, is_blueprintable?, is_blueprint_type?, display_name?, tooltip?, properties: [<typed descriptor: name, owner_class, is_inherited, kind, cpp_type, editable, edit_const, blueprint_visible, save_game, replicated, config, deprecated, disable_edit_on_instance, enum_values?, fields?, object_class?, inner?, clamp_min/max?, tooltip?, edit_condition?, categories?, units?, display_name?, allow_private_access>], property_count: int }
@@ -1113,7 +1312,8 @@ TSharedPtr<FJsonObject> HandleGetClassFunctions(const TSharedPtr<FJsonObject>& P
     return mcp_common::MakeOkReply(Listing);
 }
 
-// MCP:inspect_object - Portrait of ONE object when you do not know its property names yet: identity (name, class, class path, super class, is_valid), class flags, metadata and implemented interfaces, EVERY reflected property as { name: typed_value }, and for an actor its live components with their classes. Once you know the names, get_properties is far cheaper; get_class_properties gives the property descriptors of a class with no instance, get_class_hierarchy its ancestor chain, and get_actor_components the components alone. include_properties=false makes it the cheap "what IS this thing?" probe (identity and class only); include_property_metadata=true adds each property's editor metadata (type, editable, edit_const, blueprint_visible, replicated, save_game, clamp, tooltip, enum entries) next to its value. Accepts `world`, so the portrait can be the live server or client instance -- useful when a class is swapped at runtime -- and the reply stamps which world answered. Read-only.
+// MCP:get_object_info - Portrait of ONE object when you do not know its property names yet: identity (name, class, class path, super class, is_valid), class flags, metadata and implemented interfaces, EVERY reflected property as { name: typed_value }, and for an actor its live components with their classes. Once you know the names, get_properties is far cheaper; get_class_properties gives the property descriptors of a class with no instance, get_class_hierarchy its ancestor chain, and get_actor_components the components alone. include_properties=false makes it the cheap "what IS this thing?" probe (identity and class only); include_property_metadata=true adds each property's editor metadata (type, editable, edit_const, blueprint_visible, replicated, save_game, clamp, tooltip, enum entries) next to its value. Accepts `world`, so the portrait can be the live server or client instance -- useful when a class is swapped at runtime -- and the reply stamps which world answered. Read-only.
+//   @renamed-from inspect_object
 //   @param object_path - Path or name of the object to inspect. In the editor world: full object path, asset path, CDO/archetype, or a dotted "Actor[.Component[.Subobject]]" whose first segment is the actor's INTERNAL name. In a live world: a fully-qualified PIE path or the same dotted form (first segment matches internal name OR editor label).
 //   @param world - Optional world selector: absent/'editor' (default: the editor/asset instance) | 'pie' (ambiguous: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie'). Anything other than absent/'editor' portrays the LIVE instance in that world; an UNRECOGNIZED value is an error naming the worlds that exist, never a silent fallback to another world.
 //   @param include_properties - Optional bool (default true). false skips the properties and the components list, leaving identity and class only.
@@ -1135,7 +1335,7 @@ TSharedPtr<FJsonObject> HandleInspectObject(const TSharedPtr<FJsonObject>& Param
     // taken on the server AND on a client; absent/'editor' is the editor/asset instance.
     Impl::FWorldScopedObject Target;
     TSharedPtr<FJsonObject> Refusal;
-    if (!Impl::ResolveWorldScopedObject(Params, TargetPath, TEXT("inspect_object"),
+    if (!Impl::ResolveWorldScopedObject(Params, TargetPath, TEXT("get_object_info"),
             [](const FString& Path) { return ResolveObjectByName(Path); }, Target, Refusal))
     {
         return Refusal;
@@ -2612,7 +2812,7 @@ TSharedPtr<FJsonObject> HandleListInstanceOverrides(const TSharedPtr<FJsonObject
 
 // Batch property reads and writes on one object.
 
-// MCP:get_properties - Read one or several named properties off ONE object you can already name -- an asset path, a live object's full path, a CDO/archetype, or a dotted "Actor[.Component[.Subobject]]" whose first segment is the actor's internal name -- typed rather than stringified, as { name: typed_value } plus each property's FProperty class and not_found[] for names the class does not declare. Pick it when you have the object and the names: inspect_object when you do not know the names yet, get_actor_properties_by_class when you have no path and want instances by class or label (it drops misspelled names; this reports them), get_component_properties to list every property of one component or of a Blueprint component template. property_name reads one; property_names batches several. Accepts `world` (editor, server, client, pie:N), so the same read on server and client is the cheapest proof that a value replicated; the reply stamps which world answered. Read-only.
+// MCP:get_properties - Read one or several named properties off ONE object you can already name -- an asset path, a live object's full path, a CDO/archetype, or a dotted "Actor[.Component[.Subobject]]" whose first segment is the actor's internal name -- typed rather than stringified, as { name: typed_value } plus each property's FProperty class and not_found[] for names the class does not declare. Pick it when you have the object and the names: get_object_info when you do not know the names yet, get_actor_properties_by_class when you have no path and want instances by class or label (it drops misspelled names; this reports them), get_component_properties to list every property of one component or of a Blueprint component template. property_name reads one; property_names batches several. Accepts `world` (editor, server, client, pie:N), so the same read on server and client is the cheapest proof that a value replicated; the reply stamps which world answered. Read-only.
 //   @param object_path - Path or name of the object instance. In the editor world: full object path, asset path, CDO/archetype, or a dotted "Actor[.Component[.Subobject]]" whose first segment is the actor's INTERNAL name (editor labels are not matched here). In a live world: a fully-qualified PIE path or the same dotted form (first segment matches internal name OR editor label).
 //   @param property_names [array] - Optional names of the properties to read; every name that the class does not declare comes back in not_found[]. Required unless property_name is given.
 //   @param property_name - Optional single property to read, added to property_names.
@@ -2694,12 +2894,14 @@ TSharedPtr<FJsonObject> HandleGetProperties(const TSharedPtr<FJsonObject>& Param
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:set_properties - Write one or several properties on ONE object you can path to -- an asset, a CDO/archetype, a placed actor, or a dotted "Actor.Component[.Subobject]" -- in the EDITOR world, reporting set[] and failed[{property,error}] per name. Pick it for assets, CDOs and actors, or several properties at once; set_component_property for a placed actor's component in a live PIE world or a property this edit gate refuses; a typed set_<type>_properties tool when its description names a step you need (validation, rebuild, recompile, save); call_function to go through the object's own setter. Each write needs an editable, non-EditConst or BlueprintReadWrite property and runs Modify/PreEditChange/PostEditChange like a Details-panel edit: undoable, package dirtied, nothing saved (save_asset / save_level), no Blueprint compiled. Unregistered gameplay tags are refused. WARNING: success only means the import did not error -- re-read with get_properties before believing it, especially an FGameplayTag on a placed actor, which has reported success and left the tag empty.
-//   @param object_path - Path or name of the object instance, resolved in the EDITOR world: full object path, asset path, CDO/archetype, or a dotted "Actor[.Component[.Subobject]]" whose first segment is the actor's internal name.
+// MCP:set_properties - Write one or several properties on ONE object -- an asset, a CDO/archetype, a placed actor, or one of its components as "Actor.Component" -- in the EDITOR world, as an edit in the Details panel: each write runs Modify/PreEditChange/PostEditChange (undoable, package dirtied, the component re-registered), and the reply lists set[] and failed[{property,error}] per name. This is the tool for any editable setting of a light, fog, sky, cloud, decal, camera, post-process volume, capture, replication flag, sound, Niagara system, physical material, montage, foliage type or other asset: pass the engine's property names (get_object_info lists them), a struct as a JSON object of only the fields to change, a color as {"R","G","B","A"}. The actor is found by its internal name or by a label only it has; the component by its name or by a class only one of its components has ("Sun.DirectionalLightComponent", "Fog.ExponentialHeightFogComponent"). A key inside a struct that names no field is refused, and nothing is written to that property. clamp=true keeps numbers inside the property's ClampMin/ClampMax, as the Details panel does, and lists what it clamped; save=true saves the asset's package (refused for a level object: save_level). A blend space is resampled after the write. Use set_component_property for a component in a live PIE world, set_blueprint_component_properties for a Blueprint's component template, set_widget_property inside a Widget Blueprint, call_function for the object's own setter. Unregistered gameplay tags are refused. No Blueprint is compiled.
+//   @param object_path - The object, resolved in the EDITOR world: an asset path, a full object path, a CDO/archetype, or "Actor[.Component[.Subobject]]" where Actor is an internal name or a unique label and Component a component name or a class only one component has.
 //   @param properties [object] - Optional dict of {property_name: value}; values can be scalar, nested object, or array (UE-format text like "(X=1,Y=2,Z=3)" is also accepted for structs). Required unless property_name + value is given; both together write properties{} first.
 //   @param property_name - Optional single property to write (must be CPF_Edit and not EditConst, or it lands in failed[] with the reason). Needs value.
 //   @param value - Optional new value for property_name: string, number, boolean, JSON object (struct), JSON array (array/set/tag container), or a UE-format text string like "(X=1,Y=2,Z=3)"
-//   @returns { object_path: string, set: [string], failed: [{property, error}], success: bool }
+//   @param save [bool] - Save the asset's package after the writes (default false); refused, before anything is written, for an object in a level
+//   @param clamp [bool] - Clamp each number written to the ClampMin/ClampMax of its property, struct fields and array elements included (default false)
+//   @returns { object_path: string, resolved_path: string, set: [string], failed: [{property, error}], clamped?: [string] ("name=value", with clamp), saved?: bool, save_error?: string (with save), success: bool }
 
 TSharedPtr<FJsonObject> HandleSetProperties(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2729,14 +2931,26 @@ TSharedPtr<FJsonObject> HandleSetProperties(const TSharedPtr<FJsonObject>& Param
         return mcp_common::MakeErrorReply(TEXT("Missing required parameter: properties (object), or property_name + value"));
     }
 
+    bool bSave = false;
+    Params->TryGetBoolField(TEXT("save"), bSave);
+    bool bClamp = false;
+    Params->TryGetBoolField(TEXT("clamp"), bClamp);
+
     UObject* Object = ResolveObjectByName(ObjectPath);
     if (!Object)
     {
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Object not found: %s"), *ObjectPath));
+        return mcp_common::MakeErrorReply(DescribeUnresolvedPath(ObjectPath));
+    }
+    // save=true writes an asset's package; what lives in a level is saved with it.
+    if (bSave && Object->GetTypedOuter<UWorld>() != nullptr)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("save=true saves an asset, and %s lives in a level: nothing was written. Write without save, then save_level."), *ObjectPath));
     }
 
     TArray<TSharedPtr<FJsonValue>> SetOk;
     TArray<TSharedPtr<FJsonValue>> Failed;
+    TArray<FString> Clamped;
 
     // The writes, in order: properties{} first, then the single one.
     TArray<TPair<FString, TSharedPtr<FJsonValue>>> Writes;
@@ -2755,7 +2969,7 @@ TSharedPtr<FJsonObject> HandleSetProperties(const TSharedPtr<FJsonObject>& Param
     for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Writes)
     {
         FString Error;
-        if (ApplyCheckedPropertySet(Object, Pair.Key, Pair.Value, Error))
+        if (ApplyCheckedPropertySet(Object, Pair.Key, Pair.Value, Error, bClamp ? &Clamped : nullptr))
         {
             SetOk.Add(MakeShared<FJsonValueString>(Pair.Key));
         }
@@ -2768,15 +2982,58 @@ TSharedPtr<FJsonObject> HandleSetProperties(const TSharedPtr<FJsonObject>& Param
         }
     }
 
+    // What the Details panel runs after an edit and PostEditChange does not: a blend space rebuilds its runtime
+    // samples only in its editor (SAnimationBlendSpace), so a changed axis would leave the old grid in use.
+    if (SetOk.Num() > 0)
+    {
+        if (UBlendSpace* BlendSpace = Cast<UBlendSpace>(Object))
+        {
+            BlendSpace->ValidateSampleData();
+            BlendSpace->ResampleData();
+        }
+    }
+
+    bool bSaved = false;
+    FString SaveError;
+    if (bSave && SetOk.Num() > 0)
+    {
+        UPackage* Package = Object->GetPackage();
+        UObject* Asset = Package ? Package->FindAssetInPackage() : nullptr;
+        bSaved = mcp_common::SaveAssetPackage(Package, Asset ? Asset : Object, SaveError);
+    }
+    else if (bSave)
+    {
+        SaveError = TEXT("nothing was written, so nothing was saved");
+    }
+
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
     ResultObj->SetStringField(TEXT("object_path"), ObjectPath);
+    ResultObj->SetStringField(TEXT("resolved_path"), Object->GetPathName());
     ResultObj->SetArrayField(TEXT("set"), SetOk);
     ResultObj->SetArrayField(TEXT("failed"), Failed);
-    ResultObj->SetBoolField(TEXT("success"), Failed.Num() == 0);
+    if (bClamp)
+    {
+        TArray<TSharedPtr<FJsonValue>> ClampedJson;
+        for (const FString& Entry : Clamped)
+        {
+            ClampedJson.Add(MakeShared<FJsonValueString>(Entry));
+        }
+        ResultObj->SetArrayField(TEXT("clamped"), ClampedJson);
+    }
+    if (bSave)
+    {
+        ResultObj->SetBoolField(TEXT("saved"), bSaved);
+        if (!bSaved)
+        {
+            ResultObj->SetStringField(TEXT("save_error"), SaveError);
+        }
+    }
+    const bool bSucceeded = Failed.Num() == 0 && (!bSave || bSaved);
+    ResultObj->SetBoolField(TEXT("success"), bSucceeded);
     // The verdict measured above is the verdict EMITTED. A hardcoded success:true
     // from MakeOkReply would hide it, and callers only check that flag.
-    return mcp_common::MakeOutcomeReply(ResultObj, Failed.Num() == 0,
-        Failed.Num() == 0 ? FString() : mcp_common::MeasuredOutcomeError(TEXT("set_properties"), TEXT("Failed.Num() == 0")));
+    return mcp_common::MakeOutcomeReply(ResultObj, bSucceeded,
+        bSucceeded ? FString() : mcp_common::MeasuredOutcomeError(TEXT("set_properties"), TEXT("Failed.Num() == 0 && (!bSave || bSaved)")));
 }
 
 // ===========================================================================
@@ -2816,7 +3073,7 @@ static UObject* ReflectionPie_ResolveObjectInWorld(const FString& Path, UWorld* 
 //   @param class_name - Class filter: bare UClass name resolved with FindFirstObject (e.g. "BP_MyActor_C", "StaticMeshActor"), NOT an asset path. Matches every actor that IsA(class_name). REQUIRED unless actor_label is given.
 //   @param actor_label - Editor-label filter; matches actors whose GetActorLabel() equals this EXACTLY (no substring, no case-folding). REQUIRED unless class_name is given — the call errors when both are missing.
 //   @param component - Optional component name to drill into on each matched actor (reads that component's props instead of the actor's). WARNING: actors that have no component with this name are DROPPED from `instances` entirely, so a short list can mean "wrong component name", not "no such actor".
-//   @param properties [array] - Optional property names to read. Names the target does not have are skipped SILENTLY (no not_found list — cross-check the spelling with inspect_object or get_class_properties). Omit it to read every BlueprintVisible property, which on a Character is a very large payload.
+//   @param properties [array] - Optional property names to read. Names the target does not have are skipped SILENTLY (no not_found list — cross-check the spelling with get_object_info or get_class_properties). Omit it to read every BlueprintVisible property, which on a Character is a very large payload.
 //   @param world - Optional world selector: absent/'pie' (default, ambiguous: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'editor' | 'game' (alias of 'pie'). THIS is the parameter that separates a server reading from a client one.
 //   @returns { instances: [{ path: string, props: object (typed values) }], instance_count: int, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }
 
@@ -2956,7 +3213,7 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("get_package_info"), &HandleGetPackageInfo },
     { TEXT("get_properties"), &HandleGetProperties },
     { TEXT("get_struct_info"), &HandleGetStructInfo },
-    { TEXT("inspect_object"), &HandleInspectObject },
+    { TEXT("get_object_info"), &HandleInspectObject },
     { TEXT("list_instance_overrides"), &HandleListInstanceOverrides },
     { TEXT("set_properties"), &HandleSetProperties },
 };

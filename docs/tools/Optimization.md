@@ -2,7 +2,7 @@
 
 # Optimization
 
-11 tools for asset performance analysis, LODs, compression, streaming and memory.
+10 tools for asset performance analysis, LODs, compression, streaming and memory.
 
 Back to the [index](README.md).
 
@@ -10,26 +10,13 @@ Back to the [index](README.md).
 
 *Read-only.*
 
-Grade one asset Good, Fair or Poor against fixed thresholds, without changing it: the path is looked up in the asset registry and the asset loaded synchronously. Static meshes are graded on triangles summed over all render LODs (above 50k Fair, above 100k Poor), Texture2D on resolution (above 2K, above 4K), materials and instances on parameter count (above 25, above 50); fewer than 2 LODs or mips, a mesh or texture package over 50 MB and over 10 texture parameters only add performance_issues. Other classes get performance_rating Unknown. suggestions is fixed advice per class, not derived from the numbers; texture_sample_count counts texture parameters and instruction_count is always 0. A path missing from the registry or failing to load is an error. Many assets: analyze_assets_performance_batch; a verdict: check_asset_optimization; shader stats: get_material_stats; memory: get_asset_memory_usage.
+Grade one asset Good, Fair or Poor against fixed thresholds, without changing it: the path is looked up in the asset registry and the asset loaded synchronously. Static meshes are graded on triangles summed over all render LODs (above 50k Fair, above 100k Poor), Texture2D on resolution (above 2K, above 4K), materials and instances on parameter count (above 25, above 50); fewer than 2 LODs or mips, a mesh or texture package over 50 MB and over 10 texture parameters only add performance_issues. Other classes get performance_rating Unknown. suggestions is fixed advice per class, not derived from the numbers; texture_sample_count counts texture parameters and instruction_count is always 0. A path missing from the registry or failing to load is an error. Many assets: execute_batch; a verdict: check_asset_optimization; shader stats: get_material_stats; memory: get_asset_memory_usage.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `asset_path` | string | yes | Object path ("/Game/Meshes/SM_Rock.SM_Rock") or package path ("/Game/Meshes/SM_Rock") of an asset the asset registry knows |
 
 **Returns:** `{ asset_path: string, asset_class: string, file_size_bytes: number, file_size_mb: number, optimization_type: string, lod_count?: number, triangle_count?: number, vertex_count?: number, section_count?: number, performance_rating: string, performance_issues: [string], suggestions: [string], width?: number, height?: number, mip_count?: number, compression_settings?: string, pixel_format?: string, parameter_count?: number, texture_sample_count?: number, instruction_count?: number }`
-
-## `analyze_assets_performance_batch`
-
-*Read-only.*
-
-Batch version of analyze_asset_performance. Resolves and analyzes multiple assets by path in one call (avoids callers looping analyze_asset_performance one-by-one). Forces a synchronous load per asset, so max_results defaults conservatively.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `asset_paths` | array | yes | Required array of asset paths to analyze. |
-| `max_results` | number | no | Optional cap on how many of asset_paths to process (default 200, clamped 1..2000). Entries beyond the cap are not processed. |
-
-**Returns:** `{ requested_count: number, processed_count: number, results_truncated: bool, results: [{ asset_path: string, found: bool, asset_class?: string, file_size_bytes?: number, file_size_mb?: number, optimization_type?: string, performance_rating?: string, performance_issues?: [string], suggestions?: [string], ...same per-asset fields as analyze_asset_performance's data payload, error?: string }] }`
 
 ## `check_asset_optimization`
 
@@ -42,19 +29,6 @@ Check one asset against fixed optimization thresholds and return a verdict, with
 | `asset_path` | string | yes | Object path ("/Game/Meshes/SM_Rock.SM_Rock") or package path ("/Game/Meshes/SM_Rock") of an asset the asset registry knows |
 
 **Returns:** `{ asset_path: string, asset_class: string, file_size_bytes: number, file_size_mb: number, is_optimized: bool, optimization_status: string, issues: [string], recommendations: [string], lod_count?: number, triangle_count?: number, vertex_count?: number, width?: number, height?: number, mip_count?: number, compression_settings?: string, pixel_format?: string, parameter_count?: number, texture_sample_count?: number }`
-
-## `configure_asset_streaming`
-
-*Destructive, idempotent.*
-
-Sets the REAL NeverStream flag (UStreamableRenderAsset::NeverStream) on a texture or static mesh and saves it to disk. enable_streaming=true clears NeverStream (asset streams on demand); enable_streaming=false sets it (asset stays fully resident). Assets with no such knob (e.g. Material) fail honestly with success:false.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `asset_path` | string | yes | The path to the asset in the asset registry. |
-| `enable_streaming` | boolean | yes | Whether to enable streaming for the asset (maps to NeverStream = !enable_streaming). |
-
-**Returns:** `{ asset_path: string, enable_streaming: bool, asset_type: string, file_size_bytes: number, file_size_mb: number, is_streamable: bool, never_stream?: bool, saved?: bool, success: bool, message: string, error?: string }`
 
 ## `get_asset_compression`
 
@@ -96,7 +70,7 @@ Estimate the memory one asset needs from simple formulas, not a measurement, wit
 
 *Read-only.*
 
-Read the streaming knobs (inverse of configure_asset_streaming). Works at two levels: with NO asset_path it reports the GLOBAL texture-streaming pool size (only when the editor runs a render-asset streaming manager -- an editor started with -nullrhi has none, and then streaming_manager_available is false and the pool size is omitted); with one, it adds that asset's NeverStream flag (which applies to any UStreamableRenderAsset -- textures AND static meshes) plus the texture-only LODGroup and VirtualTextureStreamingPriority. There is NO `streaming_priority` field -- see the note below.
+Read the streaming knobs (inverse of set_asset_streaming_config). Works at two levels: with NO asset_path it reports the GLOBAL texture-streaming pool size (only when the editor runs a render-asset streaming manager -- an editor started with -nullrhi has none, and then streaming_manager_available is false and the pool size is omitted); with one, it adds that asset's NeverStream flag (which applies to any UStreamableRenderAsset -- textures AND static meshes) plus the texture-only LODGroup and VirtualTextureStreamingPriority. There is NO `streaming_priority` field -- see the note below.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -129,6 +103,19 @@ Sets the REAL LOD count on a UStaticMesh (adds/removes FStaticMeshSourceModel en
 | `lod_count` | number | yes | The desired number of LOD levels (1-8). Must be an integer. Only mutates for UStaticMesh; reported but not applied for SkeletalMesh/other. |
 
 **Returns:** `{ asset_path: string, requested_lod_count: number, asset_type: string, current_lod_count?: number, total_triangles?: number, total_vertices?: number, lod_data?: [object], saved?: bool, success: bool, message: string, error?: string, final_lod_count: number, lod_efficiency?: number, lod_recommendations?: [string] }`
+
+## `set_asset_streaming_config`
+
+*Destructive, idempotent.*
+
+Sets the REAL NeverStream flag (UStreamableRenderAsset::NeverStream) on a texture or static mesh and saves it to disk. enable_streaming=true clears NeverStream (asset streams on demand); enable_streaming=false sets it (asset stays fully resident). Assets with no such knob (e.g. Material) fail honestly with success:false.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `asset_path` | string | yes | The path to the asset in the asset registry. |
+| `enable_streaming` | boolean | yes | Whether to enable streaming for the asset (maps to NeverStream = !enable_streaming). |
+
+**Returns:** `{ asset_path: string, enable_streaming: bool, asset_type: string, file_size_bytes: number, file_size_mb: number, is_streamable: bool, never_stream?: bool, saved?: bool, success: bool, message: string, error?: string }`
 
 ## `suggest_asset_optimizations`
 

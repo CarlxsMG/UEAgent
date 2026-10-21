@@ -617,7 +617,7 @@ void McpReadbackChecks::RegisterFollowUp(McpReadback::FTables& Tables)
 
 	TMap<FString, McpReadback::FOnFailure>& O = Tables.OnFailure;
 	O.Add(TEXT("get_widget_blueprint_tree"), &CheckWidgetTreeDuringPie);
-	O.Add(TEXT("inspect_subsystem_instance"), &CheckSubsystemInEditorWorld);
+	O.Add(TEXT("get_subsystem_instance_info"), &CheckSubsystemInEditorWorld);
 	O.Add(TEXT("trigger_input_action"), &CheckInputWithoutController);
 	O.Add(TEXT("delete_material_expression"), &CheckExpressionDelete);
 	O.Add(TEXT("set_blueprint_variable_default"), &CheckInheritedVariable);

@@ -349,7 +349,7 @@ TSharedPtr<FJsonObject> HandleSetMaterialInstanceParent(const TSharedPtr<FJsonOb
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:copy_material_instance_parameters - Bulk-copy every scalar, vector and texture OVERRIDE from one material instance to another -- the way to clone a calibration onto a sibling instance instead of re-setting parameters one by one. Copies overrides only, so anything the source inherited untouched is not carried, and STATIC SWITCHES are not copied at all (set those with set_material_instance_static_switch). Read the copied counts in the reply and verify with get_material_parameters; diff_material_instances shows what still differs.
+// MCP:copy_material_instance_parameters - Bulk-copy every scalar, vector and texture OVERRIDE from one material instance to another -- the way to clone a calibration onto a sibling instance instead of re-setting parameters one by one. Copies overrides only, so anything the source inherited untouched is not carried, and STATIC SWITCHES are not copied at all (set those with set_material_instance_parameter). Read the copied counts in the reply and verify with get_material_parameters; diff_material_instances shows what still differs.
 //   @param source_path - Content path of the source UMaterialInstanceConstant.
 //   @param destination_path - Content path of the destination UMaterialInstanceConstant.
 //   @returns { source_path: string, destination_path: string, scalars_copied: int, vectors_copied: int, textures_copied: int }
@@ -440,6 +440,7 @@ namespace
 // set_material_layer_parameter
 // ---------------------------------------------------------------------------
 // MCP:set_material_layer_parameter - Write a scalar / vector / texture parameter scoped to ONE layer of a layered material instance (addressed by zero-based layer_index), so each layer of a blend keeps its own tiling, tint or texture. Different from set_material_instance_parameter_override, which targets the Global association and would hit the wrong slot on a layered material. Do not trust the success flag -- the engine's setters are known to report failure while doing the work; re-read with get_material_parameters (parameter_name, association Layer, layer_index).
+//   @retired set_material_instance_parameter - param_type="scalar"|"vector"|"texture", layer_index, value
 //   @param material_instance_path - Content path to the MIC, e.g. /Game/MyGame/MI_Example
 //   @param parameter_name - Name of the parameter to set
 //   @param parameter_type - One of "scalar", "vector", "texture"
@@ -553,7 +554,7 @@ namespace UEAgentMaterialInstanceImpl
 // ---------------------------------------------------------------------------
 // set_material_layer_stack
 // ---------------------------------------------------------------------------
-// MCP:set_material_layer_stack - Define which material-layer and blend functions a layered material instance stacks, in order -- how you compose a surface (base + dirt + snow) out of reusable layer functions instead of editing the base material graph. Order is significant and layers are addressed downstream by index (set_material_layer_parameter), so re-stacking renumbers existing per-layer values. Read the result back with get_material_layer_stack.
+// MCP:set_material_layer_stack - Define which material-layer and blend functions a layered material instance stacks, in order -- how you compose a surface (base + dirt + snow) out of reusable layer functions instead of editing the base material graph. Order is significant and layers are addressed downstream by index (set_material_instance_parameter), so re-stacking renumbers existing per-layer values. Read the result back with get_material_layer_stack.
 //   @param material_instance_path - Content path to the MIC
 //   @param layers - Optional list of {function_path} dicts naming layer material functions.
 //   @param blends - Optional list of {function_path} dicts naming blend material functions.
@@ -601,7 +602,7 @@ TSharedPtr<FJsonObject> HandleSetMaterialLayerStack(
 // ---------------------------------------------------------------------------
 // get_material_layer_stack
 // ---------------------------------------------------------------------------
-// MCP:get_material_layer_stack - Read a material's layer stack: the layer functions and blend functions it uses, in order, with has_layers telling you whether the material is layered at all. Check this before any set_material_layer_parameter call -- on a non-layered material the layer indices mean nothing, and here is where you learn which index is which surface.
+// MCP:get_material_layer_stack - Read a material's layer stack: the layer functions and blend functions it uses, in order, with has_layers telling you whether the material is layered at all. Check this before any set_material_instance_parameter call -- on a non-layered material the layer indices mean nothing, and here is where you learn which index is which surface.
 //   @param material_instance_path - Content path to the material
 //   @returns { material_instance_path: string, layers: [{name, function_path}], blends: [{name, function_path}], layer_count: int, blend_count: int, has_layers: bool }
 
@@ -752,6 +753,7 @@ namespace
 // set_material_instance_base_overrides
 // ---------------------------------------------------------------------------
 // MCP:set_material_instance_base_overrides - Set one or more base property overrides (BasePropertyOverrides) on a Material Instance Constant. Each provided axis sets BOTH its bOverride_ flag and value; omitted axes are left untouched. Persists to the asset.
+//   @retired set_properties - object_path=<material instance>, properties={"BasePropertyOverrides":{"bOverride_TwoSided":true,"TwoSided":true,...}}, save=true
 //   @param material_instance_path - Content path to the UMaterialInstanceConstant, e.g. /Game/MyGame/MI_Example
 //   @param blend_mode - Optional EBlendMode name ("Translucent" or "BLEND_Translucent"): Opaque/Masked/Translucent/Additive/Modulate/AlphaComposite/AlphaHoldout.
 //   @param two_sided - Optional bool to override the two-sided flag.
@@ -1290,6 +1292,7 @@ TSharedPtr<FJsonObject> HandleGetMaterialAllParameters(
 // set_material_instance_static_switch
 // ---------------------------------------------------------------------------
 // MCP:set_material_instance_static_switch - Set a static-switch (static bool) parameter override on a Material Instance Constant, then rebuild the static permutation and persist. Reads the value back via the getter (the engine value-setter wrapper always returns false, so its return is never trusted). Editor-only.
+//   @retired set_material_instance_parameter - param_type="static_switch", value=true|false, association, layer_index (the static permutation is rebuilt and the instance saved)
 //   @param material_instance_path - Content path to the UMaterialInstanceConstant.
 //   @param parameter_name - Name of the static-switch parameter.
 //   @param value - Bool value to assign to the switch.
@@ -1351,6 +1354,7 @@ TSharedPtr<FJsonObject> HandleSetMaterialInstanceStaticSwitch(
 // set_material_instance_static_component_mask
 // ---------------------------------------------------------------------------
 // MCP:set_material_instance_static_component_mask - Set a static component-mask (R/G/B/A bools) parameter override on a Material Instance Constant, rebuild the static permutation and persist. Reads back via GetParameterValue. Editor-only.
+//   @retired set_material_instance_parameter - param_type="static_component_mask", value=[r, g, b, a] of bools, association, layer_index
 //   @param material_instance_path - Content path to the UMaterialInstanceConstant.
 //   @param parameter_name - Name of the static component-mask parameter.
 //   @param r - Optional bool channel mask (default false).
@@ -1556,7 +1560,7 @@ TSharedPtr<FJsonObject> HandleGetMaterialInstanceParamOverridden(
 // ---------------------------------------------------------------------------
 // Inspect composition.
 // ---------------------------------------------------------------------------
-// MCP:get_material_instance_info - One-call overview of a material instance (constant, or any other UMaterialInstance): parent material path, name and class, COUNTS of scalar/vector/texture overrides, base property overrides, static switches and static component masks, and the base property overrides themselves -- blend mode, two-sided, shading model and opacity mask clip value, each with its own bOverride_ flag. The flag matters as much as the value: an override that is false means the parent's setting wins whatever value is stored, and a material that looks wrong despite correct parameters is often a blend-mode override. A triage read for parameters -- counts, not values, so it can say "there are 14 static switches here" but never which ones are on: for parameter values use get_material_parameters (parameter_type all includes the static switches). set_material_instance_parent and set_material_instance_base_overrides write what it reports.
+// MCP:get_material_instance_info - One-call overview of a material instance (constant, or any other UMaterialInstance): parent material path, name and class, COUNTS of scalar/vector/texture overrides, base property overrides, static switches and static component masks, and the base property overrides themselves -- blend mode, two-sided, shading model and opacity mask clip value, each with its own bOverride_ flag. The flag matters as much as the value: an override that is false means the parent's setting wins whatever value is stored, and a material that looks wrong despite correct parameters is often a blend-mode override. A triage read for parameters -- counts, not values, so it can say "there are 14 static switches here" but never which ones are on: for parameter values use get_material_parameters (parameter_type all includes the static switches). set_material_instance_parent and set_properties write what it reports.
 //   @param material_instance_path - Content path to the material instance (UMaterialInstanceConstant, or any UMaterialInstance).
 //   @returns { material_instance_path: string, material_instance_class: string, parent_material_path: string, parent_material_name: string, parent_material_class: string, scalar_param_count: int, vector_param_count: int, texture_param_count: int, base_override_count: int, static_switch_count: int, static_component_mask_count: int, override_blend_mode: bool, blend_mode: string, override_two_sided: bool, two_sided: bool, override_shading_model: bool, shading_model: string, override_opacity_mask_clip_value: bool, opacity_mask_clip_value: float, asset_registry_path: string }
 TSharedPtr<FJsonObject> HandleInspectMaterialInstanceConstant(

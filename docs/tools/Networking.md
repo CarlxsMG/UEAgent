@@ -2,24 +2,9 @@
 
 # Networking
 
-6 tools for replication settings, network information and dedicated servers.
+5 tools for replication settings, network information and dedicated servers.
 
 Back to the [index](README.md).
-
-## `configure_replication`
-
-*Destructive, idempotent.*
-
-Configure the replication of an editor-world actor found by object name or label: movement (bReplicateMovement) and lifecycle (bReplicates: the actor is spawned and destroyed on clients). Only the settings sent are applied, inside one undoable transaction, and each is read back: a call that sends neither replicate_movement nor replicate_lifecycle changes nothing and is an error. Physics has no switch of its own in the engine -- a simulating root's state travels with movement replication -- so replicate_physics is reported in not_applied. Only that placed instance changes, not its class defaults; nothing is saved. Read every replication setting with get_actor_replication_info.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actor_name` | string | yes | Object name or label of the actor in the editor world (first match) |
-| `replicate_movement` | boolean | no | Optional: whether to replicate movement (bReplicateMovement); applied only when sent |
-| `replicate_physics` | boolean | no | Optional; NOT applied, see the description; listed in not_applied when sent |
-| `replicate_lifecycle` | boolean | no | Optional: whether the actor replicates at all, i.e. exists on clients (bReplicates, set through AActor::SetReplicates); applied only when sent. Movement replication does nothing without it. |
-
-**Returns:** `{ actor_name: string, replication_configured: bool, message: string, previous_settings: { replicate_movement: bool, replicate_lifecycle: bool }, new_settings: { replicate_movement?: bool, replicate_lifecycle?: bool }, actual_settings: { replicate_movement: bool, replicate_lifecycle: bool }, not_applied?: [string], actor_valid: bool, actor_class: string }`
 
 ## `get_dedicated_server_status`
 
@@ -59,7 +44,7 @@ Relaunches the CURRENT editor binary with "-server -log": a real, non-rendering,
 
 *Destructive, idempotent.*
 
-Set the local net role (AActor::SetRole) of an editor-world actor, found by object name rather than label, to Authority, SimulatedProxy, AutonomousProxy or None (case-insensitive; any other value is an error before anything changes). Only that placed instance's in-memory Role changes: RemoteRole and replication settings stay as they are, there is no undo entry and the level is not marked dirty. authority_set compares the role read back with the request. Read roles with get_actor_replication_info (one actor) or get_network_info (every replicated actor, filterable by role); choose what replicates with configure_replication.
+Set the local net role (AActor::SetRole) of an editor-world actor, found by object name rather than label, to Authority, SimulatedProxy, AutonomousProxy or None (case-insensitive; any other value is an error before anything changes). Only that placed instance's in-memory Role changes: RemoteRole and replication settings stay as they are, there is no undo entry and the level is not marked dirty. authority_set compares the role read back with the request. Read roles with get_actor_replication_info (one actor) or get_network_info (every replicated actor, filterable by role); choose what replicates with set_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

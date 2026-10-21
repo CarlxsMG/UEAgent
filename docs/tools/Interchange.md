@@ -2,7 +2,7 @@
 
 # Interchange
 
-19 tools for Interchange imports and reimports, pipelines and their stack, translators and factories.
+17 tools for Interchange imports and reimports, pipelines and their stack, translators and factories.
 
 Back to the [index](README.md).
 
@@ -70,24 +70,11 @@ Read the Interchange import data (UInterchangeAssetImportData) of an asset loade
 
 **Returns:** `{ asset_path: string, present: bool, pipelines_count: number, pipelines: [{ class: string, name: string, path: string }], has_node_container: bool, source_filenames: [string], display_labels: [string], root_uids?: [string], factory_node_count?: number, factory_nodes?: [{ uid: string, class: string, display_label: string }] }`
 
-## `get_interchange_pipeline_properties`
-
-*Read-only.*
-
-Read the editable (EditAnywhere) properties of an Interchange pipeline asset by reflection, inherited ones included: each entry gives name, C++ type and, unless class_only is true, the current value as JSON (left out when it cannot be converted). It narrows inspect_object to the EditAnywhere properties and adds a names-only discovery mode; get_properties reads any other UPROPERTY. The values are the in-memory ones, so edits made with set_interchange_pipeline_properties and not yet saved already show. Read-only: it writes nothing and needs no PIE. A path that does not load as a UInterchangePipelineBase is an error. Discover the names with class_only=true, write them with set_interchange_pipeline_properties and persist with save_interchange_pipeline; the pipelines an imported asset used: get_interchange_asset_import_data; a new pipeline asset: create_interchange_pipeline_asset.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `pipeline_path` | string | yes | Object path of the pipeline asset to read (loaded via LoadObject, must be a UInterchangePipelineBase), e.g. "/Game/Pipelines/MyMeshPipeline.MyMeshPipeline". |
-| `class_only` | boolean | no | When true, return only the EditAnywhere property NAMES and types (no values) for discovery. Defaults to false (includes current values). |
-
-**Returns:** `{ pipeline_path: string, class: string, properties: [{ name: string, type: string, value?: any }], property_count: number }`
-
 ## `get_interchange_project_settings`
 
 *Read-only.*
 
-Read the project's Interchange settings, the live class defaults of UInterchangeProjectSettings as Project Settings shows them. For content import: the default pipeline stack, every pipeline stack with its pipeline paths, the per-asset-type default-stack overrides, the import dialog class and the import and reimport dialog flags. For scene import: the default stack, the two dialog flags and only a count of its per-translator dialog overrides. Plus the file picker, generic pipeline and converter default pipeline classes, the static mesh smoothing fallback flag and the Interchange groups. Read-only, with no parameters. Change the default stack with set_interchange_pipeline_stack_default; read one pipeline asset with get_interchange_pipeline_properties; the formats translators accept: get_interchange_supported_formats.
+Read the project's Interchange settings, the live class defaults of UInterchangeProjectSettings as Project Settings shows them. For content import: the default pipeline stack, every pipeline stack with its pipeline paths, the per-asset-type default-stack overrides, the import dialog class and the import and reimport dialog flags. For scene import: the default stack, the two dialog flags and only a count of its per-translator dialog overrides. Plus the file picker, generic pipeline and converter default pipeline classes, the static mesh smoothing fallback flag and the Interchange groups. Read-only, with no parameters. Change the default stack with set_interchange_pipeline_stack_default; read one pipeline asset with get_object_info; the formats translators accept: get_interchange_supported_formats.
 
 No parameters.
 
@@ -195,26 +182,13 @@ Call the Interchange reset of a UInterchangeSceneImportAsset (UInterchangeEditor
 
 *Destructive, idempotent.*
 
-Write the package of an Interchange pipeline asset (a UInterchangePipelineBase loaded by object path) over its .uasset on disk, dirty or not, through the shared asset save; saved false makes success false and save_error carries the measured cause. It is the persist step after create_interchange_pipeline_asset and set_interchange_pipeline_properties, which change memory only; repeating it is idempotent. Like save_asset it refuses during PIE and under a read-only root. A path that does not load as a pipeline is an error.
+Write the package of an Interchange pipeline asset (a UInterchangePipelineBase loaded by object path) over its .uasset on disk, dirty or not, through the shared asset save; saved false makes success false and save_error carries the measured cause. It is the persist step after create_interchange_pipeline_asset and set_properties, which change memory only; repeating it is idempotent. Like save_asset it refuses during PIE and under a read-only root. A path that does not load as a pipeline is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `pipeline_path` | string | yes | Object path of the pipeline asset whose package is written to disk (loaded via LoadObject, must be a UInterchangePipelineBase). |
 
 **Returns:** `{ pipeline_path: string, file_path: string, saved: bool, save_error?: string }`
-
-## `set_interchange_pipeline_properties`
-
-*Destructive, idempotent.*
-
-Write settings of an Interchange pipeline asset -- what a pipeline does at import, such as whether it imports materials or how it names the assets -- by reflection, from a {name: value} object (a scalar, an object for a struct, an array for a TArray). It is close to set_properties on the same asset path (editable properties only, JSON values); the difference is that it records no undo step and runs one PostEditChange for the whole batch. Values change in memory only: save_interchange_pipeline writes the asset to disk. A name that does not exist, is not editable or does not convert is listed in skipped with the reason, and the others are still written. An empty properties object is refused. Idempotent. Names, types and current values: get_interchange_pipeline_properties; which pipelines an imported asset uses: set_interchange_pipelines.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `pipeline_path` | string | yes | Object path of the pipeline asset, e.g. "/Game/Pipelines/MyMeshPipeline.MyMeshPipeline"; it must load as a UInterchangePipelineBase. |
-| `properties` | object | yes | {property_name: value}, with names as get_interchange_pipeline_properties lists them; a struct takes an object of its fields and a TArray an array. |
-
-**Returns:** `{ pipeline_path, applied_count, skipped_count, skipped?: [string], note }`
 
 ## `set_interchange_pipeline_stack_default`
 

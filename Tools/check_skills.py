@@ -47,13 +47,16 @@ def server_words() -> set[str]:
 
 
 def catalog_words() -> tuple[set[str], set[str]]:
-    """The tool names, and every word the catalog and the server use (parameters, answer fields, descriptions)."""
+    """The listed tool names, and every word the catalog and the server use (parameters, answer fields, descriptions).
+
+    A retired tool or a renamed tool's old name still runs, but a skill names what tools/list shows."""
     catalog = json.loads(CATALOG_JSON_P.read_text(encoding="utf-8"))
     tools: set[str] = set()
     words: set[str] = server_words()
     for domain in catalog["domains"]:
         for command in domain["commands"]:
-            tools.add(command["name"])
+            if not command.get("retired"):
+                tools.add(command["name"])
             words.update(p["name"] for p in command.get("params", []))
             for text in [command.get("description", ""), command.get("returns", "")] + [
                 p.get("description", "") for p in command.get("params", [])

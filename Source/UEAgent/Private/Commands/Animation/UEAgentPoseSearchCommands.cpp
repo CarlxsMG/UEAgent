@@ -119,7 +119,7 @@ namespace
 // ---------------------------------------------------------------------------
 // create_pose_search_schema
 // ---------------------------------------------------------------------------
-// MCP:create_pose_search_schema - Create a UPoseSearchSchema data asset at package_path/name (package_path defaults to /Game/MCP) bound to the USkeleton at skeleton_path, with sample_rate clamped to 1..240 and the default Trajectory and Pose channels, then save it. Idempotent: a schema already at that path is returned unchanged with already_existed true and saved false, nothing saved, its skeleton_path and skeleton_paths read from it; the requested skeleton and sample_rate are not applied, and that skeleton is not even loaded. An invalid path, an asset of another class there, or for a new schema a skeleton that does not load, is an error; a failed save of a new schema makes success false. Next create a database with create_pose_search_database; add channels with add_pose_search_channel_to_schema, change settings with set_pose_search_schema_properties, and inspect it with inspect_pose_search_schema.
+// MCP:create_pose_search_schema - Create a UPoseSearchSchema data asset at package_path/name (package_path defaults to /Game/MCP) bound to the USkeleton at skeleton_path, with sample_rate clamped to 1..240 and the default Trajectory and Pose channels, then save it. Idempotent: a schema already at that path is returned unchanged with already_existed true and saved false, nothing saved, its skeleton_path and skeleton_paths read from it; the requested skeleton and sample_rate are not applied, and that skeleton is not even loaded. An invalid path, an asset of another class there, or for a new schema a skeleton that does not load, is an error; a failed save of a new schema makes success false. Next create a database with create_pose_search_database; add channels with add_pose_search_channel_to_schema, change settings with set_properties, and inspect it with get_pose_search_schema_info.
 //   @param name - Asset name (e.g. 'PoseSearchSchema_Example').
 //   @param package_path - Target content package path (default /Game/MCP); trailing slashes are stripped.
 //   @param skeleton_path - Asset path of the USkeleton (default /Engine/EngineMeshes/SkeletalCube_Skeleton); loaded only for a schema this call creates.
@@ -752,9 +752,10 @@ TSharedPtr<FJsonObject> HandleBuildPoseSearchDatabaseIndex(const TSharedPtr<FJso
 }
 
 // ---------------------------------------------------------------------------
-// inspect_pose_search_database
+// get_pose_search_database_info
 // ---------------------------------------------------------------------------
-// MCP:inspect_pose_search_database - Read-only walk of Schema, DatabaseAnimationAssets and Channels on a UPoseSearchDatabase
+// MCP:get_pose_search_database_info - Read-only walk of Schema, DatabaseAnimationAssets and Channels on a UPoseSearchDatabase
+//   @renamed-from inspect_pose_search_database
 //   @param database_path - Asset path of the UPoseSearchDatabase (required).
 //   @returns { database_path, schema_path, pose_search_mode, kd_tree_query_num_neighbors, number_of_principal_components, base_cost_bias, tags, schema_cardinality, animation_asset_count, animation_assets[], channel_count, channels[] }
 TSharedPtr<FJsonObject> HandleInspectPoseSearchDatabase(const TSharedPtr<FJsonObject>& Params)
@@ -892,7 +893,8 @@ TSharedPtr<FJsonObject> HandleRemoveAnimationAssetFromPoseSearchDatabase(const T
 // Read side of create_pose_search_schema + db<->schema bind.
 // ---------------------------------------------------------------------------
 
-// MCP:inspect_pose_search_schema - Read-only walk of a UPoseSearchSchema's public fields + FinalizedChannels. An empty finalized_channels / is_finalized:false is NOT a bug in this tool: the schema only gets finalized by AddDefaultChannels() or by a PostEditChange() on it, so a freshly authored schema reports none until something triggers that.
+// MCP:get_pose_search_schema_info - Read-only walk of a UPoseSearchSchema's public fields + FinalizedChannels. An empty finalized_channels / is_finalized:false is NOT a bug in this tool: the schema only gets finalized by AddDefaultChannels() or by a PostEditChange() on it, so a freshly authored schema reports none until something triggers that.
+//   @renamed-from inspect_pose_search_schema
 //   @param schema_path - Asset path of the UPoseSearchSchema (required).
 //   @returns { schema_path, sample_rate, schema_cardinality, number_of_permutations, permutations_sample_rate, permutations_time_offset, add_data_padding: bool, inject_additional_debug_channels: bool, draw_inject_additional_debug_channels: bool, roled_skeletons: [{ role_name, skeleton_path, mirror_table_path }], roled_skeleton_count, is_finalized: bool, channel_count, finalized_channels: [{ class, channel_name, weight }], note?: string } -- note only when is_finalized is false.
 //   NOTE (impl): Finalize() itself is private — external callers must go through PostEditChange (PoseSearchSchema.cpp).
@@ -1167,6 +1169,7 @@ namespace
 }
 
 // MCP:set_pose_search_schema_properties - Write scalar UPROPERTYs of a PoseSearchSchema asset (SampleRate, permutations, padding, DataPreprocessor...), clamp them to ClampMin/ClampMax, re-finalize the schema and save; set_properties neither clamps nor saves. changed says whether any written value differs from what the schema held. Keys match property names case-insensitively; an empty object, a key that names no property (the error lists them), Channels or another instanced or deprecated property, a null value, or a value of the wrong kind or that does not convert is an error and nothing changes. Skeleton, mirror table, role: set_pose_search_schema_* tools.
+//   @retired set_properties - object_path=<schema>, properties with the engine names, clamp=true, save=true
 //   @param asset_path - Asset path of the target UPoseSearchSchema (required).
 //   @param properties - Object of UPoseSearchSchema UPROPERTY fields to merge; keys are the C++ property NAMES (case-insensitive), absent keys untouched. Covers: SampleRate(int, ClampMin=1 ClampMax=240), bAddDataPadding(bool), bInjectAdditionalDebugChannels(bool), bDrawInjectAdditionalDebugChannels(bool), NumberOfPermutations(int, ClampMin=1), PermutationsSampleRate(int, ClampMin=1 ClampMax=240), PermutationsTimeOffset(float), DataPreprocessor(enum name: None/Normalize/NormalizeOnlyByDeviation/NormalizeWithCommonSchema). Object-refs (skeleton, mirror_data_table) and the role tag are set via their dedicated commands, not here. An empty object, a key that names no property (or a deprecated one, or one holding instanced subobjects such as Channels), a null value or a value that does not convert is an error and nothing is changed.
 //   @returns { asset_path, asset_class, settings, applied_keys, changed, saved, save_error? }
@@ -1725,7 +1728,7 @@ namespace
     }
 
     // Read-only walk of a UPoseSearchDatabase's schema + channels + anim asset count
-    // into an existing JSON object (mirrors inspect_pose_search_database's shape).
+    // into an existing JSON object (mirrors get_pose_search_database_info's shape).
     void SerializeDatabaseSummary_PoseSearch(UPoseSearchDatabase* Database, const TSharedPtr<FJsonObject>& Out)
     {
         if (!Database || !Out.IsValid())
@@ -1986,8 +1989,8 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("create_pose_search_schema"), &HandleCreatePoseSearchSchema },
     { TEXT("evaluate_pose_search_query"), &HandleEvaluatePoseSearchQuery },
     { TEXT("get_pose_search_runtime_state"), &HandleGetPoseSearchRuntimeState },
-    { TEXT("inspect_pose_search_database"), &HandleInspectPoseSearchDatabase },
-    { TEXT("inspect_pose_search_schema"), &HandleInspectPoseSearchSchema },
+    { TEXT("get_pose_search_database_info"), &HandleInspectPoseSearchDatabase },
+    { TEXT("get_pose_search_schema_info"), &HandleInspectPoseSearchSchema },
     { TEXT("remove_animation_asset_from_pose_search_database"), &HandleRemoveAnimationAssetFromPoseSearchDatabase },
     { TEXT("remove_pose_search_channel_from_schema"), &HandleRemovePoseSearchChannelFromSchema },
     { TEXT("remove_pose_search_roled_skeleton"), &HandleRemovePoseSearchRoledSkeleton },

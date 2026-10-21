@@ -61,7 +61,7 @@
  *
  * The Blueprint, collision, reference and replication audits and capture_pie_state write their full JSON
  * report to Saved/MCPAudits/ and return only {path, summary}, so the LLM client isn't forced to ingest a
- * potentially large report just to know "did this pass"; read_mcp_audit_file(path) reads a report back on
+ * potentially large report just to know "did this pass"; get_mcp_audit_report(path) reads a report back on
  * demand. The UMG audits return their entries inline.
  */
 namespace UEAgentAuditCommands
@@ -72,7 +72,7 @@ namespace UEAgentAuditCommands
 namespace
 {
     // Writes Report to Saved/MCPAudits/<Prefix>_<UTC timestamp>.json and puts in OutPath the full absolute
-    // path written (what read_mcp_audit_file expects): the error reply when the file cannot be written.
+    // path written (what get_mcp_audit_report expects): the error reply when the file cannot be written.
     TSharedPtr<FJsonObject> AU_WriteReport(const FString& Prefix, const TSharedPtr<FJsonObject>& Report, FString& OutPath)
     {
         const FString AuditDir = FPaths::ProjectSavedDir() / TEXT("MCPAudits");
@@ -204,7 +204,7 @@ namespace
     }
 }
 
-// MCP:audit_replication - Project-wide replication audit: for every Blueprint under folder_path, which variables are Replicated (CPF_Net), whether the class itself replicates (AActor::GetIsReplicated on the GeneratedClass CDO), and which UFUNCTIONs are RPCs (FUNC_NetFuncFlags). It returns only a SUMMARY plus a report path -- the full per-Blueprint detail is written to Saved/MCPAudits/ and must be read back with read_mcp_audit_file. For one actor rather than a sweep, use get_actor_replication_info.
+// MCP:audit_replication - Project-wide replication audit: for every Blueprint under folder_path, which variables are Replicated (CPF_Net), whether the class itself replicates (AActor::GetIsReplicated on the GeneratedClass CDO), and which UFUNCTIONs are RPCs (FUNC_NetFuncFlags). It returns only a SUMMARY plus a report path -- the full per-Blueprint detail is written to Saved/MCPAudits/ and must be read back with get_mcp_audit_report. For one actor rather than a sweep, use get_actor_replication_info.
 //   @param folder_path [string] - Content-relative folder to scan. Defaults to "/Game".
 //   @param recursive [bool] - Recurse into subfolders. Defaults to true.
 //   @param max_results [number] - Cap on Blueprints processed (1-100000). Defaults to 1000.
@@ -296,7 +296,7 @@ TSharedPtr<FJsonObject> HandleAuditReplication(const TSharedPtr<FJsonObject>& Pa
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:audit_blueprint_health - Project-wide compile-sweep: RECOMPILES every Blueprint under folder_path and records error/warning counts. By far the heaviest audit here (it compiles, it does not just read metadata) and it runs synchronously in the editor -- ALWAYS scope it with folder_path on a large project, and lean on max_results, which is a hard cap. It returns only a summary plus a report path; read the detail back with read_mcp_audit_file. To find already-broken Blueprints WITHOUT recompiling anything, use find_erroring_blueprints instead.
+// MCP:audit_blueprint_health - Project-wide compile-sweep: RECOMPILES every Blueprint under folder_path and records error/warning counts. By far the heaviest audit here (it compiles, it does not just read metadata) and it runs synchronously in the editor -- ALWAYS scope it with folder_path on a large project, and lean on max_results, which is a hard cap. It returns only a summary plus a report path; read the detail back with get_mcp_audit_report. To find already-broken Blueprints WITHOUT recompiling anything, use find_erroring_blueprints instead.
 //   @param folder_path [string] - Content-relative folder to scan. Defaults to "/Game".
 //   @param recursive [bool] - Recurse into subfolders. Defaults to true.
 //   @param max_results [number] - Cap on Blueprints compiled (1-100000). Defaults to 200 (lighter than the other audits -- compiling is expensive).
@@ -374,7 +374,7 @@ TSharedPtr<FJsonObject> HandleAuditBlueprintHealth(const TSharedPtr<FJsonObject>
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:audit_collision_profiles - Aggregate report of every project collision profile AND every collision channel (built-in + custom), including which custom ECC_GameTraceChannelN slots are already taken -- the question to ask before add_collision_channel. Cheap: it reads the collision settings in memory, with no AssetRegistry scan and no asset loading, so unlike the other audit_* sweeps it takes no folder_path and no max_results. Returns a summary + a report path (read the detail with read_mcp_audit_file).
+// MCP:audit_collision_profiles - Aggregate report of every project collision profile AND every collision channel (built-in + custom), including which custom ECC_GameTraceChannelN slots are already taken -- the question to ask before add_collision_channel. Cheap: it reads the collision settings in memory, with no AssetRegistry scan and no asset loading, so unlike the other audit_* sweeps it takes no folder_path and no max_results. Returns a summary + a report path (read the detail with get_mcp_audit_report).
 //   @returns { path: string, summary: { profile_count: int, channel_count: int, custom_channels_in_use: int } }
 //   NOTE (impl): pure public API -- UCollisionProfile::GetNumOfProfiles / GetProfileByIndex / ReturnChannelNameFromContainerIndex.
 TSharedPtr<FJsonObject> HandleAuditCollisionProfiles(const TSharedPtr<FJsonObject>& /*Params*/)
@@ -445,7 +445,7 @@ TSharedPtr<FJsonObject> HandleAuditCollisionProfiles(const TSharedPtr<FJsonObjec
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:audit_asset_references - Project-wide reference audit under folder_path: assets with zero referencers ("orphans") and dependencies pointing at a package no longer on disk ("broken"). Metadata-only through the AssetRegistry -- it never LOADS the assets, so it scales to a large project without spiking memory. It returns only a summary plus a report path; read the detail back with read_mcp_audit_file. For one asset rather than a sweep, use get_asset_referencers / get_asset_dependencies; for unused assets only, find_unused_assets.
+// MCP:audit_asset_references - Project-wide reference audit under folder_path: assets with zero referencers ("orphans") and dependencies pointing at a package no longer on disk ("broken"). Metadata-only through the AssetRegistry -- it never LOADS the assets, so it scales to a large project without spiking memory. It returns only a summary plus a report path; read the detail back with get_mcp_audit_report. For one asset rather than a sweep, use get_asset_referencers / get_asset_dependencies; for unused assets only, find_unused_assets.
 //   @param folder_path [string] - Content-relative folder to scan. Defaults to "/Game".
 //   @param recursive [bool] - Recurse into subfolders. Defaults to true.
 //   @param max_results [number] - Cap on assets processed (1-100000). Defaults to 5000.
@@ -543,7 +543,7 @@ TSharedPtr<FJsonObject> HandleAuditAssetReferences(const TSharedPtr<FJsonObject>
 //   keep a 0 visibly "the flag matched nothing here", never "we lied" -- but on a snapshot of actors
 //   that own SaveGame Blueprint variables, "dead_in_this_run" is a finding worth chasing.
 //
-// MCP:capture_pie_state - Snapshot of every actor in the ACTIVE PIE world, with every property flagged Replicated or SaveGame (generic -- no judgment call about what is "relevant"). It requires a live PIE session: with none running for pie_client_index it errors cleanly instead of silently snapshotting the EDITOR world, which is what makes it usable as co-op evidence -- point it at a client index to prove a value really replicated. On a large world ALWAYS pass class_filter and/or max_actors. Returns a summary plus a report path; read the detail with read_mcp_audit_file.
+// MCP:capture_pie_state - Snapshot of every actor in the ACTIVE PIE world, with every property flagged Replicated or SaveGame (generic -- no judgment call about what is "relevant"). It requires a live PIE session: with none running for pie_client_index it errors cleanly instead of silently snapshotting the EDITOR world, which is what makes it usable as co-op evidence -- point it at a client index to prove a value really replicated. On a large world ALWAYS pass class_filter and/or max_actors. Returns a summary plus a report path; read the detail with get_mcp_audit_report.
 //   @param pie_client_index [number] - Which PIE client's world to snapshot (0 = first/server/standalone). Defaults to 0.
 //   @param class_filter - Optional actor-class guardrail. Accepts a single class name OR an array of them (the hint is deliberately absent: the type-hint grammar has no union, and `[string|array]` would make this whole @param unparseable, leaving it an EMPTY description in the catalog). Detail: one class name or an array of them, each resolved to a UClass (object/script path, short name, or the Blueprint asset name -- "<Name>_C" is tried too) and matched with IsA, so subclasses match. An entry that does not resolve, or that resolves to a non-AActor class, is a hard ERROR rather than being dropped: dropping it would silently snapshot the whole World Partition world, keeping it would silently return an empty snapshot. Defaults to no filter (every actor).
 //   @param max_actors [number] - Optional cap on how many actors get their properties reflected into the report; 0 (the default) means UNLIMITED, and negative values are clamped to 0. Actors past the cap are still COUNTED (cheap) but not reflected (the expensive part), so total_matching_actors and truncated are exact, not estimated.
@@ -739,7 +739,8 @@ TSharedPtr<FJsonObject> HandleCapturePieState(const TSharedPtr<FJsonObject>& Par
         bOnDisk ? FString() : FString::Printf(TEXT("Report file is missing or empty on disk after write: %s"), *Path));
 }
 
-// MCP:read_mcp_audit_file - Read back the FULL report that an audit_* or capture_pie_state command wrote to disk. Those commands return only a summary plus a path, so this is the second half of every one of them -- without it you never see the per-Blueprint / per-asset / per-actor detail. Restricted to Saved/MCPAudits/: it is not a general file reader.
+// MCP:get_mcp_audit_report - Read back the FULL report that an audit_* or capture_pie_state command wrote to disk. Those commands return only a summary plus a path, so this is the second half of every one of them -- without it you never see the per-Blueprint / per-asset / per-actor detail. Restricted to Saved/MCPAudits/: it is not a general file reader.
+//   @renamed-from read_mcp_audit_file
 //   @param path [string!] - Path returned by a prior audit command
 //   @returns the full parsed JSON report object
 TSharedPtr<FJsonObject> HandleReadMcpAuditFile(const TSharedPtr<FJsonObject>& Params)
@@ -1494,6 +1495,6 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("audit_widget_style"), &HandleAuditWidgetStyle },
     { TEXT("audit_widget_text"), &HandleAuditWidgetText },
     { TEXT("capture_pie_state"), &HandleCapturePieState },
-    { TEXT("read_mcp_audit_file"), &HandleReadMcpAuditFile },
+    { TEXT("get_mcp_audit_report"), &HandleReadMcpAuditFile },
 };
 } // namespace UEAgentAuditCommands

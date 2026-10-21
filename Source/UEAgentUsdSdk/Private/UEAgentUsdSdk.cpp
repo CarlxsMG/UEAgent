@@ -5,6 +5,7 @@
 #include "Containers/StringConv.h"
 #include "Modules/ModuleManager.h"
 #include "USDMemory.h"
+#include "UsdWrappers/UsdStage.h"
 
 #if USE_USD_SDK
 #include "USDIncludesStart.h"
@@ -12,6 +13,12 @@
 #include "pxr/base/vt/value.h"
 #include "pxr/usd/sdf/listOp.h"
 #include "pxr/usd/sdf/pathExpression.h"
+#include "pxr/usd/sdf/primSpec.h"
+#include "pxr/usd/sdf/variantSetSpec.h"
+#include "pxr/usd/sdf/variantSpec.h"
+#include "pxr/usd/sdf/layer.h"
+#include "pxr/usd/usd/prim.h"
+#include "pxr/usd/usd/stage.h"
 #include "USDIncludesEnd.h"
 #endif	// USE_USD_SDK
 
@@ -257,11 +264,162 @@ namespace UEAgent::UsdSdk
 		return true;
 	}
 
+	namespace Private
+	{
+		/** The prim at PrimPath on Stage; an invalid prim, with OutError, when the stage or the prim does not resolve. */
+		pxr::UsdPrim FindPrim(const pxr::UsdStageRefPtr& Stage, const FString& PrimPath, FString& OutError)
+		{
+			if (!Stage)
+			{
+				OutError = TEXT("the stage is not valid");
+				return pxr::UsdPrim();
+			}
+			const std::string PathText = ToUsd(PrimPath);
+			if (!pxr::SdfPath::IsValidPathString(PathText))
+			{
+				OutError = FString::Printf(TEXT("'%s' is not a valid prim path"), *PrimPath);
+				return pxr::UsdPrim();
+			}
+			pxr::UsdPrim Prim = Stage->GetPrimAtPath(pxr::SdfPath(PathText));
+			if (!Prim)
+			{
+				OutError = FString::Printf(TEXT("no prim at '%s'"), *PrimPath);
+			}
+			return Prim;
+		}
+	}
+
+	bool RemoveVariantSet(const UE::FUsdStage& InStage, const FString& PrimPath, const FString& VariantSetName,
+		FVariantEditResult& OutResult, FString& OutError)
+	{
+		FScopedUsdAllocs UsdAllocs;
+		OutResult = FVariantEditResult();
+		// The wrapper converts to the ref pointer two ways; the explicit operator picks one.
+		const pxr::UsdStageRefPtr& Stage = InStage.operator const pxr::UsdStageRefPtr&();
+		const pxr::UsdPrim Prim = Private::FindPrim(Stage, PrimPath, OutError);
+		if (!Prim)
+		{
+			return false;
+		}
+		const std::string Name = Private::ToUsd(VariantSetName);
+		for (const pxr::SdfPrimSpecHandle& Spec : Prim.GetPrimStack())
+		{
+			if (!Spec)
+			{
+				continue;
+			}
+			const bool bHoldsSet = Spec->GetVariantSets().count(Name) > 0;
+			pxr::SdfVariantSetNamesProxy Names = Spec->GetVariantSetNameList();
+			const bool bListsName = Names.ContainsItemEdit(Name);
+			const bool bSelects = Spec->GetVariantSelections().count(Name) > 0;
+			if (!bHoldsSet && !bListsName && !bSelects)
+			{
+				continue;
+			}
+			if (!Stage->HasLocalLayer(Spec->GetLayer()))
+			{
+				++OutResult.SpecsSkipped;
+				continue;
+			}
+			if (bHoldsSet)
+			{
+				Spec->RemoveVariantSet(Name);
+			}
+			if (bListsName)
+			{
+				Names.RemoveItemEdits(Name);
+			}
+			if (bSelects)
+			{
+				Spec->SetVariantSelection(Name, std::string());
+			}
+			++OutResult.SpecsEdited;
+		}
+		return true;
+	}
+
+	bool RemoveVariant(const UE::FUsdStage& InStage, const FString& PrimPath, const FString& VariantSetName,
+		const FString& VariantName, FVariantEditResult& OutResult, FString& OutError)
+	{
+		FScopedUsdAllocs UsdAllocs;
+		OutResult = FVariantEditResult();
+		// The wrapper converts to the ref pointer two ways; the explicit operator picks one.
+		const pxr::UsdStageRefPtr& Stage = InStage.operator const pxr::UsdStageRefPtr&();
+		const pxr::UsdPrim Prim = Private::FindPrim(Stage, PrimPath, OutError);
+		if (!Prim)
+		{
+			return false;
+		}
+		const std::string SetName = Private::ToUsd(VariantSetName);
+		const std::string Name = Private::ToUsd(VariantName);
+		for (const pxr::SdfPrimSpecHandle& Spec : Prim.GetPrimStack())
+		{
+			if (!Spec)
+			{
+				continue;
+			}
+			pxr::SdfVariantSpecHandle Variant;
+			pxr::SdfVariantSetSpecHandle Set;
+			const pxr::SdfVariantSetsProxy Sets = Spec->GetVariantSets();
+			const auto SetIt = Sets.find(SetName);
+			if (SetIt != Sets.end())
+			{
+				Set = SetIt->second;
+				for (const pxr::SdfVariantSpecHandle& Candidate : Set->GetVariantList())
+				{
+					if (Candidate && Candidate->GetName() == Name)
+					{
+						Variant = Candidate;
+						break;
+					}
+				}
+			}
+			const pxr::SdfVariantSelectionProxy Selections = Spec->GetVariantSelections();
+			const auto SelectionIt = Selections.find(SetName);
+			const bool bSelects = SelectionIt != Selections.end() && SelectionIt->second == Name;
+			if (!Variant && !bSelects)
+			{
+				continue;
+			}
+			if (!Stage->HasLocalLayer(Spec->GetLayer()))
+			{
+				++OutResult.SpecsSkipped;
+				continue;
+			}
+			if (Variant)
+			{
+				Set->RemoveVariant(Variant);
+			}
+			if (bSelects)
+			{
+				Spec->SetVariantSelection(SetName, std::string());
+			}
+			++OutResult.SpecsEdited;
+		}
+		return true;
+	}
+
 #else  // USE_USD_SDK
 
 	namespace Private
 	{
 		const TCHAR* const NoSdk = TEXT("USD SDK not available");
+	}
+
+	bool RemoveVariantSet(const UE::FUsdStage& InStage, const FString& PrimPath, const FString& VariantSetName,
+		FVariantEditResult& OutResult, FString& OutError)
+	{
+		OutResult = FVariantEditResult();
+		OutError = Private::NoSdk;
+		return false;
+	}
+
+	bool RemoveVariant(const UE::FUsdStage& InStage, const FString& PrimPath, const FString& VariantSetName,
+		const FString& VariantName, FVariantEditResult& OutResult, FString& OutError)
+	{
+		OutResult = FVariantEditResult();
+		OutError = Private::NoSdk;
+		return false;
 	}
 
 	EIntListOpItems GetIntListOpItems(const UE::FVtValue& Value)

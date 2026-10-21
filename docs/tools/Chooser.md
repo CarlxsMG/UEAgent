@@ -2,7 +2,7 @@
 
 # Chooser
 
-13 tools for Chooser tables: their columns, rows and outcomes, and evaluating them.
+14 tools for Chooser tables: their columns, rows and outcomes, and evaluating them.
 
 Back to the [index](README.md).
 
@@ -91,7 +91,7 @@ Read ONE COLUMN ACROSS ALL ROWS of a UChooserTable, plus that column's DefaultRo
 
 *Read-only.*
 
-Read ONE ROW ACROSS ALL COLUMNS of a UChooserTable, as typed cells -- the row-wise counterpart of get_chooser_column_values (one column across all rows) and finer-grained than inspect_chooser_table. Cell shapes by column type: FloatRange {min,max,b_no_min,b_no_max}; Bool {cell_value}; Enum {comparison,value}; Object {comparison,asset_path}; OutputObject {asset_path}. row_index out of range is an honest error. Read-only -- no compile, no save -- and it works headless, since row data is not editor-only.
+Read ONE ROW ACROSS ALL COLUMNS of a UChooserTable, as typed cells -- the row-wise counterpart of get_chooser_column_values (one column across all rows) and finer-grained than get_chooser_table_info. Cell shapes by column type: FloatRange {min,max,b_no_min,b_no_max}; Bool {cell_value}; Enum {comparison,value}; Object {comparison,asset_path}; OutputObject {asset_path}. row_index out of range is an honest error. Read-only -- no compile, no save -- and it works headless, since row data is not editor-only. A cell of a row is written with set_chooser_cell.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -100,7 +100,7 @@ Read ONE ROW ACROSS ALL COLUMNS of a UChooserTable, as typed cells -- the row-wi
 
 **Returns:** `{ table_path, row_index, row_count, cells: [{ column_index, column_type, <typed fields> }] }`
 
-## `inspect_chooser_table`
+## `get_chooser_table_info`
 
 *Read-only.*
 
@@ -150,11 +150,34 @@ Remove one implicit row from a UChooserTable (inverse of add_chooser_row). A cho
 
 **Returns:** `{ table_path, removed_row_index, previous_row_count, new_row_count, saved, save_error?, note? }`
 
+## `set_chooser_cell`
+
+*Destructive, idempotent.*
+
+Set the cell of one existing row in one column of a UChooserTable -- a filter cell (FloatRange range, Bool match, Enum or Name comparison and value, Object or ObjectClass match) or an output cell -- as one undo step, then compile and save the table. It takes the same typed fields as set_chooser_column_default, which sets the value rows added LATER inherit; this one edits a row already there (set_chooser_row_outcome sets a row's result object). The fields that apply depend on the column type; default_value carries the cell of a Bool (MatchFalse|MatchTrue|MatchAny), OutputFloat, OutputBool, OutputName or Randomize column. A row or column index out of range, a missing or ill-typed field, or a column type no tool writes is an error and nothing changes; a cell already holding the value changes nothing (already_existed true, saved false). The reply re-reads the cell in the shape get_chooser_row_values gives; a failed save makes success false with save_error.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `table_path` | string | yes | Long package path of an existing UChooserTable. |
+| `row_index` | number | yes | 0-based row whose cell to set (get_chooser_table_info gives the row count). |
+| `column_index` | number | yes | 0-based column of the cell. |
+| `min` | number | no | FloatRange column: lower bound of the row's float range. |
+| `max` | number | no | FloatRange column: upper bound of the row's float range. |
+| `b_no_min` | boolean | no | FloatRange column: when true, the range has no lower bound. |
+| `b_no_max` | boolean | no | FloatRange column: when true, the range has no upper bound. |
+| `default_value` | any | no | The cell value of a Bool column ("MatchFalse", "MatchTrue" or "MatchAny"), OutputFloat (a number), OutputBool (a bool), OutputName (a name string) or Randomize column (a probability weight). |
+| `comparison` | string | no | Enum and Name columns: "MatchEqual", "MatchNotEqual", "MatchAny" or "Modulus"; ObjectClass column: "Equal", "NotEqual", "SubClassOf" (default), "NotSubClassOf" or "Any". Case-insensitive. |
+| `value` | any | no | Enum and OutputEnum columns: enum ordinal (clamped to 0-255); Name column: the name string to compare; MultiEnum column: the bitmask as an integer. |
+| `asset_path` | string | no | Object/OutputObject column: long package path of the UObject the cell holds. |
+| `class_path` | string | no | ObjectClass column: path of the UClass to match, used with comparison (default SubClassOf). |
+
+**Returns:** `{ table_path, row_index, column_index, column_type, <typed cell fields as get_chooser_row_values>, already_existed, saved, save_error? }`
+
 ## `set_chooser_column_default`
 
 *Destructive, idempotent.*
 
-Set the DefaultRowValue of one UChooserTable column, the cell value rows appended by add_chooser_row inherit; set it before adding rows. The fields that apply depend on the column type (see the params); others are ignored. A change is one undo step and is compiled and saved, and success is false, with save_error, when the save fails; a value the column already holds changes nothing (already_existed true, saved false).
+Set the DefaultRowValue of one UChooserTable column, the cell value rows appended by add_chooser_row inherit; set it before adding rows (a row already there: set_chooser_cell). The fields that apply depend on the column type (see the params); others are ignored. A change is one undo step and is compiled and saved, and success is false, with save_error, when the save fails; a value the column already holds changes nothing (already_existed true, saved false).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

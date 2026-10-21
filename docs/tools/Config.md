@@ -2,7 +2,7 @@
 
 # Config
 
-14 tools for project settings and .ini values, collision channels and profiles, the default map, component properties and construction scripts.
+16 tools for project settings and .ini values, collision channels and profiles, the default map, component properties and construction scripts.
 
 Back to the [index](README.md).
 
@@ -10,7 +10,7 @@ Back to the [index](README.md).
 
 *Additive, idempotent.*
 
-Register a custom project collision channel (claims the first free ECC_GameTraceChannelN slot). Idempotent on channel_name.
+Register a custom project collision channel (claims the first free ECC_GameTraceChannelN slot). Idempotent on channel_name. Inverse: remove_collision_channel.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -25,7 +25,7 @@ Register a custom project collision channel (claims the first free ECC_GameTrace
 
 *Destructive.*
 
-Create a project collision profile, or replace an existing one of that name in full (omitted fields reset, custom responses cleared, can_modify not checked), then write Config/DefaultEngine.ini via TryUpdateDefaultConfigFile, unverified. Returns custom_response_count and already_existed; read it back with get_collision_profile.
+Create a project collision profile, or replace an existing one of that name in full (omitted fields reset, custom responses cleared, can_modify not checked), then write Config/DefaultEngine.ini via TryUpdateDefaultConfigFile, unverified. Returns custom_response_count and already_existed; read it back with get_collision_profile; inverse: remove_collision_profile.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -118,11 +118,11 @@ Read one property of a settings class default object (CDO) as its ExportText str
 
 *Read-only.*
 
-List every collision channel (built-in + custom) with its default response.
+List every collision channel of the project, built-in and custom, with its friendly name and default response; each custom channel also says whether it is in use, whether it is a trace or an object channel, and the query it answers to (TraceTypeQueryN or ObjectTypeQueryN: the value a raycast or overlap passes), read from the project's config. Read-only. Add one with add_collision_channel; compare with another project's with diff_collision_channels.
 
 No parameters.
 
-**Returns:** `{ channels: [{channel: string, friendly_name: string, value: int, default_response: string, is_custom_game_slot: bool, in_use: bool}], count: int }`
+**Returns:** `{ channels: [{channel: string, friendly_name: string, value: int, default_response: string, is_custom_game_slot: bool, in_use?: bool, is_trace_type?: bool, query_type?: string, query_index?: int, query_number?: int}], count: int }`
 
 ## `list_project_setting_sections`
 
@@ -133,6 +133,30 @@ List every loaded, concrete UDeveloperSettings subclass (the Project/Editor Sett
 No parameters.
 
 **Returns:** `{ count: int, sections: [object] }`
+
+## `remove_collision_channel`
+
+*Destructive.*
+
+Free a custom project collision channel that add_collision_channel registered (its ECC_GameTraceChannelN slot), as the Project Settings panel deletes one: the channel leaves DefaultChannelResponses and every collision profile drops its per-channel response to it (custom_responses_removed), then Config/DefaultEngine.ini is written via TryUpdateDefaultConfigFile. A channel that is still the object type of a profile is refused, naming the profiles, and nothing changes; a name no custom channel has is an honest no-op (removed=false). As with add_collision_channel, the engine's channel-name tables (and list_collision_channels, which reads them) keep the old name until the editor restarts; add_collision_channel sees the slot free at once. No undo step: the config file is written at once. Inverse of add_collision_channel.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `channel_name` | string | yes | Friendly name of the custom channel, as given to add_collision_channel |
+
+**Returns:** `{ channel_name: string, channel?: string, removed: bool, custom_responses_removed: int, profiles_updated: [string], note: string }`
+
+## `remove_collision_profile`
+
+*Destructive.*
+
+Delete a project collision profile by name, then write Config/DefaultEngine.ini via TryUpdateDefaultConfigFile. Inverse of add_collision_profile. An engine profile the editor marks not modifiable (can_modify false, like BlockAll or Pawn) is refused, and nothing changes; a name no profile has is an honest no-op (removed=false). Components and Blueprints that still name the profile keep the name and fall back to their own settings. No undo step: the config file is written at once. Read back: get_collision_profile, which then reports it not found.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `profile_name` | string | yes | Name of the collision profile to delete, e.g. "MyPawnProfile" |
+
+**Returns:** `{ profile_name: string, removed: bool, profile_count: int, note?: string }`
 
 ## `rerun_construction_scripts`
 

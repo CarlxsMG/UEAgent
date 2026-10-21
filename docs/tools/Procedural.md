@@ -2,7 +2,7 @@
 
 # Procedural
 
-20 tools for PCG graphs, nodes and parameters, PCG components and volumes, and generation.
+19 tools for PCG graphs, nodes and parameters, PCG components and volumes, and generation.
 
 Back to the [index](README.md).
 
@@ -23,7 +23,7 @@ Attach a PCG component (the procedural generation engine) to an editor-world act
 
 *Additive, idempotent.*
 
-Expose a tunable on a PCG graph (bool / int / float / double / string) so density, radius or a toggle can be driven from outside instead of being welded into a node. Idempotent (already_existed when the name is taken). Only worth doing on graphs you own -- adding one to a library graph means editing that asset. Set a value with set_pcg_graph_parameter and list them with get_pcg_graph_parameters.
+Expose a tunable on a PCG graph (bool / int / float / double / string) so density, radius or a toggle can be driven from outside instead of being welded into a node. Idempotent (already_existed when the name is taken). Only worth doing on graphs you own -- adding one to a library graph means editing that asset. Set a value with set_pcg_graph_parameter and list them with get_pcg_graph_parameters; inverse: remove_pcg_graph_parameter.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -92,7 +92,7 @@ Connects two PCG nodes by adding a directed edge from an output pin to an input 
 
 *Additive, idempotent.*
 
-Create an empty UPCGGraph asset at package_path/name and save it, or return the UPCGGraph already there unchanged (created=false, already_exists=true, nothing saved), so repeat calls are idempotent. A fresh graph holds only its implicit Input and Output nodes, which node_count leaves out (0). Another asset class at that path, or an invalid path, is an error; a failed save, as during PIE, makes success false with save_error. No undo step is recorded. Requires the PCG plugin. Next: add nodes with add_pcg_node (types from list_pcg_node_types), wire them with connect_pcg_nodes, expose tunables with add_pcg_graph_parameter, read back with get_pcg_graph_info, and use it in the level through spawn_pcg_volume or add_pcg_component.
+Create an empty UPCGGraph asset at package_path/name and save it, or return the UPCGGraph already there unchanged (created=false, already_exists=true, nothing saved), so repeat calls are idempotent. A fresh graph holds only its implicit Input and Output nodes, which node_count leaves out (0). Another asset class at that path, or an invalid path, is an error; a failed save, as during PIE, makes success false with save_error. No undo step is recorded. Requires the PCG plugin. Next: add nodes with add_pcg_node (types from list_pcg_node_types), wire them with connect_pcg_nodes, expose tunables with add_pcg_graph_parameter, read back with get_pcg_graph_info, and use it in the level through spawn_box_volume or add_pcg_component.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -201,6 +201,19 @@ No parameters.
 
 **Returns:** `{ base_class, count, types:[{name, path}] }`
 
+## `remove_pcg_graph_parameter`
+
+*Destructive.*
+
+Remove a user parameter from a PCG graph asset, in one undo step, and delete the Get Parameter nodes that read it, as the PCG editor does when a parameter goes (getter_nodes_removed); the graph is marked dirty, not saved, as add_pcg_graph_parameter leaves it. Inverse of add_pcg_graph_parameter. A name the graph has no parameter for is an honest no-op (removed=false); a graph that does not load is an error (a PCGGraphInstance is not accepted, as for set_pcg_graph_parameter). The reply re-reads the parameters (parameters). Generated output is not refreshed: cleanup_pcg_component then generate_pcg_component. Read: get_pcg_graph_parameters.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `pcg_graph_path` | string | yes | /Game/... path to the UPCGGraph (required) |
+| `name` | string | yes | Parameter name to remove (required) |
+
+**Returns:** `{ pcg_graph_path, name, removed, getter_nodes_removed, parameter_count, parameters: [string], note? }`
+
 ## `remove_pcg_node`
 
 *Destructive, idempotent.*
@@ -213,19 +226,6 @@ Removes a user-added node from a PCG graph by name.  Uses UPCGGraph::RemoveNode,
 | `node_name` | string | yes | The node_name from get_pcg_graph_info of the node to remove. The tokens "Input"/"Output" (and the endpoints' real names) are rejected: the implicit graph endpoints cannot be removed. |
 
 **Returns:** `{ graph_name: string, asset_path: string, node_name: string, removed: bool, already_removed: bool, node_count: int, saved: bool, save_error: string }`
-
-## `set_pcg_component_properties`
-
-*Destructive, idempotent.*
-
-Write UPROPERTYs (Seed, bActivated, GenerationTrigger, ...) on the PCG component of an editor-world actor found by label or name, reading each stored value back. Over set_properties: no component path and no edit gate, but no PostEditChange is sent, so the component is not refreshed -- run generate_pcg_component. Nothing is saved.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actor_name` | string | yes | Actor holding the UPCGComponent (required) |
-| `properties` | object | yes | JSON object { PropertyName: value, ... } applied to the component |
-
-**Returns:** `{ actor_name, set:[name], failed:[{name, error}], applied:{name: stored_value_text} }`
 
 ## `set_pcg_graph_parameter`
 
@@ -254,19 +254,3 @@ Write fields of one PCG node's settings object, picked by node_name in a PCG Gra
 | `properties` | object | yes | Object of UPCGSettings fields to merge, keyed by property name (matched case-insensitively) (e.g. for a SurfaceSampler: bApplyDensityToPoints(bool), PointsPerSquaredMeter(float>=0), Looseness(float)); absent keys untouched. An empty object, a key that names no property of the settings class (or a deprecated one, or one holding instanced subobjects), a null value or a value that does not convert is an error and nothing is changed. |
 
 **Returns:** `{ graph_name: string, asset_path: string, node_name: string, settings_class: string, applied_keys: [string], properties: object, saved: bool, save_error?: string }`
-
-## `spawn_pcg_volume`
-
-*Additive.*
-
-Spawn an APCGVolume in the editor world with a REAL cube brush of half-extent extent and optionally assign a PCG graph, in one undo step. Over spawn_box_volume(volume_class='PCGVolume') it adds the graph (UPCGComponent::SetGraph), a rotation and a name (used only when free); add_pcg_component sets a graph on an existing actor. Bounds, scale and brush are RE-READ, never echoed. Without extent the volume is brush-less (kept for compatibility) and the reply warns: null bounds generate 0 instances in total silence. Not saved (save_level).
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `location` | array | yes | World location [X, Y, Z] for the volume. |
-| `extent` | array | no | Cube HALF-size [x, y, z] in unreal units, each > 0 (same convention as spawn_box_volume / spawn_navmesh_bounds_volume). STRONGLY RECOMMENDED: omitting it leaves the volume with extent (0,0,0) and the PCG component generates 0 instances with no error and no warning. |
-| `rotation` | array | no | Optional [pitch, yaw, roll] rotation for the volume (default 0,0,0). |
-| `pcg_graph_path` | string | no | Optional content path of a UPCGGraph to assign to the spawned volume's PCG component. |
-| `name` | string | no | Optional explicit name (skipped if already used in the current level to avoid Rename-onto-occupied crash). |
-
-**Returns:** `{ actor_name: string, actor_label: string, actor_class: string, has_pcg_component: bool, pcg_graph_path: string, graph_assigned: bool, location: [float], bounds_extent_actual: [float], bounds_origin_actual: [float], actor_scale: [float], has_brush_geometry: bool, brush_poly_count: int, brush_requested: bool, scale_normalized: bool, warning?: string, requested: {...} }`

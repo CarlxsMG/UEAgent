@@ -49,6 +49,21 @@ DIFF_TXT = _paths.report_path("command_catalog_diff.txt")
 # names itself, so a command registered under one would be unreachable.
 META_TOOL_NAMES = {"find_tools", "describe_tool", "call_tool"}
 
+# One verb per operation (the server's instructions and CONTRIBUTING.md name them): a tool name that starts with a
+# synonym of a verb the catalog uses fails the build, so the synonym cannot come back. Value: the verb to use.
+SYNONYM_VERBS = {
+    "read": "get", "inspect": "get", "fetch": "get", "retrieve": "get", "dump": "list",
+    "query": "find", "search": "find", "lookup": "find", "detect": "is",
+    "configure": "set", "edit": "set", "update": "set", "modify": "set", "change": "set",
+    "make": "create", "scaffold": "create", "setup": "add", "append": "add", "insert": "add",
+    "place": "spawn", "destroy": "delete", "erase": "delete",
+}
+# Names kept on purpose, each with its reason.
+SYNONYM_VERB_EXCEPTIONS = {
+    "edit_level_instance": "the engine's edit mode of a level instance, which commit_level_instance leaves",
+    "insert_usd_sublayer": "USD's own operation: a sublayer goes in at a position of the layer stack",
+}
+
 # Skip these — utilities, not command handlers.
 SKIP_GROUPS = {"Common"}
 
@@ -298,6 +313,12 @@ ANNOTATION_PARAM_RE  = re.compile(
     r'^//\s{3,}@param\s+(\S+)(?:\s+\[([a-zA-Z]*)(!?)\])?\s+-\s+(.+)$')
 # @returns line: `//   @returns <description or { shape }>`
 ANNOTATION_RETURNS_RE = re.compile(r'^//\s{3,}@returns\s+(.+)$')
+# @renamed-from line: `//   @renamed-from <old_name>` -- a name the tool had before. The catalog's `renamed`
+# maps it to this tool: a call to the old name runs this one and the reply says so, and tools/list leaves it out.
+ANNOTATION_RENAMED_RE = re.compile(r'^//\s{3,}@renamed-from\s+([a-z0-9_]+)\s*$')
+# @retired line: `//   @retired <listed_tool> - <how to make the same call with it>` -- the tool leaves tools/list
+# and still runs under its own name; the reply names the listed tool that does the same, and how.
+ANNOTATION_RETIRED_RE = re.compile(r'^//\s{3,}@retired\s+([a-z0-9_]+)\s+-\s+(.+)$')
 # Any other line inside an annotation block (skip silently).
 ANNOTATION_OTHER_RE   = re.compile(r'^//')
 # `// MCP-DOMAIN: <domain>` — declares a handler class's MCP domain (the domain
@@ -342,6 +363,7 @@ def find_truncated_annotations(text: str) -> list[tuple[str, str, int, str]]:
         if not ANNOTATION_OTHER_RE.match(nxt):
             return False
         if (ANNOTATION_PARAM_RE.match(nxt) or ANNOTATION_RETURNS_RE.match(nxt)
+                or ANNOTATION_RENAMED_RE.match(nxt) or ANNOTATION_RETIRED_RE.match(nxt)
                 or ANNOTATION_MARKER_RE.match(nxt) or ANNOTATION_DOMAIN_RE.match(nxt)
                 or tool_hints.HINTS_LINE_RE.match(nxt)):
             return False
@@ -360,7 +382,8 @@ def find_truncated_annotations(text: str) -> list[tuple[str, str, int, str]]:
             if j > i and ANNOTATION_MARKER_RE.match(lines[j]):
                 break
             kind = ("description" if j == i
-                    else "@param" if ANNOTATION_PARAM_RE.match(lines[j]) else None)
+                    else "@param" if ANNOTATION_PARAM_RE.match(lines[j])
+                    else "@retired" if ANNOTATION_RETIRED_RE.match(lines[j]) else None)
             nxt = lines[j + 1] if j + 1 < len(lines) else ""
             if kind and is_continuation(nxt):
                 out.append((cmd, kind, j + 1, f'{discarded}: "{nxt.strip()[:70]}"'))
@@ -386,7 +409,8 @@ def find_truncated_annotations(text: str) -> list[tuple[str, str, int, str]]:
 def parse_annotations(text: str) -> dict[str, dict]:
     """Parse `// MCP:` annotation blocks scattered through a .cpp file.
 
-    Returns: {cmd: {"description": str, "params": {name: {"desc", "type", "required"}}, "returns": str}}.
+    Returns: {cmd: {"description": str, "params": {name: {"desc", "type", "required"}}, "returns": str,
+              "renamedFrom": [old names], "retired": {"use", "how"} or None}}.
 
     A block is a contiguous run of `//` comment lines that starts with a marker
     `// MCP:<cmd> - <desc>` and ends at the first non-comment line. Anything
@@ -407,7 +431,7 @@ def parse_annotations(text: str) -> dict[str, dict]:
             i += 1
             continue
         cmd, desc = m.group(1), m.group(2).rstrip()
-        entry: dict = {"description": desc, "params": {}, "returns": ""}
+        entry: dict = {"description": desc, "params": {}, "returns": "", "renamedFrom": [], "retired": None}
         j = i + 1
         while j < len(lines):
             ln = lines[j]
@@ -428,6 +452,10 @@ def parse_annotations(text: str) -> dict[str, dict]:
                     "type": (HINT_TYPE_ALIAS.get(_hint, _hint) or None),
                     "required": (pm.group(3) == "!"),
                 }
+            elif (nm := ANNOTATION_RENAMED_RE.match(ln)):
+                entry["renamedFrom"].append(nm.group(1))
+            elif (tm := ANNOTATION_RETIRED_RE.match(ln)):
+                entry["retired"] = {"use": tm.group(1), "how": tm.group(2).rstrip()}
             else:
                 rm = ANNOTATION_RETURNS_RE.match(ln)
                 if rm:
@@ -1364,6 +1392,9 @@ def build(args) -> int:
         k: v for k, v in cmd_to_classes.items() if len(v) > 1
     }
 
+    # Old name -> the tools that declare it (`@renamed-from`); checked once every tool is known.
+    renamed_from: dict[str, list[str]] = {}
+
     # Report annotation warnings (orphan markers + duplicates) ONCE, against the
     # final cmd_to_class set so we don't spam for each cpp file.
     all_known_cmds = set(cmd_to_class.keys())
@@ -1397,6 +1428,10 @@ def build(args) -> int:
             "params": assemble_params(extracted, ann.get("params", {}) if ann else {}, domain),
             "returns": (ann["returns"] if ann and ann.get("returns") else ""),
         }
+        if ann and ann.get("retired"):
+            entry["retired"] = dict(ann["retired"])
+        for old in (ann.get("renamedFrom", []) if ann else []):
+            renamed_from.setdefault(old, []).append(cmd)
         by_domain[domain].append(entry)
         # Track cmd that lacks a cpp annotation AND has an empty description —
         # these need human attention.
@@ -1474,6 +1509,49 @@ def build(args) -> int:
     if args.strict and naming_warns:
         print("STRICT mode: failing because of naming warnings.")
         return 2
+
+    # Renamed and retired tools. An old name must not be a command any more and belongs to one tool; a retired
+    # tool points at a LISTED tool, or the reply would send the caller to another name that is not listed either.
+    retirement_errors: list[str] = []
+    for old, owners in sorted(renamed_from.items()):
+        if len(owners) > 1:
+            retirement_errors.append(f"`{old}` is the old name of {len(owners)} tools: {', '.join(owners)}")
+        if old in all_known_cmds:
+            retirement_errors.append(f"`{old}` is declared @renamed-from by {owners[0]} but is still a command")
+    all_entries = {e["name"]: e for lst in by_domain.values() for e in lst}
+    for name, entry in sorted(all_entries.items()):
+        retired = entry.get("retired")
+        if not retired:
+            continue
+        use = all_entries.get(retired["use"])
+        if use is None:
+            retirement_errors.append(f"`{name}` is @retired for `{retired['use']}`, which is not a command")
+        elif use.get("retired"):
+            retirement_errors.append(f"`{name}` is @retired for `{retired['use']}`, which is retired too")
+    # One verb per operation: a listed tool does not start with a synonym of a verb the catalog uses.
+    for name, entry in sorted(all_entries.items()):
+        verb = name.split("_", 1)[0]
+        if verb in SYNONYM_VERBS and not entry.get("retired") and name not in SYNONYM_VERB_EXCEPTIONS:
+            retirement_errors.append(f"`{name}` starts with `{verb}_`: the catalog's verb for that is `{SYNONYM_VERBS[verb]}_`")
+
+    # A listed tool's text sends the agent only to listed tools: an old or retired name in it would be followed.
+    gone = set(renamed_from) | {n for n, e in all_entries.items() if e.get("retired")}
+    if gone:
+        gone_re = re.compile(r"(?<![A-Za-z0-9_])(" + "|".join(sorted(map(re.escape, gone), key=len, reverse=True)) + r")(?![A-Za-z0-9_])")
+        for name, entry in sorted(all_entries.items()):
+            if entry.get("retired"):
+                continue
+            texts = [entry.get("description", ""), entry.get("returns", "")]
+            texts += [p.get("description", "") for p in entry.get("params", [])]
+            named = sorted({m.group(1) for t in texts for m in gone_re.finditer(t or "")})
+            if named:
+                retirement_errors.append(f"`{name}` names retired or old tool names: {', '.join(named)}")
+    if retirement_errors:
+        print(f"--- RENAMED / RETIRED ({len(retirement_errors)}) ---")
+        for e in retirement_errors:
+            print(f"  {e}")
+        print("FAIL: renamed or retired tools that a call could not reach.")
+        return 2
     if trunc_warns and (args.check or args.strict):
         print(f"FAIL: {len(trunc_warns)} annotations silently lose part of their text.")
         return 2
@@ -1509,6 +1587,9 @@ def build(args) -> int:
         "nameLikeRule": name_like_rule(),
         "domains": domains_list,
     }
+    if renamed_from:
+        # Old name -> new name: a call to the old name runs the new tool (FMcpToolCatalog::ResolveCallName).
+        out["renamed"] = {old: owners[0] for old, owners in sorted(renamed_from.items())}
 
     # 5b) Check mode: the catalog on disk must be exactly what --write writes, prose
     # included. The descriptions, @param and @returns ARE the catalog for the agent that

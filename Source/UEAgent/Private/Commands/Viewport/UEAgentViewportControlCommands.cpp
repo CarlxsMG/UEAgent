@@ -368,6 +368,7 @@ namespace
 // ---------------------------------------------------------------------------
 
 // MCP:set_viewport_realtime - Enable or disable realtime rendering on the active editor viewport
+//   @retired set_viewport_settings - realtime=true|false
 //   @param enabled - True to turn on realtime updates, false to turn them off
 //   @returns { applied: bool, requested: bool, realtime: bool, effective_realtime: bool, override_active: bool, override_source: string }
 TSharedPtr<FJsonObject> HandleSetViewportRealtime(const TSharedPtr<FJsonObject>& Params)
@@ -424,6 +425,7 @@ TSharedPtr<FJsonObject> HandleSetViewportRealtime(const TSharedPtr<FJsonObject>&
 // ---------------------------------------------------------------------------
 
 // MCP:set_viewport_view_mode - Set the rendering view mode (Lit, Unlit, Wireframe, ShaderComplexity...) of the active level editor viewport, the focused one or else the first; no viewport is an error. view_mode is matched without case. An unknown name is an error before anything changes, and so is a mode the editor only enters with a choice of what to show (a buffer, a visualization, texture streaming data, a zebra direction): the error says which. The mode is stored for the viewport's current projection only (perspective and orthographic keep separate modes) and lasts for this editor session: no undo step, nothing saved. view_mode and view_mode_index are read back, view_mode as the name get_viewport_state reports and this tool takes back. Show flags: set_show_flag; projection: set_view_type; game view: set_game_view.
+//   @retired set_viewport_settings - view_mode
 //   @param view_mode - Engine view mode name, matched without case, e.g. Lit, Unlit, Wireframe, CSGWireframe, DetailLighting, LightingOnly, LightComplexity, ShaderComplexity, LightmapDensity, Reflections, PlayerCollision, MeshLODColoration, QuadOverdraw, Clay; each is the engine display name without spaces. BrushWireframe is accepted for Wireframe, ReflectionOverride for Reflections, RandomColor for Random; PathTracing only where ray tracing is allowed.
 //   @returns { applied: bool, requested: string, view_mode_index: int, view_mode: string }
 TSharedPtr<FJsonObject> HandleSetViewportViewMode(const TSharedPtr<FJsonObject>& Params)
@@ -455,6 +457,7 @@ TSharedPtr<FJsonObject> HandleSetViewportViewMode(const TSharedPtr<FJsonObject>&
 // ---------------------------------------------------------------------------
 
 // MCP:set_show_flag - Set one engine show flag (Grid, Bounds, Collision, Wireframe, Lighting...) on the active level editor viewport, the focused one or else the first; no viewport is an error. It sets the given state rather than toggling: enabled true turns the flag on, false turns it off, and a repeat call changes nothing. flag_name is matched without case against the engine's show flags and registered custom flags; an unknown name is an error before anything changes. It lasts for this editor session, with no undo step, nothing saved and the earlier value not returned. value is the flag read back and flag_index its engine index. get_viewport_state reads Grid, Bounds, Collision, Wireframe and Lighting back; set_game_view swaps the whole flag set; set_viewport_view_mode changes the render mode.
+//   @retired set_viewport_settings - show_flags={"<flag>": true|false}
 //   @param flag_name - Engine show flag name as FEngineShowFlags spells it, e.g. Grid, Bounds, Collision, Wireframe, Lighting; matched without case
 //   @param enabled - True to set the flag, false to clear it
 //   @returns { applied: bool, flag_name: string, flag_index: int, requested: bool, value: bool }
@@ -495,6 +498,7 @@ TSharedPtr<FJsonObject> HandleSetShowFlag(const TSharedPtr<FJsonObject>& Params)
 // ---------------------------------------------------------------------------
 
 // MCP:set_camera_speed - Set the camera movement speed of the active level editor viewport (the focused one, else the first). Affects this editor session only and saves nothing. Returns requested and camera_speed, the value read back from the viewport afterwards.
+//   @retired set_viewport_settings - camera_speed
 //   @param speed - Camera speed as a positive float; 0 or less is an error. Compare camera_speed in the reply to see what the viewport kept.
 //   @returns { applied: bool, requested: number, camera_speed: number }
 TSharedPtr<FJsonObject> HandleSetCameraSpeed(const TSharedPtr<FJsonObject>& Params)
@@ -526,6 +530,7 @@ TSharedPtr<FJsonObject> HandleSetCameraSpeed(const TSharedPtr<FJsonObject>& Para
 // ---------------------------------------------------------------------------
 
 // MCP:set_viewport_camera - Place the camera of the active level editor viewport (the focused one, else the first) at an absolute world location and/or rotation; at least one is required and no viewport is an error. Editor view only, not undoable or saved: a PIE player camera (set_view_target) or a camera actor (set_camera_transform) does not move. location must be an [x, y, z] array of three numbers in cm and rotation three numbers or a roll/pitch/yaw object; anything else is refused before the camera moves. The reply reads location and rotation back, rotation as [pitch, yaw, roll]. Frame an actor with focus_viewport.
+//   @retired set_viewport_settings - location, rotation
 //   @param location - Optional [x, y, z] world location
 //   @param rotation - Optional [pitch, yaw, roll] world rotation
 //   @returns { applied: bool, location_set: bool, rotation_set: bool, location: [number], rotation: [number] }
@@ -595,7 +600,7 @@ TSharedPtr<FJsonObject> HandleSetViewportCamera(const TSharedPtr<FJsonObject>& P
 // get_viewport_state
 // ---------------------------------------------------------------------------
 
-// MCP:get_viewport_state - Read the active level editor viewport (the focused one, else the first) without changing it: realtime (the effective value, an override such as the background throttle included), view mode name and index, camera speed, camera location [x, y, z] and rotation [pitch, yaw, roll], and the Grid, Bounds, Collision, Wireframe and Lighting show flags, a flag this engine lacks left out. view_mode names every engine view mode by its display name without spaces (Lit, CSGWireframe, PlayerCollision...), or ViewMode_<index> for a value the engine does not name; set_viewport_view_mode takes that name back, but refuses the modes that need a choice made with them. It also reads the perspective FOV, the near clip plane and far clip override, the exposure, the view type (perspective or an orthographic view) and whether cinematic tools may possess the viewport. No viewport is an error; nothing is saved or recorded for undo. Setters: set_viewport_view_mode, set_viewport_realtime, set_camera_speed, set_viewport_camera, set_show_flag, set_viewport_fov, set_near_clip_plane, set_far_clip_plane, set_viewport_exposure, set_view_type, set_allow_cinematic_control.
+// MCP:get_viewport_state - Read the active level editor viewport (the focused one, else the first) without changing it: realtime (the effective value, an override such as the background throttle included), view mode name and index, camera speed, camera location [x, y, z] and rotation [pitch, yaw, roll], and the Grid, Bounds, Collision, Wireframe and Lighting show flags, a flag this engine lacks left out. view_mode names every engine view mode by its display name without spaces (Lit, CSGWireframe, PlayerCollision...), or ViewMode_<index> for a value the engine does not name; set_viewport_settings takes that name back, but refuses the modes that need a choice made with them. It also reads the perspective FOV, the near clip plane and far clip override, the exposure, the view type (perspective or an orthographic view) and whether cinematic tools may possess the viewport. No viewport is an error; nothing is saved or recorded for undo. Setters: set_viewport_settings.
 //   @returns { realtime: bool, view_mode_index: int, view_mode: string, camera_speed: number, location: [number], rotation: [number], show_flags: object, fov: number (current perspective FOV, degrees), near_clip_plane: number (effective, cm), far_clip_plane_override: number (< 0 when no override is engaged), exposure: { fixed: bool, ev100: number }, view_type: string, view_type_index: int, allows_cinematic_control: bool }
 TSharedPtr<FJsonObject> HandleGetViewportState(const TSharedPtr<FJsonObject>& Params)
 {
@@ -655,6 +660,7 @@ TSharedPtr<FJsonObject> HandleGetViewportState(const TSharedPtr<FJsonObject>& Pa
 // ---------------------------------------------------------------------------
 
 // MCP:set_viewport_fov - Set the perspective field of view, in degrees, of the active level editor viewport, the focused one or else the first; no viewport is an error. fov must lie in 5..170, the range of the editor's Field of View control, and a value outside it is an error before anything changes. Like that control it sets both the current view FOV and the stored one that a camera reset or the end of a PIE session restores; fov and stored_fov are read back, and an orthographic view ignores them. There is no undo step and no asset is saved, and the previous FOV is not returned. A viewport piloting a camera actor keeps showing that camera's FOV until it stops piloting it. Read it with get_viewport_state (fov); a camera actor's own FOV is set_camera_fov.
+//   @retired set_viewport_settings - fov
 //   @param fov - Field of view in degrees, from 5 to 170 (the range of the editor's FOV slider)
 //   @returns { applied: bool, requested: number, fov: number, stored_fov: number }
 TSharedPtr<FJsonObject> HandleSetViewportFOV(const TSharedPtr<FJsonObject>& Params)
@@ -691,6 +697,7 @@ TSharedPtr<FJsonObject> HandleSetViewportFOV(const TSharedPtr<FJsonObject>& Para
 // ---------------------------------------------------------------------------
 
 // MCP:set_near_clip_plane - Override the near clip plane distance, in cm, of the active level editor viewport, the focused one or else the first; no viewport is an error. A negative distance (-1 by convention) drops the override so the engine near plane, GNearClippingPlane, applies again; a distance of at least 0.001, the smallest the editor's Near View Plane control allows, becomes the override. 0 (a degenerate projection), anything else below 0.001 and a value too large for a float are errors before anything changes. It lasts for this editor session with no undo step and no save, and the previous value is not returned. near_clip_plane is the effective near plane read back and override_active says whether an override is now set. get_viewport_state reads both clip planes (near_clip_plane, far_clip_plane_override); the far plane is set_far_clip_plane.
+//   @retired set_viewport_settings - near_clip
 //   @param distance - Near clip distance in cm, at least 0.001; any negative value (-1 by convention) clears the override and falls back to GNearClippingPlane
 //   @returns { applied: bool, requested: number, near_clip_plane: number, override_active: bool }
 TSharedPtr<FJsonObject> HandleSetNearClipPlane(const TSharedPtr<FJsonObject>& Params)
@@ -727,6 +734,7 @@ TSharedPtr<FJsonObject> HandleSetNearClipPlane(const TSharedPtr<FJsonObject>& Pa
 // ---------------------------------------------------------------------------
 
 // MCP:set_far_clip_plane - Override the far clip plane distance, in cm, of the active level editor viewport, the focused one or else the first, so objects beyond it are culled from the view; no viewport is an error. 0 or a negative distance drops the override and the default far plane applies again. It lasts for this editor session with no undo step and no save, and the previous value is not returned. far_clip_plane is the stored override read back, which is the distance sent, and override_active is true only for a distance above 0. get_viewport_state reads the near plane together with this override (far_clip_plane_override); the near plane is set_near_clip_plane.
+//   @retired set_viewport_settings - far_clip
 //   @param distance - Far clip distance in cm; 0 or any negative value clears the override and the default far plane applies
 //   @returns { applied: bool, requested: number, far_clip_plane: number, override_active: bool }
 TSharedPtr<FJsonObject> HandleSetFarClipPlane(const TSharedPtr<FJsonObject>& Params)
@@ -753,6 +761,7 @@ TSharedPtr<FJsonObject> HandleSetFarClipPlane(const TSharedPtr<FJsonObject>& Par
 // ---------------------------------------------------------------------------
 
 // MCP:set_viewport_exposure - Set the exposure of the active level editor viewport: fixed at ev100 when fixed is true, automatic eye adaptation when false. Affects the viewport only and saves nothing. Returns applied, fixed and ev100 as read back; get_viewport_state reads them (exposure).
+//   @retired set_viewport_settings - exposure_fixed, exposure_ev100
 //   @param fixed - True for fixed exposure (use FixedEV100), false for automatic eye-adaptation
 //   @param ev100 - EV100 value to use when fixed=true (any float; typical range -3..20)
 //   @returns { applied: bool, fixed: bool, ev100: number }
@@ -783,6 +792,7 @@ TSharedPtr<FJsonObject> HandleSetViewportExposure(const TSharedPtr<FJsonObject>&
 // ---------------------------------------------------------------------------
 
 // MCP:set_game_view - Turn Game View on or off on the active level editor viewport, the focused one or else the first (the view the editor's G key toggles); no viewport is an error. Turning it on swaps the viewport's show flags for the game set, hiding editor-only chrome such as sprites, the transform widget and selection outlines, and keeps the editor set to put back when it is turned off. It sets the given state, so a repeat call changes nothing; it lasts for this editor session with no undo step and nothing saved. in_game_view is read back. Single flags are set_show_flag, render modes set_viewport_view_mode; to run the game use start_play_in_editor.
+//   @retired set_viewport_settings - game_view
 //   @param enabled - True to enable game view, false to revert to editor view
 //   @returns { applied: bool, requested: bool, in_game_view: bool }
 TSharedPtr<FJsonObject> HandleSetGameView(const TSharedPtr<FJsonObject>& Params)
@@ -808,6 +818,7 @@ TSharedPtr<FJsonObject> HandleSetGameView(const TSharedPtr<FJsonObject>& Params)
 // ---------------------------------------------------------------------------
 
 // MCP:set_allow_cinematic_control - Set whether the active level editor viewport (the focused one, else the first) may be possessed by cinematic tools such as Sequencer to preview sequences (FEditorViewportClient::SetAllowCinematicControl). It sets the given value rather than toggling; it lasts for this editor session, nothing is saved or undoable, and no viewport is an error. allows_cinematic_control is read back from the viewport. Read the flag without changing it with get_viewport_state (allows_cinematic_control).
+//   @retired set_viewport_settings - allow_cinematic_control
 //   @param allow - True to allow cinematic control, false to block it
 //   @returns { applied: bool, requested: bool, allows_cinematic_control: bool }
 TSharedPtr<FJsonObject> HandleSetAllowCinematicControl(const TSharedPtr<FJsonObject>& Params)
@@ -833,6 +844,7 @@ TSharedPtr<FJsonObject> HandleSetAllowCinematicControl(const TSharedPtr<FJsonObj
 // ---------------------------------------------------------------------------
 
 // MCP:set_view_type - Switch the active level editor viewport, the focused one or else the first, to the perspective camera or one of the six orthographic views; no viewport is an error. type is matched without case, and any other name is an error before anything changes. Switching to an orthographic view unlocks an actor the viewport was piloting, and each projection re-applies the view mode it keeps for itself. It sets the given type, so a repeat call changes nothing; it lasts for this editor session with no undo step and no save. view_type and view_type_index are read back. Read it with get_viewport_state (view_type); render modes are set_viewport_view_mode, the camera position set_viewport_camera.
+//   @retired set_viewport_settings - view_type
 //   @param type - View type name. One of: Perspective, Top, Bottom, Left, Right, Front, Back. Matched without case.
 //   @returns { applied: bool, requested: string, view_type: string, view_type_index: int }
 TSharedPtr<FJsonObject> HandleSetViewportType(const TSharedPtr<FJsonObject>& Params)
@@ -876,8 +888,135 @@ TSharedPtr<FJsonObject> HandleSetViewportType(const TSharedPtr<FJsonObject>& Par
     return mcp_common::MakeOkReply(Data);
 }
 
+// MCP:set_viewport_settings - Change any settings of the active level editor viewport (the focused one, else the first) in one call: camera location and rotation, field of view, near and far clip planes, exposure, realtime, view mode, show flags, camera speed, perspective or orthographic view type, game view and cinematic control. Pass only the settings to change; each is validated and applied as its own step, in the order listed here, and the call stops at the first one refused (applied lists those already changed). Editor view only: not undoable, nothing saved. get_viewport_state reads every one of them back.
+//   @param location [array] - Optional camera [x, y, z] world location
+//   @param rotation [array] - Optional camera world rotation, [pitch, yaw, roll] or {"pitch","yaw","roll"}
+//   @param fov - Optional perspective field of view in degrees
+//   @param near_clip - Optional near clip plane distance in cm
+//   @param far_clip - Optional far clip plane distance in cm; 0 means no far plane
+//   @param exposure_fixed [bool] - Optional: true for a fixed exposure at exposure_ev100, false for automatic eye adaptation
+//   @param exposure_ev100 - Optional EV100 used when exposure_fixed is true (typical range -3..20); needs exposure_fixed
+//   @param realtime [bool] - Optional: realtime rendering on or off
+//   @param view_mode - Optional engine view mode name, e.g. Lit, Unlit, Wireframe, DetailLighting, LightingOnly, ShaderComplexity, Clay
+//   @param show_flags [object] - Optional {flag_name: bool} of engine show flags (Grid, Bounds, Collision, Fog...) set to that state
+//   @param camera_speed - Optional camera movement speed, above 0
+//   @param view_type - Optional: Perspective, Top, Bottom, Left, Right, Front or Back
+//   @param game_view [bool] - Optional: game view on (editor-only icons and gizmos hidden) or off
+//   @param allow_cinematic_control [bool] - Optional: whether Sequencer may drive this viewport's camera
+//   @returns { applied: { setting: that setting's reply }, failed?: { label, command, error } (when a setting is refused) }
+TSharedPtr<FJsonObject> HandleSetViewportSettings(const TSharedPtr<FJsonObject>& Params)
+{
+    TArray<mcp_common::FSubCommand> Steps;
+    auto Step = [&Steps](const TCHAR* Label, const TCHAR* Command, TSharedPtr<FJsonObject> StepParams)
+    {
+        Steps.Add({ Label, Command, StepParams });
+    };
+    auto Copy = [&Params](TSharedPtr<FJsonObject> Into, const TCHAR* From, const TCHAR* To)
+    {
+        if (const TSharedPtr<FJsonValue> Value = Params->TryGetField(From))
+        {
+            Into->SetField(To, Value);
+        }
+    };
+    double Number = 0.0;
+    bool bFlag = false;
+    FString Text;
+
+    if (Params->HasField(TEXT("location")) || Params->HasField(TEXT("rotation")))
+    {
+        TSharedPtr<FJsonObject> Camera = MakeShared<FJsonObject>();
+        Copy(Camera, TEXT("location"), TEXT("location"));
+        Copy(Camera, TEXT("rotation"), TEXT("rotation"));
+        Step(TEXT("camera"), TEXT("set_viewport_camera"), Camera);
+    }
+    if (Params->TryGetNumberField(TEXT("fov"), Number))
+    {
+        TSharedPtr<FJsonObject> Fov = MakeShared<FJsonObject>();
+        Fov->SetNumberField(TEXT("fov"), Number);
+        Step(TEXT("fov"), TEXT("set_viewport_fov"), Fov);
+    }
+    if (Params->TryGetNumberField(TEXT("near_clip"), Number))
+    {
+        TSharedPtr<FJsonObject> Near = MakeShared<FJsonObject>();
+        Near->SetNumberField(TEXT("distance"), Number);
+        Step(TEXT("near_clip"), TEXT("set_near_clip_plane"), Near);
+    }
+    if (Params->TryGetNumberField(TEXT("far_clip"), Number))
+    {
+        TSharedPtr<FJsonObject> Far = MakeShared<FJsonObject>();
+        Far->SetNumberField(TEXT("distance"), Number);
+        Step(TEXT("far_clip"), TEXT("set_far_clip_plane"), Far);
+    }
+    if (Params->TryGetBoolField(TEXT("exposure_fixed"), bFlag))
+    {
+        TSharedPtr<FJsonObject> Exposure = MakeShared<FJsonObject>();
+        Exposure->SetBoolField(TEXT("fixed"), bFlag);
+        double Ev100 = 0.0;
+        Exposure->SetNumberField(TEXT("ev100"), Params->TryGetNumberField(TEXT("exposure_ev100"), Ev100) ? Ev100 : 0.0);
+        Step(TEXT("exposure"), TEXT("set_viewport_exposure"), Exposure);
+    }
+    else if (Params->HasField(TEXT("exposure_ev100")))
+    {
+        return mcp_common::MakeErrorReply(TEXT("exposure_ev100 needs exposure_fixed=true; nothing was changed"));
+    }
+    if (Params->TryGetBoolField(TEXT("realtime"), bFlag))
+    {
+        TSharedPtr<FJsonObject> Realtime = MakeShared<FJsonObject>();
+        Realtime->SetBoolField(TEXT("enabled"), bFlag);
+        Step(TEXT("realtime"), TEXT("set_viewport_realtime"), Realtime);
+    }
+    if (Params->TryGetStringField(TEXT("view_mode"), Text))
+    {
+        TSharedPtr<FJsonObject> ViewMode = MakeShared<FJsonObject>();
+        ViewMode->SetStringField(TEXT("view_mode"), Text);
+        Step(TEXT("view_mode"), TEXT("set_viewport_view_mode"), ViewMode);
+    }
+    const TSharedPtr<FJsonObject>* ShowFlags = nullptr;
+    if (Params->TryGetObjectField(TEXT("show_flags"), ShowFlags) && ShowFlags && ShowFlags->IsValid())
+    {
+        for (const TPair<FString, TSharedPtr<FJsonValue>>& Flag : (*ShowFlags)->Values)
+        {
+            bool bEnabled = false;
+            if (!Flag.Value.IsValid() || !Flag.Value->TryGetBool(bEnabled))
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(TEXT("show_flags.%s must be true or false; nothing was changed"), *Flag.Key));
+            }
+            TSharedPtr<FJsonObject> ShowFlag = MakeShared<FJsonObject>();
+            ShowFlag->SetStringField(TEXT("flag_name"), Flag.Key);
+            ShowFlag->SetBoolField(TEXT("enabled"), bEnabled);
+            Steps.Add({ FString::Printf(TEXT("show_flags.%s"), *Flag.Key), TEXT("set_show_flag"), ShowFlag });
+        }
+    }
+    if (Params->TryGetNumberField(TEXT("camera_speed"), Number))
+    {
+        TSharedPtr<FJsonObject> Speed = MakeShared<FJsonObject>();
+        Speed->SetNumberField(TEXT("speed"), Number);
+        Step(TEXT("camera_speed"), TEXT("set_camera_speed"), Speed);
+    }
+    if (Params->TryGetStringField(TEXT("view_type"), Text))
+    {
+        TSharedPtr<FJsonObject> ViewType = MakeShared<FJsonObject>();
+        ViewType->SetStringField(TEXT("type"), Text);
+        Step(TEXT("view_type"), TEXT("set_view_type"), ViewType);
+    }
+    if (Params->TryGetBoolField(TEXT("game_view"), bFlag))
+    {
+        TSharedPtr<FJsonObject> GameView = MakeShared<FJsonObject>();
+        GameView->SetBoolField(TEXT("enabled"), bFlag);
+        Step(TEXT("game_view"), TEXT("set_game_view"), GameView);
+    }
+    if (Params->TryGetBoolField(TEXT("allow_cinematic_control"), bFlag))
+    {
+        TSharedPtr<FJsonObject> Cinematic = MakeShared<FJsonObject>();
+        Cinematic->SetBoolField(TEXT("allow"), bFlag);
+        Step(TEXT("allow_cinematic_control"), TEXT("set_allow_cinematic_control"), Cinematic);
+    }
+    return mcp_common::RunSubCommands(TEXT("set_viewport_settings"), Steps, MakeShared<FJsonObject>());
+}
+
 const McpCommandFamilies::FRegistrar Registration =
 {
+    { TEXT("set_viewport_settings"), &HandleSetViewportSettings },
     { TEXT("get_viewport_state"), &HandleGetViewportState },
     { TEXT("set_allow_cinematic_control"), &HandleSetAllowCinematicControl },
     { TEXT("set_camera_speed"), &HandleSetCameraSpeed },

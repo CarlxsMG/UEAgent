@@ -398,11 +398,12 @@ TSharedPtr<FJsonObject> HandleCreateProceduralGridMesh(
 }
 
 // ---------------------------------------------------------------------------
-// update_procedural_mesh_section {actor_label, component_index?,
+// set_procedural_mesh_section_vertices {actor_label, component_index?,
 //   section_index?, vertices?=[[x,y,z],...]}
 //   Updates an existing section in-place (same topology, new positions).
 // ---------------------------------------------------------------------------
-// MCP:update_procedural_mesh_section - Move the vertices of an existing section of a UProceduralMeshComponent on an editor-world actor found by label: vertices sets every position in order, while triangles, normals, UVs, colors and tangents stay as they were (normals are not recomputed). When the section has collision its collision vertices follow, and the component bounds are rebuilt. Sending the same positions again leaves the section as it was, so the call is idempotent. A missing actor or component, a negative or nonexistent section, an empty vertices array or a count different from the section's is an error before anything changes. Transient: nothing is marked dirty, saved or undoable. New geometry or topology: create_procedural_box_mesh, create_procedural_grid_mesh; read the section back: get_procedural_mesh_section_data; counts: get_procedural_mesh_info.
+// MCP:set_procedural_mesh_section_vertices - Move the vertices of an existing section of a UProceduralMeshComponent on an editor-world actor found by label: vertices sets every position in order, while triangles, normals, UVs, colors and tangents stay as they were (normals are not recomputed). When the section has collision its collision vertices follow, and the component bounds are rebuilt. Sending the same positions again leaves the section as it was, so the call is idempotent. A missing actor or component, a negative or nonexistent section, an empty vertices array or a count different from the section's is an error before anything changes. Transient: nothing is marked dirty, saved or undoable. New geometry or topology: create_procedural_box_mesh, create_procedural_grid_mesh; read the section back: get_procedural_mesh_section_data; counts: get_procedural_mesh_info.
+//   @renamed-from update_procedural_mesh_section
 //   @param actor_label - Editor label of the actor carrying the PMC
 //   @param component_index - Optional 0-based PMC index on the actor; defaults to 0
 //   @param section_index - Optional target section index (>= 0); defaults to 0
@@ -904,6 +905,6 @@ const McpCommandFamilies::FRegistrar Registration =
 	{ TEXT("set_procedural_mesh_material"), &HandleSetProceduralMeshMaterial },
 	{ TEXT("set_procedural_mesh_section_visible"), &HandleSetProceduralMeshSectionVisible },
 	{ TEXT("slice_procedural_mesh"), &HandleSliceProceduralMesh },
-	{ TEXT("update_procedural_mesh_section"), &HandleUpdateProceduralMeshSection },
+	{ TEXT("set_procedural_mesh_section_vertices"), &HandleUpdateProceduralMeshSection },
 };
 } // namespace UEAgentProceduralMeshCommands

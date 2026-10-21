@@ -108,7 +108,7 @@ namespace
 // Metadata tags
 // -------------------------------------------------------------------------- //
 
-// MCP:set_asset_metadata_tag - Sets (or overwrites) a string metadata tag on an asset and saves it.  The asset is loaded, UEditorAssetLibrary::SetMetadataTag is applied, the owning package is saved, and the value is read back to verify.
+// MCP:set_asset_metadata_tag - Sets (or overwrites) a string metadata tag on an asset and saves it.  The asset is loaded, UEditorAssetLibrary::SetMetadataTag is applied, the owning package is saved, and the value is read back to verify. Inverse: remove_asset_metadata_tag.
 //   @param asset_path - /Game path to the asset (e.g. "/Game/MyGame/M_Example").
 //   @param key - Metadata tag name (FName), e.g. "Author".
 //   @param value - String value to associate with the tag.
@@ -146,6 +146,51 @@ TSharedPtr<FJsonObject> HandleSetAssetMetadataTag(const TSharedPtr<FJsonObject>&
     Result->SetBoolField(TEXT("tag_set"), true);
     Result->SetBoolField(TEXT("verified"), bVerified);
     return mcp_common::MakeSavedReply(Result, bSaved, TEXT("set_asset_metadata_tag"));
+}
+
+// MCP:remove_asset_metadata_tag - Remove one string metadata tag (UMetaData) from an asset and save it (UEditorAssetLibrary::RemoveMetadataTag); no undo step, since package metadata is outside the undo history, and refused by the engine during PIE (the tag stays, reported as an error). Inverse of set_asset_metadata_tag. A key the asset has no tag for is an honest no-op (removed=false, nothing saved); an asset that does not exist is an error. The reply re-reads the tags (still_present, tag_count). Read: get_asset_metadata_tags.
+//   @param asset_path - /Game path to the asset (e.g. "/Game/MyGame/M_Example").
+//   @param key - Metadata tag name (FName) to remove, e.g. "Author".
+//   @returns { asset_path: string, key: string, removed: bool, still_present: bool, tag_count: int, saved: bool }
+
+TSharedPtr<FJsonObject> HandleRemoveAssetMetadataTag(const TSharedPtr<FJsonObject>& Params)
+{
+    FString AssetPath, Key;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("asset_path"), AssetPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("key"), Key)) { return Missing; }
+
+    if (!UEditorAssetLibrary::DoesAssetExist(AssetPath))
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Asset does not exist: %s"), *AssetPath));
+    UObject* Asset = UEditorAssetLibrary::LoadAsset(AssetPath);
+    if (!Asset)
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Failed to load asset: %s"), *AssetPath));
+
+    const FName Tag(*Key);
+    TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+    Result->SetStringField(TEXT("asset_path"), AssetPath);
+    Result->SetStringField(TEXT("key"), Key);
+    if (!UEditorAssetLibrary::GetMetadataTagValues(Asset).Contains(Tag))
+    {
+        Result->SetBoolField(TEXT("removed"), false);
+        Result->SetBoolField(TEXT("still_present"), false);
+        Result->SetNumberField(TEXT("tag_count"), UEditorAssetLibrary::GetMetadataTagValues(Asset).Num());
+        Result->SetBoolField(TEXT("saved"), false);
+        return mcp_common::MakeOkReply(Result);
+    }
+
+    UEditorAssetLibrary::RemoveMetadataTag(Asset, Tag);
+    const TMap<FName, FString> After = UEditorAssetLibrary::GetMetadataTagValues(Asset);
+    const bool bStillPresent = After.Contains(Tag);
+    if (bStillPresent)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Tag '%s' is still on the asset after RemoveMetadataTag; nothing was saved"), *Key));
+    }
+    const bool bSaved = UEditorAssetLibrary::SaveLoadedAsset(Asset, /*bOnlyIfIsDirty=*/false);
+
+    Result->SetBoolField(TEXT("removed"), true);
+    Result->SetBoolField(TEXT("still_present"), false);
+    Result->SetNumberField(TEXT("tag_count"), After.Num());
+    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("remove_asset_metadata_tag"));
 }
 
 // MCP:get_asset_metadata_tags - Reads all editor metadata tags (UMetaData) of an asset.  Wraps UEditorAssetLibrary::GetMetadataTagValues and returns each tag as a {key, value} pair. (Distinct from get_asset_by_name with include_tags, which reads Asset Registry tags instead of the asset's stored metadata tags.)
@@ -417,5 +462,6 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("get_collections"), &HandleGetCollections },
     { TEXT("remove_asset_from_collection"), &HandleRemoveAssetFromCollection },
     { TEXT("set_asset_metadata_tag"), &HandleSetAssetMetadataTag },
+    { TEXT("remove_asset_metadata_tag"), &HandleRemoveAssetMetadataTag },
 };
 } // namespace UEAgentAssetMetaCommands

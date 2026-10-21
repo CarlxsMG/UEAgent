@@ -917,7 +917,7 @@ TSharedPtr<FJsonObject> HandleListWorldPartitionActors(const TSharedPtr<FJsonObj
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:load_world_partition_region - Pins the World Partition cells intersecting an axis-aligned region [min,max] into memory for inspection (editor world).  Creates a UWorldPartitionEditorLoaderAdapter backed by FLoaderAdapterShape over the box and calls ILoaderAdapter::Load(); the adapter stays REGISTERED so the region remains resident (mirrors the editor's "Load Region from Here"), which then lets get_actors_by_class / actor tools see the now-loaded actors. Honest error on a non-WP (default) map or an uninitialized World Partition. Non-destructive: it loads (pins) actors, it never spawns/edits/saves.
+// MCP:load_world_partition_region - Pins the World Partition cells intersecting an axis-aligned region [min,max] into memory for inspection (editor world).  Creates a UWorldPartitionEditorLoaderAdapter backed by FLoaderAdapterShape over the box and calls ILoaderAdapter::Load(); the adapter stays REGISTERED so the region remains resident (mirrors the editor's "Load Region from Here"), which then lets get_actors_by_class / actor tools see the now-loaded actors. Honest error on a non-WP (default) map or an uninitialized World Partition. Non-destructive: it loads (pins) actors, it never spawns/edits/saves. Inverse: unload_world_partition_region with the same label.
 //   @param min - [x,y,z] minimum corner of the region box in world units.
 //   @param max - [x,y,z] maximum corner of the region box in world units.
 //   @param label - Optional label for the loader adapter (default "MCP Load Region").
@@ -1006,6 +1006,86 @@ TSharedPtr<FJsonObject> HandleLoadWorldPartitionRegion(const TSharedPtr<FJsonObj
         ? TEXT("Region pinned via editor loader adapter (FLoaderAdapterShape); the adapter stays registered so the region remains resident for inspection. num_loaded_actors is the world-wide loaded-descriptor count after loading.")
         : TEXT("Loader adapter created but reported not loaded (the region may intersect no World Partition cells, or the matching actors were already resident)."));
 
+    return mcp_common::MakeOkReply(ResultObj);
+}
+
+// MCP:unload_world_partition_region - Release the region load_world_partition_region pinned under label in the editor world: its loader adapter unloads the cells it holds (the editor's Unload Region) and is unregistered, so the actors only it kept resident leave memory. Inverse of load_world_partition_region; every adapter registered under that label goes (adapters_released). A label no registered adapter has is an honest no-op (adapters_released=0, the labels in use listed); a world without World Partition, or one not initialized, is an error. Not an undo step: load_world_partition_region with the same box brings the region back. Unsaved edits on unloaded actors are the editor's to handle, as when the region is unloaded by hand: save_level first. num_loaded_actors is the world-wide loaded-descriptor count after the unload.
+//   @param label - Label the region was loaded under (load_world_partition_region's label, default "MCP Load Region").
+//   @returns { world: string, label: string, adapters_released: int, unloaded: bool, num_loaded_actors: int, labels_in_use: [string] }
+
+TSharedPtr<FJsonObject> HandleUnloadWorldPartitionRegion(const TSharedPtr<FJsonObject>& Params)
+{
+    FString Label;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("label"), Label)) { return Missing; }
+
+    UWorld* World = nullptr;
+    if (TSharedPtr<FJsonObject> NoWorld = mcp_common::RequireEditorWorld(World)) { return NoWorld; }
+    UWorldPartition* WP = World->GetWorldPartition();
+    if (!WP)
+    {
+        return mcp_common::MakeErrorReply(TEXT("This world has no World Partition; there is no region to unload"));
+    }
+    if (!WP->IsInitialized())
+    {
+        return mcp_common::MakeErrorReply(TEXT("World Partition is not initialized; there is no region to unload"));
+    }
+
+    // A copy: releasing an adapter removes it from the set being walked.
+    TArray<UWorldPartitionEditorLoaderAdapter*> Matching;
+    for (const TObjectPtr<UWorldPartitionEditorLoaderAdapter>& Adapter : WP->GetRegisteredEditorLoaderAdapters())
+    {
+        IWorldPartitionActorLoaderInterface::ILoaderAdapter* Loader = Adapter ? Adapter->GetLoaderAdapter() : nullptr;
+        const TOptional<FString> AdapterLabel = Loader ? Loader->GetLabel() : TOptional<FString>();
+        if (AdapterLabel.IsSet() && AdapterLabel.GetValue() == Label)
+        {
+            Matching.Add(Adapter);
+        }
+    }
+    for (UWorldPartitionEditorLoaderAdapter* Adapter : Matching)
+    {
+        if (IWorldPartitionActorLoaderInterface::ILoaderAdapter* Loader = Adapter->GetLoaderAdapter())
+        {
+            Loader->Unload();
+        }
+        WP->ReleaseEditorLoaderAdapter(Adapter);
+    }
+
+    // The re-read: the labels still registered, and what is still resident.
+    TArray<FString> LabelsInUse;
+    bool bStillRegistered = false;
+    for (const TObjectPtr<UWorldPartitionEditorLoaderAdapter>& Adapter : WP->GetRegisteredEditorLoaderAdapters())
+    {
+        IWorldPartitionActorLoaderInterface::ILoaderAdapter* Loader = Adapter ? Adapter->GetLoaderAdapter() : nullptr;
+        const TOptional<FString> AdapterLabel = Loader ? Loader->GetLabel() : TOptional<FString>();
+        if (AdapterLabel.IsSet())
+        {
+            LabelsInUse.AddUnique(AdapterLabel.GetValue());
+            bStillRegistered |= AdapterLabel.GetValue() == Label;
+        }
+    }
+    int32 NumLoadedActors = 0;
+    for (FActorDescContainerInstanceCollection::TIterator<> It(WP); It; ++It)
+    {
+        if (FWorldPartitionActorDescInstance* Desc = *It)
+        {
+            if (Desc->IsLoaded())
+            {
+                ++NumLoadedActors;
+            }
+        }
+    }
+    if (bStillRegistered)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("An adapter labelled '%s' is still registered after the release"), *Label));
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("world"), World->GetName());
+    ResultObj->SetStringField(TEXT("label"), Label);
+    ResultObj->SetNumberField(TEXT("adapters_released"), Matching.Num());
+    ResultObj->SetBoolField(TEXT("unloaded"), Matching.Num() > 0);
+    ResultObj->SetNumberField(TEXT("num_loaded_actors"), NumLoadedActors);
+    ResultObj->SetArrayField(TEXT("labels_in_use"), mcp_common::StringsToJson(LabelsInUse));
     return mcp_common::MakeOkReply(ResultObj);
 }
 
@@ -1457,6 +1537,7 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("list_orphaned_ofpa_actors"), &HandleListOrphanedOfpaActors },
     { TEXT("list_world_partition_actors"), &HandleListWorldPartitionActors },
     { TEXT("load_world_partition_region"), &HandleLoadWorldPartitionRegion },
+    { TEXT("unload_world_partition_region"), &HandleUnloadWorldPartitionRegion },
     { TEXT("remove_actor_from_data_layer_instance"), &HandleRemoveActorFromDataLayerInstance },
     { TEXT("remove_data_layer_instance"), &HandleRemoveDataLayerInstance },
     { TEXT("remove_orphaned_ofpa_actors"), &HandleRemoveOrphanedOfpaActors },

@@ -96,7 +96,7 @@
  *   - Widget Blueprint AUTHORING (the CanvasPanel/box/grid slot layout inside a WBP asset): that is
  *     set_widget_slot_properties and friends in UEAgentWidgetCommands.cpp.
  *   - Runtime UI actually on screen in a running PIE session (HUD, menus, panels added via
- *     AddToViewport()): that is read_pie_widgets / click_pie_widget, also in UEAgentWidgetCommands.cpp.
+ *     AddToViewport()): that is list_pie_widgets / click_pie_widget, also in UEAgentWidgetCommands.cpp.
  */
 namespace UEAgentUICommands
 {
@@ -114,7 +114,7 @@ namespace
         "CURRENT EDITOR LEVEL (GEditor's world, never a running PIE session). Use "
         "list_level_widget_components to discover valid widget_name values instead of guessing. "
         "For runtime UI actually on screen in a running PIE session (HUD, menus, panels added "
-        "via AddToViewport()), use read_pie_widgets/click_pie_widget instead "
+        "via AddToViewport()), use list_pie_widgets/click_pie_widget instead "
         "(UEAgentWidgetCommands.cpp).");
 }
 
@@ -354,7 +354,7 @@ namespace UEAgentUICommandsImpl
 
 // Widgets placed in the level
 
-// MCP:get_level_widget_properties - Read the live state of a UUserWidget hosted on a UWidgetComponent in the current editor level, found by the widget's object name (list_level_widget_components gives the names): class, validity, visibility, enabled and focus, the hosting component's draw size and relative transform, parent, and the direct children of its root panel (one level). Use it for this runtime state, which no UPROPERTY read gives; inspect_object reads the widget's raw properties. A running PIE session is never searched: use read_pie_widgets for live game UI.
+// MCP:get_level_widget_properties - Read the live state of a UUserWidget hosted on a UWidgetComponent in the current editor level, found by the widget's object name (list_level_widget_components gives the names): class, validity, visibility, enabled and focus, the hosting component's draw size and relative transform, parent, and the direct children of its root panel (one level). Use it for this runtime state, which no UPROPERTY read gives; get_object_info reads the widget's raw properties. A running PIE session is never searched: use list_pie_widgets for live game UI.
 //   @param widget_name - Name of the widget to query
 //   @returns { widget_name: string, widget_class: string, widget_valid: bool, widget_visible: bool, visibility: string, size?: { width: number, height: number }, position?: { x: number, y: number, z: number }, rotation?: { pitch: number, yaw: number, roll: number }, scale?: { x: number, y: number, z: number }, parent_widget?: string, parent_class?: string, child_count: number, children: [{ name: string, class: string, depth: number (1), valid: bool, enabled: bool, visibility: string }], is_enabled: bool, has_focus: bool }
 
@@ -413,7 +413,7 @@ TSharedPtr<FJsonObject> HandleGetWidgetProperties(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeOkReply(Facts);
 }
 
-// MCP:set_level_widget_visibility - Set the Slate visibility of a UUserWidget hosted on a UWidgetComponent in the current editor level, found by the widget's object name (list_level_widget_components gives the names; a running PIE session is never searched). visibility is matched without case, and an invalid value is an error before the lookup; a widget not found is an error too. The change goes to the live widget instance only: no undo step, nothing marked dirty or saved, and a widget the component rebuilds, after a level reload for instance, starts from its class default again. A repeat call changes nothing. previous_visibility and actual_visibility are read around the write, and visibility_set compares the result with the request. Read it with get_level_widget_properties; live PIE UI is read_pie_widgets; a Widget Blueprint's own widgets are set_widget_property.
+// MCP:set_level_widget_visibility - Set the Slate visibility of a UUserWidget hosted on a UWidgetComponent in the current editor level, found by the widget's object name (list_level_widget_components gives the names; a running PIE session is never searched). visibility is matched without case, and an invalid value is an error before the lookup; a widget not found is an error too. The change goes to the live widget instance only: no undo step, nothing marked dirty or saved, and a widget the component rebuilds, after a level reload for instance, starts from its class default again. A repeat call changes nothing. previous_visibility and actual_visibility are read around the write, and visibility_set compares the result with the request. Read it with get_level_widget_properties; live PIE UI is list_pie_widgets; a Widget Blueprint's own widgets are set_widget_property.
 //   @param widget_name - Object name of the UUserWidget a UWidgetComponent in the editor level hosts, as list_level_widget_components reports it in widget_name
 //   @param visibility - Target visibility state: Visible, Collapsed, Hidden, HitTestInvisible, or SelfHitTestInvisible (matched without case)
 //   @returns { widget_name: string, visibility_set: bool, previous_visibility: string, requested_visibility: string, actual_visibility: string, widget_valid: bool }
@@ -459,7 +459,7 @@ TSharedPtr<FJsonObject> HandleSetWidgetVisibility(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeOkReply(Outcome);
 }
 
-// MCP:list_level_widget_components - CALL THIS FIRST to discover valid widget_name values instead of guessing: it enumerates ALL UWidgetComponents on ALL actors of the current EDITOR level, which is the EXACT population that get_level_widget_properties / set_level_widget_visibility search by widget_name (remove_widget searches it too). It reads GEditor's world and never a running PIE session (use read_pie_widgets for that), and it lists every widget component on an actor, not just the first. WARNING: THIS POPULATION IS NOT WIDGET BLUEPRINTS, and that is the trap the name does not warn you about: these are world-space UWidgetComponents hosted on actors. To author the CONTENT of a Widget Blueprint asset -- its tree, styles or layout -- you want get_widget_blueprint_tree / set_widget_property / set_widget_slot_properties instead. In particular ANCHORS live on a UCanvasPanelSlot inside a Widget Blueprint's tree and have no meaning at all on a level UWidgetComponent: set them with set_widget_slot_properties(widget_bp_path, widget_name, anchors=[min_x,min_y,max_x,max_y]).
+// MCP:list_level_widget_components - CALL THIS FIRST to discover valid widget_name values instead of guessing: it enumerates ALL UWidgetComponents on ALL actors of the current EDITOR level, which is the EXACT population that get_level_widget_properties / set_level_widget_visibility search by widget_name (remove_widget searches it too). It reads GEditor's world and never a running PIE session (use list_pie_widgets for that), and it lists every widget component on an actor, not just the first. WARNING: THIS POPULATION IS NOT WIDGET BLUEPRINTS, and that is the trap the name does not warn you about: these are world-space UWidgetComponents hosted on actors. To author the CONTENT of a Widget Blueprint asset -- its tree, styles or layout -- you want get_widget_blueprint_tree / set_widget_property / set_slot_properties instead. In particular ANCHORS live on a UCanvasPanelSlot inside a Widget Blueprint's tree and have no meaning at all on a level UWidgetComponent: set them with set_slot_properties(widget_bp_path, widget_name, anchors=[min_x,min_y,max_x,max_y]).
 //   @param actor_name_filter - Optional substring filter on the owning actor's name (Contains match)
 //   @returns { components: [{ actor_name: string, widget_component_name: string, widget_name: string|null, widget_class: string|null }], component_count: number, actor_name_filter: string|null }
 
@@ -507,7 +507,7 @@ TSharedPtr<FJsonObject> HandleListLevelWidgetComponents(const TSharedPtr<FJsonOb
 //   @param target_world - Optional: "editor" | "pie" | "server" (the PIE world with authority) | "client" | "pie:N" | "game" (alias of "pie"). Defaults to "pie" when a Play-In-Editor session is running, else "editor". IMPORTANT: "editor" NEVER has a PlayerController, because GEditor's world is not a game world, so add_to_viewport can never really add there -- that is reported honestly (added_to_viewport stays false), never simulated. "pie" resolves the running PIE world and its first local PlayerController, so add_to_viewport there performs a REAL AddToViewport().
 //   @returns { widget_name: string, widget_class_path: string, widget_class_name: string, target_world: string, added_to_viewport: bool, add_to_viewport_note?: string, widget_valid: bool, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }
 //   NOTE (impl): "pie" scans GEngine->GetWorldContexts() for EWorldType::PIE, the same idiom as
-//   read_pie_widgets / click_pie_widget in UEAgentWidgetCommands.cpp.
+//   list_pie_widgets / click_pie_widget in UEAgentWidgetCommands.cpp.
 
 TSharedPtr<FJsonObject> HandleCreateWidget(const TSharedPtr<FJsonObject>& Params)
 {
@@ -589,7 +589,7 @@ TSharedPtr<FJsonObject> HandleCreateWidget(const TSharedPtr<FJsonObject>& Params
                 ? TEXT("add_to_viewport was requested but target_world='editor' has no PlayerController "
                        "(the editor world is never a game world); AddToViewport() was NOT called. Pass "
                        "target_world='pie' with a running PIE session for a real AddToViewport, or use "
-                       "read_pie_widgets/click_pie_widget (UEAgentWidgetCommands.cpp) to inspect/drive "
+                       "list_pie_widgets/click_pie_widget (UEAgentWidgetCommands.cpp) to inspect/drive "
                        "runtime UI that is already on screen.")
                 : TEXT("add_to_viewport was requested but no local PlayerController was found in the PIE "
                        "world; AddToViewport() was NOT called."));
@@ -597,7 +597,7 @@ TSharedPtr<FJsonObject> HandleCreateWidget(const TSharedPtr<FJsonObject>& Params
     return mcp_common::MakeOkReply(Outcome);
 }
 
-// MCP:remove_widget - Detach a runtime UserWidget, found by object name, from the viewport or panel holding it with RemoveFromParent. It searches the worlds create_widget uses: the one target_world names, or without it the running PIE world first and then the editor world; in each, the first widget hosted by a level UWidgetComponent, then any other UserWidget of that world. The object is not deleted, no asset changes and there is no undo. was_in_viewport and had_parent are measured before the call: both false means nothing was detached, as for a component-hosted widget. It never edits a Widget Blueprint asset.
+// MCP:remove_widget - Detach a runtime UserWidget, found by object name, from the viewport or panel holding it with RemoveFromParent. It searches the worlds create_widget uses: the one target_world names, or without it the running PIE world first and then the editor world; in each, the first widget hosted by a level UWidgetComponent, then any other UserWidget of that world. The object is not deleted, no asset changes and there is no undo. was_in_viewport and had_parent are measured before the call: both false means nothing was detached, as for a component-hosted widget. It never edits a Widget Blueprint asset: remove_widget_from_blueprint deletes a widget from one.
 //   @param widget_name - Object name of the runtime widget to detach (case-insensitive), as list_level_widget_components or create_widget report it
 //   @param target_world - Optional world to search, with the values create_widget takes (editor, pie, server, client, pie:N, game). Omitted: the PIE world while PIE runs, then the editor world.
 //   @returns { widget_name: string, target_world: string, was_in_viewport: bool, had_parent: bool, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }

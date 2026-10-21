@@ -50,7 +50,7 @@ Add a top-level state (a new SubTree, never a child of another state) to a State
 
 *Additive.*
 
-Append a new enter-condition node, of the struct named by condition_struct and with that struct's default values, to the EnterConditions of one state of a StateTree asset, then save the asset without compiling it; there is no undo step. Each call appends another node, so repeating it stacks a duplicate condition. A missing tree, editor data, state or struct, or a struct that does not derive from FStateTreeConditionBase, is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. Struct names: list_condition_types; list them: list_conditions; set a field: set_condition_property; inverse: remove_state_enter_condition; a condition on a transition: add_transition_condition; check the result with compile_state_tree.
+Append a new enter-condition node, of the struct named by condition_struct and with that struct's default values, to the EnterConditions of one state of a StateTree asset, then save the asset without compiling it; there is no undo step. Each call appends another node, so repeating it stacks a duplicate condition. A missing tree, editor data, state or struct, or a struct that does not derive from FStateTreeConditionBase, is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. Struct names: list_condition_types; list them: list_conditions; set a field: set_condition_property; inverse: remove_state_enter_condition; a condition on a transition: add_state_transition_condition; check the result with compile_state_tree.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -78,7 +78,7 @@ Attach a task node (by struct name, resolved via reflection) to a state's Tasks 
 
 *Additive.*
 
-Append a transition from from_state to to_state on a StateTree asset (trigger OnStateCompleted, type GotoState), then compile and save it; each call adds another one. event_name only fills RequiredEvent, which matters with an OnEvent trigger: set that with update_transition. Returns transition_count and saved.
+Append a transition from from_state to to_state on a StateTree asset (trigger OnStateCompleted, type GotoState), then compile and save it; each call adds another one. event_name only fills RequiredEvent, which matters with an OnEvent trigger: set that with set_state_transition. Returns transition_count and saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -88,6 +88,21 @@ Append a transition from from_state to to_state on a StateTree asset (trigger On
 | `event_name` | string | no | Gameplay tag stored as the transition RequiredEvent, e.g. "AI.Event.Alert"; a tag that is not registered is ignored without error. |
 
 **Returns:** `{ tree_path, from_state, to_state, event_name, transition_count, added, saved }`
+
+## `add_state_transition_condition`
+
+*Additive.*
+
+Append a new condition node, of the struct named by condition_struct and with that struct's default values, to the Conditions of one transition of a state of a StateTree asset, then save the asset without compiling it; there is no undo step. The transition is addressed by state_name and transition_index, its 0-based position in that state's list as get_state_tree_info reports it (transitions[].index). Each call appends another node. A missing tree or state, a missing or out-of-range transition_index, or a struct that does not derive from FStateTreeConditionBase is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. Struct names: list_condition_types; set a field: set_condition_property with target_kind "transition"; inverse: remove_state_transition_condition; a condition for entering a state: add_state_enter_condition.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
+| `state_name` | string | yes | Name of the state owning the transition; the first state with that name in a depth-first walk of the hierarchy is used |
+| `transition_index` | number | yes | 0-based index of the transition within that state (the index field of get_state_tree_info transitions); required |
+| `condition_struct` | string | yes | Condition struct name or /Script path; must derive from StateTreeConditionBase (e.g. "StateTreeRandomCondition") |
+
+**Returns:** `{ tree_path, state_name, transition_index, condition_struct, condition_count, added, saved }`
 
 ## `add_state_tree_binding`
 
@@ -132,21 +147,6 @@ Add a typed parameter to the root parameter bag of a StateTree asset (the parame
 | `parameter_type` | string | no | Scalar type: bool, int (default), int64, float, double, name, string, text, byte; case is ignored, int32 and fstring are accepted as aliases, and an unrecognised type silently becomes a string parameter |
 
 **Returns:** `{ tree_path, parameter_name, parameter_type, parameter_count, added, already_existed, saved, note? }`
-
-## `add_transition_condition`
-
-*Additive.*
-
-Append a new condition node, of the struct named by condition_struct and with that struct's default values, to the Conditions of one transition of a state of a StateTree asset, then save the asset without compiling it; there is no undo step. The transition is addressed by state_name and transition_index, its 0-based position in that state's list as get_state_tree_info reports it (transitions[].index). Each call appends another node. A missing tree or state, a missing or out-of-range transition_index, or a struct that does not derive from FStateTreeConditionBase is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. Struct names: list_condition_types; set a field: set_condition_property with target_kind "transition"; inverse: remove_transition_condition; a condition for entering a state: add_state_enter_condition.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
-| `state_name` | string | yes | Name of the state owning the transition; the first state with that name in a depth-first walk of the hierarchy is used |
-| `transition_index` | number | yes | 0-based index of the transition within that state (the index field of get_state_tree_info transitions); required |
-| `condition_struct` | string | yes | Condition struct name or /Script path; must derive from StateTreeConditionBase (e.g. "StateTreeRandomCondition") |
-
-**Returns:** `{ tree_path, state_name, transition_index, condition_struct, condition_count, added, saved }`
 
 ## `compile_state_tree`
 
@@ -332,7 +332,7 @@ Read one property of a task node on a StateTree state (task_index, from list_tas
 
 *Read-only.*
 
-List the concrete condition struct types (children of FStateTreeConditionBase, abstract ones skipped) of the loaded modules, sorted by name, for add_state_enter_condition and add_transition_condition. Returns count and types [{name, struct_path}]; struct_path always assumes /Script/StateTreeModule, so pass name for other modules.
+List the concrete condition struct types (children of FStateTreeConditionBase, abstract ones skipped) of the loaded modules, sorted by name, for add_state_enter_condition and add_state_transition_condition. Returns count and types [{name, struct_path}]; struct_path always assumes /Script/StateTreeModule, so pass name for other modules.
 
 No parameters.
 
@@ -490,7 +490,7 @@ Remove a state from the tree by name.  Idempotent: removing a non-existent state
 
 *Destructive.*
 
-Remove one enter condition, by index, from a state of a StateTree asset and save the asset. An out-of-range index removes nothing and still succeeds, with removed false and a note. Returns removed, remaining and saved; for transition conditions use remove_transition_condition.
+Remove one enter condition, by index, from a state of a StateTree asset and save the asset. An out-of-range index removes nothing and still succeeds, with removed false and a note. Returns removed, remaining and saved; for transition conditions use remove_state_transition_condition.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -499,6 +499,35 @@ Remove one enter condition, by index, from a state of a StateTree asset and save
 | `condition_index` | number | yes | 0-based index into the state EnterConditions, as listed by list_conditions. |
 
 **Returns:** `{ tree_path, state_name, condition_index, removed, remaining, saved, note }`
+
+## `remove_state_transition`
+
+*Destructive, idempotent.*
+
+Remove a transition (by index) from a state. Idempotent at the index-out-of-range boundary.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `tree_path` | string | yes | Asset path to the UStateTree. |
+| `state_name` | string | yes | Name of the state. |
+| `transition_index` | number | yes | 0-based index into the state's Transitions array. |
+
+**Returns:** `{ tree_path, state_name, transition_index, removed, remaining, saved }`
+
+## `remove_state_transition_condition`
+
+*Destructive.*
+
+Remove one condition, by index, from a transition of a StateTree state and save the asset. An out-of-range transition_index is an error; an out-of-range condition_index removes nothing and still succeeds, with removed false. Returns removed, remaining and saved.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
+| `state_name` | string | yes | Name of the state that owns the transition; the command fails without it. |
+| `transition_index` | number | yes | 0-based index into the state transitions, as listed by get_state_tree_info (transitions[].index). |
+| `condition_index` | number | yes | 0-based index into the Conditions of that transition. |
+
+**Returns:** `{ tree_path, state_name, transition_index, condition_index, removed, remaining, saved, note }`
 
 ## `remove_state_tree_binding`
 
@@ -556,35 +585,6 @@ Remove a task (by index) from a state. Idempotent at the index-out-of-range boun
 | `task_index` | number | yes | 0-based index into the state's Tasks array. |
 
 **Returns:** `{ tree_path, state_name, task_index, removed, remaining, saved }`
-
-## `remove_transition`
-
-*Destructive, idempotent.*
-
-Remove a transition (by index) from a state. Idempotent at the index-out-of-range boundary.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `tree_path` | string | yes | Asset path to the UStateTree. |
-| `state_name` | string | yes | Name of the state. |
-| `transition_index` | number | yes | 0-based index into the state's Transitions array. |
-
-**Returns:** `{ tree_path, state_name, transition_index, removed, remaining, saved }`
-
-## `remove_transition_condition`
-
-*Destructive.*
-
-Remove one condition, by index, from a transition of a StateTree state and save the asset. An out-of-range transition_index is an error; an out-of-range condition_index removes nothing and still succeeds, with removed false. Returns removed, remaining and saved.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
-| `state_name` | string | yes | Name of the state that owns the transition; the command fails without it. |
-| `transition_index` | number | yes | 0-based index into the state transitions, as listed by get_state_tree_info (transitions[].index). |
-| `condition_index` | number | yes | 0-based index into the Conditions of that transition. |
-
-**Returns:** `{ tree_path, state_name, transition_index, condition_index, removed, remaining, saved, note }`
 
 ## `set_condition_property`
 
@@ -662,6 +662,30 @@ Set how one state of a StateTree asset is entered when the tree selects it (USta
 | `selection_behavior` | string | yes | One of None \| TryEnterState \| TrySelectChildrenInOrder \| TrySelectChildrenAtRandom \| TrySelectChildrenWithHighestUtility \| TrySelectChildrenAtRandomWeightedByUtility \| TryFollowTransitions; an EStateTreeStateSelectionBehavior:: prefix is accepted |
 
 **Returns:** `{ tree_path, state_name, selection_behavior, set, changed, saved, note? }`
+
+## `set_state_transition`
+
+*Destructive, idempotent.*
+
+Update any subset of the fields of an existing transition of a state of a StateTree asset -- trigger, priority, type, target state, event tag and payload, enabled flag and delay -- in one undo step, then save the asset without compiling it. Only fields explicitly passed are written; everything else is preserved, and the reply reads every field back. Every input is checked before any is written: an unknown enum name, target_state, event_tag or payload_struct, or a missing or out-of-range transition_index, is an error naming each bad input, and nothing is changed or saved, so errors in a reply is always empty. A call that leaves every field as it was changes and saves nothing (changed false, saved false, a note). A failed save (for example while PIE runs) makes success false. A new transition: add_state_transition; inverse: remove_state_transition; conditions: add_state_transition_condition.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `tree_path` | string | yes | Asset path of the UStateTree |
+| `state_name` | string | yes | State that owns the transition; the first state with that name in a depth-first walk of the hierarchy is used |
+| `transition_index` | number | yes | Index into the state's Transitions array (0-based, transitions[].index of get_state_tree_info); required |
+| `trigger` | string | no | Optional EStateTreeTransitionTrigger name (None\|OnStateCompleted\|OnStateTick\|OnEvent\|OnDelta\|...) |
+| `priority` | string | no | Optional EStateTreeTransitionPriority name (Lowest\|Low\|Normal\|High\|Highest) |
+| `transition_type` | string | no | Optional EStateTreeTransitionType name (None\|Succeeded\|Failed\|GotoState\|Parent\|NextState\|NextSelectableState\|NextParent\|NextSelectableParent) |
+| `target_state` | string | no | Optional re-target by state name (only when you want to redirect the edge) |
+| `event_tag` | string | no | Optional event tag as a literal FGameplayTag string (e.g. "GameplayCue.Movement.Jumped") |
+| `payload_struct` | string | no | Optional UScriptStruct name or /Script path for the event payload |
+| `enabled` | boolean | no | Optional bool (defaults preserved when omitted) |
+| `delay` | boolean | no | Optional bool (when true, delay_duration and delay_variance are honored by the editor) |
+| `delay_duration` | number | no | Optional number (seconds) |
+| `delay_variance` | number | no | Optional number (seconds of random variance) |
+
+**Returns:** `{ tree_path, state_name, transition_index, trigger, priority, transition_type, target_state, event_tag, payload_struct, enabled, delay, delay_duration, delay_variance, applied_fields: [string] (the fields passed), errors: [string], changed, saved, note? }`
 
 ## `set_state_tree_component_parameter_override`
 
@@ -768,30 +792,6 @@ Write one property of a task's node struct on a StateTree state (state_name + ta
 | `value` | any | yes | JSON value to apply (any FJsonObjectConverter-supported type). |
 
 **Returns:** `{ tree_path, state_name, task_index, property, set, value_changed, saved, new_value?, save_error? }`
-
-## `update_transition`
-
-*Destructive.*
-
-Update any subset of the fields of an existing transition of a state of a StateTree asset -- trigger, priority, type, target state, event tag and payload, enabled flag and delay -- in one undo step, then save the asset without compiling it. Only fields explicitly passed are written; everything else is preserved, and the reply reads every field back. Every input is checked before any is written: an unknown enum name, target_state, event_tag or payload_struct, or a missing or out-of-range transition_index, is an error naming each bad input, and nothing is changed or saved, so errors in a reply is always empty. A call that leaves every field as it was changes and saves nothing (changed false, saved false, a note). A failed save (for example while PIE runs) makes success false. A new transition: add_state_transition; inverse: remove_transition; conditions: add_transition_condition.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `tree_path` | string | yes | Asset path of the UStateTree |
-| `state_name` | string | yes | State that owns the transition; the first state with that name in a depth-first walk of the hierarchy is used |
-| `transition_index` | number | yes | Index into the state's Transitions array (0-based, transitions[].index of get_state_tree_info); required |
-| `trigger` | string | no | Optional EStateTreeTransitionTrigger name (None\|OnStateCompleted\|OnStateTick\|OnEvent\|OnDelta\|...) |
-| `priority` | string | no | Optional EStateTreeTransitionPriority name (Lowest\|Low\|Normal\|High\|Highest) |
-| `transition_type` | string | no | Optional EStateTreeTransitionType name (None\|Succeeded\|Failed\|GotoState\|Parent\|NextState\|NextSelectableState\|NextParent\|NextSelectableParent) |
-| `target_state` | string | no | Optional re-target by state name (only when you want to redirect the edge) |
-| `event_tag` | string | no | Optional event tag as a literal FGameplayTag string (e.g. "GameplayCue.Movement.Jumped") |
-| `payload_struct` | string | no | Optional UScriptStruct name or /Script path for the event payload |
-| `enabled` | boolean | no | Optional bool (defaults preserved when omitted) |
-| `delay` | boolean | no | Optional bool (when true, delay_duration and delay_variance are honored by the editor) |
-| `delay_duration` | number | no | Optional number (seconds) |
-| `delay_variance` | number | no | Optional number (seconds of random variance) |
-
-**Returns:** `{ tree_path, state_name, transition_index, trigger, priority, transition_type, target_state, event_tag, payload_struct, enabled, delay, delay_duration, delay_variance, applied_fields: [string] (the fields passed), errors: [string], changed, saved, note? }`
 
 ## `validate_state_tree`
 

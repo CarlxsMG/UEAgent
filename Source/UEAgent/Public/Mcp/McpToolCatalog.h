@@ -20,6 +20,7 @@ class FJsonObject;
  *   - rotation: the schema also accepts the {roll,pitch,yaw} OBJECT
  *   - the `@returns` shape, appended to the description
  *   - the MCP `annotations` (read-only, destructive, idempotent, open world), from the catalog
+ *   - retired and renamed tools: left out of tools/list, still callable (ResolveCallName)
  *
  * Whatever is not in the schema cannot be sent by the client, so the three escape hatches
  * above (`force`, aliases, rotation object) are declared in the schema itself (otherwise they
@@ -89,6 +90,11 @@ public:
 		/** The MCP `annotations` (readOnlyHint, destructiveHint, idempotentHint, openWorldHint) that
 		 *  Tools/tool_hints.py derives from the handler's code. Null when the catalog has none. */
 		TSharedPtr<FJsonObject> Annotations;
+		/** The listed tool that does what this one does (`retired.use` in the catalog), for a tool retired from
+		 *  tools/list that still runs under its own name. Empty for a listed tool. */
+		FString RetiredFor;
+		/** How to make the same call with RetiredFor (`retired.how` in the catalog). */
+		FString RetiredHow;
 
 		const FParam* FindParam(const FString& ParamName) const;
 		/** The description tools/list and describe_tool publish: Description, then "Returns: " and
@@ -106,9 +112,25 @@ public:
 	static TSharedPtr<const FMcpToolCatalog> GetCurrent();
 	static void SetCurrent(TSharedPtr<const FMcpToolCatalog> NewCatalog);
 
+	/** A listed tool, or a retired one (it still runs under its own name). Null for any other name, a renamed tool's
+	 *  old name included: ResolveCallName gives the name it runs under. */
 	const FTool* FindTool(const FString& ToolName) const;
+	/** The listed tools: what tools/list, find_tools and the tool counts carry. */
 	const TArray<FTool>& GetTools() const { return Tools; }
 	int32 NumTools() const { return Tools.Num(); }
+	/** The tools retired from the list that still run under their own name (FTool::RetiredFor). */
+	const TArray<FTool>& GetRetiredTools() const { return RetiredTools; }
+	/** Old name -> new name of every renamed tool (`renamed` in the catalog). */
+	const TMap<FString, FString>& GetRenamedTools() const { return RenamedTools; }
+
+	/**
+	 * The name a call to Name runs under, by the current catalog: a renamed tool's new name, else Name itself (also
+	 * when no catalog is loaded). OutNote, when given, receives what the reply tells the caller about an old or
+	 * retired name, and is emptied for any other. Safe from any thread.
+	 */
+	static FString ResolveCallName(const FString& Name, FString* OutNote = nullptr);
+	/** ResolveCallName by this catalog. */
+	FString ResolveName(const FString& Name, FString* OutNote = nullptr) const;
 	int32 NumParams() const { return TotalParams; }
 	const FString& GetSourcePath() const { return SourcePath; }
 
@@ -192,6 +214,9 @@ public:
 private:
 	TArray<FTool> Tools;
 	TMap<FString, int32> IndexByName;
+	TArray<FTool> RetiredTools;
+	TMap<FString, int32> RetiredIndexByName;
+	TMap<FString, FString> RenamedTools;
 	TArray<uint8> ToolsListUtf8;
 	TArray<uint8> CompactToolsListUtf8;
 	FString SourcePath;

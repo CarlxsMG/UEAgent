@@ -69,7 +69,7 @@ Find placed actors by CLASS (IsA) and/or editor label and read chosen properties
 | `class_name` | string | no | Class filter: bare UClass name resolved with FindFirstObject (e.g. "BP_MyActor_C", "StaticMeshActor"), NOT an asset path. Matches every actor that IsA(class_name). REQUIRED unless actor_label is given. |
 | `actor_label` | string | no | Editor-label filter; matches actors whose GetActorLabel() equals this EXACTLY (no substring, no case-folding). REQUIRED unless class_name is given — the call errors when both are missing. |
 | `component` | string | no | Optional component name to drill into on each matched actor (reads that component's props instead of the actor's). WARNING: actors that have no component with this name are DROPPED from `instances` entirely, so a short list can mean "wrong component name", not "no such actor". |
-| `properties` | array | no | Optional property names to read. Names the target does not have are skipped SILENTLY (no not_found list — cross-check the spelling with inspect_object or get_class_properties). Omit it to read every BlueprintVisible property, which on a Character is a very large payload. |
+| `properties` | array | no | Optional property names to read. Names the target does not have are skipped SILENTLY (no not_found list — cross-check the spelling with get_object_info or get_class_properties). Omit it to read every BlueprintVisible property, which on a Character is a very large payload. |
 | `world` | string | no | Optional world selector: absent/'pie' (default, ambiguous: PlayWorld, else the first PIE context) \| 'server' (the PIE world with authority) \| 'client' \| 'pie:N' \| 'editor' \| 'game' (alias of 'pie'). THIS is the parameter that separates a server reading from a client one. |
 
 **Returns:** `{ instances: [{ path: string, props: object (typed values) }], instance_count: int, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }`
@@ -103,7 +103,7 @@ Walk the full inheritance chain of a class from itself up to UObject, one record
 
 *Read-only.*
 
-List every property VISIBLE on a class — the ones it DECLARES plus every inherited one, each tagged with owner_class and is_inherited so "does this class add anything of its own?" is a FIELD (declared_property_count) and not an eyeball diff against a remembered list of engine members. declared_only=true returns just this class's own. WARNING: a component or data class usually exposes its Blueprint API as PROPERTIES, not functions: get_class_functions coming back with nothing of its own does NOT mean the class has no API — ask here too (e.g. MetaHumanComponentBase: 0 own functions, 12 own properties). Full typed descriptor per property — kind, cpp_type, editable, edit_const, blueprint_visible, replicated, save_game, config, clamp min/max, enum entries, struct fields, tooltip, edit_condition — plus the class's own flags, config name and implemented interfaces. Schema only: NO instance values. Use inspect_object (include_property_metadata=true) for the same descriptors WITH the current values of a live object, get_properties when you already know the names, and get_blueprint_variables for just the variables a Blueprint itself authored.
+List every property VISIBLE on a class — the ones it DECLARES plus every inherited one, each tagged with owner_class and is_inherited so "does this class add anything of its own?" is a FIELD (declared_property_count) and not an eyeball diff against a remembered list of engine members. declared_only=true returns just this class's own. WARNING: a component or data class usually exposes its Blueprint API as PROPERTIES, not functions: get_class_functions coming back with nothing of its own does NOT mean the class has no API — ask here too (e.g. MetaHumanComponentBase: 0 own functions, 12 own properties). Full typed descriptor per property — kind, cpp_type, editable, edit_const, blueprint_visible, replicated, save_game, config, clamp min/max, enum entries, struct fields, tooltip, edit_condition — plus the class's own flags, config name and implemented interfaces. Schema only: NO instance values. Use get_object_info (include_property_metadata=true) for the same descriptors WITH the current values of a live object, get_properties when you already know the names, and get_blueprint_variables for just the variables a Blueprint itself authored.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -150,6 +150,21 @@ Inspect ONE UFUNCTION on a class and get its exact call contract: input paramete
 
 **Returns:** `{ class_name: string, function_name: string, is_blueprint_callable: bool, is_blueprint_event: bool, is_public: bool, is_static: bool, is_blueprint_pure: bool, is_call_in_editor: bool, category?, tooltip?, parameters: [{name, type}], returns: [{name, type}] }`
 
+## `get_object_info`
+
+*Read-only.*
+
+Portrait of ONE object when you do not know its property names yet: identity (name, class, class path, super class, is_valid), class flags, metadata and implemented interfaces, EVERY reflected property as { name: typed_value }, and for an actor its live components with their classes. Once you know the names, get_properties is far cheaper; get_class_properties gives the property descriptors of a class with no instance, get_class_hierarchy its ancestor chain, and get_actor_components the components alone. include_properties=false makes it the cheap "what IS this thing?" probe (identity and class only); include_property_metadata=true adds each property's editor metadata (type, editable, edit_const, blueprint_visible, replicated, save_game, clamp, tooltip, enum entries) next to its value. Accepts `world`, so the portrait can be the live server or client instance -- useful when a class is swapped at runtime -- and the reply stamps which world answered. Read-only.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `object_path` | string | yes | Path or name of the object to inspect. In the editor world: full object path, asset path, CDO/archetype, or a dotted "Actor[.Component[.Subobject]]" whose first segment is the actor's INTERNAL name. In a live world: a fully-qualified PIE path or the same dotted form (first segment matches internal name OR editor label). |
+| `world` | string | no | Optional world selector: absent/'editor' (default: the editor/asset instance) \| 'pie' (ambiguous: PlayWorld, else the first PIE context) \| 'server' (the PIE world with authority) \| 'client' \| 'pie:N' \| 'game' (alias of 'pie'). Anything other than absent/'editor' portrays the LIVE instance in that world; an UNRECOGNIZED value is an error naming the worlds that exist, never a silent fallback to another world. |
+| `include_properties` | boolean | no | Optional bool (default true). false skips the properties and the components list, leaving identity and class only. |
+| `include_property_metadata` | boolean | no | Optional bool (default false). true returns properties as an ARRAY of typed descriptors (see get_class_properties) each with its current `value`, instead of the { name: typed_value } map. |
+
+**Returns:** `{ object_path: string, object_name: string, class_name: string, class_path: string, super_class: string, is_valid: bool, is_abstract, is_deprecated, is_placeable, is_native, config_name, implemented_interfaces: [{interface, implemented_by_k2}], class_group?, is_blueprintable?, is_blueprint_type?, display_name?, tooltip?, properties?: {prop_name: typed_value} | [<typed descriptor + value>], property_count?: int, components?: [{name, class}], world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number } -- properties/property_count/components only with include_properties; properties is the array form with include_property_metadata; super_class is "None" for UObject.`
+
 ## `get_package_info`
 
 *Read-only.*
@@ -166,7 +181,7 @@ Inspect a package that is ALREADY LOADED IN MEMORY: its long name, its is_dirty 
 
 *Read-only.*
 
-Read one or several named properties off ONE object you can already name -- an asset path, a live object's full path, a CDO/archetype, or a dotted "Actor[.Component[.Subobject]]" whose first segment is the actor's internal name -- typed rather than stringified, as { name: typed_value } plus each property's FProperty class and not_found[] for names the class does not declare. Pick it when you have the object and the names: inspect_object when you do not know the names yet, get_actor_properties_by_class when you have no path and want instances by class or label (it drops misspelled names; this reports them), get_component_properties to list every property of one component or of a Blueprint component template. property_name reads one; property_names batches several. Accepts `world` (editor, server, client, pie:N), so the same read on server and client is the cheapest proof that a value replicated; the reply stamps which world answered. Read-only.
+Read one or several named properties off ONE object you can already name -- an asset path, a live object's full path, a CDO/archetype, or a dotted "Actor[.Component[.Subobject]]" whose first segment is the actor's internal name -- typed rather than stringified, as { name: typed_value } plus each property's FProperty class and not_found[] for names the class does not declare. Pick it when you have the object and the names: get_object_info when you do not know the names yet, get_actor_properties_by_class when you have no path and want instances by class or label (it drops misspelled names; this reports them), get_component_properties to list every property of one component or of a Blueprint component template. property_name reads one; property_names batches several. Accepts `world` (editor, server, client, pie:N), so the same read on server and client is the cheapest proof that a value replicated; the reply stamps which world answered. Read-only.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -188,21 +203,6 @@ Read the definition of a UScriptStruct (native or Blueprint-authored): its path 
 | `struct_name` | string | yes | Bare struct name resolved with FindFirstObject (e.g. "Vector", "S_ItemStructure"); an asset path is NOT accepted here |
 
 **Returns:** `{ struct_name: string, struct_path: string, properties: [<typed property descriptor>] }`
-
-## `inspect_object`
-
-*Read-only.*
-
-Portrait of ONE object when you do not know its property names yet: identity (name, class, class path, super class, is_valid), class flags, metadata and implemented interfaces, EVERY reflected property as { name: typed_value }, and for an actor its live components with their classes. Once you know the names, get_properties is far cheaper; get_class_properties gives the property descriptors of a class with no instance, get_class_hierarchy its ancestor chain, and get_actor_components the components alone. include_properties=false makes it the cheap "what IS this thing?" probe (identity and class only); include_property_metadata=true adds each property's editor metadata (type, editable, edit_const, blueprint_visible, replicated, save_game, clamp, tooltip, enum entries) next to its value. Accepts `world`, so the portrait can be the live server or client instance -- useful when a class is swapped at runtime -- and the reply stamps which world answered. Read-only.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `object_path` | string | yes | Path or name of the object to inspect. In the editor world: full object path, asset path, CDO/archetype, or a dotted "Actor[.Component[.Subobject]]" whose first segment is the actor's INTERNAL name. In a live world: a fully-qualified PIE path or the same dotted form (first segment matches internal name OR editor label). |
-| `world` | string | no | Optional world selector: absent/'editor' (default: the editor/asset instance) \| 'pie' (ambiguous: PlayWorld, else the first PIE context) \| 'server' (the PIE world with authority) \| 'client' \| 'pie:N' \| 'game' (alias of 'pie'). Anything other than absent/'editor' portrays the LIVE instance in that world; an UNRECOGNIZED value is an error naming the worlds that exist, never a silent fallback to another world. |
-| `include_properties` | boolean | no | Optional bool (default true). false skips the properties and the components list, leaving identity and class only. |
-| `include_property_metadata` | boolean | no | Optional bool (default false). true returns properties as an ARRAY of typed descriptors (see get_class_properties) each with its current `value`, instead of the { name: typed_value } map. |
-
-**Returns:** `{ object_path: string, object_name: string, class_name: string, class_path: string, super_class: string, is_valid: bool, is_abstract, is_deprecated, is_placeable, is_native, config_name, implemented_interfaces: [{interface, implemented_by_k2}], class_group?, is_blueprintable?, is_blueprint_type?, display_name?, tooltip?, properties?: {prop_name: typed_value} | [<typed descriptor + value>], property_count?: int, components?: [{name, class}], world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number } -- properties/property_count/components only with include_properties; properties is the array form with include_property_metadata; super_class is "None" for UObject.`
 
 ## `list_derived_classes`
 
@@ -309,16 +309,18 @@ Read the events a subscription has recorded so far, including each fire's parame
 
 *Destructive, idempotent.*
 
-Write one or several properties on ONE object you can path to -- an asset, a CDO/archetype, a placed actor, or a dotted "Actor.Component[.Subobject]" -- in the EDITOR world, reporting set[] and failed[{property,error}] per name. Pick it for assets, CDOs and actors, or several properties at once; set_component_property for a placed actor's component in a live PIE world or a property this edit gate refuses; a typed set_&lt;type>_properties tool when its description names a step you need (validation, rebuild, recompile, save); call_function to go through the object's own setter. Each write needs an editable, non-EditConst or BlueprintReadWrite property and runs Modify/PreEditChange/PostEditChange like a Details-panel edit: undoable, package dirtied, nothing saved (save_asset / save_level), no Blueprint compiled. Unregistered gameplay tags are refused. WARNING: success only means the import did not error -- re-read with get_properties before believing it, especially an FGameplayTag on a placed actor, which has reported success and left the tag empty.
+Write one or several properties on ONE object -- an asset, a CDO/archetype, a placed actor, or one of its components as "Actor.Component" -- in the EDITOR world, as an edit in the Details panel: each write runs Modify/PreEditChange/PostEditChange (undoable, package dirtied, the component re-registered), and the reply lists set[] and failed[{property,error}] per name. This is the tool for any editable setting of a light, fog, sky, cloud, decal, camera, post-process volume, capture, replication flag, sound, Niagara system, physical material, montage, foliage type or other asset: pass the engine's property names (get_object_info lists them), a struct as a JSON object of only the fields to change, a color as {"R","G","B","A"}. The actor is found by its internal name or by a label only it has; the component by its name or by a class only one of its components has ("Sun.DirectionalLightComponent", "Fog.ExponentialHeightFogComponent"). A key inside a struct that names no field is refused, and nothing is written to that property. clamp=true keeps numbers inside the property's ClampMin/ClampMax, as the Details panel does, and lists what it clamped; save=true saves the asset's package (refused for a level object: save_level). A blend space is resampled after the write. Use set_component_property for a component in a live PIE world, set_blueprint_component_properties for a Blueprint's component template, set_widget_property inside a Widget Blueprint, call_function for the object's own setter. Unregistered gameplay tags are refused. No Blueprint is compiled.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `object_path` | string | yes | Path or name of the object instance, resolved in the EDITOR world: full object path, asset path, CDO/archetype, or a dotted "Actor[.Component[.Subobject]]" whose first segment is the actor's internal name. |
+| `object_path` | string | yes | The object, resolved in the EDITOR world: an asset path, a full object path, a CDO/archetype, or "Actor[.Component[.Subobject]]" where Actor is an internal name or a unique label and Component a component name or a class only one component has. |
 | `properties` | object | no | Optional dict of {property_name: value}; values can be scalar, nested object, or array (UE-format text like "(X=1,Y=2,Z=3)" is also accepted for structs). Required unless property_name + value is given; both together write properties{} first. |
 | `property_name` | string | no | Optional single property to write (must be CPF_Edit and not EditConst, or it lands in failed[] with the reason). Needs value. |
 | `value` | any | no | Optional new value for property_name: string, number, boolean, JSON object (struct), JSON array (array/set/tag container), or a UE-format text string like "(X=1,Y=2,Z=3)" |
+| `save` | boolean | no | Save the asset's package after the writes (default false); refused, before anything is written, for an object in a level |
+| `clamp` | boolean | no | Clamp each number written to the ClampMin/ClampMax of its property, struct fields and array elements included (default false) |
 
-**Returns:** `{ object_path: string, set: [string], failed: [{property, error}], success: bool }`
+**Returns:** `{ object_path: string, resolved_path: string, set: [string], failed: [{property, error}], clamped?: [string] ("name=value", with clamp), saved?: bool, save_error?: string (with save), success: bool }`
 
 ## `subscribe_to_delegate`
 

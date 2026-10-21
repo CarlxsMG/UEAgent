@@ -2,7 +2,7 @@
 
 # Mass
 
-22 tools for Mass Entity configs and traits, spawners, entities, tags and signals.
+21 tools for Mass Entity configs and traits, spawners, entities, tags and signals.
 
 Back to the [index](README.md).
 
@@ -45,19 +45,18 @@ Create a UMassEntityConfigAsset (an empty list of Mass traits) at package_path/c
 
 **Returns:** `{ config_path, config_name, trait_count, created, saved }`
 
-## `create_mass_spawner_actor`
+## `delete_mass_entity`
 
-*Additive.*
+*Destructive.*
 
-Spawn an AMassSpawner actor into the editor world at location (zero rotation) and label it; the level is not saved. config_path is only echoed, not linked (config_linked:false): link configs with set_mass_spawner_entity_types. Use a unique label, since the spawner tools take the first match.
+Destroy a single Mass entity by its handle (Index:SerialNumber), or with all=true every Mass entity in the editor world (not a PIE world), archetype by archetype; no undo either way. Give exactly one of entity_handle and all. To despawn what one spawner made use despawn_mass_entities.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_label` | string | yes | Editor label for the new spawner actor |
-| `config_path` | string | no | Optional entity config asset path (echoed; not linked) |
-| `location` | array | no | Optional spawn location [X, Y, Z] in world units (cm), default the origin; ignored unless it holds exactly 3 numbers |
+| `entity_handle` | string | no | "{Index}:{SerialNumber}" string returned by spawn/query. Provide this OR all. |
+| `all` | boolean | no | Optional bool, default false: true destroys every entity of the editor world's entity manager instead of one. Provide this OR entity_handle. |
 
-**Returns:** `{ actor_label, actor_name, config_path, config_linked, note }`
+**Returns:** `{ entity_handle?: string, destroyed?: bool, already_destroyed?: bool, all?: bool, destroyed_count?: int, before_count?: int, after_count?: int }`
 
 ## `despawn_mass_entities`
 
@@ -70,19 +69,6 @@ Trigger entity despawning on a AMassSpawner (DoDespawning from the FTSTicker pat
 | `actor_label` | string | yes | Editor label of the AMassSpawner actor |
 
 **Returns:** `{ actor_label, entity_count_before, entity_count_after, despawned, was_empty, note }`
-
-## `destroy_mass_entity`
-
-*Destructive.*
-
-Destroy a single Mass entity by its handle (Index:SerialNumber), or with all=true every Mass entity in the editor world (not a PIE world), archetype by archetype; no undo either way. Give exactly one of entity_handle and all. To despawn what one spawner made use despawn_mass_entities.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `entity_handle` | string | no | "{Index}:{SerialNumber}" string returned by spawn/query. Provide this OR all. |
-| `all` | boolean | no | Optional bool, default false: true destroys every entity of the editor world's entity manager instead of one. Provide this OR entity_handle. |
-
-**Returns:** `{ entity_handle?: string, destroyed?: bool, already_destroyed?: bool, all?: bool, destroyed_count?: int, before_count?: int, after_count?: int }`
 
 ## `fire_mass_signal`
 
@@ -108,6 +94,20 @@ Read the parent config path of a UMassEntityConfigAsset (inverse of set_mass_con
 | `config_path` | string | yes | Asset path of the UMassEntityConfigAsset |
 
 **Returns:** `{ config_path, parent_config_path, has_parent, config_class }`
+
+## `get_mass_entity_count`
+
+*Read-only.*
+
+Count entities matching a fragment/tag requirement. Requires "fragment" (UScriptStruct path or name) and optional "presence" ("All"|"Any"|"None" — default "All"). For tag-only queries use "tag" (UScriptStruct path).
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `fragment` | string | no | Script struct path or name (e.g. "/Script/MassMovement.MassMovementFragment" or "FMassMovementFragment"). |
+| `tag` | string | no | Optional. Same format as fragment. Use to require an FMassTag marker. |
+| `presence` | string | no | "All" (default), "Any", or "None". |
+
+**Returns:** `{ matching_count: int, fragment, tag, presence }`
 
 ## `get_mass_entity_info`
 
@@ -151,7 +151,7 @@ Read a property (name or dotted path) of a trait on a Mass entity config, picked
 
 *Read-only.*
 
-Census the Mass entities of the editor world (not a PIE world), read-only: every archetype with its live-entity and fragment counts. Returns archetype_count, total_entities (the sum over the archetypes), total (the entity manager's own count) and archetypes [{archetype_id, entity_count, fragment_count}]; get_mass_entity_info names the fragments of one entity, query_mass_entities counts by fragment or tag.
+Census the Mass entities of the editor world (not a PIE world), read-only: every archetype with its live-entity and fragment counts. Returns archetype_count, total_entities (the sum over the archetypes), total (the entity manager's own count) and archetypes [{archetype_id, entity_count, fragment_count}]; get_mass_entity_info names the fragments of one entity, get_mass_entity_count counts by fragment or tag.
 
 No parameters.
 
@@ -180,20 +180,6 @@ List the traits a UMassEntityConfigAsset holds itself (not those inherited from 
 | `config_path` | string | yes | Asset path to the UMassEntityConfig |
 
 **Returns:** `{ class, name, config_path, trait_count, traits }`
-
-## `query_mass_entities`
-
-*Read-only.*
-
-Count entities matching a fragment/tag requirement. Requires "fragment" (UScriptStruct path or name) and optional "presence" ("All"|"Any"|"None" — default "All"). For tag-only queries use "tag" (UScriptStruct path).
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `fragment` | string | no | Script struct path or name (e.g. "/Script/MassMovement.MassMovementFragment" or "FMassMovementFragment"). |
-| `tag` | string | no | Optional. Same format as fragment. Use to require an FMassTag marker. |
-| `presence` | string | no | "All" (default), "Any", or "None". |
-
-**Returns:** `{ matching_count: int, fragment, tag, presence }`
 
 ## `remove_mass_tag_from_entity`
 
@@ -280,7 +266,7 @@ Set one property (name or dotted struct path) of a trait on a Mass entity config
 
 *Additive.*
 
-Run DoSpawning on an editor-world AMassSpawner found by actor_label and report the global Mass entity-count delta -- it spawns entities, not an actor (create_mass_spawner_actor places the spawner). All configured types spawn at the spawner's own count (set_mass_spawner_count); a count that differs from it is an error and nothing is spawned. spawned can be 0. Inverse: despawn_mass_entities.
+Run DoSpawning on an editor-world AMassSpawner found by actor_label and report the global Mass entity-count delta -- it spawns entities, not an actor (spawn_actor places the spawner). All configured types spawn at the spawner's own count (set_mass_spawner_count); a count that differs from it is an error and nothing is spawned. spawned can be 0. Inverse: despawn_mass_entities.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

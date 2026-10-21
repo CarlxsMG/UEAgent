@@ -574,7 +574,7 @@ TSharedPtr<FJsonObject> HandleGetLandscapeInfo(const TSharedPtr<FJsonObject>& Pa
 // Foliage
 // ========================================================================== //
 
-// MCP:create_foliage_type - Create and save a FoliageType asset (UFoliageType_InstancedStaticMesh) wrapping a static mesh, so it can be placed as foliage and tuned with set_foliage_type_properties. Creating the asset is safe; note that the tools that PLACE instances of it (add_foliage_instances, scatter_foliage_in_box, scatter_foliage_on_layer) can crash the editor, so plan to scatter via instanced-static-mesh components or PCG. For landscape GRASS driven by the terrain material use create_landscape_grass_type instead.
+// MCP:create_foliage_type - Create and save a FoliageType asset (UFoliageType_InstancedStaticMesh) wrapping a static mesh, so it can be placed as foliage and tuned with set_properties. Creating the asset is safe; note that the tools that PLACE instances of it (add_foliage_instances, scatter_foliage_in_box, scatter_foliage_on_layer) can crash the editor, so plan to scatter via instanced-static-mesh components or PCG. For landscape GRASS driven by the terrain material use create_landscape_grass_type instead.
 //   @param name - Asset name, e.g. FT_Grass
 //   @param package_path - Target content path, defaults to /Game/Foliage
 //   @param static_mesh_path - Full path of the source StaticMesh
@@ -685,6 +685,7 @@ static void MakeFoliageTypePropsJson(UFoliageType* FT, TSharedPtr<FJsonObject>& 
 }
 
 // MCP:set_foliage_type_properties - Set tunables of a FoliageType_InstancedStaticMesh asset in one call, only the fields you pass, then save it. Over set_properties it takes the scale, z-offset and cull ranges as {"min","max"} objects and saves in the same call, but records no undo step. Returns the read-back values with applied_count and saved. An invalid mobility, or a range that is not such an object with a number bound, fails the call before anything is written. Edits the asset only: instances already placed keep their transforms. Read: get_foliage_type_properties.
+//   @retired set_properties - object_path=<foliage type>, properties={"ScaleX":{"Min":..,"Max":..},"CullDistance":{"Min":..,"Max":..},...}, save=true
 //   @param foliage_path - Asset path of a UFoliageType_InstancedStaticMesh, e.g. "/Game/Foliage/FT_Example"; actor foliage types are not found.
 //   @param density - Instances per 1000 x 1000 uu area (10 m by 10 m) when painting.
 //   @param density_adjustment_factor - Density multiplier used when reapplying: above 1 adds instances, below 1 removes them.
@@ -782,6 +783,7 @@ TSharedPtr<FJsonObject> HandleSetFoliageTypeProperties(const TSharedPtr<FJsonObj
 }
 
 // MCP:get_foliage_type_properties - Read a FoliageType_InstancedStaticMesh asset's authored tunables in one call -- density, radius, scale and z-offset ranges, cull distances, mobility, align-to-normal, random yaw, world collision, shadow and indirect-lighting flags -- under the names set_foliage_type_properties takes. A curated view with nothing computed; get_properties reads any other UPROPERTY on the asset. Actor foliage types are not found. Describes the ASSET, not what is placed in the level: for that use get_foliage_instance_count / get_foliage_in_radius.
+//   @retired get_properties - object_path=<foliage type>, property_names=["Density","Radius","ScaleX","CullDistance",...], or get_object_info for all of them
 //   @param foliage_path - Asset path of the UFoliageType
 //   @returns { asset_path, foliage_class, density, density_adjustment_factor, radius, scale_x:{min,max}, scale_y, scale_z, z_offset, cull_distance:{min,max}, mobility, align_to_normal, random_yaw, collision_with_world, cast_shadow, affect_dynamic_indirect_lighting }
 TSharedPtr<FJsonObject> HandleGetFoliageTypeProperties(const TSharedPtr<FJsonObject>& Params)
@@ -1024,7 +1026,7 @@ TSharedPtr<FJsonObject> HandleAddFoliageInstances(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:get_foliage_types - List every FoliageType actually present in the level's InstancedFoliageActors, with the instance counts each carries. The level-side inventory ("what vegetation is in this map, and how much"), as opposed to get_foliage_type_properties which describes one asset. Nothing here means nothing has been placed, even if the FoliageType assets exist in Content.
+// MCP:get_foliage_types - List every FoliageType actually present in the level's InstancedFoliageActors, with the instance counts each carries. The level-side inventory ("what vegetation is in this map, and how much"), as opposed to get_properties which describes one asset. Nothing here means nothing has been placed, even if the FoliageType assets exist in Content.
 //   @returns { foliage_types: [object], foliage_type_count: int, foliage_actor_count: int }
 TSharedPtr<FJsonObject> HandleGetFoliageTypes(const TSharedPtr<FJsonObject>& Params)
 {

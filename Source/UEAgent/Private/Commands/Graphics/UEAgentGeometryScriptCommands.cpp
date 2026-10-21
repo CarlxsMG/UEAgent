@@ -734,7 +734,8 @@ namespace
 // Dynamic-mesh actor commands: spawn an ADynamicMeshActor, then build and edit its live UDynamicMesh. Every
 // mutation here is verified by reading the triangle / vertex count back off the live mesh.
 
-// MCP:spawn_dynamic_mesh_actor - Spawn an empty ADynamicMeshActor into the editor world (not PIE) at an optional location and rotation, ignoring collisions, in one undo step -- the editable-mesh actor the GeometryScript tools (append_mesh_primitive, apply_mesh_boolean...) work on; spawn_actor has no such type. Each call adds another actor. Returns its label as actor_name, its internal name and triangle_count (0). Keep a result with copy_dynamic_mesh_to_static_mesh; remove it with remove_dynamic_mesh_actor.
+// MCP:spawn_dynamic_mesh_actor - Spawn an empty ADynamicMeshActor into the editor world (not PIE) at an optional location and rotation, ignoring collisions, in one undo step -- the editable-mesh actor the GeometryScript tools (add_mesh_primitive, apply_mesh_boolean...) work on; spawn_actor has no such type. Each call adds another actor. Returns its label as actor_name, its internal name and triangle_count (0). Keep a result with copy_dynamic_mesh_to_static_mesh; remove it with remove_dynamic_mesh_actor.
+//   @retired spawn_actor - type="DynamicMeshActor", name, location
 //   @param location - World location [x, y, z] in cm (default the world origin).
 //   @param rotation - World rotation in degrees as [pitch, yaw, roll] (default no rotation).
 //   @returns { actor_name: string, actor_internal_name: string, actor_class: string, has_dynamic_mesh_component: bool, has_dynamic_mesh: bool, triangle_count: int, spawned: bool }
@@ -775,7 +776,8 @@ TSharedPtr<FJsonObject> HandleSpawnDynamicMeshActor(const TSharedPtr<FJsonObject
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:append_mesh_primitive - Append a Box, Sphere, Cylinder or Cone to the live dynamic mesh of a DynamicMeshActor in the editor world, keeping the geometry already there: size is the box edge or the diameter and height of the round shapes, centred at location in mesh-local space. Each call adds another copy as one undo step: undo puts the mesh back as it was. Nothing is saved to an asset. An unknown actor or primitive is an error that leaves the mesh as it was; appended is true when the triangle count grew. To merge another actor's mesh use append_mesh_to_dynamic_mesh; to persist the result, copy_dynamic_mesh_to_static_mesh.
+// MCP:add_mesh_primitive - Append a Box, Sphere, Cylinder or Cone to the live dynamic mesh of a DynamicMeshActor in the editor world, keeping the geometry already there: size is the box edge or the diameter and height of the round shapes, centred at location in mesh-local space. Each call adds another copy as one undo step: undo puts the mesh back as it was. Nothing is saved to an asset. An unknown actor or primitive is an error that leaves the mesh as it was; appended is true when the triangle count grew. To merge another actor's mesh use add_mesh_to_dynamic_mesh; to persist the result, copy_dynamic_mesh_to_static_mesh.
+//   @renamed-from append_mesh_primitive
 //   @param actor_name - Label or name of the target DynamicMeshActor
 //   @param primitive - Box, Sphere, Cylinder, or Cone, default Box
 //   @param size - Dominant dimension in cm, default 100
@@ -1897,7 +1899,8 @@ TSharedPtr<FJsonObject> HandleGetMeshVolumeAreaCenter(
 // All operate on the live UDynamicMesh* of an ADynamicMeshActor (mutations).
 // ===========================================================================
 
-// MCP:append_mesh_to_dynamic_mesh - Merge another UDynamicMesh into the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_MeshBasicEditFunctions::AppendMesh. One undo step puts the target mesh back as it was; the source mesh is not changed.
+// MCP:add_mesh_to_dynamic_mesh - Merge another UDynamicMesh into the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_MeshBasicEditFunctions::AppendMesh. One undo step puts the target mesh back as it was; the source mesh is not changed.
+//   @renamed-from append_mesh_to_dynamic_mesh
 //   @param actor_name - Label or name of the target DynamicMeshActor (the receiver)
 //   @param source_actor_name - Label or name of the DynamicMeshActor whose dynamic mesh will be merged in
 //   @param append_transform - Optional [x,y,z] world-space transform applied to the source mesh before merging (default identity)
@@ -1958,7 +1961,7 @@ TSharedPtr<FJsonObject> HandleAppendMeshToDynamicMesh(
 
     const FGeometryScriptMeshCounts After = GeometryScript_NotifyAndCount(MeshComp, TargetMesh);
 
-    UE_LOG(LogTemp, Verbose, TEXT("append_mesh_to_dynamic_mesh: '%s' <- '%s' offset=%s -> tris=%d->%d verts=%d"),
+    UE_LOG(LogTemp, Verbose, TEXT("add_mesh_to_dynamic_mesh: '%s' <- '%s' offset=%s -> tris=%d->%d verts=%d"),
         *ActorName, *SourceName, *Offset.ToString(),
         TrisBefore, After.Triangles, After.Vertices);
 
@@ -2623,7 +2626,7 @@ TSharedPtr<FJsonObject> HandleCopyMeshUVChannel(
 // Typed actor remove + material set + clear mesh
 // ===========================================================================
 
-// MCP:remove_dynamic_mesh_actor - Destroy a DynamicMeshActor in the editor world, found by label or object name, inside an undoable transaction. Returns the label, internal name and triangle_count_before of the destroyed actor; fails if the name matches no DynamicMeshActor. Create one with spawn_dynamic_mesh_actor.
+// MCP:remove_dynamic_mesh_actor - Destroy a DynamicMeshActor in the editor world, found by label or object name, inside an undoable transaction. Returns the label, internal name and triangle_count_before of the destroyed actor; fails if the name matches no DynamicMeshActor. Create one with spawn_actor.
 //   @param actor_name [string!] - Label or object name (case-insensitive) of the DynamicMeshActor to destroy.
 //   @returns { actor_name: string, actor_internal_name: string, destroyed: bool, triangle_count_before: int, note?: string }
 TSharedPtr<FJsonObject> HandleRemoveDynamicMeshActor(const TSharedPtr<FJsonObject>& Params)
@@ -4578,7 +4581,7 @@ TSharedPtr<FJsonObject> HandleSetMeshUVsFromProjection(const TSharedPtr<FJsonObj
 //   @param min_patch_size [int] - patch_builder: minimum triangles per patch (default 2).
 //   @param merging_threshold [number] - patch_builder: patch merging metric threshold (default 1.5). Higher merges more aggressively, giving fewer islands.
 //   @param max_angle_deg [number] - patch_builder: max angle in degrees between merged patches (default 45).
-//   @param respect_polygroups [bool] - patch_builder: seed patches from the existing polygroups instead of curvature (default false). Useful right after append_mesh_primitive, where each appended face is already its own group.
+//   @param respect_polygroups [bool] - patch_builder: seed patches from the existing polygroups instead of curvature (default false). Useful right after add_mesh_primitive, where each appended face is already its own group.
 //   @param auto_pack [bool] - Pack the resulting islands into standard UV space (default true).
 //   @param max_iterations [int] - xatlas: solver iterations (default 2). Higher is slower and slightly tighter.
 //   @returns { actor_name, method, uv_channel, triangle_count: int, uv_channel_count: int, applied: bool }
@@ -4699,8 +4702,8 @@ TSharedPtr<FJsonObject> HandleAutoGenerateMeshUVs(const TSharedPtr<FJsonObject>&
 
 const McpCommandFamilies::FRegistrar Registration =
 {
-    { TEXT("append_mesh_primitive"), &HandleAppendMeshPrimitive },
-    { TEXT("append_mesh_to_dynamic_mesh"), &HandleAppendMeshToDynamicMesh },
+    { TEXT("add_mesh_primitive"), &HandleAppendMeshPrimitive },
+    { TEXT("add_mesh_to_dynamic_mesh"), &HandleAppendMeshToDynamicMesh },
     { TEXT("apply_adaptive_remesh"), &HandleApplyAdaptiveRemesh },
     { TEXT("apply_mesh_boolean"), &HandleApplyMeshBoolean },
     { TEXT("apply_mesh_boolean_actor_to_actor"), &HandleApplyMeshBooleanActorToActor },

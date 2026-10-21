@@ -28,7 +28,7 @@
 #include "GameFramework/Volume.h"
 #include "ActorFactories/ActorFactory.h"
 #include "Builders/CubeBuilder.h"
-// MCP:configure_water_zone reads AWaterZone::RenderTargetResolution by reflection --
+// MCP:set_water_zone_settings reads AWaterZone::RenderTargetResolution by reflection --
 // its getter (AWaterZone::GetRenderTargetResolution) is NOT exported with UE_API, so
 // calling it from this module would not link. FStructProperty lives here.
 #include "UObject/UnrealType.h"
@@ -295,6 +295,7 @@ namespace
 // create_water_zone
 // ---------------------------------------------------------------------------
 // MCP:create_water_zone - Spawn a new AWaterZone actor in the editor world at location, unrotated, and label it. Not idempotent: every call adds another zone, even with a label already in use. Nothing is saved. Returns actor_label, actor_name and has_water_mesh; link bodies via water_zone_label of create_lake_water_body and its siblings.
+//   @retired spawn_actor - type="WaterZone", name, location
 //   @param actor_label - Label to assign to the new AWaterZone actor
 //   @param location - World location [X, Y, Z] in cm; anything but a 3-number array means the origin.
 //   @returns { actor_label: string, actor_name: string, has_water_mesh: bool }
@@ -495,6 +496,7 @@ static TSharedPtr<FJsonObject> SpawnWaterBodyAndLink(
 }
 
 // MCP:create_lake_water_body - Spawn a Lake AWaterBody actor, optionally link to a WaterZone, and READ BACK the wave height the factory attached (a lake is born with the OCEAN's waves and nothing else reveals it).
+//   @retired create_water_body - body_type="lake"
 //   @param actor_label - Label to assign to the new water body actor
 //   @param location - Optional [X, Y, Z] world location (defaults to origin)
 //   @param water_zone_label - Optional label of an existing AWaterZone to auto-link the body to. If given and the zone is not found, `success` is FALSE (the body is still spawned; `linked_to_zone` says so).
@@ -512,6 +514,7 @@ TSharedPtr<FJsonObject> HandleCreateLakeWaterBody(
 }
 
 // MCP:create_river_water_body - Spawn a River AWaterBody actor, optionally link to a WaterZone, and read back its wave height (a river is born at 0.000 -- that is the control case for the lake defect).
+//   @retired create_water_body - body_type="river"
 //   @param actor_label - Label to assign to the new water body actor
 //   @param location - Optional [X, Y, Z] world location (defaults to origin)
 //   @param water_zone_label - Optional label of an existing AWaterZone to auto-link the body to. If given and the zone is not found, `success` is FALSE (the body is still spawned; `linked_to_zone` says so).
@@ -526,6 +529,7 @@ TSharedPtr<FJsonObject> HandleCreateRiverWaterBody(
 }
 
 // MCP:create_ocean_water_body - Spawn an Ocean AWaterBody actor, optionally link to a WaterZone, and read back its wave height (on an ocean the factory's waves are CORRECT -- ~508 uu -- so no warning is emitted here).
+//   @retired create_water_body - body_type="ocean"
 //   @param actor_label - Label to assign to the new water body actor
 //   @param location - Optional [X, Y, Z] world location (defaults to origin)
 //   @param water_zone_label - Optional label of an existing AWaterZone to auto-link the body to. If given and the zone is not found, `success` is FALSE (the body is still spawned; `linked_to_zone` says so).
@@ -732,7 +736,8 @@ TSharedPtr<FJsonObject> HandleSetWaterBodyMaterial(
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:configure_water_zone - Set an AWaterZone's planar extent and/or water-info render-target resolution, then RE-READ both from the actor (extent, world bounds, texel density) instead of echoing the request back.
+// MCP:set_water_zone_settings - Set an AWaterZone's planar extent and/or water-info render-target resolution, then RE-READ both from the actor (extent, world bounds, texel density) instead of echoing the request back.
+//   @renamed-from configure_water_zone
 //   @param water_zone_label - Label of the AWaterZone actor
 //   @param extent - Optional [X, Y] planar zone extent. !!! THIS IS THE **COMPLETE** EXTENT, NOT THE HALF-EXTENT / SEMI-AXIS !!! The engine halves it itself (AWaterZone::GetZoneBounds2D: "GetZoneExtents returns the full extent of the zone but BoxSphereBounds expects a half-extent"), so passing 4000000 gives world bounds of [-2000000, +2000000] around the actor -- a 40 km sea, not 80 km. Reading it as a semi-axis gives a sea of DOUBLE the intended size with bounds off the map; the `world_bounds_extent` field in the response is what disambiguates it (half of `zone_extent_actual`).
 //   @param render_target_resolution - Optional [X, Y] water-info render target resolution. Read back by reflection as `render_target_resolution_actual` (the getter is not exported, so this is the raw UPROPERTY, i.e. BEFORE the r.Water.WaterInfo.RenderTargetResolutionMax clamp).
@@ -1679,10 +1684,42 @@ TSharedPtr<FJsonObject> HandleSetWaterBodyProperties(
 	return mcp_common::MakeOkReply(Data);
 }
 
+// MCP:create_water_body - Spawn a water body actor -- a lake, an ocean or a river, by body_type -- through the Water plugin's own actor factory, optionally link it to a WaterZone, and READ BACK the wave height the factory attached (a lake is born with the ocean's waves and nothing else reveals it; disable_waves removes them and proves it). affects_landscape carves the landscape with the water brush (off by default). The actor exists in memory: save_level puts it on disk. Shape a river or lake with the spline tools; set_water_body_properties sets per-point velocity and audio, set_properties the rest.
+//   @param body_type - One of lake, ocean, river
+//   @param actor_label - Label to assign to the new water body actor
+//   @param location [array] - Optional [X, Y, Z] world location (defaults to origin)
+//   @param water_zone_label - Optional label of an existing AWaterZone to link the body to; if it is not found, success is false while the body is still spawned
+//   @param affects_landscape [bool] - When true the body carves the existing landscape via the water landscape brush; defaults to false (non-destructive)
+//   @param disable_waves [bool] - Opt-in, default false: sets the water waves to none right after the spawn and re-reads the max wave height to prove it is 0
+//   @returns { the reply of the body's creator: actor name and label, body type, zone link, wave height read back }
+TSharedPtr<FJsonObject> HandleCreateWaterBody(const TSharedPtr<FJsonObject>& Params)
+{
+    FString BodyType;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("body_type"), BodyType)) { return Missing; }
+    FString ActorLabel;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("actor_label"), ActorLabel)) { return Missing; }
+    BodyType = BodyType.ToLower();
+    if (BodyType != TEXT("lake") && BodyType != TEXT("ocean") && BodyType != TEXT("river"))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Unknown body_type '%s': one of lake, ocean, river. Nothing was spawned"), *BodyType));
+    }
+    TSharedPtr<FJsonObject> StepParams = MakeShared<FJsonObject>();
+    StepParams->SetStringField(TEXT("actor_label"), ActorLabel);
+    for (const TCHAR* Key : { TEXT("location"), TEXT("water_zone_label"), TEXT("affects_landscape"), TEXT("disable_waves") })
+    {
+        if (const TSharedPtr<FJsonValue> Value = Params->TryGetField(Key))
+        {
+            StepParams->SetField(Key, Value);
+        }
+    }
+    return mcp_common::RunSubCommand(FString::Printf(TEXT("create_%s_water_body"), *BodyType), StepParams);
+}
+
 const McpCommandFamilies::FRegistrar Registration =
 {
+    { TEXT("create_water_body"), &HandleCreateWaterBody },
 	{ TEXT("add_water_body_to_zone"), &HandleAddWaterBodyToZone },
-	{ TEXT("configure_water_zone"), &HandleConfigureWaterZone },
+	{ TEXT("set_water_zone_settings"), &HandleConfigureWaterZone },
 	{ TEXT("create_lake_water_body"), &HandleCreateLakeWaterBody },
 	{ TEXT("create_ocean_water_body"), &HandleCreateOceanWaterBody },
 	{ TEXT("create_river_water_body"), &HandleCreateRiverWaterBody },

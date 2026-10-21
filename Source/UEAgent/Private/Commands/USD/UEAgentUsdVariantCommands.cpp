@@ -11,6 +11,7 @@
 #include "UsdWrappers/SdfPrimSpec.h"  // UE::FSdfPrimSpec — for Prim.GetPrimStack().Last() (edit-target guard)
 #include "UnrealUSDWrapper.h"           // EUsdListPosition enum
 #include "Commands/USD/UEAgentUsdRegistry.h"  // stage registry + helpers shared by the USD handlers
+#include "UEAgentUsdSdk.h"                  // remove_usd_variant(_set): the spec edits the wrapper has no API for
 
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
@@ -231,7 +232,7 @@ TSharedPtr<FJsonObject> HandleListUsdVariantSets(const TSharedPtr<FJsonObject>& 
 // ---------------------------------------------------------------------------
 // add_usd_variant_set
 // ---------------------------------------------------------------------------
-// MCP:add_usd_variant_set - Author a new (empty) variant set on a prim at the requested list position; idempotent (returns already_existed:true when the set is already present)
+// MCP:add_usd_variant_set - Author a new (empty) variant set on a prim at the requested list position; idempotent (returns already_existed:true when the set is already present). Inverse: remove_usd_variant_set.
 //   @param stage_name [string!] - Stage cache key
 //   @param prim_path [string!] - SdfPath of the prim that will author the variant set
 //   @param variant_set_name [string!] - Name of the variant set to create
@@ -291,7 +292,7 @@ TSharedPtr<FJsonObject> HandleAddUsdVariantSet(const TSharedPtr<FJsonObject>& Pa
 // ---------------------------------------------------------------------------
 // add_usd_variant
 // ---------------------------------------------------------------------------
-// MCP:add_usd_variant - Add a new variant to an existing variant set at the requested list position; idempotent (returns already_existed:true when the variant is already present)
+// MCP:add_usd_variant - Add a new variant to an existing variant set at the requested list position; idempotent (returns already_existed:true when the variant is already present). Inverse: remove_usd_variant.
 //   @param stage_name [string!] - Stage cache key
 //   @param prim_path [string!] - SdfPath of the prim that authors the variant set
 //   @param variant_set_name [string!] - Variant set that will receive the new variant
@@ -460,12 +461,147 @@ TSharedPtr<FJsonObject> HandleClearUsdVariantSelection(const TSharedPtr<FJsonObj
 	return mcp_common::MakeOkReply(Data);
 }
 
+// ---------------------------------------------------------------------------
+// remove_usd_variant_set / remove_usd_variant: the inverses of add_usd_variant_set and add_usd_variant. The
+// engine's USD wrapper has no remover, so the edit runs in the UEAgentUsdSdk module on the prim's specs
+// (SdfPrimSpec::RemoveVariantSet, SdfVariantSetSpec::RemoveVariant).
+// ---------------------------------------------------------------------------
+// MCP:remove_usd_variant_set - Delete a variant set from a prim of a cached USD stage, as the variant set editor does: on every spec of the prim in the stage's local layer stack (root, sublayers, session layer) the variant set with all its variants goes, with its name in the variant set list and its selection. Inverse of add_usd_variant_set; clear_usd_variant_selection only clears the selection. Opinions authored on a layer outside the local stack (one brought in by a reference or payload) are left as they are and counted in specs_skipped, so the set can still show (still_present). A prim that does not author the set is an honest no-op (removed=false); a missing stage or prim is an error. Irreversible, like every USD composition edit here (no undo); save with save_usd_stage. Read: list_usd_variant_sets.
+//   @param stage_name [string!] - Stage cache key
+//   @param prim_path [string!] - SdfPath of the prim that authors the variant set
+//   @param variant_set_name [string!] - Name of the variant set to delete
+//   @returns { prim_path: string, variant_set_name: string, removed: bool, specs_edited: int, specs_skipped: int, still_present: bool }
+
+TSharedPtr<FJsonObject> HandleRemoveUsdVariantSet(const TSharedPtr<FJsonObject>& Params)
+{
+	UE::FUsdStage Stage;
+	FString StageName;
+	FString PrimPath;
+	if (TSharedPtr<FJsonObject> Error = UsdVariant_ResolveStageAndPrimPath(Params, Stage, StageName, PrimPath))
+	{
+		return Error;
+	}
+	FString VariantSetName;
+	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("variant_set_name"), VariantSetName)) { return Missing; }
+
+	UE::FUsdPrim Prim;
+	if (TSharedPtr<FJsonObject> Error = UsdVariant_FindPrim(Stage, StageName, PrimPath, Prim))
+	{
+		return Error;
+	}
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("prim_path"), PrimPath);
+	Data->SetStringField(TEXT("variant_set_name"), VariantSetName);
+	if (!Prim.GetVariantSets().HasVariantSet(VariantSetName))
+	{
+		Data->SetBoolField(TEXT("removed"), false);
+		Data->SetNumberField(TEXT("specs_edited"), 0);
+		Data->SetNumberField(TEXT("specs_skipped"), 0);
+		Data->SetBoolField(TEXT("still_present"), false);
+		return mcp_common::MakeOkReply(Data);
+	}
+
+	UEAgent::UsdSdk::FVariantEditResult Edit;
+	FString EditError;
+	if (!UEAgent::UsdSdk::RemoveVariantSet(Stage, PrimPath, VariantSetName, Edit, EditError))
+	{
+		return mcp_common::MakeErrorReply(FString::Printf(TEXT("Could not remove variant set '%s' from '%s': %s"), *VariantSetName, *PrimPath, *EditError));
+	}
+
+	// The re-read, through the wrapper: does the composed prim still have the set?
+	const UE::FUsdPrim After = Stage.GetPrimAtPath(UE::FSdfPath(*PrimPath));
+	const bool bStillPresent = After.IsValid() && After.GetVariantSets().HasVariantSet(VariantSetName);
+	Data->SetBoolField(TEXT("removed"), Edit.SpecsEdited > 0);
+	Data->SetNumberField(TEXT("specs_edited"), Edit.SpecsEdited);
+	Data->SetNumberField(TEXT("specs_skipped"), Edit.SpecsSkipped);
+	Data->SetBoolField(TEXT("still_present"), bStillPresent);
+	return mcp_common::MakeOutcomeReply(Data, Edit.SpecsEdited > 0, Edit.SpecsEdited > 0 ? FString() :
+		FString::Printf(TEXT("variant set '%s' is authored only on layers outside the stage's local layer stack; nothing was removed"), *VariantSetName));
+}
+
+// MCP:remove_usd_variant - Delete one variant from a variant set of a prim of a cached USD stage: on every spec of the prim in the stage's local layer stack the variant spec goes (with the opinions authored inside it), and a selection of that variant is cleared. Inverse of add_usd_variant. Opinions on a layer outside the local stack (a reference or payload) are left as they are and counted in specs_skipped. A set the prim does not have is an error; a variant the set does not have is an honest no-op (removed=false). Irreversible, like every USD composition edit here (no undo); save with save_usd_stage. Read: list_usd_variant_sets; the whole set: remove_usd_variant_set.
+//   @param stage_name [string!] - Stage cache key
+//   @param prim_path [string!] - SdfPath of the prim that authors the variant set
+//   @param variant_set_name [string!] - Variant set that holds the variant
+//   @param variant_name [string!] - Name of the variant to delete
+//   @returns { prim_path: string, variant_set_name: string, variant_name: string, removed: bool, specs_edited: int, specs_skipped: int, still_present: bool, variant_names: [string] }
+
+TSharedPtr<FJsonObject> HandleRemoveUsdVariant(const TSharedPtr<FJsonObject>& Params)
+{
+	UE::FUsdStage Stage;
+	FString StageName;
+	FString PrimPath;
+	if (TSharedPtr<FJsonObject> Error = UsdVariant_ResolveStageAndPrimPath(Params, Stage, StageName, PrimPath))
+	{
+		return Error;
+	}
+	FString VariantSetName;
+	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("variant_set_name"), VariantSetName)) { return Missing; }
+	FString VariantName;
+	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("variant_name"), VariantName)) { return Missing; }
+
+	UE::FUsdPrim Prim;
+	if (TSharedPtr<FJsonObject> Error = UsdVariant_FindPrim(Stage, StageName, PrimPath, Prim))
+	{
+		return Error;
+	}
+	UE::FUsdVariantSets VSets = Prim.GetVariantSets();
+	UE::FUsdVariantSet VSet;
+	if (TSharedPtr<FJsonObject> Error = UsdVariant_GetVariantSet(VSets, VariantSetName, PrimPath, TEXT(""), VSet))
+	{
+		return Error;
+	}
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("prim_path"), PrimPath);
+	Data->SetStringField(TEXT("variant_set_name"), VariantSetName);
+	Data->SetStringField(TEXT("variant_name"), VariantName);
+	if (!VSet.HasAuthoredVariant(VariantName))
+	{
+		Data->SetBoolField(TEXT("removed"), false);
+		Data->SetNumberField(TEXT("specs_edited"), 0);
+		Data->SetNumberField(TEXT("specs_skipped"), 0);
+		Data->SetBoolField(TEXT("still_present"), false);
+		Data->SetArrayField(TEXT("variant_names"), mcp_common::StringsToJson(VSet.GetVariantNames()));
+		return mcp_common::MakeOkReply(Data);
+	}
+
+	UEAgent::UsdSdk::FVariantEditResult Edit;
+	FString EditError;
+	if (!UEAgent::UsdSdk::RemoveVariant(Stage, PrimPath, VariantSetName, VariantName, Edit, EditError))
+	{
+		return mcp_common::MakeErrorReply(FString::Printf(TEXT("Could not remove variant '%s' of set '%s' from '%s': %s"),
+			*VariantName, *VariantSetName, *PrimPath, *EditError));
+	}
+
+	// The re-read, through the wrapper.
+	const UE::FUsdPrim After = Stage.GetPrimAtPath(UE::FSdfPath(*PrimPath));
+	TArray<FString> Names;
+	bool bStillPresent = false;
+	if (After.IsValid() && After.GetVariantSets().HasVariantSet(VariantSetName))
+	{
+		const UE::FUsdVariantSet SetAfter = After.GetVariantSets().GetVariantSet(VariantSetName);
+		Names = SetAfter.GetVariantNames();
+		bStillPresent = SetAfter.HasAuthoredVariant(VariantName);
+	}
+	Data->SetBoolField(TEXT("removed"), Edit.SpecsEdited > 0);
+	Data->SetNumberField(TEXT("specs_edited"), Edit.SpecsEdited);
+	Data->SetNumberField(TEXT("specs_skipped"), Edit.SpecsSkipped);
+	Data->SetBoolField(TEXT("still_present"), bStillPresent);
+	Data->SetArrayField(TEXT("variant_names"), mcp_common::StringsToJson(Names));
+	return mcp_common::MakeOutcomeReply(Data, Edit.SpecsEdited > 0, Edit.SpecsEdited > 0 ? FString() :
+		FString::Printf(TEXT("variant '%s' is authored only on layers outside the stage's local layer stack; nothing was removed"), *VariantName));
+}
+
 const McpCommandFamilies::FRegistrar Registration =
 {
 	{ TEXT("add_usd_variant"), &HandleAddUsdVariant },
 	{ TEXT("add_usd_variant_set"), &HandleAddUsdVariantSet },
 	{ TEXT("clear_usd_variant_selection"), &HandleClearUsdVariantSelection },
 	{ TEXT("list_usd_variant_sets"), &HandleListUsdVariantSets },
+	{ TEXT("remove_usd_variant"), &HandleRemoveUsdVariant },
+	{ TEXT("remove_usd_variant_set"), &HandleRemoveUsdVariantSet },
 	{ TEXT("set_usd_variant_selection"), &HandleSetUsdVariantSelection },
 };
 } // namespace UEAgentUsdVariantCommands

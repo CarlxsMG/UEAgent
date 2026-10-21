@@ -2,7 +2,7 @@
 
 # Replication
 
-5 tools for per-actor replication: net priority, update frequency, cull distance and dormancy.
+1 tool for per-actor replication: net priority, update frequency, cull distance and dormancy.
 
 Back to the [index](README.md).
 
@@ -10,7 +10,7 @@ Back to the [index](README.md).
 
 *Read-only.*
 
-Read every replication setting of an actor placed in the editor world, found by object name or label (first match): replicates, replicate_movement, replicate_physics (whether the root simulates physics, whose state travels with movement), net_load_on_client, net_use_owner_relevancy, always_relevant, both net update frequencies, the net cull distance (squared as stored, and in cm), dormancy, net priority and the local and remote roles (name and number). Read-only; it reads the placed instance, not a PIE server or client copy, so the roles are the authoring-time ones. Writers: configure_replication (replicates, movement), set_actor_net_dormancy, set_actor_net_update_frequency, set_actor_net_cull_distance, set_actor_net_priority, set_network_authority (local role).
+Read every replication setting of an actor placed in the editor world, found by object name or label (first match): replicates, replicate_movement, replicate_physics (whether the root simulates physics, whose state travels with movement), net_load_on_client, net_use_owner_relevancy, always_relevant, both net update frequencies, the net cull distance (squared as stored, and in cm), dormancy, net priority and the local and remote roles (name and number). Read-only; it reads the placed instance, not a PIE server or client copy, so the roles are the authoring-time ones. Writers: set_properties (replicates, movement), set_properties, set_network_authority (local role).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -18,56 +18,3 @@ Read every replication setting of an actor placed in the editor world, found by 
 | `actor_label` | string | no | Alias of actor_name. |
 
 **Returns:** `{ actor_label: string, actor_name: string, class_name: string, replicates: bool, replicate_movement: bool, replicate_physics: bool, net_load_on_client: bool, net_use_owner_relevancy: bool, always_relevant: bool, net_update_frequency: float, min_net_update_frequency: float, net_cull_distance_squared: float, net_cull_distance_cm: float, net_dormancy: string, net_dormancy_int: int, net_priority: float, role: string, local_role: int, local_role_name: string, remote_role: int, remote_role_name: string }`
-
-## `set_actor_net_cull_distance`
-
-*Destructive, idempotent.*
-
-Set the net cull distance of an actor placed in the editor world, found by label (first match): distance is the linear radius in cm, squared before AActor::SetNetCullDistanceSquared stores it (15000, the engine default, stores 225000000). Past that distance from a client's viewer the actor is no longer relevant for replication to that client, unless it is always relevant. Only that placed instance changes, not its class defaults, with no undo step, no dirty mark and no save, and a PIE copy is never touched. distance echoes the request, not a read-back: get_actor_replication_info returns both stored forms (net_cull_distance_squared, net_cull_distance_cm). A missing label or distance is an error; no range check is made. Update rate: set_actor_net_update_frequency; every replication setting at once: get_actor_replication_info.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actor_label` | string | yes | Label of the actor in the editor world (first match). |
-| `distance` | number | yes | Net cull distance in cm (will be squared before being set); a negative value squares to the same distance. |
-
-**Returns:** `{ actor_label: string, distance: float }`
-
-## `set_actor_net_dormancy`
-
-*Destructive, idempotent.*
-
-Set NetDormancy on an editor-world actor found by label (AActor::SetNetDormancy). Only that placed instance changes; it is not marked dirty and nothing is saved. dormancy in the reply is the parsed enum name (e.g. DORM_DormantAll), not a read-back: use get_actor_replication_info.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actor_label` | string | yes | Label of the actor in the editor world. |
-| `dormancy` | string | yes | ENetDormancy value, case-insensitive, with or without a DORM_ or DORMANT_ prefix: Never, Awake, DormantAll (or All), DormantPartial (or Partial), Initial; e.g. "DORM_DormantAll". |
-
-**Returns:** `{ actor_label: string, dormancy: string }`
-
-## `set_actor_net_priority`
-
-*Destructive, idempotent.*
-
-Write NetPriority, the relative replication priority when bandwidth is short, on an editor-world actor found by label. Only that placed instance changes; it is not marked dirty or saved. priority is read back after the write; get_actor_replication_info reads it as net_priority. Engine defaults: 1.0 for actors, 3.0 for pawns.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actor_name` | string | yes | Label of the actor in the editor world (matched against labels, not object names); first match. |
-| `priority` | number | yes | New NetPriority as a float, written as given with no clamping; higher makes the actor more likely to replicate when bandwidth is saturated. |
-
-**Returns:** `{ actor_name, priority }`
-
-## `set_actor_net_update_frequency`
-
-*Destructive, idempotent.*
-
-Set how often an actor placed in the editor world is considered for replication: frequency goes to NetUpdateFrequency and, when given, min_frequency to MinNetUpdateFrequency, both in updates per second, through the AActor setters. The actor is found by label (first match); only that placed instance changes, not its class defaults, with no undo step, no dirty mark and no save, and a PIE copy is never touched. Leaving out min_frequency keeps the current minimum. The reply echoes the requested numbers (min_frequency only when given), not a read-back: read them with get_actor_replication_info. A missing label or frequency is an error; neither value is range-checked. Culling by distance: set_actor_net_cull_distance; priority when bandwidth is short: set_actor_net_priority; dormancy: set_actor_net_dormancy.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actor_label` | string | yes | Label of the actor in the editor world (first match). |
-| `frequency` | number | yes | Net update frequency in Hz (updates per second), written as given; required. |
-| `min_frequency` | number | no | Optional minimum net update frequency in Hz, the floor adaptive net update frequency may drop to; omitted leaves it unchanged. |
-
-**Returns:** `{ actor_label: string, frequency: float, min_frequency: float? }`

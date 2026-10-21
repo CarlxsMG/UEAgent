@@ -97,6 +97,23 @@ Place one more instance of an InstancedStaticMeshComponent's mesh at a world tra
 
 **Returns:** `{ instance_index: int, num_instances: int }`
 
+## `add_physics_asset_body`
+
+*Additive.*
+
+Add a body for one bone to a UPhysicsAsset (FPhysicsAssetUtils::CreateNewBody) with ONE collision primitive, in one undo step, then save the asset. Without radius, length or extent the primitive is FITTED to the preview mesh's vertices weighted to that bone, as the Physics Asset editor's Add Body does (FPhysicsAssetUtils::CreateCollisionsFromBones): a capsule, sphere, box or convex hull. With any of them it is a primitive of that size centred on the bone instead -- a capsule (radius, length), a sphere (radius) or a box (extent [x,y,z]); a convex hull is fitted only, so it refuses sizes. A bone with no vertices weighted to it cannot be fitted: that is an error naming the explicit-size way, and nothing is kept; so is a convex without a preview mesh. With no preview mesh and no sizes the primitive gets the default sizes (fitted=false, and a note says so). No constraint is made: joint it with add_physics_asset_constraint, tune it with set_physics_body_properties. A bone that already has a body is a success with already_existed=true and nothing changed or saved; a bone the preview mesh's skeleton does not have is an error. Inverse: remove_physics_asset_body; read: get_physics_asset_info. A failed save makes success false with save_error.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `physics_asset_path` | string | yes | /Game path to the UPhysicsAsset. |
+| `bone_name` | string | yes | Bone the body follows (one body per bone; get_physics_asset_info lists skeleton_bones). |
+| `primitive` | string | no | "capsule" (default), "sphere", "box" or "convex" (fitted only). |
+| `radius` | number | no | Capsule or sphere radius in cm; giving it makes an explicit-size primitive instead of a fitted one (default 10 when another size is given). |
+| `length` | number | no | Capsule length in cm between the two sphere centres; giving it makes an explicit-size primitive (default 20). |
+| `extent` | array | no | Box size [x, y, z] in cm; giving it makes an explicit-size primitive (default [20, 20, 20]). |
+
+**Returns:** `{ physics_asset_path: string, bone_name: string, body_index: int, primitive: string, fitted: bool, added: bool, already_existed: bool, primitive_count: int, body_count: int, bone_in_skeleton: bool, saved: bool, save_error?: string, note?: string }`
+
 ## `add_physics_asset_constraint`
 
 *Additive, idempotent.*
@@ -156,7 +173,7 @@ Rebuilds the proximity (adjacency) graph of a UGeometryCollection asset in place
 
 *Additive, idempotent.*
 
-Create a UFieldSystem asset -- an empty list of Chaos field commands -- at package_path/field_system_name (default folder /Game/MCP), register it with the Asset Registry and save it; no undo step. Idempotent: a field system already at that path is loaded and returned unchanged in the same shape, with saved=false and a message, nothing saved; command_count tells how many commands it already holds. An invalid package name, or a name taken by an asset of another class, is an error; a failed save of the new asset gives success false with saved=false and save_error. field_system_path is the package path (e.g. /Game/MCP/FS_Example). Add commands with add_field_node, read them with get_field_system_info, place the asset in the level with spawn_field_system_actor.
+Create a UFieldSystem asset -- an empty list of Chaos field commands -- at package_path/field_system_name (default folder /Game/MCP), register it with the Asset Registry and save it; no undo step. Idempotent: a field system already at that path is loaded and returned unchanged in the same shape, with saved=false and a message, nothing saved; command_count tells how many commands it already holds. An invalid package name, or a name taken by an asset of another class, is an error; a failed save of the new asset gives success false with saved=false and save_error. field_system_path is the package path (e.g. /Game/MCP/FS_Example). Add commands with add_field_node, read them with get_field_system_info, place the asset in the level with spawn_actor.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -225,6 +242,25 @@ Cuts all transforms of a UGeometryCollection asset with num_planes random planes
 
 **Returns:** `{ geometry_collection_path: string, num_planes: int, new_fracture_count: int, transform_count: int, success: bool, saved: bool, save_error: string? }`
 
+## `find_scene_overlaps`
+
+*Read-only.*
+
+Sphere / box / capsule overlap query against the world: "what is inside this volume?", returning one JSON entry per overlapping actor+component instead of export-text, so no Python is needed to parse it. Use it over raycast_scene when the question is proximity/containment rather than line of sight -- e.g. is the pawn actually inside a water body's real collision, is anything blocking a build spot. Accepts the same `world` selector (editor / server / client / pie:N): an editor-world query does NOT see World-Partition/OFPA actor collision, so pass a live PIE world, and in co-op say WHICH one or an empty result is uninterpretable.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `shape` | string | yes | "sphere" \| "box" \| "capsule" |
+| `location` | array | yes | World-space [x, y, z] shape center |
+| `radius` | number | no | Sphere/capsule radius (required for those shapes) |
+| `half_extent` | array | no | Box HALF-extent [x, y, z], not the full size (required for box) |
+| `half_height` | number | no | Capsule half-height (required for capsule) |
+| `trace_channel` | string | no | Collision channel, canonical ("ECC_Visibility") or friendly ("Visibility"). Defaults to "Visibility". |
+| `ignore_actors` | array | no | Actor names/labels to exclude from the overlap. |
+| `world` | string | no | Which world to query: absent/"editor" (default) \| "server" (the PIE world with authority) \| "client" \| "pie:N" \| "pie" (ambiguous) \| "game" (alias of "pie"). Pass a live world to hit World-Partition/OFPA actor collision (only cooked in the PIE physics scene). |
+
+**Returns:** `{ overlaps: [{actor_path, actor_name, component_name, item_index, blocking}], count: int, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }`
+
 ## `fracture_geometry_collection`
 
 *Destructive.*
@@ -246,7 +282,7 @@ Applies Voronoi fracturing to all transforms of a UGeometryCollection asset, usi
 
 *Read-only.*
 
-Measure how BIG an actor really is: its aggregate world-space bounding box (origin, half-extent, min, max) in the EDITOR world. The size oracle for placement and footprint questions, and the honest test for "did that volume/brush actually get built" -- a spawned volume whose extent comes back (0,0,0) has no geometry no matter what the spawning tool reported. Its `components` filter is the reason to prefer it over reading a component property: "all" (default, AActor::GetActorBounds -- inflated by interaction/trigger shapes), "colliding" (only collision-enabled components) or "mesh"/"rendered" (UMeshComponent geometry ONLY, so trigger spheres/boxes are excluded and the box hugs what you actually see). Editor world only -- for a PIE-world footprint use query_scene_overlaps/raycast_scene with a `world` selector.
+Measure how BIG an actor really is: its aggregate world-space bounding box (origin, half-extent, min, max) in the EDITOR world. The size oracle for placement and footprint questions, and the honest test for "did that volume/brush actually get built" -- a spawned volume whose extent comes back (0,0,0) has no geometry no matter what the spawning tool reported. Its `components` filter is the reason to prefer it over reading a component property: "all" (default, AActor::GetActorBounds -- inflated by interaction/trigger shapes), "colliding" (only collision-enabled components) or "mesh"/"rendered" (UMeshComponent geometry ONLY, so trigger spheres/boxes are excluded and the box hugs what you actually see). Editor world only -- for a PIE-world footprint use find_scene_overlaps/raycast_scene with a `world` selector.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -323,7 +359,7 @@ Count the instances in an InstancedStaticMeshComponent, or read one instance's t
 
 *Read-only.*
 
-Read a UPhysicsAsset without changing it: body_count and constraint_count; each body's index, bone_name and primitive_count; every constraint with its name, child and parent bones, swing, twist and linear motions and limits, and its drive, breakable and projection settings; skeletal_mesh_path, the asset's preview mesh (empty when none, and not necessarily a mesh that uses the asset); and skeleton_bones, that mesh's bone names, the names body and constraint tools accept. A path that does not load as a physics asset is an error. Edit bodies with set_physics_body_properties, joints with add_physics_asset_constraint, set_physics_asset_constraint_limits or set_physics_asset_constraint_drives; a world constraint actor is get_physics_constraint_info.
+Read a UPhysicsAsset without changing it: body_count and constraint_count; each body's index, bone_name and primitive_count; every constraint with its name, child and parent bones, swing, twist and linear motions and limits, and its drive, breakable and projection settings; skeletal_mesh_path, the asset's preview mesh (empty when none, and not necessarily a mesh that uses the asset); and skeleton_bones, that mesh's bone names, the names body and constraint tools accept. A path that does not load as a physics asset is an error. Edit bodies with set_physics_body_properties, joints with add_physics_asset_constraint, set_physics_asset_constraint_limits or set_physics_asset_constraint_drives; a world constraint actor is get_physics_constraint_info. Add or remove a bone's body: add_physics_asset_body / remove_physics_asset_body.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -364,25 +400,6 @@ How big is the LEVEL: one world-space bounding box aggregated over every level-b
 | `actor_names` | array | no | Optional subset of actor names/labels; omit for every loaded actor in the world |
 
 **Returns:** `{ valid: bool, origin: {x,y,z}, extent: {x,y,z}, min: {x,y,z}, max: {x,y,z}, actor_count: int }`
-
-## `query_scene_overlaps`
-
-*Read-only.*
-
-Sphere / box / capsule overlap query against the world: "what is inside this volume?", returning one JSON entry per overlapping actor+component instead of export-text, so no Python is needed to parse it. Use it over raycast_scene when the question is proximity/containment rather than line of sight -- e.g. is the pawn actually inside a water body's real collision, is anything blocking a build spot. Accepts the same `world` selector (editor / server / client / pie:N): an editor-world query does NOT see World-Partition/OFPA actor collision, so pass a live PIE world, and in co-op say WHICH one or an empty result is uninterpretable.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `shape` | string | yes | "sphere" \| "box" \| "capsule" |
-| `location` | array | yes | World-space [x, y, z] shape center |
-| `radius` | number | no | Sphere/capsule radius (required for those shapes) |
-| `half_extent` | array | no | Box HALF-extent [x, y, z], not the full size (required for box) |
-| `half_height` | number | no | Capsule half-height (required for capsule) |
-| `trace_channel` | string | no | Collision channel, canonical ("ECC_Visibility") or friendly ("Visibility"). Defaults to "Visibility". |
-| `ignore_actors` | array | no | Actor names/labels to exclude from the overlap. |
-| `world` | string | no | Which world to query: absent/"editor" (default) \| "server" (the PIE world with authority) \| "client" \| "pie:N" \| "pie" (ambiguous) \| "game" (alias of "pie"). Pass a live world to hit World-Partition/OFPA actor collision (only cooked in the PIE physics scene). |
-
-**Returns:** `{ overlaps: [{actor_path, actor_name, component_name, item_index, blocking}], count: int, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }`
 
 ## `raycast_scene`
 
@@ -443,6 +460,20 @@ Delete ONE instance from an InstancedStaticMeshComponent by index, or, with all=
 | `all` | boolean | no | Optional bool (default false): remove every instance (ClearInstances) instead of one |
 
 **Returns:** `{ removed: bool, num_instances: int, component_name: string, all: bool, cleared: bool (all=true only: no instance left), removed_count: int (all=true only) }`
+
+## `remove_physics_asset_body`
+
+*Destructive.*
+
+Remove the body of one bone from a UPhysicsAsset (FPhysicsAssetUtils::DestroyBody, as the Physics Asset editor's Delete does): the body goes with every constraint that joins it (constraints_removed) and its entries in the collision table, in one undo step, then the asset is saved. Inverse of add_physics_asset_body; the bodies after it move down one index. Give bone_name (preferred) or body_index. A bone with no body, or an index out of range, is an honest no-op (removed=false, already_absent=true, nothing saved). A failed save makes success false with save_error. Read: get_physics_asset_info.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `physics_asset_path` | string | yes | /Game path to the UPhysicsAsset. |
+| `bone_name` | string | no | Bone whose body to remove; preferred over body_index when both are given. |
+| `body_index` | number | no | Index of the body to remove (get_physics_asset_info lists them), used when bone_name is absent. |
+
+**Returns:** `{ physics_asset_path: string, bone_name: string, body_index: int, removed: bool, already_absent: bool, constraints_removed: int, body_count: int, constraint_count: int, saved: bool, save_error?: string }`
 
 ## `remove_physics_asset_constraint`
 
@@ -531,27 +562,25 @@ Writes the mass settings of a UGeometryCollection asset (mass, mass_as_density, 
 
 **Returns:** `{ geometry_collection_path: string, mass: float, mass_as_density: bool, minimum_mass_clamp: float, density_from_physics_material: bool, success: bool, saved: bool }`
 
-## `set_physical_material_properties`
+## `set_instanced_static_mesh_instance_transform`
 
 *Destructive, idempotent.*
 
-Set friction, restitution, density, combine modes, surface type, mass power and sleep thresholds of a PhysicalMaterial asset as one undo step, then save it. Over set_properties: it clamps to the engine ranges, turns combine-mode overrides on, and saves; like a Details-panel edit it runs PostEditChange, so bodies using the material in this session see the new values. Bad enum names, or a call with no field, fail before writing. Values the material already has give changed=false and saved=false; a failed save makes success false, with saved=false and save_error, and still returns the values read back.
+Move, rotate or rescale ONE existing instance of an InstancedStaticMeshComponent in place, by index -- cheaper than remove + re-add and it keeps the index stable. Leave mark_render_state_dirty at its default true or the viewport keeps drawing the old transform.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `physical_material_path` | string | yes | /Game path to the physical material asset. |
-| `friction` | number | no | Optional new (kinetic) Friction value (>= 0) |
-| `static_friction` | number | no | Optional new StaticFriction value (>= 0) |
-| `restitution` | number | no | Optional new Restitution value (clamped to [0,1]) |
-| `density` | number | no | Optional new Density value (g/cm^3, >= 0) |
-| `friction_combine_mode` | string | no | Optional Average\|Min\|Multiply\|Max (sets bOverrideFrictionCombineMode true) |
-| `restitution_combine_mode` | string | no | Optional Average\|Min\|Multiply\|Max (sets bOverrideRestitutionCombineMode true) |
-| `surface_type` | string | no | Optional EPhysicalSurface by reflected name (e.g. 'SurfaceType_Default','SurfaceType1') or numeric value |
-| `raise_mass_to_power` | number | no | Optional RaiseMassToPower (clamped to [0.1,1]) |
-| `sleep_linear_velocity_threshold` | number | no | Optional SleepLinearVelocityThreshold (>= 0) |
-| `sleep_angular_velocity_threshold` | number | no | Optional SleepAngularVelocityThreshold (>= 0) |
+| `actor_name` | string | yes | Display label or internal name of the actor carrying the ISM component (required) |
+| `instance_index` | number | yes | Index of the instance to update (required, >=0) |
+| `component_name` | string | no | Optional ISM component name |
+| `location` | array | no | [x, y, z] new translation |
+| `rotation` | array | no | Optional [pitch, yaw, roll] |
+| `scale` | array | no | Optional [x, y, z] |
+| `world_space` | boolean | no | Optional; defaults true |
+| `mark_render_state_dirty` | boolean | no | Optional; default true (engine signature bMarkRenderStateDirty=true) |
+| `teleport` | boolean | no | Optional; default false |
 
-**Returns:** `{ physical_material_path: string, friction: number, static_friction: number, restitution: number, density: number, friction_combine_mode: string, override_friction_combine_mode: bool, restitution_combine_mode: string, override_restitution_combine_mode: bool, surface_type: string, raise_mass_to_power: number, sleep_linear_velocity_threshold: number, sleep_angular_velocity_threshold: number, friction_applied: bool, static_friction_applied: bool, restitution_applied: bool, density_applied: bool, friction_combine_mode_applied: bool, restitution_combine_mode_applied: bool, surface_type_applied: bool, raise_mass_to_power_applied: bool, sleep_linear_velocity_threshold_applied: bool, sleep_angular_velocity_threshold_applied: bool, updated: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
+**Returns:** `{ updated: bool, num_instances: int }`
 
 ## `set_physics_asset_constraint_drives`
 
@@ -737,20 +766,6 @@ Slices all transforms of a UGeometryCollection asset with a regular grid of slic
 
 **Returns:** `{ geometry_collection_path: string, slices_x: int, slices_y: int, slices_z: int, new_fracture_count: int, transform_count: int, success: bool, saved: bool, save_error: string? }`
 
-## `spawn_field_system_actor`
-
-*Additive.*
-
-Spawn a new AFieldSystemActor in the editor world (not PIE) at location, unrotated, assign an existing UFieldSystem asset to its field system component, and set its outliner label. spawn_actor has no field-system type and could not assign the asset. Every call spawns another actor; no undo step, nothing is saved (save_level). A field system asset that does not load, or no editor world, is an error and spawns nothing; has_field_system confirms the assignment by reading it back. actor_label in the reply echoes the request, and actor_name is the new actor's internal name. Create the asset with create_field_system_asset, author its commands with add_field_node and inspect them with get_field_system_info.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actor_label` | string | yes | Outliner label for the spawned actor |
-| `field_system_path` | string | yes | Asset path of an existing UFieldSystem to assign, e.g. "/Game/MyGame/FS_Example" |
-| `location` | array | no | Optional [x, y, z] world location in cm; defaults to (0,0,0) |
-
-**Returns:** `{ actor_label: string, field_system_path: string, actor_name: string, has_field_system: bool, success: bool }`
-
 ## `spawn_physics_constraint`
 
 *Additive.*
@@ -764,23 +779,3 @@ Spawns an APhysicsConstraintActor in the editor world at location (zero rotation
 | `actor2_name` | string | no | Optional name/label of the second actor to constrain |
 
 **Returns:** `{ actor_name: string, actor_internal_name: string, actor_class: string, constraint_component: string, actor1_wired: bool, actor2_wired: bool, constraint_actor1?: string, constraint_actor2?: string, spawned: bool }`
-
-## `update_instanced_static_mesh_instance_transform`
-
-*Destructive.*
-
-Move, rotate or rescale ONE existing instance of an InstancedStaticMeshComponent in place, by index -- cheaper than remove + re-add and it keeps the index stable. Leave mark_render_state_dirty at its default true or the viewport keeps drawing the old transform.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actor_name` | string | yes | Display label or internal name of the actor carrying the ISM component (required) |
-| `instance_index` | number | yes | Index of the instance to update (required, >=0) |
-| `component_name` | string | no | Optional ISM component name |
-| `location` | array | no | [x, y, z] new translation |
-| `rotation` | array | no | Optional [pitch, yaw, roll] |
-| `scale` | array | no | Optional [x, y, z] |
-| `world_space` | boolean | no | Optional; defaults true |
-| `mark_render_state_dirty` | boolean | no | Optional; default true (engine signature bMarkRenderStateDirty=true) |
-| `teleport` | boolean | no | Optional; default false |
-
-**Returns:** `{ updated: bool, num_instances: int }`

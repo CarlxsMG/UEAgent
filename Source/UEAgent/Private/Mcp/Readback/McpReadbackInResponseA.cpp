@@ -359,7 +359,7 @@ namespace McpReadbackInResponseA
 			{ TEXT("local_role"), Get(Data, TEXT("local_role")) },
 			{ TEXT("net_mode"), NetMode },
 		});
-		return WarningFinding(TEXT("spawned_without_authority"), Or(Get(Params, TEXT("actor_name")), Get(Params, TEXT("blueprint_name"))), O(Stored),
+		return WarningFinding(TEXT("spawned_without_authority"), Or(Or(Get(Params, TEXT("actor_name")), Get(Params, TEXT("blueprint_name"))), Get(Params, TEXT("name")), Get(Params, TEXT("type"))), O(Stored),
 			TEXT("in-response:has_authority/net_mode"), Percent(RB_check_spawn_without_authority_0, {
 				Or(Get(Data, TEXT("local_role")), Get(Data, TEXT("world_package")), S(TEXT("role not reported"))),
 				Or(NetMode, S(TEXT("not reported"))) }));
@@ -578,6 +578,7 @@ void McpReadbackChecks::RegisterInResponseA(McpReadback::FTables& Tables)
 	T.Add(TEXT("audit_widget_accessibility"), &CheckBlindTouchTarget);
 	T.Add(TEXT("list_world_partition_actors"), &CheckZeroWpActors);
 	T.Add(TEXT("spawn_blueprint_actor"), &CheckSpawnWithoutAuthority);
+	T.Add(TEXT("spawn_actor"), &CheckSpawnWithoutAuthority);
 	T.Add(TEXT("audit_replication"), &CheckReplicationAudit);
 	T.Add(TEXT("list_subsystem_instances"), &CheckSubsystemListEditor);
 	T.Add(TEXT("list_save_games"), &CheckFlatSaveFiles);

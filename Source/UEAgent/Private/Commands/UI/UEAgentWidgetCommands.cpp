@@ -26,6 +26,7 @@
 // UMGEditor module: Widget Blueprint asset + factory
 #include "WidgetBlueprint.h"
 #include "WidgetBlueprintFactory.h"
+#include "WidgetBlueprintEditorUtils.h"   // remove_widget_from_blueprint: DeleteWidgets, the Designer's Delete
 
 // Blueprint compile
 #include "Kismet2/KismetEditorUtilities.h"
@@ -44,7 +45,7 @@
 #include "Components/TextBlock.h"
 #include "Components/Button.h"
 #include "Components/Image.h"
-// set_pie_widget_value / read_pie_widgets(include_values) -- input widget classes.
+// set_pie_widget_value / list_pie_widgets(include_values) -- input widget classes.
 #include "Components/Slider.h"
 #include "Components/CheckBox.h"
 #include "Components/EditableTextBox.h"
@@ -64,8 +65,8 @@
 // Slate layout types used by canvas slot setters
 #include "Layout/Margin.h"
 #include "Widgets/Layout/Anchors.h"
-#include "Layout/Geometry.h"          // read_pie_widgets(include_geometry): FGeometry
-#include "Slate/WidgetTransform.h"    // read_pie_widgets(include_geometry): FWidgetTransform fields
+#include "Layout/Geometry.h"          // list_pie_widgets(include_geometry): FGeometry
+#include "Slate/WidgetTransform.h"    // list_pie_widgets(include_geometry): FWidgetTransform fields
 #include "Styling/SlateColor.h"       // SetWidgetPropertyValue FSlateColor pre-check
 
 // WidgetTree structural edits via the SAME headless-safe primitives the Designer's
@@ -95,6 +96,10 @@
 #include "Tracks/MovieSceneBoolTrack.h"
 #include "Channels/MovieSceneFloatChannel.h"
 #include "Channels/MovieSceneBoolChannel.h"
+#include "Channels/MovieSceneDoubleChannel.h"
+#include "Channels/MovieSceneChannelProxy.h"
+#include "MovieSceneBinding.h"
+#include "MovieSceneSection.h"
 
 // Non-Canvas slot layout (box family + grid). All setters are UMG_API,
 // BlueprintCallable and NOT editor-gated; the direct slot members are UE_DEPRECATED(5.1)
@@ -104,10 +109,10 @@
 #include "Components/VerticalBoxSlot.h"
 #include "Components/OverlaySlot.h"
 #include "Components/BorderSlot.h"
-#include "Components/Border.h"          // scaffold_menu_screen: the background panel
-#include "Components/ButtonSlot.h"      // scaffold_menu_screen: centre the button label
-#include "EdGraph/EdGraph.h"            // scaffold_menu_screen: FGraphNodeCreator
-#include "K2Node_ComponentBoundEvent.h" // scaffold_menu_screen: each button's OnClicked
+#include "Components/Border.h"          // create_menu_screen_widget: the background panel
+#include "Components/ButtonSlot.h"      // create_menu_screen_widget: centre the button label
+#include "EdGraph/EdGraph.h"            // create_menu_screen_widget: FGraphNodeCreator
+#include "K2Node_ComponentBoundEvent.h" // create_menu_screen_widget: each button's OnClicked
 #include "Components/SizeBoxSlot.h"
 #include "Components/ScrollBoxSlot.h"
 #include "Components/GridSlot.h"
@@ -542,10 +547,10 @@ namespace
     }
 
     // ------------------------------------------------------------------
-    // read_pie_widgets helpers -- live UMG read-back from the PIE session.
+    // list_pie_widgets helpers -- live UMG read-back from the PIE session.
     // ------------------------------------------------------------------
 
-    // Forward declaration: the read_pie_widgets include_values/include_geometry enrichment,
+    // Forward declaration: the list_pie_widgets include_values/include_geometry enrichment,
     // defined further down in this namespace; needed here since BuildPieWidgetNode calls it.
     void AddPieWidgetValueAndGeometry(const TSharedPtr<FJsonObject>& Node, UWidget* Widget,
                                        bool bIncludeValues, bool bIncludeGeometry);
@@ -725,7 +730,7 @@ namespace
     }
 
     // ------------------------------------------------------------------
-    // Shared PIE-world / live-widget resolution (read_pie_widgets, click_pie_widget,
+    // Shared PIE-world / live-widget resolution (list_pie_widgets, click_pie_widget,
     // play/stop_widget_animation and set_pie_widget_value).
     // ------------------------------------------------------------------
 
@@ -841,7 +846,7 @@ namespace
     }
 
     // ------------------------------------------------------------------
-    // read_pie_widgets(include_values / include_geometry) -- shared enrichment applied both to the
+    // list_pie_widgets(include_values / include_geometry) -- shared enrichment applied both to the
     // top-level UserWidget entry (built inline in HandleReadPieWidgets) and to every nested widget
     // (via BuildPieWidgetNode).
     // ------------------------------------------------------------------
@@ -1864,7 +1869,7 @@ TSharedPtr<FJsonObject> HandleCreateWidgetBlueprint(const TSharedPtr<FJsonObject
 // ---------------------------------------------------------------------------
 // add_widget_to_blueprint
 // ---------------------------------------------------------------------------
-// MCP:add_widget_to_blueprint - Add a widget to the tree of a Widget Blueprint asset as the last child of the panel parent_name (default the root, which must then be a panel), register it as a variable, then compile and save the blueprint; no undo step. widget_type takes the curated palette of list_widget_types (TextBlock, Button, ProgressBar, Slider, ScrollBox...), any native widget class path, or a Widget Blueprint to nest, which must not contain this one. Idempotent by name: a widget already called widget_name with the same class is returned as is (already_existed true), and the blueprint is compiled and saved only when it has unsaved changes (otherwise saved=false, nothing saved); another class under that name, an unknown widget_type or a bad parent is an error. Refused while PIE runs unless force=true; a failed save is an error. Inspect: get_widget_blueprint_tree; inverse: remove_widget.
+// MCP:add_widget_to_blueprint - Add a widget to the tree of a Widget Blueprint asset as the last child of the panel parent_name (default the root, which must then be a panel), register it as a variable, then compile and save the blueprint; no undo step. widget_type takes the curated palette of list_widget_types (TextBlock, Button, ProgressBar, Slider, ScrollBox...), any native widget class path, or a Widget Blueprint to nest, which must not contain this one. Idempotent by name: a widget already called widget_name with the same class is returned as is (already_existed true), and the blueprint is compiled and saved only when it has unsaved changes (otherwise saved=false, nothing saved); another class under that name, an unknown widget_type or a bad parent is an error. Refused while PIE runs unless force=true; a failed save is an error. Inspect: get_widget_blueprint_tree; inverse: remove_widget_from_blueprint (remove_widget is the runtime tool).
 //   @param widget_bp_path - /Game path of the Widget Blueprint asset
 //   @param widget_type - one of TextBlock, Button, Image, VerticalBox, CanvasPanel, ProgressBar, Slider, CheckBox, ComboBoxString, ScrollBox, Border, Overlay, SizeBox, WidgetSwitcher, HorizontalBox, EditableTextBox, Spacer, GridPanel, RichTextBlock, EditableText, MultiLineEditableText, ComboBox, SpinBox, ScaleBox, SafeZone, UniformGridPanel, WrapBox, MenuAnchor (the curated names; see list_widget_types), OR any other native widget class path (e.g. /Script/UMG.Throbber, /Script/UMG.ListView), OR a UserWidget-derived Widget Blueprint to embed as a nested instance, by its /Game asset path (e.g. /Game/UI/WBP_HealthBar) or generated-class path (/Game/UI/WBP_HealthBar.WBP_HealthBar_C)
 //   @param widget_name - unique name for the new widget
@@ -1937,6 +1942,145 @@ TSharedPtr<FJsonObject> HandleAddWidgetToBlueprint(const TSharedPtr<FJsonObject>
     UWidget* Verify = WidgetTree->FindWidget(FName(*WidgetName));
     return mcp_common::MakeSavedReply(AddedWidgetJson_Widget(WidgetBPPath, WidgetType, Added, Verify != nullptr),
                                       bSaved, TEXT("add_widget_to_blueprint"), SaveErr);
+}
+
+// ---------------------------------------------------------------------------
+// remove_widget_from_blueprint -- the inverse of add_widget_to_blueprint on the ASSET (remove_widget is the
+// runtime tool). FWidgetBlueprintEditorUtils::DeleteWidgets(UWidgetBlueprint*, ...) is the Designer's Delete
+// without a Designer: inside its own transaction it drops the widgets' property bindings, the graph nodes that
+// read their variables, the desired-focus references and the variables themselves, and moves the removed
+// widgets to the transient package so their names are free again.
+// ---------------------------------------------------------------------------
+// MCP:remove_widget_from_blueprint - Delete widgets from the tree of a Widget Blueprint ASSET, children included, as the Designer's Delete does: their property bindings, the graph nodes that read their variables and the variables themselves go too; then compile and save the Blueprint. The removal is one undo step (compile and save are not undone). Inverse of add_widget_to_blueprint, add_list_view and create_common_ui_stack; remove_widget is the runtime tool and never edits an asset. Give widget_name or widget_names: every name is resolved first, and one unknown name fails the call with nothing changed. The reply re-reads the tree: removed_with_children lists every widget that left it. A widget animation that still binds a removed widget keeps its binding (remove_widget_animation_track drops it). Refused during PIE unless force=true; a failed save makes success false with save_error. Read the tree: get_widget_blueprint_tree.
+//   @param widget_bp_path - /Game path of the Widget Blueprint asset
+//   @param widget_name - name of the widget to delete (get_widget_blueprint_tree lists them); give it or widget_names
+//   @param widget_names [array] - several widget names to delete in one call, with one compile and one save
+//   @returns { widget_bp_path: string, removed: string[], removed_with_children: string[], removed_count: int, widget_count: int, root_widget: string, saved: bool, save_error: string }
+
+TSharedPtr<FJsonObject> HandleRemoveWidgetFromBlueprint(const TSharedPtr<FJsonObject>& Params)
+{
+    FString WidgetBPPath;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("widget_bp_path"), WidgetBPPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+
+    TArray<FString> Names;
+    FString SingleName;
+    if (Params->TryGetStringField(TEXT("widget_name"), SingleName) && !SingleName.IsEmpty())
+    {
+        Names.AddUnique(SingleName);
+    }
+    const TArray<TSharedPtr<FJsonValue>>* NameArray = nullptr;
+    if (Params->TryGetArrayField(TEXT("widget_names"), NameArray))
+    {
+        for (const TSharedPtr<FJsonValue>& Value : *NameArray)
+        {
+            FString Name;
+            if (Value.IsValid() && Value->TryGetString(Name) && !Name.IsEmpty())
+            {
+                Names.AddUnique(Name);
+            }
+        }
+    }
+    if (Names.Num() == 0)
+    {
+        return mcp_common::MakeErrorReply(TEXT("Give widget_name or widget_names: the widgets to delete. Nothing was changed."));
+    }
+
+    FString Error;
+    UWidgetBlueprint* WidgetBP = UMGWidgetUtils::LoadWidgetBlueprint(WidgetBPPath, Error);
+    UWidgetTree* WidgetTree = WidgetBP ? GetWidgetTree_Widget(WidgetBP, Error) : nullptr;
+    if (!WidgetTree)
+    {
+        return mcp_common::MakeErrorReply(Error);
+    }
+
+    // Every name resolves before anything is touched: one unknown name fails the whole call.
+    TSet<UWidget*> Named;
+    TArray<FString> Unknown;
+    for (const FString& Name : Names)
+    {
+        if (UWidget* Widget = WidgetTree->FindWidget(FName(*Name)))
+        {
+            Named.Add(Widget);
+        }
+        else
+        {
+            Unknown.Add(Name);
+        }
+    }
+    if (Unknown.Num() > 0)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Widget(s) not found in the tree of %s: %s. Nothing was changed (get_widget_blueprint_tree lists the widgets)."),
+            *WidgetBPPath, *FString::Join(Unknown, TEXT(", "))));
+    }
+
+    // A widget whose ancestor is also named leaves with that ancestor: handing it to DeleteWidgets as well would
+    // move it out of the tree twice.
+    TSet<UWidget*> ToDelete;
+    TArray<FString> Requested;
+    TArray<FString> Leaving;
+    for (UWidget* Widget : Named)
+    {
+        Requested.Add(Widget->GetName());
+        bool bAncestorNamed = false;
+        for (UPanelWidget* Parent = Widget->GetParent(); Parent; Parent = Parent->GetParent())
+        {
+            if (Named.Contains(Parent))
+            {
+                bAncestorNamed = true;
+                break;
+            }
+        }
+        if (!bAncestorNamed)
+        {
+            ToDelete.Add(Widget);
+        }
+        Leaving.AddUnique(Widget->GetName());
+        TArray<UWidget*> Children;
+        UWidgetTree::GetChildWidgets(Widget, Children);
+        for (UWidget* Child : Children)
+        {
+            if (Child)
+            {
+                Leaving.AddUnique(Child->GetName());
+            }
+        }
+    }
+
+    FWidgetBlueprintEditorUtils::DeleteWidgets(WidgetBP, ToDelete,
+        FWidgetBlueprintEditorUtils::EDeleteWidgetWarningType::DeleteSilently);
+
+    // The re-read: a name still found in the tree did not leave it.
+    TArray<FString> StillThere;
+    for (const FString& Name : Leaving)
+    {
+        if (WidgetTree->FindWidget(FName(*Name)))
+        {
+            StillThere.Add(Name);
+        }
+    }
+    if (StillThere.Num() > 0)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("DeleteWidgets left %s in the tree of %s; nothing was compiled or saved."),
+            *FString::Join(StillThere, TEXT(", ")), *WidgetBPPath));
+    }
+
+    FString SaveErr;
+    const bool bSaved = SaveWidgetBlueprint(WidgetBP, SaveErr);
+
+    TArray<UWidget*> Remaining;
+    WidgetTree->GetAllWidgets(Remaining);
+    Requested.Sort();
+    Leaving.Sort();
+    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+    Resp->SetStringField(TEXT("widget_bp_path"), WidgetBPPath);
+    Resp->SetArrayField(TEXT("removed"), mcp_common::StringsToJson(Requested));
+    Resp->SetArrayField(TEXT("removed_with_children"), mcp_common::StringsToJson(Leaving));
+    Resp->SetNumberField(TEXT("removed_count"), Leaving.Num());
+    Resp->SetNumberField(TEXT("widget_count"), Remaining.Num());
+    Resp->SetStringField(TEXT("root_widget"), WidgetTree->RootWidget ? WidgetTree->RootWidget->GetName() : FString());
+    return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("remove_widget_from_blueprint"), SaveErr);
 }
 
 // ---------------------------------------------------------------------------
@@ -2095,6 +2239,7 @@ namespace
 }
 
 // MCP:set_widget_slot_properties - Set the CanvasPanelSlot layout of a widget inside a CanvasPanel of a Widget Blueprint asset -- anchors, offsets, position, size, z_order and auto_size, only those passed -- then compile and save the blueprint; the reply reads the whole slot back. Use it rather than set_slot_properties for canvas layout: it takes plain arrays ([MinX,MinY,MaxX,MaxY], [L,T,R,B], [X,Y]) instead of LayoutData.* paths. position and size write the same fields as offsets (Left/Top and Right/Bottom) and are applied after it, so they win when both are given. An anchors or offsets that is not exactly 4 numbers, or a position or size that is not exactly 2, fails the call before anything is written, compiled or saved. A widget not under a CanvasPanel, or a call with none of the six fields, is an error. Refused while PIE runs unless force=true. For other slot types use set_box_slot_properties, set_grid_slot_properties or set_slot_properties.
+//   @retired set_slot_properties - slot_properties={"LayoutData":{"Anchors":{"Minimum":{"X":0,"Y":0},"Maximum":{"X":0,"Y":0}},"Offsets":{"Left":x,"Top":y,"Right":width,"Bottom":height}},"ZOrder":..,"bAutoSize":..}
 //   @param widget_bp_path - /Game path of the Widget Blueprint asset
 //   @param widget_name - name of the widget whose canvas slot to edit
 //   @param anchors [array] - Optional [MinX, MinY, MaxX, MaxY] anchor floats; anything but an array of exactly 4 numbers fails the call and nothing is changed.
@@ -2421,7 +2566,7 @@ TSharedPtr<FJsonObject> HandleAddWidgetAnimation(const TSharedPtr<FJsonObject>& 
 // ---------------------------------------------------------------------------
 // get_widget_animations -- real read of WidgetBP->Animations.
 // ---------------------------------------------------------------------------
-// MCP:get_widget_animations - List the UWidgetAnimations of a Widget Blueprint asset, each with its object name, display_name and has_movie_scene, plus animation_count and the resolved asset_path. Read-only; add_widget_animation creates one and remove_widget_animation accepts either name.
+// MCP:get_widget_animations - List the UWidgetAnimations of a Widget Blueprint asset, each with its object name, display_name and has_movie_scene, plus animation_count and the resolved asset_path. Read-only; add_widget_animation creates one and remove_widget_animation accepts either name; what one animates: get_widget_animation_tracks.
 //   @param widget_bp_path - Asset path of the Widget Blueprint, e.g. "/Game/UI/WBP_MainMenu"; it must exist.
 //   @returns { widget_bp_path: string, asset_path: string, animations: [{name, display_name, has_movie_scene}], animation_count: int }
 
@@ -2679,6 +2824,7 @@ TSharedPtr<FJsonObject> HandleStopWidgetAnimation(const TSharedPtr<FJsonObject>&
 // Setting the same values again is naturally idempotent.
 // ---------------------------------------------------------------------------
 // MCP:set_box_slot_properties - Configure a widget's box-family slot layout (alignment/padding/size) in a Widget Blueprint, found by the child widget's name, then compile and save the Widget Blueprint. Applies under a HorizontalBox/VerticalBox/Overlay/Border/SizeBox/ScrollBox, dispatching by slot type through the slot's own setters; set_properties would need the slot object's path and neither compiles nor saves. A padding that is not 1, 2 or 4 numbers, or an unknown alignment or size_rule, fails the call before anything is written. Size only applies to Horizontal/Vertical/ScrollBox slots -- on the others it comes back as a note. No undo step. CanvasPanel child: set_widget_slot_properties; GridPanel child: set_grid_slot_properties.
+//   @retired set_slot_properties - slot_properties={"HorizontalAlignment":"HAlign_Center","VerticalAlignment":"VAlign_Fill","Padding":{"Left":8,"Top":4,"Right":8,"Bottom":4},"Size":{"SizeRule":"Fill","Value":1}}
 //   @param widget_bp_path - /Game path of the Widget Blueprint asset
 //   @param widget_name - name of the child widget whose box slot to edit
 //   @param horizontal_alignment - Optional alignment: Fill | Left | Center | Right
@@ -2835,6 +2981,7 @@ TSharedPtr<FJsonObject> HandleSetBoxSlotProperties(const TSharedPtr<FJsonObject>
 // (the direct members are UE_DEPRECATED(5.1)). Idempotent.
 // ---------------------------------------------------------------------------
 // MCP:set_grid_slot_properties - Configure the UGridSlot of a widget under a GridPanel in a Widget Blueprint, found by the child widget's name: row, column, spans, alignment, padding, layer, nudge. Over set_properties it needs no slot object path, uses the slot's own setters, and compiles and saves the Widget Blueprint; no undo step. A padding that is not 1, 2 or 4 numbers, a nudge that is not exactly 2, or an unknown alignment fails the call before anything is written. Idempotent. GridPanel: add_widget_to_blueprint widget_type="GridPanel"; other panels: set_box_slot_properties, set_widget_slot_properties.
+//   @retired set_slot_properties - slot_properties={"Row":..,"Column":..,"RowSpan":..,"ColumnSpan":..,"Layer":..,"Nudge":{"X":..,"Y":..}}
 //   @param widget_bp_path - /Game path of the Widget Blueprint asset
 //   @param widget_name - name of the child widget whose grid slot to edit
 //   @param row - Optional int row index of the cell
@@ -2933,7 +3080,7 @@ TSharedPtr<FJsonObject> HandleSetGridSlotProperties(const TSharedPtr<FJsonObject
 }
 
 // ---------------------------------------------------------------------------
-// read_pie_widgets -- live UMG read-back from the running PIE session.
+// list_pie_widgets -- live UMG read-back from the running PIE session.
 //
 // Enumerates the active UUserWidgets in the PIE world (added to the viewport)
 // and walks each one's live UWidgetTree, emitting name/class + optional
@@ -2951,7 +3098,8 @@ TSharedPtr<FJsonObject> HandleSetGridSlotProperties(const TSharedPtr<FJsonObject
 //   - include_bindings is accepted but not implemented (runtime property/delegate
 //     binding introspection is omitted); a top-level note flags this when requested.
 // ---------------------------------------------------------------------------
-// MCP:read_pie_widgets - Read LIVE UMG from the running PIE session (game thread): enumerate the active UUserWidgets added to the viewport and walk each widget tree, emitting name/class plus optional visibility/hover/text/value/geometry as a parent/child tree.  Reads only game-thread-safe widget-tree state (never the render thread). Errors clearly if no Play-In-Editor session is running.  DESCENDS INTO NESTED WIDGET BLUEPRINTS: an AAA screen is a Widget Blueprint composed of Widget Blueprints, so everything interesting sits one level below the first. Cycles are handled with a visited set plus max_depth, and a subtree that IS cut says so in subtree_omitted instead of looking like a leaf. Rich text is read too (URichTextBlock does not derive from UTextBlock). Not implemented: include_bindings, which is accepted and flagged in bindings_note.
+// MCP:list_pie_widgets - Read LIVE UMG from the running PIE session (game thread): enumerate the active UUserWidgets added to the viewport and walk each widget tree, emitting name/class plus optional visibility/hover/text/value/geometry as a parent/child tree.  Reads only game-thread-safe widget-tree state (never the render thread). Errors clearly if no Play-In-Editor session is running.  DESCENDS INTO NESTED WIDGET BLUEPRINTS: an AAA screen is a Widget Blueprint composed of Widget Blueprints, so everything interesting sits one level below the first. Cycles are handled with a visited set plus max_depth, and a subtree that IS cut says so in subtree_omitted instead of looking like a leaf. Rich text is read too (URichTextBlock does not derive from UTextBlock). Not implemented: include_bindings, which is accepted and flagged in bindings_note.
+//   @renamed-from read_pie_widgets
 //   @param root_filter - Optional case-sensitive substring; only top-level UserWidgets whose object name contains it are returned.
 //   @param include_text - Optional bool (default true): include UTextBlock text.
 //   @param include_visibility - Optional bool (default true): include visibility, is_hovered and has_keyboard_focus per widget. has_keyboard_focus is what tells you whether a navigation key will do anything at all: with nothing focused every key is a no-op, which reads exactly like broken navigation.
@@ -2983,7 +3131,7 @@ TSharedPtr<FJsonObject> HandleReadPieWidgets(const TSharedPtr<FJsonObject>& Para
     const int32 MaxDepth = FMath::RoundToInt(MaxDepthNum);
 
     FString WorldError, WorldSelector;
-    UWorld* PieWorld = RequirePieWorld_Widget(Params, TEXT("read_pie_widgets"), WorldError, &WorldSelector);
+    UWorld* PieWorld = RequirePieWorld_Widget(Params, TEXT("list_pie_widgets"), WorldError, &WorldSelector);
     if (!PieWorld)
     {
         return mcp_common::MakeErrorReply(WorldError);
@@ -3059,10 +3207,10 @@ TSharedPtr<FJsonObject> HandleReadPieWidgets(const TSharedPtr<FJsonObject>& Para
 // ---------------------------------------------------------------------------
 // click_pie_widget -- fire a LIVE UMG widget's event in the running PIE session.
 //
-// read_pie_widgets is READ-ONLY; this fires a live widget's event headless, so a UI flow can be
+// list_pie_widgets is READ-ONLY; this fires a live widget's event headless, so a UI flow can be
 // validated without a human clicking (driving it via call_function instead bypasses the real
 // client->server RPC path, which yields false negatives). This resolves a live UWidget by
-// name (REUSING the read_pie_widgets walk: PIE world -> active viewport UUserWidgets ->
+// name (REUSING the list_pie_widgets walk: PIE world -> active viewport UUserWidgets ->
 // WidgetTree->FindWidget by name; supports child_name) and fires its named
 // BlueprintAssignable multicast delegate.
 //
@@ -3078,8 +3226,8 @@ TSharedPtr<FJsonObject> HandleReadPieWidgets(const TSharedPtr<FJsonObject>& Para
 // widget laid out / hit-testable this frame and a focused viewport); the delegate broadcast
 // above is the reliable default.
 // ---------------------------------------------------------------------------
-// MCP:click_pie_widget - Fire a LIVE UMG widget's event in the running PIE session (game thread): resolve a UWidget by name among the active viewport UserWidgets (reusing the read_pie_widgets walk) and BROADCAST its named BlueprintAssignable multicast delegate (default OnClicked). Unlike read_pie_widgets (read-only) this MUTATES runtime state -- it runs the exact bound handlers a real click would, including the client->server RPC path, so equip/inventory/craft UI flows can be driven headless instead of by a human (driving them via call_function bypasses that RPC path and yields false negatives). Errors clearly if no Play-In-Editor session is running or the widget/event is not found.
-//   @param widget_name - Required. Name of the target UWidget in the live tree (as reported by read_pie_widgets), e.g. "ConfirmButton". Matches a widget inside an active viewport UserWidget's WidgetTree, or a top-level UserWidget by its own name.
+// MCP:click_pie_widget - Fire a LIVE UMG widget's event in the running PIE session (game thread): resolve a UWidget by name among the active viewport UserWidgets (reusing the list_pie_widgets walk) and BROADCAST its named BlueprintAssignable multicast delegate (default OnClicked). Unlike list_pie_widgets (read-only) this MUTATES runtime state -- it runs the exact bound handlers a real click would, including the client->server RPC path, so equip/inventory/craft UI flows can be driven headless instead of by a human (driving them via call_function bypasses that RPC path and yields false negatives). Errors clearly if no Play-In-Editor session is running or the widget/event is not found.
+//   @param widget_name - Required. Name of the target UWidget in the live tree (as reported by list_pie_widgets), e.g. "ConfirmButton". Matches a widget inside an active viewport UserWidget's WidgetTree, or a top-level UserWidget by its own name.
 //   @param event - Optional (default "OnClicked"): BlueprintAssignable multicast delegate to fire (e.g. "OnClicked", "OnPressed", "OnReleased").
 //   @param child_name - Optional: after resolving widget_name, drill into a descendant widget with this name (the resolved widget's own WidgetTree if it is a UserWidget, else a named child in its subtree) and fire the event on THAT widget instead.
 //   @param player_index - Optional (default 0): when set, only consider viewport UserWidgets owned by the local player with this index (single-player PIE resolves globally).
@@ -3197,7 +3345,7 @@ TSharedPtr<FJsonObject> HandleClickPieWidget(const TSharedPtr<FJsonObject>& Para
 // (no DECLARE_DYNAMIC_MULTICAST_DELEGATE in Components/ProgressBar.h) -- always set:true, no event.
 // ---------------------------------------------------------------------------
 // MCP:set_pie_widget_value - Set a LIVE PIE input widget's REAL value (companion to click_pie_widget, which only broadcasts a delegate with zero-init params and never touches Slider/CheckBox/EditableTextBox/ComboBoxString state first). Resolves the widget exactly like click_pie_widget (same widget_name/child_name/player_index rules), then calls the widget's real setter: USlider::SetValue, UCheckBox::SetIsChecked, UEditableTextBox::SetText/UEditableText::SetText, UComboBoxString::SetSelectedOption, or UProgressBar::SetPercent. fire_event genuinely gates a manual OnCheckStateChanged/OnTextChanged(+OnTextCommitted) broadcast for CheckBox/EditableText(Box); Slider/ComboBoxString auto-broadcast on the engine side whenever the value actually changes (fire_event cannot suppress that -- see event_fired_note); ProgressBar has no change event at all. Errors clearly if no PIE session is running, the widget is not found, or its class is not one of the supported input types.
-//   @param widget_name - Required. Name of the target UWidget in the live tree (as reported by read_pie_widgets).
+//   @param widget_name - Required. Name of the target UWidget in the live tree (as reported by list_pie_widgets).
 //   @param child_name - Optional: drill into a descendant widget with this name after resolving widget_name.
 //   @param player_index - Optional (default 0): filter to viewport UserWidgets owned by this local player index.
 //   @param value - Required object: {"type":"float"|"bool"|"string", "value": <matching JSON type>}.
@@ -4165,7 +4313,7 @@ TSharedPtr<FJsonObject> HandleReparentWidget(const TSharedPtr<FJsonObject>& Para
 // ---------------------------------------------------------------------------
 // reorder_widget_child
 // ---------------------------------------------------------------------------
-// MCP:reorder_widget_child - Change a widget's index among its parent panel's children via UPanelWidget::ShiftChild (clamps new_index internally; safe with any int). For a CanvasPanel parent, visual stacking is governed by each child's CanvasPanelSlot ZOrder (set_widget_slot_properties z_order), NOT child index -- the index shift is still applied and reported honestly, with a note.
+// MCP:reorder_widget_child - Change a widget's index among its parent panel's children via UPanelWidget::ShiftChild (clamps new_index internally; safe with any int). For a CanvasPanel parent, visual stacking is governed by each child's CanvasPanelSlot ZOrder (set_slot_properties z_order), NOT child index -- the index shift is still applied and reported honestly, with a note.
 //   @param widget_bp_path - /Game path of the Widget Blueprint asset
 //   @param widget_name - name of the widget to reorder
 //   @param new_index - desired index among its parent's children (clamped to [0, child_count])
@@ -4455,7 +4603,7 @@ TSharedPtr<FJsonObject> HandleDuplicateWidget(const TSharedPtr<FJsonObject>& Par
 // an FSlateColor-typed property specifically relies on the engine's own built-in property-binding
 // resolution).
 // ---------------------------------------------------------------------------
-// MCP:add_widget_animation_track - Add (or reuse) a MovieScene property track for a widget's property inside a UWidgetAnimation: finds/creates a UMovieScenePossessable bound to the named widget (+ matching FWidgetAnimationBinding), resolves property_path to a top-level reflected property on the widget's class, and adds the matching typed track (UMovieSceneFloatTrack | UMovieSceneColorTrack | UMovieSceneBoolTrack) with a full-playback-range section. track_type="auto" infers from the property's reflected type (FFloatProperty/FDoubleProperty->float; FLinearColor or FSlateColor struct->color; FBoolProperty->bool). Call add_widget_animation_keyframe afterward to place keys. Single-level property_path only (not dotted sub-paths).
+// MCP:add_widget_animation_track - Add (or reuse) a MovieScene property track for a widget's property inside a UWidgetAnimation: finds/creates a UMovieScenePossessable bound to the named widget (+ matching FWidgetAnimationBinding), resolves property_path to a top-level reflected property on the widget's class, and adds the matching typed track (UMovieSceneFloatTrack | UMovieSceneColorTrack | UMovieSceneBoolTrack) with a full-playback-range section. track_type="auto" infers from the property's reflected type (FFloatProperty/FDoubleProperty->float; FLinearColor or FSlateColor struct->color; FBoolProperty->bool). Call add_widget_animation_keyframe afterward to place keys. Single-level property_path only (not dotted sub-paths). Read: get_widget_animation_tracks; inverse: remove_widget_animation_track.
 //   @param widget_bp_path - /Game path of the Widget Blueprint asset
 //   @param animation_name - object name OR display label of the target animation
 //   @param widget_name - name of the widget (in the SAME WidgetBP's tree) to animate
@@ -4642,7 +4790,7 @@ TSharedPtr<FJsonObject> HandleAddWidgetAnimationTrack(const TSharedPtr<FJsonObje
 // ---------------------------------------------------------------------------
 // add_widget_animation_keyframe
 // ---------------------------------------------------------------------------
-// MCP:add_widget_animation_keyframe - Add a keyframe to an existing widget-animation property track's section (call add_widget_animation_track first). Converts time_seconds to an FFrameNumber via the MovieScene's tick resolution, extends the section's range to cover the key if needed, then adds the key on the matching channel(s) via the requested interpolation (AddLinearKey | AddCubicKey | AddConstantKey for float/color's FMovieSceneFloatChannel(s); bool channels have no interpolation concept and always use UpdateOrAddKey).
+// MCP:add_widget_animation_keyframe - Add a keyframe to an existing widget-animation property track's section (call add_widget_animation_track first). Converts time_seconds to an FFrameNumber via the MovieScene's tick resolution, extends the section's range to cover the key if needed, then adds the key on the matching channel(s) via the requested interpolation (AddLinearKey | AddCubicKey | AddConstantKey for float/color's FMovieSceneFloatChannel(s); bool channels have no interpolation concept and always use UpdateOrAddKey). Read: get_widget_animation_tracks; inverse: remove_widget_animation_keyframe.
 //   @param widget_bp_path - /Game path of the Widget Blueprint asset
 //   @param animation_name - object name OR display label of the target animation
 //   @param widget_name - name of the animated widget
@@ -4858,6 +5006,457 @@ TSharedPtr<FJsonObject> HandleAddWidgetAnimationKeyframe(const TSharedPtr<FJsonO
 }
 
 // ---------------------------------------------------------------------------
+// get_widget_animation_tracks / remove_widget_animation_track / remove_widget_animation_keyframe: the reader and
+// the removers of what add_widget_animation_track and add_widget_animation_keyframe write. A widget animation's
+// tracks hang off possessables of its own UMovieScene, which the Level Sequence tools never load.
+// ---------------------------------------------------------------------------
+namespace
+{
+    /** float, color or bool for the three track classes add_widget_animation_track makes; the class name otherwise. */
+    FString WidgetAnimTrackType(const UMovieSceneTrack* Track)
+    {
+        if (Track->IsA<UMovieSceneColorTrack>()) { return TEXT("color"); }
+        if (Track->IsA<UMovieSceneFloatTrack>()) { return TEXT("float"); }
+        if (Track->IsA<UMovieSceneBoolTrack>()) { return TEXT("bool"); }
+        return Track->GetClass()->GetName();
+    }
+
+    /** The possessable guid Animation binds WidgetName to (outside any named slot); invalid when it binds none. */
+    FGuid FindWidgetAnimBindingGuid(const UWidgetAnimation* Animation, const FName WidgetName)
+    {
+        for (const FWidgetAnimationBinding& Binding : Animation->AnimationBindings)
+        {
+            if (Binding.WidgetName == WidgetName && Binding.SlotWidgetName.IsNone())
+            {
+                return Binding.AnimationGuid;
+            }
+        }
+        return FGuid();
+    }
+
+    /** The track of binding Guid that animates PropertyName, whatever its class; null when there is none. */
+    UMovieScenePropertyTrack* FindWidgetAnimPropertyTrack(UMovieScene* MovieScene, const FGuid& Guid, const FName PropertyName)
+    {
+        if (const FMovieSceneBinding* Binding = MovieScene->FindBinding(Guid))
+        {
+            for (UMovieSceneTrack* Track : Binding->GetTracks())
+            {
+                UMovieScenePropertyTrack* PropTrack = Cast<UMovieScenePropertyTrack>(Track);
+                if (PropTrack && PropTrack->GetPropertyName() == PropertyName)
+                {
+                    return PropTrack;
+                }
+            }
+        }
+        return nullptr;
+    }
+
+    TSharedPtr<FJsonValue> WidgetAnimKeyValue(const FMovieSceneFloatValue& Value) { return MakeShared<FJsonValueNumber>(Value.Value); }
+    TSharedPtr<FJsonValue> WidgetAnimKeyValue(const FMovieSceneDoubleValue& Value) { return MakeShared<FJsonValueNumber>(Value.Value); }
+    TSharedPtr<FJsonValue> WidgetAnimKeyValue(const bool Value) { return MakeShared<FJsonValueBoolean>(Value); }
+
+    /** Calls Fn(ChannelType, IndexWithinType, Data) for every float, double and bool channel of Section. */
+    template <typename FnType>
+    void ForEachWidgetAnimChannel(UMovieSceneSection* Section, FnType&& Fn)
+    {
+        FMovieSceneChannelProxy& Proxy = Section->GetChannelProxy();
+        int32 Index = 0;
+        for (FMovieSceneFloatChannel* Channel : Proxy.GetChannels<FMovieSceneFloatChannel>())
+        {
+            if (Channel) { auto Data = Channel->GetData(); Fn(TEXT("float"), Index, Data); }
+            ++Index;
+        }
+        Index = 0;
+        for (FMovieSceneDoubleChannel* Channel : Proxy.GetChannels<FMovieSceneDoubleChannel>())
+        {
+            if (Channel) { auto Data = Channel->GetData(); Fn(TEXT("double"), Index, Data); }
+            ++Index;
+        }
+        Index = 0;
+        for (FMovieSceneBoolChannel* Channel : Proxy.GetChannels<FMovieSceneBoolChannel>())
+        {
+            if (Channel) { auto Data = Channel->GetData(); Fn(TEXT("bool"), Index, Data); }
+            ++Index;
+        }
+    }
+
+    /** One track as JSON: class, type, animated property and, per section, its range and every channel's keys. */
+    TSharedPtr<FJsonObject> WidgetAnimTrackJson(UMovieSceneTrack* Track, const FFrameRate& TickResolution, int32& InOutKeyCount)
+    {
+        TSharedPtr<FJsonObject> TrackJson = MakeShared<FJsonObject>();
+        TrackJson->SetStringField(TEXT("track_class"), Track->GetClass()->GetName());
+        TrackJson->SetStringField(TEXT("track_type"), WidgetAnimTrackType(Track));
+        if (const UMovieScenePropertyTrack* PropTrack = Cast<UMovieScenePropertyTrack>(Track))
+        {
+            TrackJson->SetStringField(TEXT("property_name"), PropTrack->GetPropertyName().ToString());
+            TrackJson->SetStringField(TEXT("property_path"), PropTrack->GetPropertyPath().ToString());
+        }
+        TArray<TSharedPtr<FJsonValue>> SectionsOut;
+        const TArray<UMovieSceneSection*>& Sections = Track->GetAllSections();
+        for (int32 SectionIndex = 0; SectionIndex < Sections.Num(); ++SectionIndex)
+        {
+            UMovieSceneSection* Section = Sections[SectionIndex];
+            if (!Section)
+            {
+                continue;
+            }
+            TSharedPtr<FJsonObject> SectionJson = MakeShared<FJsonObject>();
+            SectionJson->SetNumberField(TEXT("section_index"), SectionIndex);
+            if (Section->HasStartFrame())
+            {
+                SectionJson->SetNumberField(TEXT("start_seconds"), TickResolution.AsSeconds(FFrameTime(Section->GetInclusiveStartFrame())));
+            }
+            if (Section->HasEndFrame())
+            {
+                SectionJson->SetNumberField(TEXT("end_seconds"), TickResolution.AsSeconds(FFrameTime(Section->GetExclusiveEndFrame())));
+            }
+            TArray<TSharedPtr<FJsonValue>> ChannelsOut;
+            ForEachWidgetAnimChannel(Section, [&](const TCHAR* ChannelType, int32 ChannelIndex, auto& Data)
+            {
+                TArray<TSharedPtr<FJsonValue>> KeysOut;
+                const auto Times = Data.GetTimes();
+                const auto Values = Data.GetValues();
+                for (int32 KeyIndex = 0; KeyIndex < Times.Num(); ++KeyIndex)
+                {
+                    TSharedPtr<FJsonObject> KeyJson = MakeShared<FJsonObject>();
+                    KeyJson->SetNumberField(TEXT("frame"), Times[KeyIndex].Value);
+                    KeyJson->SetNumberField(TEXT("time_seconds"), TickResolution.AsSeconds(FFrameTime(Times[KeyIndex])));
+                    KeyJson->SetField(TEXT("value"), WidgetAnimKeyValue(Values[KeyIndex]));
+                    KeysOut.Add(MakeShared<FJsonValueObject>(KeyJson));
+                }
+                InOutKeyCount += Times.Num();
+                TSharedPtr<FJsonObject> ChannelJson = MakeShared<FJsonObject>();
+                ChannelJson->SetStringField(TEXT("channel_type"), ChannelType);
+                ChannelJson->SetNumberField(TEXT("channel_index"), ChannelIndex);
+                ChannelJson->SetNumberField(TEXT("key_count"), Times.Num());
+                ChannelJson->SetArrayField(TEXT("keys"), KeysOut);
+                ChannelsOut.Add(MakeShared<FJsonValueObject>(ChannelJson));
+            });
+            SectionJson->SetArrayField(TEXT("channels"), ChannelsOut);
+            SectionsOut.Add(MakeShared<FJsonValueObject>(SectionJson));
+        }
+        TrackJson->SetArrayField(TEXT("sections"), SectionsOut);
+        return TrackJson;
+    }
+
+    /**
+     * The params the two removers share and what they name: the Widget Blueprint, its animation, the binding of
+     * widget_name in it and the property track of property_path on that binding. OutTrack stays null when the widget
+     * has no binding or the binding no such track, which the callers report as nothing to remove.
+     */
+    TSharedPtr<FJsonObject> ReadWidgetAnimTrackTarget(const TSharedPtr<FJsonObject>& Params, FString& OutWidgetBPPath,
+        FString& OutAnimationName, FString& OutWidgetName, FString& OutPropertyPath, UWidgetBlueprint*& OutWidgetBP,
+        UWidgetAnimation*& OutAnimation, FGuid& OutBindingGuid, UMovieScenePropertyTrack*& OutTrack)
+    {
+        if (TSharedPtr<FJsonObject> Failure = ReadAnimationTarget_Widget(Params, OutWidgetBPPath, OutAnimationName, OutWidgetBP)) { return Failure; }
+        if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("widget_name"), OutWidgetName)) { return Missing; }
+        if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("property_path"), OutPropertyPath)) { return Missing; }
+        OutAnimation = FindWidgetAnimationByName(OutWidgetBP, OutAnimationName);
+        if (!OutAnimation || !OutAnimation->MovieScene)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("Widget animation '%s' not found on %s (get_widget_animations lists them); nothing was changed"),
+                *OutAnimationName, *OutWidgetBPPath));
+        }
+        OutBindingGuid = FindWidgetAnimBindingGuid(OutAnimation, FName(*OutWidgetName));
+        OutTrack = OutBindingGuid.IsValid()
+            ? FindWidgetAnimPropertyTrack(OutAnimation->MovieScene, OutBindingGuid, FName(*OutPropertyPath))
+            : nullptr;
+        return nullptr;
+    }
+}
+
+// MCP:get_widget_animation_tracks - Read what one UWidgetAnimation of a Widget Blueprint animates: every widget it binds (widget_name, possessable_guid, is_root_widget, widget_in_tree) with its tracks (track_class, track_type float|color|bool, the animated property) and, per section, its range in seconds and every key of every channel (frame, time_seconds, value). Read-only. It reads what add_widget_animation_track and add_widget_animation_keyframe write, and gives the widget_name, property_path and time_seconds that remove_widget_animation_track and remove_widget_animation_keyframe take; get_widget_animations lists the animations. A missing Blueprint or animation is an error.
+//   @param widget_bp_path - /Game path of the Widget Blueprint asset
+//   @param animation_name - object name OR display label of the animation (get_widget_animations lists them)
+//   @returns { widget_bp_path: string, animation_name: string, object_name: string, tick_resolution: number, playback_start_seconds: number, playback_end_seconds: number, binding_count: int, track_count: int, key_count: int, bindings: [{widget_name, possessable_guid, is_root_widget, widget_in_tree, slot_widget_name?, tracks: [{track_class, track_type, property_name, property_path, sections: [{section_index, start_seconds, end_seconds, channels: [{channel_type, channel_index, key_count, keys: [{frame, time_seconds, value}]}]}]}]}] }
+
+TSharedPtr<FJsonObject> HandleGetWidgetAnimationTracks(const TSharedPtr<FJsonObject>& Params)
+{
+    FString WidgetBPPath, AnimationName;
+    UWidgetBlueprint* WidgetBP = nullptr;
+    if (TSharedPtr<FJsonObject> Failure = ReadAnimationTarget_Widget(Params, WidgetBPPath, AnimationName, WidgetBP))
+    {
+        return Failure;
+    }
+    UWidgetAnimation* Animation = FindWidgetAnimationByName(WidgetBP, AnimationName);
+    if (!Animation || !Animation->MovieScene)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Widget animation '%s' not found on %s (get_widget_animations lists them)"), *AnimationName, *WidgetBPPath));
+    }
+
+    UMovieScene* MovieScene = Animation->MovieScene;
+    const FFrameRate TickResolution = MovieScene->GetTickResolution();
+    int32 TrackCount = 0;
+    int32 KeyCount = 0;
+    TArray<TSharedPtr<FJsonValue>> BindingsOut;
+    for (const FWidgetAnimationBinding& Binding : Animation->AnimationBindings)
+    {
+        TSharedPtr<FJsonObject> BindingJson = MakeShared<FJsonObject>();
+        BindingJson->SetStringField(TEXT("widget_name"), Binding.WidgetName.ToString());
+        if (!Binding.SlotWidgetName.IsNone())
+        {
+            BindingJson->SetStringField(TEXT("slot_widget_name"), Binding.SlotWidgetName.ToString());
+        }
+        BindingJson->SetStringField(TEXT("possessable_guid"), Binding.AnimationGuid.ToString());
+        BindingJson->SetBoolField(TEXT("is_root_widget"), Binding.bIsRootWidget);
+        BindingJson->SetBoolField(TEXT("widget_in_tree"),
+            WidgetBP->WidgetTree && WidgetBP->WidgetTree->FindWidget(Binding.WidgetName) != nullptr);
+        TArray<TSharedPtr<FJsonValue>> TracksOut;
+        if (const FMovieSceneBinding* SceneBinding = MovieScene->FindBinding(Binding.AnimationGuid))
+        {
+            for (UMovieSceneTrack* Track : SceneBinding->GetTracks())
+            {
+                if (Track)
+                {
+                    TracksOut.Add(MakeShared<FJsonValueObject>(WidgetAnimTrackJson(Track, TickResolution, KeyCount)));
+                    ++TrackCount;
+                }
+            }
+        }
+        BindingJson->SetArrayField(TEXT("tracks"), TracksOut);
+        BindingsOut.Add(MakeShared<FJsonValueObject>(BindingJson));
+    }
+
+    const TRange<FFrameNumber> Playback = MovieScene->GetPlaybackRange();
+    TSharedPtr<FJsonObject> Resp = StartReply_Widget(WidgetBPPath, TEXT("animation_name"), AnimationName);
+    Resp->SetStringField(TEXT("object_name"), Animation->GetName());
+    Resp->SetNumberField(TEXT("tick_resolution"), TickResolution.AsDecimal());
+    if (Playback.GetLowerBound().IsClosed())
+    {
+        Resp->SetNumberField(TEXT("playback_start_seconds"), TickResolution.AsSeconds(FFrameTime(Playback.GetLowerBoundValue())));
+    }
+    if (Playback.GetUpperBound().IsClosed())
+    {
+        Resp->SetNumberField(TEXT("playback_end_seconds"), TickResolution.AsSeconds(FFrameTime(Playback.GetUpperBoundValue())));
+    }
+    Resp->SetNumberField(TEXT("binding_count"), BindingsOut.Num());
+    Resp->SetNumberField(TEXT("track_count"), TrackCount);
+    Resp->SetNumberField(TEXT("key_count"), KeyCount);
+    Resp->SetArrayField(TEXT("bindings"), BindingsOut);
+    return mcp_common::MakeOkReply(Resp);
+}
+
+// MCP:remove_widget_animation_track - Remove the track that animates property_path of widget_name inside one UWidgetAnimation of a Widget Blueprint, with its sections and keys, then compile and save the Blueprint; no undo step. Inverse of add_widget_animation_track: when it was the widget's last track, the widget's binding (its possessable and FWidgetAnimationBinding) goes too, and binding_removed says so. widget_name is matched against the animation's bindings, so the binding of a widget already deleted from the tree can be cleaned too. A widget or property with no such track is an honest no-op (removed=false, nothing compiled or saved); a missing Blueprint or animation is an error. Refused during PIE unless force=true; a failed save makes success false with save_error. Read first: get_widget_animation_tracks; one key only: remove_widget_animation_keyframe; the whole animation: remove_widget_animation.
+//   @param widget_bp_path - /Game path of the Widget Blueprint asset
+//   @param animation_name - object name OR display label of the animation
+//   @param widget_name - name of the animated widget, as get_widget_animation_tracks reports it
+//   @param property_path - the property the track animates, the SAME property_path given to add_widget_animation_track (e.g. "RenderOpacity")
+//   @returns { widget_bp_path: string, animation_name: string, widget_name: string, property_path: string, removed: bool, track_class: string, binding_removed: bool, tracks_left_on_binding: int, saved: bool, save_error: string, note: string? }
+
+TSharedPtr<FJsonObject> HandleRemoveWidgetAnimationTrack(const TSharedPtr<FJsonObject>& Params)
+{
+    FString WidgetBPPath, AnimationName, WidgetName, PropertyPath;
+    UWidgetBlueprint* WidgetBP = nullptr;
+    UWidgetAnimation* Animation = nullptr;
+    FGuid BindingGuid;
+    UMovieScenePropertyTrack* Track = nullptr;
+    if (TSharedPtr<FJsonObject> Failure = ReadWidgetAnimTrackTarget(Params, WidgetBPPath, AnimationName, WidgetName,
+            PropertyPath, WidgetBP, Animation, BindingGuid, Track))
+    {
+        return Failure;
+    }
+
+    TSharedPtr<FJsonObject> Resp = StartReply_Widget(WidgetBPPath, TEXT("animation_name"), AnimationName);
+    Resp->SetStringField(TEXT("widget_name"), WidgetName);
+    Resp->SetStringField(TEXT("property_path"), PropertyPath);
+    if (!Track)
+    {
+        Resp->SetBoolField(TEXT("removed"), false);
+        Resp->SetBoolField(TEXT("binding_removed"), false);
+        Resp->SetBoolField(TEXT("saved"), false);
+        Resp->SetStringField(TEXT("note"), BindingGuid.IsValid()
+            ? TEXT("the widget's binding has no track for this property; nothing changed (get_widget_animation_tracks lists the tracks)")
+            : TEXT("the animation binds no widget of that name; nothing changed (get_widget_animation_tracks lists the bindings)"));
+        return mcp_common::MakeOkReply(Resp);
+    }
+
+    UMovieScene* MovieScene = Animation->MovieScene;
+    WidgetBP->Modify();
+    Animation->Modify();
+    MovieScene->Modify();
+    const FString TrackClass = Track->GetClass()->GetName();
+    if (!MovieScene->RemoveTrack(*Track))
+    {
+        return mcp_common::MakeErrorReply(TEXT("UMovieScene::RemoveTrack did not remove the track; nothing was compiled or saved"));
+    }
+
+    // add_widget_animation_track made the binding when the widget had none: its last track leaving takes it too.
+    const FMovieSceneBinding* SceneBinding = MovieScene->FindBinding(BindingGuid);
+    int32 TracksLeft = SceneBinding ? SceneBinding->GetTracks().Num() : 0;
+    bool bBindingRemoved = false;
+    if (TracksLeft == 0)
+    {
+        MovieScene->RemovePossessable(BindingGuid);
+        bBindingRemoved = Animation->AnimationBindings.RemoveAll(
+            [&BindingGuid](const FWidgetAnimationBinding& Binding) { return Binding.AnimationGuid == BindingGuid; }) > 0;
+    }
+
+    // The re-read: the property has no track left on the binding.
+    const bool bGone = !FindWidgetAnimPropertyTrack(MovieScene, BindingGuid, FName(*PropertyPath));
+    if (!bGone)
+    {
+        return mcp_common::MakeErrorReply(TEXT("The track is still on the binding after RemoveTrack; nothing was compiled or saved"));
+    }
+
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WidgetBP);
+    FString SaveErr;
+    const bool bSaved = SaveWidgetBlueprint(WidgetBP, SaveErr);
+
+    Resp->SetBoolField(TEXT("removed"), true);
+    Resp->SetStringField(TEXT("track_class"), TrackClass);
+    Resp->SetBoolField(TEXT("binding_removed"), bBindingRemoved);
+    Resp->SetNumberField(TEXT("tracks_left_on_binding"), TracksLeft);
+    return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("remove_widget_animation_track"), SaveErr);
+}
+
+// MCP:remove_widget_animation_keyframe - Remove the key at time_seconds (or the key_index-th key) from every channel of the track that animates property_path of widget_name in one UWidgetAnimation of a Widget Blueprint -- the four channels of a color track at once -- then compile and save the Blueprint; no undo step. Inverse of add_widget_animation_keyframe, which rounds time_seconds to a tick frame the same way, so the time given there finds its key here. The key is matched within tolerance seconds (default 0: the same tick). A time or key_index that matches no key is an error listing the key times, and nothing changes; so is a missing Blueprint, animation, binding or track. The section keeps its range. Refused during PIE unless force=true; a failed save makes success false with save_error. Read keys: get_widget_animation_tracks; the whole track: remove_widget_animation_track.
+//   @param widget_bp_path - /Game path of the Widget Blueprint asset
+//   @param animation_name - object name OR display label of the animation
+//   @param widget_name - name of the animated widget
+//   @param property_path - the SAME property_path given to add_widget_animation_track
+//   @param time_seconds [number] - time of the key to remove, in seconds; give it or key_index
+//   @param key_index [int] - index of the key among the first channel's keys (in time order); give it or time_seconds
+//   @param tolerance [number] - how far from time_seconds a key may be and still match, in seconds (default 0)
+//   @returns { widget_bp_path: string, animation_name: string, widget_name: string, property_path: string, track_type: string, removed_frame: int, removed_time_seconds: number, keys_removed: int, key_count_after: int, saved: bool, save_error: string }
+
+TSharedPtr<FJsonObject> HandleRemoveWidgetAnimationKeyframe(const TSharedPtr<FJsonObject>& Params)
+{
+    FString WidgetBPPath, AnimationName, WidgetName, PropertyPath;
+    UWidgetBlueprint* WidgetBP = nullptr;
+    UWidgetAnimation* Animation = nullptr;
+    FGuid BindingGuid;
+    UMovieScenePropertyTrack* Track = nullptr;
+    if (TSharedPtr<FJsonObject> Failure = ReadWidgetAnimTrackTarget(Params, WidgetBPPath, AnimationName, WidgetName,
+            PropertyPath, WidgetBP, Animation, BindingGuid, Track))
+    {
+        return Failure;
+    }
+    if (!Track)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("No track animates '%s' of widget '%s' in '%s' (get_widget_animation_tracks lists them); nothing was changed"),
+            *PropertyPath, *WidgetName, *AnimationName));
+    }
+
+    double TimeSeconds = 0.0;
+    int32 KeyIndex = INDEX_NONE;
+    const bool bHasTime = Params->TryGetNumberField(TEXT("time_seconds"), TimeSeconds);
+    const bool bHasIndex = Params->TryGetNumberField(TEXT("key_index"), KeyIndex);
+    if (bHasTime == bHasIndex)
+    {
+        return mcp_common::MakeErrorReply(TEXT("Give exactly one of time_seconds or key_index; nothing was changed"));
+    }
+    double ToleranceSeconds = 0.0;
+    Params->TryGetNumberField(TEXT("tolerance"), ToleranceSeconds);
+    if (ToleranceSeconds < 0.0)
+    {
+        return mcp_common::MakeErrorReply(TEXT("tolerance must be >= 0; nothing was changed"));
+    }
+
+    const FFrameRate TickResolution = Animation->MovieScene->GetTickResolution();
+    const TArray<UMovieSceneSection*>& Sections = Track->GetAllSections();
+
+    // Every key time of the track, for the frame a key_index names and for the error when nothing matches.
+    TArray<FFrameNumber> FirstChannelTimes;
+    TArray<FString> AllTimes;
+    for (UMovieSceneSection* Section : Sections)
+    {
+        if (!Section) { continue; }
+        bool bFirst = FirstChannelTimes.Num() == 0;
+        ForEachWidgetAnimChannel(Section, [&](const TCHAR*, int32, auto& Data)
+        {
+            for (const FFrameNumber& Time : Data.GetTimes())
+            {
+                if (bFirst) { FirstChannelTimes.Add(Time); }
+                AllTimes.AddUnique(FString::SanitizeFloat(TickResolution.AsSeconds(FFrameTime(Time))));
+            }
+            bFirst = false;
+        });
+    }
+
+    FFrameNumber Frame;
+    FFrameNumber ToleranceFrames(0);
+    if (bHasIndex)
+    {
+        if (!FirstChannelTimes.IsValidIndex(KeyIndex))
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("key_index %d is out of range: the track has %d key(s); nothing was changed"), KeyIndex, FirstChannelTimes.Num()));
+        }
+        Frame = FirstChannelTimes[KeyIndex];
+    }
+    else
+    {
+        Frame = TickResolution.AsFrameTime(TimeSeconds).RoundToFrame();
+        ToleranceFrames = TickResolution.AsFrameTime(ToleranceSeconds).RoundToFrame();
+    }
+
+    // Count first, remove second: a call that matches no key changes nothing.
+    int32 Matching = 0;
+    for (UMovieSceneSection* Section : Sections)
+    {
+        if (!Section) { continue; }
+        ForEachWidgetAnimChannel(Section, [&](const TCHAR*, int32, auto& Data)
+        {
+            for (const FFrameNumber& Time : Data.GetTimes())
+            {
+                if (FMath::Abs(Time.Value - Frame.Value) <= ToleranceFrames.Value) { ++Matching; }
+            }
+        });
+    }
+    if (Matching == 0)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("No key of '%s' on widget '%s' at %s s (tolerance %s s); the keys are at [%s] s. Nothing was changed."),
+            *PropertyPath, *WidgetName, *FString::SanitizeFloat(TickResolution.AsSeconds(FFrameTime(Frame))),
+            *FString::SanitizeFloat(ToleranceSeconds), *FString::Join(AllTimes, TEXT(", "))));
+    }
+
+    WidgetBP->Modify();
+    Animation->Modify();
+    int32 KeysRemoved = 0;
+    int32 KeyCountAfter = 0;
+    bool bFirstChannel = true;
+    for (UMovieSceneSection* Section : Sections)
+    {
+        if (!Section) { continue; }
+        Section->Modify();
+        ForEachWidgetAnimChannel(Section, [&](const TCHAR*, int32, auto& Data)
+        {
+            for (int32 Index = Data.GetTimes().Num() - 1; Index >= 0; --Index)
+            {
+                if (FMath::Abs(Data.GetTimes()[Index].Value - Frame.Value) <= ToleranceFrames.Value)
+                {
+                    Data.RemoveKey(Index);
+                    ++KeysRemoved;
+                }
+            }
+            if (bFirstChannel)
+            {
+                KeyCountAfter = Data.GetTimes().Num();
+                bFirstChannel = false;
+            }
+        });
+    }
+
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WidgetBP);
+    FString SaveErr;
+    const bool bSaved = SaveWidgetBlueprint(WidgetBP, SaveErr);
+
+    TSharedPtr<FJsonObject> Resp = StartReply_Widget(WidgetBPPath, TEXT("animation_name"), AnimationName);
+    Resp->SetStringField(TEXT("widget_name"), WidgetName);
+    Resp->SetStringField(TEXT("property_path"), PropertyPath);
+    Resp->SetStringField(TEXT("track_type"), WidgetAnimTrackType(Track));
+    Resp->SetNumberField(TEXT("removed_frame"), Frame.Value);
+    Resp->SetNumberField(TEXT("removed_time_seconds"), TickResolution.AsSeconds(FFrameTime(Frame)));
+    Resp->SetNumberField(TEXT("keys_removed"), KeysRemoved);
+    Resp->SetNumberField(TEXT("key_count_after"), KeyCountAfter);
+    return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("remove_widget_animation_keyframe"), SaveErr);
+}
+
+// ---------------------------------------------------------------------------
 // set_slot_properties -- GENERIC slot writer via reflection.
 //
 // Why it exists when there are already three slot shortcuts. UMG has 17 UPanelSlot subclasses
@@ -4874,7 +5473,7 @@ TSharedPtr<FJsonObject> HandleAddWidgetAnimationKeyframe(const TSharedPtr<FJsonO
 // (canvas anchors, box alignment, grid row/column) and they also normalise formats that pure
 // reflection does not guess ([L,T,R,B] to FMargin, "Fill" to ESlateSizeRule).
 // ---------------------------------------------------------------------------
-// MCP:set_slot_properties - Set ANY property of a widget's UPanelSlot BY REFLECTION, whatever the concrete slot class is -- including the 9 of UMG's 17 slot types that no shortcut covers (UButtonSlot, which is every widget inside a Button; UUniformGridSlot, UWrapBoxSlot, UStackBoxSlot, UWidgetSwitcherSlot, USafeZoneSlot, UScaleBoxSlot, UBackgroundBlurSlot, UWindowTitleBarAreaSlot) and any slot type a future engine version adds. Accepts dotted paths into nested slot structs ("Padding.Left", "Size.SizeRule") and reports field by field what landed, same honest contract as set_widget_property: the oracle is applied[]/ignored[]/errors[], not success. For the common cases prefer the validated shortcuts, which also normalise formats this does not guess: set_widget_slot_properties (CanvasPanel anchors/offsets/z-order), set_box_slot_properties (HorizontalBox/VerticalBox/Overlay/Border/SizeBox/ScrollBox alignment+padding+size) and set_grid_slot_properties (GridPanel row/column/spans).
+// MCP:set_slot_properties - Set ANY property of a widget's UPanelSlot BY REFLECTION, whatever the concrete slot class is -- including the 9 of UMG's 17 slot types that no shortcut covers (UButtonSlot, which is every widget inside a Button; UUniformGridSlot, UWrapBoxSlot, UStackBoxSlot, UWidgetSwitcherSlot, USafeZoneSlot, UScaleBoxSlot, UBackgroundBlurSlot, UWindowTitleBarAreaSlot) and any slot type a future engine version adds. Accepts dotted paths into nested slot structs ("Padding.Left", "Size.SizeRule") and reports field by field what landed, same honest contract as set_widget_property: the oracle is applied[]/ignored[]/errors[], not success. It covers the common slots too, with the engine's names and formats: a CanvasPanel slot's LayoutData {Anchors, Offsets {Left, Top, Right, Bottom}}, ZOrder and bAutoSize; a box, overlay, border, size-box or scroll-box slot's HorizontalAlignment/VerticalAlignment (HAlign_Center, VAlign_Fill...), Padding {Left, Top, Right, Bottom} and Size {SizeRule, Value}; a grid slot's Row, Column, RowSpan, ColumnSpan, Layer and Nudge {X, Y}.
 //   @param widget_bp_path - /Game path of the Widget Blueprint asset
 //   @param widget_name - name of the widget whose slot to edit (its PARENT panel decides the slot class; read it from get_widget_blueprint_tree include_slot=true)
 //   @param properties [object] - {"<property or dotted path>": <value>, ...} written onto the slot object, e.g. {"Padding":[8,4,8,4],"HorizontalAlignment":"HAlign_Center"}. Enums accept the short name; FMargin accepts a scalar, [h,v] or [l,t,r,b].
@@ -5227,13 +5826,13 @@ TSharedPtr<FJsonObject> HandleApplyWidgetStylePreset(const TSharedPtr<FJsonObjec
 // guards with IsDesignTime() behaves as in the editor; and everything that depends on the live
 // game -- bindings to a PlayerState, text filled in NativeConstruct, data that arrives through a
 // ViewModel -- comes out at its default value, EMPTY, not the game's. For that there are
-// read_pie_widgets and capture_pie_screenshot.
+// list_pie_widgets and capture_pie_screenshot.
 //
 // There is a second limit, this one from the engine: FWidgetRenderer::DrawWidget returns nullptr
 // when FApp::CanEverRender() is false (editor with -nullrhi / headless without RHI). That is NOT
 // disguised as an empty image: the answer is rendered:false with the reason.
 // ---------------------------------------------------------------------------
-// MCP:render_widget_preview - Render a Widget Blueprint to a PNG on disk WITHOUT running the game: builds the widget with the editor's own designer flags, draws it through FWidgetRenderer into a render target and writes the file. This is what turns "does this style look right?" from a PIE session someone has to watch into a static read plus one image to LOOK at. HONEST SCOPE: it is a DESIGN preview, the same thing the UMG Designer shows -- not the live HUD. Anything that only exists while the game runs (text filled in NativeConstruct, property bindings, ViewModel data, anything behind an IsDesignTime() guard) renders at its default/empty value. Use read_pie_widgets or capture_pie_screenshot for the running session. Returns rendered:false with a reason (never a blank image) when the editor has no RHI (-nullrhi/headless), because FWidgetRenderer cannot draw there.
+// MCP:render_widget_preview - Render a Widget Blueprint to a PNG on disk WITHOUT running the game: builds the widget with the editor's own designer flags, draws it through FWidgetRenderer into a render target and writes the file. This is what turns "does this style look right?" from a PIE session someone has to watch into a static read plus one image to LOOK at. HONEST SCOPE: it is a DESIGN preview, the same thing the UMG Designer shows -- not the live HUD. Anything that only exists while the game runs (text filled in NativeConstruct, property bindings, ViewModel data, anything behind an IsDesignTime() guard) renders at its default/empty value. Use list_pie_widgets or capture_pie_screenshot for the running session. Returns rendered:false with a reason (never a blank image) when the editor has no RHI (-nullrhi/headless), because FWidgetRenderer cannot draw there.
 //   @param widget_bp_path [string!] - /Game path of the Widget Blueprint asset to render
 //   @param output_path - Optional output file. A bare name lands under <ProjectSaved>/MCP/WidgetPreviews/, an absolute path is used verbatim, and .png is appended when missing. Defaults to the asset's name.
 //   @param width [int] - Optional render width in pixels. Omit BOTH width and height to render at the widget's own desired size (a Slate prepass measures it).
@@ -6030,7 +6629,7 @@ TSharedPtr<FJsonObject> HandleGetPieFocusedWidget(const TSharedPtr<FJsonObject>&
 //   @param widget_name [string!] - Name of a live UserWidget added to the viewport, or of a widget inside one.
 //   @param child_name - Optional: after resolving widget_name, drill into this descendant by name (nested Widget Blueprints included).
 //   @param player_index - Optional local player index whose viewport widgets are searched (default 0).
-//   @param world - Optional world selector, same rules as read_pie_widgets: absent/'pie' | 'server' | 'client' | 'pie:N'.
+//   @param world - Optional world selector, same rules as list_pie_widgets: absent/'pie' | 'server' | 'client' | 'pie:N'.
 //   @returns { focused: bool, widget_name: string, widget_class: string, has_keyboard_focus: bool } -- has_keyboard_focus is RE-READ off the widget after the call, so it is evidence and not an echo: false means Slate refused the focus, and the usual cause is that the widget is not focusable (check IsFocusable and its Visibility -- a HitTestInvisible widget cannot take focus).
 TSharedPtr<FJsonObject> HandleSetPieWidgetFocus(const TSharedPtr<FJsonObject>& Params)
 {
@@ -6206,7 +6805,7 @@ TSharedPtr<FJsonObject> HandleSetNamedSlotContent(const TSharedPtr<FJsonObject>&
 }
 
 // ---------------------------------------------------------------------------
-// scaffold_menu_screen
+// create_menu_screen_widget
 // ---------------------------------------------------------------------------
 namespace
 {
@@ -6277,7 +6876,8 @@ namespace
     }
 }
 
-// MCP:scaffold_menu_screen - Build a styled menu screen: create or reuse the Widget Blueprint at package_path/name with a centred panel, optional title and one button per entry bound to an event-graph OnClicked handler, then compile and save. Re-runs reuse widgets and bindings. Returns contrast_ratio_normal_text; the default colors pass audit_widget_accessibility. Layout is not measured (long labels can clip) and text is inline, not String Table.
+// MCP:create_menu_screen_widget - Build a styled menu screen: create or reuse the Widget Blueprint at package_path/name with a centred panel, optional title and one button per entry bound to an event-graph OnClicked handler, then compile and save. Re-runs reuse widgets and bindings. Returns contrast_ratio_normal_text; the default colors pass audit_widget_accessibility. Layout is not measured (long labels can clip) and text is inline, not String Table.
+//   @renamed-from scaffold_menu_screen
 //   @param package_path - /Game folder for the new Widget Blueprint (e.g. /Game/MyGame/UI).
 //   @param name - Asset name, e.g. WBP_OptionsMenu.
 //   @param entries [array] - REQUIRED, the buttons top to bottom. Each item is either a plain string (the label) or an object {label, handler_name?}. handler_name names the generated event-graph function; omitted, it becomes On<Label>Clicked. Order is preserved.
@@ -6725,7 +7325,7 @@ TSharedPtr<FJsonObject> HandleScaffoldMenuScreen(const TSharedPtr<FJsonObject>& 
 
     return mcp_common::MakeOutcomeReply(Resp, !bSave || bSaved,
         (!bSave || bSaved) ? FString() : FString(TEXT(
-            "scaffold_menu_screen: the screen was built IN MEMORY but NOT saved to disk, so it is lost "
+            "create_menu_screen_widget: the screen was built IN MEMORY but NOT saved to disk, so it is lost "
             "when the editor closes. See save_error for the measured cause (usually a read-only file, or one "
             "locked by source control).")));
 }
@@ -6742,19 +7342,23 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("create_widget_blueprint"), &HandleCreateWidgetBlueprint },
     { TEXT("duplicate_widget"), &HandleDuplicateWidget },
     { TEXT("get_pie_focused_widget"), &HandleGetPieFocusedWidget },
+    { TEXT("get_widget_animation_tracks"), &HandleGetWidgetAnimationTracks },
     { TEXT("get_widget_animations"), &HandleGetWidgetAnimations },
     { TEXT("get_widget_blueprint_tree"), &HandleGetWidgetBlueprintTree },
     { TEXT("list_widget_property_bindings"), &HandleListWidgetPropertyBindings },
     { TEXT("list_widget_types"), &HandleListWidgetTypes },
     { TEXT("play_widget_animation"), &HandlePlayWidgetAnimation },
-    { TEXT("read_pie_widgets"), &HandleReadPieWidgets },
+    { TEXT("list_pie_widgets"), &HandleReadPieWidgets },
     { TEXT("remove_widget_animation"), &HandleRemoveWidgetAnimation },
+    { TEXT("remove_widget_animation_keyframe"), &HandleRemoveWidgetAnimationKeyframe },
+    { TEXT("remove_widget_animation_track"), &HandleRemoveWidgetAnimationTrack },
+    { TEXT("remove_widget_from_blueprint"), &HandleRemoveWidgetFromBlueprint },
     { TEXT("remove_widget_property_binding"), &HandleRemoveWidgetPropertyBinding },
     { TEXT("rename_widget"), &HandleRenameWidget },
     { TEXT("render_widget_preview"), &HandleRenderWidgetPreview },
     { TEXT("reorder_widget_child"), &HandleReorderWidgetChild },
     { TEXT("reparent_widget"), &HandleReparentWidget },
-    { TEXT("scaffold_menu_screen"), &HandleScaffoldMenuScreen },
+    { TEXT("create_menu_screen_widget"), &HandleScaffoldMenuScreen },
     { TEXT("set_box_slot_properties"), &HandleSetBoxSlotProperties },
     { TEXT("set_grid_slot_properties"), &HandleSetGridSlotProperties },
     { TEXT("set_named_slot_content"), &HandleSetNamedSlotContent },

@@ -19,21 +19,6 @@ Read the AGameModeBase CDO's class slots (DefaultPawnClass, HUDClass, PlayerStat
 
 **Returns:** `{ game_mode_class: string, parent_class: string, is_multiplayer: bool, default_pawn_class: string, hud_class: string, player_state_class: string, game_state_class: string, spectator_class: string, player_controller_class: string, world_settings_default_game_mode?: string }`
 
-## `place_player_start`
-
-*Additive.*
-
-Spawn an APlayerStart actor in the editor world at the given location with optional rotation + player-start tag. Location AND rotation are RE-READ from the actor after writing them, so a mismatch is visible instead of echoed back.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `location` | array | no | [X, Y, Z] world location for the spawn point. |
-| `rotation` | array | no | Optional world rotation. TWO forms: the unambiguous OBJECT form {"roll":R,"pitch":P,"yaw":Y} (RECOMMENDED) or the ambiguous ARRAY form [Pitch, Yaw, Roll] -- note the array order, index 2 is ROLL, not yaw. Default identity. |
-| `player_start_tag` | string | no | Optional FName for the PlayerStart.Tag UPROPERTY (e.g. "Red", "Spectator", "DM"). Used by AGameModeBase to filter start points by team. |
-| `name` | string | no | Optional label for the new actor. Defaults to "PlayerStart_N". |
-
-**Returns:** `{ actor_name, location: [x,y,z] (RE-READ from the actor), rotation: {roll,pitch,yaw} (RE-READ from the actor, axes NAMED), is_spatially_loaded: bool, location_matches_request: bool, rotation_matches_request: bool, player_start_tag, spawned: bool, already_existed: bool, requested: { location, rotation, player_start_tag, name } }`
-
 ## `register_spawn_point`
 
 *Additive.*
@@ -77,3 +62,18 @@ Set -- or, with game_mode_class "" or "None", clear -- the GameMode override in 
 | `game_mode_class` | string | yes | AGameModeBase-derivative class: a native short name (e.g. "GameModeBase"), a /Script/ path, or a Blueprint GameMode asset path (e.g. "/Game/Core/BP_MyGameMode"). An empty string or "None" clears the override. |
 
 **Returns:** `{ world_settings_path: string, world_name: string, default_game_mode: string, previous_default_game_mode: string, reset: bool, is_multiplayer?: bool } -- default_game_mode is "" and reset true when the override was cleared; previous_default_game_mode is the path of the override before the call ("" when there was none); is_multiplayer only when a class was set.`
+
+## `spawn_player_start`
+
+*Additive.*
+
+Spawn an APlayerStart actor in the editor world at the given location with optional rotation + player-start tag. Location AND rotation are RE-READ from the actor after writing them, so a mismatch is visible instead of echoed back.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `location` | array | no | [X, Y, Z] world location for the spawn point. |
+| `rotation` | array | no | Optional world rotation. TWO forms: the unambiguous OBJECT form {"roll":R,"pitch":P,"yaw":Y} (RECOMMENDED) or the ambiguous ARRAY form [Pitch, Yaw, Roll] -- note the array order, index 2 is ROLL, not yaw. Default identity. |
+| `player_start_tag` | string | no | Optional FName for the PlayerStart.Tag UPROPERTY (e.g. "Red", "Spectator", "DM"). Used by AGameModeBase to filter start points by team. |
+| `name` | string | no | Optional label for the new actor. Defaults to "PlayerStart_N". |
+
+**Returns:** `{ actor_name, location: [x,y,z] (RE-READ from the actor), rotation: {roll,pitch,yaw} (RE-READ from the actor, axes NAMED), is_spatially_loaded: bool, location_matches_request: bool, rotation_matches_request: bool, player_start_tag, spawned: bool, already_existed: bool, requested: { location, rotation, player_start_tag, name } }`

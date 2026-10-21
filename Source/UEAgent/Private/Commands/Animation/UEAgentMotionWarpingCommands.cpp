@@ -283,7 +283,7 @@ namespace
 // ---------------------------------------------------------------------------
 // add_motion_warping_component
 // ---------------------------------------------------------------------------
-// MCP:add_motion_warping_component - Attach a UMotionWarpingComponent named MotionWarping to an editor-world actor given by full object path, internal name or label. add_component_to_actor (component_type MotionWarpingComponent, idempotent=true) does the same for an actor's internal name only; this tool adds the path/label lookup. Idempotent: if the actor already has one, it is returned with already_existed:true and nothing is written. A new one is an instance component (save_level keeps it, and construction-script reruns do not drop it) added in one undo step; the actor's package is marked dirty, not saved. When another object of the actor already holds the name MotionWarping, the new component gets a unique variant, returned in component_name. Add targets with add_motion_warping_target, read them with inspect_motion_warping_component.
+// MCP:add_motion_warping_component - Attach a UMotionWarpingComponent named MotionWarping to an editor-world actor given by full object path, internal name or label. add_component_to_actor (component_type MotionWarpingComponent, idempotent=true) does the same for an actor's internal name only; this tool adds the path/label lookup. Idempotent: if the actor already has one, it is returned with already_existed:true and nothing is written. A new one is an instance component (save_level keeps it, and construction-script reruns do not drop it) added in one undo step; the actor's package is marked dirty, not saved. When another object of the actor already holds the name MotionWarping, the new component gets a unique variant, returned in component_name. Add targets with add_motion_warping_target, read them with get_motion_warping_component_info.
 //   @param actor_path [string!] - Full editor path (e.g. "/Game/Maps/Test.Test:PersistentLevel.ActorName"), internal name or label of the actor.
 //   @returns { actor_path: string, component_name: string, component_path: string, already_existed: bool }
 
@@ -308,9 +308,10 @@ namespace
 //   @returns { actor_path: string, target_name?: string, all: bool, removed_count: int, removed_names: [string], previous_count: int, warp_target_count: int, cleared: bool }
 
 // ---------------------------------------------------------------------------
-// inspect_motion_warping_component
+// get_motion_warping_component_info
 // ---------------------------------------------------------------------------
-// MCP:inspect_motion_warping_component - Read the full data-layer state of a UMotionWarpingComponent: the b_search_for_windows_in_anims_within_montages flag, every warp target (via GetWarpTargets(): its FName, static location/rotation, component path or null, bone name, b_follow_component, location/rotation offsets and location_offset_direction enum integer), the modifier count (via GetModifiers()), the runtime adapter class (GetOwnerAdapter()->GetClass()), and the protected switch-off-conditions array count (via reflection — FindFProperty<FArrayProperty> + FScriptArrayHelper). Read-only, idempotent.
+// MCP:get_motion_warping_component_info - Read the full data-layer state of a UMotionWarpingComponent: the b_search_for_windows_in_anims_within_montages flag, every warp target (via GetWarpTargets(): its FName, static location/rotation, component path or null, bone name, b_follow_component, location/rotation offsets and location_offset_direction enum integer), the modifier count (via GetModifiers()), the runtime adapter class (GetOwnerAdapter()->GetClass()), and the protected switch-off-conditions array count (via reflection — FindFProperty<FArrayProperty> + FScriptArrayHelper). Read-only, idempotent.
+//   @renamed-from inspect_motion_warping_component
 //   @param actor_path [string!] - Full editor path or short name of the actor.
 //   @returns { actor_path: string, b_search_for_windows_in_anims_within_montages: bool, warp_target_count: int, modifier_count: int, owner_adapter_class: string, switch_off_condition_count: int, warp_targets: array }
 
@@ -639,7 +640,7 @@ TSharedPtr<FJsonObject> HandleInspectMotionWarpingComponent(
     }
 
     UE_LOG(LogTemp, Verbose,
-        TEXT("[MCP] inspect_motion_warping_component: actor='%s' warp_targets=%d modifiers=%d switch_off=%d adapter=%s"),
+        TEXT("[MCP] get_motion_warping_component_info: actor='%s' warp_targets=%d modifiers=%d switch_off=%d adapter=%s"),
         *Actor->GetName(), Targets.Num(), ModifierCount, SwitchOffCount, *AdapterClassName);
 
     TSharedPtr<FJsonObject> Data = MW_StartReply(Actor);
@@ -758,6 +759,7 @@ namespace
 // the existing component from the BlueprintReadOnly TWeakObjectPtr stored on the target itself.
 
 // MCP:set_motion_warping_target_bone_name - Set the BoneName on an existing FMotionWarpingTarget (resolves the existing Component ref).
+//   @retired set_motion_warping_target - bone_name
 //   @param actor_name - Engine name of the actor carrying the UMotionWarpingComponent
 //   @param warp_target_name - FName of the existing warp target on the component
 //   @param bone_name - Skeletal bone on the target's Component to anchor to; NAME_None follows the component root
@@ -798,6 +800,7 @@ TSharedPtr<FJsonObject> HandleSetMotionWarpingTargetBoneName(const TSharedPtr<FJ
 }
 
 // MCP:set_motion_warping_target_follow_component - Set bFollowComponent on an existing component-based warp target of an editor-world actor found by internal name, keeping its Component, BoneName and offsets. A missing target, or one without a Component, is an error. WarpTargets is Transient, so the change is not saved with the level.
+//   @retired set_motion_warping_target - follow_component
 //   @param actor_name - Internal object name of the actor with the UMotionWarpingComponent, e.g. "BP_Hero_C_0"; the outliner label does not match.
 //   @param warp_target_name - FName of the existing warp target on the component
 //   @param follow - When true the target tracks the Component's live transform each frame; when false it snapshots the current transform (required, no default)
@@ -841,6 +844,7 @@ TSharedPtr<FJsonObject> HandleSetMotionWarpingTargetFollowComponent(const TShare
 }
 
 // MCP:set_motion_warping_target_location_offset - Set LocationOffset (FVector) on an existing FMotionWarpingTarget (keeps BoneName/follow/rotation-offset).
+//   @retired set_motion_warping_target - location_offset
 //   @param actor_name - Engine name of the actor carrying the UMotionWarpingComponent
 //   @param warp_target_name - FName of the existing warp target on the component
 //   @param location_offset - [x, y, z] offset applied to the target relative to its LocationOffsetDirection
@@ -883,6 +887,7 @@ TSharedPtr<FJsonObject> HandleSetMotionWarpingTargetLocationOffset(const TShared
 }
 
 // MCP:set_motion_warping_component_search_in_anims - Set bSearchForWindowsInAnimsWithinMontages on the UMotionWarpingComponent of an editor-world actor found by internal name (not label): when true, warping windows are also searched in animations inside montages. Marks the level dirty, not saved; returns previous and new values and changed.
+//   @retired set_properties - object_path="<actor>.MotionWarpingComponent", properties={"bSearchForWindowsInAnimsWithinMontages":..}
 //   @param actor_name - Internal object name of the actor with the UMotionWarpingComponent, e.g. "BP_Hero_C_0"; the outliner label does not match.
 //   @param enabled - Sets bSearchForWindowsInAnimsWithinMontages: when true, motion-warping windows are also searched in animations nested inside montages (required, no default)
 //   @returns { actor_name, previous_search_in_anims: bool, new_search_in_anims: bool, changed: bool }
@@ -913,11 +918,60 @@ TSharedPtr<FJsonObject> HandleSetMotionWarpingComponentSearchInAnims(const TShar
     return mcp_common::MakeOkReply(Obj);
 }
 
+// MCP:set_motion_warping_target - Change any fields of an existing warp target of an editor-world actor's UMotionWarpingComponent in one call -- its bone name, whether it follows its component, its location offset -- keeping the others. Pass only the fields to change; each is applied by its own step and read back, and the call stops at the first one refused (a missing target, follow without a component), with applied listing those already changed. WarpTargets is transient: the change lives in this editor session. Add one: add_motion_warping_target; read them: get_motion_warping_component_info.
+//   @param actor_name - Engine name of the actor carrying the UMotionWarpingComponent
+//   @param warp_target_name - Name of the existing warp target on the component
+//   @param bone_name - Optional bone (or socket) of the target's component the target follows
+//   @param follow_component [bool] - Optional: whether the target follows its component
+//   @param location_offset [array] - Optional [x, y, z] offset applied to the target
+//   @returns { actor_name: string, warp_target_name: string, applied: { field: that field's reply }, failed?: { label, command, error } (when a field is refused) }
+TSharedPtr<FJsonObject> HandleSetMotionWarpingTarget(const TSharedPtr<FJsonObject>& Params)
+{
+    FString ActorName;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("actor_name"), ActorName)) { return Missing; }
+    FString TargetName;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("warp_target_name"), TargetName)) { return Missing; }
+    auto Target = [&ActorName, &TargetName]()
+    {
+        TSharedPtr<FJsonObject> StepParams = MakeShared<FJsonObject>();
+        StepParams->SetStringField(TEXT("actor_name"), ActorName);
+        StepParams->SetStringField(TEXT("warp_target_name"), TargetName);
+        return StepParams;
+    };
+    TArray<mcp_common::FSubCommand> Steps;
+    FString BoneName;
+    if (Params->TryGetStringField(TEXT("bone_name"), BoneName))
+    {
+        TSharedPtr<FJsonObject> Bone = Target();
+        Bone->SetStringField(TEXT("bone_name"), BoneName);
+        Steps.Add({ TEXT("bone_name"), TEXT("set_motion_warping_target_bone_name"), Bone });
+    }
+    bool bFollow = false;
+    if (Params->TryGetBoolField(TEXT("follow_component"), bFollow))
+    {
+        TSharedPtr<FJsonObject> Follow = Target();
+        Follow->SetBoolField(TEXT("follow"), bFollow);
+        Steps.Add({ TEXT("follow_component"), TEXT("set_motion_warping_target_follow_component"), Follow });
+    }
+    const TArray<TSharedPtr<FJsonValue>>* Offset = nullptr;
+    if (Params->TryGetArrayField(TEXT("location_offset"), Offset) && Offset)
+    {
+        TSharedPtr<FJsonObject> OffsetParams = Target();
+        OffsetParams->SetArrayField(TEXT("location_offset"), *Offset);
+        Steps.Add({ TEXT("location_offset"), TEXT("set_motion_warping_target_location_offset"), OffsetParams });
+    }
+    TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
+    Reply->SetStringField(TEXT("actor_name"), ActorName);
+    Reply->SetStringField(TEXT("warp_target_name"), TargetName);
+    return mcp_common::RunSubCommands(TEXT("set_motion_warping_target"), Steps, Reply);
+}
+
 const McpCommandFamilies::FRegistrar Registration =
 {
+    { TEXT("set_motion_warping_target"), &HandleSetMotionWarpingTarget },
     { TEXT("add_motion_warping_component"), &HandleAddMotionWarpingComponent },
     { TEXT("add_motion_warping_target"), &HandleAddWarpTargetToComponent },
-    { TEXT("inspect_motion_warping_component"), &HandleInspectMotionWarpingComponent },
+    { TEXT("get_motion_warping_component_info"), &HandleInspectMotionWarpingComponent },
     { TEXT("remove_motion_warping_component"), &HandleRemoveMotionWarpingComponent },
     { TEXT("remove_motion_warping_target"), &HandleRemoveWarpTarget },
     { TEXT("set_motion_warping_component_search_in_anims"), &HandleSetMotionWarpingComponentSearchInAnims },

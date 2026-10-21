@@ -20,7 +20,7 @@
 #include "GameFramework/PlayerState.h"
 #include "GameFramework/SpectatorPawn.h"
 #include "GameFramework/WorldSettings.h"
-// MCP:place_player_start needs the COMPLETE USceneComponent type: the OFPA-safe
+// MCP:spawn_player_start needs the COMPLETE USceneComponent type: the OFPA-safe
 // write path Modify()s the actor AND its RootComponent (see the handler).
 #include "Components/SceneComponent.h"
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -343,7 +343,8 @@ TSharedPtr<FJsonObject> HandleGetGameModeInfo(
 // PlayerStart placement with its tag.
 // ============================================================================
 
-// MCP:place_player_start - Spawn an APlayerStart actor in the editor world at the given location with optional rotation + player-start tag. Location AND rotation are RE-READ from the actor after writing them, so a mismatch is visible instead of echoed back.
+// MCP:spawn_player_start - Spawn an APlayerStart actor in the editor world at the given location with optional rotation + player-start tag. Location AND rotation are RE-READ from the actor after writing them, so a mismatch is visible instead of echoed back.
+//   @renamed-from place_player_start
 //   @param location - [X, Y, Z] world location for the spawn point.
 //   @param rotation - Optional world rotation. TWO forms: the unambiguous OBJECT form {"roll":R,"pitch":P,"yaw":Y} (RECOMMENDED) or the ambiguous ARRAY form [Pitch, Yaw, Roll] -- note the array order, index 2 is ROLL, not yaw. Default identity.
 //   @param player_start_tag - Optional FName for the PlayerStart.Tag UPROPERTY (e.g. "Red", "Spectator", "DM"). Used by AGameModeBase to filter start points by team.
@@ -407,7 +408,7 @@ TSharedPtr<FJsonObject> HandlePlacePlayerStart(
             // the delete is transacted, so the undo buffer holds the corpse.
             // Measured as a real crash on the sibling path (spawn_actor):
             //   Saved/Crashes/UECC-Windows-6A213E624F9B48DDA7537FA87332A631_0001.
-            // Here we do NOT refuse -- place_player_start is idempotent-by-name and the caller-visible
+            // Here we do NOT refuse -- spawn_player_start is idempotent-by-name and the caller-visible
             // identity is the LABEL (set below, and the reuse scan matches on it). So if the
             // internal name is taken by a corpse we let the engine pick a unique one and still
             // apply the requested label: the operation keeps working.
@@ -438,7 +439,7 @@ TSharedPtr<FJsonObject> HandlePlacePlayerStart(
     // SetActorTransform, which loses OFPA changes silently. Applied to the
     // freshly-spawned actor too: SpawnActor already placed it, so these are
     // no-ops there, but running the same path in both branches means there is
-    // exactly ONE way place_player_start writes a transform.
+    // exactly ONE way spawn_player_start writes a transform.
     PS->Modify();
     if (USceneComponent* Root = PS->GetRootComponent())
     {
@@ -525,10 +526,10 @@ TSharedPtr<FJsonObject> HandleRegisterSpawnPoint(
     if (!PS)
     {
         // Don't promote in place (UE doesn't support changing a runtime class).
-        // Honest error: actor must already be a PlayerStart (use place_player_start
+        // Honest error: actor must already be a PlayerStart (use spawn_player_start
         // to spawn a fresh one).
         return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Actor '%s' is not a APlayerStart. Use place_player_start to spawn one."), *ActorName));
+            FString::Printf(TEXT("Actor '%s' is not a APlayerStart. Use spawn_player_start to spawn one."), *ActorName));
     }
 
     if (!TagStr.IsEmpty())
@@ -548,7 +549,7 @@ TSharedPtr<FJsonObject> HandleRegisterSpawnPoint(
 const McpCommandFamilies::FRegistrar Registration =
 {
 	{ TEXT("get_game_mode_info"), &HandleGetGameModeInfo },
-	{ TEXT("place_player_start"), &HandlePlacePlayerStart },
+	{ TEXT("spawn_player_start"), &HandlePlacePlayerStart },
 	{ TEXT("register_spawn_point"), &HandleRegisterSpawnPoint },
 	{ TEXT("set_game_mode_classes"), &HandleSetGameModeClasses },
 	{ TEXT("set_game_mode_override"), &HandleSetGameModeOverride },

@@ -1797,13 +1797,14 @@ TSharedPtr<FJsonObject> HandleSetAnimTransitionRuleFromComparison(const TSharedP
 //
 // Two primitives on top of the AnimGraph's state-machine / state / transition /
 // conduit / notify / montage plumbing, so a locomotion AnimBP does not take 5+
-// commands wired by hand. `scaffold_locomotion_animbp` packages the recipe
+// commands wired by hand. `create_locomotion_anim_blueprint` packages the recipe
 // (create AnimBP + state machine + Idle/Walk/Run states + bidirectional
-// transitions) into one call. `setup_foot_ik` adds a UAnimGraphNode_LegIK to the
+// transitions) into one call. `add_foot_ik_node` adds a UAnimGraphNode_LegIK to the
 // AnimGraph and binds the foot bone references. Aim offset assets are made by
 // create_blend_space (blend_space_type AimOffset / AimOffset1D).
 
-// MCP:scaffold_locomotion_animbp - Create or update a character Animation Blueprint with a "Locomotion" state machine + Idle/Walk/Run states + bidirectional transitions between them. Idempotent: re-running on an existing AnimBP returns the existing scaffold.
+// MCP:create_locomotion_anim_blueprint - Create or update a character Animation Blueprint with a "Locomotion" state machine + Idle/Walk/Run states + bidirectional transitions between them. Idempotent: re-running on an existing AnimBP returns the existing scaffold.
+//   @renamed-from scaffold_locomotion_animbp
 //   @param package_path - UE content folder, e.g. "/Game/MyGame".
 //   @param asset_name - Blueprint asset name, e.g. "ABP_PlayerLocomotion".
 //   @param skeleton_path - Path to the target USkeleton.
@@ -1977,10 +1978,11 @@ TSharedPtr<FJsonObject> HandleScaffoldLocomotionAnimBp(
              "graph_name=\"<machine> > <state>\") and wire it to the StateResult, or the AnimBP "
              "compiles clean and evaluates to the reference pose."));
     Data->SetBoolField(TEXT("already_existed"), bAlreadyExistedABP);
-    return mcp_common::MakeSavedReply(Data, bSaved, TEXT("scaffold_locomotion_animbp"), SaveErr);
+    return mcp_common::MakeSavedReply(Data, bSaved, TEXT("create_locomotion_anim_blueprint"), SaveErr);
 }
 
-// MCP:setup_foot_ik - Add a Leg IK node (UAnimGraphNode_LegIK) to the top-level AnimGraph of an Animation Blueprint, or reuse the first one already there, bind the feet into its LegsDefinition, then mark the blueprint structurally modified and save it without compiling. Leg 0 gets left_foot_bone and leg 1 right_foot_bone as the FK foot bone; a leg's IK target bone is set to the same bone when it is unset or the leg's foot changes, so the node compiles but has no effect until each IK target names an IK bone (set_anim_graph_node_property on LegsDefinition with the returned node_id); legs beyond the first two and the other leg settings are kept. Bones the target skeleton lacks are an error and nothing is written. The node is left unwired: connect it with connect_anim_graph_pins. Idempotent; refused while PIE runs unless force=true.
+// MCP:add_foot_ik_node - Add a Leg IK node (UAnimGraphNode_LegIK) to the top-level AnimGraph of an Animation Blueprint, or reuse the first one already there, bind the feet into its LegsDefinition, then mark the blueprint structurally modified and save it without compiling. Leg 0 gets left_foot_bone and leg 1 right_foot_bone as the FK foot bone; a leg's IK target bone is set to the same bone when it is unset or the leg's foot changes, so the node compiles but has no effect until each IK target names an IK bone (set_anim_graph_node_property on LegsDefinition with the returned node_id); legs beyond the first two and the other leg settings are kept. Bones the target skeleton lacks are an error and nothing is written. The node is left unwired: connect it with connect_anim_graph_pins. Idempotent; refused while PIE runs unless force=true.
+//   @renamed-from setup_foot_ik
 //   @param anim_blueprint_path - Path to the UAnimBlueprint asset.
 //   @param left_foot_bone - Left foot bone, written as the FK foot bone of leg 0; checked against the target skeleton when the blueprint has one.
 //   @param right_foot_bone - Right foot bone, written as the FK foot bone of leg 1; checked against the target skeleton when the blueprint has one.
@@ -2089,7 +2091,7 @@ TSharedPtr<FJsonObject> HandleSetupFootIk(
     Data->SetStringField(TEXT("bones_checked_against"), TargetSkeleton ? TargetSkeleton->GetPathName() : FString());
     Data->SetNumberField(TEXT("ik_node_count"), FMath::Max(1, ExistingIKCount));
     Data->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
-    return mcp_common::MakeSavedReply(Data, bSaved, TEXT("setup_foot_ik"), SaveErr);
+    return mcp_common::MakeSavedReply(Data, bSaved, TEXT("add_foot_ik_node"), SaveErr);
 }
 
 // ---------------------------------------------------------------------------
@@ -2431,10 +2433,10 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("remove_anim_conduit"), &HandleRemoveAnimConduit },
     { TEXT("remove_anim_state"), &HandleRemoveAnimState },
     { TEXT("remove_anim_transition"), &HandleRemoveAnimTransition },
-    { TEXT("scaffold_locomotion_animbp"), &HandleScaffoldLocomotionAnimBp },
+    { TEXT("create_locomotion_anim_blueprint"), &HandleScaffoldLocomotionAnimBp },
     { TEXT("set_anim_transition_rule_automatic"), &HandleSetAnimTransitionRuleAutomatic },
     { TEXT("set_anim_transition_rule_from_bool"), &HandleSetAnimTransitionRuleFromBool },
     { TEXT("set_anim_transition_rule_from_comparison"), &HandleSetAnimTransitionRuleFromComparison },
-    { TEXT("setup_foot_ik"), &HandleSetupFootIk },
+    { TEXT("add_foot_ik_node"), &HandleSetupFootIk },
 };
 } // namespace UEAgentAnimBlueprintCommands

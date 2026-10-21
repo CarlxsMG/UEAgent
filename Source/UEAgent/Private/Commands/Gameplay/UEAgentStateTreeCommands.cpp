@@ -25,7 +25,7 @@
 #include "StateTreeEvaluatorBase.h"   // FStateTreeEvaluatorBase::StaticStruct() for add_evaluator
 #include "StateTreeConsiderationBase.h"        // FStateTreeConsiderationBase::StaticStruct() for add_consideration
 #include "Components/StateTreeComponent.h"     // UStateTreeComponent + StateTreeRef for set_state_tree_component_parameter_override
-#include "GameplayTagContainer.h"              // FGameplayTag parsing for update_transition event_tag
+#include "GameplayTagContainer.h"              // FGameplayTag parsing for set_state_transition event_tag
 #include "StateTreeEditingSubsystem.h"
 #include "StateTreeCompilerLog.h"
 #include "Logging/TokenizedMessage.h"
@@ -473,7 +473,7 @@ TSharedPtr<FJsonObject> HandleAddState(
 // ---------------------------------------------------------------------------
 // add_state_transition
 // ---------------------------------------------------------------------------
-// MCP:add_state_transition - Append a transition from from_state to to_state on a StateTree asset (trigger OnStateCompleted, type GotoState), then compile and save it; each call adds another one. event_name only fills RequiredEvent, which matters with an OnEvent trigger: set that with update_transition. Returns transition_count and saved.
+// MCP:add_state_transition - Append a transition from from_state to to_state on a StateTree asset (trigger OnStateCompleted, type GotoState), then compile and save it; each call adds another one. event_name only fills RequiredEvent, which matters with an OnEvent trigger: set that with set_state_transition. Returns transition_count and saved.
 //   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
 //   @param from_state - Name of the source state, which owns the new transition.
 //   @param to_state - Name of the target state the transition goes to.
@@ -830,7 +830,7 @@ TSharedPtr<FJsonObject> HandleAddStateTask(
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("add_state_task"));
 }
 
-// MCP:add_state_enter_condition - Append a new enter-condition node, of the struct named by condition_struct and with that struct's default values, to the EnterConditions of one state of a StateTree asset, then save the asset without compiling it; there is no undo step. Each call appends another node, so repeating it stacks a duplicate condition. A missing tree, editor data, state or struct, or a struct that does not derive from FStateTreeConditionBase, is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. Struct names: list_condition_types; list them: list_conditions; set a field: set_condition_property; inverse: remove_state_enter_condition; a condition on a transition: add_transition_condition; check the result with compile_state_tree.
+// MCP:add_state_enter_condition - Append a new enter-condition node, of the struct named by condition_struct and with that struct's default values, to the EnterConditions of one state of a StateTree asset, then save the asset without compiling it; there is no undo step. Each call appends another node, so repeating it stacks a duplicate condition. A missing tree, editor data, state or struct, or a struct that does not derive from FStateTreeConditionBase, is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. Struct names: list_condition_types; list them: list_conditions; set a field: set_condition_property; inverse: remove_state_enter_condition; a condition on a transition: add_state_transition_condition; check the result with compile_state_tree.
 //   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
 //   @param state_name [string!] - Name of the state that gets the condition; the first state with that name in a depth-first walk of the hierarchy is used
 //   @param condition_struct - Condition struct name or /Script path; must derive from StateTreeConditionBase (e.g. "StateTreeRandomCondition"); a leading F is optional
@@ -1030,7 +1030,8 @@ TSharedPtr<FJsonObject> HandleCompileStateTree(
 // Transition conditions + global tasks + transition properties
 // ---------------------------------------------------------------------------
 
-// MCP:add_transition_condition - Append a new condition node, of the struct named by condition_struct and with that struct's default values, to the Conditions of one transition of a state of a StateTree asset, then save the asset without compiling it; there is no undo step. The transition is addressed by state_name and transition_index, its 0-based position in that state's list as get_state_tree_info reports it (transitions[].index). Each call appends another node. A missing tree or state, a missing or out-of-range transition_index, or a struct that does not derive from FStateTreeConditionBase is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. Struct names: list_condition_types; set a field: set_condition_property with target_kind "transition"; inverse: remove_transition_condition; a condition for entering a state: add_state_enter_condition.
+// MCP:add_state_transition_condition - Append a new condition node, of the struct named by condition_struct and with that struct's default values, to the Conditions of one transition of a state of a StateTree asset, then save the asset without compiling it; there is no undo step. The transition is addressed by state_name and transition_index, its 0-based position in that state's list as get_state_tree_info reports it (transitions[].index). Each call appends another node. A missing tree or state, a missing or out-of-range transition_index, or a struct that does not derive from FStateTreeConditionBase is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. Struct names: list_condition_types; set a field: set_condition_property with target_kind "transition"; inverse: remove_state_transition_condition; a condition for entering a state: add_state_enter_condition.
+//   @renamed-from add_transition_condition
 //   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
 //   @param state_name [string!] - Name of the state owning the transition; the first state with that name in a depth-first walk of the hierarchy is used
 //   @param transition_index - 0-based index of the transition within that state (the index field of get_state_tree_info transitions); required
@@ -1069,7 +1070,7 @@ TSharedPtr<FJsonObject> HandleAddTransitionCondition(
 	Data->SetStringField(TEXT("condition_struct"), CondType->GetName());
 	Data->SetNumberField(TEXT("condition_count"), T.Conditions.Num());
 	Data->SetBoolField(TEXT("added"), true);
-	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("add_transition_condition"));
+	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("add_state_transition_condition"));
 }
 
 // MCP:add_state_tree_global_task - Attach a global task node (by struct name, via reflection) to a UStateTree; global tasks run for the whole tree's lifetime.
@@ -1592,9 +1593,10 @@ TSharedPtr<FJsonObject> HandleRemoveState(
 }
 
 // ---------------------------------------------------------------------------
-// remove_transition — remove a transition by index from a state's Transitions
+// remove_state_transition — remove a transition by index from a state's Transitions
 // ---------------------------------------------------------------------------
-// MCP:remove_transition - Remove a transition (by index) from a state. Idempotent at the index-out-of-range boundary.
+// MCP:remove_state_transition - Remove a transition (by index) from a state. Idempotent at the index-out-of-range boundary.
+//   @renamed-from remove_transition
 //   @param tree_path - Asset path to the UStateTree.
 //   @param state_name [string!] - Name of the state.
 //   @param transition_index - 0-based index into the state's Transitions array.
@@ -2349,7 +2351,7 @@ TSharedPtr<FJsonObject> HandleGetConsiderationProperty(
 // ---------------------------------------------------------------------------
 // list_condition_types — enumerate StateTreeConditionBase derivatives
 // ---------------------------------------------------------------------------
-// MCP:list_condition_types - List the concrete condition struct types (children of FStateTreeConditionBase, abstract ones skipped) of the loaded modules, sorted by name, for add_state_enter_condition and add_transition_condition. Returns count and types [{name, struct_path}]; struct_path always assumes /Script/StateTreeModule, so pass name for other modules.
+// MCP:list_condition_types - List the concrete condition struct types (children of FStateTreeConditionBase, abstract ones skipped) of the loaded modules, sorted by name, for add_state_enter_condition and add_state_transition_condition. Returns count and types [{name, struct_path}]; struct_path always assumes /Script/StateTreeModule, so pass name for other modules.
 //   @returns { count, types: [{ name, struct_path }] }
 TSharedPtr<FJsonObject> HandleListConditionTypes(
 	const TSharedPtr<FJsonObject>& Params)
@@ -2521,7 +2523,7 @@ TSharedPtr<FJsonObject> HandleGetConditionProperty(
 // ---------------------------------------------------------------------------
 // remove_state_enter_condition — remove an enter condition by index
 // ---------------------------------------------------------------------------
-// MCP:remove_state_enter_condition - Remove one enter condition, by index, from a state of a StateTree asset and save the asset. An out-of-range index removes nothing and still succeeds, with removed false and a note. Returns removed, remaining and saved; for transition conditions use remove_transition_condition.
+// MCP:remove_state_enter_condition - Remove one enter condition, by index, from a state of a StateTree asset and save the asset. An out-of-range index removes nothing and still succeeds, with removed false and a note. Returns removed, remaining and saved; for transition conditions use remove_state_transition_condition.
 //   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
 //   @param state_name [string!] - Name of the state that owns the condition; the command fails without it.
 //   @param condition_index - 0-based index into the state EnterConditions, as listed by list_conditions.
@@ -2546,9 +2548,10 @@ TSharedPtr<FJsonObject> HandleRemoveStateEnterCondition(
 }
 
 // ---------------------------------------------------------------------------
-// remove_transition_condition — remove a transition's condition by index
+// remove_state_transition_condition — remove a transition's condition by index
 // ---------------------------------------------------------------------------
-// MCP:remove_transition_condition - Remove one condition, by index, from a transition of a StateTree state and save the asset. An out-of-range transition_index is an error; an out-of-range condition_index removes nothing and still succeeds, with removed false. Returns removed, remaining and saved.
+// MCP:remove_state_transition_condition - Remove one condition, by index, from a transition of a StateTree state and save the asset. An out-of-range transition_index is an error; an out-of-range condition_index removes nothing and still succeeds, with removed false. Returns removed, remaining and saved.
+//   @renamed-from remove_transition_condition
 //   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
 //   @param state_name [string!] - Name of the state that owns the transition; the command fails without it.
 //   @param transition_index - 0-based index into the state transitions, as listed by get_state_tree_info (transitions[].index).
@@ -3424,10 +3427,11 @@ TSharedPtr<FJsonObject> HandleSetComponentParameterOverride(
 }
 
 // ===========================================================================
-// update_transition (comprehensive transition metadata update)
+// set_state_transition (comprehensive transition metadata update)
 // ===========================================================================
 
-// MCP:update_transition - Update any subset of the fields of an existing transition of a state of a StateTree asset -- trigger, priority, type, target state, event tag and payload, enabled flag and delay -- in one undo step, then save the asset without compiling it. Only fields explicitly passed are written; everything else is preserved, and the reply reads every field back. Every input is checked before any is written: an unknown enum name, target_state, event_tag or payload_struct, or a missing or out-of-range transition_index, is an error naming each bad input, and nothing is changed or saved, so errors in a reply is always empty. A call that leaves every field as it was changes and saves nothing (changed false, saved false, a note). A failed save (for example while PIE runs) makes success false. A new transition: add_state_transition; inverse: remove_transition; conditions: add_transition_condition.
+// MCP:set_state_transition - Update any subset of the fields of an existing transition of a state of a StateTree asset -- trigger, priority, type, target state, event tag and payload, enabled flag and delay -- in one undo step, then save the asset without compiling it. Only fields explicitly passed are written; everything else is preserved, and the reply reads every field back. Every input is checked before any is written: an unknown enum name, target_state, event_tag or payload_struct, or a missing or out-of-range transition_index, is an error naming each bad input, and nothing is changed or saved, so errors in a reply is always empty. A call that leaves every field as it was changes and saves nothing (changed false, saved false, a note). A failed save (for example while PIE runs) makes success false. A new transition: add_state_transition; inverse: remove_state_transition; conditions: add_state_transition_condition.
+//   @renamed-from update_transition
 //   @param tree_path - Asset path of the UStateTree
 //   @param state_name [string!] - State that owns the transition; the first state with that name in a depth-first walk of the hierarchy is used
 //   @param transition_index - Index into the state's Transitions array (0-based, transitions[].index of get_state_tree_info); required
@@ -3631,7 +3635,7 @@ TSharedPtr<FJsonObject> HandleUpdateTransition(
 		Data->SetStringField(TEXT("note"), TEXT("The transition already has those values; nothing changed and nothing was saved."));
 		return mcp_common::MakeOkReply(Data);
 	}
-	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("update_transition"));
+	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_state_transition"));
 }
 
 const McpCommandFamilies::FRegistrar Registration =
@@ -3645,7 +3649,7 @@ const McpCommandFamilies::FRegistrar Registration =
 	{ TEXT("add_state_tree_binding"), &HandleAddStateTreeBinding },
 	{ TEXT("add_state_tree_global_task"), &HandleAddStateTreeGlobalTask },
 	{ TEXT("set_state_tree_global_task_property"), &HandleAddStateTreeGlobalTaskProperty },
-	{ TEXT("add_transition_condition"), &HandleAddTransitionCondition },
+	{ TEXT("add_state_transition_condition"), &HandleAddTransitionCondition },
 	{ TEXT("add_state_tree_parameter"), &HandleAddTreeParameter },
 	{ TEXT("compile_state_tree"), &HandleCompileStateTree },
 	{ TEXT("create_state_tree"), &HandleCreateStateTree },
@@ -3676,8 +3680,8 @@ const McpCommandFamilies::FRegistrar Registration =
 	{ TEXT("remove_state_enter_condition"), &HandleRemoveStateEnterCondition },
 	{ TEXT("remove_state_tree_global_task"), &HandleRemoveStateTreeGlobalTask },
 	{ TEXT("remove_task"), &HandleRemoveTask },
-	{ TEXT("remove_transition"), &HandleRemoveTransition },
-	{ TEXT("remove_transition_condition"), &HandleRemoveTransitionCondition },
+	{ TEXT("remove_state_transition"), &HandleRemoveTransition },
+	{ TEXT("remove_state_transition_condition"), &HandleRemoveTransitionCondition },
 	{ TEXT("remove_state_tree_binding"), &HandleRemoveTreeBinding },
 	{ TEXT("remove_state_tree_parameter"), &HandleRemoveTreeParameter },
 	{ TEXT("set_state_tree_component_parameter_override"), &HandleSetComponentParameterOverride },
@@ -3691,7 +3695,7 @@ const McpCommandFamilies::FRegistrar Registration =
 	{ TEXT("set_state_type"), &HandleSetStateType },
 	{ TEXT("set_task_property"), &HandleSetTaskProperty },
 	{ TEXT("set_state_tree_parameter"), &HandleSetTreeParameter },
-	{ TEXT("update_transition"), &HandleUpdateTransition },
+	{ TEXT("set_state_transition"), &HandleUpdateTransition },
 	{ TEXT("validate_state_tree"), &HandleValidateStateTree },
 };
 } // namespace UEAgentStateTreeCommands

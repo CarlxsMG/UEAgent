@@ -2,7 +2,7 @@
 
 # Camera
 
-29 tools for camera actors and components, spring arms, cine camera lens and focus, camera rigs, shakes and Gameplay Cameras assets.
+18 tools for camera actors and components, spring arms, cine camera lens and focus, camera rigs, shakes and Gameplay Cameras assets.
 
 Back to the [index](README.md).
 
@@ -35,7 +35,7 @@ Add a UCameraComponent to an actor placed in the editor world, found by name or 
 
 *Destructive, idempotent.*
 
-Populates the Children of a composite rig node (the rig RootNode must be a UArrayCameraNode ("Sequence"); set it via set_camera_rig_root_node node_type=ArrayCameraNode). Creates a new UCameraNode of child_node_type outered to the rig and appends it, in one undo step, then saves the rig. Idempotent via optional index: index&lt;Children.Num() REPLACES that slot instead of appending. added is the read-back of the new child in its slot; a failed save fails the call, with saved false and save_error, and leaves the change in memory. Gameplay Camera System is EXPERIMENTAL (plugin GameplayCameras).
+Populates the Children of a composite rig node (the rig RootNode must be a UArrayCameraNode ("Sequence"); set it via set_camera_rig_root_node node_type=ArrayCameraNode). Creates a new UCameraNode of child_node_type outered to the rig and appends it, in one undo step, then saves the rig. Idempotent via optional index: index&lt;Children.Num() REPLACES that slot instead of appending. added is the read-back of the new child in its slot; a failed save fails the call, with saved false and save_error, and leaves the change in memory. Gameplay Camera System is EXPERIMENTAL (plugin GameplayCameras). Set its parameters with set_camera_node_parameters child_index; inverse: remove_camera_node_child.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -97,20 +97,6 @@ Build a Gameplay Cameras UCameraRigAsset, found by content path, in memory as th
 
 **Returns:** `{ camera_rig_path, built, build_status, messages: [{ severity, message }] }`
 
-## `create_camera`
-
-*Additive.*
-
-Spawn a new ACameraActor in the editor world (never in PIE) at an optional location and rotation, with camera_name as its outliner label. Labels need not be unique, so address the camera later by the returned actor_name. Each location axis must be within +-100000, otherwise an error. The level is marked dirty, not saved. location_set, rotation_set and label_set compare what the spawned actor reports with the request. Move or re-aim it with set_camera_transform; spawn_actor places a CameraActor in PIE too; add_camera_component puts a camera on an existing actor.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `camera_name` | string | yes | Name to assign to the new camera actor. |
-| `location` | array | no | Optional [X, Y, Z] world location for the new camera (defaults to origin) |
-| `rotation` | array | no | Optional [Pitch, Yaw, Roll] world rotation for the new camera (defaults to zero) |
-
-**Returns:** `{ camera_name: string, camera_created: bool, actor_name: string, location_set: bool, rotation_set: bool, label_set: bool, actual_label: string, actual_location: [number, number, number] }`
-
 ## `create_camera_asset`
 
 *Additive.*
@@ -136,34 +122,6 @@ Creates a UCameraRigAsset (Gameplay Camera System, Experimental). Idempotent (re
 | `package_path` | string | no | Target content folder (default "/Game/Cameras") |
 
 **Returns:** `{ name, asset_path, asset_class, already_existed, saved }`
-
-## `create_camera_rig_crane`
-
-*Additive.*
-
-Spawn an unrotated CameraRig_Crane actor in the editor world with the given pitch, yaw and arm length; it is always labelled "CameraRigCrane_MCP", so address it later by the returned internal_name. Returns location and the read-back crane values; the level is not saved.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `location` | array | no | Optional [X, Y, Z] world location (defaults to origin; each axis within -100000 to 100000) |
-| `crane_pitch` | number | no | Crane pitch angle in degrees (optional, default 0) |
-| `crane_yaw` | number | no | Crane yaw angle in degrees (optional, default 0) |
-| `arm_length` | number | no | Crane arm length (optional, default 500.0, valid 0-100000) |
-
-**Returns:** `{ actor_name: string, internal_name: string, location: [number, number, number], crane_pitch: number, crane_yaw: number, arm_length: number, success: bool }`
-
-## `create_camera_rig_rail`
-
-*Additive.*
-
-Spawn an unrotated CameraRig_Rail actor in the editor world; with more than 2 points the rail is rebuilt as a straight 500-unit line along local X. Always labelled "CameraRigRail_MCP", so address it by the returned internal_name, e.g. in set_camera_rig_rail_position. Not saved.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `location` | array | no | Optional [X, Y, Z] world location (defaults to origin; each axis within -100000 to 100000) |
-| `num_spline_points` | number | no | Number of spline points on the rail (optional, default 2, valid 2-100) |
-
-**Returns:** `{ actor_name: string, internal_name: string, location: [number, number, number], num_spline_points: number, success: bool }`
 
 ## `create_camera_shake_blueprint`
 
@@ -194,7 +152,7 @@ Reports a UCameraAsset's director and, for a SingleCameraDirector, the rig it ru
 
 *Read-only.*
 
-Read the overridden PostProcessSettings off a camera actor's camera component: only the fields whose bOverride_* companion is on are returned (those actually contributing). Mirrors set_camera_post_process's field set. Pure reader.
+Read the overridden PostProcessSettings off a camera actor's camera component: only the fields whose bOverride_* companion is on are returned (those actually contributing). set_properties writes them (PostProcessSettings with its bOverride_* flags). Pure reader.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -206,19 +164,19 @@ Read the overridden PostProcessSettings off a camera actor's camera component: o
 
 *Read-only.*
 
-Reports a camera rig's RootNode class and its camera-parameter fields (name + value), plus, for a composite ArrayCameraNode root, its Children (index + class). Read-only.
+Reports a camera rig's RootNode class and its camera-parameter fields (name + value), plus, for a composite ArrayCameraNode root, its Children (index, class and their own camera-parameter fields). Read-only. It reads what set_camera_node_parameters writes (child_index for a child), add_camera_node_child adds and remove_camera_node_child removes.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `camera_rig_path` | string | yes | /Game/... path to the UCameraRigAsset (required) |
 
-**Returns:** `{ camera_rig_path, has_root_node, root_node_class, parameters:[{name, value}], children:[{index, class}] }`
+**Returns:** `{ camera_rig_path, has_root_node, root_node_class, parameters:[{name, value}], children:[{index, class, parameters:[{name, value}]}] }`
 
 ## `get_cameras`
 
 *Read-only.*
 
-List the camera actors (ACameraActor or CineCameraActor) in the editor world with their world location [X, Y, Z], rotation [Pitch, Yaw, Roll] in degrees and FOV, or with camera_name only the one camera found by object name or label (case-insensitive, first match; an unknown name is an error). set_camera_transform is the writer of the transform.
+List the camera actors (ACameraActor or CineCameraActor) in the editor world with their world location [X, Y, Z], rotation [Pitch, Yaw, Roll] in degrees and FOV, or with camera_name only the one camera found by object name or label (case-insensitive, first match; an unknown name is an error). set_actor_transform is the writer of the transform.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -249,6 +207,19 @@ No parameters.
 
 **Returns:** `{ base_class, count, types:[{name, path}] }`
 
+## `remove_camera_node_child`
+
+*Destructive.*
+
+Remove the child at index from the composite ArrayCameraNode root of a camera rig, in one undo step, then save the rig. Inverse of add_camera_node_child; the children after it move down one index. A root that is not an ArrayCameraNode or an index out of range is an error and nothing changes; a failed save fails the call, with saved false and save_error, and leaves the change in memory. The reply re-reads the children (children). Gameplay Camera System is EXPERIMENTAL (plugin GameplayCameras). Read: get_camera_rig_nodes.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `camera_rig_path` | string | yes | /Game/... path to the UCameraRigAsset whose composite RootNode is edited (required) |
+| `index` | number | yes | Index of the child to remove (get_camera_rig_nodes lists them) (required) |
+
+**Returns:** `{ camera_rig_path, index, removed_class, removed, children_count, children:[string], saved, save_error }`
+
 ## `set_camera_asset_director`
 
 *Destructive, idempotent.*
@@ -262,79 +233,19 @@ Wires a new USingleCameraDirector on a UCameraAsset, pointing it at a UCameraRig
 
 **Returns:** `{ camera_asset_path, camera_rig_path, director_class, director_set, saved, save_error }`
 
-## `set_camera_fov`
-
-*Destructive, idempotent.*
-
-Set the field of view (degrees, above 0 up to 180) of the camera component of an ACameraActor or CineCameraActor in the editor world, found by object name or label. No undo transaction and nothing is saved. Returns previous_fov, actual_fov and fov_set; get_cameras with camera_name reads it.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `camera_name` | string | yes | Name of the camera to modify (matches actor name or label). |
-| `fov` | number | yes | Field of view in degrees. Must be between 0.0 and 180.0. |
-
-**Returns:** `{ camera_name: string, requested_fov: number, previous_fov: number, actual_fov: number, fov_set: bool, camera_valid: bool }`
-
 ## `set_camera_node_parameters`
 
 *Destructive, idempotent.*
 
-Sets parameters on a camera rig's RootNode by reflection, all or nothing: every property is parsed first, and an unknown property or a value that does not fit fails the call, naming each one in failed, with nothing written or saved. FXxxCameraParameter props take the raw value, a bool or a number (a whole one for an integer), written to the nested .Value; other props set directly. Otherwise all of them are written in one undo step and the rig is saved; applied reads the stored values back. Values the root node already holds are a success with changed false, saved false and a note, and nothing is written or saved. A failed save fails the call, with saved false and save_error, and leaves the change in memory.
+Sets parameters on a camera rig's RootNode by reflection, all or nothing: every property is parsed first, and an unknown property or a value that does not fit fails the call, naming each one in failed, with nothing written or saved. FXxxCameraParameter props take the raw value, a bool or a number (a whole one for an integer), written to the nested .Value; other props set directly. Otherwise all of them are written in one undo step and the rig is saved; applied reads the stored values back. Values the node already holds are a success with changed false, saved false and a note, and nothing is written or saved. A failed save fails the call, with saved false and save_error, and leaves the change in memory. With child_index the node edited is that child of a composite ArrayCameraNode root (add_camera_node_child); an index out of range, or a root that is not an ArrayCameraNode, is an error. Read the values back with get_camera_rig_nodes.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `camera_rig_path` | string | yes | /Game/... path to the UCameraRigAsset whose RootNode is edited (required) |
 | `properties` | object | yes | JSON object { PropertyName: value, ... } (e.g. {"FieldOfView": 90}) |
+| `child_index` | number | no | Optional index of a child of the composite ArrayCameraNode root to edit instead of the root node itself |
 
-**Returns:** `{ camera_rig_path, node_class, changed, set:[name], failed:[{name, error}], applied:{name: stored_value_text}, saved, save_error, note }`
-
-## `set_camera_post_process`
-
-*Destructive, idempotent.*
-
-Write PostProcessSettings on a camera actor's camera component (plain or cine) by field presence, turning on each field's bOverride_* companion so it takes effect (like a PostProcess Volume). Supplied fields only; scalars are numbers, color-grading wheels are [R,G,B,master] arrays, scene_color_tint is [R,G,B,A]. Absolute + idempotent. Forces PostProcessBlendWeight>0 and marks the render state dirty.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actor_name` | string | yes | Name or label of the camera actor to modify. |
-| `bloom_intensity` | string | no | Optional bloom intensity (number). |
-| `bloom_threshold` | string | no | Optional bloom threshold (number). |
-| `vignette_intensity` | string | no | Optional vignette intensity 0..1 (number). |
-| `film_grain_intensity` | string | no | Optional film grain intensity 0..1 (number). |
-| `chromatic_aberration_intensity` | string | no | Optional chromatic aberration / scene fringe intensity (number). |
-| `chromatic_aberration_start_offset` | string | no | Optional chromatic aberration start offset 0..1 (number). |
-| `exposure_bias` | string | no | Optional auto-exposure bias / EV compensation (number). |
-| `exposure_min_brightness` | string | no | Optional auto-exposure minimum brightness (number). |
-| `exposure_max_brightness` | string | no | Optional auto-exposure maximum brightness (number). |
-| `exposure_speed_up` | string | no | Optional auto-exposure adaptation speed up (number). |
-| `exposure_speed_down` | string | no | Optional auto-exposure adaptation speed down (number). |
-| `ambient_occlusion_intensity` | string | no | Optional ambient occlusion intensity 0..1 (number). |
-| `ambient_occlusion_radius` | string | no | Optional ambient occlusion radius (number). |
-| `color_saturation` | string | no | Optional color saturation wheel [R,G,B,master] (array). |
-| `color_contrast` | string | no | Optional color contrast wheel [R,G,B,master] (array). |
-| `color_gamma` | string | no | Optional color gamma wheel [R,G,B,master] (array). |
-| `color_gain` | string | no | Optional color gain wheel [R,G,B,master] (array). |
-| `color_offset` | string | no | Optional color offset wheel [R,G,B,master] (array). |
-| `scene_color_tint` | string | no | Optional scene color tint [R,G,B,A] (array). |
-| `white_temp` | string | no | Optional white balance temperature (number). |
-| `white_tint` | string | no | Optional white balance tint (number). |
-| `depth_of_field_fstop` | string | no | Optional depth-of-field f-stop (number). |
-| `depth_of_field_focal_distance` | string | no | Optional depth-of-field focal distance in cm (number). |
-
-**Returns:** `{ actor_name: string, applied_count: int, applied: object (field -> value read back), post_process_blend_weight: number, success: bool }`
-
-## `set_camera_rig_rail_position`
-
-*Destructive, idempotent.*
-
-Set CurrentPositionOnRail of a CameraRig_Rail actor in the editor world, found by object name or label (case-insensitive, first match): 0.0 is the start of the rail spline and 1.0 its end, and the rig moves its camera mount there on its next tick. The property is written directly and read back: no undo step, the level is not marked dirty and nothing is saved. A position outside 0 to 1, an empty name or no such rail is an error; success is false (an outcome error) only when the read-back differs. Spawn a rail with create_camera_rig_rail and pass its internal_name here; a crane rig is create_camera_rig_crane; a plain camera moves with set_camera_transform.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `rig_actor_name` | string | yes | Object name or label of the CameraRig_Rail actor, e.g. the internal_name create_camera_rig_rail returns. |
-| `position` | number | yes | Normalised position on the rail, 0.0 to 1.0, as a fraction of the spline length. |
-
-**Returns:** `{ rig_actor_name: string, position: number, success: bool }`
+**Returns:** `{ camera_rig_path, node_class, child_index?, changed, set:[name], failed:[{name, error}], applied:{name: stored_value_text}, saved, save_error, note }`
 
 ## `set_camera_rig_root_node`
 
@@ -348,89 +259,3 @@ Replace the RootNode of a Gameplay Cameras UCameraRigAsset with a new, default-v
 | `node_type` | string | yes | A concrete UCameraNode subclass name, e.g. "FieldOfViewCameraNode", "OffsetCameraNode", "ArrayCameraNode" (required) |
 
 **Returns:** `{ camera_rig_path, node_type, node_class, root_set, saved, save_error }`
-
-## `set_camera_transform`
-
-*Destructive, idempotent.*
-
-Update the location and/or rotation of an existing camera.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `camera_name` | string | yes | Name of the camera to modify (matches actor name or label). |
-| `location` | array | no | Optional new [X, Y, Z] world location; if omitted, location is preserved |
-| `rotation` | array | no | Optional new [Pitch, Yaw, Roll] world rotation; if omitted, rotation is preserved |
-
-**Returns:** `{ camera_name: string, transform_set: bool, location_set: bool, rotation_set: bool, actual_location: [number, number, number], actual_rotation: [number, number, number] }`
-
-## `set_cine_camera_aperture`
-
-*Destructive, idempotent.*
-
-Set CurrentAperture, the f-stop that drives depth of field, on the CineCameraComponent of an editor-world actor found by object name or label (case-insensitive, first match): a CineCameraActor, or any actor carrying that component. The component clamps it to its lens MinFStop and MaxFStop, so the value is read back and success is false (an outcome error) when it differs from the request. No undo step, the level is not marked dirty, nothing is saved. An aperture outside 0.01 to 512, an empty name, or an actor without the component is an error. Widen the f-stop range with set_cine_camera_lens; focal length: set_cine_camera_focal_length; focus distance: set_cine_camera_focus; read back with get_cine_camera_settings.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `camera_actor_name` | string | yes | Object name or label of the CineCameraActor (or other actor with a CineCameraComponent) to modify. |
-| `aperture` | number | yes | F-stop value. Must be between 0.01 and 512.0. |
-
-**Returns:** `{ camera_actor_name: string, aperture: number, success: bool }`
-
-## `set_cine_camera_filmback`
-
-*Destructive, idempotent.*
-
-Set the sensor size (filmback, in mm) of the CineCameraComponent on an editor-world actor found by name or label; sensor offsets are reset to 0. No undo transaction, nothing saved. Returns the read-back sensor_width, sensor_height and aspect_ratio; success is false when they do not match.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `camera_actor_name` | string | yes | Name or label of the CineCameraActor to modify. |
-| `sensor_width` | number | yes | Sensor width in mm. Must be positive and &lt;= 200. |
-| `sensor_height` | number | yes | Sensor height in mm. Must be positive and &lt;= 200. |
-
-**Returns:** `{ camera_actor_name: string, sensor_width: number, sensor_height: number, aspect_ratio: number, success: bool }`
-
-## `set_cine_camera_focal_length`
-
-*Destructive, idempotent.*
-
-Set CurrentFocalLength (mm) on the CineCameraComponent of an editor-world actor found by object name or label (case-insensitive, first match): a CineCameraActor, or any actor carrying that component. The component clamps the value to its lens MinFocalLength and MaxFocalLength, so it is read back with the resulting horizontal and vertical FOV, and success is false (an outcome error) when the read-back differs from the request. No undo step, the level is not marked dirty, nothing is saved. A focal_length outside 0 to 1000, an empty name, or an actor without the component is an error. Widen the lens limits with set_cine_camera_lens; aperture: set_cine_camera_aperture; focus: set_cine_camera_focus; read all of it back with get_cine_camera_settings.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `camera_actor_name` | string | yes | Object name or label of the CineCameraActor (or other actor with a CineCameraComponent) to modify. |
-| `focal_length` | number | yes | Focal length in millimetres. Must be between 0.0 and 1000.0. |
-
-**Returns:** `{ camera_actor_name: string, focal_length: number, horizontal_fov: number, vertical_fov: number, success: bool }`
-
-## `set_cine_camera_focus`
-
-*Destructive, idempotent.*
-
-Replace the focus settings of the CineCameraComponent on an editor-world actor found by name or label: method, manual focus distance and smoothing; other focus fields, including the tracked actor, reset to defaults. Returns the read-back focus_method and focus_distance; no undo, nothing saved.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `camera_actor_name` | string | yes | Name or label of the CineCameraActor to modify. |
-| `focus_method` | string | yes | Focus method — one of "Manual", "Tracking", or "Disable". |
-| `focus_distance` | number | no | Manual focus distance in cm (optional, default 1000.0) |
-| `smoothing_speed` | number | no | Focus smoothing interpolation speed; 0 disables smoothing (optional, default 4.0) |
-
-**Returns:** `{ camera_actor_name: string, focus_method: string, focus_distance: number, success: bool }`
-
-## `set_cine_camera_lens`
-
-*Destructive, idempotent.*
-
-Replace the lens limits of the CineCameraComponent on an editor-world actor found by name or label: focal length and f-stop ranges plus blade count; minimum focus distance resets to 0 and squeeze factor to 1. Returns the read-back focal range; no undo, nothing saved.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `camera_actor_name` | string | yes | Name or label of the CineCameraActor to modify. |
-| `min_focal_length` | number | yes | Minimum focal length in mm. Must be positive. |
-| `max_focal_length` | number | yes | Maximum focal length in mm. Must be >= min_focal_length. |
-| `min_fstop` | number | yes | Minimum f-stop. Must be positive. |
-| `max_fstop` | number | yes | Maximum f-stop. Must be >= min_fstop. |
-| `diaphragm_blades` | number | no | Number of diaphragm blades for bokeh shape (optional, default 8, valid 4-16) |
-
-**Returns:** `{ camera_actor_name: string, min_focal_length: number, max_focal_length: number, success: bool }`
