@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
 #include "Commands/Common/UEAgentGraphUtils.h" // FUEAgentGraphUtils::ResolveClass (name / /Script / BP-asset resolver: call_function class_name / component_class)

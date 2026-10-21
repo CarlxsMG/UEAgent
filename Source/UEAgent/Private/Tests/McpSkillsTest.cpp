@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 // Test of the skills installer (Mcp/McpSkills.h) on temporary folders: it touches neither the
 // project's .claude/skills or .agents/skills nor the plugin's Resources/Skills. Headless:
 //   UnrealEditor-Cmd <uproject> -ExecCmds="Automation RunTests UEAgent.Skills" -testexit="Automation Test Queue Empty" -unattended -nopause -NullRHI

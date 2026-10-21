@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Media/LevelSequenceUtils.h"
 #include "AssetRegistry/AssetRegistryModule.h"

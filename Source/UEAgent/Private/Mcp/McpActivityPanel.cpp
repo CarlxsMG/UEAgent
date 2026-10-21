@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 #include "Mcp/McpActivityPanel.h"
 
 #include "Mcp/McpActivity.h"

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 //
 // Actor-state persistence commands (serialize/restore_actor_state).
 //

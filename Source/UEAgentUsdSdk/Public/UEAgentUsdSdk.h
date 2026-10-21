@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 //
 // The USD values that UE::FVtValue and the engine's value conversion (UsdToUnreal/UnrealToUsd::ConvertValue) cannot
 // read or build, handled with the USD SDK itself: list ops of int, uint, int64 and uint64 (SdfIntListOp,

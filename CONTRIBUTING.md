@@ -63,7 +63,8 @@ change has to pass. How a call travels through the editor is in
    ```
 
 A new family is a new `.cpp` with its namespace, a `// MCP-DOMAIN: <Domain>` marker and its
-`FRegistrar`; nothing else changes. A new domain also gets a phrase in `DOMAIN_SUMMARY`
+`FRegistrar`; nothing else changes. Like every file under `Source/`, it starts with the copyright
+notice: `python Tools/check_copyright.py --write` adds it. A new domain also gets a phrase in `DOMAIN_SUMMARY`
 (`Tools/codegen_tool_docs.py`), which the reference uses to say what the domain covers. The server reads the
 catalog at editor startup and on `mcp.http.restart`.
 
@@ -71,8 +72,8 @@ catalog at editor startup and on `mcp.http.restart`.
 
 - The plugin builds with no warning of its own.
 - The documentation site builds with no warning: `pip install mkdocs-material==9.7.7`, then `mkdocs build --strict`.
-- Every generator passes `--check`; CI runs them on each push, with `Tools/check_doc_links.py`,
-  `Tools/check_skills.py` and `ruff check Tools`.
+- Every generator passes `--check`; CI runs them on each push, with `Tools/check_copyright.py`,
+  `Tools/check_doc_links.py`, `Tools/check_skills.py` and `ruff check Tools`.
 - `python Tools/smoke_test.py --launch <a throwaway .uproject> --engine <UE root>` passes: it starts a
   headless editor and checks the server end to end over HTTP.
 - A change to how `McpToolCatalog.cpp` builds a schema is made in `Tools/catalog_server.py` too:

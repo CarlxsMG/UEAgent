@@ -30,6 +30,8 @@ jobs:
         run: python Tools/codegen_tool_docs.py --check
       - name: Catalog server
         run: python Tools/catalog_server.py --check
+      - name: Copyright notice in every source file (Fab refuses a plugin without it)
+        run: python Tools/check_copyright.py
 
   docs:
     name: Documentation links resolve

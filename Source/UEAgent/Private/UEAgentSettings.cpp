@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 #include "UEAgentSettings.h"
 #include "UEAgentProjectSettings.h"
 

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 #include "Mcp/McpMetaTools.h"
 
 #include "Mcp/McpToolCatalog.h"

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 // IN_RESPONSE (3/3). Almost everything here is a WARNING: degrade=False, it informs without
 // touching `success`.
 

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 #include "MCPRuntimeEventsTestComponent.h"
 
 void UMCPRuntimeEventsTestComponent::BroadcastTestEvent()

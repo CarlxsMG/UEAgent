@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 //
 // State and helpers shared by the USD MCP handlers.
 //

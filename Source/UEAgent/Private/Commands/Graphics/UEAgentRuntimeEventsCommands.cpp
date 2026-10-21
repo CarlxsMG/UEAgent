@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Graphics/UEAgentDelegateObserver.h"
 #include "Commands/Common/McpCommonUtils.h"

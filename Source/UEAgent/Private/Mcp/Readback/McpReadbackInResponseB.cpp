@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 // IN_RESPONSE (2/3): DataTables, pins and functions, session probes, asset reads, world settings.
 
 #include "McpReadbackCheckUtil.h"

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 // IN_RESPONSE for execute_python: what the script CALLS (read without running it) and what its
 // output reveals. The code is read with McpPythonScan, the same reader the refusals use.
 

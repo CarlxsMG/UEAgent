@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
 #include "Commands/Common/UEAgentGraphUtils.h" // ResolveClass: get_assets_by_type accepts any class, not five hardwired ones

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 #include "Commands/Common/UEAgentGraphUtils.h"
 #include "Commands/Common/McpCommonUtils.h"
 #include "Engine/Blueprint.h"

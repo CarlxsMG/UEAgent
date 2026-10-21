@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 #include "UEAgentModule.h"
 #include "UEAgentBridge.h"
 #include "Commands/Editor/UEAgentAutomationCommands.h"

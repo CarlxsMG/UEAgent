@@ -1,3 +1,5 @@
+// Copyright (c) 2026 CarlxsMG.
+
 // FOLLOW_UP_CUSTOM (one or two tailored re-reads) and ON_FAILURE (why the stated reason for a
 // failure is not the real one). Every re-read goes through ProbeOrEmpty(): it fails OPEN.
 
