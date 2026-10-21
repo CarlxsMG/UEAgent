@@ -1,0 +1,60 @@
+<!doctype html>
+<!-- Source of social-preview.png, the image GitHub and the documentation site show in link previews.
+     Render it at 1280x640 with a headless Chromium, for example:
+     chrome --headless --hide-scrollbars --force-device-scale-factor=1 --window-size=1280,640
+            --virtual-time-budget=8000 --screenshot=social-preview.png social-preview.html -->
+<html>
+<head>
+<meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;700&display=block" rel="stylesheet">
+<style>
+  html, body { margin: 0; width: 1280px; height: 640px; overflow: hidden; }
+  body {
+    position: relative;
+    font-family: "Outfit", "Segoe UI", sans-serif;
+    color: #fff;
+    background:
+      linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px) 0 0 / 40px 40px,
+      linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px) 0 0 / 40px 40px,
+      radial-gradient(ellipse at 90% 100%, rgba(20, 110, 125, 0.55), transparent 55%),
+      radial-gradient(ellipse at 15% 0%, rgba(52, 58, 160, 0.75), transparent 60%),
+      linear-gradient(120deg, #1d2266 0%, #121640 55%, #0a1a2c 100%);
+  }
+  .logo { position: absolute; left: 88px; top: 170px; width: 300px; height: 300px;
+          filter: drop-shadow(0 18px 40px rgba(0, 0, 0, 0.45)); }
+  .text { position: absolute; left: 460px; top: 160px; }
+  h1 { margin: 0; font-size: 124px; font-weight: 700; letter-spacing: -2px; line-height: 1; }
+  p { margin: 22px 0 34px; font-size: 38px; font-weight: 500; line-height: 1.3; color: #c9cbff; }
+  .chips { display: flex; gap: 12px; }
+  .chips span { font-size: 21px; font-weight: 500; padding: 10px 18px; border-radius: 999px;
+                background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.22); }
+  .url { position: absolute; left: 88px; bottom: 40px; font-size: 24px; font-weight: 500; color: #9a9ee0; }
+</style>
+</head>
+<body>
+  <svg class="logo" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#2A2F7A"/>
+        <stop offset="1" stop-color="#0B0E26"/>
+      </linearGradient>
+      <linearGradient id="wire" x1="0" y1="1" x2="1" y2="0">
+        <stop offset="0" stop-color="#A78BFA"/>
+        <stop offset="1" stop-color="#22D3EE"/>
+      </linearGradient>
+    </defs>
+    <rect width="128" height="128" rx="28" fill="url(#bg)"/>
+    <path d="M30 100 L64 26 L98 100" fill="none" stroke="url(#wire)" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M46 72 C58 59 70 85 82 72" fill="none" stroke="#FFFFFF" stroke-width="6.5" stroke-linecap="round"/>
+    <circle cx="46" cy="72" r="6.5" fill="#FFFFFF"/>
+    <circle cx="82" cy="72" r="6.5" fill="#FFFFFF"/>
+    <path d="M100 18 l4 9 9 4 -9 4 -4 9 -4 -9 -9 -4 9 -4 z" fill="#22D3EE"/>
+  </svg>
+  <div class="text">
+    <h1>UEAgent</h1>
+    <p>The MCP server built into<br>the Unreal Editor</p>
+    <div class="chips"><span>Every call verified</span><span>One undo per call</span><span>Any MCP client</span><span>MIT</span></div>
+  </div>
+  <div class="url">github.com/CarlxsMG/UEAgent</div>
+</body>
+</html>

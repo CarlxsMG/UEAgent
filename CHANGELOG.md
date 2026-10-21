@@ -2,6 +2,13 @@
 
 Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](https://semver.org).
 
+## Unreleased
+
+### Fixed
+
+- The image link previews show (GitHub, the documentation site) said 2,000+ tools, a count from before 2.0. It
+  no longer gives a count, which changes with each release, and its source is in `.github/social-preview.html`.
+
 ## 2.3.0 - 2026-10-21
 
 One tool per intent, one verb per operation, and every part you can add you can also read and remove. 167 tools that
