@@ -60,6 +60,9 @@ flowchart LR
     R -- "resultado verificado" --> A
 ```
 
+En qué se diferencia un servidor dentro del editor de uno fuera de él, y qué preguntarle a cualquier
+servidor MCP para Unreal: [Choosing an MCP server](docs/choosing.md) (en inglés).
+
 ## Primeros pasos
 
 1. **Instala.** Descarga el último `UEAgent-*-UE5.8-Win64.zip` (o `-UE5.7-`, según tu motor) de

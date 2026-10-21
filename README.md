@@ -56,6 +56,9 @@ flowchart LR
     R -- "verified result" --> A
 ```
 
+How a server inside the editor differs from one outside it, and the questions to ask any MCP server
+for Unreal: [Choosing an MCP server](docs/choosing.md).
+
 ## Quick start
 
 1. **Install.** Download the latest `UEAgent-*-UE5.8-Win64.zip` (or `-UE5.7-`, for your engine) from

@@ -110,6 +110,7 @@ nav:
   - Get started:
       - Getting started: getting-started.md
       - Clients: clients.md
+      - Choosing a server: choosing.md
   - Use:
       - Examples: examples.md
       - Skills: skills.md

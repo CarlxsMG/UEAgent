@@ -203,6 +203,8 @@ Two answers an agent gets, as the contract tests in `Resources/ContractTests` re
 -   [:material-book-alphabet: **Glossary**](glossary.md): readback, refusals, undo steps and the other
     words the docs use.
 -   [:material-help-circle-outline: **FAQ**](faq.md): versions, platforms, safety and cost.
+-   [:material-scale-balance: **Choosing a server**](choosing.md): a server inside the editor or outside
+    it, and the questions to ask any MCP server for Unreal.
 -   [:material-wrench-outline: **Troubleshooting**](troubleshooting.md): when a client cannot connect or
     a call is refused.
 -   [:material-sitemap-outline: **Architecture**](architecture.md): how a call travels through the
