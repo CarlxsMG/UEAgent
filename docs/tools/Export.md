@@ -113,7 +113,7 @@ Load an asset and write a property report to a new file Saved/Reports/Assets/&lt
 
 *Read-only.*
 
-Lists the jobs currently in the editor Movie Render Queue.
+List the jobs in the editor's Movie Render Queue right now (the queue of this editor session, held by the Movie Pipeline Queue subsystem; nothing is read from disk): each job's job_name, sequence and map paths, enabled flag and setting_count (settings on its configuration), plus queue_job_count. Use it to find job names before set_render_job_output, delete_render_job or render_sequence_to_movie, and to confirm what create_render_job added; cancel_render_job stops a render in progress. Read-only and idempotent. An empty queue gives queue_job_count 0, not an error; an editor without the subsystem (Movie Render Queue plugin off) is an error.
 
 No parameters.
 
@@ -146,14 +146,14 @@ Authors a one-off render job for a sequence and starts the (async) movie render.
 
 *Destructive, idempotent.*
 
-Configures output resolution / directory / image format on a render job's config.  Finds (or adds) a UMoviePipelineOutputSetting on the job's primary configuration to set resolution + output directory, and adds the matching image-sequence output container for the requested format (png/jpg/exr/bmp).
+Set where and how a Movie Render Queue job writes its frames: resolution, output folder and image format, on the job's configuration. Use it after create_render_job, which makes the job; the queue is rendered by render_sequence_to_movie, which adds a job of its own for a sequence and then renders every job in the queue, this one included; read the queue back with get_render_queue. Each format adds its image-sequence output to the job and none is removed, so calling it with png and then jpg writes both (delete_render_job and create_render_job start the job over). Settings that are not given keep their value; an unknown format, or a resolution with only one side or a side of 0 or less, is refused and nothing changes. exr falls back to png when the EXR output is not available, and format says which was used. The queue lives in this editor session: nothing is saved to disk, and the job is lost when the editor closes.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `job_name` | string | yes | Name of an existing render job in the queue (from create_render_job). |
-| `resolution_x` | number | no | Output width in pixels (optional, must be paired with resolution_y) |
-| `resolution_y` | number | no | Output height in pixels (optional, must be paired with resolution_x) |
-| `output_dir` | string | no | Output directory path (optional) |
-| `format` | string | no | Image format: "png" \| "jpg" \| "exr" \| "bmp" (optional, default "png"; exr falls back to png if class unavailable) |
+| `job_name` | string | yes | Name of a job in the editor's render queue, as create_render_job or get_render_queue returns it. |
+| `resolution_x` | number | no | Output width in pixels, e.g. 1920; give it together with resolution_y, or neither to keep the current resolution. |
+| `resolution_y` | number | no | Output height in pixels, e.g. 1080; give it together with resolution_x. |
+| `output_dir` | string | no | Folder the frames are written to, absolute ("D:/Renders/Shot01") or with Movie Render Queue tokens ("{project_dir}/Saved/MovieRenders/"); omit it to keep the current folder. |
+| `format` | string | no | Image format of the frames: "png" (default), "jpg" (or "jpeg"), "exr" or "bmp"; any other value is refused. |
 
-**Returns:** `{ job_name: string, format: string, configured: bool, resolution_x: number?, resolution_y: number?, output_dir: string?, settings: [string], setting_count: number }`
+**Returns:** `{ job_name: string, format: string, configured: bool, resolution_x: number?, resolution_y: number?, output_dir: string?, settings: [string], image_outputs: [string], setting_count: number }`

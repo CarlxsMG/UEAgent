@@ -314,7 +314,7 @@ TSharedPtr<FJsonObject> HandleSpawnNavLinkProxy(const TSharedPtr<FJsonObject>& P
 // UNavigationSystemV1::Build() (public, NAVIGATIONSYSTEM_API) triggers navigation
 // building on all eligible navigation data for the editor world.
 // ----------------------------------------------------------------------------
-// MCP:rebuild_navigation - Triggers a navigation build on the editor world's navigation system
+// MCP:rebuild_navigation - Rebuild all navigation data of the editor world (UNavigationSystemV1::Build): regenerate every navmesh tile inside the NavMeshBoundsVolumes, spawning a missing RecastNavMesh, and block until the build finishes (seconds on a large map). Call it after moving geometry or nav volumes, or after set_recast_navmesh_settings (or pass rebuild=true there). Diagnose first, and check the result after, with diagnose_navmesh (active_tile_count) or get_navigation_data; place bounds with spawn_box_volume (volume_class=NavMeshBoundsVolume). rebuilt=true only means the build ran: with no bounds volume, or a locked build, the engine builds nothing. A world with no navigation system is not an error: rebuilt=false, nav_system_present=false. A repeat call rebuilds again. No undo step; the level is not saved (save_level). Editor world only, never a PIE session.
 //   @returns { rebuilt, nav_system_present, message, success, nav_data_count }
 TSharedPtr<FJsonObject> HandleRebuildNavigation(const TSharedPtr<FJsonObject>& Params)
 {
@@ -391,19 +391,19 @@ ARecastNavMesh* ResolveDefaultRecastNavMesh(UWorld* World)
 // recast_navmesh_present=false with a note (success stays true — nothing failed,
 // there is simply nothing to configure yet).
 // ----------------------------------------------------------------------------
-// MCP:set_recast_navmesh_settings - Configures generation settings on the editor world's default ARecastNavMesh (partial/idempotent; only provided params are applied and all numeric values are clamped server-side first).
-//   @param agent_radius - Optional float; ARecastNavMesh::AgentRadius (>= 0)
-//   @param agent_height - Optional float; ARecastNavMesh::AgentHeight (>= 0)
-//   @param agent_max_slope - Optional float degrees; ARecastNavMesh::AgentMaxSlope (clamped to <= 89)
-//   @param agent_max_step_height - Optional float; SetAgentMaxStepHeight(Default, v) (>= 0)
-//   @param tile_size_uu - Optional float; ARecastNavMesh::TileSizeUU (clamped to >= 300)
-//   @param cell_size - Optional float; SetCellSize(Default, v) (clamped 1..1024)
-//   @param cell_height - Optional float; SetCellHeight(Default, v) (clamped 1..1024)
-//   @param merge_region_size - Optional float; ARecastNavMesh::MergeRegionSize (>= 0)
-//   @param min_region_area - Optional float; ARecastNavMesh::MinRegionArea (>= 0)
-//   @param max_simplification_error - Optional float; ARecastNavMesh::MaxSimplificationError (>= 0)
-//   @param simplification_elevation_ratio - Optional float; ARecastNavMesh::SimplificationElevationRatio (>= 0)
-//   @param rebuild - Optional bool (default false); when true, calls UNavigationSystemV1::Build() synchronously to apply
+// MCP:set_recast_navmesh_settings - Change generation settings of the editor world's default RecastNavMesh: agent size, slope and step height, tile and cell size, region and simplification values. Only the params passed are written, each clamped first, and applied echoes the stored values, so a repeat call changes nothing more. Read current values with get_recast_navmesh_settings. Existing tiles keep the old settings until a rebuild: pass rebuild=true (synchronous, seconds on a large map) or call rebuild_navigation, then check tiles with diagnose_navmesh. One undo step; the level is marked dirty, not saved (save_level). Editor world only. Without a RecastNavMesh (no NavMeshBoundsVolume yet: spawn_box_volume with volume_class=NavMeshBoundsVolume, then rebuild_navigation) nothing changes and it answers recast_navmesh_present=false, success=true, with a note.
+//   @param agent_radius - Optional float, cm; ARecastNavMesh::AgentRadius, e.g. 34 (>= 0; negatives become 0). When the navmesh registers again (a map reload) the navigation system's Supported Agents config writes its own radius back
+//   @param agent_height - Optional float, cm; ARecastNavMesh::AgentHeight, e.g. 144 (>= 0); like agent_radius, the Supported Agents config writes its own value back when the navmesh registers again
+//   @param agent_max_slope - Optional float degrees; ARecastNavMesh::AgentMaxSlope, e.g. 44 (clamped to 0..89)
+//   @param agent_max_step_height - Optional float, cm; SetAgentMaxStepHeight(Default, v), the highest step agents climb, e.g. 35 (>= 0)
+//   @param tile_size_uu - Optional float, cm; ARecastNavMesh::TileSizeUU, the edge of one navmesh tile, e.g. 1000 (clamped to >= 300)
+//   @param cell_size - Optional float, cm; SetCellSize(Default, v), voxel width: smaller is finer and slower to build, e.g. 19 (clamped 1..1024)
+//   @param cell_height - Optional float, cm; SetCellHeight(Default, v), voxel height, e.g. 10 (clamped 1..1024)
+//   @param merge_region_size - Optional float; ARecastNavMesh::MergeRegionSize, regions smaller than this merge with neighbours, e.g. 400 (>= 0)
+//   @param min_region_area - Optional float; ARecastNavMesh::MinRegionArea, isolated regions smaller than this are dropped, e.g. 0 (>= 0)
+//   @param max_simplification_error - Optional float; ARecastNavMesh::MaxSimplificationError, how far simplified edges may stray from the voxel outline, e.g. 1.3 (>= 0)
+//   @param simplification_elevation_ratio - Optional float; ARecastNavMesh::SimplificationElevationRatio, e.g. 0 (>= 0)
+//   @param rebuild - Optional bool (default false); true calls UNavigationSystemV1::Build() synchronously after writing so the change takes effect now; false leaves requires_rebuild=true
 //   @returns { recast_navmesh_present, navmesh_name, applied:{field:value}, requires_rebuild, rebuilt, note, success }
 TSharedPtr<FJsonObject> HandleSetRecastNavMeshSettings(const TSharedPtr<FJsonObject>& Params)
 {
@@ -538,7 +538,7 @@ TSharedPtr<FJsonObject> HandleSetRecastNavMeshSettings(const TSharedPtr<FJsonObj
 // HONEST gate: recast_navmesh_present=false (success still true) when no
 // RecastNavMesh exists in the world.
 // ----------------------------------------------------------------------------
-// MCP:get_recast_navmesh_settings - Reads the generation settings of the editor world's default ARecastNavMesh.
+// MCP:get_recast_navmesh_settings - Read the generation settings of the editor world's default RecastNavMesh: agent_radius, agent_height, agent_max_slope (degrees) and agent_max_step_height, tile_size_uu (resolved) and tile_size_uu_raw (the property), cell_size and cell_height at Default resolution, merge_region_size, min_region_area and the simplification values; lengths in cm. The read side of set_recast_navmesh_settings: call it before and after that tool. Whether the navmesh is actually built (bounds, tile counts) is diagnose_navmesh's job, and get_navigation_data lists the nav actors of any world. Read-only and idempotent; never creates a navmesh; editor world only. With no RecastNavMesh yet (no NavMeshBoundsVolume, or never built) it answers recast_navmesh_present=false and success=true with a note, not an error.
 //   @returns { recast_navmesh_present, navmesh_name, agent_radius, agent_height, agent_max_slope, agent_max_step_height, tile_size_uu, tile_size_uu_raw, cell_size, cell_height, merge_region_size, min_region_area, max_simplification_error, simplification_elevation_ratio, note, success }
 TSharedPtr<FJsonObject> HandleGetRecastNavMeshSettings(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1052,12 +1052,13 @@ namespace
     }
 }
 
-// MCP:run_eqs_query - Runs a UEnvQuery synchronously against the editor world (UEnvQueryManager::RunInstantQuery) and returns the scored items. Generators/tests needing navigation data (SimpleGrid/PathingGrid/Pathfinding/Project/Trace) require a built navmesh; without it the query returns a non-Success status honestly (still success:true, ran:true). An unknown run_mode is an error and the query does not run.
-//   @param query_path - /Game/... path to the UEnvQuery asset (required)
-//   @param querier_actor - Optional actor display label or name used as the query Querier (drives contexts like EnvQueryContext_Querier); default: the query asset (no location)
-//   @param run_mode - "SingleResult" | "RandomBest5Pct" | "RandomBest25Pct" | "AllMatching" (default "AllMatching")
-//   @param max_items - Optional cap on how many items are serialized into the payload (default 50; the query still evaluates all)
+// MCP:run_eqs_query - Run a UEnvQuery once, synchronously, in the editor world (UEnvQueryManager::RunInstantQuery) and return status, num_items, item_type and up to max_items scored items, each with score, location and, for actor items, the actor. Use it to test a query built with create_eqs_query, add_eqs_generator and add_eqs_test; get_eqs_query_info shows its composition without running it. It changes no asset or actor and saves nothing; editor world only, never a PIE session. Generators/tests needing navigation data (SimpleGrid/PathingGrid/Pathfinding/Project/Trace) need a built navmesh (rebuild_navigation, checked with diagnose_navmesh); without it, or without a querier for Querier-relative contexts, status is not Success while success and ran stay true, with a note. No EQS manager, or a query with no usable option, answers ran=false with a note. An unknown query_path, querier_actor or run_mode is an error and the query does not run.
+//   @param query_path - Asset path of the UEnvQuery, e.g. "/Game/EQS/EQ_FindCover" (the ".EQ_FindCover" object suffix is optional), as create_eqs_query or find_assets_by_name gives it (required)
+//   @param querier_actor - Optional object name or editor label of the editor-world actor used as the query Querier (drives EnvQueryContext_Querier and Querier-relative generators), whole name, case-insensitive, first match wins, e.g. "BP_Guard_C_0"; omitted: the query asset itself, which has no location
+//   @param run_mode - "SingleResult" (the best item) | "RandomBest5Pct" | "RandomBest25Pct" (one random item scoring within 5% or 25% of the best) | "AllMatching" (every passing item, best first); case-insensitive, default "AllMatching", any other value is an error
+//   @param max_items - Optional cap on how many items are serialized into items, a whole number (default 50; negative counts as 0); the query still evaluates all and num_items counts them
 //   @returns { query_path, ran, eqs_manager_present, status, is_successful, num_items, item_type, run_mode, items:[{index, score, location:{x,y,z}, actor?}], note? }
+//   @hints read-only
 TSharedPtr<FJsonObject> HandleRunEQSQuery(const TSharedPtr<FJsonObject>& Params)
 {
     FString QueryPath;
@@ -1376,9 +1377,9 @@ TSharedPtr<FJsonObject> HandleSetEQSGeneratorProperties(const TSharedPtr<FJsonOb
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:remove_eqs_generator - Clears the generator on a query option. Idempotent (removed=false if the option had none).
-//   @param query_path - /Game/... path to the UEnvQuery asset (required)
-//   @param option_index - Option index (default 0)
+// MCP:remove_eqs_generator - Remove the generator from one option of a UEnvQuery asset, keeping the option and its tests. The inverse of add_eqs_generator; to swap generators just call add_eqs_generator, which replaces it; to drop the whole option with its tests use remove_eqs_option, and one test remove_eqs_test. get_eqs_query_info shows each option's generator before and after. An option left without a generator is skipped, with an error log, when the query runs. One undo step; the asset is marked dirty, not saved (save_asset). Idempotent: an option that already has no generator answers removed=false and nothing changes. A query that does not load, or an option_index out of range, is an error and nothing changes.
+//   @param query_path - Asset path of the UEnvQuery, e.g. "/Game/EQS/EQ_FindCover" (the ".EQ_FindCover" object suffix is optional), as create_eqs_query or find_assets_by_name gives it (required)
+//   @param option_index - 0-based index of the option whose generator goes, as get_eqs_query_info lists the options (default 0); out of range is an error
 //   @returns { query_path, option_index, removed }
 TSharedPtr<FJsonObject> HandleRemoveEQSGenerator(const TSharedPtr<FJsonObject>& Params)
 {

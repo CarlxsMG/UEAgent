@@ -569,8 +569,8 @@ TSharedPtr<FJsonObject> HandleRemoveStringTableMetadata(const TSharedPtr<FJsonOb
 // ---------------------------------------------------------------------------
 // set_active_culture
 // ---------------------------------------------------------------------------
-// MCP:set_active_culture - Set the editor's active culture/locale (FInternationalization::SetCurrentCulture). Honest error if the culture name isn't recognized.
-//   @param culture_name - Required culture identifier, e.g. "en", "es-ES", "ja".
+// MCP:set_active_culture - Switch the running editor's current culture, language and locale together to one culture (FInternationalization::SetCurrentCulture), clearing any per-asset-group culture: localized text across the editor and PIE re-resolves to that language where translations exist, and numbers and dates format in its locale. It lasts for this editor session only; nothing is saved to config and there is no undo. Use it to preview localized text or string table entries in another language; check a name and see the current culture first with get_culture_info. Setting the culture that is already active changes nothing and succeeds. A culture name the engine does not know is an error and the culture stays as it was.
+//   @param culture_name - Required culture identifier as an IETF language tag, e.g. "en", "es-ES", "ja"; get_culture_info tells whether a name is known.
 //   @returns { culture_name: string, success: bool }
 TSharedPtr<FJsonObject> HandleSetActiveCulture(const TSharedPtr<FJsonObject>& Params)
 {

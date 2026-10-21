@@ -174,14 +174,14 @@ TSharedPtr<FJsonObject> HandleCreateRenderJob(const TSharedPtr<FJsonObject>& Par
 // ---------------------------------------------------------------------------
 // set_render_job_output
 // ---------------------------------------------------------------------------
-// MCP:set_render_job_output - Configures output resolution / directory / image format on a render job's config.  Finds (or adds) a UMoviePipelineOutputSetting on the job's primary configuration to set resolution + output directory, and adds the matching image-sequence output container for the requested format (png/jpg/exr/bmp).
+// MCP:set_render_job_output - Set where and how a Movie Render Queue job writes its frames: resolution, output folder and image format, on the job's configuration. Use it after create_render_job, which makes the job; the queue is rendered by render_sequence_to_movie, which adds a job of its own for a sequence and then renders every job in the queue, this one included; read the queue back with get_render_queue. Each format adds its image-sequence output to the job and none is removed, so calling it with png and then jpg writes both (delete_render_job and create_render_job start the job over). Settings that are not given keep their value; an unknown format, or a resolution with only one side or a side of 0 or less, is refused and nothing changes. exr falls back to png when the EXR output is not available, and format says which was used. The queue lives in this editor session: nothing is saved to disk, and the job is lost when the editor closes.
 //   @renamed-from configure_render_output
-//   @param job_name - Name of an existing render job in the queue (from create_render_job).
-//   @param resolution_x - Output width in pixels (optional, must be paired with resolution_y)
-//   @param resolution_y - Output height in pixels (optional, must be paired with resolution_x)
-//   @param output_dir - Output directory path (optional)
-//   @param format - Image format: "png" | "jpg" | "exr" | "bmp" (optional, default "png"; exr falls back to png if class unavailable)
-//   @returns { job_name: string, format: string, configured: bool, resolution_x: number?, resolution_y: number?, output_dir: string?, settings: [string], setting_count: number }
+//   @param job_name - Name of a job in the editor's render queue, as create_render_job or get_render_queue returns it.
+//   @param resolution_x - Output width in pixels, e.g. 1920; give it together with resolution_y, or neither to keep the current resolution.
+//   @param resolution_y - Output height in pixels, e.g. 1080; give it together with resolution_x.
+//   @param output_dir - Folder the frames are written to, absolute ("D:/Renders/Shot01") or with Movie Render Queue tokens ("{project_dir}/Saved/MovieRenders/"); omit it to keep the current folder.
+//   @param format - Image format of the frames: "png" (default), "jpg" (or "jpeg"), "exr" or "bmp"; any other value is refused.
+//   @returns { job_name: string, format: string, configured: bool, resolution_x: number?, resolution_y: number?, output_dir: string?, settings: [string], image_outputs: [string], setting_count: number }
 
 TSharedPtr<FJsonObject> HandleConfigureRenderOutput(const TSharedPtr<FJsonObject>& Params)
 {
@@ -202,6 +202,29 @@ TSharedPtr<FJsonObject> HandleConfigureRenderOutput(const TSharedPtr<FJsonObject
             FString::Printf(TEXT("Render job '%s' has no configuration"), *JobName));
     }
 
+    // Validate everything before the first change, so a refusal leaves the job as it was.
+    int32 ResX = 0;
+    int32 ResY = 0;
+    const bool bHasResX = Params->TryGetNumberField(TEXT("resolution_x"), ResX);
+    const bool bHasResY = Params->TryGetNumberField(TEXT("resolution_y"), ResY);
+    if (bHasResX != bHasResY || (bHasResX && (ResX <= 0 || ResY <= 0)))
+    {
+        return mcp_common::MakeErrorReply(TEXT("set_render_job_output: give resolution_x and resolution_y together, both greater than 0 (or neither, to keep the current resolution); nothing was changed"));
+    }
+
+    FString Format = TEXT("png");
+    Params->TryGetStringField(TEXT("format"), Format);
+    Format = Format.ToLower();
+    if (Format == TEXT("jpeg"))
+    {
+        Format = TEXT("jpg");
+    }
+    if (Format != TEXT("png") && Format != TEXT("jpg") && Format != TEXT("exr") && Format != TEXT("bmp"))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("set_render_job_output: unknown format '%s'; use png, jpg, exr or bmp. Nothing was changed"), *Format));
+    }
+
     TArray<TSharedPtr<FJsonValue>> SettingsArray;
 
     // --- Output setting (resolution + directory + filename) ---
@@ -209,11 +232,7 @@ TSharedPtr<FJsonObject> HandleConfigureRenderOutput(const TSharedPtr<FJsonObject
         Cast<UMoviePipelineOutputSetting>(Config->FindOrAddSettingByClass(UMoviePipelineOutputSetting::StaticClass()));
     if (OutputSetting)
     {
-        int32 ResX = 0;
-        int32 ResY = 0;
-        const bool bHasResX = Params->TryGetNumberField(TEXT("resolution_x"), ResX);
-        const bool bHasResY = Params->TryGetNumberField(TEXT("resolution_y"), ResY);
-        if (bHasResX && bHasResY && ResX > 0 && ResY > 0)
+        if (bHasResX)
         {
             OutputSetting->OutputResolution = FIntPoint(ResX, ResY);
         }
@@ -227,13 +246,9 @@ TSharedPtr<FJsonObject> HandleConfigureRenderOutput(const TSharedPtr<FJsonObject
         SettingsArray.Add(MakeShared<FJsonValueString>(OutputSetting->GetClass()->GetName()));
     }
 
-    // --- Image output container by format ---
-    FString Format = TEXT("png");
-    Params->TryGetStringField(TEXT("format"), Format);
-    Format = Format.ToLower();
-
+    // --- Image output container by format (validated above) ---
     UClass* OutputContainerClass = nullptr;
-    if (Format == TEXT("jpg") || Format == TEXT("jpeg"))
+    if (Format == TEXT("jpg"))
     {
         OutputContainerClass = UMoviePipelineImageSequenceOutput_JPG::StaticClass();
     }
@@ -267,6 +282,20 @@ TSharedPtr<FJsonObject> HandleConfigureRenderOutput(const TSharedPtr<FJsonObject
         SettingsArray.Add(MakeShared<FJsonValueString>(OutputContainer->GetClass()->GetName()));
     }
 
+    // Every image-sequence output the job now has: a format set by an earlier call stays, and renders too.
+    // The base class is found by reflection, like the EXR output, so no further module is linked.
+    TArray<TSharedPtr<FJsonValue>> ImageOutputs;
+    if (const UClass* ImageOutputBase = UClass::TryFindTypeSlow<UClass>(TEXT("MoviePipelineImageSequenceOutputBase")))
+    {
+        for (const UMoviePipelineSetting* Setting : Config->GetUserSettings())
+        {
+            if (Setting && Setting->GetClass()->IsChildOf(ImageOutputBase))
+            {
+                ImageOutputs.Add(MakeShared<FJsonValueString>(Setting->GetClass()->GetName()));
+            }
+        }
+    }
+
     const int32 SettingCount = Config->GetUserSettings().Num();
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
@@ -280,6 +309,7 @@ TSharedPtr<FJsonObject> HandleConfigureRenderOutput(const TSharedPtr<FJsonObject
         Data->SetStringField(TEXT("output_dir"), OutputSetting->OutputDirectory.Path);
     }
     Data->SetArrayField(TEXT("settings"), SettingsArray);
+    Data->SetArrayField(TEXT("image_outputs"), ImageOutputs);
     Data->SetNumberField(TEXT("setting_count"), SettingCount);
     return mcp_common::MakeOkReply(Data);
 }
@@ -287,7 +317,7 @@ TSharedPtr<FJsonObject> HandleConfigureRenderOutput(const TSharedPtr<FJsonObject
 // ---------------------------------------------------------------------------
 // get_render_queue
 // ---------------------------------------------------------------------------
-// MCP:get_render_queue - Lists the jobs currently in the editor Movie Render Queue.
+// MCP:get_render_queue - List the jobs in the editor's Movie Render Queue right now (the queue of this editor session, held by the Movie Pipeline Queue subsystem; nothing is read from disk): each job's job_name, sequence and map paths, enabled flag and setting_count (settings on its configuration), plus queue_job_count. Use it to find job names before set_render_job_output, delete_render_job or render_sequence_to_movie, and to confirm what create_render_job added; cancel_render_job stops a render in progress. Read-only and idempotent. An empty queue gives queue_job_count 0, not an error; an editor without the subsystem (Movie Render Queue plugin off) is an error.
 //   @returns { jobs: [{ job_name: string, sequence: string, map: string, enabled: bool, setting_count: number }], queue_job_count: number }
 
 TSharedPtr<FJsonObject> HandleGetRenderQueue(const TSharedPtr<FJsonObject>& Params)

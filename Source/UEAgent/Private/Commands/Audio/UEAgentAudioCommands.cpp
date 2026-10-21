@@ -675,10 +675,10 @@ TSharedPtr<FJsonObject> HandleSetAudioVolume(const TSharedPtr<FJsonObject>& Para
     return Report;
 }
 
-// MCP:set_audio_3d_settings - Applies a 3D audio preset to an audio component of the editor world: spatialization (bAllowSpatialization) and an attenuation override, a sphere whose inner radius is attenuation_radius and whose falloff distance is attenuation_distance ('Disabled' turns both off). audio_3d_configured is read back from the component. attenuation_falloff and the cone numbers only describe the preset (a sphere has no cone).
+// MCP:set_audio_3d_settings - Apply a 3D audio preset to one audio component of a placed actor in the editor world, in one undo step that dirties the level without saving it: spatialization (bAllowSpatialization) plus, for every preset but Disabled, an attenuation override sphere with the preset's inner radius and falloff distance (High 1000/2000 cm, Enabled and Medium 500/1000, Low 250/500); Disabled turns both off. audio_3d_configured is read back from the component; attenuation_falloff and the cone numbers only describe the preset. The same preset again gives the same result. Only the first audio component of each actor is searched, by object name; a missing component or unknown preset is an error and nothing changes. Read the result with get_audio_component_properties; set_audio_volume and set_audio_sound change the rest.
 //   @renamed-from configure_audio_3d
-//   @param audio_component_name - Name of the audio component to configure
-//   @param audio_3d_settings - 3D setting preset: 'Enabled', 'Disabled', 'High', 'Medium', or 'Low' (case-insensitive); any other name is an error
+//   @param audio_component_name - Object name of the audio component, compared without case against the first audio component of each actor, e.g. 'AudioComponent0' (get_audio_settings lists them).
+//   @param audio_3d_settings - Preset name: 'Enabled', 'Disabled', 'High', 'Medium' or 'Low' (case-insensitive); any other name is an error.
 //   @returns { audio_component_name: string, audio_3d_settings: string, audio_3d_configured: bool, audio_3d_message: string, old_3d_enabled: bool, new_3d_enabled: bool, attenuation_override: bool, applied_attenuation_radius?: number, applied_falloff_distance?: number, 3d_enabled: bool, spatialization_enabled: bool, attenuation_distance: number, attenuation_radius: number, attenuation_falloff: number, attenuation_cone_angle: number, attenuation_cone_feather: number, audio_3d_recommendations: [string] }
 
 TSharedPtr<FJsonObject> HandleConfigureAudio3D(const TSharedPtr<FJsonObject>& Params)
@@ -763,7 +763,7 @@ TSharedPtr<FJsonObject> HandleConfigureAudio3D(const TSharedPtr<FJsonObject>& Pa
     return Report;
 }
 
-// MCP:get_audio_settings - Retrieves comprehensive audio settings and statistics including all audio components in the world, audio device capabilities, and quality metrics.
+// MCP:get_audio_settings - Survey audio in the editor: a census of the first audio component of every actor in the editor world (even while PIE runs), with each one's volume, pitch and playing, looping and spatialized state, the counts and volume and pitch statistics, and the main audio device's state (audio_enabled, max channels, mixer loaded). Read-only; no parameters. Several fields are not measured: audio_quality comes from the channel count (64+ High, under 32 Low), audio_api is the platform's default backend, reverb and occlusion always read true, sample rate and buffer size are fixed defaults, and the recommendations and complexity score are heuristics. For the project's audio settings use get_project_settings_value; for one component in depth, get_audio_component_properties.
 //   @returns { audio_settings_found: bool, audio_quality: string, audio_api: string, audio_enabled: bool, audio_mode: string, world_name?: string, audio_component_count: int, active_audio_component_count: int, spatialized_audio_component_count: int, average_volume: number, max_volume: number, max_pitch: number, engine_version: string, platform_name: string, audio_max_channels: int, audio_3d_enabled: bool, audio_reverb_enabled: bool, audio_occlusion_enabled: bool, audio_recommendations: [string], audio_complexity_score: number, audio_complexity_rating: string }
 
 TSharedPtr<FJsonObject> HandleGetAudioSettings(const TSharedPtr<FJsonObject>& Params)
@@ -868,13 +868,14 @@ TSharedPtr<FJsonObject> HandleStopSound(const TSharedPtr<FJsonObject>& Params)
     return Report;
 }
 
-// MCP:play_sound_at_location - Plays a sound asset at a specific world location without requiring an audio component.
-//   @param sound_path - Full asset path to the sound (e.g. '/Game/Audio/MySound.MySound')
-//   @param location - [x, y, z] 3D location to play the sound at
-//   @param volume - Optional volume multiplier; defaults to 1.0
-//   @param pitch - Optional pitch multiplier; defaults to 1.0
-//   @param rotation - Optional [pitch, yaw, roll] rotation of the sound (it matters to a directional attenuation)
+// MCP:play_sound_at_location - Play a sound asset (sound wave, sound cue or MetaSound source) once at a world location in the editor world, as a fire-and-forget one-shot with no audio component (UGameplayStatics::PlaySoundAtLocation) and only the sound's own attenuation. Nothing is saved, dirtied or undoable, and no handle comes back: the sound plays to its end, a looping one keeps looping with no way to stop it from here, and one out of the listener's earshot is skipped by the engine. Each call starts another instance. success is true once the request is made, even with no audio device. A sound that does not load or a location that is not an array of 3 numbers is an error. For playback you can stop or inspect, use play_sound and stop_sound on an audio component (set_audio_sound assigns its sound).
+//   @param sound_path - Object path of the sound asset, e.g. '/Game/Audio/MySound.MySound' (the package path '/Game/Audio/MySound' also loads).
+//   @param location - World position [x, y, z] in centimetres, e.g. [0, 0, 100]; required, and the origin [0, 0, 0] is valid.
+//   @param volume - Optional volume multiplier, e.g. 0.5 for half; default 1.0.
+//   @param pitch - Optional pitch multiplier, e.g. 2.0 for an octave up; default 1.0.
+//   @param rotation - Optional [pitch, yaw, roll] in degrees, the facing of the sound (it matters to a directional attenuation); default [0, 0, 0].
 //   @returns { sound_path: string, sound_name: string, location: { x, y, z }, rotation: { pitch, yaw, roll }, volume: number, pitch: number, success: bool }
+//   @hints additive
 
 TSharedPtr<FJsonObject> HandlePlaySoundAtLocation(const TSharedPtr<FJsonObject>& Params)
 {

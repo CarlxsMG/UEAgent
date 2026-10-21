@@ -101,27 +101,27 @@ Build a Gameplay Cameras UCameraRigAsset, found by content path, in memory as th
 
 *Additive.*
 
-Create a UCameraAsset (Gameplay Camera System, Experimental plugin) at package_path/name and save it; one already there is returned unchanged (already_existed:true), another asset class there is an error. Returns asset_path and saved. Next: set_camera_asset_director, then add_gameplay_camera_component.
+Create a UCameraAsset (Gameplay Camera System, Experimental plugin) at package_path/name and save it; one already there is returned unchanged with created=false, already_existed=true and saved=false (nothing is written), another asset class there is an error. A failed save of a new asset makes success false, with saved=false and save_error. Returns asset_path and saved. Next: set_camera_asset_director, then add_gameplay_camera_component.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | yes | Name of the UCameraAsset to create, e.g. "CA_Player"; also the last segment of its path |
 | `package_path` | string | no | Target content folder (default "/Game/Cameras") |
 
-**Returns:** `{ name, asset_path, asset_class, already_existed, saved }`
+**Returns:** `{ name, asset_path, asset_class, created, already_existed, saved, save_error?, note? }`
 
 ## `create_camera_rig_asset`
 
 *Additive, idempotent.*
 
-Creates a UCameraRigAsset (Gameplay Camera System, Experimental). Idempotent (returns the existing asset).
+Create an empty camera rig asset (UCameraRigAsset, from the Experimental Gameplay Cameras plugin) at package_path/name and save it; it has no root node yet. Idempotent: a camera rig already at that path is returned unchanged with created=false, already_existed=true and saved=false, since nothing is written; an asset of another class there is an error. Not an undo step. Then give it a root node with set_camera_rig_root_node, tune it with set_camera_node_parameters or add_camera_node_child, build it with build_camera_rig, and run it from a camera asset (create_camera_asset) through set_camera_asset_director; get_camera_rig_nodes reads it back. A failed save of a new rig makes success false, with saved=false and save_error, and the rig left in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `name` | string | yes | Asset name (required) |
-| `package_path` | string | no | Target content folder (default "/Game/Cameras") |
+| `name` | string | yes | Asset name, e.g. 'CR_Player'; package_path/name must form a valid long package name. |
+| `package_path` | string | no | Content folder as a long package path, e.g. '/Game/Cameras/Rigs' (default "/Game/Cameras"). |
 
-**Returns:** `{ name, asset_path, asset_class, already_existed, saved }`
+**Returns:** `{ name, asset_path, asset_class, created, already_existed, saved, save_error?, note? }`
 
 ## `create_camera_shake_blueprint`
 

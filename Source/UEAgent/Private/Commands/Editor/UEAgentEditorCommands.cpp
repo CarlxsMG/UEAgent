@@ -2579,16 +2579,17 @@ TSharedPtr<FJsonObject> HandleAlignActors(const TSharedPtr<FJsonObject>& Params)
 
 // Instance components on a placed actor
 
-// MCP:add_component_to_actor - Attach a new component of ANY class to ONE actor already placed in the level: an instance-level component, not a change to its Blueprint. Pick it for a single placed actor; add_component_to_blueprint adds it to the Blueprint so every instance gets it, and a typed add_*_component tool (add_spline_component, add_camera_component...) when you want that class's own fields set in the same call. Returns object_path, the full reflection path to feed straight into set_properties / call_function to configure it. Pass idempotent=true to make re-running safe. Editor world only; the change dirties the actor's package, so save_level to keep it.
-//   @param actor_name - Name of the placed actor to add the component to (editor world).
-//   @param component_type - Component class name (e.g., 'StaticMeshComponent', 'BoxComponent', 'UStaticMeshComponent')
-//   @param component_name - Name to assign to the new component
+// MCP:add_component_to_actor - Attach a new component of any class to one actor already placed in the editor world, as an instance component in one undo step; the actor's Blueprint is not changed. Pick it for a single placed actor; add_component_to_blueprint changes the Blueprint so every instance gets it, and a typed add_*_component tool (add_spline_component, add_camera_component...) also sets that class's fields. Each call adds another component, so a retry makes a duplicate; with idempotent=true an existing component of that class is returned instead (already_existed true). The reply's object_path feeds set_properties and call_function; component_name, suffixed when the name is taken, feeds remove_component_from_actor, the inverse. An unknown actor or a class that is not an actor component is an error. It dirties the actor's package; save_level keeps it.
+//   @param actor_name - Internal object name (not the label) of the placed actor in the editor world, e.g. 'StaticMeshActor_3'.
+//   @param component_type - Component class by name or path, with or without the U prefix or the Component suffix, e.g. 'StaticMeshComponent', 'Box' or '/Script/Engine.PointLightComponent'.
+//   @param component_name - Name for the new component, e.g. 'TriggerBox'; a taken name gets a unique variant, reported back in component_name.
 //   @param location - Optional [x, y, z] relative location (for scene components)
 //   @param rotation - Optional [pitch, yaw, roll] relative rotation (for scene components)
 //   @param scale - Optional [x, y, z] relative scale (for scene components)
 //   @param idempotent - Optional bool (default false). When true, if the actor already has a component of this class, return it instead of adding a duplicate (already_existed:true). Use for single-instance components.
 //   @returns { actor_name: string, component_name: string, object_path: string, requested_component_name: string, component_type: string, already_existed: bool, success: bool }
 //   Note: object_path is the full reflection path -- feed it to set_properties / call_function to configure the component (no dedicated add_* wrapper needed).
+//   @hints not-idempotent
 
 TSharedPtr<FJsonObject> HandleAddComponentToActor(const TSharedPtr<FJsonObject>& Params)
 {

@@ -1166,10 +1166,10 @@ TSharedPtr<FJsonObject> HandleRemoveMontageNotify(const TSharedPtr<FJsonObject>&
 // Idempotent: a missing slot returns success with already_existed=false and the
 // current slots list (no fake removed=true), mirroring remove_montage_section.
 // ---------------------------------------------------------------------------
-// MCP:remove_montage_slot - Remove a slot animation track from a UAnimMontage by name or index. A failed save makes success false, with saved=false and save_error.
-//   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
-//   @param slot_name - Name of the FSlotAnimationTrack to remove (FName). Either this or slot_index is required.
-//   @param slot_index - Zero-based index into SlotAnimTracks (alternative to slot_name). Use get_montage_info first to list slots.
+// MCP:remove_montage_slot - Remove one slot animation track (the FSlotAnimationTrack and every segment on it) from a UAnimMontage, picked by slot_name or slot_index, in one undo step, and save the montage. List the slots first with get_montage_info; add_montage_slot is the inverse, and remove_montage_segment takes out a single segment instead of the whole track. A slot that is not there is a success with removed=false and already_existed=false, and nothing is changed or saved, so a repeat by slot_name is safe; a repeat by slot_index takes out whichever track moved into that index. A failed save makes success false, with saved=false and save_error.
+//   @param montage_path - Object path of the UAnimMontage, e.g. '/Game/MyGame/AM_Example'.
+//   @param slot_name - Slot name of the track to remove, as get_montage_info lists it, e.g. 'DefaultSlot'; the first track with that name goes. Wins over slot_index when both are given; one of the two is required.
+//   @param slot_index - Zero-based index into the montage's slot tracks, in get_montage_info order (used only without slot_name); an index past the last track is a no-op success with removed=false.
 //   @returns { montage_path, slot_name?, slot_index?, removed_index?, removed_slot_name?, slot_count, slots[], already_existed, removed, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleRemoveMontageSlot(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1770,10 +1770,10 @@ namespace
 // ---------------------------------------------------------------------------
 // add_blend_space_sample
 // ---------------------------------------------------------------------------
-// MCP:add_blend_space_sample - Add a blend sample (animation + blend position) to a BlendSpace. A failed save makes success false, with saved=false and save_error.
-//   @param blendspace_path - Full asset path to the UBlendSpace (e.g.
-//   @param animation_path - Full asset path to the UAnimSequence to use as sample.
-//   @param blend_value - Blend position: single number (1D) or array of up to 3 numbers (default 0)
+// MCP:add_blend_space_sample - Add one sample (an animation placed at a blend position) to a UBlendSpace or UBlendSpace1D in one undo step, rebuild its runtime data and save the asset. Every call appends a new sample, so it is not a retry-safe call: a position too close to an existing sample, an animation on another skeleton or one whose additive type differs from the existing samples is rejected by the engine with sample_index -1 and success=false, and no sample is added. A position past an axis range widens that axis. Create the asset with create_blend_space and list its samples with get_blend_space_samples; move or swap an existing sample with set_blend_space_sample, and take one out with remove_blend_space_sample. A failed save makes success false, with saved=false and save_error.
+//   @param blendspace_path - Object path of the UBlendSpace or UBlendSpace1D asset, e.g. '/Game/Animation/BS_Locomotion' (create_blend_space makes one).
+//   @param animation_path - Object path of the UAnimSequence played at this position, on the blend space's skeleton, e.g. '/Game/Animation/Run_Fwd'.
+//   @param blend_value - Blend position in the axis units: one number for a 1D blend space, or [x, y] (up to 3 numbers) for a 2D one, e.g. [0, 300]; default 0 on every axis.
 //   @returns { blendspace_path, sample_index, num_samples, success, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleAddBlendspaceSample(const TSharedPtr<FJsonObject>& Params)
 {
@@ -5085,9 +5085,9 @@ TSharedPtr<FJsonObject> HandleAddNotifyTrack(const TSharedPtr<FJsonObject>& Para
 // ---------------------------------------------------------------------------
 // remove_notify_track
 // ---------------------------------------------------------------------------
-// MCP:remove_notify_track - Remove a named notify TRACK from an AnimSequence (deletes events on it + reindexes the rest). A failed save makes success false, with saved=false and save_error.
-//   @param animation_path - Full asset path to the UAnimSequence.
-//   @param track_name - Notify track name to remove.
+// MCP:remove_notify_track - Remove one named notify track from a UAnimSequence in one undo step and save it: the notify events and sync markers on that track go with it and the tracks after it shift down one index. Idempotent by name: a track that is not there is a success with already_absent=true, and nothing is changed or saved. Removing the sequence's last remaining track is refused with an error and nothing changes. List the track names with get_anim_notifies; add_notify_track is the inverse, and remove_anim_notify takes out a single event instead of a whole track. A failed save makes success false, with saved=false and save_error.
+//   @param animation_path - Object path of the UAnimSequence, e.g. '/Game/Animation/Run_Fwd'.
+//   @param track_name - Name of the notify track, as get_anim_notifies lists it in track_names (matched case-insensitively), e.g. '1' or 'Footsteps'.
 //   @returns { animation_path, track_name, track_names, track_count, already_absent, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleRemoveNotifyTrack(const TSharedPtr<FJsonObject>& Params)
 {
@@ -5225,9 +5225,9 @@ TSharedPtr<FJsonObject> HandleAddAnimCompositeSegment(const TSharedPtr<FJsonObje
     return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("add_anim_composite_segment"), SaveError);
 }
 
-// MCP:remove_anim_composite_segment - Remove an FAnimSegment by index from a UAnimComposite's AnimationTrack, then recompute its length. A failed save makes success false, with saved=false and save_error.
-//   @param composite_path - Object path of the UAnimComposite (e.g. "/Game/Animation/AC_Example").
-//   @param index - Zero-based index of the segment to remove, in [0, num_segments).
+// MCP:remove_anim_composite_segment - Remove one segment (an FAnimSegment) by zero-based index from a UAnimComposite's track in one undo step, re-stack the remaining segments end to end, recompute the composite length and save the asset. An index outside [0, num_segments) is an error and nothing changes. The later segments shift down one index, so a repeat with the same index removes a different segment: re-read segments from the reply before the next call. Count the segments with get_anim_asset_info; add_anim_composite_segment is the inverse. A failed save makes success false, with saved=false and save_error.
+//   @param composite_path - Object path of the UAnimComposite, e.g. '/Game/Animation/AC_Example' (create_anim_composite makes one).
+//   @param index - Zero-based index of the segment to remove, in [0, num_segments), in the order of the segments list that add_anim_composite_segment and this tool return.
 //   @returns { composite_path, index, num_segments, composite_length, segments, success, saved, save_error }
 TSharedPtr<FJsonObject> HandleRemoveAnimCompositeSegment(const TSharedPtr<FJsonObject>& Params)
 {
@@ -5973,8 +5973,8 @@ TSharedPtr<FJsonObject> HandleSetBlendSpaceInterpolation(const TSharedPtr<FJsonO
 // path and assign. Direct member assignment under Modify() (both are public).
 // Distinct from set_anim_additive_settings (additive TYPE vs retarget SOURCE).
 // ---------------------------------------------------------------------------
-// MCP:set_anim_retarget_source - Set a UAnimSequence's retarget source (and optionally its retarget reference-pose sequence) in an undo transaction and save it. A ref_pose_seq_path that does not load is an error before anything changes; values the sequence already has are a success with changed=false, applied_count 0, saved=false and a note, and nothing is modified or saved. A failed save makes success false, with saved=false and save_error.
-//   @param anim_sequence_path - Object path of the UAnimSequence to mutate.
+// MCP:set_anim_retarget_source - Set a UAnimSequence's retarget source and/or its retarget reference-pose sequence (RefPoseSeq) in one undo step and save it; pass at least one of the two, and an empty or 'None' value clears that field. Read the current values first with get_anim_sequence_info. A ref_pose_seq_path that does not load is an error before anything changes; a retarget_source the skeleton does not define is still written, with a warning in notes. Values the sequence already has are a success with changed=false, applied_count 0, saved=false and a note, and nothing is modified or saved. A failed save makes success false, with saved=false and save_error.
+//   @param anim_sequence_path - Object path of the UAnimSequence to change, e.g. '/Game/Animation/Run_Fwd'.
 //   @param retarget_source - Retarget-source name (FName). Must name an entry in the owning skeleton's retarget-source map to RESOLVE at runtime, but the property write persists regardless. Use 'None' (or empty) to clear.
 //   @param ref_pose_seq_path - Optional object path of a UAnimSequence used as the additive retarget reference pose (RefPoseSeq). Pass empty/'None' to clear it.
 //   @returns { anim_sequence_path, retarget_source, ref_pose_seq, ref_pose_seq_set, ref_pose_seq_cleared, applied_count, notes, changed, success, saved, save_error, note? }

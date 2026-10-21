@@ -930,12 +930,12 @@ TSharedPtr<FJsonObject> HandleRemoveGeometryCollectionSource(const TSharedPtr<FJ
 // ---------------------------------------------------------------------------
 // cut_geometry_collection_with_planes
 // ---------------------------------------------------------------------------
-// MCP:cut_geometry_collection_with_planes - Cuts all transforms of a UGeometryCollection asset with num_planes random planes inside its bounds (no noise, islands split by default), then saves it. new_fracture_count is the number of new pieces, measured as the transforms the cut added; the call fails when it added none (an empty collection, or planes that miss every piece) or when the save fails.
-//   @param geometry_collection_path - Asset path of the UGeometryCollection
-//   @param num_planes - Number of random cutting planes to generate, minimum 1, default 3
-//   @param random_seed - Optional seed for plane generation, default 1337
-//   @param grout - Width of the gap left between cut pieces, in cm (default 0)
-//   @param split_islands - Optional, split resulting islands, default true
+// MCP:cut_geometry_collection_with_planes - Cut every piece of a UGeometryCollection asset with num_planes flat planes placed at random (seeded) inside its bounds, with no noise on the cut surfaces, in one undo step, then save it. The cut pieces stay in the hierarchy as parents of the new ones, so each call adds pieces on top of the earlier ones; it is not idempotent. Choose it for a few long straight cuts (planks, slabs); for a regular grid of cuts use slice_geometry_collection, for organic Voronoi shards fracture_geometry_collection, and to group pieces afterwards cluster_geometry_collection. Make the collection first with create_geometry_collection; check the result with get_geometry_collection_hierarchy or get_geometry_collection_info. new_fracture_count is the number of transforms the cut added; the call fails when it added none (an empty collection, or planes that miss every piece) even though the asset is still saved, and when the save fails (for example while PIE runs). A path that does not load as a geometry collection is an error and nothing changes.
+//   @param geometry_collection_path - Asset path of the UGeometryCollection, e.g. "/Game/Destruction/GC_Wall", as create_geometry_collection returns it (asset_path).
+//   @param num_planes - Number of random cutting planes, an integer of at least 1 (smaller values become 1), default 3.
+//   @param random_seed - Integer seed for plane placement, default 1337; the same seed on the same collection gives the same planes.
+//   @param grout - Width of the gap left between cut pieces, in cm, e.g. 0.5 (default 0, no gap).
+//   @param split_islands - true (default) turns every disconnected part of a cut piece into its own piece; false keeps them together.
 //   @returns { geometry_collection_path: string, num_planes: int, new_fracture_count: int, transform_count: int, success: bool, saved: bool, save_error: string? }
 TSharedPtr<FJsonObject> HandlePlaneCutFracture(const TSharedPtr<FJsonObject>& Params)
 {

@@ -1155,11 +1155,11 @@ TSharedPtr<FJsonObject> HandleGetMaterialPhysicalMaterial(const TSharedPtr<FJson
     return Reply;
 }
 
-// MCP:set_material_usage_flag - Enable or disable a usage flag (EMaterialUsage) on a UMaterial asset and persist it to disk.  Idempotent: the engine setter no-ops when the flag already matches (already_set=true).  Recompiles shaders for the affected usage.
-//   @param material_path - Full path to the material (e.g., '/Game/Materials/MyMaterial.MyMaterial')
-//   @param usage - Usage flag name, with or without the MATUSAGE_ prefix (e.g., 'SkeletalMesh' or 'MATUSAGE_SkeletalMesh')
-//   @param enabled - Whether to enable (true, default) or disable (false) the flag
-//   @returns { material_path: string, usage: string, enabled: bool, already_set: bool, saved: bool, save_error?: string, success: bool }
+// MCP:set_material_usage_flag - Turn one usage flag (EMaterialUsage: SkeletalMesh, InstancedStaticMeshes, NiagaraSprites, SplineMesh...) on or off on a base UMaterial asset, which recompiles its shaders for that usage, then save the material. Use it when get_material_usage_flag shows the flag off for geometry that renders the material as the default checker; it works on base materials only, so set it on the parent of a material instance. Idempotent: when the flag already has that value the engine setter does nothing (already_set=true), though the material is still saved. Not an undo step. An unknown usage name or a path that does not load as a UMaterial is an error and nothing changes. A failed save (a read-only file, say) makes success false, with saved=false and save_error, and leaves the flag set in memory only.
+//   @param material_path - Object or package path of the base material, e.g. '/Game/Materials/M_Base.M_Base' or '/Game/Materials/M_Base'.
+//   @param usage - EMaterialUsage name with or without the MATUSAGE_ prefix, e.g. 'SkeletalMesh', 'InstancedStaticMeshes' or 'MATUSAGE_Nanite'; any other name is an error.
+//   @param enabled - true (default) turns the flag on, false turns it off.
+//   @returns { material_path: string, usage: string, enabled: bool (read back from the material), already_set: bool, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleSetMaterialUsageFlag(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1200,11 +1200,11 @@ TSharedPtr<FJsonObject> HandleSetMaterialUsageFlag(const TSharedPtr<FJsonObject>
     TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
     Reply->SetStringField(TEXT("material_path"), AssetPath);
     Reply->SetStringField(TEXT("usage"), UsageLabel);
-    Reply->SetBoolField(TEXT("enabled"), bWantEnabled);
+    // Read back from the material, not echoed from the request.
+    Reply->SetBoolField(TEXT("enabled"), Material->GetUsageByFlag(Usage));
     Reply->SetBoolField(TEXT("already_set"), bAlreadySet);
-    mcp_common::AddSaveOutcome(Reply, bSaved, SaveError);
-    Reply->SetBoolField(TEXT("success"), true);
-    return Reply;
+    // A save that did not reach disk answers success:false with save_error: the flag is then set in memory only.
+    return mcp_common::MakeSavedReply(Reply, bSaved, TEXT("set_material_usage_flag"), SaveError);
 }
 
 // MCP:get_material_usage_flag - Is this material allowed to be used on that kind of geometry? Reads one EMaterialUsage flag (SkeletalMesh, InstancedStaticMeshes, Niagara, SplineMesh, ...) on a base material. The check to make when a material renders fine on a static mesh and comes out as the default grey checker on a skeletal mesh or an instanced mesh -- a missing usage flag is exactly that symptom. Accepts the name with or without the MATUSAGE_ prefix; set_material_usage_flag enables it (and forces a shader recompile).

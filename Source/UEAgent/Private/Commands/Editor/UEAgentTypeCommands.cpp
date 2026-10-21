@@ -605,8 +605,8 @@ namespace
     }
 }
 
-// MCP:set_enum_bitflags - Toggle the "bitflags" meta on a Blueprint Enum (UUserDefinedEnum) so its enumerators can be combined as bit flags.  Idempotent: re-setting the same state reports already_set with applied=false.
-//   @param enum_path - Full asset path of the UUserDefinedEnum (e.g. /Game/Blueprints/MyEnum).
+// MCP:set_enum_bitflags - Turn the "Bitflags" metadata of a Blueprint Enum (UUserDefinedEnum) on or off, as the enum editor's checkbox does: on, its enumerators can be combined as bit flags, so an integer variable marked Bitmask can use it as its Bitmask Enum. Only this flag changes; build the entries with create_enum, add_enum_entry, rename_enum_entry, reorder_enum_entry or remove_enum_entry, and read them with get_enum_info. One undo step; Blueprints that use the enum are notified, and the enum is marked dirty, not saved (save_asset). Idempotent: the state it already has reports already_set=true, applied=false, and changes nothing. A path that does not load a UUserDefinedEnum (a native C++ enum included) is an error.
+//   @param enum_path - Full asset path of the UUserDefinedEnum (e.g. /Game/Blueprints/MyEnum, the ".MyEnum" suffix optional), as create_enum returns it or find_assets_by_name finds it.
 //   @param bitflags [bool] - Desired state: true to mark as bitflags, false to clear.
 //   @returns { enum_path: string, bitflags: bool, already_set: bool, applied: bool }
 TSharedPtr<FJsonObject> HandleSetEnumBitflags(const TSharedPtr<FJsonObject>& Params)

@@ -70,27 +70,64 @@ namespace
         return nullptr;
     }
 
+    // The channels the schema was GIVEN (its private Channels UPROPERTY, read by reflection), finalized or not.
+    // GetChannels() is FinalizedChannels, which Finalize() leaves EMPTY when any channel fails -- e.g. the default
+    // Pose channel on a skeleton without its foot bones -- so a lookup there misses channels the schema has.
+    TArray<UPoseSearchFeatureChannel*> PoseSearch_SourceChannels(UPoseSearchSchema* Schema)
+    {
+        TArray<UPoseSearchFeatureChannel*> Out;
+        FArrayProperty* ChannelsProp = Schema ? FindFProperty<FArrayProperty>(UPoseSearchSchema::StaticClass(), TEXT("Channels")) : nullptr;
+        const FObjectPropertyBase* InnerObjProp = ChannelsProp ? CastField<FObjectPropertyBase>(ChannelsProp->Inner) : nullptr;
+        if (!InnerObjProp)
+        {
+            return Out;
+        }
+        FScriptArrayHelper Helper(ChannelsProp, ChannelsProp->ContainerPtrToValuePtr<void>(Schema));
+        for (int32 Idx = 0; Idx < Helper.Num(); ++Idx)
+        {
+            if (UPoseSearchFeatureChannel* Channel = Cast<UPoseSearchFeatureChannel>(InnerObjProp->GetObjectPropertyValue(Helper.GetRawPtr(Idx))))
+            {
+                Out.Add(Channel);
+            }
+        }
+        return Out;
+    }
+
     // UPoseSearchSchema::FindFirstChannelOfType<T>() is templated, so we
-    // can't call it dynamically. Instead we iterate the public
-    // FinalizedChannels view and look for a cast match on ChannelClass.
-    // This covers AddChannel + PostEditChange(Finalize) writes that have
-    // already been finalized, AND AddDefaultChannels (which auto-finalizes
-    // Trajectory + Pose on schema creation).
-    const UPoseSearchFeatureChannel* FindChannelOfClass(
-        const UPoseSearchSchema* Schema, const UClass* ChannelClass)
+    // can't call it dynamically. Instead we look for a cast match on ChannelClass among the SOURCE channels,
+    // so a schema that did not finalize still finds the channel it has instead of getting a duplicate.
+    UPoseSearchFeatureChannel* FindChannelOfClass(
+        UPoseSearchSchema* Schema, const UClass* ChannelClass)
     {
         if (!Schema || !ChannelClass)
         {
             return nullptr;
         }
-        for (const TObjectPtr<UPoseSearchFeatureChannel>& ChannelPtr : Schema->GetChannels())
+        for (UPoseSearchFeatureChannel* Channel : PoseSearch_SourceChannels(Schema))
         {
-            if (ChannelPtr && ChannelPtr->IsA(ChannelClass))
+            if (Channel->IsA(ChannelClass))
             {
-                return ChannelPtr.Get();
+                return Channel;
             }
         }
         return nullptr;
+    }
+
+    // Whether the schema finalized, and the source channel count next to the finalized one: a schema whose
+    // channels do not finalize has SchemaCardinality 0, cannot be built, and says so here instead of in silence.
+    void PoseSearch_AddFinalizeState(const TSharedPtr<FJsonObject>& Obj, UPoseSearchSchema* Schema)
+    {
+        const bool bFinalized = Schema->SchemaCardinality > 0;
+        Obj->SetNumberField(TEXT("source_channel_count"), PoseSearch_SourceChannels(Schema).Num());
+        Obj->SetBoolField(TEXT("finalized"), bFinalized);
+        if (!bFinalized)
+        {
+            Obj->SetStringField(TEXT("finalize_warning"),
+                TEXT("The schema did not finalize (schema_cardinality 0), so build_pose_search_database_index refuses it: ")
+                TEXT("usually a channel names a bone its skeleton lacks (the default Pose channel uses the UE mannequin's ")
+                TEXT("foot and hand bones), and LogPoseSearch names the channel. Remove that channel with ")
+                TEXT("remove_pose_search_channel_from_schema, or give the schema a skeleton that has those bones."));
+        }
     }
 
     // The schema's finalized channels as [{ class, channel_name, weight }] (weight 1 without a Weight property).
@@ -119,12 +156,12 @@ namespace
 // ---------------------------------------------------------------------------
 // create_pose_search_schema
 // ---------------------------------------------------------------------------
-// MCP:create_pose_search_schema - Create a UPoseSearchSchema data asset at package_path/name (package_path defaults to /Game/MCP) bound to the USkeleton at skeleton_path, with sample_rate clamped to 1..240 and the default Trajectory and Pose channels, then save it. Idempotent: a schema already at that path is returned unchanged with already_existed true and saved false, nothing saved, its skeleton_path and skeleton_paths read from it; the requested skeleton and sample_rate are not applied, and that skeleton is not even loaded. An invalid path, an asset of another class there, or for a new schema a skeleton that does not load, is an error; a failed save of a new schema makes success false. Next create a database with create_pose_search_database; add channels with add_pose_search_channel_to_schema, change settings with set_properties, and inspect it with get_pose_search_schema_info.
+// MCP:create_pose_search_schema - Create a UPoseSearchSchema data asset at package_path/name (package_path defaults to /Game/MCP) bound to the USkeleton at skeleton_path, with sample_rate clamped to 1..240 and the default Trajectory and Pose channels, then save it. The default Pose channel uses the UE mannequin's foot and hand bones, so on a skeleton without them (the default SkeletalCube one included) the schema does not finalize: finalized false, schema_cardinality 0 and a finalize_warning, and build_pose_search_database_index refuses it until that channel goes (remove_pose_search_channel_from_schema) or the skeleton changes. Idempotent: a schema already at that path is returned unchanged with already_existed true and saved false, nothing saved, its skeleton_path and skeleton_paths read from it; the requested skeleton and sample_rate are not applied, and that skeleton is not even loaded. An invalid path, an asset of another class there, or for a new schema a skeleton that does not load, is an error; a failed save of a new schema makes success false. Next create a database with create_pose_search_database; add channels with add_pose_search_channel_to_schema, change settings with set_properties, and inspect it with get_pose_search_schema_info.
 //   @param name - Asset name (e.g. 'PoseSearchSchema_Example').
 //   @param package_path - Target content package path (default /Game/MCP); trailing slashes are stripped.
 //   @param skeleton_path - Asset path of the USkeleton (default /Engine/EngineMeshes/SkeletalCube_Skeleton); loaded only for a schema this call creates.
 //   @param sample_rate - Schema SampleRate (int, ClampMin=1, ClampMax=240; default 30); out-of-range values are clamped, and it is applied only to a schema this call creates.
-//   @returns { name, package_path, asset_path, schema_path, skeleton_path, skeleton_paths, sample_rate, schema_cardinality, channel_count, created, already_existed, saved, save_error, message }
+//   @returns { name, package_path, asset_path, schema_path, skeleton_path, skeleton_paths, sample_rate, schema_cardinality, channel_count (finalized), source_channel_count, finalized, finalize_warning?, created, already_existed, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleCreatePoseSearchSchema(const TSharedPtr<FJsonObject>& Params)
 {
     FString Name;
@@ -180,6 +217,7 @@ TSharedPtr<FJsonObject> HandleCreatePoseSearchSchema(const TSharedPtr<FJsonObjec
         Obj->SetNumberField(TEXT("sample_rate"), Schema->SampleRate);
         Obj->SetNumberField(TEXT("schema_cardinality"), Schema->SchemaCardinality);
         Obj->SetNumberField(TEXT("channel_count"), Schema->GetChannels().Num());
+        PoseSearch_AddFinalizeState(Obj, Schema);
         Obj->SetBoolField(TEXT("created"), bCreated);
         return Obj;
     };
@@ -332,11 +370,11 @@ TSharedPtr<FJsonObject> HandleCreatePoseSearchDatabase(const TSharedPtr<FJsonObj
 // ---------------------------------------------------------------------------
 // add_pose_search_channel_to_schema
 // ---------------------------------------------------------------------------
-// MCP:add_pose_search_channel_to_schema - Add a feature channel of channel_type to a UPoseSearchSchema asset or, when a channel of that class is already there, overwrite its Weight instead (already_existed=true); then finalize via PostEditChange and save. Returns schema_cardinality and channel_count; success stays true if the save fails: read saved.
+// MCP:add_pose_search_channel_to_schema - Add a feature channel (what motion matching compares: Pose, Trajectory, Position, Velocity or Heading) to a Pose Search schema, or, when the schema already has a channel of that class, set that channel's weight instead (already_existed true), then re-finalize the schema and save it. Use it to shape what a database built on the schema matches on; remove one with remove_pose_search_channel_from_schema, read the result with get_pose_search_schema_info, and rebuild the index afterwards with build_pose_search_database_index, which this does not do. Idempotent per channel class: the check looks at every channel the schema has, finalized or not, so a repeat call never adds a duplicate. finalized says whether the schema finalized with the change: when false (schema_cardinality 0, a finalize_warning, usually a channel naming a bone the skeleton lacks) the channel is still added and saved, but the schema cannot be built until that is fixed. An unknown channel_type or a schema that does not load is an error and nothing changes; a failed save answers success false with the change kept in memory.
 //   @param schema_path - Asset path of the UPoseSearchSchema (required).
 //   @param channel_type - One of 'Pose', 'Trajectory', 'Position', 'Velocity', 'Heading' (required).
-//   @param weight - Channel weight (float); default 1.0, which also resets the weight of an existing channel when omitted
-//   @returns { schema_path, channel_type, channel_class, weight, schema_cardinality, channel_count, added, already_existed, weight_updated, saved, message }
+//   @param weight - How much this channel counts against the others when matching, a float >= 0 (default 1.0); omitting it on an existing channel resets that channel's weight to 1.0.
+//   @returns { schema_path, channel_type, channel_class, weight, schema_cardinality, channel_count (finalized), source_channel_count, finalized, finalize_warning?, added, already_existed, weight_updated, saved, save_error?, message }
 TSharedPtr<FJsonObject> HandleAddPoseSearchChannelToSchema(const TSharedPtr<FJsonObject>& Params)
 {
     FString SchemaPath;
@@ -371,6 +409,7 @@ TSharedPtr<FJsonObject> HandleAddPoseSearchChannelToSchema(const TSharedPtr<FJso
         Obj->SetNumberField(TEXT("weight"), Weight);
         Obj->SetNumberField(TEXT("schema_cardinality"), Schema->SchemaCardinality);
         Obj->SetNumberField(TEXT("channel_count"), Schema->GetChannels().Num());
+        PoseSearch_AddFinalizeState(Obj, Schema);
         Obj->SetBoolField(TEXT("added"), !bAlreadyExisted);
         Obj->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
         Obj->SetBoolField(TEXT("weight_updated"), bWeightUpdated);
@@ -400,11 +439,10 @@ TSharedPtr<FJsonObject> HandleAddPoseSearchChannelToSchema(const TSharedPtr<FJso
         const bool bSaved = mcp_common::SaveAssetPackage(Schema->GetPackage(), Schema, SaveError);
 
         TSharedPtr<FJsonObject> Obj = BuildPayload(/*bAlreadyExisted=*/true, /*bWeightUpdated=*/true);
-        Obj->SetBoolField(TEXT("saved"), bSaved);
         Obj->SetStringField(TEXT("message"), bSaved
             ? TEXT("Channel of requested type already existed; weight updated and saved")
             : FString::Printf(TEXT("Channel exists, weight updated, save failed: %s"), *SaveError));
-        return mcp_common::MakeOkReply(Obj);
+        return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("add_pose_search_channel_to_schema"), SaveError);
     }
 
     // Append a fresh channel instance and let the post-edit finalize it.
@@ -430,11 +468,10 @@ TSharedPtr<FJsonObject> HandleAddPoseSearchChannelToSchema(const TSharedPtr<FJso
     const bool bSaved = mcp_common::SaveAssetPackage(Schema->GetPackage(), Schema, SaveError);
 
     TSharedPtr<FJsonObject> Obj = BuildPayload(/*bAlreadyExisted=*/false, /*bWeightUpdated=*/false);
-    Obj->SetBoolField(TEXT("saved"), bSaved);
     Obj->SetStringField(TEXT("message"), bSaved
         ? TEXT("Channel added and saved")
         : FString::Printf(TEXT("Channel added but save failed: %s"), *SaveError));
-    return mcp_common::MakeOkReply(Obj);
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("add_pose_search_channel_to_schema"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -652,10 +689,10 @@ TSharedPtr<FJsonObject> HandleAddAnimationAssetToPoseSearchDatabase(const TShare
 // ---------------------------------------------------------------------------
 // build_pose_search_database_index
 // ---------------------------------------------------------------------------
-// MCP:build_pose_search_database_index - Request an async build of the PoseSearch index for a database
-//   @param database_path - Asset path of the UPoseSearchDatabase (required).
-//   @param wait_for_completion - If true, block until the build completes (the engine's FTickableGameObject pumps during the wait).
-//   @returns { database_path, schema_path, schema_cardinality, animation_asset_count, wait_for_completion, result, success, in_progress, failed, message }
+// MCP:build_pose_search_database_index - Start a fresh build of the motion-matching search index of a UPoseSearchDatabase (FAsyncPoseSearchDatabasesManagement::RequestAsyncBuildIndex with NewRequest), cancelling any build already running for it and replacing the old index, and by default wait for it to finish. Run it after add_animation_asset_to_pose_search_database, remove_animation_asset_from_pose_search_database, set_pose_search_database_schema or a schema channel change, none of which rebuild the index; then test it with evaluate_pose_search_query. The index is derived data, not saved into the asset: nothing is saved and there is no undo step. A database that does not load, has no schema (set_pose_search_database_schema), or whose schema still has no finalized channels after a re-finalize in memory is an error before any build. status says what happened: built (success true), in_progress (success true when wait_for_completion is false, since the build was started; a build still running after a wait is a failure), or failed (success false: a database with no animation assets always fails, because the engine fails an empty index, and the message says so; any other failure is in LogPoseSearch). Repeating the call rebuilds again.
+//   @param database_path - Asset path of the UPoseSearchDatabase, e.g. "/Game/Anim/PSD_Locomotion", as create_pose_search_database returns it (required).
+//   @param wait_for_completion - true (default) blocks until the build ends, pumping the engine meanwhile, so large databases take a while; false returns at once, usually with status in_progress (or built when the index was already up to date).
+//   @returns { database_path, schema_path, schema_cardinality, animation_asset_count, wait_for_completion, result: "Success"|"InProgress"|"Failed", status: "built"|"in_progress"|"failed", success, in_progress, failed, message }
 TSharedPtr<FJsonObject> HandleBuildPoseSearchDatabaseIndex(const TSharedPtr<FJsonObject>& Params)
 {
     FString DatabasePath;
@@ -729,34 +766,50 @@ TSharedPtr<FJsonObject> HandleBuildPoseSearchDatabaseIndex(const TSharedPtr<FJso
     Obj->SetNumberField(TEXT("schema_cardinality"), Database->Schema->SchemaCardinality);
     Obj->SetNumberField(TEXT("animation_asset_count"), Database->GetNumAnimationAssets());
     Obj->SetBoolField(TEXT("wait_for_completion"), bWait);
+    // Without waiting, a build still running is what was asked for: it was started. Waiting, only a built index is a
+    // success -- a build still running after the wait is reported as the failure it is.
+    const bool bStarted = bInProgress && !bWait;
+    const bool bOutcome = bSuccess || bStarted;
     Obj->SetStringField(TEXT("result"), ResultStr);
-    Obj->SetBoolField(TEXT("success"), bSuccess);
+    Obj->SetStringField(TEXT("status"), bSuccess ? TEXT("built") : (bInProgress ? TEXT("in_progress") : TEXT("failed")));
+    Obj->SetBoolField(TEXT("success"), bOutcome);
     Obj->SetBoolField(TEXT("in_progress"), bInProgress);
     Obj->SetBoolField(TEXT("failed"), bFailed);
+    FString FailureMessage;
     if (bSuccess)
     {
         Obj->SetStringField(TEXT("message"), TEXT("Index built successfully"));
     }
-    else if (bInProgress)
+    else if (bStarted)
     {
         Obj->SetStringField(TEXT("message"),
-            TEXT("Index build still in progress (wait_for_completion was false)"));
+            TEXT("Index build started and still in progress (wait_for_completion was false): call again with wait_for_completion true to wait for it"));
+    }
+    else if (bInProgress)
+    {
+        FailureMessage = TEXT("build_pose_search_database_index: the index build was still in progress after waiting for it");
+        Obj->SetStringField(TEXT("message"), FailureMessage);
     }
     else
     {
-        Obj->SetStringField(TEXT("message"), TEXT("Index build failed (check LogPoseSearch)"));
+        // The engine fails every build whose index comes out empty (FPoseSearchDatabaseAsyncCacheTask::Wait,
+        // bFailedIndexing = SearchIndex.IsEmpty()) even while LogPoseSearch says "BuildIndex Succeeded": a database
+        // without animation assets always lands here, so name that cause instead of sending the caller to the log.
+        FailureMessage = Database->GetNumAnimationAssets() == 0
+            ? FString(TEXT("build_pose_search_database_index: the database has no animation assets, and the engine fails a build whose index is empty; add some with add_animation_asset_to_pose_search_database first"))
+            : FString(TEXT("build_pose_search_database_index: the index build failed (check LogPoseSearch)"));
+        Obj->SetStringField(TEXT("message"), FailureMessage);
     }
     // The verdict measured above is the verdict EMITTED.
-    return mcp_common::MakeOutcomeReply(Obj, bSuccess,
-        bSuccess ? FString() : mcp_common::MeasuredOutcomeError(TEXT("build_pose_search_database_index"), TEXT("bSuccess")));
+    return mcp_common::MakeOutcomeReply(Obj, bOutcome, FailureMessage);
 }
 
 // ---------------------------------------------------------------------------
 // get_pose_search_database_info
 // ---------------------------------------------------------------------------
-// MCP:get_pose_search_database_info - Read-only walk of Schema, DatabaseAnimationAssets and Channels on a UPoseSearchDatabase
+// MCP:get_pose_search_database_info - Read a UPoseSearchDatabase without changing it: its schema path, search mode (BruteForce, PCAKDTree, VPTree or EventOnly), KD-tree neighbours, principal components, base cost bias and tags; every animation entry with its index, enabled flag, sampling range (0 to 0 means the whole asset) and asset path; and the schema's channels with class and weight. Use the entry index with remove_animation_asset_from_pose_search_database; for the schema's own settings and finalized channels use get_pose_search_schema_info; to search it at runtime use evaluate_pose_search_query. A database with no schema gives an empty schema_path and no channels rather than an error. schema_cardinality is not recomputed here, so it can read 0 for a schema loaded but not yet finalized (build_pose_search_database_index finalizes it). A path that does not load as a UPoseSearchDatabase is an error.
 //   @renamed-from inspect_pose_search_database
-//   @param database_path - Asset path of the UPoseSearchDatabase (required).
+//   @param database_path - Asset path of the UPoseSearchDatabase, e.g. "/Game/Anim/PSD_Locomotion", as create_pose_search_database returns it (required).
 //   @returns { database_path, schema_path, pose_search_mode, kd_tree_query_num_neighbors, number_of_principal_components, base_cost_bias, tags, schema_cardinality, animation_asset_count, animation_assets[], channel_count, channels[] }
 TSharedPtr<FJsonObject> HandleInspectPoseSearchDatabase(const TSharedPtr<FJsonObject>& Params)
 {

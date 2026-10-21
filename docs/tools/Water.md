@@ -8,16 +8,16 @@ Back to the [index](README.md).
 
 ## `add_water_body_to_zone`
 
-*Additive.*
+*Destructive, idempotent.*
 
-Link an existing water body actor to an existing AWaterZone.
+Link a water body to a water zone for good by pointing the body's WaterZoneOverride at it (UWaterBodyComponent::SetWaterZoneOverride), replacing any override it had: a saved property the engine prefers over spatial overlap, so the body stays in that zone wherever it lies, and the zone rebuilds its water info and mesh around it; both are found by editor label in the editor world. linked is read back: the override and the body's owning zone both name the zone, which is what get_water_body_info (water_zone_label) and get_water_zone_info (linked_body_count) then report; owning_zone_label and previous_zone_label say where it is and was. One undo step; the level is marked dirty, not saved (save_level). Idempotent: a body already linked this way changes nothing (changed=false). Inverse: remove_water_body_from_zone. An unknown body or zone label, or a body without a UWaterBodyComponent, is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `water_body_label` | string | yes | Label of the existing AWaterBody actor to link |
-| `water_zone_label` | string | yes | Label of the existing AWaterZone actor to link into |
+| `water_body_label` | string | yes | Editor label (not the object name) of the AWaterBody actor -- lake, river, ocean or custom -- e.g. "Lake_Main", as create_water_body set it; whole label, case-insensitive, first match |
+| `water_zone_label` | string | yes | Editor label of the AWaterZone actor, e.g. "WaterZone_1"; spawn_actor with type="WaterZone" places one |
 
-**Returns:** `{ water_body_label: string, water_zone_label: string, linked: bool }`
+**Returns:** `{ water_body_label: string, water_zone_label: string, linked: bool, changed: bool, water_zone_override: string (the override's object path, read back), owning_zone_label: string, previous_zone_label: string }`
 
 ## `create_water_body`
 
@@ -30,11 +30,11 @@ Spawn a water body actor -- a lake, an ocean or a river, by body_type -- through
 | `body_type` | string | yes | One of lake, ocean, river |
 | `actor_label` | string | yes | Label to assign to the new water body actor |
 | `location` | array | no | Optional [X, Y, Z] world location (defaults to origin) |
-| `water_zone_label` | string | no | Optional label of an existing AWaterZone to link the body to; if it is not found, success is false while the body is still spawned |
+| `water_zone_label` | string | no | Optional editor label of an existing AWaterZone to link the body to, through its WaterZoneOverride as add_water_body_to_zone does (saved with the level, kept wherever the body lies); linked_to_zone and owning_zone_label are read back from the body. If the zone is not found, success is false while the body is still spawned |
 | `affects_landscape` | boolean | no | When true the body carves the existing landscape via the water landscape brush; defaults to false (non-destructive) |
 | `disable_waves` | boolean | no | Opt-in, default false: sets the water waves to none right after the spawn and re-reads the max wave height to prove it is 0 |
 
-**Returns:** `{ the reply of the body's creator: actor name and label, body type, zone link, wave height read back }`
+**Returns:** `{ actor_label: string, actor_name: string, body_type: string, water_zone_label: string, linked_to_zone: bool, water_zone_override: string, owning_zone_label: string, affects_landscape: bool, max_wave_height: number, max_wave_height_on_spawn: number, has_waves: bool, waves_disabled: bool, warning?: string, requested: object }`
 
 ## `create_water_body_exclusion_volume`
 
@@ -92,26 +92,26 @@ Read the spline control points of any water body -- river, lake, ocean or custom
 
 *Read-only.*
 
-Read info about an existing AWaterZone and count its linked water bodies.
+Read a water zone of the editor world, found by editor label: actor_label, actor_name, has_water_mesh, zone_extent [X, Y] in cm (the complete extent times the actor scale, not a half-extent), overlap_priority, and linked_body_count, the number of water bodies whose own owning zone is this one (by spatial overlap, or by the WaterZoneOverride add_water_body_to_zone sets). Use it before and after set_water_zone_settings, which also reports render-target resolution, world bounds and texel size; for one body's zone, type and waves use get_water_body_info. Read-only and idempotent. A label no AWaterZone has is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `water_zone_label` | string | yes | Label of the existing AWaterZone actor |
+| `water_zone_label` | string | yes | Editor label (not the object name) of the AWaterZone actor, e.g. "WaterZone_1"; whole label, case-insensitive, first match. find_actors_by_name with match='label' lists labels |
 
 **Returns:** `{ actor_label: string, actor_name: string, has_water_mesh: bool, linked_body_count: number, zone_extent: [number, number], overlap_priority: int }`
 
 ## `remove_water_body_from_zone`
 
-*Destructive.*
+*Destructive, idempotent.*
 
-Unlink an existing water body actor from an existing AWaterZone (inverse of add_water_body_to_zone).
+Unlink a water body from a water zone (inverse of add_water_body_to_zone): a WaterZoneOverride naming that zone is cleared, in one undo step that marks the level dirty, so the body falls back to the zone its bounds overlap, if any; owning_zone_label reads that back. A body inside the zone's bounds belongs to it by overlap whatever its override says, so that case is refused before anything changes. Idempotent: a body not linked to the zone is a success with already_unlinked=true and nothing changed. Read the result with get_water_body_info (water_zone_label). An unknown body or zone label is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `water_body_label` | string | yes | Label of the existing AWaterBody actor to unlink |
-| `water_zone_label` | string | yes | Label of the existing AWaterZone actor to unlink from |
+| `water_body_label` | string | yes | Editor label of the AWaterBody actor to unlink, e.g. "Lake_Main" |
+| `water_zone_label` | string | yes | Editor label of the AWaterZone actor to unlink from, e.g. "WaterZone_1" |
 
-**Returns:** `{ water_body_label: string, water_zone_label: string, removed: bool, note: string }`
+**Returns:** `{ water_body_label: string, water_zone_label: string, removed: bool, override_cleared: bool, already_unlinked: bool, owning_zone_label: string }`
 
 ## `set_river_width_depth_at_point`
 
@@ -215,12 +215,12 @@ Set ANY water body's spline path from world points, then synchronize the water s
 
 *Destructive, idempotent.*
 
-Set an AWaterZone's planar extent and/or water-info render-target resolution, then RE-READ both from the actor (extent, world bounds, texel density) instead of echoing the request back.
+Set a water zone's planar extent and/or its water-info render-target resolution, then RE-READ both from the actor (extent, world bounds, texel density) instead of echoing the request back. For a read without changing anything use get_water_zone_info; place a zone with spawn_actor (type="WaterZone"). Only the values passed are written, and one the zone already holds is skipped, so a repeat call changes nothing. One undo step; the level is marked dirty, not saved (save_level). applied is derived from the read-back: false, with an error, when the extent read back differs (GetZoneExtent multiplies by the actor scale; see actor_scale) or the resolution does. water_info_texel_size_uu (extent / resolution) tells whether shorelines can resolve. A label no AWaterZone has is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `water_zone_label` | string | yes | Label of the AWaterZone actor |
+| `water_zone_label` | string | yes | Editor label (not the object name) of the AWaterZone actor in the editor world, e.g. "WaterZone_1"; whole label, case-insensitive, first match |
 | `extent` | array | no | Optional [X, Y] planar zone extent. !!! THIS IS THE **COMPLETE** EXTENT, NOT THE HALF-EXTENT / SEMI-AXIS !!! The engine halves it itself (AWaterZone::GetZoneBounds2D: "GetZoneExtents returns the full extent of the zone but BoxSphereBounds expects a half-extent"), so passing 4000000 gives world bounds of [-2000000, +2000000] around the actor -- a 40 km sea, not 80 km. Reading it as a semi-axis gives a sea of DOUBLE the intended size with bounds off the map; the `world_bounds_extent` field in the response is what disambiguates it (half of `zone_extent_actual`). |
-| `render_target_resolution` | array | no | Optional [X, Y] water-info render target resolution. Read back by reflection as `render_target_resolution_actual` (the getter is not exported, so this is the raw UPROPERTY, i.e. BEFORE the r.Water.WaterInfo.RenderTargetResolutionMax clamp). |
+| `render_target_resolution` | array | no | Optional [X, Y] water-info render target resolution in texels, whole numbers, e.g. [2048, 2048]. Read back by reflection as `render_target_resolution_actual` (the getter is not exported, so this is the raw UPROPERTY, i.e. BEFORE the r.Water.WaterInfo.RenderTargetResolutionMax clamp). |
 
 **Returns:** `{ water_zone_label: string, zone_extent: [x,y] (RE-READ, kept for compatibility), zone_extent_actual: [x,y] (RE-READ, COMPLETE extent), world_bounds_extent: [x,y,z] (HALF-extent of the real actor bounds), world_bounds_origin: [x,y,z], world_bounds_min: [x,y,z], world_bounds_max: [x,y,z], actor_scale: [x,y,z], render_target_resolution_actual: [x,y] (omitted if unreadable), render_target_resolution_verified: bool, water_info_texel_size_uu: number (zone_extent / render_target_resolution; omitted if the resolution is unreadable or zero), applied: bool (DERIVED from read-back == request), requested: { extent, render_target_resolution } }`

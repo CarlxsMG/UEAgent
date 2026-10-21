@@ -326,12 +326,13 @@ namespace
 	}
 
 	/**
-	 * Remove Items[Index] (Owner->Modify() first, the tree saved after) and add removed, remaining and saved to Data.
-	 * An out-of-range Index removes nothing and adds OutOfRangeNote as note.
+	 * Remove Items[Index] (Owner->Modify() first, the tree saved after), add removed, remaining and saved to Data and
+	 * return Command's reply: a failed save answers success false with save_error (MakeSavedReply). An out-of-range
+	 * Index removes and saves nothing, adds OutOfRangeNote as note and succeeds (the idempotent no-op).
 	 */
 	template <typename ItemType>
-	void StateTree_RemoveAtIndex(const TSharedPtr<FJsonObject>& Data, UStateTree* Tree, UObject* Owner,
-		TArray<ItemType>& Items, int32 Index, const TCHAR* OutOfRangeNote)
+	TSharedPtr<FJsonObject> StateTree_RemoveAtIndex(const TSharedPtr<FJsonObject>& Data, UStateTree* Tree, UObject* Owner,
+		TArray<ItemType>& Items, int32 Index, const TCHAR* OutOfRangeNote, const TCHAR* Command)
 	{
 		if (!Items.IsValidIndex(Index))
 		{
@@ -339,14 +340,15 @@ namespace
 			Data->SetNumberField(TEXT("remaining"), Items.Num());
 			Data->SetBoolField  (TEXT("saved"),     false);
 			Data->SetStringField(TEXT("note"),      OutOfRangeNote);
-			return;
+			return mcp_common::MakeOkReply(Data);
 		}
 		Owner->Modify();
 		Items.RemoveAt(Index, 1, EAllowShrinking::No);
-		const bool bSaved = mcp_common::SaveAssetPackage(Tree->GetPackage(), Tree);
+		FString SaveError;
+		const bool bSaved = mcp_common::SaveAssetPackage(Tree->GetPackage(), Tree, SaveError);
 		Data->SetBoolField  (TEXT("removed"),   true);
 		Data->SetNumberField(TEXT("remaining"), Items.Num());
-		Data->SetBoolField  (TEXT("saved"),     bSaved);
+		return mcp_common::MakeSavedReply(Data, bSaved, Command, SaveError);
 	}
 
 	/** Map a friendly type string to EPropertyBagPropertyType. */
@@ -433,9 +435,9 @@ TSharedPtr<FJsonObject> HandleCreateStateTree(
 // ---------------------------------------------------------------------------
 // add_state
 // ---------------------------------------------------------------------------
-// MCP:add_state - Add a top-level state (a new SubTree, never a child of another state) to a StateTree asset, then compile and save it. Idempotent: if any state already has that name nothing changes and already_existed is true. Returns state_count, added and saved.
-//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
-//   @param state_name - Name of the new state, e.g. "Patrol"; the other state commands find states by this name.
+// MCP:add_state - Add a top-level state of type State (a new SubTree; it cannot create a child of another state) to an existing StateTree asset, then compile and save it; there is no undo step. Create the tree first with create_state_tree; then fill the state with add_state_task, add_state_transition and add_consideration, make it the root with set_state_tree_root, change its type with set_state_type, delete it with remove_state and read the hierarchy back with get_state_tree_info. Idempotent: when a state at any depth already has that name (case-insensitive), nothing is changed or saved and already_existed is true. A tree that does not load or has no editor data is an error; a failed save (for example while PIE runs) makes success false with the state only in memory.
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as create_state_tree or list_state_trees (trees[].path) returns it.
+//   @param state_name - Name of the new state, e.g. "Patrol"; it should be unique in the whole tree, because every other state command finds a state by this name (the first match, depth-first).
 //   @returns { tree_path, state_name, state_count, already_existed, added, saved }
 TSharedPtr<FJsonObject> HandleAddState(
 	const TSharedPtr<FJsonObject>& Params)
@@ -986,8 +988,8 @@ TSharedPtr<FJsonObject> HandleSetStateSelectionBehavior(
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_state_selection_behavior"));
 }
 
-// MCP:compile_state_tree - Compile a UStateTree via the editor subsystem (validate + compile); reports success and error/warning counts.
-//   @param tree_path - Asset path to the UStateTree
+// MCP:compile_state_tree - Validate and compile a StateTree asset through the StateTree editing subsystem (the editor's Compile button), then save it to disk, and report compiled with the error and warning counts of the compiler log. Use it after authoring with add_state, add_state_task, add_state_transition or set_task_property, which mostly save without compiling; to check a tree without saving it use validate_state_tree, which also returns the messages themselves. The asset is saved even when compilation fails, so compiled false with error_count above 0 still has success true; success is false only when the save fails (for example while PIE runs). A tree that does not load or has no editor data is an error and nothing is compiled. Repeating the call compiles and saves again.
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as list_state_trees (trees[].path) returns it.
 //   @returns { tree_path, compiled, error_count, warning_count, message_count, saved }
 TSharedPtr<FJsonObject> HandleCompileStateTree(
 	const TSharedPtr<FJsonObject>& Params)
@@ -1073,9 +1075,9 @@ TSharedPtr<FJsonObject> HandleAddTransitionCondition(
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("add_state_transition_condition"));
 }
 
-// MCP:add_state_tree_global_task - Attach a global task node (by struct name, via reflection) to a UStateTree; global tasks run for the whole tree's lifetime.
-//   @param tree_path - Asset path to the UStateTree
-//   @param task_struct - Task struct name or /Script path; must derive from StateTreeTaskBase (e.g. "StateTreeDebugTextTask")
+// MCP:add_state_tree_global_task - Append a global task node, of the task struct named by task_struct with its default values, to a StateTree asset, then save the asset without compiling it; there is no undo step. Global tasks belong to the tree, not to a state, and run for as long as the tree runs: for a task that runs only while one state is active use add_state_task instead. Each call appends another node, so repeating it stacks a duplicate task. A tree that does not load or has no editor data, a struct that is not found, or one that does not derive from FStateTreeTaskBase is an error before anything changes; a failed save (for example while PIE runs) makes success false with the task only in memory. Struct names: list_task_types; list them: list_state_tree_global_tasks; set a field: set_state_tree_global_task_property; inverse: remove_state_tree_global_task; check the result with compile_state_tree.
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as list_state_trees (trees[].path) returns it.
+//   @param task_struct - Task struct name as list_task_types returns it, or its /Script path; a leading F is optional; must derive from FStateTreeTaskBase (e.g. "StateTreeDebugTextTask").
 //   @returns { tree_path, task_struct, global_task_count, added, saved }
 TSharedPtr<FJsonObject> HandleAddStateTreeGlobalTask(
 	const TSharedPtr<FJsonObject>& Params)
@@ -1236,10 +1238,10 @@ TSharedPtr<FJsonObject> HandleAddStateTreeBinding(
 // State completion aggregation + linked-asset states + evaluators
 // ---------------------------------------------------------------------------
 
-// MCP:set_state_completion_type - Set how a state aggregates its tasks' completion (UStateTreeState::TasksCompletion).  NOTE: this is the tasks-aggregation policy EStateTreeTaskCompletionType {All, Any} (All = the state completes when ALL its tasks complete; Any = when ANY single task completes) — NOT a success/failed result.
-//   @param tree_path - Asset path to the UStateTree.
-//   @param state_name [string!] - Name of the state to modify.
-//   @param completion_type - Aggregation policy: "All" (default in engine: Any) | "Any" (case-insensitive).
+// MCP:set_state_completion_type - Set when a state of a StateTree asset counts as completed from its tasks (UStateTreeState TasksCompletion): All waits for every task, Any (the engine default) for the first one; it is not a success or failure result. One undo step, then the asset is saved without compiling it. It always writes and saves, even when the state already has that value (set is then still true). An unknown completion_type, a missing tree or editor data, or a missing state is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. The tasks it aggregates: list_tasks, add_state_task; other state settings: set_state_type, set_state_selection_behavior; read back with get_state_tree_info (states[] task completion); check the tree with compile_state_tree.
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as list_state_trees (trees[].path) returns it.
+//   @param state_name [string!] - Name of the state, as get_state_tree_info lists it; the first state with that name in a depth-first walk is used.
+//   @param completion_type - "All" or "Any" (case-insensitive; the engine default for a new state is Any).
 //   @returns { tree_path, state_name, completion_type, set, saved }
 TSharedPtr<FJsonObject> HandleSetStateCompletionType(
 	const TSharedPtr<FJsonObject>& Params)
@@ -1381,10 +1383,10 @@ TSharedPtr<FJsonObject> HandleListStateTrees(
 // ---------------------------------------------------------------------------
 // list_tasks — tasks of a single state
 // ---------------------------------------------------------------------------
-// MCP:list_tasks - List all tasks of a state, with their struct class name, instance ID, and per-task condition count.
-//   @param tree_path - Asset path to the UStateTree.
-//   @param state_name [string!] - Name of the state.
-//   @returns { tree_path, state_name, count, tasks: [{ index, class, instance_id, condition_count }] }
+// MCP:list_tasks - List the tasks of one state of a StateTree asset without changing it, as they are in memory (unsaved edits included): count and, per task in array order, its index, class (the task struct name) and instance_id (the node GUID). A state with no tasks gives count 0 and an empty list; a missing tree, editor data or state is an error. index is what get_task_info, get_task_property, set_task_property and remove_task take; add a task with add_state_task. Tree-scoped tasks are not here: list_state_tree_global_tasks; other node lists of a state: list_conditions, list_considerations; every state with its counts at once: get_state_tree_info.
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as list_state_trees (trees[].path) returns it.
+//   @param state_name [string!] - Name of the state, as get_state_tree_info lists it; the first state with that name in a depth-first walk is used.
+//   @returns { tree_path, state_name, count, tasks: [{ index, class, instance_id }] }
 TSharedPtr<FJsonObject> HandleListTasks(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -1504,11 +1506,11 @@ TSharedPtr<FJsonObject> HandleListTreeBindings(
 // ---------------------------------------------------------------------------
 // remove_state — remove a named state (optionally with descendants)
 // ---------------------------------------------------------------------------
-// MCP:remove_state - Remove a state from the tree by name.  Idempotent: removing a non-existent state returns removed:false with a note.
-//   @param tree_path - Asset path to the UStateTree.
-//   @param state_name - Name of the state to remove.
-//   @param with_descendants - When true (default), also removes all child states recursively.
-//   @returns { tree_path, state_name, removed, with_descendants, remaining_top_level, note }
+// MCP:remove_state - Remove one state, found by name at any depth, from a StateTree asset with its tasks, conditions and transitions, in one undo step, then save the asset without compiling it. With with_descendants true (the default) its child states go too; with false they are kept and take its place in its parent's list (or at the top level), in their order, as moved_children and new_parent report. states_removed counts the states that went, read back from the tree. Transitions in other states that pointed at a removed state are left dangling: fix them with set_state_transition or remove_state_transition, then check with compile_state_tree. Idempotent: a name that matches no state changes and saves nothing and returns removed false with a note. A tree that does not load or has no editor data is an error. A failed save (for example while PIE runs) makes success false, with saved false and save_error, the removal only in memory. Inverse: add_state (top-level states only); see the hierarchy with get_state_tree_info.
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as list_state_trees (trees[].path) returns it.
+//   @param state_name - Name of the state to remove, as get_state_tree_info lists it; the first state with that name in a depth-first walk is removed.
+//   @param with_descendants - true (default) removes the state's whole subtree; false removes only the state and moves its children up one level, to where it was.
+//   @returns { tree_path, state_name, removed, with_descendants, states_removed, moved_children: [string], new_parent (empty at the top level), remaining_top_level, saved, save_error?, note }
 TSharedPtr<FJsonObject> HandleRemoveState(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -1541,65 +1543,100 @@ TSharedPtr<FJsonObject> HandleRemoveState(
 	bool bWithDescendants = true;
 	Params->TryGetBoolField(TEXT("with_descendants"), bWithDescendants);
 
-	ED->Modify();
-
-	// Find which parent owns this state (root SubTrees or a Children array).
-	int32 RemovedCount = 0;
-	auto RemoveFromChildren = [&](TArray<TObjectPtr<UStateTreeState>>& Arr) -> bool
+	// The list that owns the state -- the tree's SubTrees for a top-level state, else its parent's Children -- found
+	// by the same depth-first walk FindStateByName uses, together with that parent (null at the top level).
+	TArray<TObjectPtr<UStateTreeState>>* OwnerList = nullptr;
+	UStateTreeState* OwnerParent = nullptr;
+	int32 OwnerIndex = INDEX_NONE;
+	TFunction<void(TArray<TObjectPtr<UStateTreeState>>&, UStateTreeState*)> Walk =
+		[&](TArray<TObjectPtr<UStateTreeState>>& List, UStateTreeState* ListParent)
 	{
-		const int32 idx = Arr.IndexOfByKey(State);
-		if (idx == INDEX_NONE) { return false; }
-		Arr.RemoveAt(idx, 1, EAllowShrinking::No);
-		RemovedCount++;
-		return true;
+		for (int32 i = 0; i < List.Num() && !OwnerList; ++i)
+		{
+			UStateTreeState* S = List[i];
+			if (!S) { continue; }
+			if (S == State) { OwnerList = &List; OwnerParent = ListParent; OwnerIndex = i; return; }
+			Walk(S->Children, S);
+		}
 	};
-
-	if (RemoveFromChildren(ED->SubTrees))
+	Walk(ED->SubTrees, nullptr);
+	if (!OwnerList)
 	{
-		// Top-level — done.
+		return mcp_common::MakeErrorReply(FString::Printf(
+			TEXT("remove_state: state '%s' was found by name but is in no parent's list of states, so it cannot be removed. Nothing was changed."),
+			*StateName));
+	}
+
+	const int32 StatesBefore = StateTree_CountAllStates(ED);
+
+	// Recorded (Modify) BEFORE the change, as the StateTree editor's Delete State does: the owner of the list (the
+	// parent state, or the editor data at the top level), the state itself and, when they move, its children -- so
+	// undo restores a nested state as well as a top-level one.
+	if (OwnerParent)
+	{
+		OwnerParent->Modify();
 	}
 	else
 	{
-		// Recursive walk over the entire SubTrees tree to find the parent.
-		TArray<TObjectPtr<UStateTreeState>>* Found = nullptr;
-		int32 FoundIndex = INDEX_NONE;
-		TFunction<void(TArray<TObjectPtr<UStateTreeState>>&)> Walk = [&](TArray<TObjectPtr<UStateTreeState>>& Arr)
+		ED->Modify();
+	}
+	State->Modify();
+
+	// with_descendants false: the children take the removed state's place in its parent's list, in their order, and
+	// that parent becomes theirs -- the editor's own move (Children / SubTrees plus Parent), objects unchanged.
+	TArray<TObjectPtr<UStateTreeState>> MovedChildren;
+	if (!bWithDescendants)
+	{
+		MovedChildren = State->Children;
+		for (UStateTreeState* Child : MovedChildren)
 		{
-			for (int32 i = 0; i < Arr.Num() && !Found; ++i)
+			if (Child)
 			{
-				UStateTreeState* S = Arr[i];
-				if (!S) { continue; }
-				if (S == State) { Found = &Arr; FoundIndex = i; return; }
-				Walk(S->Children);
+				Child->Modify();
+				Child->Parent = OwnerParent;
 			}
-		};
-		Walk(ED->SubTrees);
-		if (Found && FoundIndex != INDEX_NONE)
+		}
+		State->Children.Reset();
+	}
+	OwnerList->RemoveAt(OwnerIndex, 1, EAllowShrinking::No);
+	if (MovedChildren.Num() > 0)
+	{
+		OwnerList->Insert(MovedChildren, OwnerIndex);
+	}
+	State->Parent = nullptr;
+
+	const int32 StatesRemoved = StatesBefore - StateTree_CountAllStates(ED);
+	TArray<TSharedPtr<FJsonValue>> MovedNames;
+	for (const UStateTreeState* Child : MovedChildren)
+	{
+		if (Child)
 		{
-			Found->RemoveAt(FoundIndex, 1, EAllowShrinking::No);
-			RemovedCount++;
+			MovedNames.Add(MakeShared<FJsonValueString>(Child->Name.ToString()));
 		}
 	}
 
-	const bool bSaved = mcp_common::SaveAssetPackage(Tree->GetPackage(), Tree);
+	FString SaveError;
+	const bool bSaved = mcp_common::SaveAssetPackage(Tree->GetPackage(), Tree, SaveError);
 
 	TSharedPtr<FJsonObject> Data = StateTree_NewStateData(Tree, State);
-	Data->SetBoolField  (TEXT("removed"),           RemovedCount > 0);
-	Data->SetBoolField  (TEXT("with_descendants"),  bWithDescendants);
+	Data->SetBoolField  (TEXT("removed"),             true);
+	Data->SetBoolField  (TEXT("with_descendants"),    bWithDescendants);
+	Data->SetNumberField(TEXT("states_removed"),      StatesRemoved);
+	Data->SetArrayField (TEXT("moved_children"),      MovedNames);
+	Data->SetStringField(TEXT("new_parent"),          OwnerParent ? OwnerParent->Name.ToString() : FString());
 	Data->SetNumberField(TEXT("remaining_top_level"), ED->SubTrees.Num());
-	Data->SetStringField(TEXT("note"),               RemovedCount > 0 ? TEXT("") : TEXT("State was not present in any parent's Children array -- could not remove."));
-	Data->SetBoolField  (TEXT("saved"),             bSaved);
-	return mcp_common::MakeOkReply(Data);
+	Data->SetStringField(TEXT("note"),                TEXT(""));
+	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("remove_state"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
 // remove_state_transition — remove a transition by index from a state's Transitions
 // ---------------------------------------------------------------------------
-// MCP:remove_state_transition - Remove a transition (by index) from a state. Idempotent at the index-out-of-range boundary.
+// MCP:remove_state_transition - Remove one transition, with its conditions, from a state of a StateTree asset by its 0-based index, in one undo step, then save the asset without compiling it; later transitions shift down one index. Find the index in get_state_tree_info (transitions[].index, filtered by from_state). Use it to delete a transition; to change one in place use set_state_transition, to drop only a condition of it use remove_state_transition_condition; inverse: add_state_transition. An out-of-range index removes and saves nothing and still succeeds, with removed false and a note. A missing tree, editor data or state, or a missing transition_index, is an error. A failed save (for example while PIE runs) leaves saved false while success stays true.
 //   @renamed-from remove_transition
-//   @param tree_path - Asset path to the UStateTree.
-//   @param state_name [string!] - Name of the state.
-//   @param transition_index - 0-based index into the state's Transitions array.
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as list_state_trees (trees[].path) returns it.
+//   @param state_name [string!] - Name of the state that owns the transition (its from_state); the first state with that name in a depth-first walk is used.
+//   @param transition_index - 0-based index of the transition in that state's list, e.g. 0, as get_state_tree_info reports it (transitions[].index); required.
 //   @returns { tree_path, state_name, transition_index, removed, remaining, saved }
 TSharedPtr<FJsonObject> HandleRemoveTransition(
 	const TSharedPtr<FJsonObject>& Params)
@@ -1616,18 +1653,17 @@ TSharedPtr<FJsonObject> HandleRemoveTransition(
 
 	TSharedPtr<FJsonObject> Data = StateTree_NewStateData(Tree, State);
 	Data->SetNumberField(TEXT("transition_index"), Index);
-	StateTree_RemoveAtIndex(Data, Tree, State, State->Transitions, Index,
-		TEXT("Index out of range -- nothing removed (idempotent no-op)."));
-	return mcp_common::MakeOkReply(Data);
+	return StateTree_RemoveAtIndex(Data, Tree, State, State->Transitions, Index,
+		TEXT("Index out of range -- nothing removed (idempotent no-op)."), TEXT("remove_state_transition"));
 }
 
 // ---------------------------------------------------------------------------
 // remove_task — remove a task (by index) from a state's Tasks
 // ---------------------------------------------------------------------------
-// MCP:remove_task - Remove a task (by index) from a state. Idempotent at the index-out-of-range boundary.
-//   @param tree_path - Asset path to the UStateTree.
-//   @param state_name [string!] - Name of the state.
-//   @param task_index - 0-based index into the state's Tasks array.
+// MCP:remove_task - Remove one task node from a state of a StateTree asset by its 0-based index, in one undo step, then save the asset without compiling it; later tasks shift down one index, and bindings that targeted the task are not cleaned up (remove_state_tree_binding). Find the index with list_tasks. For a tree-scoped task use remove_state_tree_global_task; inverse: add_state_task. An out-of-range index removes and saves nothing and still succeeds, with removed false and a note. A missing tree, editor data or state, or a missing task_index, is an error. A failed save (for example while PIE runs) makes success false, with saved false and save_error, the removal only in memory.Check the tree afterwards with compile_state_tree.
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as list_state_trees (trees[].path) returns it.
+//   @param state_name [string!] - Name of the state that owns the task; the first state with that name in a depth-first walk is used.
+//   @param task_index - 0-based index of the task in that state, e.g. 0, as list_tasks reports it (tasks[].index); required.
 //   @returns { tree_path, state_name, task_index, removed, remaining, saved }
 TSharedPtr<FJsonObject> HandleRemoveTask(
 	const TSharedPtr<FJsonObject>& Params)
@@ -1644,17 +1680,16 @@ TSharedPtr<FJsonObject> HandleRemoveTask(
 
 	TSharedPtr<FJsonObject> Data = StateTree_NewStateData(Tree, State);
 	Data->SetNumberField(TEXT("task_index"),  Index);
-	StateTree_RemoveAtIndex(Data, Tree, State, State->Tasks, Index,
-		TEXT("Index out of range -- nothing removed (idempotent no-op)."));
-	return mcp_common::MakeOkReply(Data);
+	return StateTree_RemoveAtIndex(Data, Tree, State, State->Tasks, Index,
+		TEXT("Index out of range -- nothing removed (idempotent no-op)."), TEXT("remove_task"));
 }
 
 // ---------------------------------------------------------------------------
 // remove_evaluator — remove a tree-scoped evaluator (by index)
 // ---------------------------------------------------------------------------
-// MCP:remove_evaluator - Remove a tree-scoped evaluator (by index). Idempotent at the index-out-of-range boundary.
-//   @param tree_path - Asset path to the UStateTree.
-//   @param evaluator_index - 0-based index into the tree's Evaluators array.
+// MCP:remove_evaluator - Remove one evaluator node from a StateTree asset (evaluators are tree-scoped, so no state is named) by its 0-based index, in one undo step, then save the asset without compiling it; later evaluators shift down one index, and bindings that read from it are not cleaned up (remove_state_tree_binding). Find the index with list_evaluators. Inverse: add_evaluator; a tree-scoped task instead: remove_state_tree_global_task. An out-of-range index removes and saves nothing and still succeeds, with removed false and a note. A missing tree or editor data, or a missing evaluator_index, is an error. A failed save (for example while PIE runs) makes success false, with saved false and save_error, the removal only in memory.Check the tree afterwards with compile_state_tree.
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as list_state_trees (trees[].path) returns it.
+//   @param evaluator_index - 0-based index of the evaluator in the tree, e.g. 0, as list_evaluators reports it; required.
 //   @returns { tree_path, evaluator_index, removed, remaining, saved }
 TSharedPtr<FJsonObject> HandleRemoveEvaluator(
 	const TSharedPtr<FJsonObject>& Params)
@@ -1672,9 +1707,8 @@ TSharedPtr<FJsonObject> HandleRemoveEvaluator(
 
 	TSharedPtr<FJsonObject> Data = StateTree_NewTreeData(Tree);
 	Data->SetNumberField(TEXT("evaluator_index"), Index);
-	StateTree_RemoveAtIndex(Data, Tree, ED, ED->Evaluators, Index,
-		TEXT("Index out of range -- nothing removed (idempotent no-op)."));
-	return mcp_common::MakeOkReply(Data);
+	return StateTree_RemoveAtIndex(Data, Tree, ED, ED->Evaluators, Index,
+		TEXT("Index out of range -- nothing removed (idempotent no-op)."), TEXT("remove_evaluator"));
 }
 
 // ---------------------------------------------------------------------------
@@ -1685,9 +1719,9 @@ TSharedPtr<FJsonObject> HandleRemoveEvaluator(
 //   remove_evaluator: RemoveAt is the symmetric inverse of the twin's
 //   GlobalTasks.AddDefaulted_GetRef().
 // ---------------------------------------------------------------------------
-// MCP:remove_state_tree_global_task - Remove a tree-scoped global task (by index). Idempotent at the index-out-of-range boundary.
-//   @param tree_path - Asset path to the UStateTree.
-//   @param global_task_index - 0-based index into the tree's GlobalTasks array.
+// MCP:remove_state_tree_global_task - Remove one global task node (a task of the whole tree, not of a state) from a StateTree asset by its 0-based index, in one undo step, then save the asset without compiling it; later global tasks shift down one index. Find the index with list_state_tree_global_tasks. For a task of one state use remove_task; inverse: add_state_tree_global_task. An out-of-range index removes and saves nothing and still succeeds, with removed false and a note. A missing tree or editor data, or a missing global_task_index, is an error. A failed save (for example while PIE runs) makes success false, with saved false and save_error, the removal only in memory.Check the tree afterwards with compile_state_tree.
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as list_state_trees (trees[].path) returns it.
+//   @param global_task_index - 0-based index of the global task, e.g. 0, as list_state_tree_global_tasks reports it (global_tasks[].index); required.
 //   @returns { tree_path, global_task_index, removed, remaining, saved }
 TSharedPtr<FJsonObject> HandleRemoveStateTreeGlobalTask(
 	const TSharedPtr<FJsonObject>& Params)
@@ -1705,9 +1739,8 @@ TSharedPtr<FJsonObject> HandleRemoveStateTreeGlobalTask(
 
 	TSharedPtr<FJsonObject> Data = StateTree_NewTreeData(Tree);
 	Data->SetNumberField(TEXT("global_task_index"), Index);
-	StateTree_RemoveAtIndex(Data, Tree, ED, ED->GlobalTasks, Index,
-		TEXT("Index out of range -- nothing removed (idempotent no-op)."));
-	return mcp_common::MakeOkReply(Data);
+	return StateTree_RemoveAtIndex(Data, Tree, ED, ED->GlobalTasks, Index,
+		TEXT("Index out of range -- nothing removed (idempotent no-op)."), TEXT("remove_state_tree_global_task"));
 }
 
 // ---------------------------------------------------------------------------
@@ -2195,7 +2228,7 @@ TSharedPtr<FJsonObject> HandleGetTaskProperty(
 // ---------------------------------------------------------------------------
 // remove_consideration — remove a consideration (by index) from a state's Considerations
 // ---------------------------------------------------------------------------
-// MCP:remove_consideration - Remove a consideration (by index) from a state. Idempotent at the index-out-of-range boundary.
+// MCP:remove_consideration - Remove a consideration (by index) from a state and save the asset. Idempotent at the index-out-of-range boundary. A failed save makes success false, with saved false and save_error.
 //   @param tree_path - Asset path to the UStateTree.
 //   @param state_name [string!] - Name of the state.
 //   @param consideration_index - 0-based index into the state's Considerations array.
@@ -2215,9 +2248,8 @@ TSharedPtr<FJsonObject> HandleRemoveConsideration(
 
 	TSharedPtr<FJsonObject> Data = StateTree_NewStateData(Tree, State);
 	Data->SetNumberField(TEXT("consideration_index"), Index);
-	StateTree_RemoveAtIndex(Data, Tree, State, State->Considerations, Index,
-		TEXT("index out of range -- idempotent no-op"));
-	return mcp_common::MakeOkReply(Data);
+	return StateTree_RemoveAtIndex(Data, Tree, State, State->Considerations, Index,
+		TEXT("index out of range -- idempotent no-op"), TEXT("remove_consideration"));
 }
 
 // ---------------------------------------------------------------------------
@@ -2243,11 +2275,11 @@ TSharedPtr<FJsonObject> HandleListConsiderations(
 // ---------------------------------------------------------------------------
 // get_consideration_info — full struct dump of a state's consideration instance
 // ---------------------------------------------------------------------------
-// MCP:get_consideration_info - Serialize a single consideration's instance data (FJsonObjectConverter over the consideration struct) for inspection.
-//   @param tree_path - Asset path to the UStateTree.
-//   @param state_name [string!] - Name of the state.
-//   @param consideration_index - 0-based index into State->Considerations.
-//   @returns { tree_path, state_name, consideration_index, class, instance_id, properties: {...} }
+// MCP:get_consideration_info - Read one utility consideration of a state of a StateTree asset without changing it: its struct name (class), its instance_id (node GUID), every property of the node struct as JSON (properties), and its instance data -- the per-node values such as the Constant of a Constant consideration or the Input of a Float Input one -- as instance_data with its struct or class name in instance_type (both empty when the consideration has none). Use it to see a whole node at once; for one field use get_consideration_property, to write one set_consideration_property, and to find the index list_considerations. A missing tree, editor data or state, a missing consideration_index, or one out of range is an error.
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as list_state_trees (trees[].path) returns it.
+//   @param state_name [string!] - Name of the state that owns the consideration; the first state with that name in a depth-first walk is used.
+//   @param consideration_index - 0-based index of the consideration in that state, e.g. 0, as list_considerations reports it (index); required.
+//   @returns { tree_path, state_name, consideration_index, class, instance_id, properties: {...}, instance_type: string, instance_data: {...} }
 TSharedPtr<FJsonObject> HandleGetConsiderationInfo(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -2270,6 +2302,23 @@ TSharedPtr<FJsonObject> HandleGetConsiderationInfo(
 	{
 		return DumpError;
 	}
+	// The consideration's instance data -- its FInstanceDataType, e.g. the Constant of a Constant consideration or the
+	// Input of a Float Input one -- held by the editor node as a struct (Instance) or, for a class type, as an object
+	// (InstanceObject); both members exist on FStateTreeEditorNode in 5.7 and 5.8. Empty when it has none.
+	TSharedPtr<FJsonObject> InstanceProps = MakeShared<FJsonObject>();
+	FString InstanceType;
+	if (UObject* InstanceObject = Node->InstanceObject.Get())
+	{
+		InstanceType = InstanceObject->GetClass()->GetName();
+		FJsonObjectConverter::UStructToJsonObject(InstanceObject->GetClass(), InstanceObject, InstanceProps.ToSharedRef(), 0, 0);
+	}
+	else if (const UScriptStruct* InstanceStruct = Node->Instance.GetScriptStruct())
+	{
+		InstanceType = InstanceStruct->GetName();
+		FJsonObjectConverter::UStructToJsonObject(InstanceStruct, Node->Instance.GetMemory(), InstanceProps.ToSharedRef(), 0, 0);
+	}
+	Data->SetStringField(TEXT("instance_type"), InstanceType);
+	Data->SetObjectField(TEXT("instance_data"), InstanceProps);
 	return mcp_common::MakeOkReply(Data);
 }
 
@@ -2523,7 +2572,7 @@ TSharedPtr<FJsonObject> HandleGetConditionProperty(
 // ---------------------------------------------------------------------------
 // remove_state_enter_condition — remove an enter condition by index
 // ---------------------------------------------------------------------------
-// MCP:remove_state_enter_condition - Remove one enter condition, by index, from a state of a StateTree asset and save the asset. An out-of-range index removes nothing and still succeeds, with removed false and a note. Returns removed, remaining and saved; for transition conditions use remove_state_transition_condition.
+// MCP:remove_state_enter_condition - Remove one enter condition, by index, from a state of a StateTree asset and save the asset. An out-of-range index removes nothing and still succeeds, with removed false and a note. Returns removed, remaining and saved; a failed save makes success false, with save_error. For transition conditions use remove_state_transition_condition.
 //   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
 //   @param state_name [string!] - Name of the state that owns the condition; the command fails without it.
 //   @param condition_index - 0-based index into the state EnterConditions, as listed by list_conditions.
@@ -2542,15 +2591,14 @@ TSharedPtr<FJsonObject> HandleRemoveStateEnterCondition(
 	}
 	TSharedPtr<FJsonObject> Data = StateTree_NewStateData(Tree, State);
 	Data->SetNumberField(TEXT("condition_index"), Index);
-	StateTree_RemoveAtIndex(Data, Tree, State, State->EnterConditions, Index,
-		TEXT("Index out of range -- nothing removed (idempotent no-op)."));
-	return mcp_common::MakeOkReply(Data);
+	return StateTree_RemoveAtIndex(Data, Tree, State, State->EnterConditions, Index,
+		TEXT("Index out of range -- nothing removed (idempotent no-op)."), TEXT("remove_state_enter_condition"));
 }
 
 // ---------------------------------------------------------------------------
 // remove_state_transition_condition — remove a transition's condition by index
 // ---------------------------------------------------------------------------
-// MCP:remove_state_transition_condition - Remove one condition, by index, from a transition of a StateTree state and save the asset. An out-of-range transition_index is an error; an out-of-range condition_index removes nothing and still succeeds, with removed false. Returns removed, remaining and saved.
+// MCP:remove_state_transition_condition - Remove one condition, by index, from a transition of a StateTree state and save the asset. An out-of-range transition_index is an error; an out-of-range condition_index removes nothing and still succeeds, with removed false. Returns removed, remaining and saved; a failed save makes success false, with save_error.
 //   @renamed-from remove_transition_condition
 //   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
 //   @param state_name [string!] - Name of the state that owns the transition; the command fails without it.
@@ -2581,9 +2629,8 @@ TSharedPtr<FJsonObject> HandleRemoveTransitionCondition(
 	TSharedPtr<FJsonObject> Data = StateTree_NewStateData(Tree, State);
 	Data->SetNumberField(TEXT("transition_index"), TIdx);
 	Data->SetNumberField(TEXT("condition_index"),  CIdx);
-	StateTree_RemoveAtIndex(Data, Tree, State, State->Transitions[TIdx].Conditions, CIdx,
-		TEXT("Condition index out of range -- nothing removed (idempotent no-op)."));
-	return mcp_common::MakeOkReply(Data);
+	return StateTree_RemoveAtIndex(Data, Tree, State, State->Transitions[TIdx].Conditions, CIdx,
+		TEXT("Condition index out of range -- nothing removed (idempotent no-op)."), TEXT("remove_state_transition_condition"));
 }// =========================================================================
 // Evaluators + bindings + parameters + validation
 //

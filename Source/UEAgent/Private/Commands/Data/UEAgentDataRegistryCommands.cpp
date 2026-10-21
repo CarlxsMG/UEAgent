@@ -389,10 +389,10 @@ TSharedPtr<FJsonObject> HandleCreateDataRegistry(
 // class is Within=DataRegistry), points it at a DataTable via SetSourceTable, and
 // appends it into the registry's protected DataSources array via reflection.
 // ---------------------------------------------------------------------------
-// MCP:add_data_registry_source - Attach a DataTable source to a UDataRegistry.  Creates a UDataRegistrySource_DataTable (owned by the registry) pointing at the given DataTable and appends it to the registry's source list. The DataTable RowStruct must match the registry's ItemStruct.
-//   @param registry_path - Content path to the UDataRegistry asset.
-//   @param data_table_path - Content path to the source UDataTable.
-//   @param precache - bool, enables synchronous cached lookups (default true).
+// MCP:add_data_registry_source - Attach a DataTable as a source of a UDataRegistry asset: a UDataRegistrySource_DataTable owned by the registry, pointing at the table, is appended to the registry's DataSources list, in one undo step, and the registry is saved. The DataTable RowStruct must match the registry's ItemStruct (create_data_registry sets it); a mismatch, or a registry or table that does not load, is an error and nothing changes. Each call appends another source, even for a table already attached, so check get_data_registry_info (DataSources) first; remove_data_registry_source is the inverse. The running subsystem does not see the new source until initialize_data_registry or refresh_data_registry_map; then get_data_registry_item reads its rows. A failed save makes success false with saved=false and save_error, the source kept in memory.
+//   @param registry_path - Content path to the UDataRegistry asset, e.g. "/Game/Data/DR_Items" (the ".DR_Items" suffix optional), as create_data_registry returns it.
+//   @param data_table_path - Content path to the source UDataTable, e.g. "/Game/Data/DT_Items"; its RowStruct must equal the registry's ItemStruct.
+//   @param precache - bool, enables synchronous cached lookups (default true): the table is loaded into the cache when the registry initializes, which get_data_registry_item needs.
 //   @returns { registry_path: string, data_table_path: string, source_name: string, success: bool, precache: bool, source_count: int, saved: bool, save_error: string }
 
 TSharedPtr<FJsonObject> HandleAddDataRegistrySource(

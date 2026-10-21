@@ -689,9 +689,9 @@ TSharedPtr<FJsonObject> HandleGetPythonStatus(const TSharedPtr<FJsonObject>& Par
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:list_automation_tests - List registered automation tests in the editor (read-only; does not run them)
-//   @param filter - Optional case-insensitive substring matched against the full test path
-//   @param max_results - Cap on returned entries (default 500)
+// MCP:list_automation_tests - List the automation tests registered in this editor without running any: per test its display name, full_test_path, test_name, tags, parameter, source file and line, and participants required. Engine, product and performance tests are listed too, not only smoke tests: the call widens the framework's test filter to every flag and loads the modules that register tests, but changes no asset or level. Tests are returned in registry order up to max_results; total_count counts every registered test, matched_count those the filter matches, and truncated is true when matches were cut off, so narrow the filter or raise max_results. Use it to find the name for run_automation_test; run_smoke_tests runs the smoke set and get_automation_test_results re-reads the last result.
+//   @param filter - Optional case-insensitive substring matched against the full test path, e.g. 'UEAgent.' or 'Project.Functional'; empty lists every test.
+//   @param max_results - Most tests to return, a positive number (default 500); 0 or a negative value also means 500.
 //   @returns { display_name, full_test_path, test_name, test_tags, test_parameter, source_file, source_file_line, num_participants_required, tests, total_count, matched_count, returned_count, max_results, truncated, filter }
 TSharedPtr<FJsonObject> HandleListAutomationTests(const TSharedPtr<FJsonObject>& Params)
 {
@@ -768,7 +768,7 @@ TSharedPtr<FJsonObject> HandleListAutomationTests(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:run_automation_test - Run a single automation test by name and return its result (synchronous tests only)
+// MCP:run_automation_test - Run ONE registered automation test in this editor, synchronously, and return its verdict (pass, fail or skipped) with its errors, warnings and log entries. Find the name first with list_automation_tests; re-read the last result later without running anything with get_automation_test_results; run every smoke test at once with run_smoke_tests. A test that needs several ticks (PIE, a map load, a wait) is not run here but answered verdict skipped with the reason -- drive it with run_functional_test_in_pie -- and so is one that needs an interactive user or a real renderer in a headless editor; an editor busy with a slow task or PIE refuses the start. Marked destructive and not idempotent because the test's own code runs in the editor and can create, change or delete assets and actors as it was written to, so two runs need not do the same; this tool itself saves nothing and adds no undo step for what the test did.
 //   @param test_name - The test's test_name or its full_test_path, exactly as list_automation_tests gives them (e.g. "UEAgent.ClaudeCode")
 //   @returns { test_name, started, completed, passed, verdict, duration_s, errors, warnings, entries:[{type,message,context,filename,line}], entry_count, note }
 TSharedPtr<FJsonObject> HandleRunAutomationTest(const TSharedPtr<FJsonObject>& Params)

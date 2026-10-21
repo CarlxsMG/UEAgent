@@ -122,6 +122,8 @@ namespace UEAgentGameplayAbilitiesImpl
         AActor* Actor = nullptr;
         UAbilitySystemComponent* Asc = nullptr;
         TSharedPtr<FJsonObject> Error;
+        // Set by ReadTagEventTarget: "object_name" or "label", the way the actor was found.
+        const TCHAR* ResolvedBy = TEXT("object_name");
     };
 
     FAbilityOwner ResolveAbilityOwner(const FString& ActorName)
@@ -173,8 +175,8 @@ namespace UEAgentGameplayAbilitiesImpl
     }
 
     // The target of a gameplay-tag event command, checked in this order: the required actor_name, that
-    // editor-world actor, its ability system, and the required event_tag, which must be registered.
-    // Owner.Error carries the reply when a check fails.
+    // editor-world actor (its object name, else an editor label only one actor has), its ability system, and
+    // the required event_tag, which must be registered. Owner.Error carries the reply when a check fails.
     FAbilityOwner ReadTagEventTarget(const TSharedPtr<FJsonObject>& Params, FString& OutActorName, FGameplayTag& OutEventTag)
     {
         FAbilityOwner Owner;
@@ -183,11 +185,22 @@ namespace UEAgentGameplayAbilitiesImpl
             Owner.Error = mcp_common::MakeErrorReply(TEXT("Missing 'actor_name'"));
             return Owner;
         }
-        Owner.Actor = mcp_common::FindActorByObjectName(mcp_common::GetEditorWorld(), OutActorName);
+        UWorld* const EditorWorld = mcp_common::GetEditorWorld();
+        Owner.Actor = mcp_common::FindActorByObjectName(EditorWorld, OutActorName);
         if (!Owner.Actor)
         {
-            Owner.Error = mcp_common::MakeErrorReply(FString::Printf(TEXT("Actor '%s' not found"), *OutActorName));
-            return Owner;
+            // A label is taken only when exactly one actor carries it: two actors with that label would make
+            // the target a guess.
+            int32 LabelMatches = 0;
+            Owner.Actor = mcp_common::FindActorByUniqueLabel(EditorWorld, OutActorName, &LabelMatches);
+            Owner.ResolvedBy = TEXT("label");
+            if (!Owner.Actor)
+            {
+                Owner.Error = mcp_common::MakeErrorReply(LabelMatches > 1
+                    ? FString::Printf(TEXT("Actor label '%s' is shared by %d actors; pass the object name instead"), *OutActorName, LabelMatches)
+                    : FString::Printf(TEXT("Actor '%s' not found (neither an object name nor an editor label)"), *OutActorName));
+                return Owner;
+            }
         }
         Owner.Asc = FindAbilitySystem(Owner.Actor);
         if (!Owner.Asc)
@@ -390,8 +403,8 @@ namespace UEAgentGameplayAbilitiesImpl
 
 // --- Reading an actor's ability system component -------------------------------
 
-// MCP:get_ability_system_component - Read the ability system component of an editor-world actor (the IAbilitySystemInterface answer, else its first UAbilitySystemComponent): component_name, active_abilities_count (all granted specs, active or not) and active_effects_count. Read-only; a missing actor or component is an error, not has_ability_system=false.
-//   @param actor_name - Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names
+// MCP:get_ability_system_component - Read a short census of an editor-world actor's ability system component: component_name, active_abilities_count (every granted spec, running or not) and active_effects_count. Call it first to confirm an actor has a component before grant_ability, apply_gameplay_effect or send_gameplay_event_to_actor; for the entries behind the counts use get_active_abilities, get_active_effects or get_attributes. The component is the actor's IAbilitySystemInterface answer, else its first UAbilitySystemComponent. Read-only and idempotent; it reads the editor world, not a PIE session. A missing actor or component is an error, so has_ability_system is never false.
+//   @param actor_name - Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1": the whole name, case-insensitive, no wildcards. get_actors_in_level lists names; find_actors_by_name maps a label to its name
 //   @returns { actor_name, has_ability_system, component_name, active_abilities_count, active_effects_count }
 TSharedPtr<FJsonObject> HandleGetAbilitySystemComponent(const TSharedPtr<FJsonObject>& Params)
 {
@@ -508,9 +521,9 @@ TSharedPtr<FJsonObject> HandleActivateAbility(const TSharedPtr<FJsonObject>& Par
     return Reply;
 }
 
-// MCP:cancel_ability - Cancel one granted ability on an editor-world actor ability system component (CancelAbilityHandle), reading its spec before and after: returns was_active, still_active and cancelled. success is false, with an error, when the ability is still active afterwards (it may not allow cancelling).
-//   @param actor_name - Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names
-//   @param ability_name - Ability to match among the granted specs: the ability_name from get_active_abilities, the class name with or without _C ("GA_Jump"), the asset path ("/Game/Abilities/GA_Jump") or the class path; case-insensitive, first match wins
+// MCP:cancel_ability - Stop a running ability on an editor-world actor's ability system component (CancelAbilityHandle) while keeping it granted, reading its spec before and after: was_active, still_active and cancelled. Start it again with activate_ability; to ungrant it use remove_ability instead; get_active_abilities shows which granted abilities are running (is_active). Idempotent: cancelling one that is not running changes nothing and still succeeds with cancelled=false. success is false, with an error, when it is still active afterwards (the ability may not allow cancelling). Runtime state only: no undo step, nothing saved. An unknown actor, a missing component or no matching granted ability is an error.
+//   @param actor_name - Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1": the whole name, case-insensitive, no wildcards. get_actors_in_level lists names; find_actors_by_name maps a label to its name
+//   @param ability_name - Granted ability to cancel: the ability_name get_active_abilities returns, the class name with or without _C ("GA_Jump"), the asset path ("/Game/Abilities/GA_Jump") or the class path; case-insensitive, first matching spec wins
 //   @returns { actor_name, ability_name, was_active, still_active, cancelled } -- read back from the spec: cancelled means was_active and not still_active
 TSharedPtr<FJsonObject> HandleCancelAbility(const TSharedPtr<FJsonObject>& Params)
 {
@@ -614,9 +627,9 @@ TSharedPtr<FJsonObject> HandleGrantAbility(const TSharedPtr<FJsonObject>& Params
     return Reply;
 }
 
-// MCP:remove_ability - Remove one granted ability from an editor-world actor ability system component with ClearAbility. An active ability is only marked, and leaves when it ends (pending_removal=true); removed=true means the spec is gone. success is false with an error otherwise.
-//   @param actor_name - Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names
-//   @param ability_name - Ability to match among the granted specs: the ability_name from get_active_abilities, the class name with or without _C ("GA_Jump"), the asset path ("/Game/Abilities/GA_Jump") or the class path; case-insensitive, first match wins
+// MCP:remove_ability - Ungrant one ability from an editor-world actor's ability system component with ClearAbility, the inverse of grant_ability. To only stop a running ability and keep it granted, use cancel_ability instead; get_active_abilities lists what is granted and confirms the result. A running ability is only marked and leaves when it ends (pending_removal=true, still a success); removed=true means the spec is gone now. Only the first matching spec goes, so a class granted twice needs two calls; once none is left a call answers Ability not found. success is false with an error if the spec is still granted afterwards. Runtime state only: no undo step, nothing saved. An unknown actor or missing component is an error and changes nothing.
+//   @param actor_name - Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1": the whole name, case-insensitive, no wildcards. get_actors_in_level lists names; find_actors_by_name maps a label to its name
+//   @param ability_name - Granted ability to remove: the ability_name get_active_abilities returns, the class name with or without _C ("GA_Jump"), the asset path ("/Game/Abilities/GA_Jump") or the class path; case-insensitive, first matching spec wins
 //   @returns { actor_name, ability_name, removed, pending_removal } -- read back: removed means the spec is gone; an active ability is only marked, and leaves when it ends (pending_removal)
 TSharedPtr<FJsonObject> HandleRemoveAbility(const TSharedPtr<FJsonObject>& Params)
 {
@@ -650,11 +663,11 @@ TSharedPtr<FJsonObject> HandleRemoveAbility(const TSharedPtr<FJsonObject>& Param
 
 // --- Gameplay effects applied to a component -------------------------------------
 
-// MCP:apply_gameplay_effect - Apply a GameplayEffect class to an editor-world actor ability system component: an outgoing spec at the given level, with a fresh context from that component, applied to self. applied tells whether the engine returned a valid handle. execute_batch of apply_gameplay_effect calls applies a list.
-//   @param actor_name - Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names
-//   @param effect_class - Class path of a UGameplayEffect subclass; a Blueprint GE needs its _C class path, e.g. "/Game/Effects/GE_Burn.GE_Burn_C"
-//   @param level - Effect level for scalable magnitudes, fractions allowed; default 1.0
-//   @returns { actor_name, effect_class, level, applied }
+// MCP:apply_gameplay_effect - Apply a GameplayEffect class to an editor-world actor's ability system component: an outgoing spec at the given level, with a fresh context from that component, applied to self. Duration and infinite effects then show in get_active_effects and come off with remove_gameplay_effect; an instant effect changes base values at once and leaves nothing active. Check the outcome with get_attributes or get_attribute_value; to set one value directly use set_attribute_base_value. applied is the engine's verdict (WasSuccessfullyApplied), true for an instant effect that executed; active says whether an active effect now stands for it, false for an instant one. When the engine refuses the effect (application requirements, an immunity, its chance to apply) applied is false and the call fails, with nothing changed. Not idempotent: each call adds another application or stack. Runtime state only: no undo step, nothing saved. execute_batch of apply_gameplay_effect calls applies a list.
+//   @param actor_name - Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1": the whole name, case-insensitive, no wildcards. get_actors_in_level lists names; find_actors_by_name maps a label to its name
+//   @param effect_class - Class path of a UGameplayEffect subclass, loaded with LoadClass: a Blueprint GE needs its _C class path, e.g. "/Game/Effects/GE_Burn.GE_Burn_C"; a C++ one "/Script/MyGame.GE_Burn". create_gameplay_effect_blueprint makes one; an unloadable path is an error
+//   @param level - Effect level that scalable magnitudes are read at, a number, fractions allowed (e.g. 2.5); default 1.0
+//   @returns { actor_name, effect_class, level, applied, active } -- applied: the engine applied or executed the effect; active: an active effect now tracks it (duration or infinite effects)
 TSharedPtr<FJsonObject> HandleApplyGameplayEffect(const TSharedPtr<FJsonObject>& Params)
 {
     namespace Impl = UEAgentGameplayAbilitiesImpl;
@@ -687,15 +700,22 @@ TSharedPtr<FJsonObject> HandleApplyGameplayEffect(const TSharedPtr<FJsonObject>&
     }
     const FActiveGameplayEffectHandle AppliedHandle = Owner.Asc->ApplyGameplayEffectSpecToSelf(*OutgoingSpec.Data.Get());
 
+    // WasSuccessfullyApplied is the engine's verdict for every duration policy. IsValid() is not: an Instant
+    // effect that executed comes back as a handle that tracks no active effect, so IsValid() is false for it.
+    const bool bApplied = AppliedHandle.WasSuccessfullyApplied();
+    const bool bActive = AppliedHandle.IsValid() && Owner.Asc->GetActiveGameplayEffect(AppliedHandle) != nullptr;
+
     TSharedPtr<FJsonObject> Reply = Impl::NewActorReply(ActorName, TEXT("effect_class"), EffectClassPath);
     Reply->SetNumberField(TEXT("level"), EffectLevel);
-    Reply->SetBoolField(TEXT("applied"), AppliedHandle.IsValid());
-    return Reply;
+    Reply->SetBoolField(TEXT("applied"), bApplied);
+    Reply->SetBoolField(TEXT("active"), bActive);
+    return mcp_common::MakeOutcomeReply(Reply, bApplied, bApplied ? FString()
+        : FString(TEXT("apply_gameplay_effect: the engine did not apply the effect (its application requirements, an immunity or its chance to apply refused it); nothing changed.")));
 }
 
-// MCP:remove_gameplay_effect - Remove the first active gameplay effect on an editor-world actor ability system component whose definition matches effect_name, with all its stacks (RemoveActiveGameplayEffect). removed is the engine answer confirmed by the effect no longer being active; success is false with an error otherwise.
-//   @param actor_name - Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names
-//   @param effect_name - Active effect to match by its definition: the effect_name from get_active_effects, the class name with or without _C ("GE_Burn"), the asset path ("/Game/Effects/GE_Burn") or the class path; case-insensitive, first match wins
+// MCP:remove_gameplay_effect - Remove one active gameplay effect, with all its stacks, from an editor-world actor's ability system component (RemoveActiveGameplayEffect): the first whose definition matches effect_name. The inverse of apply_gameplay_effect; get_active_effects lists what is active and confirms the result. To change the effect asset itself use remove_gameplay_effect_modifier or remove_gameplay_effect_component instead. Instant effects never stay active, so they cannot be removed here (restore a value with set_attribute_base_value). When several active effects share a definition only the first goes, so call again for each; with none left a call answers Effect not found. removed is the engine answer confirmed by the effect no longer being active; success is false with an error otherwise. Runtime state only: no undo step, nothing saved.
+//   @param actor_name - Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1": the whole name, case-insensitive, no wildcards. get_actors_in_level lists names; find_actors_by_name maps a label to its name
+//   @param effect_name - Active effect to remove, matched by its definition: the effect_name get_active_effects returns, the class name with or without _C ("GE_Burn"), the asset path ("/Game/Effects/GE_Burn") or the class path; case-insensitive, first active match wins
 //   @returns { actor_name, effect_name, removed } -- removed is what the engine reports, confirmed by the effect not being active afterwards
 TSharedPtr<FJsonObject> HandleRemoveGameplayEffect(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1224,8 +1244,8 @@ TSharedPtr<FJsonObject> HandleApplyMultipleGameplayEffects(const TSharedPtr<FJso
     return ResultObj;
 }
 
-// MCP:get_gameplay_effect_modifiers - Read the attribute modifiers of a GameplayEffect asset (native asset, or Blueprint GE class default object): attribute, attribute_set, modifier_op and, when static, the magnitude at level 1, plus duration_policy and modifier_count. Read-only; magnitude_type always says ScalableFloat, whatever the real type.
-//   @param effect_path - GameplayEffect asset path: a Blueprint GE ("/Game/Effects/GE_Burn") or a native UGameplayEffect asset
+// MCP:get_gameplay_effect_modifiers - Read the attribute modifiers authored on a GameplayEffect asset (a native UGameplayEffect asset, or a Blueprint GE's class default object): for each, attribute, attribute_set, modifier_op (Additive, Multiplicitive, Division or Override) and magnitude_value_at_level_1; plus duration_policy (Instant, HasDuration or Infinite) and modifier_count. Use it to inspect an effect before apply_gameplay_effect; for an effect already active on an actor use get_gameplay_effect_info, for the asset's components get_gameplay_effect_components, and change modifiers with add_gameplay_effect_modifier, set_gameplay_effect_modifier or remove_gameplay_effect_modifier. Read-only and idempotent. magnitude_type always says ScalableFloat whatever the real type; magnitude_value_at_level_1 is present only for a ScalableFloat magnitude, so its absence means attribute-based, SetByCaller or custom. An unknown path is an error.
+//   @param effect_path - Asset path of the effect, not its _C class path: a Blueprint GE "/Game/Effects/GE_Burn" or a native UGameplayEffect asset "/Game/Effects/GE_Native" (".Name" suffix optional). find_assets_by_name finds it; create_gameplay_effect_blueprint or create_gameplay_effect_asset makes one
 //   @returns { attribute, attribute_set, modifier_op, magnitude_type, magnitude_value_at_level_1, effect_path, duration_policy, modifier_count, modifiers }
 TSharedPtr<FJsonObject> HandleGetGameplayEffectModifiers(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1688,11 +1708,11 @@ TSharedPtr<FJsonObject> HandleGetAttributeMetaOnSetClass(const TSharedPtr<FJsonO
     return ResultObj;
 }
 
-// MCP:send_gameplay_event_to_actor - Sends a FGameplayEvent to the target actor's UAbilitySystemComponent via UAbilitySystemBlueprintLibrary::SendGameplayEventToActor (AbilitySystemBlueprintLibrary.h). Wraps the engine's Lyra-style event bus entry point.
-//   @param actor_name - Display label or internal name of the target editor-world actor (required)
-//   @param event_tag - FGameplayTag name (e.g. "Gameplay.Event.Hit") (required)
-//   @param payload_magnitude - Optional numeric magnitude placed in FGameplayEventData::EventMagnitude
-//   @returns { actor_name: string, event_tag: string, sent: bool, asc_resolved: bool }
+// MCP:send_gameplay_event_to_actor - Send a gameplay event to an editor-world actor's ability system component (UAbilitySystemBlueprintLibrary::SendGameplayEventToActor): it tries to activate every granted ability whose trigger is a GameplayEvent on event_tag or a parent tag, and wakes listeners such as Wait Gameplay Event tasks. Use it for event-driven abilities; to start an ability directly use activate_ability, to change attributes apply_gameplay_effect, and to watch tag count changes register_gameplay_tag_event. Not idempotent: each call fires the event again. Nothing is saved and there is no undo step. sent is measured: a probe listening on the component for exactly event_tag saw the event arrive (the call fails when it did not); asc_resolved says the engine's send path found that same component. Neither says which abilities reacted: check with get_active_abilities (is_active) or get_ability_tasks. An unknown actor, a label several actors share, a missing component or an unregistered tag is an error and sends nothing.
+//   @param actor_name - Object name of the editor-world actor, e.g. "BP_Hero_C_1" (whole name, case-insensitive, no wildcards), or else an editor label only one actor has; resolved_by in the reply says which matched. get_actors_in_level lists names (required)
+//   @param event_tag - Full name of a registered gameplay tag, e.g. "Gameplay.Event.Hit"; find_gameplay_tags lists them, create_gameplay_tag adds one, and an unregistered tag is an error (required)
+//   @param payload_magnitude - Optional number placed in the payload's EventMagnitude, e.g. 25.0; omitted leaves 0. The payload carries only EventTag and EventMagnitude (no instigator, target or object)
+//   @returns { actor_name: string, event_tag: string, resolved_by: string ("object_name" | "label"), actor_object_name: string, sent: bool, asc_resolved: bool }
 TSharedPtr<FJsonObject> HandleSendGameplayEventToActor(const TSharedPtr<FJsonObject>& Params)
 {
     FString ActorName;
@@ -1711,12 +1731,38 @@ TSharedPtr<FJsonObject> HandleSendGameplayEventToActor(const TSharedPtr<FJsonObj
     }
     Payload.EventTag = EventTag;
 
+    // The component the engine's send path resolves for the actor (UAbilitySystemGlobals' lookup); asc_resolved
+    // says it is the component this call listens on.
+    UAbilitySystemComponent* const SendTarget = UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(Target.Actor);
+    const bool bAscResolved = SendTarget != nullptr && SendTarget == Target.Asc;
+
+    // A probe on the component's exact-tag event callbacks for the duration of the send: HandleGameplayEvent
+    // broadcasts them when the component receives the event, so the probe firing is the measured delivery.
+    // The callbacks may add map entries, so the entry is looked up again before the probe is taken off, and an
+    // entry this call created is removed again so the component is left as it was.
+    bool bDelivered = false;
+    const bool bHadCallbacks = Target.Asc->GenericGameplayEventCallbacks.Contains(EventTag);
+    const FDelegateHandle Probe = Target.Asc->GenericGameplayEventCallbacks.FindOrAdd(EventTag).AddLambda(
+        [&bDelivered](const FGameplayEventData*) { bDelivered = true; });
+
     UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(Target.Actor, EventTag, Payload);
 
+    if (FGameplayEventMulticastDelegate* Callbacks = Target.Asc->GenericGameplayEventCallbacks.Find(EventTag))
+    {
+        Callbacks->Remove(Probe);
+        if (!bHadCallbacks && !Callbacks->IsBound())
+        {
+            Target.Asc->GenericGameplayEventCallbacks.Remove(EventTag);
+        }
+    }
+
     TSharedPtr<FJsonObject> Result = UEAgentGameplayAbilitiesImpl::NewActorReply(ActorName, TEXT("event_tag"), EventTag.ToString());
-    Result->SetBoolField(TEXT("sent"), true);
-    Result->SetBoolField(TEXT("asc_resolved"), true);
-    return mcp_common::MakeOkReply(Result);
+    Result->SetStringField(TEXT("resolved_by"), Target.ResolvedBy);
+    Result->SetStringField(TEXT("actor_object_name"), Target.Actor->GetName());
+    Result->SetBoolField(TEXT("asc_resolved"), bAscResolved);
+    Result->SetBoolField(TEXT("sent"), bDelivered);
+    return mcp_common::MakeOutcomeReply(Result, bDelivered, bDelivered ? FString()
+        : FString(TEXT("send_gameplay_event_to_actor: the event did not reach the actor's ability system component (asc_resolved says whether the engine's send path found the same component)")));
 }
 
 // --- Gameplay tag listeners: register / poll / unregister ------------------------
@@ -1744,7 +1790,7 @@ void RecordGameplayTagEventFire(int64 SubscriptionId, int32 NewCount)
 }
 
 // MCP:register_gameplay_tag_event - Registers a REAL listener on a target actor's UAbilitySystemComponent for a gameplay tag's count changes (UAbilitySystemComponent::RegisterGameplayTagEvent, AbilitySystemComponent.h), binding an actual callback (.AddLambda) and keeping its FDelegateHandle so unregister_gameplay_tag_event can honestly undo it later. Idempotent: re-registering the same (actor, tag, event_type) returns the existing subscription_id instead of stacking a duplicate listener. Poll fires with poll_gameplay_tag_events.
-//   @param actor_name - Display label or internal name of the target editor-world actor (required)
+//   @param actor_name - Object name of the target editor-world actor, or an editor label only one actor has (required)
 //   @param event_tag - FGameplayTag name (e.g. "Gameplay.Event.Hit") (required)
 //   @param event_type - "NewOrRemoved" | "AnyCountChange" (default "NewOrRemoved")
 //   @returns { actor_name: string, event_tag: string, event_type: string, subscription_id: number, registered: bool, already_existed: bool }
@@ -1764,7 +1810,8 @@ TSharedPtr<FJsonObject> HandleRegisterGameplayTagEvent(const TSharedPtr<FJsonObj
     EGameplayTagEventType::Type EventType = EGameplayTagEventType::NewOrRemoved;
     if (TypeStr.Equals(TEXT("AnyCountChange"), ESearchCase::IgnoreCase)) EventType = EGameplayTagEventType::AnyCountChange;
 
-    const FString Key = MakeGameplayTagEventKey(ActorName, EventTag, EventType);
+    // Keyed by the actor's object name, so the same actor named by its label or by its object name is one subscription.
+    const FString Key = MakeGameplayTagEventKey(Target.Actor->GetName(), EventTag, EventType);
 
     FScopeLock Lock(&GTagEventMutex);
 
@@ -1791,7 +1838,7 @@ TSharedPtr<FJsonObject> HandleRegisterGameplayTagEvent(const TSharedPtr<FJsonObj
     });
 
     FGameplayTagEventSubscription& Sub = GTagEventSubscriptions.Add(SubscriptionId);
-    Sub.ActorName = ActorName;
+    Sub.ActorName = Target.Actor->GetName(); // what unregister rebuilds the key from
     Sub.ASC = ASC;
     Sub.Tag = EventTag;
     Sub.EventType = EventType;

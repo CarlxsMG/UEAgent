@@ -640,10 +640,10 @@ TSharedPtr<FJsonObject> HandleAddAnimStateMachine(const TSharedPtr<FJsonObject>&
 // ---------------------------------------------------------------------------
 // add_anim_state
 // ---------------------------------------------------------------------------
-// MCP:add_anim_state - Add a state node to a state machine inside an Animation Blueprint.
-//   @param anim_blueprint_path - Path to the UAnimBlueprint asset
-//   @param machine_name - Name of the target state machine
-//   @param state_name - Name for the new state
+// MCP:add_anim_state - Add a state node named state_name to an existing state machine of an Animation Blueprint, then mark the blueprint structurally modified and save it without compiling (compile_anim_blueprint gives runtime effect). Not an undo step. Idempotent by name: a state of that name (case-insensitive) is returned unchanged with already_existed true, and nothing is saved. The machine must sit on the top-level AnimGraph (add_anim_state_machine creates it); a missing blueprint or machine is an error. The new state is unconnected and its animation graph empty: link it with add_anim_transition, fill it with add_anim_graph_node, check the machine with get_anim_state_machine_info; remove_anim_state is the inverse. Refused while PIE runs unless force=true; a failed save is an error, the change kept in memory.
+//   @param anim_blueprint_path - Content path of the UAnimBlueprint (object or package path), e.g. '/Game/Characters/ABP_Hero'.
+//   @param machine_name - Name of a state machine on the blueprint's top-level AnimGraph, as get_anim_blueprint_info lists it in state_machines (case-insensitive), e.g. 'Locomotion'.
+//   @param state_name - Name for the new state, e.g. 'Idle'; the reply's state_name is the name its graph actually got.
 //   @returns { anim_blueprint_path: string, machine_name: string, state_name: string, node_class: string, state_created: bool, already_existed: bool, saved: bool, state_count: int, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleAddAnimState(const TSharedPtr<FJsonObject>& Params)
@@ -900,10 +900,10 @@ TSharedPtr<FJsonObject> HandleAddAnimTransition(const TSharedPtr<FJsonObject>& P
 // UAnimationStateMachineGraphs; each command calls the node's DestroyNode() override so its bound subgraph is
 // torn down, not leaked.
 
-// MCP:remove_anim_state - Remove a state node (and its bound animation subgraph) from a state machine.
-//   @param anim_blueprint_path - Path to the UAnimBlueprint asset
-//   @param machine_name - Name of the state machine that owns the state
-//   @param state_name - Name of the state to remove
+// MCP:remove_anim_state - Remove a state node from a state machine of an Animation Blueprint, together with its animation graph and every transition into or out of it (cascaded_transitions_removed), then mark the blueprint structurally modified and save it without compiling (compile_anim_blueprint gives runtime effect). Not an undo step. Idempotent by name: a state that is not there is a success with already_absent=true, and nothing is changed or saved. A name that belongs to a conduit is an error (use remove_anim_conduit), and so is a missing blueprint or machine. List the states first with get_anim_state_machine_info; add_anim_state is the inverse, and remove_anim_transition takes out a single transition instead. Refused while PIE runs unless force=true; a failed save is an error, the change kept in memory.
+//   @param anim_blueprint_path - Content path of the UAnimBlueprint (object or package path), e.g. '/Game/Characters/ABP_Hero'.
+//   @param machine_name - Name of a state machine on the blueprint's top-level AnimGraph, as get_anim_blueprint_info lists it in state_machines (case-insensitive), e.g. 'Locomotion'.
+//   @param state_name - Name of the state to remove, as get_anim_state_machine_info lists it (case-insensitive), e.g. 'Idle'.
 //   @returns { anim_blueprint_path: string, machine_name: string, state_name: string, removed: bool, already_absent: bool, state_count: int, transition_count: int, cascaded_transitions_removed: int, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleRemoveAnimState(const TSharedPtr<FJsonObject>& Params)
 {
@@ -986,10 +986,10 @@ TSharedPtr<FJsonObject> HandleRemoveAnimState(const TSharedPtr<FJsonObject>& Par
 // ---------------------------------------------------------------------------
 // remove_anim_conduit
 // ---------------------------------------------------------------------------
-// MCP:remove_anim_conduit - Remove a conduit node (and its bound rule subgraph) from a state machine.
-//   @param anim_blueprint_path - Path to the UAnimBlueprint asset
-//   @param machine_name - Name of the state machine that owns the conduit
-//   @param conduit_name - Name of the conduit to remove
+// MCP:remove_anim_conduit - Remove a conduit node from a state machine of an Animation Blueprint, together with its rule graph and every transition into or out of it (cascaded_transitions_removed), then mark the blueprint structurally modified and save it without compiling (compile_anim_blueprint gives runtime effect). Not an undo step. Idempotent by name: a conduit that is not there is a success with already_absent=true, and nothing is changed or saved. A name that belongs to a state is an error (use remove_anim_state), and so is a missing blueprint or machine. List the conduits first with get_anim_state_machine_info; add_anim_conduit is the inverse, and remove_anim_transition takes out a single transition instead. Refused while PIE runs unless force=true; a failed save is an error, the change kept in memory.
+//   @param anim_blueprint_path - Content path of the UAnimBlueprint (object or package path), e.g. '/Game/Characters/ABP_Hero'.
+//   @param machine_name - Name of a state machine on the blueprint's top-level AnimGraph, as get_anim_blueprint_info lists it in state_machines (case-insensitive), e.g. 'Locomotion'.
+//   @param conduit_name - Name of the conduit to remove, as get_anim_state_machine_info lists it (case-insensitive), e.g. 'ToAirborne'.
 //   @returns { anim_blueprint_path: string, machine_name: string, conduit_name: string, removed: bool, already_absent: bool, conduit_count: int, transition_count: int, cascaded_transitions_removed: int, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleRemoveAnimConduit(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1066,11 +1066,11 @@ TSharedPtr<FJsonObject> HandleRemoveAnimConduit(const TSharedPtr<FJsonObject>& P
 // ---------------------------------------------------------------------------
 // remove_anim_transition
 // ---------------------------------------------------------------------------
-// MCP:remove_anim_transition - Remove a source->target transition (and its rule subgraph) from a state machine.
-//   @param anim_blueprint_path - Path to the UAnimBlueprint asset
-//   @param machine_name - Name of the state machine that owns the transition
-//   @param source_state - Name of the source state (transition origin)
-//   @param target_state - Name of the target state (transition destination)
+// MCP:remove_anim_transition - Remove the transition from source_state to target_state in a state machine of an Animation Blueprint, with its rule graph (kept while a bidirectional twin shares it), then mark the blueprint structurally modified and save it without compiling (compile_anim_blueprint gives runtime effect). Only that direction goes; the states stay. Not an undo step. Idempotent: a missing source or target state, or no transition between them, is a success with already_absent=true, and nothing is changed or saved; a missing blueprint or machine is an error. add_anim_transition is the inverse; clear_anim_transition_rule empties the rule but keeps the transition; remove_state_transition is the StateTree counterpart. Refused while PIE runs unless force=true; a failed save is an error, the change kept in memory.
+//   @param anim_blueprint_path - Content path of the UAnimBlueprint (object or package path), e.g. '/Game/Characters/ABP_Hero'.
+//   @param machine_name - Name of a state machine on the blueprint's top-level AnimGraph, as get_anim_blueprint_info lists it in state_machines (case-insensitive), e.g. 'Locomotion'.
+//   @param source_state - Name of the state or conduit the transition leaves, as get_anim_state_machine_info lists it (case-insensitive), e.g. 'Idle'.
+//   @param target_state - Name of the state or conduit the transition enters (case-insensitive), e.g. 'Run'.
 //   @returns { anim_blueprint_path: string, machine_name: string, source_state: string, target_state: string, removed: bool, already_absent: bool, transition_count: int, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleRemoveAnimTransition(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1377,12 +1377,12 @@ TSharedPtr<FJsonObject> HandleGetAnimStateMachineInfo(const TSharedPtr<FJsonObje
 // ---------------------------------------------------------------------------
 // clear_anim_transition_rule
 // ---------------------------------------------------------------------------
-// MCP:clear_anim_transition_rule - Remove every rule node from a transition's BoundGraph except the sink.
-//   @param anim_blueprint_path - Asset path of the UAnimBlueprint
-//   @param machine_name - Name of the state machine that owns the transition
-//   @param source_state - Name of the source state (transition origin)
-//   @param target_state - Name of the target state (transition destination)
-//   @returns { anim_blueprint_path, machine_name, source_state, target_state, rule_cleared, sink_present, removed_count, remaining_rule_nodes, saved, save_error? }
+// MCP:clear_anim_transition_rule - Empty the rule of one transition (source_state to target_state) in an Animation Blueprint state machine: every rule-graph node but the result node is deleted, then the blueprint is marked structurally modified and saved without compiling (compile_anim_blueprint). The transition and its settings stay; with nothing wired it is never taken unless its automatic rule is on (set_anim_transition_rule_automatic). Not an undo step. An already empty rule is a success with removed_count 0, nothing saved; a missing blueprint, machine, state or transition is an error. No need to clear first for a new rule: set_anim_transition_rule_from_bool and set_anim_transition_rule_from_comparison rebuild it; remove_anim_transition drops the whole transition. Refused while PIE runs unless force=true; a failed save is an error, the change kept in memory.
+//   @param anim_blueprint_path - Content path of the UAnimBlueprint (object or package path), e.g. '/Game/Characters/ABP_Hero'.
+//   @param machine_name - Name of a state machine on the blueprint's top-level AnimGraph, as get_anim_blueprint_info lists it in state_machines (case-insensitive), e.g. 'Locomotion'.
+//   @param source_state - Name of the state or conduit the transition leaves, as get_anim_state_machine_info lists it (case-insensitive), e.g. 'Idle'.
+//   @param target_state - Name of the state or conduit the transition enters (case-insensitive), e.g. 'Run'.
+//   @returns { anim_blueprint_path, machine_name, source_state, target_state, rule_cleared, already_clear?, sink_present, removed_count, remaining_rule_nodes, saved, save_error? }
 TSharedPtr<FJsonObject> HandleClearAnimTransitionRule(const TSharedPtr<FJsonObject>& Params)
 {
     FString AnimBPPath, MachineName, SourceName, TargetName;
@@ -1397,8 +1397,11 @@ TSharedPtr<FJsonObject> HandleClearAnimTransitionRule(const TSharedPtr<FJsonObje
     // The BoundGraph of a UAnimStateTransitionNode is canonically a UAnimationTransitionGraph
     // and holds exactly one UAnimGraphNode_TransitionResult sink node (CanUserDeleteNode=false)
     // plus zero or more contributor nodes (variable gets, comparisons, time-based rules, etc.).
-    // "Clearing the rule" means removing every contributor node while keeping the sink intact —
-    // the resulting transition evaluates to true implicitly at runtime (standard engine semantics).
+    // "Clearing the rule" means removing every contributor node while keeping the sink intact. The
+    // sink's bCanEnterTransition pin is then unwired, so its default value decides (false unless changed):
+    // the engine never takes such a transition unless its automatic rule (bAutomaticRuleBasedOnSequencePlayerInState)
+    // or a native transition binding drives it -- the compiler warns "will never be taken"
+    // (UAnimStateTransitionNode::ValidateNodeDuringCompilation).
     UEdGraph* RuleGraph = Transition->BoundGraph;
     if (!RuleGraph)
         return mcp_common::MakeErrorReply(
@@ -1803,15 +1806,15 @@ TSharedPtr<FJsonObject> HandleSetAnimTransitionRuleFromComparison(const TSharedP
 // AnimGraph and binds the foot bone references. Aim offset assets are made by
 // create_blend_space (blend_space_type AimOffset / AimOffset1D).
 
-// MCP:create_locomotion_anim_blueprint - Create or update a character Animation Blueprint with a "Locomotion" state machine + Idle/Walk/Run states + bidirectional transitions between them. Idempotent: re-running on an existing AnimBP returns the existing scaffold.
+// MCP:create_locomotion_anim_blueprint - Create in one call an Animation Blueprint for a skeleton with a locomotion state machine: the machine, its states (Idle, Walk, Run by default), the entry wired to the first state and a transition each way between consecutive states, then compile and save it. Use it as the quick start for a character; for any other layout build the machine from a JSON spec with build_anim_state_machine, or step by step with create_anim_blueprint, add_anim_state_machine, add_anim_state and add_anim_transition. What it leaves to do: the states are empty (put an animation in each with add_anim_graph_node) and the transitions have no rule, so they are never taken (set_anim_transition_rule_from_comparison, _from_bool or _automatic). Idempotent: an existing Animation Blueprint, machine, state or transition is reused, not duplicated, and an entry already wired is left alone; an existing blueprint is kept even if its skeleton is not skeleton_path. Compile errors are not reported here (check with compile_anim_blueprint); a failed save is an error. Refused while PIE runs unless force=true.
 //   @renamed-from scaffold_locomotion_animbp
-//   @param package_path - UE content folder, e.g. "/Game/MyGame".
-//   @param asset_name - Blueprint asset name, e.g. "ABP_PlayerLocomotion".
-//   @param skeleton_path - Path to the target USkeleton.
-//   @param machine_name - Optional state machine name (default "Locomotion").
-//   @param states - Optional list of state names to add (default ["Idle", "Walk", "Run"]).
-//   @param add_transitions - Optional bool (default true). Add Idle<->Walk and Walk<->Run transitions.
-//   @returns { anim_blueprint_path, package_path, skeleton_path, machine_name, state_count, transition_count, already_existed, saved }
+//   @param package_path - Content folder for the asset, e.g. "/Game/Characters/Hero/Animation" (a trailing slash is ignored).
+//   @param asset_name - Name of the Animation Blueprint, e.g. "ABP_Hero"; the asset is package_path/asset_name.
+//   @param skeleton_path - Path of the USkeleton asset, e.g. "/Game/Characters/Hero/SK_Hero_Skeleton"; it must load even when the blueprint already exists.
+//   @param machine_name - Name of the state machine node in the AnimGraph (default "Locomotion"); a machine of that name is reused.
+//   @param states - State names in order, e.g. ["Idle", "Walk", "Run", "Sprint"] (default ["Idle", "Walk", "Run"]); the first is the entry state, and transitions link each state with the next one.
+//   @param add_transitions - Whether to add the two-way transitions between consecutive states, with a 0.2 s crossfade (default true); false leaves the states unlinked.
+//   @returns { anim_blueprint_path, package_path, skeleton_path, machine_name, state_count, transition_count, entry_wired, entry_state, note_states_are_empty, already_existed, saved, save_error? }
 TSharedPtr<FJsonObject> HandleScaffoldLocomotionAnimBp(
     const TSharedPtr<FJsonObject>& Params)
 {

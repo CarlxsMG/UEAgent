@@ -201,14 +201,14 @@ Compare two Content folders (project vs external, fork vs source) WITHOUT loadin
 
 *Destructive.*
 
-Draw a line into a render target via the canvas. drawn is false, and the call fails, when start and end are the same point (the canvas skips a zero-length line).
+Draw one straight line onto a UTextureRenderTarget2D asset in a single canvas pass in the editor world (UCanvas::K2_DrawLine), from start to end in render-target pixels, with color and thickness. The line blends over the existing pixels: nothing is cleared, saved or undoable, each call adds another line, and render-target contents live on the GPU only, so keep them with create_static_texture_from_render_target or export_render_target. Wipe it first with clear_render_target; for text, a texture or a material use draw_text_to_render_target, draw_texture_to_render_target or draw_material_to_render_target; get_render_target_info gives the size, create_render_target_2d makes a target. A missing render target is an error; drawn is false, and the call fails, when start and end are the same point (the canvas skips a zero-length line).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `render_target_path` | string | yes | Asset path of the destination render target |
-| `start` | string | yes | Line start position [x, y] in screen-space pixels |
-| `end` | string | yes | Line end position [x, y] in screen-space pixels |
-| `color` | string | no | Optional [r, g, b, a] line color, defaults to opaque white |
+| `render_target_path` | string | yes | Asset path of the destination UTextureRenderTarget2D, e.g. "/Game/RT/RT_Canvas" |
+| `start` | string | yes | Line start [x, y] in render-target pixels from the top-left corner, e.g. [0, 0] |
+| `end` | string | yes | Line end [x, y] in render-target pixels from the top-left corner, e.g. [256, 128]; it must differ from start |
+| `color` | string | no | Optional [r, g, b, a] linear color, each usually 0..1; channels left out keep opaque white, the default |
 | `thickness` | number | no | Optional line thickness in pixels, default 1 |
 
 **Returns:** `{ render_target_path: string, drawn: bool, thickness: number, start: [number], end: [number] }`
@@ -601,13 +601,13 @@ List package files (.uasset/.umap) under a content path whose ON-DISK mtime is n
 
 *Destructive.*
 
-Reimport an asset from its recorded source file via FReimportManager (legacy).  Works on any asset that carries UAssetImportData (e.g. a texture or sound that was imported from a file on disk). Runs fully automated (no dialogs). Returns can_reimport, reimported, and the recorded source_files.
+Reimport an asset from the source file it was imported from (texture, sound, mesh or anything with UAssetImportData), through the legacy FReimportManager handlers, fully automated with no dialogs, overwriting the asset's content in memory with the file's current content. The asset is marked dirty but not saved: save it with save_asset. It cannot be undone. Use it after the source file changed on disk; for assets imported through Interchange pipelines use reimport_interchange_asset; to see the recorded source file first use get_asset_import_data; to bring in a new file use import_texture_file or import_sound_file. success is true only when the asset was reimported. It is false, with reimported false and the reason, when no legacy handler accepts the asset (can_reimport false), when no source file is recorded, when a recorded file is missing on disk (missing_files; refused before the reimport, which can crash the editor then, so nothing changes), or when the handler reports a failure. source_validated says the recorded files were found. Repeating it reimports again. An asset that does not load is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `asset_path` | string | yes | Object path of the asset, e.g. /Game/Imported/MyTex.MyTex. |
+| `asset_path` | string | yes | Asset path in object form, e.g. "/Game/Imported/T_Rock.T_Rock" (package form "/Game/Imported/T_Rock" also loads). |
 
-**Returns:** `{ asset_path: string, can_reimport: bool, reimported: bool, source_files: [string] }`
+**Returns:** `{ asset_path: string, can_reimport: bool, reimported: bool, source_validated: bool, source_files: [string], missing_files?: [string] }`
 
 ## `remove_asset_from_collection`
 
@@ -778,15 +778,15 @@ Set the Nanite settings of a UStaticMesh asset through the StaticMeshEditor subs
 
 *Destructive, idempotent.*
 
-Update the relative transform of an existing static mesh socket (only the provided fields). A location, rotation or scale that is not three numbers is an error.
+Move, rotate or scale an existing socket of a UStaticMesh asset relative to the mesh, writing only the fields given (the others keep their value), in one undo step (undo restores the old transform), then save the mesh. The reply reads back the socket's whole transform. Use it to adjust a socket that add_static_mesh_socket created; to rename one use rename_static_mesh_socket, to delete one remove_static_mesh_socket, to see every socket get_static_mesh_info; skeletal mesh sockets have their own tools. A socket_name the mesh does not have is not an error: updated is false and nothing is touched or saved. A mesh that does not load, or a location, rotation or scale that is not three numbers, is an error before anything changes; a failed save (for example while PIE runs) is an error too, with the new transform already on the mesh in memory. The same values again rewrite them and save.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `static_mesh_path` | string | yes | Content path to the UStaticMesh asset. |
-| `socket_name` | string | yes | Name of the socket to update. |
-| `location` | array | no | Socket relative location as [x, y, z] (optional). |
-| `rotation` | array | no | Socket relative rotation as [pitch, yaw, roll] (optional). |
-| `scale` | array | no | Socket relative scale as [x, y, z] (optional). |
+| `static_mesh_path` | string | yes | Package or object path of the UStaticMesh, e.g. "/Game/Meshes/SM_Crate". |
+| `socket_name` | string | yes | Name of the existing socket, compared as an FName (case-insensitive), as get_static_mesh_info lists it. |
+| `location` | array | no | New relative location [x, y, z] in cm from the mesh origin, e.g. [0, 0, 50] (optional). |
+| `rotation` | array | no | New relative rotation [pitch, yaw, roll] in degrees, e.g. [0, 90, 0] (optional). |
+| `scale` | array | no | New relative scale [x, y, z] as multipliers, e.g. [1, 1, 1] (optional). |
 
 **Returns:** `{ static_mesh_path, socket_name, updated, location:{x,y,z}, rotation:{pitch,yaw,roll}, scale:{x,y,z}, saved }`
 

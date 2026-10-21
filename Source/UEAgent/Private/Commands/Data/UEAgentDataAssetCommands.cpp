@@ -948,11 +948,11 @@ TSharedPtr<FJsonObject> HandleCreateDataTable(const TSharedPtr<FJsonObject>& Par
         bSaved ? FString() : mcp_common::MeasuredOutcomeError(TEXT("create_data_table"), TEXT("bSaved")));
 }
 
-// MCP:create_composite_data_table - Create (or re-converge) a UCompositeDataTable whose row map is the merge of its parent DataTables, so a fork can EXTEND an upstream table instead of replacing it. The parent list is SET, not appended (re-running with a different list rewrites it), the row struct of every parent is validated BEFORE assignment (a mismatch or a cyclic parent chain would make the engine open a modal dialog and hang the editor), and the merge is verified by re-reading the live row map. Re-running with the row struct and parent list it already has changes nothing: saved=false and a note, and nothing is saved.
-//   @param table_name - Name of the composite DataTable asset to create or converge.
-//   @param package_path - Target content package path where the asset lives (check the body for the default).
-//   @param parent_tables - Array of full asset paths of the parent DataTables, LOW precedence first: a row present in several parents is won by the one with the HIGHEST index.
-//   @param row_struct - Optional UScriptStruct name for the composite rows. Defaults to the row struct of the first resolved parent (or, on an existing composite, to the one it already has -- which cannot be changed in place).
+// MCP:create_composite_data_table - Create, or bring up to date, a UCompositeDataTable whose rows are the merge of its parent DataTables, so a project can extend an upstream table without editing it; then save it and verify the merge against the live row map. Idempotent: the parent list is set, not appended, so a re-run with the same row struct and parents changes nothing (saved=false and a note), and one with another list overwrites the old one. Every parent must load and share the row struct, and the chain must not loop; a breach, an asset of another class at that path, or a new row struct for an existing composite is an error before anything is created or modified. Not an undo step. A standalone table is create_data_table; read the merged rows with get_data_table_rows. A failed save makes success false.
+//   @param table_name - Asset name of the composite, e.g. 'DT_Items_Combined'; package_path/table_name must form a valid long package name.
+//   @param package_path - Content folder as a long package path, e.g. '/Game/Data' (default /Game/DataTables).
+//   @param parent_tables - Array of DataTable asset paths, lowest precedence first: a row present in several parents takes its values from the one with the highest index, e.g. ["/Game/Data/DT_Items", "/Game/Mod/DT_ItemsExtra"]. A path listed twice counts once.
+//   @param row_struct - Optional row struct name without the F prefix, e.g. 'ItemRow', or its path '/Script/MyGame.ItemRow'. Defaults to the existing composite's struct, else the first parent's; an existing composite's struct cannot be changed in place.
 //   @param include_row_sources - Optional bool (default false): also return the winning parent for EVERY merged row. Expensive on large tables.
 //   @returns { table_name, package_path, table_path, table_class, row_struct, created, already_existed, requested_parent_tables, missing_parents, parents_applied, saved, save_error, note, parent_tables, parent_count, contributing_parent_count, merged_row_count, sum_parent_row_counts, expected_merged_row_count, merged_row_count_matches_parents, parent_row_struct_mismatch, shadowed_rows, shadowed_row_count, row_sources_included, row_sources? }
 TSharedPtr<FJsonObject> HandleCreateCompositeDataTable(const TSharedPtr<FJsonObject>& Params)
@@ -3522,10 +3522,10 @@ TSharedPtr<FJsonObject> HandleExportDataTableAsJson(const TSharedPtr<FJsonObject
     return ExportWholeTable(Params, /*bAsCsv*/ false);
 }
 
-// MCP:export_data_table_as_csv - Export a whole DataTable to CSV with the native exporter (read-only), returning row_struct, row_count and the csv string, optionally also written to a UTF-8 file. Use it as the backup before import_data_table_csv; nested structs and TMaps do not survive CSV cleanly, so export_data_table_as_json is the faithful copy.
-//   @param table_path - Full asset path of the DataTable.
+// MCP:export_data_table_as_csv - Export a whole DataTable to CSV with the engine's native exporter, returning row_struct, row_count and the csv string; with file_path the same text is also written to that file as UTF-8, overwriting any file there. The DataTable asset itself is never changed. Use it as the backup before import_data_table_csv; nested structs and TMaps do not survive CSV cleanly, so export_data_table_as_json is the faithful copy, and get_data_table_rows or get_data_table_column read rows without exporting. A table that does not load or has no row struct is an error, and so is a file that cannot be written (the csv is then not returned either).
+//   @param table_path - Object or package path of the DataTable asset, e.g. '/Game/Data/DT_Items'.
 //   @param data_table - Alias of table_path: pass one of the two.
-//   @param file_path - Optional OS path to also write the CSV string to (echoed back as written_to)
+//   @param file_path - Optional absolute OS path of the file to write, e.g. 'C:/Backups/DT_Items.csv'; an existing file is overwritten, and the path is echoed back as written_to.
 //   @returns { table_path, row_struct, row_count, csv, written_to? }
 TSharedPtr<FJsonObject> HandleExportDataTableAsCsv(const TSharedPtr<FJsonObject>& Params)
 {

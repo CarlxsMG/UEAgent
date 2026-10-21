@@ -83,9 +83,9 @@ Add a real process node to a MetaSound Source graph by its registered class name
 
 ## `add_modulation_input_to_patch`
 
-*Additive.*
+*Destructive.*
 
-Appends a USoundControlBus as an input of a USoundModulationPatch asset and saves the patch. A bus whose asset name is already among the inputs is skipped (added false, already_present true, not saved). input_name is not stored. Returns patch_path, bus_path, input_count, added, already_present, saved.
+Appends a USoundControlBus as an input of a USoundModulationPatch asset, in one undo step (undo removes it again), and saves the patch. A bus whose asset name is already among the inputs is skipped (added false, already_present true, not saved). input_name is not stored. Returns patch_path, bus_path, input_count, added, already_present, saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -405,14 +405,14 @@ Create a USoundConcurrency asset at package_path/name, or load the one already t
 
 ## `create_sound_cue`
 
-*Additive.*
+*Additive, idempotent.*
 
-Create an empty USoundCue (no nodes, no first node) at package_path/name and save it; an existing cue there is returned unchanged (already_existed:true). Returns cue_path, asset_path, node_count and saved. Build the graph with add_sound_cue_node, connect_sound_cue_nodes and set_sound_cue_first_node.
+Create an empty USoundCue asset (no nodes and no first node, so it plays nothing yet) at package_path/name and save it. Idempotent: a sound cue already at that path is returned unchanged with created=false and already_existed=true, and nothing is saved; an asset of another class there is an error and nothing is written. Not an undo step. Build the graph next with add_sound_cue_node, connect_sound_cue_nodes and set_sound_cue_first_node, and read it back with get_sound_cue_graph; cue_path is the path those tools take. A failed save makes success false, with saved=false and the new cue left in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `name` | string | yes | Asset name, e.g. SC_Footsteps |
-| `package_path` | string | no | Target content path, defaults to /Game/SoundCues |
+| `name` | string | yes | Asset name, e.g. 'SC_Footsteps'; package_path/name must form a valid long package name. |
+| `package_path` | string | no | Content folder as a long package path, e.g. '/Game/Audio/Cues' (default /Game/SoundCues); trailing slashes are ignored. |
 
 **Returns:** `{ name: string, package_path: string, asset_path: string, cue_path: string, created: bool, already_existed: bool, node_count: int, saved: bool, message: string }`
 
@@ -583,7 +583,7 @@ Read an editor-level audio component by object name: volume, pitch, active state
 
 *Read-only.*
 
-Retrieves comprehensive audio settings and statistics including all audio components in the world, audio device capabilities, and quality metrics.
+Survey audio in the editor: a census of the first audio component of every actor in the editor world (even while PIE runs), with each one's volume, pitch and playing, looping and spatialized state, the counts and volume and pitch statistics, and the main audio device's state (audio_enabled, max channels, mixer loaded). Read-only; no parameters. Several fields are not measured: audio_quality comes from the channel count (64+ High, under 32 Low), audio_api is the platform's default backend, reverb and occlusion always read true, sample rate and buffer size are fixed defaults, and the recommendations and complexity score are heuristics. For the project's audio settings use get_project_settings_value; for one component in depth, get_audio_component_properties.
 
 No parameters.
 
@@ -658,11 +658,11 @@ Read one field of the Configuration struct of a MetaSound Source node, found by 
 
 *Read-only.*
 
-Reads a USoundModulationGenerator asset without changing it. Returns generator_path, generator_class and settings by class: LFO shape, frequency, amplitude, offset, phase; ADEnvelope attack_time, decay_time; EnvelopeFollower attack_time, release_time, gain, audio_bus_path; empty for any other class.
+Read the class and settings of a USoundModulationGenerator asset without changing it. settings depend on the class: LFO gives shape, frequency, amplitude, offset and phase; ADEnvelope gives attack_time and decay_time; EnvelopeFollower gives attack_time, release_time, gain and audio_bus_path (empty when no audio bus is set); any other generator class gives an empty settings object. Use it to check create_modulation_generator or set_modulation_generator_settings; for a modulation parameter use get_modulation_parameter_info, for a control bus get_control_bus_info, for a patch get_sound_modulation_patch_info. A path that does not load as a modulation generator is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `generator_path` | string | yes | Asset path to the USoundModulationGenerator |
+| `generator_path` | string | yes | Asset path of the generator, e.g. "/Game/Audio/Mod/LFO_Wobble", as create_modulation_generator returns it. |
 
 **Returns:** `{ generator_path, generator_class, settings: {...} }`
 
@@ -813,17 +813,17 @@ Starts the sound already assigned to an audio component of the editor world, mat
 
 ## `play_sound_at_location`
 
-*Destructive.*
+*Additive.*
 
-Plays a sound asset at a specific world location without requiring an audio component.
+Play a sound asset (sound wave, sound cue or MetaSound source) once at a world location in the editor world, as a fire-and-forget one-shot with no audio component (UGameplayStatics::PlaySoundAtLocation) and only the sound's own attenuation. Nothing is saved, dirtied or undoable, and no handle comes back: the sound plays to its end, a looping one keeps looping with no way to stop it from here, and one out of the listener's earshot is skipped by the engine. Each call starts another instance. success is true once the request is made, even with no audio device. A sound that does not load or a location that is not an array of 3 numbers is an error. For playback you can stop or inspect, use play_sound and stop_sound on an audio component (set_audio_sound assigns its sound).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `sound_path` | string | yes | Full asset path to the sound (e.g. '/Game/Audio/MySound.MySound') |
-| `location` | array | yes | [x, y, z] 3D location to play the sound at |
-| `volume` | number | no | Optional volume multiplier; defaults to 1.0 |
-| `pitch` | number | no | Optional pitch multiplier; defaults to 1.0 |
-| `rotation` | array | no | Optional [pitch, yaw, roll] rotation of the sound (it matters to a directional attenuation) |
+| `sound_path` | string | yes | Object path of the sound asset, e.g. '/Game/Audio/MySound.MySound' (the package path '/Game/Audio/MySound' also loads). |
+| `location` | array | yes | World position [x, y, z] in centimetres, e.g. [0, 0, 100]; required, and the origin [0, 0, 0] is valid. |
+| `volume` | number | no | Optional volume multiplier, e.g. 0.5 for half; default 1.0. |
+| `pitch` | number | no | Optional pitch multiplier, e.g. 2.0 for an octave up; default 1.0. |
+| `rotation` | array | no | Optional [pitch, yaw, roll] in degrees, the facing of the sound (it matters to a directional attenuation); default [0, 0, 0]. |
 
 **Returns:** `{ sound_path: string, sound_name: string, location: { x, y, z }, rotation: { pitch, yaw, roll }, volume: number, pitch: number, success: bool }`
 
@@ -894,14 +894,14 @@ Removes a node from a MetaSound Source graph by its node_id GUID (inverse of add
 
 ## `remove_modulation_input_from_patch`
 
-*Destructive.*
+*Destructive, idempotent.*
 
-Removes every input of a USoundModulationPatch asset whose bus has the same asset name as bus_path, then saves the patch; a removal succeeds only when the patch reaches disk. When no input matches, the patch is already the state asked for: the call succeeds with removed false and already_removed true, and saves nothing. Returns patch_path, bus_path, removed, already_removed, input_count, saved.
+Remove every input of a USoundModulationPatch asset whose control bus has the same asset name as the bus at bus_path (so a same-named bus in another folder matches too), in one undo step (undo restores the inputs), then save the patch. Inverse of add_modulation_input_to_patch; list the inputs first with get_sound_modulation_patch_info. Idempotent: when no input matches, nothing is changed or saved and the call succeeds with removed false and already_removed true. A patch or bus that does not load is an error and nothing changes; a removal succeeds only when the patch reaches disk, so a failed save (for example while PIE runs) makes success false with the inputs gone only in memory. input_count is the number of inputs left.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `patch_path` | string | yes | Asset path to the USoundModulationPatch |
-| `bus_path` | string | yes | Asset path to the USoundControlBus whose input is removed |
+| `patch_path` | string | yes | Asset path of the USoundModulationPatch, e.g. "/Game/Audio/Mod/MP_Volume", as create_sound_modulation_patch returns it. |
+| `bus_path` | string | yes | Asset path of an existing USoundControlBus, e.g. "/Game/Audio/Mod/CB_Music"; it must load, and only its asset name is compared with the inputs' buses. |
 
 **Returns:** `{ patch_path, bus_path, removed, already_removed, input_count, saved }`
 
@@ -974,12 +974,12 @@ Remove a single FSubtitleAssetData cue by index. Inverse of add_subtitle_cue; us
 
 *Destructive, idempotent.*
 
-Applies a 3D audio preset to an audio component of the editor world: spatialization (bAllowSpatialization) and an attenuation override, a sphere whose inner radius is attenuation_radius and whose falloff distance is attenuation_distance ('Disabled' turns both off). audio_3d_configured is read back from the component. attenuation_falloff and the cone numbers only describe the preset (a sphere has no cone).
+Apply a 3D audio preset to one audio component of a placed actor in the editor world, in one undo step that dirties the level without saving it: spatialization (bAllowSpatialization) plus, for every preset but Disabled, an attenuation override sphere with the preset's inner radius and falloff distance (High 1000/2000 cm, Enabled and Medium 500/1000, Low 250/500); Disabled turns both off. audio_3d_configured is read back from the component; attenuation_falloff and the cone numbers only describe the preset. The same preset again gives the same result. Only the first audio component of each actor is searched, by object name; a missing component or unknown preset is an error and nothing changes. Read the result with get_audio_component_properties; set_audio_volume and set_audio_sound change the rest.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `audio_component_name` | string | yes | Name of the audio component to configure |
-| `audio_3d_settings` | string | yes | 3D setting preset: 'Enabled', 'Disabled', 'High', 'Medium', or 'Low' (case-insensitive); any other name is an error |
+| `audio_component_name` | string | yes | Object name of the audio component, compared without case against the first audio component of each actor, e.g. 'AudioComponent0' (get_audio_settings lists them). |
+| `audio_3d_settings` | string | yes | Preset name: 'Enabled', 'Disabled', 'High', 'Medium' or 'Low' (case-insensitive); any other name is an error. |
 
 **Returns:** `{ audio_component_name: string, audio_3d_settings: string, audio_3d_configured: bool, audio_3d_message: string, old_3d_enabled: bool, new_3d_enabled: bool, attenuation_override: bool, applied_attenuation_radius?: number, applied_falloff_distance?: number, 3d_enabled: bool, spatialization_enabled: bool, attenuation_distance: number, attenuation_radius: number, attenuation_falloff: number, attenuation_cone_angle: number, attenuation_cone_feather: number, audio_3d_recommendations: [string] }`
 
@@ -1109,7 +1109,7 @@ Write one field of a MetaSound Source node's Configuration struct, node found by
 
 *Destructive, idempotent.*
 
-Writes the settings that match the class of a USoundModulationGenerator asset (LFO, ADEnvelope or EnvelopeFollower) and saves it; params of another class are ignored and other generator classes are refused. The LFO shape (waveform) is set with create_modulation_generator. Returns generator_path, generator_class, settings as stored, updated, saved.
+Writes the settings that match the class of a USoundModulationGenerator asset (LFO, ADEnvelope or EnvelopeFollower), in one undo step (undo restores the previous settings), and saves it; params of another class are ignored, and other generator classes and an audio_bus_path that does not load are refused with nothing changed. The LFO shape (waveform) is set with create_modulation_generator. Returns generator_path, generator_class, settings as stored, updated, saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1130,7 +1130,7 @@ Writes the settings that match the class of a USoundModulationGenerator asset (L
 
 *Destructive, idempotent.*
 
-Writes the given Settings fields (value_normalized, clamp_to_normalized_range, value_unit) of a USoundModulationParameter asset and saves it; omitted fields keep their value, and the asset is saved even when none is given. Returns parameter_path, the three settings as stored, updated, saved.
+Writes the given Settings fields (value_normalized, clamp_to_normalized_range, value_unit) of a USoundModulationParameter asset, in one undo step (undo restores the previous settings), and saves it; omitted fields keep their value, and the asset is saved even when none is given. Returns parameter_path, the three settings as stored, updated, saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1145,12 +1145,12 @@ Writes the given Settings fields (value_normalized, clamp_to_normalized_range, v
 
 *Destructive, idempotent.*
 
-Sets the bBypass flag of a USoundModulationPatch asset and saves it. A bypassed patch stays active but outputs the default value of its output parameter; new patches start bypassed. Returns patch_path, bBypass as stored, updated, saved.
+Set the bBypass flag of a USoundModulationPatch asset, in one undo step (undo restores the old value), and save it. A bypassed patch stays active but outputs the default value of its output parameter, so a patch made by create_sound_modulation_patch (which starts bypassed) does nothing until this sets bypass false. Typical order: add_modulation_input_to_patch, set_modulation_patch_output_parameter, then this; read the result with get_sound_modulation_patch_info. It always writes and saves, even when the flag already had that value (updated is always true); bBypass is read back after the write. A patch that does not load or a missing bypass is an error and nothing changes; a failed save (for example while PIE runs) makes success false with the change only in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `patch_path` | string | yes | Asset path to the USoundModulationPatch |
-| `bypass` | boolean | yes | New bypass value (required bool) |
+| `patch_path` | string | yes | Asset path of the USoundModulationPatch, e.g. "/Game/Audio/Mod/MP_Volume", as create_sound_modulation_patch returns it. |
+| `bypass` | boolean | yes | true bypasses the patch (it outputs its parameter's default); false makes it apply its inputs. Required. |
 
 **Returns:** `{ patch_path, bBypass, updated, saved }`
 
@@ -1158,7 +1158,7 @@ Sets the bBypass flag of a USoundModulationPatch asset and saves it. A bypassed 
 
 *Destructive, idempotent.*
 
-Sets the output USoundModulationParameter of a USoundModulationPatch asset, or clears it when parameter_path is an empty string, and saves the patch. Returns patch_path, parameter_path and parameter_class as stored (empty after a clear), updated, cleared, saved. Create a parameter with create_modulation_parameter.
+Sets the output USoundModulationParameter of a USoundModulationPatch asset, or clears it when parameter_path is an empty string, in one undo step (undo restores the previous one), and saves the patch. Returns patch_path, parameter_path and parameter_class as stored (empty after a clear), updated, cleared, saved. Create a parameter with create_modulation_parameter.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1240,13 +1240,13 @@ Point the AudioBus output of a USoundSourceBus asset at a UAudioBus, or clear it
 
 *Destructive, idempotent.*
 
-Author a single FSoundSourceBusSendInfo entry on USoundBase::BusSends via reflection (partial merge + clamp).
+Write one bus send (an entry of BusSends, routing this sound's audio to another source bus or audio bus at a send level) on a USoundSourceBus asset, in one undo step, then save it. Only the fields given in send_info change, numbers are clamped to the property limits, and send_info in the reply is the whole entry read back (applied_keys only echoes your keys). A send_index past the end grows the list to send_index + 1, filling gaps with default sends. A soundSourceBus or audioBus path that does not load sets that reference to none without an error. Bus output: set_sound_source_bus_audio_bus; CustomCurve send level: set_sound_source_bus_send_level_curve; targets: create_sound_source_bus, create_audio_bus; get_sound_source_bus does not list sends. Idempotent for the same values. A missing or negative send_index, a missing send_info, an asset that does not load, or a field that does not convert is an error; a failed save (for example while PIE runs) makes success false with the change only in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `ssb_path` | string | yes | Full content path of the target USoundSourceBus (USoundBase.BusSends is the target array; USoundSourceBus inherits it unchanged). |
-| `send_index` | number | yes | 0-based index into BusSends; the entry is REPLACED in place. If out of range, the entry is appended (resize+append). |
-| `send_info` | object | yes | Object of FSoundSourceBusSendInfo fields to merge (sourceBusSendLevelControlMethod(Linear\|CustomCurve\|Manual), soundSourceBus(path), audioBus(path), sendLevel(Manual), minSendLevel/maxSendLevel(Linear), minSendDistance/maxSendDistance(Linear), customSendLevelCurve(object), bEnableLPFCutoff(bool), lPFCutoff(20..20000Hz), bEnableHPFCutoff(bool), hPFCutoff(20..20000Hz)). |
+| `ssb_path` | string | yes | Asset path of the USoundSourceBus to edit, e.g. "/Game/Audio/SSB_Radio", as create_sound_source_bus returns it (asset_path). |
+| `send_index` | number | yes | 0-based position in the BusSends list, e.g. 0; an existing entry is updated in place, a larger index grows the list (required). |
+| `send_info` | object | yes | Object of FSoundSourceBusSendInfo fields to merge (sourceBusSendLevelControlMethod(Linear\|CustomCurve\|Manual), soundSourceBus(path), audioBus(path), sendLevel(Manual), minSendLevel/maxSendLevel(Linear), minSendDistance/maxSendDistance(Linear), customSendLevelCurve(object), bEnableLPFCutoff(bool), lPFCutoff(20..20000Hz), bEnableHPFCutoff(bool), hPFCutoff(20..20000Hz)), e.g. {"sourceBusSendLevelControlMethod":"Manual","audioBus":"/Game/Audio/AB_Reverb","sendLevel":0.5} (required). |
 
 **Returns:** `{ ssb_path: string, send_index: int, bus_sends_count: int, send_info: object, applied_keys: [string], saved: bool }`
 
@@ -1268,15 +1268,15 @@ Merge a FRuntimeFloatCurve JSON into BusSends[send_index].CustomSendLevelCurve o
 
 *Destructive, idempotent.*
 
-Configure a submix effect preset's Settings struct (by chain index) via reflection (partial merge + clamp).
+Change the Settings struct of one effect preset in a USoundSubmix's effect chain, picked by chain index, through reflection: only the keys given are written, each clamped to its ClampMin/ClampMax, and settings echoes the whole struct read back. Read the chain first with get_submix_effect_chain; add_submix_effect_to_chain appends a preset and remove_submix_effect_from_chain takes one out. One undo step, then the submix package is saved, and so is the preset's own package when the preset is a separate asset appended by path (preset_in_submix_package=false) -- that asset is shared, so every submix that uses it hears the change. submix_saved and preset_saved report each save, and saved is both; a failed save of either makes success false with save_error. Repeating the same values changes nothing more. An index out of range, an empty slot, a preset class with no Settings struct or a value that does not convert is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `submix_path` | string | yes | Full content path of the target USoundSubmix |
+| `submix_path` | string | yes | Full content path of the target USoundSubmix, e.g. "/Game/Audio/Submix_Music" |
 | `effect_index` | number | yes | 0-based index into SubmixEffectChain (same order add_submix_effect_to_chain appended / get_submix_effect_chain reports) |
-| `settings` | object | yes | Object of fields to merge into the preset's Settings struct; absent keys untouched |
+| `settings` | object | yes | Object of fields to merge into the preset's Settings struct, keyed by property name (case-insensitive), e.g. {"ThresholdDb": -12, "Ratio": 4} for a dynamics processor; absent keys untouched, unknown keys ignored |
 
-**Returns:** `{ submix_path: string, effect_index: int, preset_class: string, settings: object, saved: bool }`
+**Returns:** `{ submix_path: string, effect_index: int, preset_class: string, preset_path: string, preset_in_submix_package: bool, submix_saved: bool, preset_saved: bool, settings: object, saved: bool, save_error?: string }`
 
 ## `set_subtitle_cue`
 

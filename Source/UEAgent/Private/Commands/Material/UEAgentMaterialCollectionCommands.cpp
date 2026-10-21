@@ -452,11 +452,11 @@ TSharedPtr<FJsonObject> HandleAddCollectionScalarParam(const TSharedPtr<FJsonObj
     return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("add_collection_parameter"), SaveError);
 }
 
-// MCP:set_collection_parameter_default - Set the default of an existing scalar or vector parameter of a Material Parameter Collection asset and save it: a scalar takes scalar_value, a vector takes vector [r, g, b, a]. Errors when neither array has the name or the needed value is missing.
-//   @param collection_path - Full /Game path to the MPC asset
-//   @param param_name - Name of the existing parameter to update
-//   @param scalar_value - Optional new float value for a scalar parameter
-//   @param vector [array] - New linear color for a vector parameter, as a JSON array [r, g, b, a]; alpha is 1 when only three values are given
+// MCP:set_collection_parameter_default - Change the default value stored in a Material Parameter Collection asset for one existing parameter, in one undo step, then save the asset; every material reading the collection sees the new default. A scalar parameter takes scalar_value, a vector parameter takes vector [r, g, b, a]; the value is read back from the asset into the reply. This edits the asset; to override the value only in a running world use set_material_parameter_collection_instance_value. Add a parameter first with add_collection_parameter; list names, kinds and current defaults with get_collection_info; rename with rename_collection_parameter. Idempotent: the same value again rewrites it and saves. A collection that does not load, a name that is neither a scalar nor a vector parameter, or a missing value for the parameter's kind is an error and nothing changes; a failed save (for example while PIE runs) makes success false with the change only in memory.
+//   @param collection_path - Asset path of the Material Parameter Collection, e.g. "/Game/Materials/MPC_Weather", as create_material_parameter_collection returns it.
+//   @param param_name - Exact name of an existing parameter, e.g. "WindStrength", as get_collection_info lists it.
+//   @param scalar_value - New float default for a scalar parameter, e.g. 0.75; required when the parameter is scalar, ignored for a vector one.
+//   @param vector [array] - New linear color default for a vector parameter, as a JSON array [r, g, b, a] of floats, e.g. [1, 0.5, 0, 1]; alpha is 1 when only three values are given. Required when the parameter is a vector.
 //   @returns { collection_path: string, param_name: string, param_type: string, default_set: bool, saved: bool, default_value: number, scalar_value: number, default: object, default_rgba: [number] }
 TSharedPtr<FJsonObject> HandleSetCollectionParamDefault(const TSharedPtr<FJsonObject>& Params)
 {

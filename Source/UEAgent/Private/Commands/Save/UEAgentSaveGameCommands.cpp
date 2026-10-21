@@ -138,10 +138,10 @@ namespace UEAgentSaveGameImpl
 
 // Slot lifecycle and inspection.
 
-// MCP:save_game - Write a NEW default-valued SaveGame object of save_game_class (default UMCPSaveGame) to a slot with SaveGameToSlot, overwriting what the slot held. On desktop the file is Saved/SaveGames/<slot>.sav. Returns success and message.
-//   @param slot_name - Save slot name where the game will be saved
+// MCP:save_game - Write a NEW SaveGame object holding its class defaults, of save_game_class (default UMCPSaveGame), to a slot with SaveGameToSlot, overwriting whatever the slot held. It captures no live game or level state, so use it to create or reset a slot, e.g. to test a load path. On desktop the file is Saved/SaveGames/<slot>.sav. Read it back with load_game, check it with get_save_game_slot_info or list_save_games, delete it with delete_save_game; for bytes that never touch disk use save_game_to_memory. The old file is not backed up and there is no undo step. An unknown, non-SaveGame or abstract class is an error and nothing is written; success is false, with an error, when the engine refuses the write.
+//   @param slot_name - Save slot name, e.g. "Slot1"; on desktop it is the file name Saved/SaveGames/<slot_name>.sav. list_save_games shows the slots that exist
 //   @param user_index - Platform user index for the save system; default 0 (the generic desktop save system ignores it)
-//   @param save_game_class - Name of a loaded, concrete USaveGame subclass, e.g. "MySaveGame" (found with FindFirstObject, never loaded from disk); default UMCPSaveGame
+//   @param save_game_class - Name of a loaded, concrete USaveGame subclass, e.g. "MySaveGame", or "BP_MySave_C" for a Blueprint one already loaded (found with FindFirstObject, never loaded from disk); default UMCPSaveGame
 //   @returns { slot_name: string, user_index: int, success: bool, message: string }
 TSharedPtr<FJsonObject> HandleSaveGame(const TSharedPtr<FJsonObject>& Params)
 {
@@ -260,7 +260,7 @@ TSharedPtr<FJsonObject> HandleDeleteSaveGame(const TSharedPtr<FJsonObject>& Para
     return mcp_common::MakeOutcomeReply(Payload, bErased, Failure);
 }
 
-// MCP:list_save_games - List all save games for a given user index. The list is what the platform's save system calls slots: on desktop, the .sav files at the root of the save folder. A save system can also keep a slot as a FOLDER of .sav files, which is not a slot here: those folders are reported apart, in slot_folders, so an empty list is only proof of no save when slot_folders is empty too.
+// MCP:list_save_games - List the save slots the platform's save system knows for a user index: on desktop, the .sav files at the root of Saved/SaveGames, each with slot_name and, when that file exists, file_path and file_size. Use it to find slot names for load_game, get_save_game_slot_info (one slot, with its modified time) or delete_save_game; save_game writes a slot. A save system can also keep a slot as a FOLDER of .sav files, which is not a slot here: those folders are reported apart in slot_folders (count does not include them), so an empty list is only proof of no save when slot_folders is empty too. Read-only and idempotent; no PIE needed. No saves at all gives count 0, not an error.
 //   @param user_index - Optional user index, default 0. Passed to the platform's save system; the generic desktop one keeps every user's slots in one folder, so there it changes nothing.
 //   @returns { user_index: int, save_directory: string, save_games: [{ slot_name, file_path?, file_size? }], count: int, slot_folders: [{ folder, sav_files }] (subfolders of save_directory holding .sav files, searched recursively) }
 TSharedPtr<FJsonObject> HandleListSaveGames(const TSharedPtr<FJsonObject>& Params)
@@ -348,9 +348,10 @@ TSharedPtr<FJsonObject> HandleGetSaveGameSlotInfo(const TSharedPtr<FJsonObject>&
 
 // In-memory (base64) round trip.
 
-// MCP:save_game_to_memory - Serialize a NEW default-valued SaveGame object of save_game_class (default UMCPSaveGame) with SaveGameToMemory and return it as memory_base64 with memory_size; nothing is written to disk. Pass the blob to load_game_from_memory to round-trip it.
-//   @param save_game_class - Name of a loaded, concrete USaveGame subclass, e.g. "MySaveGame" (found with FindFirstObject, never loaded from disk); default UMCPSaveGame
+// MCP:save_game_to_memory - Serialize a NEW SaveGame object holding its class defaults, of save_game_class (default UMCPSaveGame), with SaveGameToMemory and return the bytes as memory_base64 with memory_size. Despite the save verb it writes nothing: no slot, file or asset, and the object is transient and dropped. Use it to see a SaveGame class's default serialized form, or to get a blob for load_game_from_memory, which round-trips it; to write a slot on disk use save_game. No live game state is captured. An unknown, non-SaveGame or abstract class is an error; success is false, with an error and no memory_base64, when the engine fails to serialize.
+//   @param save_game_class - Name of a loaded, concrete USaveGame subclass, e.g. "MySaveGame", or "BP_MySave_C" for a Blueprint one already loaded (found with FindFirstObject, never loaded from disk); default UMCPSaveGame
 //   @returns { success: bool, save_game_class: string, memory_size: int, memory_base64: string }
+//   @hints read-only
 TSharedPtr<FJsonObject> HandleSaveGameToMemory(const TSharedPtr<FJsonObject>& Params)
 {
     // Serializing also needs a concrete class: the USaveGame base is abstract.

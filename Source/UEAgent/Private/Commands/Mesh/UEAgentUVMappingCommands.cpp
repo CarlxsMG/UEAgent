@@ -65,6 +65,170 @@ namespace UEAgentUVMappingCommands
 
 namespace
 {
+    // How many triangle pairs the overlap test may visit before it stops and reports itself incomplete: the grid
+    // keeps an ordinary layout far below it, but every triangle stacked in one spot would make the pass quadratic.
+    constexpr int64 UVMapping_MaxOverlapPairVisits = 20000000;
+
+    // Slack, in UV units, that two triangles must exceed along every separating axis to count as overlapping:
+    // triangles that share an edge or a corner only touch, and their projections meet exactly there.
+    constexpr double UVMapping_OverlapEpsilon = 1e-6;
+
+    struct FUVOverlapCount
+    {
+        int32 OverlappingTriangles = 0; // triangles whose UV triangle overlaps at least one other with positive area
+        bool bCapped = false;           // the pair budget ran out, so the count is a lower bound
+    };
+
+    // Whether no edge normal of A separates A from B (separating axis test on A's three edges).
+    bool UVMapping_NoSeparatingEdge(const FVector2D* A, const FVector2D* B)
+    {
+        for (int32 Edge = 0; Edge < 3; ++Edge)
+        {
+            const FVector2D Dir = A[(Edge + 1) % 3] - A[Edge];
+            const double Length = Dir.Size();
+            if (Length <= 1e-12)
+            {
+                continue;
+            }
+            const FVector2D Axis(-Dir.Y / Length, Dir.X / Length);
+            double MinA = TNumericLimits<double>::Max();
+            double MaxA = TNumericLimits<double>::Lowest();
+            double MinB = TNumericLimits<double>::Max();
+            double MaxB = TNumericLimits<double>::Lowest();
+            for (int32 Corner = 0; Corner < 3; ++Corner)
+            {
+                const double OnA = FVector2D::DotProduct(A[Corner], Axis);
+                const double OnB = FVector2D::DotProduct(B[Corner], Axis);
+                MinA = FMath::Min(MinA, OnA);
+                MaxA = FMath::Max(MaxA, OnA);
+                MinB = FMath::Min(MinB, OnB);
+                MaxB = FMath::Max(MaxB, OnB);
+            }
+            if (MaxA <= MinB + UVMapping_OverlapEpsilon || MaxB <= MinA + UVMapping_OverlapEpsilon)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // Two triangles overlap with positive area exactly when no edge normal of either one separates them.
+    bool UVMapping_TrianglesOverlap(const FVector2D* A, const FVector2D* B)
+    {
+        return UVMapping_NoSeparatingEdge(A, B) && UVMapping_NoSeparatingEdge(B, A);
+    }
+
+    /**
+     * How many triangles (three corners each in Corners) overlap another one in UV space with positive area.
+     * Degenerate triangles (no area) cannot overlap and are skipped. A uniform grid over the UV bounds limits the
+     * pairs tested to triangles whose boxes share a cell, and each pair is tested once, in the first cell both
+     * boxes cover; at most MaxPairVisits pairs are visited.
+     */
+    FUVOverlapCount UVMapping_CountOverlappingTriangles(const TArray<FVector2D>& Corners, int64 MaxPairVisits)
+    {
+        FUVOverlapCount Result;
+        const int32 NumTris = Corners.Num() / 3;
+
+        TArray<int32> Live;
+        Live.Reserve(NumTris);
+        FBox2D Bounds(ForceInit);
+        for (int32 Tri = 0; Tri < NumTris; ++Tri)
+        {
+            const FVector2D& P0 = Corners[Tri * 3];
+            const FVector2D& P1 = Corners[Tri * 3 + 1];
+            const FVector2D& P2 = Corners[Tri * 3 + 2];
+            const double TwiceArea = FMath::Abs((P1.X - P0.X) * (P2.Y - P0.Y) - (P1.Y - P0.Y) * (P2.X - P0.X));
+            if (TwiceArea <= 1e-12)
+            {
+                continue;
+            }
+            Live.Add(Tri);
+            Bounds += P0;
+            Bounds += P1;
+            Bounds += P2;
+        }
+        if (Live.Num() < 2)
+        {
+            return Result;
+        }
+
+        const int32 GridSize = FMath::Clamp(static_cast<int32>(FMath::Sqrt(static_cast<double>(Live.Num()))), 1, 512);
+        const FVector2D Size = Bounds.GetSize();
+        const double CellX = FMath::Max(Size.X / GridSize, 1e-12);
+        const double CellY = FMath::Max(Size.Y / GridSize, 1e-12);
+        auto CellIndex = [GridSize](double Value, double Min, double Cell)
+        {
+            return FMath::Clamp(static_cast<int32>(FMath::FloorToDouble((Value - Min) / Cell)), 0, GridSize - 1);
+        };
+
+        // Each live triangle's cell range, and the triangles of each cell.
+        TArray<FIntRect> Ranges;
+        Ranges.SetNum(Live.Num());
+        TArray<TArray<int32>> Cells;
+        Cells.SetNum(GridSize * GridSize);
+        for (int32 K = 0; K < Live.Num(); ++K)
+        {
+            const FVector2D* P = &Corners[Live[K] * 3];
+            const double MinX = FMath::Min3(P[0].X, P[1].X, P[2].X);
+            const double MaxX = FMath::Max3(P[0].X, P[1].X, P[2].X);
+            const double MinY = FMath::Min3(P[0].Y, P[1].Y, P[2].Y);
+            const double MaxY = FMath::Max3(P[0].Y, P[1].Y, P[2].Y);
+            FIntRect& Range = Ranges[K];
+            Range.Min = FIntPoint(CellIndex(MinX, Bounds.Min.X, CellX), CellIndex(MinY, Bounds.Min.Y, CellY));
+            Range.Max = FIntPoint(CellIndex(MaxX, Bounds.Min.X, CellX), CellIndex(MaxY, Bounds.Min.Y, CellY));
+            for (int32 CY = Range.Min.Y; CY <= Range.Max.Y; ++CY)
+            {
+                for (int32 CX = Range.Min.X; CX <= Range.Max.X; ++CX)
+                {
+                    Cells[CY * GridSize + CX].Add(K);
+                }
+            }
+        }
+
+        TBitArray<> Overlapping(false, Live.Num());
+        int64 Visits = 0;
+        for (int32 CY = 0; CY < GridSize && !Result.bCapped; ++CY)
+        {
+            for (int32 CX = 0; CX < GridSize && !Result.bCapped; ++CX)
+            {
+                const TArray<int32>& InCell = Cells[CY * GridSize + CX];
+                for (int32 I = 0; I < InCell.Num() && !Result.bCapped; ++I)
+                {
+                    for (int32 J = I + 1; J < InCell.Num(); ++J)
+                    {
+                        if (++Visits > MaxPairVisits)
+                        {
+                            Result.bCapped = true;
+                            break;
+                        }
+                        const int32 A = InCell[I];
+                        const int32 B = InCell[J];
+                        // Tested only in the first cell both boxes cover, so a pair is never tested twice.
+                        if (FMath::Max(Ranges[A].Min.X, Ranges[B].Min.X) != CX || FMath::Max(Ranges[A].Min.Y, Ranges[B].Min.Y) != CY)
+                        {
+                            continue;
+                        }
+                        if (Overlapping[A] && Overlapping[B])
+                        {
+                            continue; // both already counted: the test could not change the result
+                        }
+                        if (UVMapping_TrianglesOverlap(&Corners[Live[A] * 3], &Corners[Live[B] * 3]))
+                        {
+                            Overlapping[A] = true;
+                            Overlapping[B] = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        for (int32 K = 0; K < Live.Num(); ++K)
+        {
+            Result.OverlappingTriangles += Overlapping[K] ? 1 : 0;
+        }
+        return Result;
+    }
+
     /** The UStaticMesh at Path: null once OutMesh holds it, otherwise the error reply "<FailurePrefix>: <Path>". */
     TSharedPtr<FJsonObject> UVMapping_LoadMesh(const FString& Path, const TCHAR* FailurePrefix, UStaticMesh*& OutMesh)
     {
@@ -141,9 +305,9 @@ namespace
     }
 }
 
-// MCP:list_uv_channels - Per-LOD inventory of UV channels on a static mesh (read-only, no MarkDirty / no save).
-//   @param mesh_path - Static mesh path (e.g. /Game/Meshes/Cube)
-//   @param lod_index - Optional LOD index to inspect, or -1 to inventory every LOD (default -1)
+// MCP:list_uv_channels - List the UV channels of a static mesh asset per LOD: for each LOD uv_channel_count, vertex_count, triangle_count, the mesh's lightmap_coordinate_index and has_lightmap (that index names an existing channel), and one entry per channel with is_lightmap. Use it first to see which LODs and channels exist; then get_uv_health_report checks one channel's layout, get_static_mesh_geometry_stats measures UV area, and set_static_mesh_lightmap changes the lightmap channel. Read-only and idempotent: no undo step, nothing dirtied or saved. Channel and vertex counts come from the built render data, triangle_count from the LOD's source mesh description (0 when it has none); each channel's vertex_count is the LOD's vertex count. A mesh that does not load, or a lod_index past the last LOD, is an error.
+//   @param mesh_path - Content path of the UStaticMesh asset, e.g. "/Game/Meshes/SM_Rock" (the object path "/Game/Meshes/SM_Rock.SM_Rock" also works); find_assets_by_name finds it
+//   @param lod_index - Optional 0-based LOD to inspect, or -1 to list every LOD (default -1); total_lods in the reply says how many exist, and one past the last is an error
 //   @returns { mesh_path: string, total_lods: int, lods: [{lod_index, uv_channel_count, vertex_count, triangle_count, lightmap_coordinate_index, has_lightmap, channels: [{channel, is_lightmap, vertex_count}]}] }
 TSharedPtr<FJsonObject> HandleListUVChannels(const TSharedPtr<FJsonObject>& Params)
 {
@@ -213,19 +377,19 @@ TSharedPtr<FJsonObject> HandleListUVChannels(const TSharedPtr<FJsonObject>& Para
     return mcp_common::MakeOkReply(Resp);
 }
 
-// MCP:get_uv_health_report - Read-only diagnostic summary for one UV channel on a static mesh: counts, lightmap status, in-unit-square ratio, overlap count, and unique UVs.
-//   @param mesh_path - Static mesh path (e.g. /Game/Meshes/Cube)
-//   @param lod_index - LOD index to inspect (default 0)
-//   @param uv_channel - UV channel index to inspect (default 0)
-//   @returns { mesh_path, lod_index, uv_channel, vertex_count, triangle_count, lightmap_coordinate_index, no_lightmap_configured: bool, is_lightmap_hard_failing: bool, approx_overlap_count, in_unit_square_triangle_ratio, approx_unique_islands, per_triangle_iteration_error?: string } -- approx_unique_islands counts distinct UV positions (rounded to 4 decimals), not islands; when per_triangle_iteration_error is set the per-triangle counters stay 0.
+// MCP:get_uv_health_report - Check the layout of one UV channel of one LOD of a static mesh asset, reading its built render data: in_unit_square_triangle_ratio (share of triangles with all three UVs inside 0..1), overlapping_triangle_count (triangles whose UV triangle overlaps another one's with positive area; a shared edge or corner does not count, so a clean unwrap gives 0 and a lightmap channel should), overlap_test_complete, approx_unique_islands, plus vertex and triangle counts, lightmap_coordinate_index and is_lightmap_hard_failing (no lightmap index set, or no UV channels). Pick the LOD and channel with list_uv_channels first; change the lightmap channel with set_static_mesh_lightmap, and edit the asset's UVs with set_triangle_uvs or clear_uv_channel. Read-only and idempotent; nothing dirtied or saved. A mesh that does not load, or a LOD or channel out of range, is an error.
+//   @param mesh_path - Content path of the UStaticMesh asset, e.g. "/Game/Meshes/SM_Rock" (the object path "/Game/Meshes/SM_Rock.SM_Rock" also works); find_assets_by_name finds it
+//   @param lod_index - 0-based LOD to inspect (default 0), below the total_lods list_uv_channels reports
+//   @param uv_channel - 0-based UV channel to inspect (default 0), below that LOD's uv_channel_count from list_uv_channels
+//   @returns { mesh_path, lod_index, uv_channel, vertex_count, triangle_count, lightmap_coordinate_index, no_lightmap_configured: bool, is_lightmap_hard_failing: bool, overlapping_triangle_count: int, overlap_test_complete: bool, in_unit_square_triangle_ratio, approx_unique_islands, per_triangle_iteration_error?: string } -- overlapping_triangle_count: triangles overlapping another in UV space with positive area (a lower bound when overlap_test_complete is false: the test stops after 20 million pair visits); approx_unique_islands counts distinct UV positions (rounded to 4 decimals), not islands; when per_triangle_iteration_error is set the per-triangle counters stay 0.
 //
 // Per-vertex UV iteration goes through the BAKED
 // FStaticMeshVertexBuffer — same data the GPU rasterizer reads. The path is:
 //   Mesh->GetRenderData()->LODResources[LODIndex] (IndexBuffer + VertexBuffers).
 //   For each baked triangle, pull UV[uv_channel] from the vertex buffer and:
-//     - count overlap (rounded 4-decimal duplicate via TSet),
 //     - mark in-unit-square (all 3 UVs in [0,1]^2),
-//     - publish unique-UVs after the pass (= approx_unique_islands).
+//     - collect the distinct rounded UVs (= approx_unique_islands),
+//     - keep the UV triangle for the overlap test (grid + separating axes) after the pass.
 // If the render data isn't built (uncooked / very-new mesh), the per-triangle
 // counters come back as 0 and `per_triangle_iteration_error` carries the
 // reason; the rest of the response is still well-shaped.
@@ -265,16 +429,14 @@ TSharedPtr<FJsonObject> HandleGetUVHealthReport(const TSharedPtr<FJsonObject>& P
     const bool bNoLightmapConfigured = (LightmapIdx < 0);
     const bool bIsLightmapHardFailing = bNoLightmapConfigured || (UVChCount == 0);
 
-    // -- Per-vertex UV iteration through the BAKED render-data vertex buffer.
-    //    Two passes through every baked triangle vertex: in-unit-square + overlap
-    //    count. UVs are rounded to 4-decimal precision (~1cm granularity on a
-    //    [0,1] UV plane — coarser overlaps than that would not be a real
-    //    "shared pixel" anyway).
+    // -- Per-triangle UV iteration through the BAKED render-data vertex buffer:
+    //    in-unit-square count, the distinct UV positions (rounded to 4 decimals),
+    //    and every triangle's three UV corners for the UV-space overlap test after
+    //    the pass.
     int32 TrianglesInUnitSquare = 0;
     int32 TrianglesTotal = 0;
-    int32 OverlapCount = 0;
-    int32 OverlapCheckedVertices = 0;
     int32 ApproxUniqueIslands = 0;
+    TArray<FVector2D> UVCorners; // three per tested triangle
     FString PerTriError;
 
     auto RoundUV = [](const FVector2f& V) -> FVector2D
@@ -328,6 +490,7 @@ TSharedPtr<FJsonObject> HandleGetUVHealthReport(const TSharedPtr<FJsonObject>& P
             {
                 TSet<FVector2D> RoundedUVs;
                 RoundedUVs.Reserve(FMath::Max(256, NumRenderVerts));
+                UVCorners.Reserve(NumTris * 3);
 
                 for (int32 T = 0; T < NumTris; ++T)
                 {
@@ -357,24 +520,14 @@ TSharedPtr<FJsonObject> HandleGetUVHealthReport(const TSharedPtr<FJsonObject>& P
                     {
                         ++TrianglesInUnitSquare;
                     }
-                    auto AddAndCheck = [&](const FVector2D& R)
-                    {
-                        FSetElementId Existing = RoundedUVs.FindId(R);
-                        if (Existing.IsValidId())
-                        {
-                            ++OverlapCount;
-                        }
-                        else
-                        {
-                            RoundedUVs.Add(R);
-                        }
-                        ++OverlapCheckedVertices;
-                    };
-                    AddAndCheck(RoundUV(UV0));
-                    AddAndCheck(RoundUV(UV1));
-                    AddAndCheck(RoundUV(UV2));
+                    RoundedUVs.Add(RoundUV(UV0));
+                    RoundedUVs.Add(RoundUV(UV1));
+                    RoundedUVs.Add(RoundUV(UV2));
+                    UVCorners.Add(FVector2D(UV0));
+                    UVCorners.Add(FVector2D(UV1));
+                    UVCorners.Add(FVector2D(UV2));
                 }
-                // island approx = unique rounded UV positions post-overlap-pass
+                // Distinct rounded UV positions, the historical approx_unique_islands.
                 ApproxUniqueIslands = RoundedUVs.Num();
             }
         }
@@ -383,6 +536,10 @@ TSharedPtr<FJsonObject> HandleGetUVHealthReport(const TSharedPtr<FJsonObject>& P
     const float InUnitSquareRatio = (TrianglesTotal > 0)
         ? static_cast<float>(TrianglesInUnitSquare) / static_cast<float>(TrianglesTotal)
         : 0.0f;
+
+    // Triangles whose UV triangle overlaps another one's with positive area (a shared edge or corner is not an
+    // overlap): what a lightmap channel must not have, and what a stacked or mirrored layout has on purpose.
+    const FUVOverlapCount Overlap = UVMapping_CountOverlappingTriangles(UVCorners, UVMapping_MaxOverlapPairVisits);
 
     TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
     Resp->SetStringField(TEXT("mesh_path"), Mesh->GetPathName());
@@ -393,7 +550,8 @@ TSharedPtr<FJsonObject> HandleGetUVHealthReport(const TSharedPtr<FJsonObject>& P
     Resp->SetNumberField(TEXT("lightmap_coordinate_index"), LightmapIdx);
     Resp->SetBoolField(TEXT("no_lightmap_configured"), bNoLightmapConfigured);
     Resp->SetBoolField(TEXT("is_lightmap_hard_failing"), bIsLightmapHardFailing);
-    Resp->SetNumberField(TEXT("approx_overlap_count"), OverlapCount);
+    Resp->SetNumberField(TEXT("overlapping_triangle_count"), Overlap.OverlappingTriangles);
+    Resp->SetBoolField(TEXT("overlap_test_complete"), !Overlap.bCapped);
     Resp->SetNumberField(TEXT("in_unit_square_triangle_ratio"), InUnitSquareRatio);
     Resp->SetNumberField(TEXT("approx_unique_islands"), ApproxUniqueIslands);
     if (!PerTriError.IsEmpty())

@@ -116,14 +116,14 @@ List every property VISIBLE on a class — the ones it DECLARES plus every inher
 
 *Read-only.*
 
-Retrieve lifecycle, activation, registration, transform, and input events available on a component.
+List the events (dynamic multicast delegate properties, such as OnComponentHit or OnComponentBeginOverlap) that one component of an actor in the editor world exposes, read from its class by reflection, inherited ones included: per event its name, declaring class, whether it is inherited, its signature and parameters (name, C++ type, is_out), whether Blueprints can bind it (blueprint_assignable) and whether anything is bound to it on this component now. Also facts about the component: class with its category, tooltip and display-name metadata, active and registered state, owner and creation method. Read-only. A name it lists is what subscribe_to_delegate takes to record fires, and what add_component_bound_event binds in a Blueprint; get_class_properties lists every property of a class. An actor or component not found is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Name of the actor containing the component |
-| `component_name` | string | yes | Name of the component to get events from |
+| `actor_name` | string | yes | Object name (not the label) of the actor in the editor world, compared without case, e.g. 'StaticMeshActor_0'. |
+| `component_name` | string | yes | Object name of one of that actor's components, compared without case, e.g. 'StaticMeshComponent0'; get_actor_components lists them. |
 
-**Returns:** `{ actor_name: string, component_name: string, component_class: string, component_category: string, component_tooltip: string, component_display_name: string, events: [{name, type, description, category, is_overrideable, is_blueprint_event, function_signature}], events_count: int, component_is_active: bool, component_is_registered: bool, component_owner: string, component_creation_method: string }`
+**Returns:** `{ actor_name: string, component_name: string, component_class: string, component_category: string, component_tooltip: string, component_display_name: string, events: [{name, owner_class, is_inherited, blueprint_assignable, blueprint_callable, signature, parameters: [{name, type, is_out}], parameter_count, is_bound}], events_count: int, declared_events_count: int, component_is_active: bool, component_is_registered: bool, component_owner: string, component_creation_method: string }`
 
 ## `get_enum_info`
 
@@ -255,12 +255,12 @@ Audit a PLACED ACTOR (and every one of its components) against its ARCHETYPE and
 
 *Read-only.*
 
-Enumerate known engine/game/plugin modules (loaded or not), optionally filtered by name substring.
+List the C++ modules the editor's module manager knows (FModuleManager::QueryModules) -- engine, editor, project and plugin modules, loaded or not -- each with name, file_path (its binary on disk), is_loaded and is_game_module, plus count; optionally only names containing name_pattern, or only loaded ones. Use it to check that a module's code is present and loaded before relying on its classes; for a plugin's enabled state use get_plugin_status, and for the types a module defines list_derived_classes, list_structs or list_enums (Niagara stack modules are list_niagara_modules, a different thing). Read-only and idempotent: it loads or unloads nothing. No match gives count 0, not an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `name_pattern` | string | no | Optional module name substring filter (case-insensitive) |
-| `loaded_only` | boolean | no | Only include currently-loaded modules (default false) |
+| `name_pattern` | string | no | Optional plain substring of the module name, case-insensitive, no wildcards, e.g. "Niagara"; omitted or empty lists every module |
+| `loaded_only` | boolean | no | true keeps only the modules loaded right now (default false) |
 
 **Returns:** `{ modules: [{name, file_path, is_loaded, is_game_module}], count: int }`
 
@@ -296,12 +296,12 @@ Enumerate loaded UScriptStruct types (native + user-defined/Blueprint), optional
 
 *Read-only.*
 
-Read the events a subscription has recorded so far, including each fire's parameters (non-destructive cursor read).
+Return the fires a subscribe_to_delegate subscription has recorded after cursor, oldest first, each with its sequence_id, a timestamp in seconds (FPlatformTime::Seconds) and the delegate's parameters as payload. It does not wait for new fires and does not consume what it returns, so the same cursor gives the same events again; pass next_cursor back to read only newer ones. Only the latest 512 fires per subscription are kept. subscription_active false means the target object is gone: recorded fires still come back, but no new ones will arrive. An unknown subscription_id is an error. unsubscribe_delegate ends the subscription; poll_gameplay_tag_events is the same reader for register_gameplay_tag_event.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `subscription_id` | number | yes | The id returned by subscribe_to_delegate |
-| `cursor` | number | no | Optional int64; only events with a higher sequence_id are returned (default 0 = everything currently retained) |
+| `subscription_id` | number | yes | The subscription_id that subscribe_to_delegate returned, e.g. 3. |
+| `cursor` | number | no | Optional sequence_id: only fires with a higher one are returned; pass the previous reply's next_cursor. Default 0 returns every fire still kept. |
 
 **Returns:** `{ events: [{sequence_id, ts, payload}], next_cursor: int, subscription_active: bool }`
 

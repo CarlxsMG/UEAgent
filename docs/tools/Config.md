@@ -95,7 +95,7 @@ Read UGameMapsSettings EditorStartupMap and GameDefaultMap from the in-memory CD
 
 *Read-only.*
 
-Read the project metadata from the in-memory UGeneralProjectSettings defaults (Project Settings, Description), read-only. Returns project_name, project_version, company_name, company_distinguished_name, copyright_notice, description, homepage, licensing_terms, privacy_policy and support_contact, as strings that may be empty.
+Read the ten project metadata fields of Project Settings > Project > Description (UGeneralProjectSettings, as held in memory, unsaved edits included) without changing anything: project name and version, company name and distinguished name, copyright notice, description, homepage, licensing terms, privacy policy and support contact; any of them can be an empty string when the project never set it. Use it to identify the project in one call. For any other setting read the property with get_project_settings_value (its section names: list_project_setting_sections); to change one of these fields use set_project_settings_value with class_name "/Script/EngineSettings.GeneralProjectSettings" (the short name is not found, since the class is not a UDeveloperSettings); for the engine version and build use get_engine_info; for startup and default maps get_default_game_map. Takes no parameters.
 
 No parameters.
 

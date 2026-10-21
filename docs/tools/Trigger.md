@@ -34,11 +34,11 @@ Read the overlap-event configuration of an actor's primitive component: collisio
 
 *Read-only.*
 
-Retrieves information about a trigger actor, including its type and bounding box.
+Read what kind of trigger an editor-world actor is and where it reaches: actor_class, is_trigger_box, is_trigger_sphere, and the world-space bounds of its root collision shape as bounds_origin and bounds_extent (half-size, cm, as "X=.. Y=.. Z=.." text; left out when the root is not a primitive). Use get_actors_in_trigger for what it overlaps now, get_trigger_events for its overlap and collision settings, get_volume_info for other volumes; resize with set_trigger_box_extent or set_trigger_sphere_radius. Read-only and idempotent; editor world only, not PIE. An unknown name, or an actor that is not a TriggerBox, TriggerSphere or TriggerVolume, is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Name of the trigger actor to query |
+| `actor_name` | string | yes | Object name (not the editor label) of the trigger actor in the editor world, e.g. "TriggerBox_0", as spawn_actor returns it; whole name, case-insensitive. find_actors_by_name maps a label to its name |
 
 **Returns:** `{ actor_name, actor_class, is_trigger_box, is_trigger_sphere, bounds_origin, bounds_extent }`
 
@@ -110,12 +110,12 @@ Configure overlap-event generation on a trigger/volume's root primitive componen
 
 *Destructive, idempotent.*
 
-Resize a TriggerSphere in the editor world by setting the unscaled radius of its sphere collision component and updating its overlaps; the level is marked dirty, not saved. Returns previous_radius, new_radius and changed. The radius must be greater than 0.
+Resize a TriggerSphere in the editor world by setting the unscaled radius of its sphere collision component and updating its overlaps, in one undo step; the level is marked dirty, not saved (save_level). Returns previous_radius, new_radius and changed. For a TriggerBox use set_trigger_box_extent; for a brush volume such as a TriggerVolume there is no resize tool. Read the result with get_trigger_info (bounds, which include the actor scale) and what now overlaps with get_actors_in_trigger. Idempotent: the same radius again reports changed=false, though the level is still marked dirty. A radius of 0 or less, an unknown name, an actor that is not a TriggerSphere, or one without a sphere collision component is an error and nothing changes.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Object name of the TriggerSphere actor in the editor world; its editor label is not matched. |
-| `radius` | number | yes | New unscaled sphere radius in cm, greater than 0. |
+| `actor_name` | string | yes | Object name of the TriggerSphere actor in the editor world, e.g. "TriggerSphere_0", as spawn_actor returns it; its editor label is not matched. |
+| `radius` | number | yes | New unscaled sphere radius in cm, greater than 0, e.g. 250; the actor scale multiplies it in the world. |
 
 **Returns:** `{ actor_name, component_name, previous_radius, new_radius, changed }`
 

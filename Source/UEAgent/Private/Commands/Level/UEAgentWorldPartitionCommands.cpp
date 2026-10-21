@@ -917,10 +917,11 @@ TSharedPtr<FJsonObject> HandleListWorldPartitionActors(const TSharedPtr<FJsonObj
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:load_world_partition_region - Pins the World Partition cells intersecting an axis-aligned region [min,max] into memory for inspection (editor world).  Creates a UWorldPartitionEditorLoaderAdapter backed by FLoaderAdapterShape over the box and calls ILoaderAdapter::Load(); the adapter stays REGISTERED so the region remains resident (mirrors the editor's "Load Region from Here"), which then lets get_actors_by_class / actor tools see the now-loaded actors. Honest error on a non-WP (default) map or an uninitialized World Partition. Non-destructive: it loads (pins) actors, it never spawns/edits/saves. Inverse: unload_world_partition_region with the same label.
-//   @param min - [x,y,z] minimum corner of the region box in world units.
-//   @param max - [x,y,z] maximum corner of the region box in world units.
-//   @param label - Optional label for the loader adapter (default "MCP Load Region").
+// MCP:load_world_partition_region - Load the World Partition actors inside a box of the editor world into memory and keep them there, as the editor's Load Region does, so get_actors_by_class, get_properties and the other actor tools can see actors that were unloaded. Use it on a World Partition map before reading or editing actors far from what is loaded; release them with unload_world_partition_region and the same label. It edits, spawns and saves nothing, but it is not idempotent: each call registers one more region under its label (unload releases them all). A map without World Partition, or one not initialized, and a zero-volume box are errors and nothing loads; a box that touches no cell answers loaded false. num_loaded_actors counts the loaded actors of the whole world, not only this box.
+//   @hints additive not-idempotent
+//   @param min - [x,y,z] one corner of the box, in centimetres (world units); min and max may come in either order, they are sorted per axis.
+//   @param max - [x,y,z] the opposite corner of the box, in centimetres; it must differ from min so the box has volume.
+//   @param label - Name for the region, used later by unload_world_partition_region (default "MCP Load Region"); use one label per region to release them separately.
 //   @returns { world: string, is_world_partition: bool, loaded: bool, region_min: [x,y,z], region_max: [x,y,z], label: string, num_loaded_actors: int, note: string }
 
 TSharedPtr<FJsonObject> HandleLoadWorldPartitionRegion(const TSharedPtr<FJsonObject>& Params)

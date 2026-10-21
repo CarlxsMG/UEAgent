@@ -104,13 +104,13 @@ Read ONE ROW ACROSS ALL COLUMNS of a UChooserTable, as typed cells -- the row-wi
 
 *Read-only.*
 
-Read-only summary of a UChooserTable: ResultType, OutputObjectType, column count + per-column type names, ResultsStructs count, ContextData count, effective row count.
+Read the shape of one Chooser Table asset without changing it: its result type, output object class, columns (index and column struct type), row count, result count and context-data count. Use it first, to learn the column indices and row count that get_chooser_column_values (one column across all rows), get_chooser_row_values (one row across all columns), set_chooser_cell and remove_chooser_row take; to see which row a context would pick, use evaluate_chooser_table; to find tables, list_chooser_tables. row_count is the largest of the result count and every column's row array, so a half-built table still reports all its rows. A path that does not load a Chooser Table is an error and nothing is read.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `table_path` | string | yes | Long package path of an existing UChooserTable. |
+| `table_path` | string | yes | Long package path of the Chooser Table, without the object suffix, e.g. "/Game/Animation/CHT_Locomotion", as list_chooser_tables returns it. |
 
-**Returns:** `{ table_path: string, result_type: string, output_object_class: string|null, column_count: int, columns: [{index, type}], row_count: int, results_count: int, context_data_count: int }`
+**Returns:** `{ table_path: string, result_type: "Object"|"Class"|"NoPrimaryResult", output_object_class: string (empty when none), column_count: int, columns: [{index, type}], row_count: int, results_count: int, context_data_count: int }`
 
 ## `list_chooser_tables`
 

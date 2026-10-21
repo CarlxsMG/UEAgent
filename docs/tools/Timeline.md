@@ -235,13 +235,13 @@ Adds a cinematic shot section (UMovieSceneCinematicShotSection) to the shot trac
 
 ## `add_shot_track`
 
-*Additive.*
+*Additive, idempotent.*
 
-Adds a cinematic shot track (UMovieSceneCinematicShotTrack) to a Level Sequence.
+Make sure a Level Sequence has its cinematic shot track (UMovieSceneCinematicShotTrack), the root track that holds shot sections, adding it when missing, in one undo step, then save the sequence. Idempotent: a sequence that already has one keeps it (track_added=false; section_count counts its shots), though the sequence is saved again either way. add_shot_section also creates this track when missing, so call this one only to get an empty shot track; list tracks with get_sequence_tracks; remove_sequence_track is the inverse. The sequence must already exist (create_level_sequence). An unknown sequence is an error and nothing changes; a failed save makes success false with saved=false and save_error, the track kept in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `sequence_path` | string | yes | Full /Game path OR bare asset name of the target Level Sequence. |
+| `sequence_path` | string | yes | Full /Game path, e.g. "/Game/Cinematics/LS_Intro", OR bare asset name "LS_Intro" (the first Level Sequence under /Game with that name); get_level_sequences lists them. |
 | `sequence_name` | string | no | Alias for sequence_path. |
 
 **Returns:** `{ sequence_path: string, track_class: string, track_added: bool, section_count: int, saved: bool, save_error?: string }`
@@ -278,12 +278,12 @@ Add the root time-dilation (slomo) track of a Level Sequence found by asset name
 
 *Additive.*
 
-Adds a spawnable actor binding to a Level Sequence (asset-model, headless).
+Add a spawnable binding to a Level Sequence asset: the sequence itself spawns an actor of class_name while it plays and despawns it after, so no level actor is needed or created now and no open Sequencer is needed. To animate an actor already placed in the level use bind_actor_to_sequence (a possessable) instead; for a keyed camera with its camera cut use create_cine_camera_in_sequence. Each call adds another binding (not idempotent). One undo step, then the sequence is saved. Pass the returned binding_guid to add_transform_track_to_binding and the other binding tools; list bindings with get_sequence_bindings; remove_sequence_binding is the inverse. An unknown sequence or a class that is not an AActor subclass is an error and nothing is added; a failed save makes success false with saved=false and save_error, the binding kept in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `sequence_name` | string | yes | Name of the target Level Sequence (found by AssetName under /Game). |
-| `class_name` | string | no | AActor subclass name (e.g. "CineCameraActor" default, "StaticMeshActor", "PointLight", or a "/Script/Module.Class" path). |
+| `sequence_name` | string | yes | Asset name (not a path) of the target Level Sequence, e.g. "LS_Intro": the first Level Sequence under /Game with that name, case-insensitive; get_level_sequences lists them, create_level_sequence makes one. |
+| `class_name` | string | no | AActor subclass to spawn: "CineCameraActor" (default), "StaticMeshActor", "PointLight", another native class by short name (e.g. "SkeletalMeshActor"), or a path such as "/Script/Engine.SkyLight" or a Blueprint's "/Game/BP_Door.BP_Door_C". |
 
 **Returns:** `{ sequence_name: string, binding_guid: string, display_name: string, class_name: string, spawnable: bool, saved: bool, save_error?: string }`
 
@@ -337,14 +337,14 @@ Adds one transform keyframe (9 double channels) at a time on a binding's transfo
 
 ## `add_transform_track_to_binding`
 
-*Additive.*
+*Destructive, idempotent.*
 
-Adds a 3D transform track (with a section spanning the playback range) to a binding. Inverse: remove_sequence_track with binding_guid.
+Give one binding of a Level Sequence a 3D transform track (location, rotation, scale) with a section over the playback range, so the bound actor can be animated. Use it before add_transform_keyframe, which needs it; the binding comes from add_spawnable_to_sequence or bind_actor_to_sequence (get_sequence_bindings lists them). Other track kinds on a binding: add_property_track, add_skeletal_animation_track, add_attach_track. Idempotent: a binding that already has a transform track keeps it and its first section (track_added and section_created false); a track with no section gets one. An unknown sequence, a malformed GUID or a GUID that is not a binding of the sequence is an error and nothing changes. One undo step, then the sequence is saved; a failed save answers success false with the change kept in memory. Remove it with remove_sequence_track (track_name "MovieScene3DTransformTrack" and the same binding_guid).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `sequence_name` | string | yes | Name of the target Level Sequence. |
-| `binding_guid` | string | yes | GUID of the binding (from add_spawnable_to_sequence / bind_actor_to_sequence / get_sequence_bindings). |
+| `sequence_name` | string | yes | Asset name of the Level Sequence, not a path, e.g. "LS_Intro"; the one with that name under /Game is used. |
+| `binding_guid` | string | yes | GUID of the binding, e.g. "8E2F14A64B7D5C3E9A1B2C3D4E5F6071", as add_spawnable_to_sequence, bind_actor_to_sequence or get_sequence_bindings return it. |
 
 **Returns:** `{ sequence_name: string, binding_guid: string, track_class: string, track_added: bool, section_created: bool, section_count: int, saved: bool, save_error?: string }`
 
@@ -464,11 +464,11 @@ Read every keyframe on one channel of a binding's section (resolved like set_sec
 
 *Read-only.*
 
-Retrieve the current playback status of an active Level Sequence player
+Read the playback state of a runtime Level Sequence player in a PIE or game world, found by the player_key play_level_sequence_runtime returned, without changing it: status (Playing, Paused or Stopped), the playing, paused and reversed flags, current_time and duration in seconds, frame_rate in frames per second and playback_progress as a percentage (0 to 100; 0 for a zero-length sequence). Use it to check the effect of pause_level_sequence_runtime, resume_level_sequence_runtime or set_level_sequence_time_runtime; for a sequence asset's length and frame rates without any player use get_timeline_info instead. A key that was never issued, was released by stop_level_sequence_runtime, or whose player was destroyed (ending PIE destroys them all) is an error saying to call play_level_sequence_runtime first.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `player_key` | string | yes | Player key returned from play_level_sequence_runtime |
+| `player_key` | string | yes | The player_key string play_level_sequence_runtime returned in this editor session; keys do not survive the end of PIE. |
 
 **Returns:** `{ player_key: string, status: string, is_playing: bool, is_paused: bool, is_reversed: bool, current_time: number, duration: number, frame_rate: number, playback_progress: number }`
 
@@ -476,14 +476,14 @@ Retrieve the current playback status of an active Level Sequence player
 
 *Read-only.*
 
-List all Level Sequences in the project, optionally filtered by package path
+List the Level Sequence assets under a content folder and its subfolders (default /Game) from the asset registry, without loading or changing anything: per sequence its name, package_path, asset_path and class. Use it to find the sequence_name or path that get_timeline_info, get_sequence_tracks, play_timeline, set_timeline_time and play_level_sequence_runtime take; for any asset type use find_assets_by_name; to make one use create_level_sequence. At most max_results entries come back, in registry order: total_count is the number of sequences found, returned_count the number listed, and truncated is true when total_count is larger, so narrow package_path or raise max_results. A folder with none gives an empty list; a max_results outside 1 to 10000 is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `package_path` | string | no | Filter to a long package path, defaults to /Game |
-| `max_results` | number | no | Maximum number of sequences to return, 1 to 10000, default 1000 |
+| `package_path` | string | no | Long package path of the folder to search, subfolders included, e.g. "/Game/Cinematics" (default "/Game"; plugin content needs its own root such as "/MyPlugin"). |
+| `max_results` | number | no | Maximum number of sequences to return, an integer from 1 to 10000 (default 1000). |
 
-**Returns:** `{ sequences: [object], total_count: int, max_results: int, truncated: bool }`
+**Returns:** `{ sequences: [object], total_count: int (found under package_path), returned_count: int (listed, at most max_results), max_results: int, truncated: bool }`
 
 ## `get_marked_frames`
 
@@ -501,16 +501,16 @@ Lists every user marked frame in a Level Sequence's movie scene.
 
 *Read-only.*
 
-Get detailed info about a sequencer section: range, easing, completion mode, blend type, lock/infinite state.
+Read the settings of one section of a Level Sequence: start_frame and end_frame (tick-resolution frames, end exclusive; 0 for an open, infinite bound), ease-in and ease-out lengths and whether they are manual, completion_mode (keep_state, restore_state or project_default), blend_type (absolute, additive, relative, additive_from_base, override, or invalid when unset), is_locked, is_active and, for a 3D-attach section, its six attach_rules. The section is found by binding_guid (none for a root track such as a shot, camera cut or audio track), then track_type or track_index, then section_index: get_sequence_tracks lists tracks with section counts, get_sequence_bindings the bindings. The read side of set_section_properties, set_section_range and set_attach_section_rules. Read-only and idempotent; reads the asset, no open Sequencer needed. An unknown sequence, an invalid GUID, a binding without tracks, a track_type with no such track, or an index out of range is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `sequence_path` | string | yes | Full /Game path OR bare asset name of the target Level Sequence. |
+| `sequence_path` | string | yes | Full /Game path, e.g. "/Game/Cinematics/LS_Intro", OR bare asset name "LS_Intro" of the target Level Sequence. |
 | `sequence_name` | string | no | Alias for sequence_path. |
-| `binding_guid` | string | no | GUID of the binding whose section to inspect. Omit it (and binding_name_or_guid) for a section of a ROOT track -- shot, camera cut, audio, event, sub-sequence, fade: track_type or track_index then pick among the root tracks in get_sequence_tracks order, camera cut last. |
-| `track_type` | string | no | Optional class filter (see set_section_properties). |
-| `track_index` | number | no | Index into the binding's tracks (0 = first track, default 0). Without binding_guid it indexes the root tracks. |
-| `section_index` | number | no | Index of the section on the resolved track (default 0). |
+| `binding_guid` | string | no | GUID of the binding whose section to inspect, as get_sequence_bindings or get_sequence_tracks gives it. Omit it (and binding_name_or_guid) for a section of a ROOT track -- shot, camera cut, audio, event, sub-sequence, fade: track_type or track_index then pick among the root tracks in get_sequence_tracks order, camera cut last. |
+| `track_type` | string | no | Optional kind of track, case-insensitive: "transform"\|"float"\|"bool"\|"vector"\|"color"\|"visibility"\|"audio"\|"event"\|"fade"\|"skeletalanimation"\|"subsequence"\|"cameracut"\|"shot"\|"slomo"\|"property"\|"attach"; the first track of that kind wins and none is an error; any other value is ignored and track_index picks. |
+| `track_index` | number | no | Index into the binding's tracks (0 = first track, default 0), in get_sequence_tracks order. Without binding_guid it indexes the root tracks. |
+| `section_index` | number | no | Index of the section on the resolved track (default 0); get_sequence_tracks gives each track's section_count. |
 | `binding_name_or_guid` | string | no | Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved. |
 
 **Returns:** `{ sequence_path: string, section_index: int, start_frame: int, end_frame: int, ease_in_frames: int, ease_out_frames: int, manual_ease_in: bool, manual_ease_out: bool, completion_mode: string, blend_type: string, blend_type_valid: bool, is_locked: bool, is_active: bool, is_attach_section: bool, attach_rules: object? }`
@@ -624,11 +624,11 @@ Pauses, at its current position, the runtime ULevelSequencePlayer whose player_k
 
 *Destructive.*
 
-Pause playback in the open Sequencer editor on a target sequence
+Pause the editor Sequencer's preview playback on a Level Sequence found by asset name under /Game, first opening that sequence in the Sequencer when another one (or none) is shown; the playhead stays where it is. Editor preview only: to pause a sequence playing in PIE or a game use pause_level_sequence_runtime. Changes no asset; pausing a sequence that is not playing does nothing and still succeeds. playing and paused are read right after the call (paused is simply not playing). A sequence that is not found, or no Sequencer that can show it, is an error. Start again with play_timeline; move the playhead with set_timeline_time.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `sequence_name` | string | yes | Name of the target level sequence |
+| `sequence_name` | string | yes | Asset name of the Level Sequence, not its path, e.g. "LS_Intro" (case-insensitive; the first match under /Game is used), as get_level_sequences returns it (sequences[].name). |
 
 **Returns:** `{ sequence_name: string, playing: bool, paused: bool }`
 
@@ -661,7 +661,7 @@ Starts playback in the editor's Sequencer on a Level Sequence found by asset nam
 
 *Destructive.*
 
-Remove one keyframe (located by 'index' or 'frame') from a binding's section channel (resolved like move_keyframe).  The out-of-range guard is applied BEFORE RemoveKey because TMovieSceneChannelData::RemoveKey has a fatal check(IsValidIndex) -- an invalid locator returns a clean error, never a crash.  channel_type selects the proxy view ("double" default | "float" | "bool").
+Delete one key from one channel of a section of a Level Sequence, found by its index or by its frame. Read the keys first with get_channel_keyframes, which takes the same locator and lists each key's index, frame and value; to move a key use move_keyframe, to copy one duplicate_keyframe, to change its value or tangents set_binding_channel_keyframe_interpolation, and to drop the whole section remove_section. The section is found like set_section_properties: binding_guid with track_type or track_index and section_index, or no binding for a root track; channel_type and channel_index pick the channel (transform location x, y, z are double channels 0-2, rotation 3-5, scale 6-8). A key that does not exist (index out of range, or no key within tolerance of frame) is an error and nothing changes. Not idempotent: repeating a call with the same index removes the key that took its place. One undo step, then the sequence is saved; a failed save answers success false with the change kept in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1039,12 +1039,12 @@ Set the playback parameters of one subsequence or cinematic shot section (a UMov
 
 *Destructive, idempotent.*
 
-Set the playhead time of the open Sequencer editor on a target sequence
+Move the editor Sequencer's playhead on a Level Sequence, found by asset name under /Game, to a time in seconds (a jump: nothing plays in between), first opening that sequence in the Sequencer when another one (or none) is shown. Editor preview only: to seek a sequence playing in PIE or a game use set_level_sequence_time_runtime. Changes no asset: the actors the sequence binds are only previewed at that time, as the Sequencer does. The same time again lands on the same frame. actual_frame is where the playhead landed, in display-rate frames, read back after the jump; time_set only says the jump was issued. A negative time, a sequence that is not found, or no Sequencer that can show it is an error and nothing moves. See the sequence length first with get_timeline_info; play or pause with play_timeline and pause_timeline.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `sequence_name` | string | yes | Name of the target level sequence |
-| `time` | number | yes | Playback time in seconds, must be >= 0 |
+| `sequence_name` | string | yes | Asset name of the Level Sequence, not its path, e.g. "LS_Intro" (case-insensitive; the first match under /Game is used), as get_level_sequences returns it (sequences[].name). |
+| `time` | number | yes | Playhead position in seconds from the sequence start, e.g. 2.5; must be 0 or more (a time past the end is not refused). |
 
 **Returns:** `{ sequence_name: string, requested_time: number, actual_frame: int, time_set: bool }`
 

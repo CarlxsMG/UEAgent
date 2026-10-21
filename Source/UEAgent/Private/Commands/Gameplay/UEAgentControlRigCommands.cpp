@@ -613,11 +613,11 @@ TSharedPtr<FJsonObject> HandleRemoveRigElement(const TSharedPtr<FJsonObject>& Pa
 // ---------------------------------------------------------------------------
 // rename_rig_element
 // ---------------------------------------------------------------------------
-// MCP:rename_rig_element - Rename an element in a Control Rig's hierarchy.  Idempotent: renaming to the current name is a no-op ({ renamed:false, already_named:true }). The engine disambiguates name collisions with a numeric suffix rather than failing, reported honestly via name_adjusted.
-//   @param control_rig_path - Path to the UControlRigBlueprint asset
-//   @param element_type - Element type ("Bone"/"Null"/"Control"/"Curve"/"Socket"/"Connector")
-//   @param element_name - Current name of the element to rename
-//   @param new_name - Desired new name for the element
+// MCP:rename_rig_element - Rename one element -- a bone, null, control, curve, socket or connector -- in the hierarchy of a Control Rig Blueprint, then compile and save the blueprint; there is no undo step and it is refused while Play-in-Editor runs unless force is set. Read current names and types with get_rig_hierarchy; add_rig_element and remove_rig_element add and take away elements; a bone of a USkeleton asset is rename_bone instead. The engine never fails on a name already in use: it appends a numeric suffix, so element_key is the name the element really got and name_adjusted says when it differs from new_name. Idempotent: renaming to the current name is a no-op that compiles and saves nothing ({ renamed:false, already_named:true }). An unknown element_type, or an element of that type the hierarchy does not have, is an error and nothing changes; a failed save makes success false with save_error.
+//   @param control_rig_path - Path to the UControlRigBlueprint asset, e.g. "/Game/Rigs/CR_Mannequin"; create_control_rig_blueprint makes one
+//   @param element_type - Element type ("Bone"/"Null"/"Control"/"Curve"/"Socket"/"Connector"), case-insensitive; "Space" also means Null
+//   @param element_name - Current name of the element to rename, as get_rig_hierarchy lists it (case-insensitive)
+//   @param new_name - Desired new name for the element, e.g. "spine_01_ctrl"; a name in use gets a numeric suffix
 //   @returns { asset_path: string, old_name: string, element_key: string, element_type: string, renamed: bool, already_named: bool, name_adjusted: bool, bone_count: int, null_count: int, control_count: int, curve_count: int, other_count: int, total: int, saved: bool, save_error: string }
 
 TSharedPtr<FJsonObject> HandleRenameRigElement(const TSharedPtr<FJsonObject>& Params)

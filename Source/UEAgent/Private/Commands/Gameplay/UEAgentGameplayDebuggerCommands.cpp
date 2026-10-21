@@ -124,9 +124,9 @@ void UnregisterAllCategories()
 #endif
 }
 
-// MCP:register_gameplay_debugger_category - Registers (or reconfigures, idempotently) a named GameplayDebugger category backed by a single generic data-driven FGameplayDebuggerCategory (GameplayDebugger.h IGameplayDebugger::RegisterCategory). FGameplayDebuggerCategory has 0 BlueprintCallable surface, so this is the only path to author a custom debugger category from MCP. Toggle visibility in-game with the console command "showdebug <category_name>".
-//   @param category_name - Unique name for this debugger category (required)
-//   @param specs [array] - [{actor_class?: string, property_name: string, color?: string ("white"|"red"|"green"|"yellow"|"cyan"...), label?: string}] -- which properties to print for the current debug-actor, and how
+// MCP:register_gameplay_debugger_category - Register a custom Gameplay Debugger category that prints chosen properties of the selected debug actor, one line per spec (IGameplayDebugger::RegisterCategory); Blueprints cannot author debugger categories, so this is the only way from MCP. Idempotent: a repeat with the same name updates its specs to the new list (already_existed true) and registers nothing new. It lives in memory for this editor session only, nothing is saved; unregister_gameplay_debugger_category is the inverse. It draws only in PIE or a game with a debug actor selected: open the debugger with the apostrophe key or the console command gdt.Toggle; the category starts enabled. A missing name, empty specs or a spec without property_name is an error and nothing is registered, as is a build without the GameplayDebugger module.
+//   @param category_name - Name of the category as the debugger shows it, e.g. 'MyAI'; reusing a name this tool registered updates it.
+//   @param specs [array] - Non-empty array of {property_name, actor_class?, color?, label?}: property_name is a property of the debug actor's class (a missing one prints '<property not found>'); actor_class limits the line to actors of that class by short class name, e.g. 'Character'; color is a debugger text color such as 'white', 'red', 'green', 'yellow' or 'cyan'; label replaces the property name in the line. e.g. [{"property_name": "Health", "color": "green"}]
 //   @returns { category_name: string, spec_count: int, registered: bool, already_existed: bool }
 TSharedPtr<FJsonObject> HandleRegisterGameplayDebuggerCategory(const TSharedPtr<FJsonObject>& Params)
 {

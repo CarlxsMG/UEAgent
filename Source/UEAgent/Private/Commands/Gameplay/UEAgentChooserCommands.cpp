@@ -935,10 +935,10 @@ TSharedPtr<FJsonObject> HandleSetChooserRowOutcome(const TSharedPtr<FJsonObject>
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_chooser_row_outcome"), SaveError);
 }
 
-// MCP:get_chooser_table_info - Read-only summary of a UChooserTable: ResultType, OutputObjectType, column count + per-column type names, ResultsStructs count, ContextData count, effective row count.
+// MCP:get_chooser_table_info - Read the shape of one Chooser Table asset without changing it: its result type, output object class, columns (index and column struct type), row count, result count and context-data count. Use it first, to learn the column indices and row count that get_chooser_column_values (one column across all rows), get_chooser_row_values (one row across all columns), set_chooser_cell and remove_chooser_row take; to see which row a context would pick, use evaluate_chooser_table; to find tables, list_chooser_tables. row_count is the largest of the result count and every column's row array, so a half-built table still reports all its rows. A path that does not load a Chooser Table is an error and nothing is read.
 //   @renamed-from inspect_chooser_table
-//   @param table_path - Long package path of an existing UChooserTable.
-//   @returns { table_path: string, result_type: string, output_object_class: string|null, column_count: int, columns: [{index, type}], row_count: int, results_count: int, context_data_count: int }
+//   @param table_path - Long package path of the Chooser Table, without the object suffix, e.g. "/Game/Animation/CHT_Locomotion", as list_chooser_tables returns it.
+//   @returns { table_path: string, result_type: "Object"|"Class"|"NoPrimaryResult", output_object_class: string (empty when none), column_count: int, columns: [{index, type}], row_count: int, results_count: int, context_data_count: int }
 TSharedPtr<FJsonObject> HandleInspectChooserTable(const TSharedPtr<FJsonObject>& Params)
 {
 	TSharedPtr<FJsonObject> Error;

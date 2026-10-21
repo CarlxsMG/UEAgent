@@ -114,11 +114,11 @@ List the primary asset types the running Asset Manager has registered, read-only
 
 *Read-only.*
 
-Read the AssetBundles tag of one asset from the Asset Registry without loading it: each bundle with bundle_name, asset_paths and num_assets, plus bundle_count and asset_found. An asset with no bundles, or not found, returns an empty list rather than an error. Read-only.
+Read every asset bundle tagged on one asset from the Asset Registry, without loading it: for each bundle its bundle_name, asset_paths and num_assets, plus bundle_count and asset_found. Bundles are the soft references a primary asset (typically a data asset) marks with AssetBundles meta, which the Asset Manager loads together; use this to see what each bundle would pull in. To read one bundle of a primary asset by its id from the Asset Manager's cache use get_asset_bundle_entry; get_primary_asset_id turns a path into that id. Read-only and idempotent. An asset with no bundles, or a path the registry does not know (asset_found=false), returns an empty list rather than an error; only an uninitialized Asset Manager is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `asset_path` | string | yes | Full object path including the object name, e.g. /Game/MyGame/M_Example.M_Example; a package-only path does not resolve to the asset. |
+| `asset_path` | string | yes | Full object path including the object name, e.g. /Game/MyGame/DA_Sword.DA_Sword (find_assets_by_name gives it); a package-only path such as /Game/MyGame/DA_Sword does not resolve to the asset and answers asset_found=false. |
 
 **Returns:** `{ bundle_name, asset_paths, num_assets, asset_path, asset_found, bundles, bundle_count }`
 
@@ -163,12 +163,12 @@ Look up the registered Primary Asset Id ("Type:Name") of an asset path: primary_
 
 *Read-only.*
 
-List the Primary Asset Ids the running Asset Manager has registered for one type: asset_ids entries with type, name and full_id, plus count; success is false when none are found, unknown type included. Only scanned assets appear (see scan_primary_assets). Read-only.
+List the Primary Asset Ids the running Asset Manager has registered for one primary asset type: asset_ids entries with type, name and full_id ("Type:Name"), plus count. Only scanned assets appear, so after adding or changing a rule (add_primary_asset_rule) run scan_primary_assets first. List the registered types with get_all_primary_asset_types and the configured rules with get_primary_asset_types; for one asset's id use get_primary_asset_id, and for a bundle of it get_asset_bundle_entry. Read-only and idempotent. success is false, with an empty list, when nothing is found, an unknown type included; an uninitialized Asset Manager is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `asset_type_name` | string | yes | Name of the primary asset type, e.g. "Item". |
-| `filter` | string | no | "unloaded_only" keeps only assets with no current or pending bundle state (not loaded through the Asset Manager); omitted or any other value lists all. |
+| `asset_type_name` | string | yes | Name of the primary asset type as registered, e.g. "Item" or "Map" (case-insensitive); get_all_primary_asset_types lists them. |
+| `filter` | string | no | "unloaded_only" (case-insensitive) keeps only assets with no current or pending bundle state (not loaded through the Asset Manager); omitted or any other value lists all. |
 
 **Returns:** `{ type, name, full_id, asset_type_name, success, asset_ids, count }`
 

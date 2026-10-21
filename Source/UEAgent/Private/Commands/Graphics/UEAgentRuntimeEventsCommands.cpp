@@ -293,9 +293,9 @@ TSharedPtr<FJsonObject> HandleSubscribeToDelegate(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeOkReply(Out);
 }
 
-// MCP:poll_delegate_events - Read the events a subscription has recorded so far, including each fire's parameters (non-destructive cursor read).
-//   @param subscription_id - The id returned by subscribe_to_delegate
-//   @param cursor - Optional int64; only events with a higher sequence_id are returned (default 0 = everything currently retained)
+// MCP:poll_delegate_events - Return the fires a subscribe_to_delegate subscription has recorded after cursor, oldest first, each with its sequence_id, a timestamp in seconds (FPlatformTime::Seconds) and the delegate's parameters as payload. It does not wait for new fires and does not consume what it returns, so the same cursor gives the same events again; pass next_cursor back to read only newer ones. Only the latest 512 fires per subscription are kept. subscription_active false means the target object is gone: recorded fires still come back, but no new ones will arrive. An unknown subscription_id is an error. unsubscribe_delegate ends the subscription; poll_gameplay_tag_events is the same reader for register_gameplay_tag_event.
+//   @param subscription_id - The subscription_id that subscribe_to_delegate returned, e.g. 3.
+//   @param cursor - Optional sequence_id: only fires with a higher one are returned; pass the previous reply's next_cursor. Default 0 returns every fire still kept.
 //   @returns { events: [{sequence_id, ts, payload}], next_cursor: int, subscription_active: bool }
 
 TSharedPtr<FJsonObject> HandlePollDelegateEvents(const TSharedPtr<FJsonObject>& Params)
@@ -375,69 +375,54 @@ TSharedPtr<FJsonObject> HandleUnsubscribeDelegate(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeOkReply(Out);
 }
 
-// get_component_events' fixed catalogue of component events, plus its actor/component lookup.
+// get_component_events' reflection of a component class's multicast delegates, plus its actor/component lookup.
 namespace UEAgentRuntimeEventsImpl
 {
-    /** Which components get_component_events lists an event for. */
-    enum class EEventListing : uint8
+    /**
+     * One multicast delegate property of a component, read from reflection: its name, the class that declares it,
+     * its signature function and parameters, its Blueprint flags and whether anything is bound to it on Component
+     * right now. The delegate name is what subscribe_to_delegate takes.
+     */
+    TSharedPtr<FJsonObject> DescribeMulticastDelegate(const FMulticastDelegateProperty* Delegate, UActorComponent* Component)
     {
-        AnyComponent,
-        SceneComponentsOnly,
-        StaticMeshComponentsOnly
-    };
+        TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+        Entry->SetStringField(TEXT("name"), Delegate->GetName());
+        const UClass* Owner = Delegate->GetOwnerClass();
+        Entry->SetStringField(TEXT("owner_class"), Owner ? Owner->GetName() : FString());
+        Entry->SetBoolField(TEXT("is_inherited"), Owner != Component->GetClass());
+        Entry->SetBoolField(TEXT("blueprint_assignable"), Delegate->HasAnyPropertyFlags(CPF_BlueprintAssignable));
+        Entry->SetBoolField(TEXT("blueprint_callable"), Delegate->HasAnyPropertyFlags(CPF_BlueprintCallable));
 
-    /** One catalogued component event. Category doubles as the listed "type". */
-    struct FKnownComponentEvent
-    {
-        const TCHAR* Name;
-        const TCHAR* Category;
-        const TCHAR* Description;
-        const TCHAR* Signature;
-        EEventListing Listing;
-    };
+        // The signature function is named <Name>__DelegateSignature; the reply drops the suffix.
+        const UFunction* Signature = Delegate->SignatureFunction;
+        FString SignatureName = Signature ? Signature->GetName() : FString();
+        SignatureName.RemoveFromEnd(TEXT("__DelegateSignature"));
+        Entry->SetStringField(TEXT("signature"), SignatureName);
 
-    // The order get_component_events lists the entries in.
-    const FKnownComponentEvent KnownComponentEvents[] =
-    {
-        { TEXT("BeginPlay"), TEXT("Lifecycle"), TEXT("Called when the component begins play"),
-          TEXT("UFUNCTION(BlueprintImplementableEvent) void BeginPlay()"),
-          EEventListing::AnyComponent },
-        { TEXT("EndPlay"), TEXT("Lifecycle"), TEXT("Called when the component ends play"),
-          TEXT("UFUNCTION(BlueprintImplementableEvent) void EndPlay(EEndPlayReason::Type EndPlayReason)"),
-          EEventListing::AnyComponent },
-        { TEXT("Tick"), TEXT("Update"), TEXT("Called every frame"),
-          TEXT("UFUNCTION(BlueprintImplementableEvent) void Tick(float DeltaTime)"),
-          EEventListing::AnyComponent },
-        { TEXT("Activate"), TEXT("Activation"), TEXT("Called when the component is activated"),
-          TEXT("UFUNCTION(BlueprintImplementableEvent) void Activate()"),
-          EEventListing::AnyComponent },
-        { TEXT("Deactivate"), TEXT("Activation"), TEXT("Called when the component is deactivated"),
-          TEXT("UFUNCTION(BlueprintImplementableEvent) void Deactivate()"),
-          EEventListing::AnyComponent },
-        { TEXT("Register"), TEXT("Registration"), TEXT("Called when the component is registered"),
-          TEXT("UFUNCTION(BlueprintImplementableEvent) void Register()"),
-          EEventListing::AnyComponent },
-        { TEXT("Unregister"), TEXT("Registration"), TEXT("Called when the component is unregistered"),
-          TEXT("UFUNCTION(BlueprintImplementableEvent) void Unregister()"),
-          EEventListing::AnyComponent },
-        { TEXT("TransformUpdated"), TEXT("Transform"), TEXT("Called when the component's transform is updated"),
-          TEXT("UFUNCTION(BlueprintImplementableEvent) void TransformUpdated()"),
-          EEventListing::SceneComponentsOnly },
-        { TEXT("OnClicked"), TEXT("Input"), TEXT("Called when the component is clicked"),
-          TEXT("UFUNCTION(BlueprintImplementableEvent) void OnClicked(UPrimitiveComponent* ClickedComp, FKey ButtonPressed)"),
-          EEventListing::StaticMeshComponentsOnly },
-    };
-
-    /** Whether get_component_events shows this entry for a component of the given kind. */
-    bool IsListedFor(const FKnownComponentEvent& Known, bool bSceneComponent, bool bStaticMeshComponent)
-    {
-        switch (Known.Listing)
+        TArray<TSharedPtr<FJsonValue>> Parameters;
+        if (Signature)
         {
-        case EEventListing::AnyComponent:             return true;
-        case EEventListing::SceneComponentsOnly:      return bSceneComponent;
-        case EEventListing::StaticMeshComponentsOnly: return bStaticMeshComponent;
-        default:                                      return false;
+            for (TFieldIterator<FProperty> It(Signature); It; ++It)
+            {
+                const FProperty* Param = *It;
+                if (!Param->HasAnyPropertyFlags(CPF_Parm) || Param->HasAnyPropertyFlags(CPF_ReturnParm))
+                {
+                    continue;
+                }
+                TSharedPtr<FJsonObject> ParamObj = MakeShared<FJsonObject>();
+                ParamObj->SetStringField(TEXT("name"), Param->GetName());
+                ParamObj->SetStringField(TEXT("type"), Param->GetCPPType());
+                ParamObj->SetBoolField(TEXT("is_out"),
+                    Param->HasAnyPropertyFlags(CPF_OutParm) && !Param->HasAnyPropertyFlags(CPF_ConstParm));
+                Parameters.Add(MakeShared<FJsonValueObject>(ParamObj));
+            }
         }
+        Entry->SetArrayField(TEXT("parameters"), Parameters);
+        Entry->SetNumberField(TEXT("parameter_count"), Parameters.Num());
+
+        const FMulticastScriptDelegate* Bound = Delegate->GetMulticastDelegate(Delegate->ContainerPtrToValuePtr<void>(Component));
+        Entry->SetBoolField(TEXT("is_bound"), Bound != nullptr && Bound->IsBound());
+        return Entry;
     }
 
     /**
@@ -500,10 +485,10 @@ namespace UEAgentRuntimeEventsImpl
 
 // Component event introspection.
 
-// MCP:get_component_events - Retrieve lifecycle, activation, registration, transform, and input events available on a component.
-//   @param actor_name - Name of the actor containing the component
-//   @param component_name - Name of the component to get events from
-//   @returns { actor_name: string, component_name: string, component_class: string, component_category: string, component_tooltip: string, component_display_name: string, events: [{name, type, description, category, is_overrideable, is_blueprint_event, function_signature}], events_count: int, component_is_active: bool, component_is_registered: bool, component_owner: string, component_creation_method: string }
+// MCP:get_component_events - List the events (dynamic multicast delegate properties, such as OnComponentHit or OnComponentBeginOverlap) that one component of an actor in the editor world exposes, read from its class by reflection, inherited ones included: per event its name, declaring class, whether it is inherited, its signature and parameters (name, C++ type, is_out), whether Blueprints can bind it (blueprint_assignable) and whether anything is bound to it on this component now. Also facts about the component: class with its category, tooltip and display-name metadata, active and registered state, owner and creation method. Read-only. A name it lists is what subscribe_to_delegate takes to record fires, and what add_component_bound_event binds in a Blueprint; get_class_properties lists every property of a class. An actor or component not found is an error.
+//   @param actor_name - Object name (not the label) of the actor in the editor world, compared without case, e.g. 'StaticMeshActor_0'.
+//   @param component_name - Object name of one of that actor's components, compared without case, e.g. 'StaticMeshComponent0'; get_actor_components lists them.
+//   @returns { actor_name: string, component_name: string, component_class: string, component_category: string, component_tooltip: string, component_display_name: string, events: [{name, owner_class, is_inherited, blueprint_assignable, blueprint_callable, signature, parameters: [{name, type, is_out}], parameter_count, is_bound}], events_count: int, declared_events_count: int, component_is_active: bool, component_is_registered: bool, component_owner: string, component_creation_method: string }
 
 TSharedPtr<FJsonObject> HandleGetComponentEvents(const TSharedPtr<FJsonObject>& Params)
 {
@@ -516,25 +501,14 @@ TSharedPtr<FJsonObject> HandleGetComponentEvents(const TSharedPtr<FJsonObject>& 
     UActorComponent* Component = nullptr;
     if (TSharedPtr<FJsonObject> Error = Impl::FindNamedComponent(OwnerName, TargetComponent, Component)) { return Error; }
 
-    // The catalogue entries that apply to this kind of component, in catalogue order. Every
-    // listed entry is reported as an overridable Blueprint event.
-    const bool bSceneComponent = Component->IsA<USceneComponent>();
-    const bool bStaticMeshComponent = Component->IsA<UStaticMeshComponent>();
+    // Every multicast delegate property the component's class has, its own and inherited ones, in reflection
+    // order (the class's own first, then each super class's) -- read from the class, never a fixed list.
     TArray<TSharedPtr<FJsonValue>> Listed;
-    for (const Impl::FKnownComponentEvent& Known : Impl::KnownComponentEvents)
+    int32 DeclaredCount = 0;
+    for (TFieldIterator<FMulticastDelegateProperty> It(Component->GetClass(), EFieldIteratorFlags::IncludeSuper); It; ++It)
     {
-        if (!Impl::IsListedFor(Known, bSceneComponent, bStaticMeshComponent))
-        {
-            continue;
-        }
-        TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
-        Entry->SetStringField(TEXT("name"), Known.Name);
-        Entry->SetStringField(TEXT("type"), Known.Category);
-        Entry->SetStringField(TEXT("category"), Known.Category);
-        Entry->SetStringField(TEXT("description"), Known.Description);
-        Entry->SetStringField(TEXT("function_signature"), Known.Signature);
-        Entry->SetBoolField(TEXT("is_overrideable"), true);
-        Entry->SetBoolField(TEXT("is_blueprint_event"), true);
+        TSharedPtr<FJsonObject> Entry = Impl::DescribeMulticastDelegate(*It, Component);
+        DeclaredCount += Entry->GetBoolField(TEXT("is_inherited")) ? 0 : 1;
         Listed.Add(MakeShared<FJsonValueObject>(Entry));
     }
 
@@ -542,6 +516,7 @@ TSharedPtr<FJsonObject> HandleGetComponentEvents(const TSharedPtr<FJsonObject>& 
     Payload->SetStringField(TEXT("actor_name"), OwnerName);
     Payload->SetStringField(TEXT("component_name"), TargetComponent);
     Payload->SetNumberField(TEXT("events_count"), Listed.Num());
+    Payload->SetNumberField(TEXT("declared_events_count"), DeclaredCount);
     Payload->SetArrayField(TEXT("events"), Listed);
     Impl::WriteComponentFacts(Component, Payload);
     return Payload;

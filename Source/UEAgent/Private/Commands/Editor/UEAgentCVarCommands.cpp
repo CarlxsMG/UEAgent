@@ -180,8 +180,8 @@ TSharedPtr<FJsonObject> HandleSetCVar(const TSharedPtr<FJsonObject>& Params)
 // ---------------------------------------------------------------------------
 // get_cvar
 // ---------------------------------------------------------------------------
-// MCP:get_cvar - Reads a console variable's live value, help text, and flags.
-//   @param name - Console variable name, e.g. "r.ScreenPercentage".
+// MCP:get_cvar - Read the live value of one console variable of the running editor through IConsoleManager, without changing it: the value as a string and parsed as int, float and bool, its help text, its raw flags and set_by (which layer last set it, such as Constructor, Scalability, ProjectSetting or Console). Use it to read one variable by exact name; to find names by substring or prefix use list_cvars; to change a value use set_cvar (or set_cvars_from_json for many); scalability groups as a whole: get_scalability_levels. A name that is not a registered console variable (including a console command, which has no value) is an error.
+//   @param name - Exact console variable name, e.g. "r.ScreenPercentage" or "t.MaxFPS", as list_cvars returns it (case-insensitive).
 //   @returns { name: string, value: string, string_value: string, int_value: int, float_value: float, bool_value: bool, help: string, flags: int, set_by: string }
 
 TSharedPtr<FJsonObject> HandleGetCVar(const TSharedPtr<FJsonObject>& Params)
@@ -357,7 +357,7 @@ TSharedPtr<FJsonObject> HandleSetScalabilityQuality(const TSharedPtr<FJsonObject
 // ---------------------------------------------------------------------------
 // get_scalability_levels
 // ---------------------------------------------------------------------------
-// MCP:get_scalability_levels - Reads the current engine scalability quality levels.  Calls Scalability::GetQualityLevels().
+// MCP:get_scalability_levels - Read the engine's live scalability quality levels (Scalability::GetQualityLevels, the sg.* groups of the editor session) without changing anything: one level per group, 0 Low, 1 Medium, 2 High, 3 Epic, 4 Cinematic, except ResolutionQuality, which is a screen percentage; single_quality_level is the shared level when every group agrees and -1 when they differ (custom). Use it before and after set_scalability_quality, which changes one group or all; for a single sg.* or r.* console variable use get_cvar; for frame rate under those settings use get_fps_info. These are the editor's current settings, not a per-platform device profile or a saved user setting. Takes no parameters and does not fail.
 //   @returns { ResolutionQuality: int, ViewDistanceQuality: int, AntiAliasingQuality: int, ShadowQuality: int, GlobalIlluminationQuality: int, ReflectionQuality: int, PostProcessQuality: int, TextureQuality: int, EffectsQuality: int, FoliageQuality: int, ShadingQuality: int, LandscapeQuality: int, single_quality_level: int }
 
 TSharedPtr<FJsonObject> HandleGetScalabilityLevels(const TSharedPtr<FJsonObject>& Params)
