@@ -100,6 +100,8 @@ old or retired name keeps working until 3.0, and its reply says what to call ins
   use one by one, as IWYU and Fab require. On 5.7, the build also warned about `USDMemory.h` where the
   `SetMetadata` write opens USD's allocator scope; the warning does not apply there, and is turned off.
 - The plugin's description in **Edit > Plugins** said about 2,100 tools, the count before 2.0.
+- The documentation site's GitHub box could show an older release for as long as the browser tab lived: the
+  theme kept the release, stars and forks for the whole session. It now asks GitHub again after an hour.
 
 ### Retired
 
