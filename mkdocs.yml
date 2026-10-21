@@ -127,6 +127,7 @@ nav:
   - Project:
       - Architecture: architecture.md
       - Security and privacy: security.md
+      - Accessibility: accessibility.md
       - Changelog: changelog.md
       - Contributing: contributing.md
       - Migrating to 2.0: migrating-to-2.0.md
