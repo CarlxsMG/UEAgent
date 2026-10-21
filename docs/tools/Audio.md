@@ -83,14 +83,14 @@ Add a real process node to a MetaSound Source graph by its registered class name
 
 ## `add_modulation_input_to_patch`
 
-*Destructive.*
+*Additive, idempotent.*
 
-Appends a USoundControlBus as an input of a USoundModulationPatch asset, in one undo step (undo removes it again), and saves the patch. A bus whose asset name is already among the inputs is skipped (added false, already_present true, not saved). input_name is not stored. Returns patch_path, bus_path, input_count, added, already_present, saved.
+Add a control bus as an input of a sound modulation patch asset, so the patch's output follows that bus, then save the patch. Use it after create_sound_modulation_patch and create_control_bus, which make the two assets; see the inputs with get_sound_modulation_patch_info, take one out with remove_modulation_input_from_patch, and set what the patch drives with set_modulation_patch_output_parameter. Idempotent per bus: a bus whose asset name is already an input is not added again (added false, already_present true) and nothing is saved. A patch or bus path that does not load is an error and nothing changes. One undo step that removes the input again; a failed save answers success false with the change kept in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `patch_path` | string | yes | Asset path to the USoundModulationPatch |
-| `bus_path` | string | yes | Asset path to the USoundControlBus to add as an input |
+| `patch_path` | string | yes | Asset path of the sound modulation patch, e.g. "/Game/Audio/Mod/SMP_Ducking", as create_sound_modulation_patch returns it. |
+| `bus_path` | string | yes | Asset path of the control bus to add, e.g. "/Game/Audio/Mod/CB_Music", as create_control_bus returns it. |
 | `input_name` | string | no | Ignored: the engine input struct has no name field, so the value is only written to the log (default empty) |
 
 **Returns:** `{ patch_path, bus_path, input_count, added, already_present, saved }`
@@ -583,11 +583,11 @@ Read an editor-level audio component by object name: volume, pitch, active state
 
 *Read-only.*
 
-Survey audio in the editor: a census of the first audio component of every actor in the editor world (even while PIE runs), with each one's volume, pitch and playing, looping and spatialized state, the counts and volume and pitch statistics, and the main audio device's state (audio_enabled, max channels, mixer loaded). Read-only; no parameters. Several fields are not measured: audio_quality comes from the channel count (64+ High, under 32 Low), audio_api is the platform's default backend, reverb and occlusion always read true, sample rate and buffer size are fixed defaults, and the recommendations and complexity score are heuristics. For the project's audio settings use get_project_settings_value; for one component in depth, get_audio_component_properties.
+Survey audio in the editor, every value read from the engine: a census of EVERY audio component of every actor in the editor world (even while PIE runs; an actor with several is counted once per component), each entry naming its owner and object path, with its volume, pitch and playing, looping and spatialized state, plus the counts and volume and pitch statistics; the main audio device's live state (audio_api is the module that created the device, then sample rate, buffer size, max channels, mixer and which audio plugins are on), all null with audio_device_note when there is no device (audio off: an editor started with -NoSound, or no device could be created); the audio quality level the engine applies (the user's quality level within the project's Audio settings levels); and the platform audio config the project sets (audio_platform_config, only the keys the config sets). Read-only; no parameters. audio_quality_score (the share of active components, null with none), the recommendations and the complexity score are heuristics. For other project audio settings use get_project_settings_value; for one component in depth, get_audio_component_properties.
 
 No parameters.
 
-**Returns:** `{ audio_settings_found: bool, audio_quality: string, audio_api: string, audio_enabled: bool, audio_mode: string, world_name?: string, audio_component_count: int, active_audio_component_count: int, spatialized_audio_component_count: int, average_volume: number, max_volume: number, max_pitch: number, engine_version: string, platform_name: string, audio_max_channels: int, audio_3d_enabled: bool, audio_reverb_enabled: bool, audio_occlusion_enabled: bool, audio_recommendations: [string], audio_complexity_score: number, audio_complexity_rating: string }`
+**Returns:** `{ audio_settings_found: bool, audio_settings_message: string, world_name?: string, audio_component_count: int, active_audio_component_count: int, playing_audio_component_count: int, looping_audio_component_count: int, spatialized_audio_component_count: int, sound_wave_count: int, sound_cue_count: int, total_volume: number, average_volume: number, max_volume: number, min_volume: number, total_pitch: number, average_pitch: number, max_pitch: number, min_pitch: number, audio_component_details: [{ audio_component_name: string, audio_component_path: string, audio_owner_name: string, audio_component_class: string, audio_volume: number, audio_pitch: number, audio_enabled: bool, audio_playing: bool, audio_looping: bool, audio_spatialized: bool, audio_mobility: string, audio_sound_name: string, audio_sound_class: string, audio_sound_duration: number, audio_sound_is_sound_wave: bool, audio_sound_is_sound_cue: bool, audio_position: { x, y, z } }], engine_version: string, platform_name: string, platform_architecture: string, platform_os: string, audio_enabled: bool, audio_api: string|null, audio_mixer_loaded: bool|null, audio_max_channels: int|null, audio_sample_rate: number|null, audio_buffer_size: int|null, audio_num_buffers: int|null, audio_spatialization_plugin_enabled: bool|null, audio_reverb_plugin_enabled: bool|null, audio_occlusion_plugin_enabled: bool|null, audio_modulation_plugin_enabled: bool|null, audio_device_note?: string, audio_quality: string|null, audio_quality_level: int|null, audio_quality_max_channels: int|null, audio_quality_level_count: int, audio_platform_config: { section: string, sample_rate?: int, callback_buffer_frame_size?: int, num_buffers?: int, max_channels?: int, num_source_workers?: int }, audio_quality_score: number|null, audio_recommendations: [string], audio_complexity_score: number, audio_complexity_rating: string }`
 
 ## `get_control_bus_info`
 
@@ -802,20 +802,21 @@ Lists all subtitle cues on a USubtitleAssetUserData.  Read-only walk of the Subt
 
 *Additive.*
 
-Starts the sound already assigned to an audio component of the editor world, matched by object name (case-insensitive) against the first audio component of each actor; components in a running PIE world are not reached. start_time is an offset in seconds into the sound. A component without a sound is an error: assign one with set_audio_sound. Transient: nothing is saved, marked dirty or undoable. was_playing and playing are read just before and just after the call. Stop with stop_sound; to play an asset at a location without a component use play_sound_at_location.
+Starts the sound already assigned to an audio component of the editor world, found by object name (case-insensitive) among EVERY audio component of every actor, so an actor's second or third audio component is reached too; a name that components of several actors carry is an error listing the owners unless actor_name (object name, not label) picks one. Components in a running PIE world are not reached. start_time is an offset in seconds into the sound. A component without a sound is an error: assign one with set_audio_sound. Transient: nothing is saved, marked dirty or undoable. success is true only when the audio device holds a new active sound for this component afterwards, read on the audio thread before and after the call (active_sounds_before/after, sounds of the component not being stopped). No audio device (an editor started with -NoSound, or no device could be created), a world that does not allow audio playback, or a sound the device did not start (not playable, out of range, a concurrency limit, a looping sound parked as a virtual loop until a listener comes in range) is an error saying which and naming the component. was_playing and playing (UAudioComponent::IsPlaying) are read just before and just after the call; audio_component_path and audio_owner_name name the component used. Stop with stop_sound; to play an asset at a location without a component use play_sound_at_location.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `audio_component_name` | string | yes | Name of the audio component to play sound on |
+| `audio_component_name` | string | yes | Object name of the audio component to play (e.g. "AudioComponent0"), compared without case against every audio component of every actor in the editor world. |
 | `start_time` | number | no | Optional offset in seconds to start playback at |
+| `actor_name` | string | no | Optional object name (not label) of the actor that owns the component, compared without case. Needed when several actors own an audio component of that name (every AmbientSound's is AudioComponent0); an empty one, one that names no actor, or one whose actor has no such component is an error. |
 
-**Returns:** `{ audio_component_name: string, playing: bool, was_playing: bool, sound_name: string, start_time: number, success: bool }`
+**Returns:** `{ audio_component_name: string, audio_component_path: string, audio_owner_name: string, playing: bool, was_playing: bool, sound_name: string, start_time: number, active_sounds_before: int, active_sounds_after: int (active sounds of this component on the device, those being stopped left out), active_sound_started: bool, success: bool }`
 
 ## `play_sound_at_location`
 
 *Additive.*
 
-Play a sound asset (sound wave, sound cue or MetaSound source) once at a world location in the editor world, as a fire-and-forget one-shot with no audio component (UGameplayStatics::PlaySoundAtLocation) and only the sound's own attenuation. Nothing is saved, dirtied or undoable, and no handle comes back: the sound plays to its end, a looping one keeps looping with no way to stop it from here, and one out of the listener's earshot is skipped by the engine. Each call starts another instance. success is true once the request is made, even with no audio device. A sound that does not load or a location that is not an array of 3 numbers is an error. For playback you can stop or inspect, use play_sound and stop_sound on an audio component (set_audio_sound assigns its sound).
+Play a sound asset (sound wave, sound cue or MetaSound source) once at a world location in the editor world, as a fire-and-forget one-shot with no audio component (UGameplayStatics::PlaySoundAtLocation) and only the sound's own attenuation. Nothing is saved, dirtied or undoable, and no handle comes back: the sound plays to its end, and a looping one keeps looping with no way to stop it from here. Each call starts another instance. success is true only when the audio device holds a new active sound of that asset afterwards, counted on the audio thread before and after the call (active_sounds_before/after). No audio device (an editor started with -NoSound, or no device could be created), a world that does not allow audio playback, a one-shot out of earshot of every listener (the engine's own audibility test), or a sound the device did not start (not playable, a concurrency limit, a looping sound parked as a virtual loop) is an error saying which. A sound that does not load or a location that is not an array of 3 numbers is an error too. For playback you can stop or inspect, use play_sound and stop_sound on an audio component (set_audio_sound assigns its sound).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -825,7 +826,7 @@ Play a sound asset (sound wave, sound cue or MetaSound source) once at a world l
 | `pitch` | number | no | Optional pitch multiplier, e.g. 2.0 for an octave up; default 1.0. |
 | `rotation` | array | no | Optional [pitch, yaw, roll] in degrees, the facing of the sound (it matters to a directional attenuation); default [0, 0, 0]. |
 
-**Returns:** `{ sound_path: string, sound_name: string, location: { x, y, z }, rotation: { pitch, yaw, roll }, volume: number, pitch: number, success: bool }`
+**Returns:** `{ sound_path: string, sound_name: string, location: { x, y, z }, rotation: { pitch, yaw, roll }, volume: number, pitch: number, audio_device_id: int, audible: bool (the engine's audibility test at that location), max_distance: number, looping: bool, active_sounds_before: int, active_sounds_after: int (active sounds of this asset on the device), active_sound_created: bool, success: bool }`
 
 ## `remove_bus_from_mix`
 
@@ -974,14 +975,15 @@ Remove a single FSubtitleAssetData cue by index. Inverse of add_subtitle_cue; us
 
 *Destructive, idempotent.*
 
-Apply a 3D audio preset to one audio component of a placed actor in the editor world, in one undo step that dirties the level without saving it: spatialization (bAllowSpatialization) plus, for every preset but Disabled, an attenuation override sphere with the preset's inner radius and falloff distance (High 1000/2000 cm, Enabled and Medium 500/1000, Low 250/500); Disabled turns both off. audio_3d_configured is read back from the component; attenuation_falloff and the cone numbers only describe the preset. The same preset again gives the same result. Only the first audio component of each actor is searched, by object name; a missing component or unknown preset is an error and nothing changes. Read the result with get_audio_component_properties; set_audio_volume and set_audio_sound change the rest.
+Apply a 3D audio preset to one audio component of a placed actor in the editor world, in one undo step that dirties the level without saving it: spatialization (bAllowSpatialization) plus, for every preset but Disabled, an attenuation override sphere with the preset's inner radius and falloff distance (High 1000/2000 cm, Enabled and Medium 500/1000, Low 250/500); Disabled turns both off. audio_3d_configured is read back from the component; attenuation_falloff and the cone numbers only describe the preset. The same preset again gives the same result. The component is found by object name (case-insensitive) among EVERY audio component of every actor, so an actor's second or third audio component is reached too; a name that components of several actors carry is an error listing the owners unless actor_name (object name, not label) picks one, and the reply names the component changed (audio_component_path, audio_owner_name). A missing component or unknown preset is an error and nothing changes. Read the result with get_audio_component_properties; set_audio_volume and set_audio_sound change the rest.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `audio_component_name` | string | yes | Object name of the audio component, compared without case against the first audio component of each actor, e.g. 'AudioComponent0' (get_audio_settings lists them). |
+| `audio_component_name` | string | yes | Object name of the audio component, compared without case against every audio component of every actor, e.g. 'AudioComponent0' (get_audio_settings lists them with their owners). |
 | `audio_3d_settings` | string | yes | Preset name: 'Enabled', 'Disabled', 'High', 'Medium' or 'Low' (case-insensitive); any other name is an error. |
+| `actor_name` | string | no | Optional object name (not label) of the actor that owns the component, compared without case. Needed when several actors own an audio component of that name (every AmbientSound's is AudioComponent0); an empty one, one that names no actor, or one whose actor has no such component is an error. |
 
-**Returns:** `{ audio_component_name: string, audio_3d_settings: string, audio_3d_configured: bool, audio_3d_message: string, old_3d_enabled: bool, new_3d_enabled: bool, attenuation_override: bool, applied_attenuation_radius?: number, applied_falloff_distance?: number, 3d_enabled: bool, spatialization_enabled: bool, attenuation_distance: number, attenuation_radius: number, attenuation_falloff: number, attenuation_cone_angle: number, attenuation_cone_feather: number, audio_3d_recommendations: [string] }`
+**Returns:** `{ audio_component_name: string, audio_component_path: string, audio_owner_name: string, audio_3d_settings: string, audio_3d_configured: bool, audio_3d_message: string, old_3d_enabled: bool, new_3d_enabled: bool, attenuation_override: bool, applied_attenuation_radius?: number, applied_falloff_distance?: number, 3d_enabled: bool, spatialization_enabled: bool, attenuation_distance: number, attenuation_radius: number, attenuation_falloff: number, attenuation_cone_angle: number, attenuation_cone_feather: number, audio_3d_recommendations: [string] }`
 
 ## `set_audio_bus_channels`
 
@@ -1000,27 +1002,29 @@ Change the channel layout (AudioBusChannels) of an existing UAudioBus asset and 
 
 *Destructive, idempotent.*
 
-Sets the sound asset of an audio component of the editor world, matched by object name (case-insensitive) against the first audio component of each actor; components in a running PIE world are not reached. A component that is playing restarts with the new sound unless it allows multiple instances. The change is not saved, marked dirty or undoable. A missing component or a sound that does not load is an error. previous_sound_name names the sound it replaced (None when there was none). Start playback with play_sound.
+Sets the sound asset of an audio component of the editor world, found by object name (case-insensitive) among EVERY audio component of every actor, so an actor's second or third audio component is reached too; a name that components of several actors carry is an error listing the owners unless actor_name (object name, not label) picks one. Components in a running PIE world are not reached. A component that is playing restarts with the new sound unless it allows multiple instances. The change is not saved, marked dirty or undoable. A missing component or a sound that does not load is an error. previous_sound_name names the sound it replaced (None when there was none); audio_component_path and audio_owner_name name the component changed. Start playback with play_sound.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `audio_component_name` | string | yes | Name of the audio component to modify |
+| `audio_component_name` | string | yes | Object name of the audio component to modify (e.g. "AudioComponent0"), compared without case against every audio component of every actor in the editor world. |
 | `sound_path` | string | yes | Full asset path to the sound (e.g. '/Game/Audio/MySound.MySound') |
+| `actor_name` | string | no | Optional object name (not label) of the actor that owns the component, compared without case. Needed when several actors own an audio component of that name (every AmbientSound's is AudioComponent0); an empty one, one that names no actor, or one whose actor has no such component is an error. |
 
-**Returns:** `{ audio_component_name: string, sound_path: string, sound_name: string, previous_sound_name: string, sound_duration: number, success: bool }`
+**Returns:** `{ audio_component_name: string, audio_component_path: string, audio_owner_name: string, sound_path: string, sound_name: string, previous_sound_name: string, sound_duration: number, success: bool }`
 
 ## `set_audio_volume`
 
 *Destructive, idempotent.*
 
-Set VolumeMultiplier (0 to 10, else an error; also resets VolumeModulationMin/Max to 1) on an audio component of the editor world, matched by object name against the first audio component of each actor. No undo, no dirty mark. Returns old_volume, new_volume and volume_set.
+Set VolumeMultiplier (0 to 10, else an error; also resets VolumeModulationMin/Max to 1) on one audio component of the editor world, found by object name (case-insensitive) among EVERY audio component of every actor, so an actor's second or third audio component is reached too. A name that components of several actors carry is an error listing the owners, nothing changed, unless actor_name (object name, not label) picks one. No undo, no dirty mark. Returns old_volume, new_volume and volume_set, and which component it changed: audio_component_path and audio_owner_name.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `audio_component_name` | string | yes | Object name of the audio component to modify (e.g. "AudioComponent0"), compared without case; only the first audio component of each actor is searched. |
+| `audio_component_name` | string | yes | Object name of the audio component to modify (e.g. "AudioComponent0"), compared without case against every audio component of every actor in the editor world. |
 | `volume` | number | yes | Volume multiplier between 0.0 and 10.0 |
+| `actor_name` | string | no | Optional object name (not label) of the actor that owns the component, compared without case. Needed when several actors own an audio component of that name (every AmbientSound's is AudioComponent0); an empty one, one that names no actor, or one whose actor has no such component is an error. |
 
-**Returns:** `{ audio_component_name: string, old_volume: number, new_volume: number, requested_volume: number, volume_set: bool, volume_message: string, audio_enabled: bool, audio_pitch: number, audio_mobility: string, audio_sound_name: string, audio_3d_attenuation_radius: number, audio_position: { x, y, z }, audio_owner_name: string }`
+**Returns:** `{ audio_component_name: string, audio_component_path: string, audio_owner_name: string, old_volume: number, new_volume: number, requested_volume: number, volume_set: bool, volume_message: string, audio_enabled: bool, audio_pitch: number, audio_mobility: string, audio_sound_name: string, audio_3d_attenuation_radius: number, audio_position: { x, y, z } }`
 
 ## `set_control_bus_mix_stage_value`
 
@@ -1130,14 +1134,14 @@ Writes the settings that match the class of a USoundModulationGenerator asset (L
 
 *Destructive, idempotent.*
 
-Writes the given Settings fields (value_normalized, clamp_to_normalized_range, value_unit) of a USoundModulationParameter asset, in one undo step (undo restores the previous settings), and saves it; omitted fields keep their value, and the asset is saved even when none is given. Returns parameter_path, the three settings as stored, updated, saved.
+Change the default value and range settings of a sound modulation parameter asset (the value a modulator starts from, and whether it is clamped to 0-1), then save it. Use it after create_modulation_parameter, which makes the asset; read the settings back with get_modulation_parameter_info. Only the fields you pass change; the others keep their value, and a call with none of them still saves the asset. A path that does not load as a modulation parameter is an error, and so is clamp_to_normalized_range on Unreal Engine 5.7, which lacks that setting; nothing changes then. Idempotent: the same values give the same asset. One undo step that restores the previous settings; a failed save answers success false with the change kept in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `parameter_path` | string | yes | Asset path to the USoundModulationParameter |
-| `value_normalized` | number | no | Optional float in [0,1]; sets Settings.ValueNormalized |
-| `clamp_to_normalized_range` | boolean | no | Optional bool; sets Settings.bClampToNormalizedRange. Needs UE 5.8. |
-| `value_unit` | number | no | Optional float (editor-only); sets Settings.ValueUnit |
+| `value_normalized` | number | no | Default value in normalized units, from 0 to 1 (e.g. 0.5); written as given, without clamping. |
+| `clamp_to_normalized_range` | boolean | no | true to keep the parameter's value within 0-1, false to let it go outside; Unreal Engine 5.8 only (refused on 5.7). |
+| `value_unit` | number | no | Default value in the parameter's own unit (for example decibels or hertz), shown in the editor; editor-only. |
 
 **Returns:** `{ parameter_path, value_normalized, clamp_to_normalized_range, value_unit, updated, saved }`
 
@@ -1299,10 +1303,11 @@ Updates the text and timing fields on an existing subtitle cue.  Loads the USubt
 
 *Destructive.*
 
-Stop playback on an audio component of the editor world (UAudioComponent::Stop), matched by object name against the first audio component of each actor; components in a running PIE world are not reached. Returns was_playing and playing; success is always true. Start playback with play_sound.
+Stop playback on an audio component of the editor world (UAudioComponent::Stop), found by object name (case-insensitive) among EVERY audio component of every actor, so an actor's second or third audio component is reached too; a name that components of several actors carry is an error listing the owners unless actor_name (object name, not label) picks one. Components in a running PIE world are not reached. Returns was_playing and playing, and audio_component_path and audio_owner_name naming the component stopped; success is always true once the component is found. Start playback with play_sound.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `audio_component_name` | string | yes | Object name of the audio component to stop (e.g. "AudioComponent0"), compared without case; only the first audio component of each actor is searched. |
+| `audio_component_name` | string | yes | Object name of the audio component to stop (e.g. "AudioComponent0"), compared without case against every audio component of every actor in the editor world. |
+| `actor_name` | string | no | Optional object name (not label) of the actor that owns the component, compared without case. Needed when several actors own an audio component of that name (every AmbientSound's is AudioComponent0); an empty one, one that names no actor, or one whose actor has no such component is an error. |
 
-**Returns:** `{ audio_component_name: string, playing: bool, was_playing: bool, success: bool }`
+**Returns:** `{ audio_component_name: string, audio_component_path: string, audio_owner_name: string, playing: bool, was_playing: bool, success: bool }`

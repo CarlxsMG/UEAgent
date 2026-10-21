@@ -617,9 +617,10 @@ TSharedPtr<FJsonObject> HandleCreateSoundModulationPatch(
 // ---------------------------------------------------------------------------
 // add_modulation_input_to_patch
 // ---------------------------------------------------------------------------
-// MCP:add_modulation_input_to_patch - Appends a USoundControlBus as an input of a USoundModulationPatch asset, in one undo step (undo removes it again), and saves the patch. A bus whose asset name is already among the inputs is skipped (added false, already_present true, not saved). input_name is not stored. Returns patch_path, bus_path, input_count, added, already_present, saved.
-//   @param patch_path - Asset path to the USoundModulationPatch
-//   @param bus_path - Asset path to the USoundControlBus to add as an input
+// MCP:add_modulation_input_to_patch - Add a control bus as an input of a sound modulation patch asset, so the patch's output follows that bus, then save the patch. Use it after create_sound_modulation_patch and create_control_bus, which make the two assets; see the inputs with get_sound_modulation_patch_info, take one out with remove_modulation_input_from_patch, and set what the patch drives with set_modulation_patch_output_parameter. Idempotent per bus: a bus whose asset name is already an input is not added again (added false, already_present true) and nothing is saved. A patch or bus path that does not load is an error and nothing changes. One undo step that removes the input again; a failed save answers success false with the change kept in memory.
+//   @hints additive idempotent
+//   @param patch_path - Asset path of the sound modulation patch, e.g. "/Game/Audio/Mod/SMP_Ducking", as create_sound_modulation_patch returns it.
+//   @param bus_path - Asset path of the control bus to add, e.g. "/Game/Audio/Mod/CB_Music", as create_control_bus returns it.
 //   @param input_name - Ignored: the engine input struct has no name field, so the value is only written to the log (default empty)
 //   @returns { patch_path, bus_path, input_count, added, already_present, saved }
 TSharedPtr<FJsonObject> HandleAddModulationInputToPatch(
@@ -951,11 +952,11 @@ TSharedPtr<FJsonObject> HandleCreateModulationParameter(
 // ---------------------------------------------------------------------------
 // set_modulation_parameter_settings
 // ---------------------------------------------------------------------------
-// MCP:set_modulation_parameter_settings - Writes the given Settings fields (value_normalized, clamp_to_normalized_range, value_unit) of a USoundModulationParameter asset, in one undo step (undo restores the previous settings), and saves it; omitted fields keep their value, and the asset is saved even when none is given. Returns parameter_path, the three settings as stored, updated, saved.
+// MCP:set_modulation_parameter_settings - Change the default value and range settings of a sound modulation parameter asset (the value a modulator starts from, and whether it is clamped to 0-1), then save it. Use it after create_modulation_parameter, which makes the asset; read the settings back with get_modulation_parameter_info. Only the fields you pass change; the others keep their value, and a call with none of them still saves the asset. A path that does not load as a modulation parameter is an error, and so is clamp_to_normalized_range on Unreal Engine 5.7, which lacks that setting; nothing changes then. Idempotent: the same values give the same asset. One undo step that restores the previous settings; a failed save answers success false with the change kept in memory.
 //   @param parameter_path - Asset path to the USoundModulationParameter
-//   @param value_normalized - Optional float in [0,1]; sets Settings.ValueNormalized
-//   @param clamp_to_normalized_range - Optional bool; sets Settings.bClampToNormalizedRange. Needs UE 5.8.
-//   @param value_unit - Optional float (editor-only); sets Settings.ValueUnit
+//   @param value_normalized - Default value in normalized units, from 0 to 1 (e.g. 0.5); written as given, without clamping.
+//   @param clamp_to_normalized_range - true to keep the parameter's value within 0-1, false to let it go outside; Unreal Engine 5.8 only (refused on 5.7).
+//   @param value_unit - Default value in the parameter's own unit (for example decibels or hertz), shown in the editor; editor-only.
 //   @returns { parameter_path, value_normalized, clamp_to_normalized_range, value_unit, updated, saved }
 TSharedPtr<FJsonObject> HandleSetModulationParameterSettings(
 	const TSharedPtr<FJsonObject>& Params)

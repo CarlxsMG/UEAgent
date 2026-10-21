@@ -580,14 +580,14 @@ Delete a variant set from a prim of a cached USD stage, as the variant set edito
 
 *Destructive.*
 
-Save a USD stage's file layers to disk: the root layer and every sublayer of its stack (UE::FSdfLayer::Save on each), each one only when it is dirty unless force is set. layers reports every layer with was_dirty, saved, dirty after and, for one left alone, skipped ("clean", or "anonymous" for an in-memory layer, which has no file); layers_saved counts the writes. Session layers are never saved (they are in-memory by design); a memory-only stage is exported with flatten_usd_stage instead. saved is true when at least one layer was written and none failed; when every layer is clean or anonymous nothing is written and the call fails with saved:false, and a layer whose Save returns false is named in the error. Use force=true to re-write clean file layers (rare — typically only when a downstream tool requires a specific mtime). list_usd_stage_layers shows which layers are dirty first.
+Save a USD stage's file layers to disk: the root layer and every sublayer of its stack (UE::FSdfLayer::Save on each), each one only when it is dirty unless force is set. layers reports every layer with was_dirty, saved, dirty after and, for one left alone, skipped ("clean", or "anonymous" for an in-memory layer, which has no file); layers_saved counts the writes. Session layers are never saved (they are in-memory by design); a memory-only stage is exported with flatten_usd_stage instead. When nothing needs saving (every layer clean) nothing is written and the call succeeds with layers_saved 0, saved false and a note. saved is true when at least one layer was written and every dirty layer was; a dirty layer left unsaved -- its Save returned false, or it is anonymous, with no file to write -- fails the call with saved false and a save_error naming it. Use force=true to re-write clean file layers (rare — typically only when a downstream tool requires a specific mtime). list_usd_stage_layers shows which layers are dirty first.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `stage_name` | string | yes | Name the stage was registered under, OR an absolute file path to auto-open. |
 | `force` | boolean | no | Re-save every file layer of the stack even when it is clean (default false: only dirty layers are written). |
 
-**Returns:** `{ stage_name: string, resolution: string, saved: bool, layers_saved: int, layers: [{ identifier: string, real_path: string, is_root: bool, was_dirty: bool, saved: bool, dirty: bool, skipped?: string }], dirty: bool (the root layer after the save), force: bool, real_path: string (the root layer's), errors: [string]? }`
+**Returns:** `{ stage_name: string, resolution: string, saved: bool, layers_saved: int, layers: [{ identifier: string, real_path: string, is_root: bool, was_dirty: bool, saved: bool, dirty: bool, skipped?: string }], dirty: bool (the root layer after the save), force: bool, real_path: string (the root layer's), note?: string (nothing needed saving), save_error?: string (the dirty layers left unsaved), errors: [string]? }`
 
 ## `set_usd_attribute_value`
 

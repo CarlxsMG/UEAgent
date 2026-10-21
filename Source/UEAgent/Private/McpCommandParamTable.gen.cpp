@@ -3269,7 +3269,7 @@ static const TCHAR* const GFlatCommandParams[] =
         TEXT("sequence_name"), TEXT("world"),
     nullptr,
     TEXT("play_sound"),
-        TEXT("audio_component_name"), TEXT("start_time"),
+        TEXT("actor_name"), TEXT("audio_component_name"), TEXT("start_time"),
     nullptr,
     TEXT("play_sound_at_location"),
         TEXT("location"), TEXT("pitch"), TEXT("rotation"), TEXT("sound_path"), TEXT("volume"),
@@ -4256,7 +4256,7 @@ static const TCHAR* const GFlatCommandParams[] =
         TEXT("attribute_set_class_path"), TEXT("data_table_path"), TEXT("metadata_rows"),
     nullptr,
     TEXT("set_audio_3d_settings"),
-        TEXT("audio_3d_settings"), TEXT("audio_component_name"),
+        TEXT("actor_name"), TEXT("audio_3d_settings"), TEXT("audio_component_name"),
     nullptr,
     TEXT("set_audio_bus_channels"),
         TEXT("bus_path"), TEXT("channels"),
@@ -4269,10 +4269,10 @@ static const TCHAR* const GFlatCommandParams[] =
         TEXT("time_seconds"), TEXT("volume"),
     nullptr,
     TEXT("set_audio_sound"),
-        TEXT("audio_component_name"), TEXT("sound_path"),
+        TEXT("actor_name"), TEXT("audio_component_name"), TEXT("sound_path"),
     nullptr,
     TEXT("set_audio_volume"),
-        TEXT("audio_component_name"), TEXT("volume"),
+        TEXT("actor_name"), TEXT("audio_component_name"), TEXT("volume"),
     nullptr,
     TEXT("set_behavior_class"),
         TEXT("behavior_class"), TEXT("config_path"),
@@ -5884,7 +5884,7 @@ static const TCHAR* const GFlatCommandParams[] =
         TEXT("force"),
     nullptr,
     TEXT("stop_sound"),
-        TEXT("audio_component_name"),
+        TEXT("actor_name"), TEXT("audio_component_name"),
     nullptr,
     TEXT("stop_trace"),
     nullptr,
@@ -5981,7 +5981,7 @@ static const TCHAR* const GFlatCommandParams[] =
 };
 
 static constexpr int32 GNumCommands = 1789;
-static constexpr int32 GNumParamNames = 6027;
+static constexpr int32 GNumParamNames = 6032;
 
 // Built ONCE, on first use (function-local static => thread-safe init). The
 // dispatcher is game-thread only, so there is no contention after that.

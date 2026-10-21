@@ -5,7 +5,7 @@
 #include "Commands/Gameplay/GameplayActorLookup.h"
 #include "Commands/Common/McpJsonPropertyApply.h"   // set/get_behavior_tree_node_property: dotted paths and the honest JSON applier
 #include "Engine/World.h"
-#include "Engine/Engine.h"                                 // GEngine, FWorldContext (get_behavior_tree_status: PIE first)
+#include "Engine/Engine.h"                                 // GEngine, FWorldContext (the runtime tools look in a PIE world first)
 #include "EngineUtils.h"
 #include "Editor.h"
 #include "GameFramework/Actor.h"
@@ -443,16 +443,47 @@ namespace
 // Helpers
 //----------------------------------------------------------------------//
 
-// Editor-world actor lookup (object name or label) and the AI components that drive it.
+// The actor a runtime tool acts on (object name or label) and the AI components that drive it.
 
-AActor* FindActorByName(const FString& NameOrLabel)
+/**
+ * The actor NameOrLabel names, looked up in a running PIE world first -- where a placed pawn is possessed by its
+ * AIController and really runs its tree and blackboard -- then in the editor world, where no pawn is possessed.
+ * OutWorldLabel says which world answered: "pie" or "editor". An empty name answers nothing (no actor is visited).
+ */
+static AActor* FindActorPieFirst(const FString& NameOrLabel, FString& OutWorldLabel)
 {
-    // Editor world only, and an empty name answers nothing (no actor is visited).
+    OutWorldLabel = TEXT("editor");
     if (NameOrLabel.IsEmpty())
     {
         return nullptr;
     }
+    if (GEngine)
+    {
+        for (const FWorldContext& Context : GEngine->GetWorldContexts())
+        {
+            UWorld* PieWorld = Context.WorldType == EWorldType::PIE ? Context.World() : nullptr;
+            if (AActor* Found = PieWorld ? mcp_common::FindActorByName(PieWorld, NameOrLabel) : nullptr)
+            {
+                OutWorldLabel = TEXT("pie");
+                return Found;
+            }
+        }
+    }
     return mcp_common::FindActorByName(mcp_common::GetEditorWorld(), NameOrLabel);
+}
+
+/** Stamps on R the world that answered a FindActorPieFirst lookup: world ("pie" or "editor") and world_name, read from InWorld. */
+static void AddAnsweringWorld(const TSharedPtr<FJsonObject>& R, const FString& WorldLabel, const UObject* InWorld)
+{
+    const UWorld* World = InWorld ? InWorld->GetWorld() : nullptr;
+    R->SetStringField(TEXT("world"), WorldLabel);
+    R->SetStringField(TEXT("world_name"), World ? World->GetName() : FString());
+}
+
+/** The error reply for an actor_name found in neither world. */
+static TSharedPtr<FJsonObject> RuntimeActorNotFoundReply(const FString& ActorName)
+{
+    return mcp_common::MakeErrorReply(FString::Printf(TEXT("Actor not found in a PIE world or the editor world: %s"), *ActorName));
 }
 
 UBehaviorTreeComponent* ResolveBehaviorTreeComponent(AActor* Subject)
@@ -490,50 +521,51 @@ UBlackboardComponent* GetBlackboardComponent(AActor* Subject)
     return Subject->FindComponentByClass<UBlackboardComponent>();
 }
 
-// The same lookups for a request, each null with the error reply in OutError when a step fails: the running
-// blackboard of the actor ActorName; the behavior tree component of the actor the required actor_name names; and
-// that actor's running blackboard with the type of the key the required key_name names.
+// The same lookups for a request, each null with the error reply in OutError when a step fails, and OutWorldLabel
+// naming the world the actor was found in (FindActorPieFirst): the running blackboard of the actor ActorName; the
+// behavior tree component of the actor the required actor_name names; and that actor's running blackboard with the
+// type of the key the required key_name names.
 
-UBlackboardComponent* FindLiveBlackboard(const FString& ActorName, TSharedPtr<FJsonObject>& OutError)
+UBlackboardComponent* FindLiveBlackboard(const FString& ActorName, FString& OutWorldLabel, TSharedPtr<FJsonObject>& OutError)
 {
-    AActor* Actor = FindActorByName(ActorName);
+    AActor* Actor = FindActorPieFirst(ActorName, OutWorldLabel);
     if (!Actor)
     {
-        OutError = mcp_common::MakeErrorReply(FString::Printf(TEXT("Actor not found: %s"), *ActorName));
+        OutError = RuntimeActorNotFoundReply(ActorName);
         return nullptr;
     }
     UBlackboardComponent* BB = GetBlackboardComponent(Actor);
     if (!BB)
     {
-        OutError = mcp_common::MakeErrorReply(FString::Printf(TEXT("No running BlackboardComponent found for actor '%s' (requires an AI-possessed pawn with an active blackboard)."), *ActorName));
+        OutError = mcp_common::MakeErrorReply(FString::Printf(TEXT("No running BlackboardComponent found for actor '%s' in the %s world (requires an AI-possessed pawn with an active blackboard, or a BlackboardComponent on the actor)."), *ActorName, *OutWorldLabel));
     }
     return BB;
 }
 
 UBehaviorTreeComponent* ReadTreeComponent(const TSharedPtr<FJsonObject>& Params, FString& OutActorName,
-    TSharedPtr<FJsonObject>& OutError)
+    FString& OutWorldLabel, TSharedPtr<FJsonObject>& OutError)
 {
     if (!Params.IsValid() || !Params->TryGetStringField(TEXT("actor_name"), OutActorName) || OutActorName.IsEmpty())
     {
         OutError = mcp_common::MakeErrorReply(TEXT("Missing required parameter 'actor_name'"));
         return nullptr;
     }
-    AActor* Actor = FindActorByName(OutActorName);
+    AActor* Actor = FindActorPieFirst(OutActorName, OutWorldLabel);
     if (!Actor)
     {
-        OutError = mcp_common::MakeErrorReply(FString::Printf(TEXT("Actor not found: %s"), *OutActorName));
+        OutError = RuntimeActorNotFoundReply(OutActorName);
         return nullptr;
     }
     UBehaviorTreeComponent* BTC = ResolveBehaviorTreeComponent(Actor);
     if (!BTC)
     {
-        OutError = mcp_common::MakeErrorReply(FString::Printf(TEXT("No UBehaviorTreeComponent on actor '%s'"), *OutActorName));
+        OutError = mcp_common::MakeErrorReply(FString::Printf(TEXT("No UBehaviorTreeComponent on actor '%s' in the %s world"), *OutActorName, *OutWorldLabel));
     }
     return BTC;
 }
 
 UBlackboardComponent* ReadBlackboardKey(const TSharedPtr<FJsonObject>& Params, FString& OutActorName,
-    FString& OutKeyName, UClass*& OutKeyType, TSharedPtr<FJsonObject>& OutError)
+    FString& OutKeyName, UClass*& OutKeyType, FString& OutWorldLabel, TSharedPtr<FJsonObject>& OutError)
 {
     if (!Params.IsValid() || !Params->TryGetStringField(TEXT("actor_name"), OutActorName) || OutActorName.IsEmpty())
     {
@@ -545,7 +577,7 @@ UBlackboardComponent* ReadBlackboardKey(const TSharedPtr<FJsonObject>& Params, F
     {
         return nullptr;
     }
-    UBlackboardComponent* BB = FindLiveBlackboard(OutActorName, OutError);
+    UBlackboardComponent* BB = FindLiveBlackboard(OutActorName, OutWorldLabel, OutError);
     if (!BB)
     {
         return nullptr;
@@ -553,7 +585,7 @@ UBlackboardComponent* ReadBlackboardKey(const TSharedPtr<FJsonObject>& Params, F
     const FBlackboard::FKey KeyID = BB->GetKeyID(FName(*OutKeyName));
     if (KeyID == FBlackboard::InvalidKey)
     {
-        OutError = mcp_common::MakeErrorReply(FString::Printf(TEXT("Blackboard key '%s' not found on actor '%s'"), *OutKeyName, *OutActorName));
+        OutError = mcp_common::MakeErrorReply(FString::Printf(TEXT("Blackboard key '%s' not found on actor '%s' in the %s world"), *OutKeyName, *OutActorName, *OutWorldLabel));
         return nullptr;
     }
     OutKeyType = BB->GetKeyType(KeyID);
@@ -617,10 +649,10 @@ TSharedPtr<FJsonObject> HandleGetBehaviorTreeInfo(const TSharedPtr<FJsonObject>&
 // Runtime: run / stop
 //----------------------------------------------------------------------//
 
-// MCP:run_behavior_tree - Start a BehaviorTree asset with AAIController::RunBehaviorTree on an AIController or the pawn it possesses. The actor is searched in the editor world only, never PIE, where pawns are not auto-possessed, so it usually errors with no AIController. Returns started and ai_controller; nothing is saved.
-//   @param actor_name - Object name or label of the pawn or AIController in the editor world (first match).
+// MCP:run_behavior_tree - Start a BehaviorTree asset with AAIController::RunBehaviorTree on an AIController or the pawn it possesses. The actor is looked up in a running PIE world first, where a placed pawn is possessed by its AI controller, then in the editor world, where no pawn is possessed (so an editor-world pawn errors with no AIController); world says which answered (pie or editor) and world_name names it. Returns started and ai_controller; runtime state only, nothing is saved. An actor found in neither world, a tree that does not load, or no AIController is an error. Read the run with get_behavior_tree_status; stop it with stop_behavior_tree.
+//   @param actor_name - Object name or label of the pawn or AIController, searched in the PIE world first, then the editor world (first match).
 //   @param behavior_tree_path - Asset path of the UBehaviorTree, e.g. "/Game/AI/BT_Enemy"; a bare asset name is not resolved.
-//   @returns { actor_name: string, behavior_tree_path: string, started: bool, ai_controller: string }
+//   @returns { actor_name: string, world: "pie"|"editor", world_name: string, behavior_tree_path: string, started: bool, ai_controller: string }
 
 TSharedPtr<FJsonObject> HandleRunBehaviorTree(const TSharedPtr<FJsonObject>& Params)
 {
@@ -633,11 +665,11 @@ TSharedPtr<FJsonObject> HandleRunBehaviorTree(const TSharedPtr<FJsonObject>& Par
     FString BTPath;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("behavior_tree_path"), BTPath)) { return Missing; }
 
-    AActor* Actor = FindActorByName(ActorName);
+    FString WorldLabel;
+    AActor* Actor = FindActorPieFirst(ActorName, WorldLabel);
     if (!Actor)
     {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Actor not found: %s"), *ActorName));
+        return RuntimeActorNotFoundReply(ActorName);
     }
 
     UBehaviorTree* BTAsset = mcp_common::LoadAssetOrSoftPath<UBehaviorTree>(BTPath);
@@ -652,13 +684,14 @@ TSharedPtr<FJsonObject> HandleRunBehaviorTree(const TSharedPtr<FJsonObject>& Par
     if (!AICon)
     {
         return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("No AAIController found for actor '%s'. Behavior trees require an AI-possessed pawn (not available headless without PIE/possession)."), *ActorName));
+            FString::Printf(TEXT("No AAIController found for actor '%s' in the %s world. A behavior tree runs on an AIController or the pawn it possesses: in PIE a placed pawn is possessed by its AIControllerClass, in the editor world no pawn is."), *ActorName, *WorldLabel));
     }
 
     const bool bStarted = AICon->RunBehaviorTree(BTAsset);
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("actor_name"), ActorName);
+    AddAnsweringWorld(Result, WorldLabel, Actor);
     Result->SetStringField(TEXT("behavior_tree_path"), BTPath);
     Result->SetBoolField(TEXT("started"), bStarted);
     Result->SetStringField(TEXT("ai_controller"), AICon->GetName());
@@ -672,9 +705,9 @@ TSharedPtr<FJsonObject> HandleRunBehaviorTree(const TSharedPtr<FJsonObject>& Par
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:stop_behavior_tree - Stop the behavior tree of an editor-world actor with StopTree (Safe mode), through its AIController brain component or else a UBehaviorTreeComponent on the actor. Runtime state only, nothing saved; editor world only, never PIE. was_running is read before the stop (running and not paused); stopped is true when a started tree, running or paused, is no longer started afterwards. A tree that was not started is not an error: success with stopped false and a note. A tree still started after the call (a task still aborting) is an error. An unknown actor, or one with no behavior tree component, is an error. Unlike pause_behavior_tree it cannot be continued with resume_behavior_tree: start again with restart_behavior_tree (the last tree) or run_behavior_tree.
-//   @param actor_name - Object name or label of the pawn or AIController in the editor world (first match)
-//   @returns { actor_name: string, was_running: bool, stopped: bool, note?: string }
+// MCP:stop_behavior_tree - Stop the behavior tree of an actor with StopTree (Safe mode), through its AIController brain component or else a UBehaviorTreeComponent on the actor. The actor is looked up in a running PIE world first, then in the editor world; world says which answered (pie or editor) and world_name names it. Runtime state only, nothing saved. was_running is read before the stop (running and not paused); stopped is true when a started tree, running or paused, is no longer started afterwards. A tree that was not started is not an error: success with stopped false and a note. A tree still started after the call (a task still aborting) is an error. An actor found in neither world, or one with no behavior tree component, is an error. Unlike pause_behavior_tree it cannot be continued with resume_behavior_tree: start again with restart_behavior_tree (the last tree) or run_behavior_tree.
+//   @param actor_name - Object name or label of the pawn or AIController, searched in the PIE world first, then the editor world (first match)
+//   @returns { actor_name: string, world: "pie"|"editor", world_name: string, was_running: bool, stopped: bool, note?: string }
 
 TSharedPtr<FJsonObject> HandleStopBehaviorTree(const TSharedPtr<FJsonObject>& Params)
 {
@@ -684,18 +717,18 @@ TSharedPtr<FJsonObject> HandleStopBehaviorTree(const TSharedPtr<FJsonObject>& Pa
         return mcp_common::MakeErrorReply(TEXT("Missing required parameter 'actor_name'"));
     }
 
-    AActor* Actor = FindActorByName(ActorName);
+    FString WorldLabel;
+    AActor* Actor = FindActorPieFirst(ActorName, WorldLabel);
     if (!Actor)
     {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Actor not found: %s"), *ActorName));
+        return RuntimeActorNotFoundReply(ActorName);
     }
 
     UBehaviorTreeComponent* BTComp = ResolveBehaviorTreeComponent(Actor);
     if (!BTComp)
     {
         return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("No running BehaviorTreeComponent found for actor '%s' (no AIController/brain component)."), *ActorName));
+            FString::Printf(TEXT("No running BehaviorTreeComponent found for actor '%s' in the %s world (no AIController/brain component)."), *ActorName, *WorldLabel));
     }
 
     // A started tree (running or paused) is what StopTree tears down. In Safe mode it returns early, with the
@@ -708,6 +741,7 @@ TSharedPtr<FJsonObject> HandleStopBehaviorTree(const TSharedPtr<FJsonObject>& Pa
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("actor_name"), ActorName);
+    AddAnsweringWorld(Result, WorldLabel, Actor);
     Result->SetBoolField(TEXT("was_running"), bWasRunning);
     Result->SetBoolField(TEXT("stopped"), bWasStarted && !bStillStarted);
     if (bStillStarted)
@@ -728,19 +762,20 @@ TSharedPtr<FJsonObject> HandleStopBehaviorTree(const TSharedPtr<FJsonObject>& Pa
 // Runtime blackboard
 //----------------------------------------------------------------------//
 
-// MCP:set_blackboard_value - Write one key of the running blackboard of an editor-world actor, converting the value string by key type. Not read back: set is always true, and an unparsable number or vector is written as 0. Runtime state only, nothing saved; editor world only, never PIE. Verify with get_blackboard_value.
-//   @param actor_name - Name of the actor whose blackboard to modify
+// MCP:set_blackboard_value - Write one key of the running blackboard of an actor (its AIController blackboard, else one on the actor), converting the value string by key type. The actor is looked up in a running PIE world first, then in the editor world; world says which answered (pie or editor) and world_name names it. Not read back: set is always true, and an unparsable number or vector is written as 0. Runtime state only, nothing saved. Verify with get_blackboard_value.
+//   @param actor_name - Object name or label of the actor whose blackboard to modify, searched in the PIE world first, then the editor world (first match)
 //   @param key_name - Name of the blackboard key to set
 //   @param value - Value as a string, converted by key type: "42", "0.5", "true" or "1", a name, an enum index, a vector "X=1 Y=2 Z=3", a rotator "P=0 Y=90 R=0", an object or class path. Omitted means empty (0, false, none).
-//   @returns { actor_name: string, key_name: string, key_type: string, value: string, set: bool }
+//   @returns { actor_name: string, world: "pie"|"editor", world_name: string, key_name: string, key_type: string, value: string, set: bool }
 
 TSharedPtr<FJsonObject> HandleSetBlackboardValue(const TSharedPtr<FJsonObject>& Params)
 {
     FString Target;
     FString KeyText;
     UClass* KeyTypeClass = nullptr;
+    FString WorldLabel;
     TSharedPtr<FJsonObject> LookupError;
-    UBlackboardComponent* BB = ReadBlackboardKey(Params, Target, KeyText, KeyTypeClass, LookupError);
+    UBlackboardComponent* BB = ReadBlackboardKey(Params, Target, KeyText, KeyTypeClass, WorldLabel, LookupError);
     if (!BB)
     {
         return LookupError;
@@ -815,6 +850,7 @@ TSharedPtr<FJsonObject> HandleSetBlackboardValue(const TSharedPtr<FJsonObject>& 
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("actor_name"), Target);
+    AddAnsweringWorld(Result, WorldLabel, BB);
     Result->SetStringField(TEXT("key_name"), KeyText);
     Result->SetStringField(TEXT("key_type"), KeyTypeClass->GetName());
     Result->SetStringField(TEXT("value"), ValueStr);
@@ -823,18 +859,19 @@ TSharedPtr<FJsonObject> HandleSetBlackboardValue(const TSharedPtr<FJsonObject>& 
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:get_blackboard_value - Read one key of the running blackboard of an editor-world actor (its AIController blackboard, else one on the actor). value is a number for Int, Float and Enum keys, a bool for Bool, else a string (objects as paths). Read-only; editor world only, never PIE.
-//   @param actor_name - Name of the actor whose blackboard to query
+// MCP:get_blackboard_value - Read one key of the running blackboard of an actor (its AIController blackboard, else one on the actor). The actor is looked up in a running PIE world first, then in the editor world; world says which answered (pie or editor) and world_name names it. value is a number for Int, Float and Enum keys, a bool for Bool, else a string (objects as paths). Read-only.
+//   @param actor_name - Object name or label of the actor whose blackboard to query, searched in the PIE world first, then the editor world (first match)
 //   @param key_name - Name of the blackboard key to retrieve
-//   @returns { actor_name: string, key_name: string, key_type: string, value: number|string|bool }
+//   @returns { actor_name: string, world: "pie"|"editor", world_name: string, key_name: string, key_type: string, value: number|string|bool }
 
 TSharedPtr<FJsonObject> HandleGetBlackboardValue(const TSharedPtr<FJsonObject>& Params)
 {
     FString Target;
     FString KeyText;
     UClass* KeyTypeClass = nullptr;
+    FString WorldLabel;
     TSharedPtr<FJsonObject> LookupError;
-    UBlackboardComponent* BB = ReadBlackboardKey(Params, Target, KeyText, KeyTypeClass, LookupError);
+    UBlackboardComponent* BB = ReadBlackboardKey(Params, Target, KeyText, KeyTypeClass, WorldLabel, LookupError);
     if (!BB)
     {
         return LookupError;
@@ -843,6 +880,7 @@ TSharedPtr<FJsonObject> HandleGetBlackboardValue(const TSharedPtr<FJsonObject>& 
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("actor_name"), Target);
+    AddAnsweringWorld(Result, WorldLabel, BB);
     Result->SetStringField(TEXT("key_name"), KeyText);
     Result->SetStringField(TEXT("key_type"), KeyTypeClass ? KeyTypeClass->GetName() : TEXT("None"));
 
@@ -897,10 +935,10 @@ TSharedPtr<FJsonObject> HandleGetBlackboardValue(const TSharedPtr<FJsonObject>& 
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:get_blackboard_data - Dump a blackboard from its asset or from a running component. With blackboard_path, which wins when both are given, it reads the UBlackboardData asset: name, parent and key definitions (name, type, instance_synced, base class or enum subsettings). With actor_name, it reads the running UBlackboardComponent of that actor in the editor world, never PIE (its AIController blackboard, else one on the actor): the component's name, has_valid_asset and num_keys, the key definitions of its blackboard asset as keys, and entries with each key's name, type and current value as text; a component with no asset gives empty lists. Either way every key is listed in key-ID order, those inherited from parent blackboards first, each with inherited and defined_in naming the asset that declares it. Nothing is written. No parameter, an asset that does not load, an actor not found by object name or label, or no running blackboard is an error. One key: get_blackboard_value; write a value: set_blackboard_value; add a key: add_blackboard_key.
-//   @param actor_name - Object name or label of the editor-world pawn, its AIController, or an actor with its own UBlackboardComponent, whose running blackboard to dump (first match); ignored when blackboard_path is given
+// MCP:get_blackboard_data - Dump a blackboard from its asset or from a running component. With blackboard_path, which wins when both are given, it reads the UBlackboardData asset: name, parent and key definitions (name, type, instance_synced, base class or enum subsettings). With actor_name, it reads the running UBlackboardComponent of that actor (its AIController blackboard, else one on the actor), the actor looked up in a running PIE world first, then in the editor world, with world (pie or editor) and world_name saying which answered: the component's name, has_valid_asset and num_keys, the key definitions of its blackboard asset as keys, and entries with each key's name, type and current value as text; a component with no asset gives empty lists. Either way every key is listed in key-ID order, those inherited from parent blackboards first, each with inherited and defined_in naming the asset that declares it. Nothing is written. No parameter, an asset that does not load, an actor found by object name or label in neither world, or no running blackboard is an error. One key: get_blackboard_value; write a value: set_blackboard_value; add a key: add_blackboard_key.
+//   @param actor_name - Object name or label of the pawn, its AIController, or an actor with its own UBlackboardComponent, whose running blackboard to dump, searched in the PIE world first, then the editor world (first match); ignored when blackboard_path is given
 //   @param blackboard_path - Content path of a UBlackboardData asset to read instead, e.g. "/Game/AI/BB_Enemy"; takes precedence over actor_name
-//   @returns { actor_name: string?, blackboard_asset: string?, name: string?, parent: string?, component_name: string? (actor mode), has_valid_asset: bool? (actor mode), num_keys: number? (actor mode), keys: [{ name, type, instance_synced, base_class?, enum_type?, enum_name?, inherited, defined_in }], entries: [{ name, type, value, inherited, defined_in }]? (actor mode), key_count: number }
+//   @returns { actor_name: string?, world: "pie"|"editor"? (actor mode), world_name: string? (actor mode), blackboard_asset: string?, name: string?, parent: string?, component_name: string? (actor mode), has_valid_asset: bool? (actor mode), num_keys: number? (actor mode), keys: [{ name, type, instance_synced, base_class?, enum_type?, enum_name?, inherited, defined_in }], entries: [{ name, type, value, inherited, defined_in }]? (actor mode), key_count: number }
 
 TSharedPtr<FJsonObject> HandleGetBlackboardData(const TSharedPtr<FJsonObject>& Params)
 {
@@ -931,8 +969,9 @@ TSharedPtr<FJsonObject> HandleGetBlackboardData(const TSharedPtr<FJsonObject>& P
         return mcp_common::MakeErrorReply(TEXT("Provide 'blackboard_path' (asset) or 'actor_name' (running blackboard)"));
     }
 
+    FString WorldLabel;
     TSharedPtr<FJsonObject> LookupError;
-    UBlackboardComponent* BB = FindLiveBlackboard(ActorName, LookupError);
+    UBlackboardComponent* BB = FindLiveBlackboard(ActorName, WorldLabel, LookupError);
     if (!BB)
     {
         return LookupError;
@@ -940,6 +979,7 @@ TSharedPtr<FJsonObject> HandleGetBlackboardData(const TSharedPtr<FJsonObject>& P
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("actor_name"), ActorName);
+    AddAnsweringWorld(Result, WorldLabel, BB);
     Result->SetStringField(TEXT("component_name"), BB->GetName());
     Result->SetBoolField(TEXT("has_valid_asset"), BB->HasValidAsset());
     Result->SetNumberField(TEXT("num_keys"), BB->GetNumKeys());
@@ -2271,14 +2311,15 @@ TSharedPtr<FJsonObject> HandleRemoveBTService(const TSharedPtr<FJsonObject>& Par
 // Runtime BT lifecycle (pause/resume/restart/status) + AI perception (sight radius / perceived actors)
 // ============================================================================
 
-// MCP:pause_behavior_tree - Pause the behavior tree of an editor-world actor (its AIController brain component, else a UBehaviorTreeComponent on the actor) with PauseLogic. paused is always true, not read back; was_running is measured. Editor world only, never PIE. Continue it with resume_behavior_tree.
-//   @param actor_name - Object name or label of the pawn, its AIController, or an actor with a UBehaviorTreeComponent, in the editor world (first match).
-//   @returns { actor_name, paused, was_running }
+// MCP:pause_behavior_tree - Pause the behavior tree of an actor (its AIController brain component, else a UBehaviorTreeComponent on the actor) with PauseLogic. The actor is looked up in a running PIE world first, then in the editor world; world says which answered (pie or editor) and world_name names it. paused is always true, not read back; was_running is measured. Runtime state only, nothing saved. An actor found in neither world, or one with no behavior tree component, is an error. Continue it with resume_behavior_tree.
+//   @param actor_name - Object name or label of the pawn, its AIController, or an actor with a UBehaviorTreeComponent, searched in the PIE world first, then the editor world (first match).
+//   @returns { actor_name, world: "pie"|"editor", world_name: string, paused, was_running }
 TSharedPtr<FJsonObject> HandlePauseBehaviorTree(const TSharedPtr<FJsonObject>& Params)
 {
     FString ActorName;
+    FString WorldLabel;
     TSharedPtr<FJsonObject> LookupError;
-    UBehaviorTreeComponent* BTC = ReadTreeComponent(Params, ActorName, LookupError);
+    UBehaviorTreeComponent* BTC = ReadTreeComponent(Params, ActorName, WorldLabel, LookupError);
     if (!BTC)
     {
         return LookupError;
@@ -2287,18 +2328,21 @@ TSharedPtr<FJsonObject> HandlePauseBehaviorTree(const TSharedPtr<FJsonObject>& P
     BTC->PauseLogic(TEXT("mcp_w152_pause"));
     TSharedPtr<FJsonObject> R = MakeShared<FJsonObject>();
     R->SetStringField(TEXT("actor_name"), ActorName);
+    AddAnsweringWorld(R, WorldLabel, BTC);
     R->SetBoolField(TEXT("paused"), true);
     R->SetBoolField(TEXT("was_running"), bWasRunning);
     return mcp_common::MakeOkReply(R);
 }
 
-// MCP:resume_behavior_tree - Resume a behavior tree paused by pause_behavior_tree (ResumeLogic) on an editor-world actor, through its AIController brain component or a UBehaviorTreeComponent on the actor. Returns was_paused and is_paused, both read from the component. Editor world only, never PIE.
-//   @param actor_name - Name or label of the AI-possessed pawn (or AIController) whose UBehaviorTreeComponent to resume.
+// MCP:resume_behavior_tree - Resume a behavior tree paused by pause_behavior_tree (ResumeLogic), through the actor's AIController brain component or a UBehaviorTreeComponent on the actor. The actor is looked up in a running PIE world first, then in the editor world; world says which answered (pie or editor) and world_name names it. Returns was_paused and is_paused, both read from the component. Runtime state only, nothing saved. An actor found in neither world, or one with no behavior tree component, is an error.
+//   @param actor_name - Name or label of the AI-possessed pawn (or AIController) whose UBehaviorTreeComponent to resume, searched in the PIE world first, then the editor world.
+//   @returns { actor_name, world: "pie"|"editor", world_name: string, was_paused: bool, is_paused: bool }
 TSharedPtr<FJsonObject> HandleResumeBehaviorTree(const TSharedPtr<FJsonObject>& Params)
 {
     FString ActorName;
+    FString WorldLabel;
     TSharedPtr<FJsonObject> LookupError;
-    UBehaviorTreeComponent* BTC = ReadTreeComponent(Params, ActorName, LookupError);
+    UBehaviorTreeComponent* BTC = ReadTreeComponent(Params, ActorName, WorldLabel, LookupError);
     if (!BTC)
     {
         return LookupError;
@@ -2307,18 +2351,21 @@ TSharedPtr<FJsonObject> HandleResumeBehaviorTree(const TSharedPtr<FJsonObject>& 
     BTC->ResumeLogic(TEXT("mcp_w152_resume"));
     TSharedPtr<FJsonObject> R = MakeShared<FJsonObject>();
     R->SetStringField(TEXT("actor_name"), ActorName);
+    AddAnsweringWorld(R, WorldLabel, BTC);
     R->SetBoolField(TEXT("was_paused"), bWasPaused);
     R->SetBoolField(TEXT("is_paused"), BTC->IsPaused());
     return mcp_common::MakeOkReply(R);
 }
 
-// MCP:restart_behavior_tree - Restart the current behavior tree of an editor-world actor from its root (RestartTree), through its AIController brain component or a UBehaviorTreeComponent on the actor. restarted is always true, not measured: check get_behavior_tree_status. Editor world only, never PIE.
-//   @param actor_name - Name or label of the AI-possessed pawn (or AIController) whose UBehaviorTreeComponent to restart.
+// MCP:restart_behavior_tree - Restart the current behavior tree of an actor from its root (RestartTree), through its AIController brain component or a UBehaviorTreeComponent on the actor; a stopped tree starts again from the last tree it ran. The actor is looked up in a running PIE world first, then in the editor world; world says which answered (pie or editor) and world_name names it. restarted is always true, not measured: check get_behavior_tree_status. Runtime state only, nothing saved. An actor found in neither world, or one with no behavior tree component, is an error.
+//   @param actor_name - Name or label of the AI-possessed pawn (or AIController) whose UBehaviorTreeComponent to restart, searched in the PIE world first, then the editor world.
+//   @returns { actor_name, world: "pie"|"editor", world_name: string, restarted: bool }
 TSharedPtr<FJsonObject> HandleRestartBehaviorTree(const TSharedPtr<FJsonObject>& Params)
 {
     FString ActorName;
+    FString WorldLabel;
     TSharedPtr<FJsonObject> LookupError;
-    UBehaviorTreeComponent* BTC = ReadTreeComponent(Params, ActorName, LookupError);
+    UBehaviorTreeComponent* BTC = ReadTreeComponent(Params, ActorName, WorldLabel, LookupError);
     if (!BTC)
     {
         return LookupError;
@@ -2326,11 +2373,12 @@ TSharedPtr<FJsonObject> HandleRestartBehaviorTree(const TSharedPtr<FJsonObject>&
     BTC->RestartTree();
     TSharedPtr<FJsonObject> R = MakeShared<FJsonObject>();
     R->SetStringField(TEXT("actor_name"), ActorName);
+    AddAnsweringWorld(R, WorldLabel, BTC);
     R->SetBoolField(TEXT("restarted"), true);
     return mcp_common::MakeOkReply(R);
 }
 
-// MCP:get_behavior_tree_status - Read the live state of the behavior tree component driving one actor: has_bt (whether a UBehaviorTreeComponent was found, through the actor's AIController brain or on the actor itself), is_running, is_paused, bt_asset_name (the tree it is running) and active_node_name (the node it is executing, empty when none). The actor is looked up in a running PIE world first, where possessed AI pawns run their trees, then in the editor world (where a tree started with run_behavior_tree runs); world says which answered (pie or editor) and world_name names it. Read-only. An actor without a tree is a success with has_bt false; an actor found in neither world is an error. Inspect the tree asset itself with get_behavior_tree_info and blackboard values with get_blackboard_value; change the run state with pause_behavior_tree, resume_behavior_tree, restart_behavior_tree or stop_behavior_tree (editor world only).
+// MCP:get_behavior_tree_status - Read the live state of the behavior tree component driving one actor: has_bt (whether a UBehaviorTreeComponent was found, through the actor's AIController brain or on the actor itself), is_running, is_paused, bt_asset_name (the tree it is running) and active_node_name (the node it is executing, empty when none). The actor is looked up in a running PIE world first, where possessed AI pawns run their trees, then in the editor world; world says which answered (pie or editor) and world_name names it. Read-only. An actor without a tree is a success with has_bt false; an actor found in neither world is an error. Inspect the tree asset itself with get_behavior_tree_info and blackboard values with get_blackboard_value; change the run state with run_behavior_tree, pause_behavior_tree, resume_behavior_tree, restart_behavior_tree or stop_behavior_tree, which look the actor up the same way.
 //   @param actor_name - Object name or label of the AI-possessed pawn, or of its AIController, e.g. 'BP_Guard_C_0'; searched in the PIE world first, then the editor world.
 //   @returns { actor_name, world: "pie"|"editor", world_name: string, has_bt: bool, is_running?: bool, is_paused?: bool, bt_asset_name?: string, active_node_name?: string }
 TSharedPtr<FJsonObject> HandleGetBehaviorTreeStatus(const TSharedPtr<FJsonObject>& Params)
@@ -2340,37 +2388,15 @@ TSharedPtr<FJsonObject> HandleGetBehaviorTreeStatus(const TSharedPtr<FJsonObject
     {
         return mcp_common::MakeErrorReply(TEXT("Missing required parameter 'actor_name'"));
     }
-    // A running PIE world first -- where a possessed AI pawn really runs its tree -- then the editor world.
-    AActor* Actor = nullptr;
-    UWorld* AnsweringWorld = nullptr;
-    const TCHAR* WorldLabel = TEXT("editor");
-    if (GEngine)
-    {
-        for (const FWorldContext& Context : GEngine->GetWorldContexts())
-        {
-            UWorld* PieWorld = Context.WorldType == EWorldType::PIE ? Context.World() : nullptr;
-            if (AActor* Found = PieWorld ? mcp_common::FindActorByName(PieWorld, ActorName) : nullptr)
-            {
-                Actor = Found;
-                AnsweringWorld = PieWorld;
-                WorldLabel = TEXT("pie");
-                break;
-            }
-        }
-    }
+    FString WorldLabel;
+    AActor* Actor = FindActorPieFirst(ActorName, WorldLabel);
     if (!Actor)
     {
-        Actor = FindActorByName(ActorName);
-        AnsweringWorld = Actor ? Actor->GetWorld() : nullptr;
-    }
-    if (!Actor)
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Actor not found in a PIE world or the editor world: %s"), *ActorName));
+        return RuntimeActorNotFoundReply(ActorName);
     }
     TSharedPtr<FJsonObject> R = MakeShared<FJsonObject>();
     R->SetStringField(TEXT("actor_name"), ActorName);
-    R->SetStringField(TEXT("world"), WorldLabel);
-    R->SetStringField(TEXT("world_name"), AnsweringWorld ? AnsweringWorld->GetName() : FString());
+    AddAnsweringWorld(R, WorldLabel, Actor);
     UBehaviorTreeComponent* BTC = ResolveBehaviorTreeComponent(Actor);
     if (!BTC)
     {

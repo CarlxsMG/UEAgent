@@ -32,9 +32,9 @@
 
 // Skeletal mesh editor subsystem (SkeletalMeshEditor module — editor dep)
 #include "SkeletalMeshEditorSubsystem.h"
+#include "ScopedTransaction.h"        // FScopedTransaction -- set_morph_target_deltas, and the 5.7 body of RemoveSocket
 #if UE_VERSION_OLDER_THAN(5, 8, 0)
 #include "EditorScriptingHelpers.h"   // CheckIfInEditorAndPIE -- the 5.7 body of SetAllowCPUAccess
-#include "ScopedTransaction.h"        // FScopedTransaction -- the 5.7 body of RemoveSocket
 #endif
 
 // PhysicsAsset (Engine module — needed for assign_skeletal_mesh_physics_asset)
@@ -997,7 +997,7 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshLodSettings(
 // ---------------------------------------------------------------------------
 // create_skeletal_mesh_morph_target
 // ---------------------------------------------------------------------------
-// MCP:create_skeletal_mesh_morph_target - Register a new morph target on a skeletal mesh asset in memory only, for the rest of the editor session: it is never saved (persisted_to_disk is always false), and a mesh rebuild or reload drops any morph the mesh's imported source data does not contain. Each LOD gets one tiny seed delta on vertex 0 so the morph counts as valid; write real deltas with set_morph_target_deltas. Marks the mesh dirty. Idempotent: an existing name returns created=false and already_exists=true.
+// MCP:create_skeletal_mesh_morph_target - Register a new morph target on a skeletal mesh asset in memory only, for the rest of the editor session: it is never saved (persisted_to_disk is always false), and a mesh rebuild or reload drops any morph the mesh's imported source data does not contain. Each LOD gets one tiny seed delta on vertex 0 so the morph counts as valid; write real deltas with set_morph_target_deltas. Marks the mesh dirty; it is not an undo step. Idempotent: an existing name returns created=false and already_exists=true.
 //   @param skeletal_mesh_path - Content path to the skeletal mesh asset (e.g. /Game/MyGame/SKM_Example)
 //   @param morph_target_name - Name for the new morph target
 //   @returns { morph_target_name: string, skeletal_mesh_path: string, created: bool, persisted_to_disk: bool, total_morph_targets: int, note: string }
@@ -1273,12 +1273,12 @@ TSharedPtr<FJsonObject> HandleRenameSkeletalMeshMorphTarget(
 // ---------------------------------------------------------------------------
 // set_morph_target_deltas
 // ---------------------------------------------------------------------------
-// MCP:set_morph_target_deltas - Overwrite all vertex deltas of an existing morph target on one LOD of a skeletal mesh asset with the deltas passed, then save the mesh. The LOD's old deltas are discarded; deltas whose position offset is 0.015 units or less are dropped (normal-only deltas included) and entries that are not objects are skipped, so deltas_set counts what was sent, not what was kept. Not an undo step; repeating the same call writes the same data again. A missing morph target or a lod_index outside the mesh's LODs is an error and nothing changes; a failed save is an error. Find the morph with get_skeletal_mesh_morph_targets (create_skeletal_mesh_morph_target adds one) and read the result back with get_morph_target_deltas, since total_deltas_lod0 only reports LOD 0.
+// MCP:set_morph_target_deltas - Overwrite all vertex deltas of an existing morph target on one LOD of a skeletal mesh asset with the deltas passed, in one undo step that restores the old deltas, then save the mesh. The undo step records the morph target only, not the mesh: undoing a step that holds the mesh rebuilds it, and the rebuild drops every morph target its imported data does not hold, those of create_skeletal_mesh_morph_target included. The LOD's old deltas are discarded; deltas whose position offset is 0.015 units or less are dropped (normal-only deltas included) and entries that are not objects are skipped, so deltas_set counts what was sent and total_deltas what that LOD kept. When the morph target had no data for a LOD below lod_index, the engine adds an empty one for it (created=true in deltas_per_lod). Every count is read back from the morph target after the save: total_deltas for lod_index, total_deltas_lod0 for LOD 0, deltas_per_lod for each LOD the morph target has, and total_deltas_all_lods. Repeating the same call writes the same data again. A missing morph target or a lod_index outside the mesh's LODs is an error and nothing changes; a failed save makes success false, with saved=false and save_error. Find the morph with get_skeletal_mesh_morph_targets (create_skeletal_mesh_morph_target adds one) and read the deltas themselves back with get_morph_target_deltas.
 //   @param skeletal_mesh_path - Content path of the USkeletalMesh asset (object or package path), e.g. '/Game/Characters/SKM_Hero'.
 //   @param morph_target_name - Name of an existing morph target, as get_skeletal_mesh_morph_targets lists it, e.g. 'Smile'.
 //   @param lod_index - 0-based LOD index whose deltas are overwritten (default 0); it must be below num_lods from get_skeletal_mesh_info.
 //   @param deltas - Array of objects {vertex_index, position_delta, normal_delta}: vertex_index is the vertex's index in that LOD's vertex buffer (not range-checked), the two deltas are {x, y, z} offsets in mesh-local units and a missing one is zero, e.g. [{"vertex_index": 0, "position_delta": {"x": 1.0, "y": 0, "z": 0}, "normal_delta": {"x": 0, "y": 0, "z": 0}}]. An empty array leaves the LOD with no deltas.
-//   @returns { morph_target_name: string, lod_index: int, deltas_set: int, total_deltas_lod0: int, saved: bool }
+//   @returns { morph_target_name: string, lod_index: int, deltas_set: int, total_deltas: int, total_deltas_lod0: int, deltas_per_lod: [{ lod_index: int, total_deltas: int, written: bool, created: bool }], total_deltas_all_lods: int, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleSetMorphTargetDeltas(
 	const TSharedPtr<FJsonObject>& Params)
@@ -1331,19 +1331,55 @@ TSharedPtr<FJsonObject> HandleSetMorphTargetDeltas(
 		Deltas.Add(Delta);
 	}
 
-	Mesh->Modify();
-	MT->PopulateDeltas(Deltas, LodIndex, Sections);
+	// The deltas live on the morph target, not on the mesh, so the morph target is what the undo step must record.
+	// The engine creates morph targets without RF_Transactional (import and build), and Modify() records nothing
+	// on an object without it. The MESH is deliberately NOT recorded: undoing a step that holds it runs the mesh's
+	// PostEditChange, which calls Build() and regenerates the morph targets from the imported source -- dropping
+	// every morph target that is not in it, those create_skeletal_mesh_morph_target adds included (measured: undo
+	// left "Morph target not found"). UMorphTarget::Serialize writes MorphLODModels, so the morph alone restores.
+	const int32 LodModelsBefore = MT->GetMorphLODModels().Num();
+	{
+		FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetMorphTargetDeltas", "Set Morph Target Deltas"));
+		MT->SetFlags(RF_Transactional);
+		MT->Modify();
+		// Writes LOD lod_index, and adds an empty LOD model for every LOD below it the morph target had none for.
+		MT->PopulateDeltas(Deltas, LodIndex, Sections);
+	}
 
-	if (TSharedPtr<FJsonObject> SaveFailed = SkMesh_SaveOrReply(Mesh))
-		return SaveFailed;
+	FString SaveError;
+	const bool bSaved = mcp_common::SaveAssetPackage(Mesh->GetOutermost(), Mesh, SaveError);
 
+	// Read back from the morph target the mesh holds now, every LOD of it.
+	const UMorphTarget* After = Mesh->FindMorphTarget(MorphFName);
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("morph_target_name"), MorphName);
 	Data->SetNumberField(TEXT("lod_index"), LodIndex);
 	Data->SetNumberField(TEXT("deltas_set"), Deltas.Num());
-	Data->SetNumberField(TEXT("total_deltas_lod0"), MT->GetNumDeltasForLOD(0));
-	Data->SetBoolField(TEXT("saved"), true);
-	return mcp_common::MakeOkReply(Data);
+	Data->SetNumberField(TEXT("total_deltas"), After ? After->GetNumDeltasForLOD(LodIndex) : 0);
+	Data->SetNumberField(TEXT("total_deltas_lod0"), After ? After->GetNumDeltasForLOD(0) : 0);
+	TArray<TSharedPtr<FJsonValue>> PerLod;
+	int32 TotalAllLods = 0;
+	const int32 LodModelsAfter = After ? After->GetMorphLODModels().Num() : 0;
+	for (int32 Lod = 0; Lod < LodModelsAfter; ++Lod)
+	{
+		const int32 LodDeltas = After->GetNumDeltasForLOD(Lod);
+		TotalAllLods += LodDeltas;
+		TSharedPtr<FJsonObject> LodObj = MakeShared<FJsonObject>();
+		LodObj->SetNumberField(TEXT("lod_index"), Lod);
+		LodObj->SetNumberField(TEXT("total_deltas"), LodDeltas);
+		LodObj->SetBoolField(TEXT("written"), Lod == LodIndex);
+		LodObj->SetBoolField(TEXT("created"), Lod >= LodModelsBefore);
+		PerLod.Add(MakeShared<FJsonValueObject>(LodObj));
+	}
+	Data->SetArrayField(TEXT("deltas_per_lod"), PerLod);
+	Data->SetNumberField(TEXT("total_deltas_all_lods"), TotalAllLods);
+	if (!After)
+	{
+		mcp_common::AddSaveOutcome(Data, bSaved, SaveError);
+		return mcp_common::MakeOutcomeReply(Data, false, FString::Printf(
+			TEXT("set_morph_target_deltas: morph target '%s' is no longer on the mesh after the write and save"), *MorphName));
+	}
+	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_morph_target_deltas"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
