@@ -154,7 +154,7 @@ namespace
 }
 
 // ---------------------------------------------------------------------------
-// MCP:can_reset_interchange_actor - Report, read-only, whether Interchange can reset an actor of the editor world (UInterchangeEditorScriptLibrary::CanResetActor, which needs a bound UInterchangeSceneImportAsset); returns actor_path and can_reset. The actor is found by full object path or by object name in the persistent level, not by label.
+// MCP:can_reset_interchange_actor - Check, without changing anything, whether an Interchange reset (restoring an imported actor to what its Interchange scene import produced) can run on one actor of the editor world (UInterchangeEditorScriptLibrary::CanResetActor). can_reset is true only when the Interchange.FeatureFlags.InterchangeReset console variable is on and a component of the actor carries Interchange asset user data (for a Level Instance, its map's world settings do; that map is loaded to check). false is a normal answer, not an error. Use it before reset_interchange_actors, which skips the actors that fail this check without saying which; for a whole map use can_reset_interchange_world and reset_interchange_level_asset; to see what an asset's import recorded, get_interchange_asset_import_data. An actor that is not found is an error.
 //   @param actor_path [string!] - Full object path of the actor (e.g. "/Game/Maps/MyMap.MyMap:PersistentLevel.ActorName_0") or its object name in the persistent level of the editor world (e.g. "StaticMeshActor_3"); labels are not matched.
 //   @returns { actor_path: string, can_reset: bool }
 TSharedPtr<FJsonObject> HandleInterchangeCanResetActor(const TSharedPtr<FJsonObject>& Params)

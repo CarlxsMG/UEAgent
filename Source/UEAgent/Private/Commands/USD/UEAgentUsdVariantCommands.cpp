@@ -161,10 +161,10 @@ namespace
 // ---------------------------------------------------------------------------
 // list_usd_variant_sets
 // ---------------------------------------------------------------------------
-// MCP:list_usd_variant_sets - List every variant set authored on a prim with its variant names and the current selection for each set (the selections map may be empty when no selection is authored), or with variant_set_name only that set, reported also as variant_set_name, current_selection and variant_count. A variant_set_name the prim does not author is an error.
-//   @param stage_name [string!] - Stage cache key
-//   @param prim_path [string!] - SdfPath of the prim to inspect
-//   @param variant_set_name - Optional name of the one variant set to report
+// MCP:list_usd_variant_sets - List the variant sets a prim of a cached USD stage has, without changing anything: their names, each set's variant names (variants) and the selected variant of each set that has one (selections, empty when none is authored). With variant_set_name only that set is reported, also as variant_set_name, current_selection (empty when none) and variant_count, and a set the prim does not have is an error. Use it before set_usd_variant_selection or clear_usd_variant_selection, which take these names; author sets and variants with add_usd_variant_set and add_usd_variant, delete them with remove_usd_variant_set and remove_usd_variant. An unknown stage, an invalid prim path or a prim that does not exist is an error; open a stage first with open_usd_stage.
+//   @param stage_name [string!] - Name the stage was registered under by open_usd_stage or create_usd_stage (list_usd_stages shows it), or the end of a cached stage's root layer identifier, case-insensitive, e.g. "Shot010"
+//   @param prim_path [string!] - Absolute SdfPath of the existing prim to inspect, e.g. "/World/Car"
+//   @param variant_set_name - Optional name of the one variant set to report, e.g. "color"; omitted or empty reports every set
 //   @returns { prim_path: string, names: [string], selections: object, variants: object (set name -> [variant name]), count: int, variant_set_name?: string, current_selection?: string, variant_count?: int }
 
 TSharedPtr<FJsonObject> HandleListUsdVariantSets(const TSharedPtr<FJsonObject>& Params)
@@ -414,10 +414,10 @@ TSharedPtr<FJsonObject> HandleSetUsdVariantSelection(const TSharedPtr<FJsonObjec
 // ---------------------------------------------------------------------------
 // clear_usd_variant_selection
 // ---------------------------------------------------------------------------
-// MCP:clear_usd_variant_selection - Clear the active variant selection on a variant set (leaves the set and its variants intact — only the selection arc is removed); HasVariantSet guard
-//   @param stage_name [string!] - Stage cache key
-//   @param prim_path [string!] - SdfPath of the prim that authors the variant set
-//   @param variant_set_name [string!] - Variant set whose selection should be cleared
+// MCP:clear_usd_variant_selection - Clear the selected variant of one variant set on a prim of a cached USD stage, so no variant of that set is selected there; the set and its variants stay. It first moves the stage's edit target to the strongest layer that defines the prim and clears the selection on that layer, so a selection authored on another layer can still apply: check with list_usd_variant_sets. The edit stays in memory until save_usd_stage and has no undo step. A repeat call changes nothing more; cleared is the engine's answer. An unknown stage, an invalid or missing prim, or a variant set the prim does not have is an error and nothing is written. To pick another variant instead use set_usd_variant_selection; to delete the set itself, remove_usd_variant_set.
+//   @param stage_name [string!] - Name the stage was registered under by open_usd_stage or create_usd_stage (list_usd_stages shows it), or the end of a cached stage's root layer identifier, case-insensitive, e.g. "Shot010"
+//   @param prim_path [string!] - Absolute SdfPath of the existing prim that has the variant set, e.g. "/World/Car"
+//   @param variant_set_name [string!] - Variant set whose selection is cleared, as list_usd_variant_sets reports it, e.g. "color"
 //   @returns { prim_path: string, variant_set_name: string, cleared: bool }
 
 TSharedPtr<FJsonObject> HandleClearUsdVariantSelection(const TSharedPtr<FJsonObject>& Params)

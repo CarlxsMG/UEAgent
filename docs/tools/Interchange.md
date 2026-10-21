@@ -10,7 +10,7 @@ Back to the [index](README.md).
 
 *Read-only.*
 
-Report, read-only, whether Interchange can reset an actor of the editor world (UInterchangeEditorScriptLibrary::CanResetActor, which needs a bound UInterchangeSceneImportAsset); returns actor_path and can_reset. The actor is found by full object path or by object name in the persistent level, not by label.
+Check, without changing anything, whether an Interchange reset (restoring an imported actor to what its Interchange scene import produced) can run on one actor of the editor world (UInterchangeEditorScriptLibrary::CanResetActor). can_reset is true only when the Interchange.FeatureFlags.InterchangeReset console variable is on and a component of the actor carries Interchange asset user data (for a Level Instance, its map's world settings do; that map is loaded to check). false is a normal answer, not an error. Use it before reset_interchange_actors, which skips the actors that fail this check without saying which; for a whole map use can_reset_interchange_world and reset_interchange_level_asset; to see what an asset's import recorded, get_interchange_asset_import_data. An actor that is not found is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -34,12 +34,12 @@ Report, read-only, whether Interchange can reset a world (UInterchangeEditorScri
 
 *Read-only.*
 
-Whether a registered Interchange translator can read a source file (a path on disk or an asset path). Read-only.
+Checks whether a translator registered with this editor's Interchange framework can read a source file, judged for most formats by the file extension alone: true means import_interchange_asset can try it, not that the file exists or will import cleanly. Read-only: nothing is imported, loaded or changed. It answers false, not an error, when Interchange import is disabled, the extension is blocked for import in the project, or no translator matches. Use it as a pre-flight check before import_interchange_asset; get_interchange_supported_formats lists every supported extension, and register_interchange_translator adds a reader for a new format.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `file_path` | string | yes | Path of the source file to test on disk (e.g. "C:/Assets/Mesh.fbx"), or an Unreal asset path. Passed to UInterchangeManager::CreateSourceData. |
-| `scene_only` | boolean | no | When true, restrict the check to scene translators (bSceneOnly). Defaults to false (any translator type). |
+| `file_path` | string | yes | Path of the source file, absolute on disk (e.g. "C:/Assets/Mesh.fbx", "D:/Scans/room.gltf"); for most translators only its extension is looked at, so the file need not exist yet. |
+| `scene_only` | boolean | no | When true, answer true only when the matching translator is a scene translator (one that imports actors into a level, not only assets). Defaults to false (any translator type). |
 
 **Returns:** `{ file_path: string, scene_only: bool, can_translate: bool }`
 
@@ -134,11 +134,11 @@ Register a translator class -- the Interchange reader of one or more source file
 
 *Destructive.*
 
-Reimport an existing asset from its stored UInterchangeAssetImportData (UInterchangeManager::ReimportAsset). An asset without Interchange import data (a legacy factory import, or one never imported) gets an error.
+Reimports an asset that was imported through Interchange, from the source file and pipeline stack stored on its Interchange import data, synchronously and without dialogs: the asset's content in memory is overwritten with the file's current content. This tool does not save it (save_asset writes it). An asset without Interchange import data -- a legacy-importer asset, or one never imported -- is an error and nothing changes: use reimport_asset for those. Check which kind an asset has, and its source file, with get_interchange_asset_import_data; change the stored pipelines first with set_interchange_pipelines. A reimport the engine reports as failed still answers success, with reimported false and a note pointing to the editor log, so read reimported.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `asset_path` | string | yes | Asset path (e.g. "/Game/Foo/Foo") or fully-qualified object path ("/Game/Foo/Foo.Foo") |
+| `asset_path` | string | yes | Package path (e.g. "/Game/Meshes/SM_Rock") or object path ("/Game/Meshes/SM_Rock.SM_Rock") of the asset to reimport; it is loaded if needed. |
 
 **Returns:** `{ asset_path: string, reimported: bool, count: number, note: string }`
 

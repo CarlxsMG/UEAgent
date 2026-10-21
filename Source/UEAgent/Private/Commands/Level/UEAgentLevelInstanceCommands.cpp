@@ -244,7 +244,7 @@ TSharedPtr<FJsonObject> HandleCreateLevelInstance(const TSharedPtr<FJsonObject>&
 // get_level_instance_info
 // ---------------------------------------------------------------------------
 
-// MCP:get_level_instance_info - Lists every ALevelInstance actor in the editor world.  REAL read via TActorIterator<ALevelInstance>; serialises each actor's referenced world asset and loaded state. An empty list on a map with no level instances is the correct result (honest read).
+// MCP:get_level_instance_info - List every Level Instance actor (ALevelInstance, Packed Level Actors included) in the editor world, live from the world's actors, without changing anything: per actor its label (or name when unlabeled), the .umap it references, whether that reference is valid, whether its level has finished loading (false right after binding, as loading is deferred) and its location. Use it to find the actor the other level-instance tools take: create_level_instance places one, edit_level_instance and commit_level_instance edit its content in place, break_level_instance turns it into plain actors, pack_level_actors bakes a map into a packed Blueprint. Classic streaming sub-levels are listed by get_streaming_levels instead, and other actors by get_actors_in_level. A map with no level instances is a success with an empty list and count 0. Reads the editor world, not a PIE session.
 //   @returns { world: string, level_instances: [{ actor_name: string, world_asset_path: string, world_asset_valid: bool, is_loaded: bool, location: [number,number,number] }], count: number }
 
 TSharedPtr<FJsonObject> HandleGetLevelInstanceInfo(const TSharedPtr<FJsonObject>& Params)

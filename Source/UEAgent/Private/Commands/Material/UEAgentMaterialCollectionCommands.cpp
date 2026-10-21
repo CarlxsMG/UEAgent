@@ -748,10 +748,10 @@ TSharedPtr<FJsonObject> HandleRemoveCollectionParam(const TSharedPtr<FJsonObject
     return mcp_common::MakeSavedReply(Result, bSaved, TEXT("remove_collection_parameter"), SaveError);
 }
 
-// MCP:rename_collection_parameter - Rename one parameter of a Material Parameter Collection asset, keeping its Id, and save it. Refuses when new_name is already used in the same array, and errors when param_name is not in the array param_type selects (default scalar).
-//   @param collection_path - Full /Game path to the MPC asset
-//   @param param_name - Current parameter name
-//   @param new_name - New parameter name, must not collide with another
+// MCP:rename_collection_parameter - Rename one scalar or vector parameter of a Material Parameter Collection asset, keeping its Id so the materials that read it keep resolving it, in one undo step, then save the asset. Use it rather than remove_collection_parameter plus add_collection_parameter, which gives the parameter a new Id that those materials do not know; to give it a new Id on purpose use regenerate_collection_parameter_id. A new_name already used in the same array, the parameter's own name included (names compare case-insensitively), is refused, so repeating a rename fails; a param_name that is not in the array param_type selects is an error; nothing changes in either case. A collection that does not load is an error; a failed save makes success false, with saved false, save_error and the rename only in memory. List the names with get_collection_info.
+//   @param collection_path - Asset path of the collection, e.g. "/Game/MPC/MPC_Global" or the object path "/Game/MPC/MPC_Global.MPC_Global".
+//   @param param_name - Current name of the parameter, as get_collection_info lists it (scalar_params[].name or vector_params[].name); case-insensitive.
+//   @param new_name - New parameter name, e.g. "WindStrength"; must not be used by another parameter of the same kind (compared case-insensitively).
 //   @param param_type - Which array to search: "scalar" or "vector", any case; omitted or anything else means scalar
 //   @returns { collection_path: string, param_name: string, new_name: string, param_type: string, renamed: bool, saved: bool }
 TSharedPtr<FJsonObject> HandleRenameCollectionParam(const TSharedPtr<FJsonObject>& Params)
@@ -841,11 +841,11 @@ TSharedPtr<FJsonObject> HandleRegenerateCollectionParamId(const TSharedPtr<FJson
     return mcp_common::MakeSavedReply(Result, bSaved, TEXT("regenerate_collection_parameter_id"), SaveError);
 }
 
-// MCP:duplicate_material_parameter_collection - Duplicate a Material Parameter Collection asset, parameters included with their names, Ids and defaults, to package_path/new_name and save the copy. Refuses when the target already exists. Returns collection_path, scalar_count, vector_count, saved and save_error.
-//   @param source_path - Source MPC path, e.g. "/Game/MPC/MPC_A" or the object path "/Game/MPC/MPC_A.MPC_A"
-//   @param new_name - Asset name of the copy, e.g. "MPC_B"; must not be empty
-//   @param package_path - Target folder; default is the folder of source_path when it is an object path with a dot ("/Game/MPC/MPC_A.MPC_A"), else "/Game/MaterialCollections"
-//   @returns { source_path: string, collection_path: string, asset_path: string, name: string, package_path: string, scalar_count: int, vector_count: int, duplicated: bool, saved: bool, save_error: string }
+// MCP:duplicate_material_parameter_collection - Copy a Material Parameter Collection asset to package_path/new_name, with every scalar and vector parameter's name, Id and default value, then save the copy; the source is not changed and there is no undo step. Use it to start a variant of an existing collection; for an empty one use create_material_parameter_collection, and for any other asset type duplicate_asset. An asset already at the target path is refused, so a repeat call fails and nothing changes; a source that does not load as a collection, or an invalid target name, is an error too. A failed save makes success false, with saved false, save_error and the copy only in memory. Read the copy with get_collection_info; rename its parameters with rename_collection_parameter.
+//   @param source_path - Collection to copy, as an asset path, e.g. "/Game/MPC/MPC_A", or the object path "/Game/MPC/MPC_A.MPC_A".
+//   @param new_name - Asset name of the copy without folder, e.g. "MPC_B"; must be a valid, non-empty asset name.
+//   @param package_path - Target folder, e.g. "/Game/MPC"; default is the folder of source_path when it is an object path with a dot ("/Game/MPC/MPC_A.MPC_A"), else "/Game/MaterialCollections".
+//   @returns { source_path: string, collection_path: string, asset_path: string, name: string, package_path: string, scalar_count: int, vector_count: int, duplicated: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleDuplicateMpc(const TSharedPtr<FJsonObject>& Params)
 {
     FString SourcePath;
@@ -1090,8 +1090,8 @@ TSharedPtr<FJsonObject> HandleSetMpciScalarParameterValue(const TSharedPtr<FJson
     return mcp_common::MakeOutcomeReply(Result, bReadback, ReadbackError);
 }
 
-// MCP:get_material_parameter_collection_instance_info - Read the transient Material Parameter Collection Instance of one collection on a world: instance_exists, is_valid, parent_collection_path and, per parameter, current_value or current_rgba with readback_ok. The world is the editor world by default, or the Play-in-Editor world world_label selects; world_package and world_type say which one was read. Changes no value, but the engine lookup creates the instance, at the collection defaults, when the world has none, so instance_exists is true in practice; scalar_override_count and vector_override_count are only the parameter counts.
-//   @param collection_path - Full /Game path of the parent MPC
+// MCP:get_material_parameter_collection_instance_info - Read the live per-world values of a Material Parameter Collection (its transient instance on one world) without changing any value: current_value per scalar and current_rgba per vector, each with readback_ok (false when the instance lacks that parameter, the value then being the asset default), plus parent_collection_path and is_valid. The world is the editor world by default, or the Play-in-Editor world world_label selects; the world fields and pie_instance (-1 outside PIE) say which one answered. Use it to check set_material_parameter_collection_instance_value or reset_material_parameter_collection_instance; for the saved defaults use get_collection_info. The engine lookup creates the instance at the defaults when the world has none, so instance_exists is true in practice, and scalar_override_count and vector_override_count are only the parameter counts, not overrides. A collection that does not load, or a world_label no live world matches, is an error.
+//   @param collection_path - Asset path of the collection, e.g. "/Game/MPC/MPC_Global", as get_collection_info takes it.
 //   @param world_label - Which world: empty or "editor" for the editor world (the default), even while Play-in-Editor runs; "pie" (alias "game") for the running PIE world, "server" or "client" for that PIE world, "pie:N" for PIE instance N. any other value names a live world by its object name (the editor world is checked first, so a map name selects it) or by its package name (UEDPIE_N_ and the map name for a PIE world), and a value no world has fails and lists the worlds present
 //   @returns { collection_path: string, world_name: string, world_package: string, world_type: string, net_mode: string, pie_instance: int, instance_exists: bool, is_valid: bool, parent_collection_path: string, scalar_override_count: int, vector_override_count: int, scalars: [object], vectors: [object] }
 TSharedPtr<FJsonObject> HandleGetMpciInfo(const TSharedPtr<FJsonObject>& Params)

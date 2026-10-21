@@ -348,14 +348,14 @@ Creates a modulation generator asset of class LFO, ADEnvelope or EnvelopeFollowe
 
 ## `create_modulation_parameter`
 
-*Additive.*
+*Additive, idempotent.*
 
-Creates a USoundModulationParameter asset of the chosen concrete class at parameter_path and saves it. An existing parameter there is returned untouched with its real class (not saved). Returns parameter_path, parameter_name, parameter_class, created, already_existed, saved. Tune it with set_modulation_parameter_settings.
+Create a sound modulation parameter asset of one concrete class at parameter_path, with the engine's default settings, then save it; there is no undo step. A parameter is what a modulation patch outputs to (set_modulation_patch_output_parameter), and its class sets the unit and mixing (Volume in decibels, Frequency in hertz...). Idempotent: when a modulation parameter already exists at that path it is returned untouched with its real class, parameter_class is not checked, nothing is saved and already_existed is true. An unknown class, a path that does not split into folder and name, or an asset of another type there is an error and nothing changes; a failed save (for example while PIE runs) makes success false with the asset only in memory. Tune it with set_modulation_parameter_settings and read it with get_modulation_parameter_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `parameter_path` | string | yes | Full asset path (e.g. /Game/MyGame/Param_Volume); the package path is the directory portion and the leaf becomes the asset name |
-| `parameter_class` | string | yes | Concrete class name (case-insensitive). One of: Volume, Frequency, LPFrequency, HPFrequency, Bipolar, Additive, Scaled; the engine spellings LPFFrequency and HPFFrequency are accepted too. |
+| `parameter_path` | string | yes | Full asset path, folder plus asset name, e.g. "/Game/Audio/Mod/Param_Volume"; the last segment becomes the asset name and a missing folder is created. |
+| `parameter_class` | string | yes | Concrete class name (case-insensitive). One of: Volume, Frequency, LPFrequency, HPFrequency, Bipolar, Additive, Scaled; the engine spellings LPFFrequency and HPFFrequency are accepted too. Not checked when a parameter already exists at parameter_path. |
 
 **Returns:** `{ parameter_path, parameter_name, parameter_class, created, already_existed, saved }`
 
@@ -391,15 +391,15 @@ Create a USoundClass asset at package_path/name (package_path defaults to /Game/
 
 ## `create_sound_concurrency`
 
-*Additive.*
+*Destructive, idempotent.*
 
-Create a USoundConcurrency asset at package_path/name, or load the one already there, optionally set MaxCount, and save it. Returns max_count read back, created, already_exists and saved; set_properties edits the other concurrency settings.
+Creates a Sound Concurrency asset (USoundConcurrency, the rule that caps how many sounds of a group play at once) at package_path/name, or loads the one already there instead of making a duplicate (created and already_exists say which), then saves it; success is false, with save_error, when the save fails. With max_count it also sets MaxCount, which on an existing asset overwrites the old value, as one undo step; without it an existing asset is left as it was. Idempotent: the same call again gives the same asset and value. An invalid path, or an asset of another class at that path, is an error. The other concurrency settings (resolution rule, volume scaling, retrigger time) are edited with set_properties on the asset_path this returns, and read with get_properties; sibling audio assets come from create_sound_class, create_sound_attenuation and create_sound_mix.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `name` | string | yes | Name of the new Sound Concurrency asset |
-| `package_path` | string | no | Target content path, defaults to /Game/Audio |
-| `max_count` | number | no | Most sounds of this group that play at once (MaxCount); values below 1 become 1 and fractions are truncated. Unchanged when omitted. |
+| `name` | string | yes | Asset name of the Sound Concurrency, without a folder (e.g. "SCon_Footsteps"). |
+| `package_path` | string | no | Content folder for the asset, e.g. "/Game/Audio/Concurrency"; defaults to /Game/Audio. |
+| `max_count` | number | no | Optional whole number: most sounds of this group that play at once (MaxCount); values below 1 become 1 and fractions are truncated. Unchanged when omitted. |
 
 **Returns:** `{ name: string, package_path: string, asset_path: string, asset_class: string, max_count: int, applied_max_count: bool, created: bool, already_exists: bool, saved: bool }`
 
@@ -433,14 +433,14 @@ Create a USoundMix asset at package_path/name (package_path defaults to /Game/Au
 
 ## `create_sound_modulation_patch`
 
-*Additive.*
+*Additive, idempotent.*
 
-Creates a USoundModulationPatch asset at package_path/patch_name with no inputs or output, bypassed by default (bBypass true), and saves it; a patch already there is returned untouched, not re-saved. Returns patch_path, bBypass, input_count, output_parameter_path, created, already_existed, saved. Fill it with add_modulation_input_to_patch and set_modulation_patch_output_parameter.
+Create an empty sound modulation patch asset at package_path/patch_name (no inputs, no output parameter, bypassed with bBypass true), then save it; there is no undo step. A patch combines control buses into the value of one output parameter; for a single bus use create_control_bus, for a time-varying source create_modulation_generator. Idempotent: a patch already at that path is returned untouched as it stands, nothing is saved and already_existed is true. An invalid path, or an asset of another type at it, is an error and nothing changes; a failed save (for example while PIE runs) makes success false with the asset only in memory. Then add buses with add_modulation_input_to_patch, set the output with set_modulation_patch_output_parameter (a parameter from create_modulation_parameter), turn bypass off with set_modulation_patch_bypass, and read it back with get_sound_modulation_patch_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `patch_name` | string | yes | Name of the modulation patch asset (e.g. "Patch_Volume") |
-| `package_path` | string | no | Target content package path where the asset is created (default /Game/MCP) |
+| `patch_name` | string | yes | Asset name of the patch without its folder, e.g. "Patch_Volume"; appended to package_path. |
+| `package_path` | string | no | Content folder for the asset, e.g. "/Game/Audio/Mod" (default /Game/MCP); created when missing. |
 
 **Returns:** `{ patch_path, patch_name, bBypass, input_count, output_parameter_path, created, already_existed, saved }`
 
@@ -543,14 +543,14 @@ Drop the edge that feeds the input to_input_name of node to_node_id in a MetaSou
 
 *Destructive.*
 
-Clear a wired child out of a parent node's input slot (inverse of connect_sound_cue_nodes)
+Unwires one input of a node in a USoundCue asset: the parent's input slot, picked by the child wired into it or by its index, is emptied, in one undo step, then the cue is saved; a failed save, as during PIE, makes success false with save_error. Inverse of connect_sound_cue_nodes. The slot itself is kept (empty, -1 in get_sound_cue_graph) so other input indexes do not shift, and the child node stays in the cue: remove_sound_cue_node deletes a node. A slot that is already empty or out of range, or a child not wired into the parent, succeeds with already_disconnected true and nothing changed or saved. A cue that does not load, a node id out of range, or neither child_node_id nor input_index is an error. Read ids and wiring first with get_sound_cue_graph; the cue's output node is set with set_sound_cue_first_node.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `cue_path` | string | yes | Full asset path of the cue |
-| `parent_node_id` | number | yes | node_id of the upstream node whose input slot is cleared |
-| `child_node_id` | number | no | Optional node_id of the wired child; its slot is located via IndexOfByKey |
-| `input_index` | number | no | Optional slot to clear directly; supply this OR child_node_id |
+| `cue_path` | string | yes | Object or package path of the Sound Cue asset (e.g. "/Game/Audio/SC_Footsteps"). |
+| `parent_node_id` | number | yes | node_id (index in the cue's AllNodes, as get_sound_cue_graph lists it) of the node whose input slot is emptied. |
+| `child_node_id` | number | no | Optional node_id of the wired child; the first slot of the parent holding it is emptied. Wins over input_index when both are given. |
+| `input_index` | number | no | Optional 0-based input slot of the parent to empty directly (its position in that node's child_ids); supply this OR child_node_id. |
 
 **Returns:** `{ cue_path: string, parent_node_id: int, child_node_id: int, input_index: int, parent_class: string, child_class: string, parent_child_count: int, disconnected: bool, already_disconnected: bool, saved: bool }`
 
@@ -670,13 +670,13 @@ Read the class and settings of a USoundModulationGenerator asset without changin
 
 *Read-only.*
 
-Reads a USoundModulationParameter asset without changing it. Returns parameter_path, parameter_class (the concrete class, e.g. SoundModulationParameterVolume) and its settings value_normalized, clamp_to_normalized_range and value_unit. Change them with set_modulation_parameter_settings.
+Read a sound modulation parameter asset without changing it: its concrete class (e.g. SoundModulationParameterVolume) and its settings, value_normalized (the 0-1 default), clamp_to_normalized_range (left out on Unreal Engine 5.7, which lacks it) and value_unit (the default in the parameter's own unit). Use it to check a parameter before making it a patch output with set_modulation_patch_output_parameter, or after set_modulation_parameter_settings changed it. A path that does not load as a modulation parameter is an error. Create one with create_modulation_parameter; patches and generators have their own readers: get_sound_modulation_patch_info, get_modulation_generator_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `parameter_path` | string | yes | Asset path to the USoundModulationParameter |
+| `parameter_path` | string | yes | Asset path of the modulation parameter, e.g. "/Game/Audio/Mod/Param_Volume", as create_modulation_parameter returns it (parameter_path). |
 
-**Returns:** `{ parameter_path, parameter_class, value_normalized, clamp_to_normalized_range, value_unit }`
+**Returns:** `{ parameter_path, parameter_class, value_normalized, clamp_to_normalized_range?, value_unit }`
 
 ## `get_sound_class_properties`
 
@@ -694,11 +694,11 @@ Read a USoundClass asset: every FSoundClassProperties field that set_properties 
 
 *Read-only.*
 
-Read the node graph of a USoundCue without changing it: every node in AllNodes with its id (the node_id other sound cue tools take), class, child_ids (-1 for an empty slot), max_child_nodes and editable properties, plus first_node_id (-1 when unset) and node_count.
+Reads the node graph of a USoundCue without changing it: every node in AllNodes with its id (the node_id the other sound cue tools take), class, child_ids (the wired child's id per input slot, -1 for an empty slot), max_child_nodes and editable properties (the keys set_sound_cue_node_properties accepts), plus first_node_id (the output node, -1 when unset) and node_count. Read-only: nothing is modified or saved; a cue that does not load is an error. Call it before connect_sound_cue_nodes, disconnect_sound_cue_nodes, remove_sound_cue_node, set_sound_cue_first_node or set_sound_cue_node_properties to get ids, and after them to check the result; ids are positions, so re-read after remove_sound_cue_node shifts them. Create a cue with create_sound_cue and add nodes with add_sound_cue_node.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `cue_path` | string | yes | Full asset path of the cue |
+| `cue_path` | string | yes | Object or package path of the Sound Cue asset (e.g. "/Game/Audio/SC_Footsteps" or "/Game/Audio/SC_Footsteps.SC_Footsteps"). |
 
 **Returns:** `{ cue_path: string, asset_path: string, nodes: [object], node_count: int, first_node_id: int, has_first_node: bool }`
 
@@ -730,11 +730,11 @@ Read the routing fields of a USoundSourceBus asset: source_bus_channels (Mono or
 
 *Read-only.*
 
-Read a USoundfieldSubmix asset without changing it: its soundfield_encoding_format and resolved_format, encoding_settings {class, path}, and effect_chain entries {index, class, path, settings_class, settings_path} with chain_length. Adds a note when no concrete soundfield effect class is loaded.
+Read a soundfield submix asset without changing it: its encoding format as authored (soundfield_encoding_format) and as the engine resolves it (resolved_format), its encoding settings object (class and path), and every effect of its chain in order with index, class, path and settings class and path. A note is added when no concrete soundfield effect class is loaded (stock Unreal ships none; a spatial audio plugin adds them), which is why the chain is usually empty. Use it after create_soundfield_submix, or to find the effect_index that remove_soundfield_effect takes; append an effect with add_soundfield_effect_to_submix. For an ordinary submix's effects use get_submix_effect_chain. A path that does not load as a soundfield submix is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `submix_path` | string | yes | Full path to the USoundfieldSubmix (required). |
+| `submix_path` | string | yes | Asset path of the soundfield submix, e.g. "/Game/Audio/SFS_Ambisonics" or "/Game/Audio/SFS_Ambisonics.SFS_Ambisonics", as create_soundfield_submix returns it (submix_path). |
 
 **Returns:** `{ submix_path, soundfield_encoding_format, resolved_format, encoding_settings_class, encoding_settings: { class, path }, effect_chain: [{ index, class, path, settings_class, settings_path }], chain_length, note? }`
 
@@ -766,13 +766,13 @@ List every edge of the default graph of a MetaSound Source: from which node and 
 
 *Read-only.*
 
-Enumerate all MetaSound node classes registered with the engine (via Metasound::Frontend::ISearchEngine). Editor-only because ISearchEngine::FindAllClasses is gated by WITH_EDITORONLY_DATA.
+List the MetaSound node classes the editor's MetaSound search engine knows, without changing anything: per class its class_name, class_path (Namespace.Name.Variant, e.g. UE.Sine.Audio: the three parts add_metasound_node takes as class_namespace, class_name and class_variant), type (e.g. External, the type of node classes and MetaSound assets), highest version (major.minor; the major is add_metasound_node's major_version), access_flags and is_native (true when the class name has a namespace, as engine and plugin nodes do). Deprecated classes are left out and only the highest version of each is listed; with include_unloaded (default) MetaSound assets not loaded yet are included too. The list is long (hundreds of classes) and has no filter. Use it to find a class before add_metasound_node; the nodes already in one MetaSound's graph are list_metasound_nodes, and one node's pins get_metasound_node_info. Editor only.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `include_unloaded` | boolean | no | If true (default), include classes from assets not yet loaded into memory. |
+| `include_unloaded` | boolean | no | true (default) also lists the classes of MetaSound assets not loaded into memory yet, from the MetaSound asset manager's tag data; false lists only the classes registered now. |
 
-**Returns:** `{ count, types: [{ class_name, class_path, type, version, is_native }] }`
+**Returns:** `{ count, types: [{ class_name, class_path, type, version, access_flags, is_native }] }`
 
 ## `list_metasound_nodes`
 
@@ -790,11 +790,11 @@ List every node in the default graph of a MetaSound Source asset with its GUID i
 
 *Read-only.*
 
-Lists all subtitle cues on a USubtitleAssetUserData.  Read-only walk of the Subtitles array, returning cue_count, max_duration (from USubtitleAssetUserData::GetMaximumDuration), and per-cue fields (index, text, start_offset, duration, duration_type, priority, subtitle_type, comment).
+List every cue of a subtitles asset (USubtitleAssetUserData, the engine's list of timed subtitle cues) in stored order, without changing anything: per cue its 0-based index, text, start_offset and duration in seconds, duration_type (use_sound_duration or use_duration_property), priority, subtitle_type (subtitle, closed_caption or audio_description) and comment, plus count and max_duration (GetMaximumDuration, the latest end time). Use it to find the cue_index that set_subtitle_cue and remove_subtitle_cue take, or to check add_subtitle_cue's result; create the asset with create_subtitles_asset. An asset with no cues is a success with count 0; a path that does not load as a USubtitleAssetUserData is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `asset_path` | string | yes | Content path of the USubtitleAssetUserData asset. |
+| `asset_path` | string | yes | Subtitles asset as a package or object path, e.g. "/Game/Audio/Subs/SUB_Intro" or "/Game/Audio/Subs/SUB_Intro.SUB_Intro". |
 
 **Returns:** `{ asset_path: string, success: bool, count: int, max_duration: float, cues: [{index, text, start_offset, duration, duration_type, priority, subtitle_type, comment}] }`
 
@@ -936,12 +936,12 @@ Remove the sound class adjuster for one sound class from a USoundMix, in one und
 
 *Destructive.*
 
-Detach the effect at effect_index from a USoundfieldSubmix effect chain (undoable) and save; the effect object stays in the package, an out-of-range index is an error, and a removal succeeds only when the submix reaches disk. Returns removed_effect_class, removed_effect_path and chain_length. With no concrete effect class loaded nothing changes and the call fails, with removed false and a note.
+Detach the effect at effect_index from the effect chain of a soundfield submix asset, in one undo step, then save the submix; later effects shift down one index and the effect object itself stays in the package. The inverse of add_soundfield_effect_to_submix; find the index with get_soundfield_submix_info. The same index again removes the next effect, and an index past the end of the chain is an error with nothing changed. Success needs the save: a failed save makes success false, with saved false, save_error and the change only in memory. When no concrete soundfield effect class is loaded (stock Unreal ships none; a spatial audio plugin adds them) the chain is not touched and the call fails with removed false and a note. A path that does not load as a soundfield submix is an error. For an ordinary submix use remove_submix_effect_from_chain.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `submix_path` | string | yes | Full path to the USoundfieldSubmix (required). |
-| `effect_index` | number | yes | Zero-based index into SoundfieldEffectChain (required). |
+| `submix_path` | string | yes | Asset path of the soundfield submix, e.g. "/Game/Audio/SFS_Ambisonics", as create_soundfield_submix returns it (submix_path). |
+| `effect_index` | number | yes | 0-based position in the effect chain, as get_soundfield_submix_info returns it (effect_chain[].index); a negative value is an error. |
 
 **Returns:** `{ submix_path, effect_index, removed_effect_class, removed_effect_path, removed: true, already_absent: false, chain_length, saved, save_error? } -- success only when saved; with no concrete effect class loaded the call fails with { submix_path, effect_index, removed: false, saved: false, note } and the chain is not touched.`
 
@@ -1016,12 +1016,12 @@ Sets the sound asset of an audio component of the editor world, found by object 
 
 *Destructive, idempotent.*
 
-Set VolumeMultiplier (0 to 10, else an error; also resets VolumeModulationMin/Max to 1) on one audio component of the editor world, found by object name (case-insensitive) among EVERY audio component of every actor, so an actor's second or third audio component is reached too. A name that components of several actors carry is an error listing the owners, nothing changed, unless actor_name (object name, not label) picks one. No undo, no dirty mark. Returns old_volume, new_volume and volume_set, and which component it changed: audio_component_path and audio_owner_name.
+Sets the VolumeMultiplier of one audio component placed in the editor world (not PIE); the engine setter also resets its VolumeModulationMin/Max to 1. The component is found by object name (case-insensitive) among EVERY audio component of every actor; a name that components of several actors carry is an error listing the owners, nothing changed, unless actor_name (object name, not label) picks one. No undo step and no dirty mark: the value is lost on reload unless the level gets saved for another reason. A volume outside 0-10 is an error and nothing changes; the same value again gives the same result. Find components with get_audio_settings and read one with get_audio_component_properties; set_audio_sound changes its sound, set_audio_3d_settings its attenuation; to scale a whole sound class use set_sound_mix_class_override.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `audio_component_name` | string | yes | Object name of the audio component to modify (e.g. "AudioComponent0"), compared without case against every audio component of every actor in the editor world. |
-| `volume` | number | yes | Volume multiplier between 0.0 and 10.0 |
+| `audio_component_name` | string | yes | Object name of the audio component to modify (e.g. "AudioComponent0"), compared without case against every audio component of every actor in the editor world; get_audio_settings lists them with their owners. |
+| `volume` | number | yes | Volume multiplier from 0.0 to 10.0 (1.0 = the sound's own level, 0.5 = half, 0 = silent); outside that range is an error. |
 | `actor_name` | string | no | Optional object name (not label) of the actor that owns the component, compared without case. Needed when several actors own an audio component of that name (every AmbientSound's is AudioComponent0); an empty one, one that names no actor, or one whose actor has no such component is an error. |
 
 **Returns:** `{ audio_component_name: string, audio_component_path: string, audio_owner_name: string, old_volume: number, new_volume: number, requested_volume: number, volume_set: bool, volume_message: string, audio_enabled: bool, audio_pitch: number, audio_mobility: string, audio_sound_name: string, audio_3d_attenuation_radius: number, audio_position: { x, y, z } }`

@@ -373,8 +373,8 @@ TSharedPtr<FJsonObject> HandleSetActorTeam(const TSharedPtr<FJsonObject>& Params
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:get_actor_team - Reads the native FGenericTeamId assigned to an actor (or its Controller, for a Pawn possessed by an AAIController). Returns the engine-reserved NoTeam id (255) if neither the actor nor its Controller implements IGenericTeamAgentInterface.
-//   @param actor_name - Display label or internal name (required)
+// MCP:get_actor_team - Reads the native team id (FGenericTeamId) of an actor in the editor world, the team AI Perception uses to tell friend from foe: from the actor itself when it implements IGenericTeamAgentInterface, otherwise from its AAIController when it is a pawn possessed by one; resolved_on says which. When neither implements the interface the call still succeeds, with the engine-reserved NoTeam id 255, is_no_team true and resolved_on "none". Read-only: changes nothing. Editor world only, never a PIE session, so teams assigned at runtime are not seen. An unknown actor is an error. Use it to check set_actor_team, which writes the id; set_native_team_attitude decides whether two team ids are friendly, neutral or hostile; get_ai_perception_senses lists which senses a Blueprint's perception has.
+//   @param actor_name - Object name or label of the actor in the editor world (case-insensitive, first match), e.g. "BP_Guard_C_0" (required); a pawn, or the AIController itself.
 //   @returns { actor_name, team_id, resolved_on: "actor"|"controller"|"none", is_no_team }
 TSharedPtr<FJsonObject> HandleGetActorTeam(const TSharedPtr<FJsonObject>& Params)
 {

@@ -101,10 +101,10 @@ UMoviePipelineExecutorJob* FindJobByName(const FString& JobName)
 // ---------------------------------------------------------------------------
 // create_render_job
 // ---------------------------------------------------------------------------
-// MCP:create_render_job - Allocates a real Movie Render Queue job for a Level Sequence (headless authoring).  Adds a new UMoviePipelineExecutorJob to the editor Movie Pipeline queue, points it at the given Level Sequence, optionally sets its map, and ensures it has a primary configuration. The job persists in the editor's transient render queue.          (e.g. "/Game/Maps/MyMap.MyMap").
-//   @param sequence_name - Name of the target Level Sequence (found by AssetName under /Game).
-//   @param job_name - Optional explicit job name; auto-generated as "RenderJob_<sequence_name>" if omitted
-//   @param map_path - Optional map object path for the job (e.g. "/Game/Maps/MyMap.MyMap")
+// MCP:create_render_job - Adds a new job for a Level Sequence to this editor session's Movie Render Queue, without rendering: the job points at the sequence, takes map_path as its map when given, and has its default primary configuration. One undo step; the queue lives in memory, so nothing is saved to disk and the job is gone when the editor closes. Works headless. Each call adds another job, even with a job_name the queue already has (tools that take job_name then act on the first match). Next, set resolution, folder and image format with set_render_job_output and render with render_sequence_to_movie, which renders every job in the queue; get_render_queue lists the jobs and delete_render_job takes one out. For a quick render with default PNG output, render_sequence_to_movie alone is enough.
+//   @param sequence_name - Asset name of the Level Sequence, not a path (e.g. "Intro"): the first Level Sequence under /Game with that name, case-insensitive; get_level_sequences lists them.
+//   @param job_name - Optional job name (default "RenderJob_<sequence_name>"), the name set_render_job_output and delete_render_job take; not checked for uniqueness.
+//   @param map_path - Optional object path of the map the job renders in (e.g. "/Game/Maps/MyMap.MyMap"), stored as given and not checked; without it the render plays the level open in the editor.
 //   @returns { job_name: string, sequence_name: string, sequence_path: string, map: string, has_configuration: bool, job_created: bool, queue_job_count: number }
 
 TSharedPtr<FJsonObject> HandleCreateRenderJob(const TSharedPtr<FJsonObject>& Params)
@@ -361,9 +361,9 @@ TSharedPtr<FJsonObject> HandleGetRenderQueue(const TSharedPtr<FJsonObject>& Para
 // ---------------------------------------------------------------------------
 // render_sequence_to_movie
 // ---------------------------------------------------------------------------
-// MCP:render_sequence_to_movie - Authors a one-off render job for a sequence and starts the (async) movie render.  Allocates a real job (sequence + default PNG output config) and triggers RenderQueueWithExecutor using the PIE executor. The render runs ASYNCHRONOUSLY (it spins up a Play-In-Editor session), so this returns render_started immediately with an honest async note rather than blocking for completion. In a headless / non-interactive context the render may not start; the job + config are still authored for real.
-//   @param sequence_name - Name of the target Level Sequence (found by AssetName under /Game).
-//   @param map_path - Optional map object path (e.g. "/Game/Maps/MyMap.MyMap")
+// MCP:render_sequence_to_movie - Renders a Level Sequence to PNG frames with Movie Render Queue: adds a job named OneShot_<sequence_name> with the engine's default output (1920x1080 into {project_dir}/Saved/MovieRenders/) and starts rendering the whole editor queue, jobs from create_render_job included, in a Play-In-Editor session. Asynchronous: it returns at once without waiting for frames, and render_started only says a render executor was launched, not that frames were written; while a render is already running it starts nothing new. Needs an interactive editor, since it starts its own PIE session; headless, the job is still added. Frames overwrite earlier files of the same name in the output folder, and each call adds another job. For another resolution or format use create_render_job and set_render_job_output first; follow progress with get_render_queue and stop with cancel_render_job.
+//   @param sequence_name - Asset name of the Level Sequence, not a path (e.g. "Intro"): the first Level Sequence under /Game with that name, case-insensitive; get_level_sequences lists them.
+//   @param map_path - Optional object path of the map to render in (e.g. "/Game/Maps/MyMap.MyMap"), stored as given and not checked; without it the render plays the level open in the editor.
 //   @returns { sequence_name: string, job_name: string, job_created: bool, queue_job_count: number, render_started: bool, render_async: bool, note: string }
 
 TSharedPtr<FJsonObject> HandleRenderSequenceToMovie(const TSharedPtr<FJsonObject>& Params)
@@ -443,9 +443,9 @@ TSharedPtr<FJsonObject> HandleRenderSequenceToMovie(const TSharedPtr<FJsonObject
 // ---------------------------------------------------------------------------
 // delete_render_job
 // ---------------------------------------------------------------------------
-// MCP:delete_render_job - Deletes a job from the editor Movie Render Queue (headless-safe).  Removes a single job by name via UMoviePipelineQueue::DeleteJob, or clears the whole queue via DeleteAllJobs when delete_all is set. Idempotent: deleting a job that is not present reports already_absent:true honestly instead of failing.
-//   @param job_name - Name of the render job to delete (required unless delete_all is true).
-//   @param delete_all - Optional bool; when true, clears every job from the queue and ignores job_name.
+// MCP:delete_render_job - Deletes one job, by name, from this editor session's Movie Render Queue, or every job with delete_all true. Only the queued job goes: its sequence, its map and any frames already rendered stay. One undo step; nothing is saved to disk, since the queue lives in memory. Works headless. Idempotent: a job_name the queue does not have succeeds with already_absent true and nothing changes; when several jobs share the name, only the first is deleted. A call with neither job_name nor delete_all is an error. get_render_queue lists the job names, create_render_job and render_sequence_to_movie add jobs, and cancel_render_job stops a render in progress, which this tool does not do.
+//   @param job_name - Name of the job to delete, as get_render_queue lists it (e.g. "RenderJob_Intro"), matched case-insensitively; required unless delete_all is true.
+//   @param delete_all - Optional bool, default false; true deletes every job in the queue and ignores job_name.
 //   @returns { job_name?: string, deleted?: bool, already_absent?: bool, deleted_all?: bool, queue_job_count: number }
 
 TSharedPtr<FJsonObject> HandleDeleteRenderJob(const TSharedPtr<FJsonObject>& Params)

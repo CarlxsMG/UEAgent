@@ -1351,9 +1351,9 @@ TSharedPtr<FJsonObject> HandleRecomputeMeshNormals(const TSharedPtr<FJsonObject>
         NormalsError);
 }
 
-// MCP:simplify_mesh - QEM-simplify a DynamicMeshActor's dynamic mesh to a target triangle count. One undo step restores the mesh; a call that changes nothing adds no undo step.
-//   @param actor_name [!] - Label or name of the target DynamicMeshActor
-//   @param target_triangle_count [int!] - Target triangle count to simplify down to (must be > 0)
+// MCP:simplify_mesh - Simplifies the live dynamic mesh of a DynamicMeshActor in the editor world down toward target_triangle_count with attribute-aware QEM edge collapse, the shape kept as close as the count allows; the engine stops early when no further collapse is allowed, so triangle_count_after can stay above the target. A target at or above the current count, or an empty mesh, changes nothing (simplified false) and adds no undo step; otherwise one undo step restores the mesh. The level is marked dirty, nothing is saved to an asset. An unknown actor or a target of 0 or less is an error. For evenly sized triangles use apply_uniform_remesh, for density driven by a weight map apply_adaptive_remesh; read counts with get_dynamic_mesh_info and keep the result with copy_dynamic_mesh_to_static_mesh.
+//   @param actor_name [!] - Label or object name of the DynamicMeshActor in the editor world (case-insensitive); create one with spawn_actor.
+//   @param target_triangle_count [int!] - Triangle count to simplify down to, greater than 0 (e.g. half of the triangle_count get_dynamic_mesh_info reports); at or above the current count nothing changes.
 //   @returns { actor_name: string, target_triangle_count: int, triangle_count_before: int, triangle_count_after: int, vertex_count: int, simplified: bool }
 TSharedPtr<FJsonObject> HandleSimplifyMesh(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1467,8 +1467,8 @@ TSharedPtr<FJsonObject> HandleWeldMeshEdges(const TSharedPtr<FJsonObject>& Param
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:remove_unused_vertices - Remove the vertices no triangle references from a DynamicMeshActor's live dynamic mesh in the editor world and refresh its render data. Remaining vertex IDs are not renumbered and a clean mesh is a no-op that adds no undo step; otherwise one undo step restores the mesh. Returns vertex_count_before, vertex_count, vertices_removed and removed.
-//   @param actor_name [!] - Label or object name (case-insensitive) of the target DynamicMeshActor in the editor world.
+// MCP:remove_unused_vertices - Deletes the orphan vertices (those no triangle uses) of a DynamicMeshActor's live dynamic mesh in the editor world and refreshes its render data; triangles and their shape are untouched. Remaining vertex IDs are not renumbered: run compact_mesh afterwards for dense IDs. A mesh without orphan vertices is a success with removed false and adds no undo step; otherwise one undo step restores the mesh. The level is marked dirty, nothing is saved to an asset; an unknown actor or one without a dynamic mesh is an error. Typical after delete_mesh_triangles or apply_mesh_boolean; open seams are closed by weld_mesh_edges, overlaps by repair_mesh_self_intersections, and get_dynamic_mesh_info reads the counts.
+//   @param actor_name [!] - Label or object name (case-insensitive) of the target DynamicMeshActor in the editor world; create one with spawn_actor.
 //   @returns { actor_name: string, triangle_count: int, vertex_count: int, vertex_count_before: int, vertices_removed: int, removed: bool }
 TSharedPtr<FJsonObject> HandleRemoveUnusedVertices(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1899,12 +1899,12 @@ TSharedPtr<FJsonObject> HandleGetMeshVolumeAreaCenter(
 // All operate on the live UDynamicMesh* of an ADynamicMeshActor (mutations).
 // ===========================================================================
 
-// MCP:add_mesh_to_dynamic_mesh - Merge another UDynamicMesh into the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_MeshBasicEditFunctions::AppendMesh. One undo step puts the target mesh back as it was; the source mesh is not changed.
+// MCP:add_mesh_to_dynamic_mesh - Appends a copy of another DynamicMeshActor's live dynamic mesh to the live dynamic mesh of a target DynamicMeshActor in the editor world, keeping the geometry already there: the source vertices, shifted by append_transform, land in the target's mesh-local space, and neither actor's world transform is applied. One undo step puts the target back as it was; the source is not changed, the level is marked dirty and nothing is saved to an asset. Each call adds another copy. An empty source is a success with appended false and a note; an unknown actor, or one without a dynamic mesh, is an error. For a primitive shape use add_mesh_primitive, for a Static Mesh asset copy_static_mesh_to_dynamic_mesh, for a boolean union apply_mesh_boolean_actor_to_actor; keep the result with copy_dynamic_mesh_to_static_mesh.
 //   @renamed-from append_mesh_to_dynamic_mesh
-//   @param actor_name - Label or name of the target DynamicMeshActor (the receiver)
-//   @param source_actor_name - Label or name of the DynamicMeshActor whose dynamic mesh will be merged in
-//   @param append_transform - Optional [x,y,z] world-space transform applied to the source mesh before merging (default identity)
-//   @returns { actor_name, source_actor_name, triangles_before, triangles_after, triangles_added, vertex_count_after, appended: bool } -- appended is false when the source mesh has no triangles
+//   @param actor_name - Label or object name (case-insensitive) of the DynamicMeshActor that receives the geometry, in the editor world.
+//   @param source_actor_name - Label or object name (case-insensitive) of the DynamicMeshActor whose dynamic mesh is copied in; it is read, not changed.
+//   @param append_transform - Optional [x, y, z] translation in cm added to every source vertex before the copy (default [0, 0, 0]); translation only, no rotation or scale.
+//   @returns { actor_name, source_actor_name, triangles_before, triangles_after, triangles_added, vertex_count_after, appended: bool, note?: string } -- appended is false, with a note, when the source mesh has no triangles
 TSharedPtr<FJsonObject> HandleAppendMeshToDynamicMesh(
     const TSharedPtr<FJsonObject>& Params)
 {
@@ -2278,10 +2278,10 @@ TSharedPtr<FJsonObject> HandleFindNearestRayIntersectionWithMesh(
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:is_point_inside_mesh - Test whether a 3D point is inside the live dynamic mesh of a DynamicMeshActor using Fast Winding Number via UGeometryScriptLibrary_MeshSpatial::IsPointInsideMesh. Every call builds a fresh BVH and fast winding tree from the mesh as it is now (the plugin keeps none), so the answer always reflects the latest mesh edits. The mesh is not changed.
-//   @param actor_name - Label or name of the target DynamicMeshActor.
-//   @param query_point - [x, y, z] point in the mesh's local space.
-//   @param winding_threshold - Optional float; default 0.5 (standard parity test). Higher values shrink the "inside" region.
+// MCP:is_point_inside_mesh - Tests whether a point lies inside the live dynamic mesh of a DynamicMeshActor in the editor world, with the engine's fast winding number (IsPointInsideMesh), which also gives a sensible answer for meshes with small holes. Every call builds a fresh BVH and winding tree from the mesh as it is now, so the answer reflects the latest edits; nothing is changed or saved. An unknown actor or a missing query_point is an error. Use it for inside/outside tests; for the closest surface point use find_nearest_point_on_mesh, for a ray hit find_nearest_ray_intersection_with_mesh; build_mesh_bvh is never needed first. The point is in mesh-local space: subtract the actor's location (and undo its rotation and scale) to test a world position.
+//   @param actor_name - Label or object name (case-insensitive) of the DynamicMeshActor in the editor world.
+//   @param query_point - [x, y, z] point in the mesh's local space, in cm (e.g. [0, 0, 50]).
+//   @param winding_threshold - Optional float, default 0.5: the winding number above which the point counts as inside; higher values shrink the inside region, lower ones grow it.
 //   @param max_distance - Optional float; it has no effect on this query, whose winding-number test uses no search distance.
 //   @param allow_unsafe_modified [bool] - Optional; maps to bAllowUnsafeModifiedQueries (default false). It has no effect: the BVH is built fresh on every call, so it always matches the mesh.
 //   @returns { actor_name, is_inside: bool, containment_outcome: string } -- actor_name is the dynamic mesh component's name, not the actor label.
@@ -2667,10 +2667,10 @@ TSharedPtr<FJsonObject> HandleRemoveDynamicMeshActor(const TSharedPtr<FJsonObjec
     return mcp_common::MakeOkReply(Removal);
 }
 
-// MCP:set_dynamic_mesh_material - Assign a UMaterialInterface asset to a slot on a DynamicMeshActor's UDynamicMeshComponent, in an editor transaction. applied is the slot read back after the assignment; the call fails when it does not hold the material.
-//   @param actor_name [string!] - Label or name of the target DynamicMeshActor (required).
-//   @param material_path [string!] - Asset path of the UMaterialInterface (e.g. /Engine/EngineMaterials/DefaultMaterial) (required).
-//   @param slot_index [number] - Material slot to assign. Default 0 (the dynamic mesh only uses slot 0).
+// MCP:set_dynamic_mesh_material - Sets the material of one slot on a DynamicMeshActor's DynamicMeshComponent in the editor world, in one undo step, and refreshes its render state; the level is marked dirty, not saved. applied is the slot read back; the call fails when the slot does not hold the material. Setting the material a slot already has succeeds again (applied true). A missing actor, component or material, or a slot_index outside the component's slots, is an error and nothing changes. Which triangles use a slot is their MaterialID: paint it with set_mesh_material_id and read it with get_mesh_material_ids. For static mesh actors use set_actor_material; get_available_materials lists material paths.
+//   @param actor_name [string!] - Label or object name (case-insensitive) of the DynamicMeshActor in the editor world (required).
+//   @param material_path [string!] - Object path of a material or material instance (e.g. "/Engine/EngineMaterials/DefaultMaterial.DefaultMaterial"; a path without the .Name suffix also loads), as get_available_materials returns it (required).
+//   @param slot_index [number] - 0-based material slot, less than the component's slot count (slot 0 is always accepted); default 0.
 //   @returns { actor_name: string, material_path: string, material_name: string, slot_index: int, applied: bool, note?: string }
 TSharedPtr<FJsonObject> HandleSetDynamicMeshMaterial(const TSharedPtr<FJsonObject>& Params)
 {

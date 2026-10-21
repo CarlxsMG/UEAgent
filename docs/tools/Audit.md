@@ -10,14 +10,14 @@ Back to the [index](README.md).
 
 *Destructive.*
 
-Project-wide reference audit under folder_path: assets with zero referencers ("orphans") and dependencies pointing at a package no longer on disk ("broken"). Metadata-only through the AssetRegistry -- it never LOADS the assets, so it scales to a large project without spiking memory. It returns only a summary plus a report path; read the detail back with get_mcp_audit_report. For one asset rather than a sweep, use get_asset_referencers / get_asset_dependencies; for unused assets only, find_unused_assets.
+Sweeps the assets under folder_path for two reference problems: orphans (assets no package references, by Asset Registry metadata) and broken references (a dependency on a package that is no longer on disk; /Script/ C++ modules are skipped). Metadata-only: it never loads, changes or saves an asset, so it scales to large projects. Not read-only, though: the full lists go to a new JSON report under &lt;Project>/Saved/MCPAudits/ (a call within the same second replaces the previous one), and the reply carries only the counts and the report path; read the lists with get_mcp_audit_report. Orphans are candidates, not proof: levels and assets loaded by name or from config have no referencers either. For one asset use get_asset_referencers or get_asset_dependencies; for unused assets only, find_unused_assets; delete with delete_asset and clean redirectors with fixup_redirectors.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `folder_path` | string | no | Content-relative folder to scan. Defaults to "/Game". |
+| `folder_path` | string | no | Content folder to scan, e.g. "/Game/Props" or a plugin mount such as "/MyPlugin". Defaults to "/Game". |
 | `recursive` | boolean | no | Recurse into subfolders. Defaults to true. |
-| `max_results` | number | no | Cap on assets processed (1-100000). Defaults to 5000. |
-| `dependency_type` | string | no | "hard"\|"soft"\|"all" (case-insensitive), default "all". Scopes BOTH the referencer check (orphan detection) and the dependency check (broken-reference detection) to that dependency kind. Use "hard" to find only the broken references that actually break loading -- a broken SOFT reference (TSoftObjectPtr/FSoftObjectPath) does not. "all" applies no Hard/Soft requirement at all. |
+| `max_results` | number | no | Cap on assets processed, clamped to 1-100000; defaults to 5000. The summary has no truncation flag: asset_count equal to the cap means the sweep was cut. |
+| `dependency_type` | string | no | "hard"\|"soft"\|"all" (case-insensitive), default "all"; any other value is treated as "all". Scopes BOTH the referencer check (orphan detection) and the dependency check (broken-reference detection) to that dependency kind. Use "hard" to find only the broken references that actually break loading -- a broken SOFT reference (TSoftObjectPtr/FSoftObjectPath) does not. "all" applies no Hard/Soft requirement at all. |
 
 **Returns:** `{ path: string, summary: { asset_count: int, orphan_count: int, broken_reference_count: int, dependency_type: string } }`
 

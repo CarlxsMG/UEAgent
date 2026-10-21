@@ -183,14 +183,14 @@ Put editor-world actors on the editor CLIPBOARD (edactCopySelected), either by n
 
 ## `create_blueprint_interface`
 
-*Destructive.*
+*Additive.*
 
-Create a Blueprint Interface asset: a contract of function signatures that unrelated classes can implement, so callers talk to the contract instead of a concrete class. The right tool when several different kinds of actor must answer the same request (interactable, damageable, workable) and you do not want a shared base class -- one interface replaces N-by-M hard-wired cases. Created empty: add functions with add_blueprint_function, then implement_interface on each class and add_blueprint_function with override=true per function.
+Create an empty Blueprint Interface asset at path/name (a contract of function signatures that unrelated Blueprints implement, so a caller sends the message without knowing the concrete class) and mark its package dirty without saving it; there is no undo step. Use it when several kinds of actor must answer the same request (interact, take damage, work) without sharing a base class; when they can share one, use create_blueprint with a common parent instead. An asset already at that path, or an invalid name, is an error and nothing changes, so a repeat call fails. Refused while Play-in-Editor runs unless force=true. Next: add each signature with add_blueprint_function, add the interface to each class with implement_interface, implement each function there with add_blueprint_function (override=true), and save with save_asset.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `name` | string | yes | Asset name (no path) |
-| `path` | string | no | Target content path for the new asset (default /Game/Blueprints) |
+| `name` | string | yes | Asset name without folder, e.g. "BPI_Interactable"; must be a valid asset name not already used in that folder. |
+| `path` | string | no | Content folder for the new asset, e.g. "/Game/Blueprints/Interfaces" (default /Game/Blueprints); a trailing slash is ignored. |
 
 **Returns:** `{ name, path, type }`
 
@@ -236,15 +236,15 @@ Create a UFileMediaSource asset at package_path/name that points at a movie file
 
 ## `create_functional_test`
 
-*Additive.*
+*Additive, idempotent.*
 
-Create a Blueprint subclass of AFunctionalTest (the canonical UE pattern for a multiplayer-friendly, Blueprint-scriptable test actor) and save it.
+Create a Blueprint subclass of AFunctionalTest (an actor placed in a test map that runs scripted checks and reports pass or fail to the automation framework) at package_path/asset_name, then save it; there is no undo step. Use it to author a level-based gameplay test; for an ordinary actor Blueprint use create_blueprint, and to run registered tests use run_automation_test (list them with list_automation_tests). Idempotent: when a Blueprint already exists at that path it is returned as it is, with already_existed true, and saved again; its parent is not checked and parent_class echoes the requested one. A parent that is not found or is not a Functional Test, or an asset of another type at the path, is an error and nothing changes. A failed save makes success false, with saved false and the Blueprint only in memory. Refused while Play-in-Editor runs unless force=true. Then script it with add_blueprint_function and add_graph_node, and place it in a map with spawn_actor.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `asset_name` | string | yes | Name for the new Functional Test BP asset. |
-| `package_path` | string | no | Target content folder; defaults to /Game/MCP. |
-| `parent_class` | string | no | Optional AFunctionalTest-derivative parent (default "FunctionalTest"). |
+| `asset_name` | string | yes | Asset name of the new Blueprint without folder, e.g. "BP_FT_PlayerHealth". |
+| `package_path` | string | no | Content folder for the asset, e.g. "/Game/Tests" (default /Game/MCP). |
+| `parent_class` | string | no | Optional parent: a class deriving from AFunctionalTest, by name without prefix (e.g. "FunctionalTest", the default) or by /Script/ path; a Blueprint parent must be loaded and named by its generated class (e.g. "BP_FT_Base_C"). |
 
 **Returns:** `{ asset_name, asset_path, package_class, parent_class, already_existed, saved }`
 
@@ -731,14 +731,14 @@ List the automation tests registered in this editor without running any: per tes
 
 *Read-only.*
 
-Lists registered console variables whose name contains a substring, or starts with prefix.  Iterates IConsoleManager::Get().ForEachConsoleObjectThatContains(filter) (ForEachConsoleObjectThatStartsWith(prefix) when prefix is given), collecting only console *variables* unless include_commands also lists console commands, capped at max_results. Read-only.
+List the console variables registered in the running editor whose name contains filter and/or starts with prefix, each with its current value as text and its help, without changing anything. Console commands are left out unless include_commands is true (they come with help but no value); with neither filter nor prefix every variable is walked. The list stops at max_results, and truncated plus total_matches tell how many more matched. Use it to discover names; then read one in full (int, float and bool values, flags, set_by) with get_cvar, change it with set_cvar or several at once with set_cvars_from_json, and read the scalability groups with get_scalability_levels. Matching nothing is a success with an empty cvars list.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `filter` | string | no | Substring filter for cvar names (empty matches all); with prefix, a name must match both. |
-| `prefix` | string | no | Optional name prefix, case-insensitive, e.g. "r.Shadow." or "t."; when given only names starting with it are listed. |
-| `include_commands` | boolean | no | Optional bool (default false): also list console commands, entries with a name and help but no value. |
-| `max_results` | number | no | Cap on results (default 200, min 1). |
+| `filter` | string | no | Text the name must contain, case ignored, e.g. "Shadow" (default empty = no filter). Without prefix, space-separated words must all appear and a single character matches as a name prefix; with prefix, a name must start with prefix and contain the whole filter. |
+| `prefix` | string | no | Text the name must start with, case ignored, e.g. "r.Shadow." or "t." (default empty = any name). |
+| `include_commands` | boolean | no | true to also list console commands (name and help, no value); default false lists variables only. |
+| `max_results` | number | no | Most entries to return, a whole number of at least 1 (default 200); total_matches still counts every match. |
 
 **Returns:** `{ filter: string, prefix?: string, include_commands: bool, cvars: [{name, value?, help}], count: int, total_matches: int, max_results: int, truncated: bool }`
 
@@ -760,12 +760,12 @@ What is UNSAVED in the editor right now: every dirty package with its disk path,
 
 *Read-only.*
 
-List the section names of one INI in the merged in-memory config (GConfig), like get_engine_ini_value reads it: count, sections, found (false when GConfig does not know that INI) and file_path. Read-only.
+List the section names of one INI (Engine, Game, Input, Editor, Scalability...) as the running editor holds it in GConfig, the in-memory merge of every config layer, without changing anything. An INI GConfig does not know (a misspelt name, say) is a success with found=false and an empty list. Use it to discover a section before reading one key with get_engine_ini_value or writing one with set_engine_ini_value; for UDeveloperSettings classes use get_project_settings_value. file_path is the saved-config path Saved/Config/&lt;Platform>/&lt;name>.ini built from the name, not a file that was read or checked to exist.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `config_file` | string | no | INI base name, e.g. "Engine" (default), "Game", "Input", "Editor", "Scalability"; a trailing ".ini" is dropped. |
-| `include_base` | boolean | no | Ignored: the code reads it but never uses it, so Base.ini sections are neither added nor removed. |
+| `include_base` | boolean | no | Ignored: the code reads it but never uses it, so the list is the same whatever you pass. |
 
 **Returns:** `{ count, sections: [string], found: bool, config_file, file_path }`
 
@@ -905,12 +905,12 @@ Remove one enumerator from a Blueprint Enum by display name (or internal name). 
 
 *Destructive, idempotent.*
 
-Remove a member from a user-defined struct.  Idempotent (a missing member reports already_absent without error); the engine refuses to remove the last remaining member (a struct cannot be empty) -- reported as an honest error.
+Remove one member from a Blueprint user-defined struct, found by display name or else by internal var name (case-insensitive), through the engine's struct editor: one undo step, the struct is recompiled so the Blueprints and DataTable rows that use it lose that field, and the package is marked dirty but not saved (save_asset). Idempotent: a member that is not there changes nothing and answers already_absent true. Removing the last member is refused, since a struct cannot be empty, and nothing changes; a path that does not load as a user-defined struct is an error. Find the names with get_struct_members; inverse: add_struct_member; to keep the data under another name use rename_struct_member instead.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `struct_path` | string | yes | Full asset path of the UUserDefinedStruct. |
-| `member_name` | string | yes | Member to remove, by its display name (or internal var name). |
+| `struct_path` | string | yes | Asset path of the user-defined struct, e.g. "/Game/Data/S_Item", as get_struct_members takes it. |
+| `member_name` | string | yes | Member to remove, by its display name as get_struct_members returns it (members[].name) or by its var_name; case-insensitive. |
 
 **Returns:** `{ struct_path: string, member_name: string, removed: bool, already_absent: bool, member_count: int }`
 
@@ -996,14 +996,14 @@ Run ONE registered automation test in this editor, synchronously, and return its
 
 *Destructive.*
 
-Start a Play-in-Editor session that runs the named AFunctionalTest BP and return the test verdict. Requires the named BP to exist; it will be auto-added to the current editor world's "PrepareForPIE" list so PIE picks it up. Honest-gated: returns success=false (not an error) if PIE fails to start -- the harness detects a transport drop separately.
+Place one instance of a Functional Test Blueprint class in the editor level (unless one is already there), then ask the editor to start a Simulate-in-Editor session and, with auto_stop_pie (default), to end it again. It does not wait for the test or read its result: verdict is "pass" whenever a session is running right after the request and "not_run" otherwise, so it is no test verdict -- read the outcome in the output log (get_output_log_lines), or run a registered test with run_automation_test, whose verdict is real. The start request is deferred (and with no level viewport, headless, nothing starts), so on a first call pie_started is usually false and the session starts after the reply without being stopped: end it with stop_play_in_editor. With a session already running it answers pass and, with auto_stop_pie, ends that session. The placed actor stays in the level, unsaved and with no undo step. Create the test first with create_functional_test; a class that is not found, or is not a Functional Test, is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `test_asset_path` | string | yes | Path to the AFunctionalTest BP asset (e.g. "/Game/Tests/BP_FT_PlayerHealth"). |
-| `auto_stop_pie` | boolean | no | Optional bool (default true). After the test completes (pass/fail), stop PIE and return the verdict. |
+| `test_asset_path` | string | yes | Functional Test Blueprint, as an asset path ("/Game/Tests/BP_FT_PlayerHealth"), object path or generated-class path ("/Game/Tests/BP_FT_PlayerHealth.BP_FT_PlayerHealth_C"); when none loads, the first loaded Functional Test class whose name contains the last path segment is used. |
+| `auto_stop_pie` | boolean | no | Optional bool (default true): request the end of the session right after it is seen running, including a session that was already running before the call. |
 
-**Returns:** `{ test_asset_path, pie_started, verdict: "pass"|"fail"|"not_run", pie_stopped, already_in_pie }`
+**Returns:** `{ test_asset_path, pie_started, verdict: "pass"|"not_run", pie_stopped?, already_in_pie?, spawned?, already_in_world?, note? }`
 
 ## `run_smoke_tests`
 
@@ -1100,11 +1100,11 @@ Sets a console variable via IConsoleManager and reads the value back.  Uses ICon
 
 *Destructive, idempotent.*
 
-Apply many cvars in one call. JSON shape: {"name":"value", ...}
+Set several console variables of the running editor in one call, from a JSON object of name/value pairs, each through IConsoleManager at SetByCode priority. Not atomic: names are applied one by one, an unknown name goes to errors and the others still apply. Unlike set_cvar (one variable, console priority, read back) it reads nothing back, and applied counts every name found, including a set the engine ignores because the variable was last set at a higher priority (by the console or by set_cvar), so confirm values with get_cvar. Find names with list_cvars. The values live in this editor session only: nothing is written to an INI (set_engine_ini_value does that) and nothing is undoable. Text that is not a JSON object is an error and nothing changes. Repeating the call sets the same values again.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `cvars` | string | yes | JSON object string {"cvar":"value", ...} |
+| `cvars` | string | yes | A STRING holding a JSON object of exact cvar names to values, e.g. '{"r.ScreenPercentage":"75","t.MaxFPS":"60"}'; names as list_cvars returns them. Give values as text such as "1": a JSON number is passed as its text, and a JSON true/false as the words true/false, which an integer cvar reads as 0. |
 
 **Returns:** `{ applied, requested, errors: [{name, error}] }`
 
@@ -1154,12 +1154,12 @@ Turn a plugin on (or off, with enabled=false) in the .uproject and save the proj
 
 *Destructive, idempotent.*
 
-Sets engine scalability quality via the Scalability API and reads it back.  Modifies a Scalability::FQualityLevels (starting from the current live state), then applies it with Scalability::SetQualityLevels + ApplyCachedQualityLevels.
+Set the running editor's scalability quality, every sg.* group at once (category all, the default) or one group, through Scalability::SetQualityLevels + ApplyCachedQualityLevels, then read all the levels back. It starts from the current levels, so a single-group change leaves the other groups as they were. The change lives in this editor session only: it is not undoable and is not written to GameUserSettings, an INI or a device profile. Check the levels before with get_scalability_levels; for one sg.* or r.* variable use set_cvar instead. An unknown quality word or category is an error and nothing changes; a number outside 0-4 is clamped. set is always true, so compare the returned levels with requested_level. Repeating the call sets the same levels again (idempotent).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `quality` | any | no | Level 0-3(/4) or one of "Low"/"Medium"/"High"/"Epic"/"Cinematic". |
-| `category` | string | no | Optional category name: "ViewDistance", "AntiAliasing", "Shadows", "GlobalIllumination", "Reflection", "PostProcess", "Texture", "Effects", "Foliage", "Shading", "Landscape", or "all" (default all). |
+| `quality` | any | no | Level as a number 0-4 (0 Low, 1 Medium, 2 High, 3 Epic, 4 Cinematic; others clamped) or one of "Low", "Medium", "High", "Epic", "Cinematic", case ignored. Required. |
+| `category` | string | no | One group, case ignored: "ViewDistance", "AntiAliasing", "Shadows", "GlobalIllumination" (or "GI"), "Reflection", "PostProcess", "Texture", "Effects", "Foliage", "Shading", "Landscape"; or "all" (the default) for every group. |
 
 **Returns:** `{ set: bool, requested_level: int, category: string, ResolutionQuality: int, ViewDistanceQuality: int, AntiAliasingQuality: int, ShadowQuality: int, GlobalIlluminationQuality: int, ReflectionQuality: int, PostProcessQuality: int, TextureQuality: int, EffectsQuality: int, FoliageQuality: int, ShadingQuality: int, LandscapeQuality: int }`
 
@@ -1167,13 +1167,13 @@ Sets engine scalability quality via the Scalability API and reads it back.  Modi
 
 *Destructive, idempotent.*
 
-Set the default value of a user-defined struct member (read-modify-write; the value is validated against the member's type by the engine, so an incompatible value is an honest error).  Idempotent: re-setting the same value is a no-op success.
+Set the default value of one member of a Blueprint user-defined struct, found by display name or else by internal var name (case-insensitive), through the engine's struct editor, which checks the value against the member's type and recompiles the struct; one undo step, and the package is marked dirty but not saved (save_asset). Idempotent: a value equal to the stored default text changes nothing and answers already_set true (compared as text, so "1.5" and "1.50" differ). A value invalid for the type, a member that is not found or a path that does not load as a user-defined struct is an error and nothing changes. Read the members and their current defaults with get_struct_members; a new member gets its type from add_struct_member first.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `struct_path` | string | yes | Full asset path of the UUserDefinedStruct. |
-| `member_name` | string | yes | Member to edit, by its display name (or internal var name). |
-| `default_value` | string | yes | New default as a string appropriate to the member's type (e.g. "7", "true", "1.5", "Hello"); pass "" to clear. |
+| `struct_path` | string | yes | Asset path of the user-defined struct, e.g. "/Game/Data/S_Item", as get_struct_members takes it. |
+| `member_name` | string | yes | Member to edit, by its display name as get_struct_members returns it (members[].name) or by its var_name; case-insensitive. |
+| `default_value` | string | yes | New default as text in the member type's format (e.g. "7", "true", "1.5", "Hello", "(X=1.0,Y=2.0,Z=3.0)" for a Vector); pass "" to clear it. |
 
 **Returns:** `{ struct_path: string, member_name: string, default_value: string, applied_default_value: string, already_set: bool, applied: bool, member: object }`
 

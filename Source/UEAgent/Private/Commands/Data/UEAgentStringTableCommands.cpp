@@ -630,8 +630,8 @@ TSharedPtr<FJsonObject> HandleGetCultureInfo(const TSharedPtr<FJsonObject>& Para
 // Dashboard, run in-process (Execute() is the documented embedded-caller entry point) rather than spawning
 // an external UAT/editor process.
 
-// MCP:list_localization_targets - List localization targets configured in the Localization Dashboard (ULocalizationSettings::GetEngineTargetSet/GetGameTargetSet), with their native/supported cultures.
-//   @param scope - Optional: "engine" | "game" | "all". Defaults to "all".
+// MCP:list_localization_targets - List the localization targets configured in the Localization Dashboard (ULocalizationSettings engine and game target sets) without changing anything, each with its scope, native culture and supported cultures. It is the first step of the localization pipeline: pass a name to gather_text_for_target, then compile_text_for_target, and preview a supported culture with set_active_culture. For one culture's details use get_culture_info; for string tables use get_string_table_entries. A project with no targets is a success with targets_count 0; a scope other than engine, game or all is an error.
+//   @param scope - "engine", "game" or "all" (default all), case ignored: which target set to list. Project targets such as "Game" live in the game set.
 //   @returns { scope: string, targets: [{ name: string, scope: string, native_culture: string, supported_cultures: string[] }], targets_count: int }
 TSharedPtr<FJsonObject> HandleListLocalizationTargets(const TSharedPtr<FJsonObject>& Params)
 {
@@ -702,9 +702,9 @@ TSharedPtr<FJsonObject> HandleListLocalizationTargets(const TSharedPtr<FJsonObje
 // ---------------------------------------------------------------------------
 // gather_text_for_target
 // ---------------------------------------------------------------------------
-// MCP:gather_text_for_target - Gather text into a localization target's manifest/archive files, by generating its GatherText commandlet config (LocalizationConfigurationScript::GenerateGatherTextConfigFile) and running it in-process (UGatherTextCommandlet::Execute) -- the same pipeline the Localization Dashboard's "Gather Text" button drives.
-//   @param target_name - Required. Target name, as listed by list_localization_targets.
-//   @param scope - Optional: "engine" | "game". Disambiguates a same-named target in both sets; defaults to searching both.
+// MCP:gather_text_for_target - Gather the localizable text of a localization target into its manifest and archive files (Content/Localization/<target>/ for a game target), the same pipeline as the Localization Dashboard's Gather Text button: it writes the target's GatherText config file (through source control when enabled) and runs the GatherText commandlet in-process, which blocks the editor until it finishes. The manifest is regenerated from the current sources, so text no longer in the project drops out of it; translations already in the archives are kept for text that remains. No undo step. Run it before compile_text_for_target, which builds the runtime .locres files; find target names with list_localization_targets. An unknown target, or a config file that cannot be written, is an error before anything runs; a non-zero commandlet exit code is success=false with exit_code (details in the Output Log). Repeating it gathers again from the current sources.
+//   @param target_name - Exact target name as list_localization_targets returns it, e.g. "Game".
+//   @param scope - "engine" or "game", case ignored, to pick between same-named targets; omitted (or any other value) searches the engine set first, then the game set.
 //   @returns { target_name: string, scope: string, config_path: string, config_written: bool, exit_code: int, success: bool, message: string }
 TSharedPtr<FJsonObject> HandleGatherTextForTarget(const TSharedPtr<FJsonObject>& Params)
 {

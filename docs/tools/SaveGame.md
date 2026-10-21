@@ -23,14 +23,14 @@ Delete the save file of a slot with DeleteGameInSlot; the data is gone for good.
 
 *Read-only.*
 
-Read the metadata of a save slot: exists and, for an existing slot, save_path (the generic desktop Saved/SaveGames/&lt;slot>.sav) plus file_size, modified_iso and modified_ticks when that file is on disk. A missing slot is exists=false with an error field, not a failure.
+Read the file facts of one save slot without loading or changing it: exists (UGameplayStatics::DoesSaveGameExist) and, for an existing slot, save_path (the generic desktop Saved/SaveGames/&lt;slot>.sav) plus file_size, modified_iso and modified_ticks when that file is on disk. Use it to check one slot before load_game or delete_save_game, or after save_game to confirm the write; to discover slot names use list_save_games; to read the saved object's contents use load_game. A missing slot is a success with exists=false and an error field saying so, and then no save_path, size or time.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `slot_name` | string | yes | Save slot name to query |
-| `user_index` | number | no | Platform user index for the save system; default 0 (the generic desktop save system ignores it) |
+| `slot_name` | string | yes | Exact save slot name, e.g. "Slot1", as list_save_games returns it; on desktop it is the file name without .sav. |
+| `user_index` | number | no | Platform user index, a whole number (default 0); the generic desktop save system ignores it. |
 
-**Returns:** `{ slot_name: string, user_index: int, exists: bool, save_path: string, file_size: int, modified_iso: string, modified_ticks: int, error: string }`
+**Returns:** `{ slot_name: string, user_index: int, exists: bool, save_path?: string, file_size?: int, modified_iso?: string, modified_ticks?: int, error?: string }`
 
 ## `list_save_games`
 

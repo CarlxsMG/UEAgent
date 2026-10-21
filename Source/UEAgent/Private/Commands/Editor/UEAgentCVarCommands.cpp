@@ -204,11 +204,11 @@ TSharedPtr<FJsonObject> HandleGetCVar(const TSharedPtr<FJsonObject>& Params)
 // ---------------------------------------------------------------------------
 // list_cvars
 // ---------------------------------------------------------------------------
-// MCP:list_cvars - Lists registered console variables whose name contains a substring, or starts with prefix.  Iterates IConsoleManager::Get().ForEachConsoleObjectThatContains(filter) (ForEachConsoleObjectThatStartsWith(prefix) when prefix is given), collecting only console *variables* unless include_commands also lists console commands, capped at max_results. Read-only.
-//   @param filter - Substring filter for cvar names (empty matches all); with prefix, a name must match both.
-//   @param prefix - Optional name prefix, case-insensitive, e.g. "r.Shadow." or "t."; when given only names starting with it are listed.
-//   @param include_commands - Optional bool (default false): also list console commands, entries with a name and help but no value.
-//   @param max_results - Cap on results (default 200, min 1).
+// MCP:list_cvars - List the console variables registered in the running editor whose name contains filter and/or starts with prefix, each with its current value as text and its help, without changing anything. Console commands are left out unless include_commands is true (they come with help but no value); with neither filter nor prefix every variable is walked. The list stops at max_results, and truncated plus total_matches tell how many more matched. Use it to discover names; then read one in full (int, float and bool values, flags, set_by) with get_cvar, change it with set_cvar or several at once with set_cvars_from_json, and read the scalability groups with get_scalability_levels. Matching nothing is a success with an empty cvars list.
+//   @param filter - Text the name must contain, case ignored, e.g. "Shadow" (default empty = no filter). Without prefix, space-separated words must all appear and a single character matches as a name prefix; with prefix, a name must start with prefix and contain the whole filter.
+//   @param prefix - Text the name must start with, case ignored, e.g. "r.Shadow." or "t." (default empty = any name).
+//   @param include_commands - true to also list console commands (name and help, no value); default false lists variables only.
+//   @param max_results - Most entries to return, a whole number of at least 1 (default 200); total_matches still counts every match.
 //   @returns { filter: string, prefix?: string, include_commands: bool, cvars: [{name, value?, help}], count: int, total_matches: int, max_results: int, truncated: bool }
 
 TSharedPtr<FJsonObject> HandleListCVars(const TSharedPtr<FJsonObject>& Params)
@@ -295,9 +295,9 @@ TSharedPtr<FJsonObject> HandleListCVars(const TSharedPtr<FJsonObject>& Params)
 // ---------------------------------------------------------------------------
 // set_scalability_quality
 // ---------------------------------------------------------------------------
-// MCP:set_scalability_quality - Sets engine scalability quality via the Scalability API and reads it back.  Modifies a Scalability::FQualityLevels (starting from the current live state), then applies it with Scalability::SetQualityLevels + ApplyCachedQualityLevels.
-//   @param quality - Level 0-3(/4) or one of "Low"/"Medium"/"High"/"Epic"/"Cinematic".
-//   @param category - Optional category name: "ViewDistance", "AntiAliasing", "Shadows", "GlobalIllumination", "Reflection", "PostProcess", "Texture", "Effects", "Foliage", "Shading", "Landscape", or "all" (default all).
+// MCP:set_scalability_quality - Set the running editor's scalability quality, every sg.* group at once (category all, the default) or one group, through Scalability::SetQualityLevels + ApplyCachedQualityLevels, then read all the levels back. It starts from the current levels, so a single-group change leaves the other groups as they were. The change lives in this editor session only: it is not undoable and is not written to GameUserSettings, an INI or a device profile. Check the levels before with get_scalability_levels; for one sg.* or r.* variable use set_cvar instead. An unknown quality word or category is an error and nothing changes; a number outside 0-4 is clamped. set is always true, so compare the returned levels with requested_level. Repeating the call sets the same levels again (idempotent).
+//   @param quality - Level as a number 0-4 (0 Low, 1 Medium, 2 High, 3 Epic, 4 Cinematic; others clamped) or one of "Low", "Medium", "High", "Epic", "Cinematic", case ignored. Required.
+//   @param category - One group, case ignored: "ViewDistance", "AntiAliasing", "Shadows", "GlobalIllumination" (or "GI"), "Reflection", "PostProcess", "Texture", "Effects", "Foliage", "Shading", "Landscape"; or "all" (the default) for every group.
 //   @returns { set: bool, requested_level: int, category: string, ResolutionQuality: int, ViewDistanceQuality: int, AntiAliasingQuality: int, ShadowQuality: int, GlobalIlluminationQuality: int, ReflectionQuality: int, PostProcessQuality: int, TextureQuality: int, EffectsQuality: int, FoliageQuality: int, ShadingQuality: int, LandscapeQuality: int }
 
 TSharedPtr<FJsonObject> HandleSetScalabilityQuality(const TSharedPtr<FJsonObject>& Params)
@@ -374,8 +374,8 @@ TSharedPtr<FJsonObject> HandleGetScalabilityLevels(const TSharedPtr<FJsonObject>
 // ===========================================================================
 // Engine settings: bulk cvar set and direct INI access.
 
-// MCP:set_cvars_from_json - Apply many cvars in one call. JSON shape: {"name":"value", ...}
-//   @param cvars - JSON object string {"cvar":"value", ...}
+// MCP:set_cvars_from_json - Set several console variables of the running editor in one call, from a JSON object of name/value pairs, each through IConsoleManager at SetByCode priority. Not atomic: names are applied one by one, an unknown name goes to errors and the others still apply. Unlike set_cvar (one variable, console priority, read back) it reads nothing back, and applied counts every name found, including a set the engine ignores because the variable was last set at a higher priority (by the console or by set_cvar), so confirm values with get_cvar. Find names with list_cvars. The values live in this editor session only: nothing is written to an INI (set_engine_ini_value does that) and nothing is undoable. Text that is not a JSON object is an error and nothing changes. Repeating the call sets the same values again.
+//   @param cvars - A STRING holding a JSON object of exact cvar names to values, e.g. '{"r.ScreenPercentage":"75","t.MaxFPS":"60"}'; names as list_cvars returns them. Give values as text such as "1": a JSON number is passed as its text, and a JSON true/false as the words true/false, which an integer cvar reads as 0.
 //   @returns { applied, requested, errors: [{name, error}] }
 TSharedPtr<FJsonObject> HandleSetCVarsFromJson(const TSharedPtr<FJsonObject>& Params)
 {
@@ -420,9 +420,9 @@ TSharedPtr<FJsonObject> HandleSetCVarsFromJson(const TSharedPtr<FJsonObject>& Pa
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:list_engine_ini_sections - List the section names of one INI in the merged in-memory config (GConfig), like get_engine_ini_value reads it: count, sections, found (false when GConfig does not know that INI) and file_path. Read-only.
+// MCP:list_engine_ini_sections - List the section names of one INI (Engine, Game, Input, Editor, Scalability...) as the running editor holds it in GConfig, the in-memory merge of every config layer, without changing anything. An INI GConfig does not know (a misspelt name, say) is a success with found=false and an empty list. Use it to discover a section before reading one key with get_engine_ini_value or writing one with set_engine_ini_value; for UDeveloperSettings classes use get_project_settings_value. file_path is the saved-config path Saved/Config/<Platform>/<name>.ini built from the name, not a file that was read or checked to exist.
 //   @param config_file - INI base name, e.g. "Engine" (default), "Game", "Input", "Editor", "Scalability"; a trailing ".ini" is dropped.
-//   @param include_base - Ignored: the code reads it but never uses it, so Base.ini sections are neither added nor removed.
+//   @param include_base - Ignored: the code reads it but never uses it, so the list is the same whatever you pass.
 //   @returns { count, sections: [string], found: bool, config_file, file_path }
 TSharedPtr<FJsonObject> HandleListEngineIniSections(const TSharedPtr<FJsonObject>& Params)
 {

@@ -448,11 +448,11 @@ TSharedPtr<FJsonObject> HandleConnectSoundCueNodes(const TSharedPtr<FJsonObject>
 // ---------------------------------------------------------------------------
 // disconnect_sound_cue_nodes
 // ---------------------------------------------------------------------------
-// MCP:disconnect_sound_cue_nodes - Clear a wired child out of a parent node's input slot (inverse of connect_sound_cue_nodes)
-//   @param cue_path - Full asset path of the cue
-//   @param parent_node_id - node_id of the upstream node whose input slot is cleared
-//   @param child_node_id - Optional node_id of the wired child; its slot is located via IndexOfByKey
-//   @param input_index - Optional slot to clear directly; supply this OR child_node_id
+// MCP:disconnect_sound_cue_nodes - Unwires one input of a node in a USoundCue asset: the parent's input slot, picked by the child wired into it or by its index, is emptied, in one undo step, then the cue is saved; a failed save, as during PIE, makes success false with save_error. Inverse of connect_sound_cue_nodes. The slot itself is kept (empty, -1 in get_sound_cue_graph) so other input indexes do not shift, and the child node stays in the cue: remove_sound_cue_node deletes a node. A slot that is already empty or out of range, or a child not wired into the parent, succeeds with already_disconnected true and nothing changed or saved. A cue that does not load, a node id out of range, or neither child_node_id nor input_index is an error. Read ids and wiring first with get_sound_cue_graph; the cue's output node is set with set_sound_cue_first_node.
+//   @param cue_path - Object or package path of the Sound Cue asset (e.g. "/Game/Audio/SC_Footsteps").
+//   @param parent_node_id - node_id (index in the cue's AllNodes, as get_sound_cue_graph lists it) of the node whose input slot is emptied.
+//   @param child_node_id - Optional node_id of the wired child; the first slot of the parent holding it is emptied. Wins over input_index when both are given.
+//   @param input_index - Optional 0-based input slot of the parent to empty directly (its position in that node's child_ids); supply this OR child_node_id.
 //   @returns { cue_path: string, parent_node_id: int, child_node_id: int, input_index: int, parent_class: string, child_class: string, parent_child_count: int, disconnected: bool, already_disconnected: bool, saved: bool }
 TSharedPtr<FJsonObject> HandleDisconnectSoundCueNodes(const TSharedPtr<FJsonObject>& Params)
 {
@@ -748,8 +748,8 @@ TSharedPtr<FJsonObject> HandleSetSoundCueNodeProperties(const TSharedPtr<FJsonOb
 // ---------------------------------------------------------------------------
 // get_sound_cue_graph
 // ---------------------------------------------------------------------------
-// MCP:get_sound_cue_graph - Read the node graph of a USoundCue without changing it: every node in AllNodes with its id (the node_id other sound cue tools take), class, child_ids (-1 for an empty slot), max_child_nodes and editable properties, plus first_node_id (-1 when unset) and node_count.
-//   @param cue_path - Full asset path of the cue
+// MCP:get_sound_cue_graph - Reads the node graph of a USoundCue without changing it: every node in AllNodes with its id (the node_id the other sound cue tools take), class, child_ids (the wired child's id per input slot, -1 for an empty slot), max_child_nodes and editable properties (the keys set_sound_cue_node_properties accepts), plus first_node_id (the output node, -1 when unset) and node_count. Read-only: nothing is modified or saved; a cue that does not load is an error. Call it before connect_sound_cue_nodes, disconnect_sound_cue_nodes, remove_sound_cue_node, set_sound_cue_first_node or set_sound_cue_node_properties to get ids, and after them to check the result; ids are positions, so re-read after remove_sound_cue_node shifts them. Create a cue with create_sound_cue and add nodes with add_sound_cue_node.
+//   @param cue_path - Object or package path of the Sound Cue asset (e.g. "/Game/Audio/SC_Footsteps" or "/Game/Audio/SC_Footsteps.SC_Footsteps").
 //   @returns { cue_path: string, asset_path: string, nodes: [object], node_count: int, first_node_id: int, has_first_node: bool }
 TSharedPtr<FJsonObject> HandleGetSoundCueGraph(const TSharedPtr<FJsonObject>& Params)
 {

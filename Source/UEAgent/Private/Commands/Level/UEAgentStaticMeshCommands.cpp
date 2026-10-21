@@ -676,10 +676,10 @@ TSharedPtr<FJsonObject> HandleGetStaticMeshSections(
 // ---------------------------------------------------------------------------
 // set_static_mesh_lightmap
 // ---------------------------------------------------------------------------
-// MCP:set_static_mesh_lightmap - Set lightmap resolution and/or lightmap UV coordinate index on a static mesh (no rebuild).
-//   @param static_mesh_path - Content path to the UStaticMesh asset.
-//   @param lightmap_resolution - Absolute lightmap texture resolution (optional).
-//   @param lightmap_coordinate_index - Absolute lightmap UV channel index (optional).
+// MCP:set_static_mesh_lightmap - Sets the lightmap resolution and/or the lightmap UV channel index stored on a static mesh asset, in one undo step, then saves the asset; success is false, with save_error, when the save fails. Only those two properties change: the mesh is not rebuilt and no lighting is rebuilt, so baked lighting picks the values up on the next build_lighting. The values are stored as given, without range checks, and read back into the reply; repeating a call with the same values saves again with the same result. Placed actors that override their own lightmap resolution keep their override. Passing neither value is an error and nothing changes. Read the current values with get_static_mesh_info; check which UV channels exist, and which one is the lightmap, with list_uv_channels and its layout with get_uv_health_report.
+//   @param static_mesh_path - Package or object path of the UStaticMesh asset (e.g. "/Game/Props/SM_Crate").
+//   @param lightmap_resolution - Optional lightmap texture size in texels per side, a whole number such as 64, 128 or 256 (powers of two are the usual choice); omitted, it stays as it is.
+//   @param lightmap_coordinate_index - Optional 0-based UV channel the lightmap uses (typically 1); it should name a channel the mesh has (list_uv_channels), since it is not checked. Omitted, it stays as it is.
 //   @returns { static_mesh_path, lightmap_resolution, lightmap_coordinate_index, applied_count, saved, save_error? }
 TSharedPtr<FJsonObject> HandleSetStaticMeshLightmap(
 	const TSharedPtr<FJsonObject>& Params)

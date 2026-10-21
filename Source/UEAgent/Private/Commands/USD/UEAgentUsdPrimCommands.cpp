@@ -281,9 +281,9 @@ TSharedPtr<FJsonObject> HandleRemoveUsdPrim(const TSharedPtr<FJsonObject>& Param
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:set_usd_prim_specifier - Change the specifier ("Def", "Over" or "Class") of an existing prim on a registered USD stage, at the current edit target. An unknown specifier is refused before anything is authored. specifier reports the one written, only when the write succeeded (set); a failed write fails the call. Not saved to disk.
+// MCP:set_usd_prim_specifier - Change the specifier of an existing prim on a registered USD stage to Def (a concrete prim), Over (opinions that define nothing on their own) or Class (an abstract template that does not render), authored on the stage's current edit target layer (pick it with set_usd_edit_target). Use it to convert a prim in place; to create one use define_usd_prim, and to add an over where nothing is defined yet override_usd_prim. The edit stays in memory until save_usd_stage, with no undo step. An unknown specifier, an unregistered stage_name or a prim that does not exist is an error and nothing is authored; a write USD refuses fails the call with set=false. specifier is reported only after a successful write (there is no getter to read it back); inspect the prim with get_usd_prim_info. Setting the same specifier again writes it again (idempotent). A prim made Class, or Over with no def on any layer, no longer appears in list_usd_prims, which lists defined, non-abstract prims only.
 //   @param stage_name [string!] - Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier.
-//   @param prim_path [string!] - Absolute SdfPath of an existing prim, e.g. "/World/Cube".
+//   @param prim_path [string!] - Absolute SdfPath of an existing prim, e.g. "/World/Cube", as list_usd_prims returns it.
 //   @param specifier [string!] - "Def", "Over" or "Class", case-insensitive; anything else is refused.
 //   @returns { set: bool, specifier?: string, requested?: object }
 TSharedPtr<FJsonObject> HandleSetUsdPrimSpecifier(const TSharedPtr<FJsonObject>& Params)
@@ -515,9 +515,9 @@ TSharedPtr<FJsonObject> HandleGetUsdPrimMetadata(const TSharedPtr<FJsonObject>& 
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:list_usd_prims - List the prims under one prim (default the pseudo root "/") on a registered USD stage, each with prim_path, type_name and active, plus count: its direct children, or with recursive=true its whole subtree in depth-first order. Only active, loaded, defined, non-abstract prims appear, and instance proxies are not traversed. Read-only.
+// MCP:list_usd_prims - List the prims under one prim (default the pseudo root "/") of a registered USD stage without changing anything, each with prim_path and type_name, plus count: its direct children, or with recursive=true its whole subtree in depth-first order (each parent before its children, siblings in stage order). Only active, loaded, defined, non-abstract prims appear (so active is always true here), and instance proxies are not traversed: a deactivated prim, an over-only prim or a Class prim needs get_usd_prim_info by path. Use it to discover prim paths before get_usd_prim_info (one prim's schemas and variant sets), list_usd_prim_attributes or the authoring tools; list_usd_stages shows which stages are open and get_usd_stage_info the total prim count. An unregistered stage_name, a malformed prim_path_prefix or a prim that does not exist is an error; a prim without children is a success with count 0.
 //   @param stage_name [string!] - Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier.
-//   @param prim_path_prefix [string] - SdfPath of the prim whose children are listed; it must exist. Default "/" (the pseudo root).
+//   @param prim_path_prefix [string] - Absolute SdfPath of the prim whose children are listed, e.g. "/World"; it must exist (it is a parent path, not a text prefix). Default "/" (the pseudo root).
 //   @param recursive [bool] - false (default) lists the direct children only; true lists every descendant, each parent before its children.
 //   @returns { prims: [{ prim_path, type_name, active }], count: number }
 TSharedPtr<FJsonObject> HandleListUsdPrims(const TSharedPtr<FJsonObject>& Params)

@@ -278,9 +278,9 @@ TSharedPtr<FJsonObject> HandleListDerivedClasses(const TSharedPtr<FJsonObject>& 
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:list_structs - Enumerate loaded UScriptStruct types (native + user-defined/Blueprint), optionally filtered by module or name substring.
-//   @param module_filter - Optional module name substring filter (case-insensitive)
-//   @param name_pattern - Optional struct name substring filter (case-insensitive)
+// MCP:list_structs - List the struct types (UScriptStruct) loaded in memory, native C++ and Blueprint user-defined, without changing anything: per struct its name, path, owning module (C++ structs only) and is_user_defined. Unfiltered it returns every loaded struct, thousands of them, so pass name_pattern or module_filter. module_filter matches C++ structs only, since a Blueprint struct has no module, and a Blueprint struct asset that is not loaded is not listed. No match gives count 0, not an error. Read one struct's fields with get_struct_info (by the struct_name given here) or a Blueprint struct's members with get_struct_members (by its asset path); enums: list_enums; author a struct with create_struct.
+//   @param module_filter - Optional plain substring of the owning module name, case-insensitive, no wildcards, e.g. "CoreUObject" or "StateTreeModule"; matches C++ structs only.
+//   @param name_pattern - Optional plain substring of the struct name (no F prefix), case-insensitive, no wildcards, e.g. "Vector"; omitted or empty keeps every name.
 //   @returns { structs: [{struct_name, path, module?, is_user_defined}], count: int }
 
 TSharedPtr<FJsonObject> HandleListStructs(const TSharedPtr<FJsonObject>& Params)
@@ -321,9 +321,9 @@ TSharedPtr<FJsonObject> HandleListStructs(const TSharedPtr<FJsonObject>& Params)
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:list_enums - Enumerate loaded UEnum types (native + user-defined/Blueprint), optionally filtered by module or name substring.
-//   @param module_filter - Optional module name substring filter (case-insensitive)
-//   @param name_pattern - Optional enum name substring filter (case-insensitive)
+// MCP:list_enums - List the enum types (UEnum) loaded in memory, native C++ and Blueprint user-defined, with their entries, without changing anything: per enum its name, path, owning module (C++ enums only) and entries [{name, value}], leaving out the _MAX sentinel and entries tagged Hidden. Unfiltered it returns every loaded enum with all its entries, a very large reply, so pass name_pattern or module_filter. module_filter matches C++ enums only, since a Blueprint enum has no module, and a Blueprint enum asset that is not loaded is not listed. No match gives count 0, not an error. For one enum's display names, which differ from the internal names on a Blueprint enum, use get_enum_info; structs: list_structs; author enums with create_enum and add_enum_entry.
+//   @param module_filter - Optional plain substring of the owning module name, case-insensitive, no wildcards, e.g. "Engine" or "StateTreeModule"; matches C++ enums only.
+//   @param name_pattern - Optional plain substring of the enum name, case-insensitive, no wildcards, e.g. "Collision"; omitted or empty keeps every name.
 //   @returns { enums: [{enum_name, path, module?, entries:[{name, value}]}], count: int }
 
 TSharedPtr<FJsonObject> HandleListEnums(const TSharedPtr<FJsonObject>& Params)
@@ -469,9 +469,9 @@ TSharedPtr<FJsonObject> HandleListObjectsOfClass(const TSharedPtr<FJsonObject>& 
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:find_classes_implementing_interface - Enumerate every loaded class that implements a given UInterface. No inverse index exists in the engine (confirmed against source) -- this is an O(loaded classes) sweep.
-//   @param interface - Name/path of the interface to search for (resolved via ResolveClass)
-//   @param include_blueprints - Include Blueprint-generated (non-native) classes (default true)
+// MCP:find_classes_implementing_interface - Find every class loaded in memory that implements an interface (a native UInterface or a Blueprint Interface), directly or through a parent class, without changing anything: per class its name, path, is_blueprint and implemented_by_k2 (the interface was added in a Blueprint). The engine keeps no reverse index, so it sweeps every loaded class (scanned_class_count) and returns the whole list, never truncated; deprecated and replaced classes are skipped. A Blueprint that is not loaded is missed: for a base class rather than an interface use list_derived_classes, which also reads unloaded Blueprints from the Asset Registry. An interface that does not resolve, or a class that is not an interface, is an error. One class's interfaces: get_class_hierarchy; add an interface to a Blueprint: implement_interface.
+//   @param interface - Interface to search for: bare reflected name (e.g. "Interactable" or "UInteractable"), a /Script/Module.Name path, or a Blueprint Interface asset path (e.g. "/Game/BPI/BPI_Use.BPI_Use"), resolved like list_derived_classes' base_class.
+//   @param include_blueprints - true (default) also returns Blueprint-generated classes; false returns native C++ classes only.
 //   @returns { interface: string, classes: [{class_name, path, is_blueprint, implemented_by_k2}], count: int, scanned_class_count: int }
 
 TSharedPtr<FJsonObject> HandleFindClassesImplementingInterface(const TSharedPtr<FJsonObject>& Params)

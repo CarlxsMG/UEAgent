@@ -73,12 +73,12 @@ Run the editor's Map Check (the MAP CHECK console command) on the level open in 
 
 *Destructive, idempotent.*
 
-Set a real debugging breakpoint on a specific node within a blueprint graph via FKismetDebugUtilities::CreateBreakpoint. Idempotent (guarded by FindBreakpointForNode).
+Add an enabled Blueprint debugger breakpoint on one node of a Blueprint's function or event graphs, found by its title, so execution pauses there in the editor's Blueprint debugger the next time Play-in-Editor reaches it. It changes editor debug state only: the asset is not modified or saved, and there is no undo step. Idempotent: a node that already has a breakpoint answers already_existed true. The first node whose title contains node_name is used (function graphs first, then event graphs; macro graphs are not searched), so pass a distinctive part of the title; no matching node answers found_in_graph false and breakpoint_set false rather than an error. Inverse: remove_blueprint_breakpoint; find node titles with get_graph_nodes. A Blueprint that does not resolve, an asset that is not a Blueprint, or a bare name matching several Blueprints is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `blueprint_path` | string | yes | Object path, package path, or bare short name of the blueprint (resolved via mcp_common::ResolveAssetFlexible; ambiguity errors out listing candidates) |
-| `node_name` | string | yes | Name or title of the graph node to set as a breakpoint (title-contains match) |
+| `blueprint_path` | string | yes | Blueprint to debug: object path, package path (e.g. "/Game/BP/BP_Door") or bare asset name (e.g. "BP_Door"); a bare name matching several Blueprints is an error that lists them. |
+| `node_name` | string | yes | Part of the node title as the graph shows it, e.g. "Print String" or "Event BeginPlay"; matched case-insensitively against node titles (not object names), first match wins. |
 
 **Returns:** `{ blueprint_path: string, node_name: string, breakpoint_set: bool, already_existed: bool, found_in_graph: bool, node_class?: string, node_title?: string }`
 
@@ -86,11 +86,11 @@ Set a real debugging breakpoint on a specific node within a blueprint graph via 
 
 *Read-only.*
 
-Run the enabled editor data validators (UEditorValidatorSubsystem::IsAssetValid, Script use case) on one asset: validation_result (Valid, Invalid or NotValidated), is_valid (NotValidated counts as valid), errors and warnings. Read-only; validators_run counts the enabled validators, not those that applied.
+Run the editor's enabled data validators (the Data Validation plugin, in its Script use case) on one asset and report the verdict, without changing or saving it (the asset gets loaded): validation_result is Valid, Invalid or NotValidated (no validator applies to that asset), is_valid is false only for Invalid, and errors and warnings carry the validators' messages. Use it to check one asset after editing it, e.g. before a commit or a cook; for a whole folder use validate_assets_in_path, to see which validators exist list_validators, and for a level's actors run_map_check. validators_run counts the enabled validators, not the ones that applied to this asset, so a NotValidated result is the sign that none did. An asset the Asset Registry cannot find, or the Data Validation plugin being off, is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `asset_path` | string | yes | Object/package path of the asset, e.g. "/Game/MyGame/M_Example". |
+| `asset_path` | string | yes | Asset to validate, as an object path ("/Game/MyGame/M_Example.M_Example") or a package path ("/Game/MyGame/M_Example", which names its primary asset). |
 
 **Returns:** `{ asset_path: string, resolved_object_path: string, validation_result: string, is_valid: bool, errors: [string], warnings: [string], error_count: number, warning_count: number, validators_run: number }`
 

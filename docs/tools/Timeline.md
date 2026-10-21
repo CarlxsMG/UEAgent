@@ -384,13 +384,13 @@ Adds a possessable binding for an actor's component to a Level Sequence, and wit
 
 *Additive.*
 
-Creates a spawnable CineCameraActor binding, keys its transform, and binds a camera cut to it.  High-value one-shot: spawnable CineCameraActor + transform track keyed at frame 0 + a camera cut spanning the playback range.
+Adds a keyed camera to an existing Level Sequence in one call: a new spawnable CineCameraActor binding, a transform track whose section spans the playback range with location, rotation and scale 1 keyed at frame 0, and a camera cut bound to that camera over the whole playback range (the camera cut track is added when missing). One undo step; then saves the sequence, and success requires the save. Each call adds another camera and cut; on a sequence that already has cuts the engine re-sorts them and the new cut overlaps them. The sequence must exist (create_level_sequence; get_level_sequences lists names). For another spawnable class use add_spawnable_to_sequence, for a cut to an existing binding add_camera_cut, for more keys add_transform_keyframe; get_sequence_bindings reads the result.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `sequence_name` | string | yes | Name of the target Level Sequence. |
-| `location` | array | no | Optional [x, y, z] world location for the camera's key at frame 0. |
-| `rotation` | array | no | Optional [pitch, yaw, roll] world rotation for the camera's key at frame 0. |
+| `sequence_name` | string | yes | Asset name of the Level Sequence, not a path (e.g. "Intro"): the first Level Sequence under /Game with that name, case-insensitive. |
+| `location` | array | no | Optional [x, y, z] world location in cm for the camera's key at frame 0 (default [0, 0, 0]). |
+| `rotation` | array | no | Optional rotation in degrees for the key at frame 0: object {"pitch": P, "yaw": Y, "roll": R} (missing axes 0) or array [pitch, yaw, roll]; default all 0. |
 
 **Returns:** `{ sequence_name: string, binding_guid: string, display_name: string, class_name: string, spawnable: bool, transform_keyed: bool, camera_cut_added: bool, saved: bool, save_error?: string }`
 
@@ -444,18 +444,18 @@ Read the playback settings of one audio section of a Level Sequence (path or bar
 
 *Read-only.*
 
-Read every keyframe on one channel of a binding's section (resolved like set_section_properties).  Pure reader (no transaction/save).  channel_type selects which channel proxy view to index: "double" (transform loc/rot/scale, default), "float" (property/color), "bool" (visibility).  Bool keys omit interp/tangent fields.
+Lists every key of one channel of one section of a Level Sequence: index, tick-resolution frame, time in seconds and value, plus interpolation, tangent mode and tangents for double and float channels (bool keys have none). The section is resolved like get_section_info (binding_guid, track_type or track_index, section_index; a root track without binding_guid); channel_type and channel_index pick the channel. Read-only: nothing is modified or saved; an empty channel returns key_count 0, and a missing sequence, track, section or channel is an error. Use it to find the index or frame that move_keyframe, remove_keyframe, duplicate_keyframe and set_binding_channel_keyframe_interpolation take, and to check add_transform_keyframe or add_keyframe_to_property_track; get_section_info reads the section's range and settings.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `sequence_path` | string | yes | Full /Game path OR bare asset name of the target Level Sequence. |
-| `sequence_name` | string | no | Alias for sequence_path. |
-| `binding_guid` | string | no | GUID of the binding whose section to read. Omit it (and binding_name_or_guid) for a section of a ROOT track -- shot, camera cut, audio, event, sub-sequence, fade: track_type or track_index then pick among the root tracks in get_sequence_tracks order, camera cut last. |
-| `track_type` | string | no | Optional class filter (see set_section_properties) selecting the track on the binding. |
-| `track_index` | number | no | Index into the binding's tracks (default 0; used when track_type omitted). Without binding_guid it indexes the root tracks. |
-| `section_index` | number | no | Index of the section on the resolved track (default 0). |
-| `channel_type` | string | no | Channel value kind: "double" (default) \| "float" \| "bool". |
-| `channel_index` | number | no | Index of the channel within its proxy view (default 0). |
+| `sequence_path` | string | yes | Full /Game object path (e.g. "/Game/Cinematics/Intro.Intro") or bare asset name ("Intro") of the Level Sequence; a bare name, or a path that does not load, resolves to the first Level Sequence under /Game with that asset name. |
+| `sequence_name` | string | no | Alias for sequence_path, read when sequence_path is absent or empty; same formats. |
+| `binding_guid` | string | no | GUID of the binding whose section to read, as get_sequence_bindings returns it. Omit it (and binding_name_or_guid) for a section of a ROOT track -- shot, camera cut, audio, event, sub-sequence, fade: track_type or track_index then pick among the root tracks in get_sequence_tracks order, camera cut last. |
+| `track_type` | string | no | Optional track kind; the first track of exactly that kind wins, else the first subclass: transform, float, bool, vector, color, visibility, audio, event, fade, skeletalanimation, sub, cameracut, shot, slomo, property, attach. An unrecognised value is ignored and track_index is used. |
+| `track_index` | number | no | 0-based index into the binding's tracks, or into the root tracks without binding_guid, in get_sequence_tracks order (default 0); used when track_type is omitted. |
+| `section_index` | number | no | 0-based index of the section on the resolved track (default 0); out of range is an error. |
+| `channel_type` | string | no | Channel value kind: "double" (default; transform tracks) \| "float" (float, color and other property tracks) \| "bool" (bool and visibility tracks). Aliases transform, scalar, color, boolean, visibility are accepted; anything else is an error. |
+| `channel_index` | number | no | 0-based index among the section's channels of that kind (default 0); on a transform section 0-2 = location X/Y/Z, 3-5 = rotation roll/pitch/yaw, 6-8 = scale X/Y/Z. |
 | `binding_name_or_guid` | string | no | Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved. |
 
 **Returns:** `{ sequence_path: string, channel_index: int, channel_type: string, key_count: int, keyframes: [{ index: int, frame: int, time_seconds: number, value: number|bool, interp_mode: string, tangent_mode: string, arrive_tangent: number, leave_tangent: number }] }`
@@ -489,11 +489,11 @@ List the Level Sequence assets under a content folder and its subfolders (defaul
 
 *Read-only.*
 
-Lists every user marked frame in a Level Sequence's movie scene.
+Lists the user marked frames (labelled timeline markers) of a Level Sequence in stored order, each with its index, tick-resolution frame, label and determinism-fence flags, plus whether the marks are locked. Read-only: loads the sequence, changes and saves nothing; a sequence without marks returns an empty list and count 0, an unknown name is an error. Use it to get the index, frame or label that remove_marked_frame takes, and to check add_marked_frame, which adds or updates a mark; lock marks with set_sequence_settings (marked_frames_locked). Sequence names come from get_level_sequences; tracks and sections are read with get_sequence_tracks.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `sequence_name` | string | yes | Name of the target Level Sequence. |
+| `sequence_name` | string | yes | Asset name of the Level Sequence, not a path (e.g. "Intro"): the first Level Sequence under /Game with that name, case-insensitive. |
 
 **Returns:** `{ sequence_name: string, marked_frames: [{index, frame, label, is_determinism_fence, is_inclusive}], marked_frame_count: int, marked_frames_locked: bool }`
 
@@ -533,12 +533,12 @@ Lists the object bindings of a Level Sequence, the first asset under /Game whose
 
 *Read-only.*
 
-Read the Sequencer folder tree of a Level Sequence (root folders, recursively, with child tracks + bindings). Read-only.
+Reads the Sequencer outliner folder tree of a Level Sequence: each root folder with its child folders nested to any depth, the root tracks it holds (class and track name) and the object-binding GUIDs it holds. Read-only: nothing is modified or saved; a sequence without folders returns an empty list, and a sequence that cannot be found is an error. Use it to check add_sequence_folder, remove_sequence_folder and move_track_to_folder, and to get the folder_name they take. Tracks and bindings outside every folder are not listed here: get_sequence_tracks and get_sequence_bindings give the full flat lists.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `sequence_path` | string | yes | Asset path OR bare asset name of the target Level Sequence. |
-| `sequence_name` | string | no | Alias for sequence_path. |
+| `sequence_path` | string | yes | Full /Game object path (e.g. "/Game/Cinematics/Intro.Intro") or bare asset name ("Intro") of the Level Sequence; a bare name, or a path that does not load, resolves to the first Level Sequence under /Game with that asset name. get_level_sequences lists them. |
+| `sequence_name` | string | no | Alias for sequence_path, read when sequence_path is absent or empty; same formats. |
 
 **Returns:** `{ sequence_path: string, root_folder_count: int, folders: [{ name: string, child_folders: [...recursive...], child_tracks: [{class, name}], child_bindings: [guid_string] }] }`
 
@@ -595,16 +595,16 @@ Move one key of a channel of one section on an object-binding track of a Level S
 
 *Destructive, idempotent.*
 
-Move a master track (by class) or an object-binding (by GUID) into a named Sequencer folder, inside an undo transaction, and save the sequence; success requires the save. Idempotent: a track or binding already in the folder succeeds with already_present true and saved false (nothing is written).
+Moves one root (master) track, picked by class, or one object binding, picked by GUID, into an existing Sequencer outliner folder of a Level Sequence, taking it out of any other folder, in one undo step, then saves the sequence; success requires the save. Only the outliner grouping changes: sections, keys and playback stay as they were. Idempotent: a track or binding already in that folder succeeds with already_present true and saved false (nothing is written). Refused with nothing changed when the folder is missing (create it with add_sequence_folder), the GUID is not a binding of the sequence, no track or several tracks of that class match (pass track_name), or both or neither of track_class and binding_guid are given. Check the result with get_sequence_folders; level actors go in folders with set_actor_folder instead.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `sequence_path` | string | yes | Asset path OR bare asset name of the target Level Sequence. |
-| `folder_name` | string | yes | Name of the destination folder (searched recursively). |
-| `sequence_name` | string | no | Alias for sequence_path. |
-| `track_class` | string | no | Class name of the master track to move (e.g. "MovieSceneCameraCutTrack"). Mutually exclusive with binding_guid. |
-| `track_name` | string | no | Optional track name to disambiguate when several tracks share the class. |
-| `binding_guid` | string | no | GUID of an object-binding to move into the folder. Mutually exclusive with track_class. |
+| `sequence_path` | string | yes | Full /Game object path (e.g. "/Game/Cinematics/Intro.Intro") or bare asset name ("Intro") of the Level Sequence; a bare name, or a path that does not load, resolves to the first Level Sequence under /Game with that asset name. |
+| `folder_name` | string | yes | Name of the destination folder, as get_sequence_folders lists it; searched depth-first through all folders, the first with that name wins. |
+| `sequence_name` | string | no | Alias for sequence_path, read when sequence_path is absent or empty; same formats. |
+| `track_class` | string | no | Class name of the root track to move, without the U prefix, case-insensitive (e.g. "MovieSceneCameraCutTrack", "MovieSceneAudioTrack"; get_sequence_tracks lists each root track's class). Mutually exclusive with binding_guid. |
+| `track_name` | string | no | Optional track name (as get_sequence_tracks lists it) to pick one when several root tracks share the class. |
+| `binding_guid` | string | no | GUID of an object binding to move with all its tracks, as get_sequence_bindings returns it. Mutually exclusive with track_class. |
 
 **Returns:** `{ sequence_path: string, folder_name: string, track_class: string, track_name: string, binding_guid: string, moved: bool, already_present: bool, saved: bool, save_error?: string }`
 
@@ -700,16 +700,16 @@ Removes one user marked frame from a Level Sequence, by index, frame, or label -
 
 *Destructive.*
 
-Remove a section from a sequencer track by index.  Resolves the section like set_section_properties (binding_guid + track_type/index + section_index; without binding_guid, a section of a root track such as a shot, a camera cut or an audio clip), then removes it from its owning track via UMovieSceneTrack::RemoveSectionAt. One delete for what every per-track add_*_section adds.
+Deletes one section, by index, from a track of a Level Sequence in one undo step, then saves the sequence; success requires the save. The section is resolved like get_section_info: with binding_guid, a track of that object binding; without it, a root track (shot, camera cut, audio, event, sub-sequence, fade). track_type picks the first track of that kind, else track_index; section_index picks the section. A missing sequence, binding, track or section index is an error and nothing changes. The track itself stays, even when left empty: remove_sequence_track deletes a whole track, remove_keyframe a single key. A repeat call deletes whatever section now sits at that index, so re-read indexes first with get_sequence_tracks or get_section_info. Inverse of add_audio_section, add_shot_section, add_event_track_section and add_camera_cut.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `sequence_path` | string | yes | Full /Game path OR bare asset name of the target Level Sequence. |
-| `sequence_name` | string | no | Alias for sequence_path. |
-| `binding_guid` | string | no | GUID of the binding whose section to remove. Omit it (and binding_name_or_guid) for a section of a ROOT track -- shot, camera cut, audio, event, sub-sequence, fade: track_type or track_index then pick among the root tracks in get_sequence_tracks order, camera cut last. |
-| `track_type` | string | no | Optional class filter (see set_section_properties). |
-| `track_index` | number | no | Index into the binding's tracks (0 = first track, default 0). Without binding_guid it indexes the root tracks. |
-| `section_index` | number | no | Index of the section on the resolved track to remove (default 0). |
+| `sequence_path` | string | yes | Full /Game object path (e.g. "/Game/Cinematics/Intro.Intro") or bare asset name ("Intro") of the Level Sequence; a bare name, or a path that does not load, resolves to the first Level Sequence under /Game with that asset name. |
+| `sequence_name` | string | no | Alias for sequence_path, read when sequence_path is absent or empty; same formats. |
+| `binding_guid` | string | no | GUID of the binding whose section to remove, as get_sequence_bindings returns it. Omit it (and binding_name_or_guid) for a section of a ROOT track -- shot, camera cut, audio, event, sub-sequence, fade: track_type or track_index then pick among the root tracks in get_sequence_tracks order, camera cut last. |
+| `track_type` | string | no | Optional track kind; the first track of exactly that kind wins, else the first subclass: transform, float, bool, vector, color, visibility, audio, event, fade, skeletalanimation, sub, cameracut, shot, slomo, property, attach. An unrecognised value is ignored and track_index is used. |
+| `track_index` | number | no | 0-based index into the binding's tracks, or into the root tracks without binding_guid, in get_sequence_tracks order (default 0); used when track_type is omitted. |
+| `section_index` | number | no | 0-based index of the section to delete on the resolved track (default 0); out of range is an error. |
 | `binding_name_or_guid` | string | no | Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved. |
 
 **Returns:** `{ sequence_path: string, section_index: int, track_type: string, track_index: int, removed: bool, remaining_sections: int, saved: bool, save_error?: string }`

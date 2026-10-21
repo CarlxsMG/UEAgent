@@ -1241,10 +1241,10 @@ TSharedPtr<FJsonObject> HandleWaitForPieCompletion(const TSharedPtr<FJsonObject>
     return mcp_common::MakeOkReply(R);
 }
 
-// MCP:capture_pie_screenshot - Write a PNG of the game viewport (else the active editor viewport) from a synchronous ReadPixels, which omits the UMG/Slate HUD; returns output_path, width, height and bytes_written. With include_ui=true during PIE, a cropped HUD version overwrites output_path a frame later (ui_overwrite_next_frame).
-//   @param output_path - Optional string. If empty, auto-names into <Project>/Saved/MCP/PIE_<utc>.png.
-//   @param include_ui - When true and PIE is running with rendering, also request an engine screenshot with the HUD that a later frame crops to the game viewport (editor chrome removed) and writes over output_path; SDR only, given up after 8 s. Default false.
-//   @returns { saved_to_pie_active, output_path, width, height, bytes_written, includes_ui, ui_overwrite_next_frame, ui_note? }
+// MCP:capture_pie_screenshot - Write a PNG of what the running game shows: the PIE game viewport, or the active editor viewport when there is no game viewport (with PIE not running, saved_to_pie_active=false and a note says so). It reads the pixels synchronously, so the file holds the 3D scene without the UMG/Slate HUD, and an existing file at output_path is overwritten. With include_ui=true during PIE it also queues an engine screenshot that a later frame crops to the game viewport, HUD included, and writes over the same file (ui_overwrite_next_frame=true): re-read the file after the call. Use it to SHOW a play-test result; for the editor viewport with a fresh redraw, resizing or base64 use capture_viewport, for a supersampled image capture_high_res_screenshot, and for actor state instead of pixels capture_pie_state. Start PIE with start_play_in_editor first. No viewport, a zero-size viewport or a failed write is an error. Changes nothing in the level; every call writes the file again.
+//   @param output_path - File path of the PNG, absolute or relative to the editor's working directory, e.g. "D:/Shots/hud.png"; folders are created. Omit it to auto-name <Project>/Saved/MCP/PIE_<yyyyMMdd_HHmmss UTC>.png.
+//   @param include_ui - true to also write the HUD version over output_path on a later frame (PIE with rendering only, SDR only, abandoned after 8 s, e.g. with an HDR editor display); default false keeps only the scene-only PNG.
+//   @returns { saved_to_pie_active, output_path, width, height, bytes_written, includes_ui, ui_overwrite_next_frame, ui_note?, note? }
 TSharedPtr<FJsonObject> HandleCapturePieScreenshot(const TSharedPtr<FJsonObject>& Params)
 {
     ULevelEditorSubsystem* LevelEditorSubsystem = GEditor ? GEditor->GetEditorSubsystem<ULevelEditorSubsystem>() : nullptr;
@@ -1704,9 +1704,9 @@ TSharedPtr<FJsonObject> HandleInjectMouseButton(const TSharedPtr<FJsonObject>& P
     return mcp_common::MakeOkReply(R);
 }
 
-// MCP:possess_pawn - Possess a pawn (by actor name/label) with the active PIE session's PlayerController (AController::Possess). Honest note (not an error) if the engine's own authority gate silently no-ops the possession (Standalone/ListenServer's local PlayerController normally has authority; a pure Client's does not).
-//   @param pawn_actor_name - Required. Name or label of the pawn actor in the PIE world.
-//   @param pie_client_index - Optional int (default 0).
+// MCP:possess_pawn - Make the first PlayerController of a running PIE session possess a pawn of that PIE world (AController::Possess), so input and camera go to it; the pawn it controlled before is unpossessed and stays in the world. Requires PIE: start it with start_play_in_editor; with no PIE session for pie_client_index, or a name that is not a pawn in that world, it is an error and nothing changes. Then drive it with inject_key_input or inject_analog_input, or aim it with set_control_rotation. Runtime only: nothing is saved and there is no undo. A pawn the controller already has is a success with already_possessed=true and no call. The engine's authority gate silently skips the possession on a pure client's PlayerController (Standalone and ListenServer have authority): then possessed=false, had_authority=false and a note, still a success, so always read possessed.
+//   @param pawn_actor_name - Name or label of the pawn actor in the PIE world, e.g. "BP_Vehicle_C_0" or "Truck"; find_actors_by_name or get_actors_in_level with world="pie" list them.
+//   @param pie_client_index - Which PIE instance, a whole number from 0 (default 0: the first, the server in a ListenServer session); 1, 2... for further clients.
 //   @returns { possessed: bool, already_possessed: bool, had_authority: bool, pawn_actor_name: string, pie_client_index: int, note?: string }
 TSharedPtr<FJsonObject> HandlePossessPawn(const TSharedPtr<FJsonObject>& Params)
 {

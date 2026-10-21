@@ -10,15 +10,15 @@ Back to the [index](README.md).
 
 *Additive.*
 
-Append an FAnimSegment referencing a real UAnimSequence to a UAnimComposite's AnimationTrack, then recompute its length. A failed save makes success false, with saved=false and save_error.
+Add an FAnimSegment that plays a whole UAnimSequence to a UAnimComposite's AnimationTrack in one undo step, re-stack all segments end to end, recompute the composite length and save the asset. The segments are ordered by start_pos before the re-stack, so to append at the end pass start_pos at or past the current composite_length; the default 0 ties with the first segment and normally sorts in front of it. Every call adds another segment (not idempotent). Create the composite first with create_anim_composite, check it with get_anim_asset_info, and take a segment out by index with remove_anim_composite_segment. A composite and sequence on different skeletons, or a path that does not load, is an error and nothing changes. A failed save (always while PIE runs) makes the reply's success false with saved=false and save_error; the success field inside the data stays true, so read saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `composite_path` | string | yes | Object path of the UAnimComposite (e.g. "/Game/Animation/AC_Example"). |
-| `animation_path` | string | yes | Object path of the UAnimSequence to reference. |
-| `start_pos` | number | no | Segment start position; ignored after auto-stacking (default 0) |
-| `play_rate` | number | no | Segment play rate (default 1.0) |
-| `loop_count` | number | no | Segment loop count, minimum 1 (default 1) |
+| `composite_path` | string | yes | Object path of the UAnimComposite, e.g. '/Game/Animation/AC_Example' (create_anim_composite makes one). |
+| `animation_path` | string | yes | Object path of the UAnimSequence to play, on the composite's skeleton, e.g. '/Game/Anims/A_Walk'; the segment covers its full length. |
+| `start_pos` | number | no | Start time in seconds used only to order the new segment among the existing ones before all are re-stacked end to end (default 0, which normally sorts it first); pass the current composite_length or more to append. |
+| `play_rate` | number | no | Playback rate of the segment, 1.0 = normal speed, 2.0 = twice as fast (default 1.0). |
+| `loop_count` | number | no | How many times the segment repeats, a whole number; values below 1 become 1 (default 1). |
 
 **Returns:** `{ composite_path, animation_path, num_segments, composite_length, segments, success, saved, save_error }`
 
@@ -128,14 +128,14 @@ Add an instance of a UAnimNotifyState class with a start time and duration to a 
 
 *Additive, idempotent.*
 
-Add an animation slot group (the groups montage slots belong to) to a USkeleton asset and save it. Idempotent: an existing group returns added false and changes nothing, but the skeleton is still saved; a failed save returns success false. Returns added and slot_group_count.
+Add an animation slot group (a named group that montage slots belong to; one slot per group plays at a time) to a USkeleton asset in one undo step and save the skeleton. Use it before giving a montage a slot in a new group; the montage side is create_anim_montage (slot_name) or add_montage_slot, and the inverse is remove_anim_slot_group. get_skeleton_info with load_full_data=true reports slot_group_count. Idempotent: a group that already exists returns added=false and is not changed, but the skeleton is still marked dirty and saved. A skeleton that does not load is an error. A failed save (always while PIE runs) makes success false, with saved=false and save_error. Edit a project copy (create_editable_skeleton), not engine content.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `skeleton_path` | string | yes | USkeleton asset path, e.g. "/Game/Characters/SK_Hero_Skeleton". |
-| `group_name` | string | yes | Name of the slot group to add, e.g. "WeaponGroup". |
+| `skeleton_path` | string | yes | USkeleton asset as a package or object path, e.g. "/Game/Characters/SK_Hero_Skeleton", as get_skeleton_info returns it. |
+| `group_name` | string | yes | Name of the slot group to add, compared as an FName (case ignored), e.g. "WeaponGroup". |
 
-**Returns:** `{ asset_path: string, group_name: string, added: bool, slot_group_count: int, saved: bool }`
+**Returns:** `{ asset_path: string, group_name: string, added: bool, slot_group_count: int, saved: bool, save_error?: string }`
 
 ## `add_anim_state`
 
@@ -301,12 +301,12 @@ Add a retarget bone chain from start_bone to end_bone, optionally tied to an IK 
 
 *Additive.*
 
-Add an IK solver to the bottom of an IK Rig's solver stack.  Solver type is one of "FullBodyIK", "Limb", "Pole", "BodyMover", "SetTransform" or "StretchLimb" (default "FullBodyIK"). Unknown types are rejected with an honest error. A failed save makes success false, with saved=false and save_error.
+Add a new, unconfigured IK solver at the bottom of an existing IK Rig's solver stack through the IK Rig controller (one undo step), then save the asset. Every call adds another solver (not idempotent); solver_index in the reply is the handle the other solver tools take. Create the rig first with create_ik_rig; then set its bones with set_ik_solver_bones, its settings with set_ik_solver_settings, attach goals (add_ik_goal) with connect_ik_goal_to_solver, reorder with move_ik_solver_in_stack, take one out with remove_ik_solver, and read the stack back with get_ik_rig_info or one solver with get_ik_solver_details. An unknown solver_type, or a rig that does not load, is an error and nothing changes. A failed save (always while PIE runs) makes success false, with saved=false and save_error, the solver kept in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `ik_rig_path` | string | yes | Path to the UIKRigDefinition asset |
-| `solver_type` | string | no | Optional solver type: "FullBodyIK"\|"Limb"\|"Pole"\|"BodyMover"\|"SetTransform"\|"StretchLimb"; defaults to "FullBodyIK" |
+| `ik_rig_path` | string | yes | IK Rig (UIKRigDefinition) asset as a package or object path, e.g. "/Game/Rigs/IK_Mannequin". |
+| `solver_type` | string | no | "FullBodyIK" (default; also "FBIK"), "Limb", "Pole", "BodyMover", "SetTransform" or "StretchLimb", case ignored; spaced forms ("Full Body IK") and the struct names ("FIKRigLimbSolver") are accepted too. solver_type in the reply is the canonical name and solver_struct the engine struct. |
 
 **Returns:** `{ asset_path: string, solver_index: int, solver_type: string, solver_struct: string, solver_count: int, saved: bool, save_error?: string }`
 
@@ -769,14 +769,14 @@ Create and save a UAnimComposite asset bound to a USkeleton, under /Game. Idempo
 
 *Additive, idempotent.*
 
-Create and save an empty-but-valid UAnimMontage asset under /Game. Idempotent: a UAnimMontage already at that path is returned unchanged with already_existed=true and saved=false, and nothing is saved. A failed save makes success false, with saved=false and save_error.
+Create an empty-but-valid UAnimMontage asset at package_path/name, bound to skeleton_path, with a slot track named slot_name and a 'Default' section at time 0 but no animation yet, and save it; no undo transaction. Idempotent: a UAnimMontage already at that path is returned unchanged with already_existed=true and saved=false, even when its skeleton or slot differ, and nothing is saved; an asset of another class at that path is refused and nothing changes. Next, give it an animation with add_montage_segment, sections with add_montage_section and more slots with add_montage_slot, and read it back with get_montage_info. A skeleton_path that does not load is an error. A failed save (always while PIE runs) makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `name` | string | yes | Asset name (e.g. 'AM_Example'). |
-| `package_path` | string | no | Target content package path where the asset is created (default /Game/Animation) |
-| `slot_name` | string | no | Montage slot name (e.g. DefaultSlot) |
-| `skeleton_path` | string | no | Asset path of the target Skeleton |
+| `name` | string | yes | Asset name, no folder or extension, e.g. 'AM_Attack'. |
+| `package_path` | string | no | Content folder as a long package path, e.g. '/Game/Animation/Montages' (default /Game/Animation; a trailing slash is ignored). |
+| `slot_name` | string | no | Name of the slot track the montage plays on, e.g. 'DefaultSlot' or 'UpperBody' (default DefaultSlot); the AnimBlueprint must have a Slot node with that name to play it. |
+| `skeleton_path` | string | no | Object path of the USkeleton the montage plays on, e.g. '/Game/Characters/SK_Hero_Skeleton' (default the engine's /Engine/EngineMeshes/SkeletalCube_Skeleton). |
 
 **Returns:** `{ name, package_path, asset_path, montage_path, skeleton_path, slot_names, slot_name, slot_count, section_count, created, already_existed, saved, save_error, message }`
 
@@ -1032,12 +1032,12 @@ Run a live motion-matching query on a PIE/Game actor against a loaded UPoseSearc
 
 *Read-only.*
 
-Report the AnimMontage(s) currently playing on a live PIE actor's skeletal mesh (useful for blend-out debugging).
+Report the animation montages active right now on an actor's skeletal mesh in a running Play-in-Editor session (or the world that world selects), without changing anything: the top montage and every montage still blending out, each with its current section, position (seconds and normalized), length, play rate, blend weights, playing and active flags and the slots it plays on. Use it to debug a montage that does not play, cuts off or blends out too early while the game runs; to read a montage asset's sections, slots and notifies use get_montage_info instead. No montage playing gives montage_count 0, not an error. No resolvable world (for the default, PIE not running), an actor not found in that world, a component that is not found, or a mesh without an anim instance is an error. world_name, world_package, world_type, net_mode and pie_instance say which world answered.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor` | string | yes | Name, label, or full path of a live actor (resolved in the PIE world by default). |
-| `component` | string | no | Optional skeletal mesh component name; defaults to the actor's primary USkeletalMeshComponent. |
+| `actor` | string | yes | Live actor in the selected world, by object name, editor label or full object path (whole string, case-insensitive), e.g. "BP_Hero_C_0". |
+| `component` | string | no | Optional skeletal mesh component name on that actor, e.g. "CharacterMesh0" (whole name, case-insensitive); omitted uses the actor's first skeletal mesh component. |
 | `world` | string | no | Which world to resolve the actor in: absent/'pie' (default, ambiguous: PlayWorld, else the first PIE context) \| 'server' (the PIE world with authority) \| 'client' \| 'pie:N' \| 'editor' \| 'game' (alias of 'pie'). |
 
 **Returns:** `{ actor, actor_name, component, world, anim_instance_class, montage_count, is_any_montage_playing, top_montage_id, enumeration, montages: [{ index, montage_path, montage_name, is_top, current_section, position, normalized_position, length, play_rate, blend_weight, desired_weight, blend_time, is_playing, is_active, instance_id, slots:[string] }], world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }`
@@ -1070,15 +1070,15 @@ Read an Animation Blueprint without compiling or changing it: its Asset Registry
 
 *Read-only.*
 
-Read one curve of a UAnimSequence without changing it: for a float curve its flags, num_keys and keys as time/value pairs; for a transform curve only flags and a summed num_keys. found=false (still a success) when the curve does not exist.
+Read one curve of a UAnimSequence's data model without changing it: for a float curve its flags, num_keys and every key as a time/value pair; for a transform curve only its flags and num_keys summed over translation, rotation and scale (no key values). A curve that does not exist is still a success with found=false and no num_keys, flags or keys. Get the curve names first from get_anim_sequence_info (it lists the float and transform curves); rekey a float curve with add_anim_float_curve, retime it with scale_anim_curve, change flags with set_anim_curve_flags. For a standalone UCurveFloat asset use evaluate_curve_at_time instead. A path that does not load as a UAnimSequence is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `anim_sequence_path` | string | yes | Full asset path to the UAnimSequence |
-| `curve_name` | string | yes | Name of the curve to read |
-| `curve_type` | string | no | Curve type to target: float (default) or transform |
+| `anim_sequence_path` | string | yes | Object path of the UAnimSequence, e.g. '/Game/Anims/A_Walk' or '/Game/Anims/A_Walk.A_Walk'. |
+| `curve_name` | string | yes | Exact curve name as get_anim_sequence_info lists it, e.g. 'FootLock_L'. |
+| `curve_type` | string | no | "float" (default) or "transform", case ignored; any other value reads a float curve. |
 
-**Returns:** `{ anim_sequence_path, curve_name, curve_type, found, num_keys, flags, time, value, keys }`
+**Returns:** `{ anim_sequence_path, curve_name, curve_type, found, num_keys, flags, keys: [{ time, value }] }`
 
 ## `get_anim_graph_node_properties`
 
@@ -1227,11 +1227,11 @@ Read one solver of an IK Rig asset by its 0-based stack index: solver_type (the 
 
 *Read-only.*
 
-Read a UAnimMontage without changing it: skeleton_path, section, slot and notify counts with their name lists, blend_in/blend_out times, blend modes, enable_auto_blend_out, blend_out_trigger_time, sync_group and sync_slot_index. Change them with set_properties.
+Read one UAnimMontage asset without changing it: its skeleton, the counts and names of its composite sections, slot tracks and notifies, its blend-in/out times and modes, its auto blend-out settings and its sync group. For a short summary of any animation type use get_anim_asset_info; for the montages playing on a PIE actor use get_active_montages. Change the blend and sync fields with set_properties, sections with add_montage_section / remove_montage_section, slots with add_montage_slot, notifies with add_montage_notify. A path that does not load as a UAnimMontage is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `montage_path` | string | yes | Full asset path of the montage (e.g. '/Game/MyGame/AM_Example'). |
+| `montage_path` | string | yes | Object path of the UAnimMontage, package form '/Game/Anims/AM_Attack' or object form '/Game/Anims/AM_Attack.AM_Attack'; list montages with get_assets_by_type (class AnimMontage). |
 
 **Returns:** `{ montage_path, skeleton_path, section_count, slot_count, notify_count, sections, slots, notifies, blend_in, blend_out, blend_mode_in, blend_mode_out, enable_auto_blend_out, blend_out_trigger_time, sync_group, sync_slot_index }`
 
@@ -1254,11 +1254,11 @@ Read back the vertex deltas of a morph target on a specific LOD (inverse of set_
 
 *Read-only.*
 
-Read the full data-layer state of a UMotionWarpingComponent: the b_search_for_windows_in_anims_within_montages flag, every warp target (via GetWarpTargets(): its FName, static location/rotation, component path or null, bone name, b_follow_component, location/rotation offsets and location_offset_direction enum integer), the modifier count (via GetModifiers()), the runtime adapter class (GetOwnerAdapter()->GetClass()), and the protected switch-off-conditions array count (via reflection — FindFProperty&lt;FArrayProperty> + FScriptArrayHelper). Read-only, idempotent.
+Read the UMotionWarpingComponent of an actor without changing anything: whether warp windows are also searched in animations inside montages, every warp target (name, location, rotation, the component it follows or null, bone name, follow flag, location and rotation offsets, and location_offset_direction as the enum's integer), the modifier count, the owner adapter class (None when unset) and the number of switch-off conditions (a protected array read by reflection; -1 if the engine renames it). Warp targets are transient, so on an editor actor they are the ones added this session with add_motion_warping_target. Change a target with set_motion_warping_target, take one out with remove_motion_warping_target, and flip the montage search with set_properties on "&lt;actor>.&lt;component name>" (property bSearchForWindowsInAnimsWithinMontages). An actor that is not found, or one without a UMotionWarpingComponent (add_motion_warping_component adds it), is an error. For a generic component property dump use get_component_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_path` | string | yes | Full editor path or short name of the actor. |
+| `actor_path` | string | yes | Actor as a full object path ('/Game/Maps/Arena.Arena:PersistentLevel.BP_Hero_C_1'), or the internal name or label of an editor-world actor ('BP_Hero_C_1', 'Hero'). |
 
 **Returns:** `{ actor_path: string, b_search_for_windows_in_anims_within_montages: bool, warp_target_count: int, modifier_count: int, owner_adapter_class: string, switch_off_condition_count: int, warp_targets: array }`
 
@@ -1306,11 +1306,11 @@ Read-only walk of a UPoseSearchSchema's public fields + FinalizedChannels. An em
 
 *Read-only.*
 
-List every retarget pose (source and target) of an IK Retargeter with its root translation delta and per-bone rotation deltas.  Read-only. Bone rotation deltas use the same quat keys as set_retarget_pose_bone_rotation (quat_x, quat_y, quat_z, quat_w).
+List every retarget pose of an IK Retargeter, for the source and the target side, without changing anything: per pose its name, whether it is the side's current pose, its root translation offset and the per-bone rotation deltas it stores (only the bones that were rotated), as quaternions with the same quat_x/quat_y/quat_z/quat_w keys set_retarget_pose_bone_rotation takes. Use it to check a pose before or after set_retarget_pose_bone_rotation; create one with create_retarget_pose, delete one with remove_retarget_pose. For the retargeter's rigs, chains and op stack use get_ik_retargeter_info, for one op's settings get_retargeter_op_info. A path that does not load as a UIKRetargeter is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `ik_retargeter_path` | string | yes | Content path to the UIKRetargeter asset. |
+| `ik_retargeter_path` | string | yes | IK Retargeter asset as a package or object path, e.g. "/Game/Retarget/RTG_Manny_To_Hero". |
 
 **Returns:** `{ asset_path: string, source: [{ name, is_current, root_translation_offset: {x,y,z}, bone_rotations: [{ bone, quat_x, quat_y, quat_z, quat_w }] }], target: [ ... same shape ... ] }`
 
@@ -1500,12 +1500,12 @@ Re-run UAnimMontage::RefreshCacheData on a UAnimMontage in an undo transaction (
 
 *Destructive.*
 
-Reimport a UAnimSequence, or any reimportable asset (the class is not checked), from source_file_path or its first recorded source via FReimportManager, automated (no dialogs) and unsaved. A missing source is refused before the reimport, which would crash the editor on it, and a reimport the handler reports as failed is a failure too: both make success false with reimported=false, and the missing source a note.
+Reimport a UAnimSequence from a source file you name (source_file_path), or else from its first recorded source, through FReimportManager, fully automated with no dialogs. The class is not checked, so any asset a legacy reimport handler accepts works. The new content lands in memory only and is not saved (save it with save_asset), and it cannot be undone. Use reimport_asset for a plain reimport from the recorded sources, reimport_interchange_asset for an asset imported through Interchange, and get_asset_import_data to see the recorded source first. Before reimporting it checks the one source file it will use: none recorded, or the file missing on disk (the engine would crash on it), is refused with success=false, reimported=false, source_validated=false and a note, and nothing changes; a reimport the handler reports as failed is success=false too. An asset no handler accepts, or a path that does not load, is an error. Every call reimports again.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `anim_sequence_path` | string | yes | Full asset path to the UAnimSequence |
-| `source_file_path` | string | no | Absolute path of the file to reimport from on disk (e.g. "D:/Art/Walk.fbx"); defaults to the first source file recorded in the asset import data. |
+| `anim_sequence_path` | string | yes | Object path of the UAnimSequence, e.g. '/Game/Anims/A_Walk' or '/Game/Anims/A_Walk.A_Walk'. |
+| `source_file_path` | string | no | Absolute path on disk of the file to reimport from, e.g. "D:/Art/Walk.fbx"; omit it to use the first source file recorded in the asset's import data (get_asset_import_data shows it). |
 
 **Returns:** `{ anim_sequence_path, source_file_path, reimported, source_validated, note? }`
 
@@ -1807,11 +1807,11 @@ Remove one slot animation track (the FSlotAnimationTrack and every segment on it
 
 *Destructive, idempotent.*
 
-Detach the UMotionWarpingComponent from an actor (mirror of add_motion_warping_component). Idempotent: an actor that has no such component returns already_existed:false + removed:false + note, not an error.
+Destroy the UMotionWarpingComponent of an actor (the first one found), with all its warp targets; the inverse of add_motion_warping_component. The actor is recorded in the call's undo step (Actor->Modify) and its level is marked dirty, not saved (save_level persists it). Only an instance component stays gone: one that the actor's Blueprint or C++ class defines comes back (when its construction script reruns, or on reload), so remove that one from the class instead. To clear targets but keep the component use remove_motion_warping_target (all=true); check the result with get_motion_warping_component_info. Idempotent: an actor without one returns already_existed=false, removed=false and a note, not an error. An actor that is not found is an error and nothing changes.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_path` | string | yes | Full editor path or short name of the actor. |
+| `actor_path` | string | yes | Actor as a full object path ('/Game/Maps/Arena.Arena:PersistentLevel.BP_Hero_C_1'), or the internal name or label of an editor-world actor ('BP_Hero_C_1', 'Hero'). |
 
 **Returns:** `{ actor_path: string, component_path?: string, removed: bool, already_existed: bool, note?: string }`
 
@@ -1845,14 +1845,14 @@ Remove one named notify track from a UAnimSequence in one undo step and save it:
 
 ## `remove_pose_curve`
 
-*Destructive.*
+*Destructive, idempotent.*
 
-Delete the named curve from a UPoseAsset (UPoseAsset::DeleteCurves) in an undo transaction and save the asset; an absent curve is a success with removed=false, removed_count 0 and saved=false, and the asset is neither modified nor saved. Returns removed_count, removed and num_curves. A failed save makes success false, with saved=false and save_error.
+Delete one named curve, with its value in every pose, from a UPoseAsset (UPoseAsset::DeleteCurves) in one undo step and save the asset. To delete a whole pose use remove_pose_from_pose_asset instead; for a curve on a UAnimSequence use remove_anim_curve, and to unregister a curve name from a skeleton remove_anim_curve_name. No tool adds a pose curve back, so only undo restores it. Idempotent in effect: an absent curve is a success with removed=false, removed_count 0 and saved=false, and the asset is neither modified nor saved. get_anim_asset_info reports the pose asset's curve count. A path that does not load as a UPoseAsset is an error. A failed save (always while PIE runs) makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `pose_asset_path` | string | yes | Path to the UPoseAsset. |
-| `curve_name` | string | yes | Name of the curve to remove. |
+| `pose_asset_path` | string | yes | Object path of the UPoseAsset, e.g. '/Game/Anims/PA_Face' or '/Game/Anims/PA_Face.PA_Face'. |
+| `curve_name` | string | yes | Exact curve name, matched as an FName (case ignored), e.g. 'Blink_L'. |
 
 **Returns:** `{ pose_asset_path, curve_name, removed_count, removed, num_curves, saved, save_error, message }`
 
@@ -1873,29 +1873,29 @@ Delete the named pose from a UPoseAsset (UPoseAsset::DeletePoses, which also fix
 
 *Destructive.*
 
-Remove a UPoseSearchFeatureChannel_* from a UPoseSearchSchema by index or type (inverse of add_pose_search_channel_to_schema)
+Remove one feature channel (a UPoseSearchFeatureChannel_* such as Pose or Trajectory) from a motion-matching UPoseSearchSchema, chosen by index or by type, in one undo step; the schema is then re-finalized (PostEditChange) and saved. The inverse of add_pose_search_channel_to_schema; to only lower a channel's influence, set its weight with that tool instead. List the channels first with get_pose_search_schema_info, and rebuild every database that uses the schema with build_pose_search_database_index afterwards, since the old index no longer matches. An index out of range or no channel of that type is a success with removed=false, already_absent=true and nothing saved. Not idempotent: indices shift after a removal, and by type each call takes the next channel of that class. Passing neither selector, an unknown channel_type, or a schema that does not load is an error. previous_count counts the schema's source channels, while channel_count counts the finalized ones, which can be 0 when finalizing fails. A failed save (always while PIE runs) makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `schema_path` | string | yes | Asset path of the UPoseSearchSchema (required). |
-| `channel_index` | number | no | 0-based index into the schema's source Channels array (optional; takes precedence over channel_type). |
-| `channel_type` | string | no | One of 'Pose', 'Trajectory', 'Position', 'Velocity', 'Heading'; removes the first channel of that class (optional; used only when channel_index is absent). |
+| `schema_path` | string | yes | UPoseSearchSchema asset as a package or object path, e.g. "/Game/MotionMatching/PSS_Locomotion" (required). |
+| `channel_index` | number | no | 0-based index into the schema's source channel list (the order of get_pose_search_schema_info's finalized_channels once the schema is finalized; that tool lists none before); takes precedence over channel_type when both are given. |
+| `channel_type` | string | no | "Pose", "Trajectory", "Position", "Velocity" or "Heading", case ignored; removes the first channel of that class, subclasses included. Used only when channel_index is absent. |
 
-**Returns:** `{ schema_path, channel_index, channel_type, channel_class, schema_cardinality, channel_count, previous_count, removed, already_absent, saved, message }`
+**Returns:** `{ schema_path, channel_index, channel_type, channel_class, schema_cardinality, channel_count, previous_count, removed, already_absent, saved, save_error?, message }`
 
 ## `remove_pose_search_roled_skeleton`
 
 *Destructive, idempotent.*
 
-Remove a roled FPoseSearchRoledSkeleton entry from a UPoseSearchSchema by role or by index (inverse of set_pose_search_schema_skeleton with a new role). Idempotent: no match = no write, reported as already_absent with saved=false. The schema is re-finalized after the removal, so finalized_channels changes with it.
+Remove one roled skeleton entry (FPoseSearchRoledSkeleton: a role name bound to a USkeleton and optional mirror table) from a UPoseSearchSchema, chosen by role or by index, in one undo step; the schema is then re-finalized (PostEditChange), which can change its finalized channels, and saved. Use it to drop a character from a multi-character schema; it is the inverse of set_pose_search_schema_skeleton with a new role. To swap the skeleton of a role use set_pose_search_schema_skeleton, to rename a role set_pose_search_schema_role, and list the entries with get_pose_search_schema_info. Idempotent by role: no matching entry (or an index out of range) is a success with removed=false, already_absent=true, saved=false and a note, and nothing is written; by index a repeat removes the next entry, since indices shift. Passing both or neither selector, or a schema that does not load, is an error. Rebuild databases on the schema with build_pose_search_database_index afterwards. A failed save (always while PIE runs) makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `asset_path` | string | yes | Asset path of the target UPoseSearchSchema (required). |
-| `role` | string | no | Role name (FName) of the FPoseSearchRoledSkeleton entry to remove (provide this OR skeleton_index; empty = default/None role). |
-| `skeleton_index` | number | no | 0-based index into the roled-skeleton list of the entry to remove (provide this OR role). |
+| `asset_path` | string | yes | UPoseSearchSchema asset as a package or object path, e.g. "/Game/MotionMatching/PSS_Interaction" (required). |
+| `role` | string | no | Role name of the entry to remove, compared as an FName (case ignored), e.g. "Defender"; an empty string means the default (None) role. Give this OR skeleton_index. |
+| `skeleton_index` | number | no | 0-based index of the entry in the schema's roled-skeleton list, in get_pose_search_schema_info order. Give this OR role. |
 
-**Returns:** `{ asset_path, role, skeleton_index, removed_skeleton_path, roled_skeleton_count, previous_count, removed, already_absent, saved, note? }`
+**Returns:** `{ asset_path, role, skeleton_index, removed_skeleton_path, roled_skeleton_count, previous_count, removed, already_absent, saved, save_error?, note? }`
 
 ## `remove_retarget_pose`
 
@@ -1995,12 +1995,12 @@ Delete one morph target, by name, from a skeletal mesh asset found by content pa
 
 *Destructive, idempotent.*
 
-Remove a socket from a skeletal mesh (and its skeleton twin). Idempotent: re-running with an absent socket returns already_removed=true without mutating the asset.
+Deletes a socket from a skeletal mesh asset, together with the same-named socket on its skeleton and the preview assets attached to that socket name. One undo step, then the mesh package is saved, and a failed save is an error. The skeleton is only changed in memory and left unsaved (save_asset writes it), so a socket that exists only on the skeleton is deleted there but not on disk. Idempotent: a name neither the mesh nor its skeleton has returns already_removed true, with nothing changed or saved. A socket that should go from a Skeleton asset alone is better deleted with remove_skeleton_socket, which saves it; static meshes use remove_static_mesh_socket. Re-add with add_skeletal_mesh_socket; get_skeletal_mesh_info reports the socket count.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `skeletal_mesh_path` | string | yes | Content path to the skeletal mesh asset |
-| `socket_name` | string | yes | Name of the socket to remove |
+| `skeletal_mesh_path` | string | yes | Package or object path of the skeletal mesh asset (e.g. "/Game/Characters/SK_Hero"). |
+| `socket_name` | string | yes | Name of the socket to delete, matched case-insensitively (e.g. "hand_r_socket"). |
 
 **Returns:** `{ socket_name: string, skeletal_mesh_path: string, removed: bool, already_removed: bool, socket_count: int }`
 
@@ -2136,15 +2136,15 @@ Rename a morph target on a skeletal mesh asset and save the mesh. Fails if old_n
 
 *Destructive.*
 
-Rename a socket on a skeletal mesh (and its skeleton twin).
+Renames a socket of a skeletal mesh asset; a socket of the same name on the mesh's skeleton is renamed too. One undo step, then the mesh package is saved, and a failed save is an error (the rename stays in memory). The skeleton is only changed in memory and left unsaved (save_asset writes it), so a socket that exists only on the skeleton is renamed there but not written to disk. Refused with nothing changed when new_name equals old_name, a socket called new_name already exists on the mesh or its skeleton, or old_name is not found, so a repeat call fails because old_name is gone. Add a socket with add_skeletal_mesh_socket, re-parent one with set_skeletal_mesh_socket_parent, delete one with remove_skeletal_mesh_socket; Skeleton assets: add_skeleton_socket and remove_skeleton_socket; static meshes: rename_static_mesh_socket.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `skeletal_mesh_path` | string | yes | Content path to the skeletal mesh asset |
-| `old_name` | string | yes | Current name of the socket |
-| `new_name` | string | yes | New name for the socket |
+| `skeletal_mesh_path` | string | yes | Package or object path of the skeletal mesh asset (e.g. "/Game/Characters/SK_Hero"). |
+| `old_name` | string | yes | Current socket name, matched case-insensitively (e.g. "hand_r_socket"). |
+| `new_name` | string | yes | New socket name; must differ from old_name and be free on the mesh and its skeleton (a change of letter case only counts as taken). |
 
-**Returns:** `{ old_name: string, new_name: string, skeletal_mesh_path: string, renamed: bool, already_renamed: bool, socket_count: int }`
+**Returns:** `{ old_name: string, new_name: string, skeletal_mesh_path: string, renamed: bool, already_renamed: bool, socket_count: int } -- already_renamed is always false (a repeat call is an error instead); socket_count adds the mesh's sockets and its skeleton's`
 
 ## `scale_anim_curve`
 
@@ -2491,15 +2491,15 @@ Edit a blend sample (by index): blend value and/or animation. At least one of bl
 
 *Destructive, idempotent.*
 
-Re-parent a bone (pass empty parent_name to make it a new root).
+Move a bone, with its children, under another parent in the reference skeleton of a USkeleton asset (FReferenceSkeletonModifier::SetParent), or make it an extra root with an empty parent_name, in one undo step, then save the skeleton; no commit_bone_changes is needed. Bones may be re-indexed, so read bone_index (the bone's new index) and re-list with get_skeleton_info (load_full_data=true). Skeletal meshes bound to the skeleton are not changed. Use add_bone to create a bone under a parent, rename_bone to rename, set_bone_transform to move its reference pose. A bone or parent not in the skeleton, or a skeleton that does not load, is an error and nothing changes. The engine refuses a parent that is the bone itself or one of its descendants, and a parent it already has: then updated=false and bone_index -1, still a success, and the unchanged skeleton is saved again. A failed save (always while PIE runs) makes success false, with saved=false and save_error. Edit a project copy (create_editable_skeleton), not engine content.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `skeleton_path` | string | yes | Path to the USkeleton asset |
-| `bone_name` | string | yes | Bone to re-parent |
-| `parent_name` | string | no | New parent bone name, or empty/null to detach to root |
+| `skeleton_path` | string | yes | USkeleton asset as a package or object path, e.g. "/Game/Characters/SK_Hero_Skeleton", as get_skeleton_info returns it. |
+| `bone_name` | string | yes | Exact name of the bone to move (case ignored), as get_skeleton_info lists it, e.g. "hand_r". |
+| `parent_name` | string | no | Exact name of the new parent bone, e.g. "lowerarm_r"; empty or omitted makes the bone a root. |
 
-**Returns:** `{ asset_path, bone_name, parent_name, bone_index, parent_index, updated, not_found, bone_count, saved, op: "set_bone_parent" }`
+**Returns:** `{ asset_path, bone_name, parent_name, bone_index, updated, not_found, bone_count, saved, save_error?, op: "set_bone_parent" }`
 
 ## `set_bone_transform`
 

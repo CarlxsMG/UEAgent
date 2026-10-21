@@ -441,8 +441,8 @@ TSharedPtr<FJsonObject> HandleSetSubtitleCueTiming(
 // (from USubtitleAssetUserData::GetMaximumDuration — Duration + StartOffset),
 // and per-cue fields matching add_subtitle_cue's wire shape.
 // ---------------------------------------------------------------------------
-// MCP:list_subtitle_cues - Lists all subtitle cues on a USubtitleAssetUserData.  Read-only walk of the Subtitles array, returning cue_count, max_duration (from USubtitleAssetUserData::GetMaximumDuration), and per-cue fields (index, text, start_offset, duration, duration_type, priority, subtitle_type, comment).
-//   @param asset_path - Content path of the USubtitleAssetUserData asset.
+// MCP:list_subtitle_cues - List every cue of a subtitles asset (USubtitleAssetUserData, the engine's list of timed subtitle cues) in stored order, without changing anything: per cue its 0-based index, text, start_offset and duration in seconds, duration_type (use_sound_duration or use_duration_property), priority, subtitle_type (subtitle, closed_caption or audio_description) and comment, plus count and max_duration (GetMaximumDuration, the latest end time). Use it to find the cue_index that set_subtitle_cue and remove_subtitle_cue take, or to check add_subtitle_cue's result; create the asset with create_subtitles_asset. An asset with no cues is a success with count 0; a path that does not load as a USubtitleAssetUserData is an error.
+//   @param asset_path - Subtitles asset as a package or object path, e.g. "/Game/Audio/Subs/SUB_Intro" or "/Game/Audio/Subs/SUB_Intro.SUB_Intro".
 //   @returns { asset_path: string, success: bool, count: int, max_duration: float, cues: [{index, text, start_offset, duration, duration_type, priority, subtitle_type, comment}] }
 
 TSharedPtr<FJsonObject> HandleListSubtitleCues(

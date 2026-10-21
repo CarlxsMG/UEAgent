@@ -243,7 +243,7 @@ TSharedPtr<FJsonObject> HandleGetPackageBuildStatus(const TSharedPtr<FJsonObject
 // ---------------------------------------------------------------------------
 // cancel_package_build
 // ---------------------------------------------------------------------------
-// MCP:cancel_package_build - Cancels the in-progress package build, if one is running (honest no-op otherwise). FMonitoredProcess::Cancel(true) kills the whole process tree, since UAT spawns child processes (UBT, the cooker) that would otherwise keep running.
+// MCP:cancel_package_build - Stop the package build that start_package_build launched in this editor session, if it is still running: the whole process tree is killed (UAT and the UnrealBuildTool and cooker processes it spawned), so its partial output stays as it is and the build has to be started again from the beginning. A build launched outside this editor session is not seen. Idempotent: with no build running, or none started this session, nothing happens and canceled and was_running are false. canceled true means the kill was requested; the processes end asynchronously, so confirm with get_package_build_status (canceled true, running false) before starting a new build with start_package_build.
 //   @returns { canceled: bool, was_running: bool }
 TSharedPtr<FJsonObject> HandleCancelPackageBuild(const TSharedPtr<FJsonObject>& Params)
 {

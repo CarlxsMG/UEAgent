@@ -4377,9 +4377,9 @@ TSharedPtr<FJsonObject> HandleRemoveNiagaraRenderer(const TSharedPtr<FJsonObject
 // get_niagara_emitter_renderers
 // Read-only enumeration of the emitter's renderers (via the const GetRenderers).
 // ---------------------------------------------------------------------------
-// MCP:get_niagara_emitter_renderers - List all renderers on a Niagara emitter (read-only).  Each entry also dumps the authored renderer UPROPERTYs (base bIsEnabled/SortOrderHint/MotionVectorSetting/bAllowInCullProxies plus the Sprite/Mesh-specific fields present on the concrete class) and, for Mesh renderers, the assigned static-mesh slots — so set_niagara_renderer_properties / set_niagara_mesh_renderer_mesh round-trip.
-//   @param system_path - Asset path of the Niagara System.
-//   @param emitter_name - Name of the emitter handle.
+// MCP:get_niagara_emitter_renderers - List every renderer of one emitter in a Niagara System asset, in stack order, without changing anything: per renderer its 0-based index, class (Sprite, Mesh, Ribbon, Light, Decal...), object name and material path, the authored fields set_niagara_renderer_properties writes (bIsEnabled, SortOrderHint, MotionVectorSetting, bAllowInCullProxies plus the Sprite, Mesh, Light or Decal fields the class has) and, for a Mesh renderer, its static-mesh slots. Use it to find the renderer_index the renderer tools take; for every property of one renderer use get_niagara_renderer_info. Change a renderer with set_niagara_renderer_properties, set_niagara_renderer_material or set_niagara_mesh_renderer_mesh, add one with add_niagara_renderer, take one out with remove_niagara_renderer. An unknown system or emitter name is an error; an emitter with no renderers is a success with renderer_count 0.
+//   @param system_path - Niagara System asset, package or object path, e.g. '/Game/FX/NS_Sparks'.
+//   @param emitter_name - Display name of the emitter handle in that system, case ignored, e.g. 'Sparks', as get_niagara_emitter_handles lists it.
 //   @returns { system_path: string, emitter_name: string, renderer_count: int, renderers: [{ index, class, display_name, material_path, properties:{...}, meshes?:[{ slot, mesh_path }] }] }
 
 TSharedPtr<FJsonObject> HandleGetNiagaraEmitterRenderers(const TSharedPtr<FJsonObject>& Params)
@@ -5356,9 +5356,9 @@ TSharedPtr<FJsonObject> HandleRemoveNiagaraUserParameter(const TSharedPtr<FJsonO
 // ---------------------------------------------------------------------------
 // get_niagara_data_interfaces  - list all user-param DIs on the system.
 // ---------------------------------------------------------------------------
-// MCP:get_niagara_data_interfaces - List all UNiagaraDataInterface user-parameter bindings on a Niagara system, or just the one named parameter_name, each with the name and property class of its UPROPERTYs (Transient and DuplicateTransient ones skipped). parameter_name is the user parameter's short name (no "User." prefix), the name the other data interface tools take; object_name and path_name name the data interface object itself; index is its slot in the system's data interface store. Read-only; a parameter_name that is not a data interface user parameter of the system is an error.
-//   @param system_path - Asset path of the Niagara System.
-//   @param parameter_name - Optional short name (no "User." prefix, case-insensitive) of one data interface user parameter to return.
+// MCP:get_niagara_data_interfaces - List the data interfaces bound to a Niagara System's user parameters (the User.* parameters of a data interface type, such as a static mesh or texture DI), or only the one named parameter_name, without changing anything: per binding its user parameter, the DI object and class, and the name and property class of each UPROPERTY (Transient and DuplicateTransient ones skipped; names and types only, no values). This is the system-level list: for the DIs set on module inputs inside one emitter's stacks use get_niagara_emitter_data_interfaces, and for every user parameter, DI or not, get_niagara_system_info. Add a DI with add_niagara_data_interface, point it at an asset with set_niagara_data_interface_asset, set its other fields with set_niagara_data_interface_default. A parameter_name that is not a data interface user parameter of the system, or a system that does not load, is an error; a system with none is a success with count 0. parameter_name in the reply is the short name the other data interface tools take; index is the DI's slot in the system's exposed-parameter store.
+//   @param system_path - Niagara System asset, package or object path, e.g. '/Game/FX/NS_Sparks' or '/Game/FX/NS_Sparks.NS_Sparks'.
+//   @param parameter_name - Short name of one data interface user parameter, e.g. 'SourceMesh'; a leading "User." is dropped and case is ignored. Omit it to list every binding.
 //   @returns { system_path: string, count: int, data_interfaces: [{ index, parameter_name, object_name, data_interface_class, data_interface_class_path, path_name, properties: [{ name, type }], property_count: int }] }
 
 TSharedPtr<FJsonObject> HandleGetNiagaraDataInterfaces(const TSharedPtr<FJsonObject>& Params)
@@ -7784,9 +7784,9 @@ TSharedPtr<FJsonObject> HandleRemoveNiagaraEventHandler(const TSharedPtr<FJsonOb
     return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("remove_niagara_event_handler"), SaveError);
 }
 
-// MCP:get_niagara_event_handlers - List a Niagara emitter's event handlers and their properties.  Reads FVersionedNiagaraEmitterData::GetEventHandlers(); each entry reports its usage_id (the remove key), source_event_name, execution_mode, spawn/event counts and source_emitter_id.
-//   @param system_path - Asset path of the Niagara System.
-//   @param emitter_name - Display name of the emitter handle within the system.
+// MCP:get_niagara_event_handlers - List the event handlers of one emitter in a Niagara System asset (FVersionedNiagaraEmitterData::GetEventHandlers), without changing anything: per handler its usage_id, the source event name and source emitter id it listens to, its execution mode, spawn and event-per-frame limits, and whether it has its event script. Pass usage_id to remove_niagara_event_handler to take one out; add one with add_niagara_event_handler. For the emitter's renderers use get_niagara_emitter_renderers, for its simulation stages get_niagara_simulation_stages. An unknown system or emitter name is an error; an emitter with no handlers is a success with event_handler_count 0.
+//   @param system_path - Niagara System asset, package or object path, e.g. '/Game/FX/NS_Sparks'.
+//   @param emitter_name - Display name of the emitter handle in that system, case ignored, e.g. 'Sparks', as get_niagara_emitter_handles lists it.
 //   @returns { system_path: string, emitter_name: string, event_handler_count: int, event_handlers: [{usage_id, source_event_name, execution_mode, spawn_number, max_events_per_frame, min_spawn_number, random_spawn_number, source_emitter_id, has_script}] }
 
 TSharedPtr<FJsonObject> HandleGetNiagaraEventHandlers(const TSharedPtr<FJsonObject>& Params)

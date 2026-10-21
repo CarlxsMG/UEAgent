@@ -477,11 +477,11 @@ TSharedPtr<FJsonObject> HandleAddPoseSearchChannelToSchema(const TSharedPtr<FJso
 // ---------------------------------------------------------------------------
 // remove_pose_search_channel_from_schema  (inverse of add_pose_search_channel_to_schema)
 // ---------------------------------------------------------------------------
-// MCP:remove_pose_search_channel_from_schema - Remove a UPoseSearchFeatureChannel_* from a UPoseSearchSchema by index or type (inverse of add_pose_search_channel_to_schema)
-//   @param schema_path - Asset path of the UPoseSearchSchema (required).
-//   @param channel_index - 0-based index into the schema's source Channels array (optional; takes precedence over channel_type).
-//   @param channel_type - One of 'Pose', 'Trajectory', 'Position', 'Velocity', 'Heading'; removes the first channel of that class (optional; used only when channel_index is absent).
-//   @returns { schema_path, channel_index, channel_type, channel_class, schema_cardinality, channel_count, previous_count, removed, already_absent, saved, message }
+// MCP:remove_pose_search_channel_from_schema - Remove one feature channel (a UPoseSearchFeatureChannel_* such as Pose or Trajectory) from a motion-matching UPoseSearchSchema, chosen by index or by type, in one undo step; the schema is then re-finalized (PostEditChange) and saved. The inverse of add_pose_search_channel_to_schema; to only lower a channel's influence, set its weight with that tool instead. List the channels first with get_pose_search_schema_info, and rebuild every database that uses the schema with build_pose_search_database_index afterwards, since the old index no longer matches. An index out of range or no channel of that type is a success with removed=false, already_absent=true and nothing saved. Not idempotent: indices shift after a removal, and by type each call takes the next channel of that class. Passing neither selector, an unknown channel_type, or a schema that does not load is an error. previous_count counts the schema's source channels, while channel_count counts the finalized ones, which can be 0 when finalizing fails. A failed save (always while PIE runs) makes success false, with saved=false and save_error.
+//   @param schema_path - UPoseSearchSchema asset as a package or object path, e.g. "/Game/MotionMatching/PSS_Locomotion" (required).
+//   @param channel_index - 0-based index into the schema's source channel list (the order of get_pose_search_schema_info's finalized_channels once the schema is finalized; that tool lists none before); takes precedence over channel_type when both are given.
+//   @param channel_type - "Pose", "Trajectory", "Position", "Velocity" or "Heading", case ignored; removes the first channel of that class, subclasses included. Used only when channel_index is absent.
+//   @returns { schema_path, channel_index, channel_type, channel_class, schema_cardinality, channel_count, previous_count, removed, already_absent, saved, save_error?, message }
 TSharedPtr<FJsonObject> HandleRemovePoseSearchChannelFromSchema(const TSharedPtr<FJsonObject>& Params)
 {
     FString SchemaPath;
@@ -1492,11 +1492,11 @@ TSharedPtr<FJsonObject> HandleSetPoseSearchSchemaRole(const TSharedPtr<FJsonObje
 //   the roled-skeleton set) and are WITH_EDITOR-gated (Finalize is editor-only).
 // ---------------------------------------------------------------------------
 
-// MCP:remove_pose_search_roled_skeleton - Remove a roled FPoseSearchRoledSkeleton entry from a UPoseSearchSchema by role or by index (inverse of set_pose_search_schema_skeleton with a new role). Idempotent: no match = no write, reported as already_absent with saved=false. The schema is re-finalized after the removal, so finalized_channels changes with it.
-//   @param asset_path - Asset path of the target UPoseSearchSchema (required).
-//   @param role - Role name (FName) of the FPoseSearchRoledSkeleton entry to remove (provide this OR skeleton_index; empty = default/None role).
-//   @param skeleton_index - 0-based index into the roled-skeleton list of the entry to remove (provide this OR role).
-//   @returns { asset_path, role, skeleton_index, removed_skeleton_path, roled_skeleton_count, previous_count, removed, already_absent, saved, note? }
+// MCP:remove_pose_search_roled_skeleton - Remove one roled skeleton entry (FPoseSearchRoledSkeleton: a role name bound to a USkeleton and optional mirror table) from a UPoseSearchSchema, chosen by role or by index, in one undo step; the schema is then re-finalized (PostEditChange), which can change its finalized channels, and saved. Use it to drop a character from a multi-character schema; it is the inverse of set_pose_search_schema_skeleton with a new role. To swap the skeleton of a role use set_pose_search_schema_skeleton, to rename a role set_pose_search_schema_role, and list the entries with get_pose_search_schema_info. Idempotent by role: no matching entry (or an index out of range) is a success with removed=false, already_absent=true, saved=false and a note, and nothing is written; by index a repeat removes the next entry, since indices shift. Passing both or neither selector, or a schema that does not load, is an error. Rebuild databases on the schema with build_pose_search_database_index afterwards. A failed save (always while PIE runs) makes success false, with saved=false and save_error.
+//   @param asset_path - UPoseSearchSchema asset as a package or object path, e.g. "/Game/MotionMatching/PSS_Interaction" (required).
+//   @param role - Role name of the entry to remove, compared as an FName (case ignored), e.g. "Defender"; an empty string means the default (None) role. Give this OR skeleton_index.
+//   @param skeleton_index - 0-based index of the entry in the schema's roled-skeleton list, in get_pose_search_schema_info order. Give this OR role.
+//   @returns { asset_path, role, skeleton_index, removed_skeleton_path, roled_skeleton_count, previous_count, removed, already_absent, saved, save_error?, note? }
 //   NOTE (impl): UPoseSearchSchema exposes no public RemoveSkeleton, so the private Skeletons TArray is resized by
 //   reflection (FScriptArrayHelper::RemoveValues) — the same idiom as remove_pose_search_channel_from_schema —
 //   then re-Finalized via PostEditChange.

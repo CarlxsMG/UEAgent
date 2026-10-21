@@ -39,17 +39,17 @@ Set one key (time, value) on a row of a UCurveTable asset with rich curves, in o
 
 ## `add_curve_table_row`
 
-*Destructive.*
+*Destructive, idempotent.*
 
-Add (or replace) a named FRichCurve row in a UCurveTable, optionally seeding keys.
+Create a named row (one rich curve) in a curve table asset, seeded with the given keys, in one undo step, then save the table. A row that already exists is replaced: its old keys are dropped and only the given ones remain (none when keys is omitted). Use it to write a whole row at once; to set one key without touching the others use add_curve_table_key, to delete a key remove_curve_table_key, to delete or rename the row delete_curve_table_row or rename_curve_table_row, and to read it back get_curve_table_info; create the table with create_curve_table. Idempotent: the same row_name and keys again give the same row (rebuilt and saved again). Entries of keys that are not [time, value] pairs are skipped and keys_added counts the ones applied; two keys at the same time keep the later value. A table that does not load, or one in SimpleCurves mode (imported simple curves cannot hold rich rows), is an error before anything changes; a failed save makes success false, with saved false, save_error and the change only in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `curve_table_path` | string | yes | Full asset path to the UCurveTable. |
-| `row_name` | string | yes | Name of the row (rich curve) to add. |
-| `keys` | array | no | Optional [[time, value], ...] array of seed keys |
+| `curve_table_path` | string | yes | Asset path of the curve table, e.g. "/Game/Data/CT_Damage", as create_curve_table returns it. |
+| `row_name` | string | yes | Name of the row (one curve), e.g. "Fireball"; an existing row of that name is replaced. |
+| `keys` | array | no | Optional seed keys as [[time, value], ...] floats, e.g. [[1, 10], [10, 250]] (time is the X axis, often a level or seconds); omitted gives a row with no keys. |
 
-**Returns:** `{ curve_table_path: string, row_name: string, row_added: bool, keys_added: int, key_count: int, row_count: int, curve_table_mode: string, saved: bool, keys: [{ time, value }] }`
+**Returns:** `{ curve_table_path: string, row_name: string, row_added: bool, keys_added: int, key_count: int, row_count: int, curve_table_mode: string, saved: bool, keys: [{ time, value }], save_error?: string }`
 
 ## `add_data_registry_source`
 
@@ -270,12 +270,12 @@ Export a whole DataTable, a composite one included, through the engine's native 
 
 *Destructive.*
 
-Gather text into a localization target's manifest/archive files, by generating its GatherText commandlet config (LocalizationConfigurationScript::GenerateGatherTextConfigFile) and running it in-process (UGatherTextCommandlet::Execute) -- the same pipeline the Localization Dashboard's "Gather Text" button drives.
+Gather the localizable text of a localization target into its manifest and archive files (Content/Localization/&lt;target>/ for a game target), the same pipeline as the Localization Dashboard's Gather Text button: it writes the target's GatherText config file (through source control when enabled) and runs the GatherText commandlet in-process, which blocks the editor until it finishes. The manifest is regenerated from the current sources, so text no longer in the project drops out of it; translations already in the archives are kept for text that remains. No undo step. Run it before compile_text_for_target, which builds the runtime .locres files; find target names with list_localization_targets. An unknown target, or a config file that cannot be written, is an error before anything runs; a non-zero commandlet exit code is success=false with exit_code (details in the Output Log). Repeating it gathers again from the current sources.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `target_name` | string | yes | Required. Target name, as listed by list_localization_targets. |
-| `scope` | string | no | Optional: "engine" \| "game". Disambiguates a same-named target in both sets; defaults to searching both. |
+| `target_name` | string | yes | Exact target name as list_localization_targets returns it, e.g. "Game". |
+| `scope` | string | no | "engine" or "game", case ignored, to pick between same-named targets; omitted (or any other value) searches the engine set first, then the game set. |
 
 **Returns:** `{ target_name: string, scope: string, config_path: string, config_written: bool, exit_code: int, success: bool, message: string }`
 
@@ -343,12 +343,12 @@ Read a UDataRegistry asset: registry_type, item_struct, initialized, every DataS
 
 *Read-only.*
 
-Synchronously look up a precached item by registry type and item name.  Uses UDataRegistrySubsystem::GetCachedItemRaw. Only returns data for items backed by a precached source (the registry must be initialized first). Returns a clean error if the item is not cached.
+Read one item of a data registry from the DataRegistry subsystem's cache, by registry type and item name, without changing anything: item_data is the item struct exported as Unreal text, e.g. (Damage=10.0,Name="Sword"), and item_struct names its struct. Only cached items can be read, which means a precached source (a DataTable source) of a registry initialized this session with initialize_data_registry; an item that is not cached, or a registry type the subsystem does not know, is an error, so found is true in every reply. Find registry types with list_data_registry_types and item names with get_data_registry_info (item_names); for the source DataTable row itself use get_data_table_row. A missing subsystem (DataRegistry plugin off) is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `registry_type` | string | yes | The registry type name. |
-| `item_name` | string | yes | The item (row) name. |
+| `registry_type` | string | yes | Registry type name the asset declares, as list_data_registry_types returns it (registries[].registry_type), e.g. "Items". |
+| `item_name` | string | yes | Item name, as get_data_registry_info lists it in item_names; for a DataTable source it is the row name, e.g. "Sword". |
 
 **Returns:** `{ registry_type: string, item_name: string, item_struct: string, found: bool, item_data: string }`
 
@@ -474,19 +474,19 @@ No parameters.
 
 *Read-only.*
 
-List localization targets configured in the Localization Dashboard (ULocalizationSettings::GetEngineTargetSet/GetGameTargetSet), with their native/supported cultures.
+List the localization targets configured in the Localization Dashboard (ULocalizationSettings engine and game target sets) without changing anything, each with its scope, native culture and supported cultures. It is the first step of the localization pipeline: pass a name to gather_text_for_target, then compile_text_for_target, and preview a supported culture with set_active_culture. For one culture's details use get_culture_info; for string tables use get_string_table_entries. A project with no targets is a success with targets_count 0; a scope other than engine, game or all is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `scope` | string | no | Optional: "engine" \| "game" \| "all". Defaults to "all". |
+| `scope` | string | no | "engine", "game" or "all" (default all), case ignored: which target set to list. Project targets such as "Game" live in the game set. |
 
 **Returns:** `{ scope: string, targets: [{ name: string, scope: string, native_culture: string, supported_cultures: string[] }], targets_count: int }`
 
 ## `refresh_data_registry_map`
 
-*Destructive.*
+*Destructive, idempotent.*
 
-Force UDataRegistrySubsystem::RefreshRegistryMap().  Call this after editing registry assets (e.g. add/remove sources, change registry_type) to make the subsystem re-read its registry map without needing an editor restart.
+Make the DataRegistry subsystem rebuild, for this editor session, its map from registry type to registry asset out of the registry assets loaded in memory under its scan paths, so edits to registry assets (a changed registry_type, sources changed with add_data_registry_source or remove_data_registry_source) are seen without restarting the editor. A registry whose type drops out of the map is deinitialized, losing its cached items. It changes no asset and saves nothing, and it neither loads nor initializes a registry: use initialize_data_registry for that, then get_data_registry_item to read items. Idempotent: a repeat call rebuilds the same map. refreshed is always true, since the engine call reports nothing; check the outcome with list_data_registry_types. A missing subsystem (DataRegistry plugin off) is an error.
 
 No parameters.
 

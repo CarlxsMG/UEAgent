@@ -64,12 +64,12 @@ Bind a key to an InputAction in a saved Enhanced Input mapping context, addressi
 
 *Additive, idempotent.*
 
-Create a UForceFeedbackEffect data asset (NewObject + save).  Seeds the effect with one default FForceFeedbackChannelDetails so it is a meaningful, non-empty asset. Idempotent: if the asset already exists it is loaded and returned.
+Create a force feedback effect asset (the controller rumble a Play Force Feedback call plays) at package_path/name, with one default channel (all four motors affected, an intensity curve with no keys, so it does not vibrate until the curve is keyed), then save it; there is no undo step. Idempotent: when a force feedback effect already exists at that path it is loaded and returned as it is, with already_existed true, and nothing is saved. An asset of another type at the path, or an invalid name, is an error and nothing changes; a failed save is an error, the new asset staying only in memory. Edit its channels and curves with set_properties (ChannelDetails) on the asset path and read them back with get_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `name` | string | yes | Asset name (e.g. FFE_Rumble) |
-| `package_path` | string | no | Target /Game package path (optional, default "/Game/Gameplay") |
+| `name` | string | yes | Asset name without folder, e.g. "FFE_Rumble". |
+| `package_path` | string | no | Content folder for the asset, e.g. "/Game/Input/Feedback" (optional, default "/Game/Gameplay"); a trailing slash is ignored. |
 
 **Returns:** `{ name: string, asset_path: string, asset_class: string, channel_detail_count: number, is_force_feedback_effect: bool, already_existed: bool, created: bool }`
 

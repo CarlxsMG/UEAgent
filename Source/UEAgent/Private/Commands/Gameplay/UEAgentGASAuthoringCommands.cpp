@@ -2268,9 +2268,9 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierAttributeTagFilters(const
 
 // GameplayAbility CDO authoring
 
-// MCP:set_ability_cost - Set the Cost GameplayEffect class on a GameplayAbility CDO (the GE applied when the ability is committed). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
-//   @param ability_blueprint_path - Full asset path of the GameplayAbility Blueprint
-//   @param cost_effect_path - Full asset path of the GameplayEffect Blueprint to use as the cost
+// MCP:set_ability_cost - Point CostGameplayEffectClass on the class defaults of a GameplayAbility Blueprint at the generated class of a GameplayEffect Blueprint, both loaded by asset path, then save the ability without recompiling. That effect is applied when the ability commits, and its modifiers (usually a negative add to an attribute such as Mana) are the price: the commit fails when the owner cannot pay. Give the effect its modifier with add_gameplay_effect_modifier; for the effect that blocks re-use use set_ability_cooldown instead; make a new effect with create_gameplay_effect_blueprint; read the value back with get_properties on the ability's class defaults. Any cost class already set is overwritten and every call writes and saves, so a repeat call leaves the same state; there is no way to clear it here. A path that is not a GameplayAbility or GameplayEffect Blueprint, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. set and cost_effect_class_matches are the value read back after the save.
+//   @param ability_blueprint_path - Asset path of the GameplayAbility Blueprint, e.g. "/Game/GAS/Abilities/GA_Fireball".
+//   @param cost_effect_path - Asset path of the GameplayEffect Blueprint used as the cost, e.g. "/Game/GAS/Effects/GE_Cost_Fireball"; typically an Instant effect that subtracts from an attribute.
 //   @returns { ability_blueprint_path: string, cost_effect_path: string, cost_effect_class: string, cost_effect_class_matches: bool, set: bool }
 TSharedPtr<FJsonObject> HandleSetAbilityCost(const TSharedPtr<FJsonObject>& Params)
 {

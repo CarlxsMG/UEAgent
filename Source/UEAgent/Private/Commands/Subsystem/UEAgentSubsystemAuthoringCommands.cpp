@@ -137,8 +137,8 @@ TSharedPtr<FJsonObject> HandleActivateExternalSubsystem(
 // ---------------------------------------------------------------------------
 // deactivate_external_subsystem
 // ---------------------------------------------------------------------------
-// MCP:deactivate_external_subsystem - Externally deactivate a Blueprint-authored USubsystem via FSubsystemCollectionBase::DeactivateExternalSubsystem. Refuses to toggle native / abstract / base classes.
-//   @param class_name - Short class name or /Script/ path of a Blueprint-derived USubsystem
+// MCP:deactivate_external_subsystem - Tear down a Blueprint-authored subsystem (a non-native, non-abstract USubsystem class) in every live subsystem collection of its family (engine, editor, game instance, world or local player), through the engine's external-subsystem switch: its Deinitialize runs and its runtime state is lost. Runtime only: nothing is saved and there is no undo, and a world or game instance created later builds it again. The inverse is activate_external_subsystem; check what is live with list_subsystem_instances (with class_name it answers active true or false), and find candidate classes with list_derived_classes. Native engine subsystems, the subsystem base classes and abstract classes are refused, since tearing them down can crash the editor; a class that is not found or is not a subsystem is an error. Idempotent: a repeat call, or one for a subsystem that is not active, changes nothing. deactivated is always true, since the engine call reports nothing, so confirm with list_subsystem_instances.
+//   @param class_name - Blueprint subsystem class, by its Blueprint asset path (e.g. "/Game/Systems/BP_ScoreSubsystem"), generated class path, or loaded generated class name (e.g. "BP_ScoreSubsystem_C"); a native /Script/ class resolves but is refused.
 //   @returns { class_name: string, deactivated: bool }
 
 TSharedPtr<FJsonObject> HandleDeactivateExternalSubsystem(

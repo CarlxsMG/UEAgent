@@ -319,10 +319,10 @@ TSharedPtr<FJsonObject> HandleListSaveGames(const TSharedPtr<FJsonObject>& Param
     return mcp_common::MakeOkReply(Listing);
 }
 
-// MCP:get_save_game_slot_info - Read the metadata of a save slot: exists and, for an existing slot, save_path (the generic desktop Saved/SaveGames/<slot>.sav) plus file_size, modified_iso and modified_ticks when that file is on disk. A missing slot is exists=false with an error field, not a failure.
-//   @param slot_name - Save slot name to query
-//   @param user_index - Platform user index for the save system; default 0 (the generic desktop save system ignores it)
-//   @returns { slot_name: string, user_index: int, exists: bool, save_path: string, file_size: int, modified_iso: string, modified_ticks: int, error: string }
+// MCP:get_save_game_slot_info - Read the file facts of one save slot without loading or changing it: exists (UGameplayStatics::DoesSaveGameExist) and, for an existing slot, save_path (the generic desktop Saved/SaveGames/<slot>.sav) plus file_size, modified_iso and modified_ticks when that file is on disk. Use it to check one slot before load_game or delete_save_game, or after save_game to confirm the write; to discover slot names use list_save_games; to read the saved object's contents use load_game. A missing slot is a success with exists=false and an error field saying so, and then no save_path, size or time.
+//   @param slot_name - Exact save slot name, e.g. "Slot1", as list_save_games returns it; on desktop it is the file name without .sav.
+//   @param user_index - Platform user index, a whole number (default 0); the generic desktop save system ignores it.
+//   @returns { slot_name: string, user_index: int, exists: bool, save_path?: string, file_size?: int, modified_iso?: string, modified_ticks?: int, error?: string }
 TSharedPtr<FJsonObject> HandleGetSaveGameSlotInfo(const TSharedPtr<FJsonObject>& Params)
 {
     FString Slot;

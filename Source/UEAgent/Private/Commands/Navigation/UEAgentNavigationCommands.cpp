@@ -1161,8 +1161,8 @@ TSharedPtr<FJsonObject> HandleRunEQSQuery(const TSharedPtr<FJsonObject>& Params)
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:get_eqs_query_info - Reports the composition of a UEnvQuery asset: each option's generator class and its list of test classes. Read-only.
-//   @param query_path - /Game/... path to the UEnvQuery asset (required)
+// MCP:get_eqs_query_info - Reports the composition of an Environment Query (UEnvQuery) asset without running it: each option with its index, its generator class (absent when the option has none) and its tests in order, each with index and class. Read-only: loads the asset, changes and saves nothing; an asset that does not load as a UEnvQuery is an error, and a query without options returns option_count 0. Use it to get the option_index and test_index that add_eqs_generator, add_eqs_test, set_eqs_test_scoring, set_eqs_generator_properties, remove_eqs_test and remove_eqs_option take, and to check their result. To see what the query actually selects in the level, run it with run_eqs_query; the classes to add come from list_eqs_generator_types and list_eqs_test_types.
+//   @param query_path - Asset path of the UEnvQuery (required), e.g. "/Game/EQS/EQ_FindCover" (the ".EQ_FindCover" object suffix is optional), as create_eqs_query or find_assets_by_name gives it.
 //   @returns { query_path, option_count, options:[{index, generator_class?, generator_path?, test_count, tests:[{index, class, path}]}] }
 TSharedPtr<FJsonObject> HandleGetEQSQueryInfo(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1229,7 +1229,7 @@ TSharedPtr<FJsonObject> HandleListEQSTestTypes(const TSharedPtr<FJsonObject>& Pa
     return mcp_common::MakeOkReply(BuildEQSDerivedClassList(UEnvQueryTest::StaticClass(), TEXT("EnvQueryTest")));
 }
 
-// MCP:list_eqs_context_types - Lists all concrete UEnvQueryContext subclasses usable as EQS contexts. Read-only reflection (GetDerivedClasses).
+// MCP:list_eqs_context_types - Lists the concrete EQS context classes (UEnvQueryContext subclasses, such as EnvQueryContext_Querier or EnvQueryContext_Item) loaded in this editor, sorted by name, each with its name and class path; abstract and deprecated classes are left out. Read-only reflection: takes no parameters, loads and changes nothing. Blueprint contexts appear only once their Blueprint is loaded. A context class says what a generator or test is measured from: pass its path to a context property, such as SearchCenter, with set_eqs_generator_properties. For generator classes use list_eqs_generator_types, for test classes list_eqs_test_types; get_eqs_query_info shows what a query already uses.
 //   @returns { base_class, count, types:[{name, path}] }
 TSharedPtr<FJsonObject> HandleListEQSContextTypes(const TSharedPtr<FJsonObject>& Params)
 {

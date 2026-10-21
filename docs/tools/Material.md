@@ -430,15 +430,15 @@ Copy one expression node of a UMaterial asset into the same material, optionally
 
 *Additive.*
 
-Duplicate a Material Parameter Collection asset, parameters included with their names, Ids and defaults, to package_path/new_name and save the copy. Refuses when the target already exists. Returns collection_path, scalar_count, vector_count, saved and save_error.
+Copy a Material Parameter Collection asset to package_path/new_name, with every scalar and vector parameter's name, Id and default value, then save the copy; the source is not changed and there is no undo step. Use it to start a variant of an existing collection; for an empty one use create_material_parameter_collection, and for any other asset type duplicate_asset. An asset already at the target path is refused, so a repeat call fails and nothing changes; a source that does not load as a collection, or an invalid target name, is an error too. A failed save makes success false, with saved false, save_error and the copy only in memory. Read the copy with get_collection_info; rename its parameters with rename_collection_parameter.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `source_path` | string | yes | Source MPC path, e.g. "/Game/MPC/MPC_A" or the object path "/Game/MPC/MPC_A.MPC_A" |
-| `new_name` | string | yes | Asset name of the copy, e.g. "MPC_B"; must not be empty |
-| `package_path` | string | no | Target folder; default is the folder of source_path when it is an object path with a dot ("/Game/MPC/MPC_A.MPC_A"), else "/Game/MaterialCollections" |
+| `source_path` | string | yes | Collection to copy, as an asset path, e.g. "/Game/MPC/MPC_A", or the object path "/Game/MPC/MPC_A.MPC_A". |
+| `new_name` | string | yes | Asset name of the copy without folder, e.g. "MPC_B"; must be a valid, non-empty asset name. |
+| `package_path` | string | no | Target folder, e.g. "/Game/MPC"; default is the folder of source_path when it is an object path with a dot ("/Game/MPC/MPC_A.MPC_A"), else "/Game/MaterialCollections". |
 
-**Returns:** `{ source_path: string, collection_path: string, asset_path: string, name: string, package_path: string, scalar_count: int, vector_count: int, duplicated: bool, saved: bool, save_error: string }`
+**Returns:** `{ source_path: string, collection_path: string, asset_path: string, name: string, package_path: string, scalar_count: int, vector_count: int, duplicated: bool, saved: bool, save_error?: string }`
 
 ## `get_collection_info`
 
@@ -522,11 +522,11 @@ Read a material's layer stack: the layer functions and blend functions it uses, 
 
 *Read-only.*
 
-Read the transient Material Parameter Collection Instance of one collection on a world: instance_exists, is_valid, parent_collection_path and, per parameter, current_value or current_rgba with readback_ok. The world is the editor world by default, or the Play-in-Editor world world_label selects; world_package and world_type say which one was read. Changes no value, but the engine lookup creates the instance, at the collection defaults, when the world has none, so instance_exists is true in practice; scalar_override_count and vector_override_count are only the parameter counts.
+Read the live per-world values of a Material Parameter Collection (its transient instance on one world) without changing any value: current_value per scalar and current_rgba per vector, each with readback_ok (false when the instance lacks that parameter, the value then being the asset default), plus parent_collection_path and is_valid. The world is the editor world by default, or the Play-in-Editor world world_label selects; the world fields and pie_instance (-1 outside PIE) say which one answered. Use it to check set_material_parameter_collection_instance_value or reset_material_parameter_collection_instance; for the saved defaults use get_collection_info. The engine lookup creates the instance at the defaults when the world has none, so instance_exists is true in practice, and scalar_override_count and vector_override_count are only the parameter counts, not overrides. A collection that does not load, or a world_label no live world matches, is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `collection_path` | string | yes | Full /Game path of the parent MPC |
+| `collection_path` | string | yes | Asset path of the collection, e.g. "/Game/MPC/MPC_Global", as get_collection_info takes it. |
 | `world_label` | string | no | Which world: empty or "editor" for the editor world (the default), even while Play-in-Editor runs; "pie" (alias "game") for the running PIE world, "server" or "client" for that PIE world, "pie:N" for PIE instance N. any other value names a live world by its object name (the editor world is checked first, so a map name selects it) or by its package name (UEDPIE_N_ and the map name for a PIE world), and a value no world has fails and lists the worlds present |
 
 **Returns:** `{ collection_path: string, world_name: string, world_package: string, world_type: string, net_mode: string, pie_instance: int, instance_exists: bool, is_valid: bool, parent_collection_path: string, scalar_override_count: int, vector_override_count: int, scalars: [object], vectors: [object] }`
@@ -654,13 +654,13 @@ Remove one parameter from a Material Parameter Collection asset by name and save
 
 *Destructive.*
 
-Rename one parameter of a Material Parameter Collection asset, keeping its Id, and save it. Refuses when new_name is already used in the same array, and errors when param_name is not in the array param_type selects (default scalar).
+Rename one scalar or vector parameter of a Material Parameter Collection asset, keeping its Id so the materials that read it keep resolving it, in one undo step, then save the asset. Use it rather than remove_collection_parameter plus add_collection_parameter, which gives the parameter a new Id that those materials do not know; to give it a new Id on purpose use regenerate_collection_parameter_id. A new_name already used in the same array, the parameter's own name included (names compare case-insensitively), is refused, so repeating a rename fails; a param_name that is not in the array param_type selects is an error; nothing changes in either case. A collection that does not load is an error; a failed save makes success false, with saved false, save_error and the rename only in memory. List the names with get_collection_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `collection_path` | string | yes | Full /Game path to the MPC asset |
-| `param_name` | string | yes | Current parameter name |
-| `new_name` | string | yes | New parameter name, must not collide with another |
+| `collection_path` | string | yes | Asset path of the collection, e.g. "/Game/MPC/MPC_Global" or the object path "/Game/MPC/MPC_Global.MPC_Global". |
+| `param_name` | string | yes | Current name of the parameter, as get_collection_info lists it (scalar_params[].name or vector_params[].name); case-insensitive. |
+| `new_name` | string | yes | New parameter name, e.g. "WindStrength"; must not be used by another parameter of the same kind (compared case-insensitively). |
 | `param_type` | string | no | Which array to search: "scalar" or "vector", any case; omitted or anything else means scalar |
 
 **Returns:** `{ collection_path: string, param_name: string, new_name: string, param_type: string, renamed: bool, saved: bool }`
@@ -896,15 +896,15 @@ Turn one usage flag (EMaterialUsage: SkeletalMesh, InstancedStaticMeshes, Niagar
 
 ## `set_substrate_slab_scalar`
 
-*Destructive, idempotent.*
+*Destructive.*
 
-Drive a Substrate Slab BSDF scalar pin with a Constant node.  Creates a Constant expression set to `value` and connects it to the named slab pin (e.g. Roughness, F0, DiffuseAlbedo, Anisotropy). Works regardless of whether Substrate is enabled. Requires create_substrate_slab_node first.
+Drives one input pin of the Substrate Slab BSDF node of a material with a constant: adds a NEW Constant expression holding value to the material graph and wires it into the named pin of the material's first Slab node, replacing whatever fed that pin, then saves the material. Each call adds another Constant node, even for the same pin and value; a constant that fed the pin before stays in the graph, unwired. Not recorded for undo, and the save result is not checked. Works whether Substrate is enabled or not (substrate_enabled reports it). The material needs a Slab node from create_substrate_slab_node; connect_substrate_slab_to_material wires the slab to the output. An unknown pin name is an error, but the Constant created before the failed wire stays in the graph. To change a constant already wired, use set_material_expression_property on its constant_node_id; delete stray nodes with delete_material_expression.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `material_path` | string | yes | Content path to the UMaterial holding the slab node |
-| `pin_name` | string | yes | Slab input pin to drive (e.g. "Roughness") |
-| `value` | number | yes | Scalar constant value to feed into the pin |
+| `material_path` | string | yes | Package or object path of the UMaterial holding the slab node (e.g. "/Game/Materials/M_Substrate"). |
+| `pin_name` | string | yes | Slab input pin to drive, by its input name: e.g. "Roughness", "Anisotropy", "F0" or "DiffuseAlbedo" (a color pin receives the scalar on all channels). |
+| `value` | number | yes | Scalar the Constant node holds (e.g. 0.35 for Roughness); not range-checked. |
 
 **Returns:** `{ material_path: string, slab_node_id: string, constant_node_id: string, pin_name: string, value: number, connected: bool, substrate_enabled: bool, r_substrate_cvar: int, note?: string }`
 

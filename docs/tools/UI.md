@@ -296,11 +296,11 @@ Read what one UWidgetAnimation of a Widget Blueprint animates: every widget it b
 
 *Read-only.*
 
-List the UWidgetAnimations of a Widget Blueprint asset, each with its object name, display_name and has_movie_scene, plus animation_count and the resolved asset_path. Read-only; add_widget_animation creates one and remove_widget_animation accepts either name; what one animates: get_widget_animation_tracks.
+Lists the animations (UWidgetAnimations) authored in a Widget Blueprint asset, each with its object name, display name and whether it has a movie scene, plus animation_count and the resolved asset_path. Read-only: loads the asset, changes and saves nothing; a path that does not exist or is not a Widget Blueprint is an error, and a Blueprint without animations returns an empty list. Use it to get the animation_name that play_widget_animation, stop_widget_animation, remove_widget_animation, get_widget_animation_tracks and add_widget_animation_track take (either name works). add_widget_animation creates one; get_widget_animation_tracks shows what one animates.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `widget_bp_path` | string | yes | Asset path of the Widget Blueprint, e.g. "/Game/UI/WBP_MainMenu"; it must exist. |
+| `widget_bp_path` | string | yes | Asset path of the Widget Blueprint, e.g. "/Game/UI/WBP_MainMenu" (package or object path); it must exist and be a Widget Blueprint. |
 
 **Returns:** `{ widget_bp_path: string, asset_path: string, animations: [{name, display_name, has_movie_scene}], animation_count: int }`
 
@@ -380,16 +380,16 @@ No parameters.
 
 *Destructive.*
 
-Play a widget animation. REAL playback (UUserWidget::PlayAnimation) when a live PIE instance of this WidgetBP is found in the viewport's active UUserWidgets; falls back to an honest headless gate (played:false, headless:true, requires_pie:true) when no PIE session is running or no live instance is found.
+Plays an animation of a Widget Blueprint on a live instance of that widget in a running Play-In-Editor session (UUserWidget::PlayAnimation): the first on-screen instance of the Blueprint's class in the PIE world that world selects. Without a PIE session, or without such an instance, nothing plays and the call still succeeds with played false, headless true, requires_pie true and a note: start PIE with start_play_in_editor and get the widget on screen first. It changes only the running widget, never the asset (saved is always false), and played true means PlayAnimation was called, not read back; a repeat call starts the animation again. An animation name the Blueprint does not have is an error. Names come from get_widget_animations; stop playback with stop_widget_animation; list_pie_widgets shows which widgets are on screen.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `widget_bp_path` | string | yes | /Game path of the Widget Blueprint asset |
-| `animation_name` | string | yes | object name OR display label of the animation to play |
-| `start_at_time` | number | no | Optional float seconds to start playback at (default 0). |
-| `num_loops` | number | no | Optional int number of loops (default 1). |
-| `play_mode` | string | no | Optional Forward \| Reverse \| PingPong (default Forward). |
-| `playback_speed` | number | no | Optional float speed multiplier (default 1.0). |
+| `widget_bp_path` | string | yes | Asset path of the Widget Blueprint (e.g. "/Game/UI/WBP_HUD"); it must exist. |
+| `animation_name` | string | yes | Object name or display label of the animation, as get_widget_animations lists it (case-insensitive). |
+| `start_at_time` | number | no | Optional time in seconds into the animation to start from (default 0). |
+| `num_loops` | number | no | Optional whole number of times to play (default 1); values below 1 play once, so the engine's endless loop (0) is not available. |
+| `play_mode` | string | no | Optional "Forward" (default) \| "Reverse" \| "PingPong", case-insensitive; any other value plays Forward. |
+| `playback_speed` | number | no | Optional speed multiplier (default 1.0; 2.0 plays twice as fast). |
 | `restore_state` | boolean | no | Optional bool: restore the pre-animation state on finish (default false). |
 | `world` | string | no | Optional world selector: absent/'pie' (default: PlayWorld, else the first PIE context) \| 'server' (the PIE world with authority) \| 'client' \| 'pie:N' \| 'game' (alias of 'pie'). In a 2-player PIE session EVERY client has its OWN widgets, so the default may well read the other player's HUD. |
 

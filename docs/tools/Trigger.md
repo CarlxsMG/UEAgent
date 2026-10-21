@@ -46,13 +46,13 @@ Read what kind of trigger an editor-world actor is and where it reaches: actor_c
 
 *Read-only.*
 
-Read a volume actor in the editor world without changing it: its class, whether it is a BlockingVolume, KillZVolume, PainCausingVolume or PostProcessVolume and, when it has a brush component, bounds_origin and bounds_extent as text plus has_brush. Fails if the actor is not an AVolume.
+Read a volume actor (any AVolume: BlockingVolume, KillZVolume, PainCausingVolume, PostProcessVolume, TriggerVolume, NavMeshBoundsVolume...) in the editor world without changing it: its class, a flag for each of four common kinds (blocking, kill-Z, pain-causing, post-process) and, when it has a brush component, the world-space bounds of that brush as bounds_origin and bounds_extent (half-size, cm, as "X=.. Y=.. Z=.." text) plus has_brush (whether brush geometry is assigned; without it the volume encloses nothing). Use it to check a volume made by spawn_box_volume; for a TriggerBox or TriggerSphere use get_trigger_info, for overlap settings get_trigger_events, for kind-specific settings get_properties; delete one with remove_volume. Editor world only, not PIE. An unknown name, or an actor that is not a volume, is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Object name of the volume actor in the editor world; its editor label is not matched. |
+| `actor_name` | string | yes | Object name of the volume actor in the editor world, e.g. "BlockingVolume_0", as spawn_box_volume returns it; its editor label is not matched (find_actors_by_name maps a label to its name). |
 
-**Returns:** `{ actor_name, actor_class, is_blocking_volume, is_killz_volume, is_pain_causing_volume, is_post_process_volume, bounds_origin, bounds_extent, has_brush }`
+**Returns:** `{ actor_name, actor_class, is_blocking_volume, is_killz_volume, is_pain_causing_volume, is_post_process_volume, bounds_origin?, bounds_extent?, has_brush? }`
 
 ## `remove_trigger`
 
@@ -82,12 +82,12 @@ Destroy a volume ACTOR in the world -- any AVolume subclass: BlockingVolume, Pai
 
 *Destructive, idempotent.*
 
-Resize a TriggerBox in the editor world by setting the unscaled half-extent of its box collision component and updating its overlaps; the level is marked dirty, not saved. Returns previous_extent, new_extent and changed. Each extent must be greater than 0.
+Resize a TriggerBox in the editor world by setting the unscaled half-extent of its box collision component and updating its overlaps, in one undo step; the level is marked dirty, not saved (save_level). For a TriggerSphere use set_trigger_sphere_radius; a brush volume such as a TriggerVolume has no resize tool. Read the result with get_trigger_info (bounds, which include the actor scale) and what now overlaps with get_actors_in_trigger. Idempotent: the same extent again reports changed=false, though the level is still marked dirty. An extent of 0 or less or a missing one, an unknown name, an actor that is not a TriggerBox, or one without a box collision component is an error and nothing changes.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Object name of the TriggerBox actor in the editor world; its editor label is not matched. |
-| `extent_x` | number | yes | Half-extent along local X in cm, greater than 0; the box is twice as long. |
+| `actor_name` | string | yes | Object name of the TriggerBox actor in the editor world, e.g. "TriggerBox_0", as spawn_actor returns it; its editor label is not matched (find_actors_by_name maps a label to its name). |
+| `extent_x` | number | yes | Half-extent along local X in cm, greater than 0, e.g. 200; the box is twice as long, and the actor scale multiplies it in the world. |
 | `extent_y` | number | yes | Half-extent along local Y in cm, greater than 0. |
 | `extent_z` | number | yes | Half-extent along local Z in cm, greater than 0. |
 

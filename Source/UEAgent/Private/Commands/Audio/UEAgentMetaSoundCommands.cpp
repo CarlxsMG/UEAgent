@@ -1772,9 +1772,9 @@ TSharedPtr<FJsonObject> HandleRemoveMetaSoundGraphOutput(const TSharedPtr<FJsonO
 // ---------------------------------------------------------------------------
 // list_metasound_node_types — ISearchEngine reflection of registered node classes
 // ---------------------------------------------------------------------------
-// MCP:list_metasound_node_types - Enumerate all MetaSound node classes registered with the engine (via Metasound::Frontend::ISearchEngine). Editor-only because ISearchEngine::FindAllClasses is gated by WITH_EDITORONLY_DATA.
-//   @param include_unloaded - If true (default), include classes from assets not yet loaded into memory.
-//   @returns { count, types: [{ class_name, class_path, type, version, is_native }] }
+// MCP:list_metasound_node_types - List the MetaSound node classes the editor's MetaSound search engine knows, without changing anything: per class its class_name, class_path (Namespace.Name.Variant, e.g. UE.Sine.Audio: the three parts add_metasound_node takes as class_namespace, class_name and class_variant), type (e.g. External, the type of node classes and MetaSound assets), highest version (major.minor; the major is add_metasound_node's major_version), access_flags and is_native (true when the class name has a namespace, as engine and plugin nodes do). Deprecated classes are left out and only the highest version of each is listed; with include_unloaded (default) MetaSound assets not loaded yet are included too. The list is long (hundreds of classes) and has no filter. Use it to find a class before add_metasound_node; the nodes already in one MetaSound's graph are list_metasound_nodes, and one node's pins get_metasound_node_info. Editor only.
+//   @param include_unloaded - true (default) also lists the classes of MetaSound assets not loaded into memory yet, from the MetaSound asset manager's tag data; false lists only the classes registered now.
+//   @returns { count, types: [{ class_name, class_path, type, version, access_flags, is_native }] }
 TSharedPtr<FJsonObject> HandleListMetaSoundNodeTypes(
 	const TSharedPtr<FJsonObject>& Params)
 {

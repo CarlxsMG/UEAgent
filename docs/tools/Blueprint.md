@@ -351,16 +351,16 @@ Assign a material ASSET to one slot of a Blueprint component TEMPLATE (an OWN SC
 
 ## `attach_blueprint_component`
 
-*Destructive.*
+*Destructive, idempotent.*
 
-Parent an existing SCS component under another component (or the native root). The parent may be an SCS component of this Blueprint OR a NATIVE inherited scene component from a parent C++ class (e.g. ACharacter's "CharacterMesh0" or the native capsule) -- when the name is not an SCS node and is not the native root, it is resolved from the parent-class CDO and the child is parented to it natively (bIsParentComponentNative=true). This makes sockets on inherited native meshes reachable (e.g. a socket under CharacterMesh0 at "spine_4", or a ChildActor attached at "spine_2").
+Re-parents a component already in a Blueprint's Components tree (an SCS component), at an optional socket or bone: under another SCS component, under a native scene component inherited from a C++ parent (e.g. ACharacter's "CharacterMesh0", so its sockets are reachable), or under the scene root when parent_component_name is omitted or "root". The Blueprint is then compiled and left unsaved (save_asset writes it). Idempotent: a component already under that parent with the same socket returns already_attached true and nothing is recompiled. Refused with nothing changed when the Blueprint, the component or the parent is not found, or when the parent is the component itself or one of its descendants. Refused while Play-in-Editor runs unless force=true. To add a new component use add_component_to_blueprint (inverse: remove_component_from_blueprint); read the tree with get_blueprint_components; for actors placed in a level use attach_actor.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `blueprint_name` | string | yes | Name of the blueprint |
-| `component_name` | string | yes | Name of the SCS component to attach (the child) |
-| `parent_component_name` | string | no | Optional parent component name; omit / "root" / the native root name attaches to the native root component. May also name a NATIVE inherited scene component (e.g. "CharacterMesh0") to parent the child natively to it. |
-| `socket_name` | string | no | Optional socket/bone name on the parent (AttachToName) |
+| `blueprint_name` | string | yes | Blueprint asset path (e.g. "/Game/Characters/BP_Hero") or bare asset name, looked up under /Game/Blueprints first and then anywhere under /Game. |
+| `component_name` | string | yes | Variable name of the SCS component to move (the child), as get_blueprint_components lists it; inherited native components cannot be moved. |
+| `parent_component_name` | string | no | Optional parent component name, as get_blueprint_components lists it; omit / "root" / the native root name attaches to the scene root. May also name a NATIVE inherited scene component (e.g. "CharacterMesh0") to parent the child natively to it. |
+| `socket_name` | string | no | Optional socket or bone name on the parent (AttachToName), e.g. "hand_r"; not checked against the parent's mesh, and omitting it clears any socket. |
 
 **Returns:** `{ blueprint_name, component_name, parent, parent_is_native, attach_socket, already_attached }`
 

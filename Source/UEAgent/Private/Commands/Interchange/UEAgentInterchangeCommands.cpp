@@ -871,9 +871,9 @@ TSharedPtr<FJsonObject> HandleInterchangeSavePipeline(const TSharedPtr<FJsonObje
 
 // Headless imports via UInterchangeManager (medium risk: game-thread)
 
-// MCP:can_translate_interchange_source_data - Whether a registered Interchange translator can read a source file (a path on disk or an asset path). Read-only.
-//   @param file_path [string!] - Path of the source file to test on disk (e.g. "C:/Assets/Mesh.fbx"), or an Unreal asset path. Passed to UInterchangeManager::CreateSourceData.
-//   @param scene_only [bool] - When true, restrict the check to scene translators (bSceneOnly). Defaults to false (any translator type).
+// MCP:can_translate_interchange_source_data - Checks whether a translator registered with this editor's Interchange framework can read a source file, judged for most formats by the file extension alone: true means import_interchange_asset can try it, not that the file exists or will import cleanly. Read-only: nothing is imported, loaded or changed. It answers false, not an error, when Interchange import is disabled, the extension is blocked for import in the project, or no translator matches. Use it as a pre-flight check before import_interchange_asset; get_interchange_supported_formats lists every supported extension, and register_interchange_translator adds a reader for a new format.
+//   @param file_path [string!] - Path of the source file, absolute on disk (e.g. "C:/Assets/Mesh.fbx", "D:/Scans/room.gltf"); for most translators only its extension is looked at, so the file need not exist yet.
+//   @param scene_only [bool] - When true, answer true only when the matching translator is a scene translator (one that imports actors into a level, not only assets). Defaults to false (any translator type).
 //   @returns { file_path: string, scene_only: bool, can_translate: bool }
 TSharedPtr<FJsonObject> HandleInterchangeCanTranslateSourceData(const TSharedPtr<FJsonObject>& Params)
 {
@@ -960,8 +960,8 @@ TSharedPtr<FJsonObject> HandleInterchangeImportAsset(const TSharedPtr<FJsonObjec
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:reimport_interchange_asset - Reimport an existing asset from its stored UInterchangeAssetImportData (UInterchangeManager::ReimportAsset). An asset without Interchange import data (a legacy factory import, or one never imported) gets an error.
-//   @param asset_path [string!] - Asset path (e.g. "/Game/Foo/Foo") or fully-qualified object path ("/Game/Foo/Foo.Foo")
+// MCP:reimport_interchange_asset - Reimports an asset that was imported through Interchange, from the source file and pipeline stack stored on its Interchange import data, synchronously and without dialogs: the asset's content in memory is overwritten with the file's current content. This tool does not save it (save_asset writes it). An asset without Interchange import data -- a legacy-importer asset, or one never imported -- is an error and nothing changes: use reimport_asset for those. Check which kind an asset has, and its source file, with get_interchange_asset_import_data; change the stored pipelines first with set_interchange_pipelines. A reimport the engine reports as failed still answers success, with reimported false and a note pointing to the editor log, so read reimported.
+//   @param asset_path [string!] - Package path (e.g. "/Game/Meshes/SM_Rock") or object path ("/Game/Meshes/SM_Rock.SM_Rock") of the asset to reimport; it is loaded if needed.
 //   @returns { asset_path: string, reimported: bool, count: number, note: string }
 TSharedPtr<FJsonObject> HandleInterchangeReimportAsset(const TSharedPtr<FJsonObject>& Params)
 {

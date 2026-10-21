@@ -338,9 +338,9 @@ TSharedPtr<FJsonObject> HandleAddStructMember(const TSharedPtr<FJsonObject>& Par
     return Result;
 }
 
-// MCP:create_blueprint_interface - Create a Blueprint Interface asset: a contract of function signatures that unrelated classes can implement, so callers talk to the contract instead of a concrete class. The right tool when several different kinds of actor must answer the same request (interactable, damageable, workable) and you do not want a shared base class -- one interface replaces N-by-M hard-wired cases. Created empty: add functions with add_blueprint_function, then implement_interface on each class and add_blueprint_function with override=true per function.
-//   @param name - Asset name (no path)
-//   @param path - Target content path for the new asset (default /Game/Blueprints)
+// MCP:create_blueprint_interface - Create an empty Blueprint Interface asset at path/name (a contract of function signatures that unrelated Blueprints implement, so a caller sends the message without knowing the concrete class) and mark its package dirty without saving it; there is no undo step. Use it when several kinds of actor must answer the same request (interact, take damage, work) without sharing a base class; when they can share one, use create_blueprint with a common parent instead. An asset already at that path, or an invalid name, is an error and nothing changes, so a repeat call fails. Refused while Play-in-Editor runs unless force=true. Next: add each signature with add_blueprint_function, add the interface to each class with implement_interface, implement each function there with add_blueprint_function (override=true), and save with save_asset.
+//   @param name - Asset name without folder, e.g. "BPI_Interactable"; must be a valid asset name not already used in that folder.
+//   @param path - Content folder for the new asset, e.g. "/Game/Blueprints/Interfaces" (default /Game/Blueprints); a trailing slash is ignored.
 //   @returns { name, path, type }
 TSharedPtr<FJsonObject> HandleCreateBlueprintInterface(const TSharedPtr<FJsonObject>& Params)
 {
@@ -392,10 +392,10 @@ TSharedPtr<FJsonObject> HandleGetStructMembers(const TSharedPtr<FJsonObject>& Pa
     return Result;
 }
 
-// MCP:set_struct_member_default - Set the default value of a user-defined struct member (read-modify-write; the value is validated against the member's type by the engine, so an incompatible value is an honest error).  Idempotent: re-setting the same value is a no-op success.
-//   @param struct_path - Full asset path of the UUserDefinedStruct.
-//   @param member_name - Member to edit, by its display name (or internal var name).
-//   @param default_value - New default as a string appropriate to the member's type (e.g. "7", "true", "1.5", "Hello"); pass "" to clear.
+// MCP:set_struct_member_default - Set the default value of one member of a Blueprint user-defined struct, found by display name or else by internal var name (case-insensitive), through the engine's struct editor, which checks the value against the member's type and recompiles the struct; one undo step, and the package is marked dirty but not saved (save_asset). Idempotent: a value equal to the stored default text changes nothing and answers already_set true (compared as text, so "1.5" and "1.50" differ). A value invalid for the type, a member that is not found or a path that does not load as a user-defined struct is an error and nothing changes. Read the members and their current defaults with get_struct_members; a new member gets its type from add_struct_member first.
+//   @param struct_path - Asset path of the user-defined struct, e.g. "/Game/Data/S_Item", as get_struct_members takes it.
+//   @param member_name - Member to edit, by its display name as get_struct_members returns it (members[].name) or by its var_name; case-insensitive.
+//   @param default_value - New default as text in the member type's format (e.g. "7", "true", "1.5", "Hello", "(X=1.0,Y=2.0,Z=3.0)" for a Vector); pass "" to clear it.
 //   @returns { struct_path: string, member_name: string, default_value: string, applied_default_value: string, already_set: bool, applied: bool, member: object }
 TSharedPtr<FJsonObject> HandleSetStructMemberDefault(const TSharedPtr<FJsonObject>& Params)
 {
@@ -452,9 +452,9 @@ TSharedPtr<FJsonObject> HandleSetStructMemberDefault(const TSharedPtr<FJsonObjec
     return Result;
 }
 
-// MCP:remove_struct_member - Remove a member from a user-defined struct.  Idempotent (a missing member reports already_absent without error); the engine refuses to remove the last remaining member (a struct cannot be empty) -- reported as an honest error.
-//   @param struct_path - Full asset path of the UUserDefinedStruct.
-//   @param member_name - Member to remove, by its display name (or internal var name).
+// MCP:remove_struct_member - Remove one member from a Blueprint user-defined struct, found by display name or else by internal var name (case-insensitive), through the engine's struct editor: one undo step, the struct is recompiled so the Blueprints and DataTable rows that use it lose that field, and the package is marked dirty but not saved (save_asset). Idempotent: a member that is not there changes nothing and answers already_absent true. Removing the last member is refused, since a struct cannot be empty, and nothing changes; a path that does not load as a user-defined struct is an error. Find the names with get_struct_members; inverse: add_struct_member; to keep the data under another name use rename_struct_member instead.
+//   @param struct_path - Asset path of the user-defined struct, e.g. "/Game/Data/S_Item", as get_struct_members takes it.
+//   @param member_name - Member to remove, by its display name as get_struct_members returns it (members[].name) or by its var_name; case-insensitive.
 //   @returns { struct_path: string, member_name: string, removed: bool, already_absent: bool, member_count: int }
 TSharedPtr<FJsonObject> HandleRemoveStructMember(const TSharedPtr<FJsonObject>& Params)
 {

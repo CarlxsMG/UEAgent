@@ -895,9 +895,9 @@ static bool ResolveBreakpointTargetNode(
     return true;
 }
 
-// MCP:set_blueprint_breakpoint - Set a real debugging breakpoint on a specific node within a blueprint graph via FKismetDebugUtilities::CreateBreakpoint. Idempotent (guarded by FindBreakpointForNode).
-//   @param blueprint_path - Object path, package path, or bare short name of the blueprint (resolved via mcp_common::ResolveAssetFlexible; ambiguity errors out listing candidates)
-//   @param node_name - Name or title of the graph node to set as a breakpoint (title-contains match)
+// MCP:set_blueprint_breakpoint - Add an enabled Blueprint debugger breakpoint on one node of a Blueprint's function or event graphs, found by its title, so execution pauses there in the editor's Blueprint debugger the next time Play-in-Editor reaches it. It changes editor debug state only: the asset is not modified or saved, and there is no undo step. Idempotent: a node that already has a breakpoint answers already_existed true. The first node whose title contains node_name is used (function graphs first, then event graphs; macro graphs are not searched), so pass a distinctive part of the title; no matching node answers found_in_graph false and breakpoint_set false rather than an error. Inverse: remove_blueprint_breakpoint; find node titles with get_graph_nodes. A Blueprint that does not resolve, an asset that is not a Blueprint, or a bare name matching several Blueprints is an error.
+//   @param blueprint_path - Blueprint to debug: object path, package path (e.g. "/Game/BP/BP_Door") or bare asset name (e.g. "BP_Door"); a bare name matching several Blueprints is an error that lists them.
+//   @param node_name - Part of the node title as the graph shows it, e.g. "Print String" or "Event BeginPlay"; matched case-insensitively against node titles (not object names), first match wins.
 //   @returns { blueprint_path: string, node_name: string, breakpoint_set: bool, already_existed: bool, found_in_graph: bool, node_class?: string, node_title?: string }
 
 TSharedPtr<FJsonObject> HandleSetBlueprintBreakpoint(const TSharedPtr<FJsonObject>& Params)

@@ -236,10 +236,10 @@ TSharedPtr<FJsonObject> HandleAddVirtualBone(const TSharedPtr<FJsonObject>& Para
 // ---------------------------------------------------------------------------
 // add_anim_slot_group
 // ---------------------------------------------------------------------------
-// MCP:add_anim_slot_group - Add an animation slot group (the groups montage slots belong to) to a USkeleton asset and save it. Idempotent: an existing group returns added false and changes nothing, but the skeleton is still saved; a failed save returns success false. Returns added and slot_group_count.
-//   @param skeleton_path - USkeleton asset path, e.g. "/Game/Characters/SK_Hero_Skeleton".
-//   @param group_name - Name of the slot group to add, e.g. "WeaponGroup".
-//   @returns { asset_path: string, group_name: string, added: bool, slot_group_count: int, saved: bool }
+// MCP:add_anim_slot_group - Add an animation slot group (a named group that montage slots belong to; one slot per group plays at a time) to a USkeleton asset in one undo step and save the skeleton. Use it before giving a montage a slot in a new group; the montage side is create_anim_montage (slot_name) or add_montage_slot, and the inverse is remove_anim_slot_group. get_skeleton_info with load_full_data=true reports slot_group_count. Idempotent: a group that already exists returns added=false and is not changed, but the skeleton is still marked dirty and saved. A skeleton that does not load is an error. A failed save (always while PIE runs) makes success false, with saved=false and save_error. Edit a project copy (create_editable_skeleton), not engine content.
+//   @param skeleton_path - USkeleton asset as a package or object path, e.g. "/Game/Characters/SK_Hero_Skeleton", as get_skeleton_info returns it.
+//   @param group_name - Name of the slot group to add, compared as an FName (case ignored), e.g. "WeaponGroup".
+//   @returns { asset_path: string, group_name: string, added: bool, slot_group_count: int, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleAddAnimSlotGroup(const TSharedPtr<FJsonObject>& Params)
 {
     FString SkeletonPath, GroupName;
@@ -902,11 +902,11 @@ TSharedPtr<FJsonObject> HandleSetBoneTransform(const TSharedPtr<FJsonObject>& Pa
 // ---------------------------------------------------------------------------
 // set_bone_parent
 // ---------------------------------------------------------------------------
-// MCP:set_bone_parent - Re-parent a bone (pass empty parent_name to make it a new root).
-//   @param skeleton_path - Path to the USkeleton asset
-//   @param bone_name - Bone to re-parent
-//   @param parent_name - New parent bone name, or empty/null to detach to root
-//   @returns { asset_path, bone_name, parent_name, bone_index, parent_index, updated, not_found, bone_count, saved, op: "set_bone_parent" }
+// MCP:set_bone_parent - Move a bone, with its children, under another parent in the reference skeleton of a USkeleton asset (FReferenceSkeletonModifier::SetParent), or make it an extra root with an empty parent_name, in one undo step, then save the skeleton; no commit_bone_changes is needed. Bones may be re-indexed, so read bone_index (the bone's new index) and re-list with get_skeleton_info (load_full_data=true). Skeletal meshes bound to the skeleton are not changed. Use add_bone to create a bone under a parent, rename_bone to rename, set_bone_transform to move its reference pose. A bone or parent not in the skeleton, or a skeleton that does not load, is an error and nothing changes. The engine refuses a parent that is the bone itself or one of its descendants, and a parent it already has: then updated=false and bone_index -1, still a success, and the unchanged skeleton is saved again. A failed save (always while PIE runs) makes success false, with saved=false and save_error. Edit a project copy (create_editable_skeleton), not engine content.
+//   @param skeleton_path - USkeleton asset as a package or object path, e.g. "/Game/Characters/SK_Hero_Skeleton", as get_skeleton_info returns it.
+//   @param bone_name - Exact name of the bone to move (case ignored), as get_skeleton_info lists it, e.g. "hand_r".
+//   @param parent_name - Exact name of the new parent bone, e.g. "lowerarm_r"; empty or omitted makes the bone a root.
+//   @returns { asset_path, bone_name, parent_name, bone_index, updated, not_found, bone_count, saved, save_error?, op: "set_bone_parent" }
 TSharedPtr<FJsonObject> HandleSetBoneParent(const TSharedPtr<FJsonObject>& Params)
 {
     FString SkeletonPath, BoneName, ParentNameStr;
