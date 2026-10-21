@@ -56,4 +56,15 @@
       } | tojson }}
     </script>
   {% endif %}
+  {#- The theme keeps the repository's facts (latest release, stars, forks) in sessionStorage for the whole browser
+      session, which a restored tab stretches over days: a tab opened before a release went on showing the one
+      before. This runs before the theme's script reads them, and forgets them once they are an hour old. -#}
+  <script>
+    try {
+      if (!(Date.now() - __md_get("__source_seen", sessionStorage) < 36e5)) {
+        sessionStorage.removeItem(__md_scope.pathname + ".__source");
+        __md_set("__source_seen", Date.now(), sessionStorage);
+      }
+    } catch (e) {}
+  </script>
 {% endblock %}
