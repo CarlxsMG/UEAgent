@@ -282,6 +282,111 @@ namespace
 		return FString();
 	}
 
+	/** Whether a preview asset of Container is attached to AttachName (a bone or socket name). */
+	bool SkMesh_HasPreviewAttachedTo(const FPreviewAssetAttachContainer& Container, FName AttachName)
+	{
+		for (int32 Index = 0; Index < Container.Num(); ++Index)
+		{
+			if (Container[Index].AttachedTo == AttachName)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * The assets a rename or removal of the socket SocketName writes, the way USkeletalMeshEditorSubsystem::RenameSocket
+	 * and RemoveSocket change them: the mesh when it has its own socket of that name or a preview asset attached to it,
+	 * its skeleton when the skeleton has a socket of that name or a preview asset attached to it. A socket lives in
+	 * the package of the asset that owns it, so that is the package to save.
+	 */
+	struct FSkMeshSocketOwners
+	{
+		USkeleton* Skeleton = nullptr;
+		bool bMeshSocket = false;
+		bool bSkeletonSocket = false;
+		bool bMeshChanges = false;
+		bool bSkeletonChanges = false;
+	};
+
+	FSkMeshSocketOwners SkMesh_SocketOwners(USkeletalMesh* Mesh, FName SocketName)
+	{
+		FSkMeshSocketOwners Owners;
+		for (const TObjectPtr<USkeletalMeshSocket>& Socket : Mesh->GetMeshOnlySocketList())
+		{
+			if (Socket && Socket->SocketName == SocketName)
+			{
+				Owners.bMeshSocket = true;
+				break;
+			}
+		}
+		Owners.bMeshChanges = Owners.bMeshSocket || SkMesh_HasPreviewAttachedTo(Mesh->GetPreviewAttachedAssetContainer(), SocketName);
+		Owners.Skeleton = Mesh->GetSkeleton();
+		if (Owners.Skeleton)
+		{
+			Owners.bSkeletonSocket = Owners.Skeleton->FindSocket(SocketName) != nullptr;
+			Owners.bSkeletonChanges = Owners.bSkeletonSocket
+				|| SkMesh_HasPreviewAttachedTo(Owners.Skeleton->PreviewAttachedAssetContainer, SocketName);
+		}
+		return Owners;
+	}
+
+	/** Why the assets Owners says will change cannot be saved, or empty when both can: checked before the edit, so a
+	 *  refusal changes nothing. */
+	FString SkMesh_SocketOwnersWriteBlocker(USkeletalMesh* Mesh, const FSkMeshSocketOwners& Owners)
+	{
+		if (Owners.bMeshChanges)
+		{
+			const FString Blocker = SkMesh_PackageWriteBlocker(Mesh->GetOutermost()->GetName());
+			if (!Blocker.IsEmpty())
+			{
+				return FString::Printf(TEXT("the mesh %s cannot be saved: %s"), *Mesh->GetPathName(), *Blocker);
+			}
+		}
+		if (Owners.bSkeletonChanges && Owners.Skeleton)
+		{
+			const FString Blocker = SkMesh_PackageWriteBlocker(Owners.Skeleton->GetOutermost()->GetName());
+			if (!Blocker.IsEmpty())
+			{
+				return FString::Printf(TEXT("its skeleton %s cannot be saved: %s"), *Owners.Skeleton->GetPathName(), *Blocker);
+			}
+		}
+		return FString();
+	}
+
+	/** Saves the packages of the assets Owners says changed, listing each in Data's saved_assets; false with OutError
+	 *  naming every asset whose save failed. */
+	bool SkMesh_SaveSocketOwners(USkeletalMesh* Mesh, const FSkMeshSocketOwners& Owners, const TSharedPtr<FJsonObject>& Data,
+		FString& OutError)
+	{
+		TArray<TSharedPtr<FJsonValue>> SavedAssets;
+		TArray<FString> Failures;
+		auto SaveOne = [&SavedAssets, &Failures](UObject* Asset)
+		{
+			FString SaveError;
+			if (mcp_common::SaveAssetPackage(Asset->GetOutermost(), Asset, SaveError))
+			{
+				SavedAssets.Add(MakeShared<FJsonValueString>(Asset->GetPathName()));
+			}
+			else
+			{
+				Failures.Add(FString::Printf(TEXT("%s: %s"), *Asset->GetPathName(), *SaveError));
+			}
+		};
+		if (Owners.bMeshChanges)
+		{
+			SaveOne(Mesh);
+		}
+		if (Owners.bSkeletonChanges && Owners.Skeleton)
+		{
+			SaveOne(Owners.Skeleton);
+		}
+		Data->SetArrayField(TEXT("saved_assets"), SavedAssets);
+		OutError = FString::Join(Failures, TEXT("; "));
+		return Failures.Num() == 0;
+	}
+
 	/** The info of LOD LodIndex into OutInfo; the error reply when the index (IndexLabel in the message) is out of
 	 *  range or the LOD has no info. */
 	TSharedPtr<FJsonObject> SkMesh_FindLODInfo(USkeletalMesh* Mesh, int32 LodIndex, const TCHAR* IndexLabel, FSkeletalMeshLODInfo*& OutInfo)
@@ -1968,11 +2073,11 @@ TSharedPtr<FJsonObject> HandleBakeSkeletalMeshLod(const TSharedPtr<FJsonObject>&
 // ---------------------------------------------------------------------------
 // rename_skeletal_mesh_socket
 // ---------------------------------------------------------------------------
-// MCP:rename_skeletal_mesh_socket - Renames a socket of a skeletal mesh asset; a socket of the same name on the mesh's skeleton is renamed too. One undo step, then the mesh package is saved, and a failed save is an error (the rename stays in memory). The skeleton is only changed in memory and left unsaved (save_asset writes it), so a socket that exists only on the skeleton is renamed there but not written to disk. Refused with nothing changed when new_name equals old_name, a socket called new_name already exists on the mesh or its skeleton, or old_name is not found, so a repeat call fails because old_name is gone. Add a socket with add_skeletal_mesh_socket, re-parent one with set_skeletal_mesh_socket_parent, delete one with remove_skeletal_mesh_socket; Skeleton assets: add_skeleton_socket and remove_skeleton_socket; static meshes: rename_static_mesh_socket.
+// MCP:rename_skeletal_mesh_socket - Renames a socket of a skeletal mesh asset; a socket of the same name on the mesh's skeleton is renamed too, and preview assets attached to the old name follow it. One undo step, then every asset that changed is saved: the mesh for its own socket, the skeleton for its socket (saved_assets lists them), so a socket that lives only on the skeleton is written to the skeleton's file; a failed save makes success false with save_error and leaves the rename in memory. Refused with nothing changed when new_name equals old_name, a socket called new_name already exists on the mesh or its skeleton while old_name is still there, old_name is not found, or an asset that would change cannot be saved (engine content, a read-only root). Idempotent: when old_name is gone and new_name is there, it succeeds with already_renamed true and nothing changed or saved. Add a socket with add_skeletal_mesh_socket, re-parent one with set_skeletal_mesh_socket_parent, delete one with remove_skeletal_mesh_socket; Skeleton assets: add_skeleton_socket and remove_skeleton_socket; static meshes: rename_static_mesh_socket.
 //   @param skeletal_mesh_path - Package or object path of the skeletal mesh asset (e.g. "/Game/Characters/SK_Hero").
 //   @param old_name - Current socket name, matched case-insensitively (e.g. "hand_r_socket").
 //   @param new_name - New socket name; must differ from old_name and be free on the mesh and its skeleton (a change of letter case only counts as taken).
-//   @returns { old_name: string, new_name: string, skeletal_mesh_path: string, renamed: bool, already_renamed: bool, socket_count: int } -- already_renamed is always false (a repeat call is an error instead); socket_count adds the mesh's sockets and its skeleton's
+//   @returns { old_name: string, new_name: string, skeletal_mesh_path: string, renamed: bool, already_renamed: bool, renamed_on_mesh: bool, renamed_on_skeleton: bool, saved_assets: [string], saved: bool, save_error?: string, socket_count: int } -- renamed is read back (new_name found, old_name gone); socket_count adds the mesh's sockets and its skeleton's
 
 TSharedPtr<FJsonObject> HandleRenameSkeletalMeshSocket(
 	const TSharedPtr<FJsonObject>& Params)
@@ -1996,44 +2101,84 @@ TSharedPtr<FJsonObject> HandleRenameSkeletalMeshSocket(
 	const FName OldFName(*OldName);
 	const FName NewFName(*NewName);
 
+	// USkeletalMesh::FindSocket searches the mesh's own sockets, then its skeleton's.
+	const bool bOldPresent = Mesh->FindSocket(OldFName) != nullptr;
+	const bool bNewPresent = Mesh->FindSocket(NewFName) != nullptr;
+
+	auto NewReply = [&](bool bRenamed, bool bAlreadyRenamed)
+	{
+		TSharedPtr<FJsonObject> Data = SkMesh_NewPayload(MeshPath);
+		Data->SetStringField(TEXT("old_name"), OldName);
+		Data->SetStringField(TEXT("new_name"), NewName);
+		Data->SetBoolField(TEXT("renamed"), bRenamed);
+		Data->SetBoolField(TEXT("already_renamed"), bAlreadyRenamed);
+		Data->SetNumberField(TEXT("socket_count"), Mesh->NumSockets());
+		return Data;
+	};
+
+	// A repeat call: the rename it asks for is already the state, so nothing changes and nothing is saved.
+	if (!bOldPresent && bNewPresent)
+	{
+		TSharedPtr<FJsonObject> Data = NewReply(/*bRenamed=*/false, /*bAlreadyRenamed=*/true);
+		Data->SetBoolField(TEXT("renamed_on_mesh"), false);
+		Data->SetBoolField(TEXT("renamed_on_skeleton"), false);
+		Data->SetArrayField(TEXT("saved_assets"), TArray<TSharedPtr<FJsonValue>>());
+		Data->SetBoolField(TEXT("saved"), false);
+		return mcp_common::MakeOkReply(Data);
+	}
+
 	// Honest dedup: if new_name already exists as a socket, fail loud.
 	// We do NOT silently coalesce because that would hide a logic error at the
 	// call site (the caller almost certainly did not realize they were clobbering).
-	if (Mesh->FindSocket(NewFName))
+	if (bNewPresent)
 		return mcp_common::MakeErrorReply(
-			FString::Printf(TEXT("Socket '%s' already exists on mesh; refusing to overwrite"), *NewName));
+			FString::Printf(TEXT("Socket '%s' already exists on the mesh or its skeleton; refusing to overwrite"), *NewName));
 
-	if (!Mesh->FindSocket(OldFName))
+	if (!bOldPresent)
 		return mcp_common::MakeErrorReply(
-			FString::Printf(TEXT("Socket '%s' not found on mesh"), *OldName));
+			FString::Printf(TEXT("Socket '%s' not found on the mesh or its skeleton"), *OldName));
+
+	// The assets the rename writes, refused before anything changes when one of them cannot be saved.
+	const FSkMeshSocketOwners Owners = SkMesh_SocketOwners(Mesh, OldFName);
+	const FString WriteBlocker = SkMesh_SocketOwnersWriteBlocker(Mesh, Owners);
+	if (!WriteBlocker.IsEmpty())
+	{
+		return mcp_common::MakeErrorReply(FString::Printf(
+			TEXT("Renaming socket '%s' would change an asset that %s; nothing was changed"), *OldName, *WriteBlocker));
+	}
 
 	UE_LOG(LogTemp, Verbose, TEXT("[MCP] rename_skeletal_mesh_socket: %s -> %s on %s"),
 		*OldName, *NewName, *MeshPath);
 
-	Mesh->Modify();
+	// RenameSocket calls Modify() on each socket it renames (and on the mesh or skeleton whose preview assets follow).
 	if (!USkeletalMeshEditorSubsystem::RenameSocket(Mesh, OldFName, NewFName))
 		return mcp_common::MakeErrorReply(
 			FString::Printf(TEXT("RenameSocket failed for '%s' -> '%s'"), *OldName, *NewName));
 
-	if (TSharedPtr<FJsonObject> SaveFailed = SkMesh_SaveOrReply(Mesh))
-		return SaveFailed;
+	// Read back: the new name is found and the old one is gone, on the mesh and its skeleton.
+	const bool bRenamed = Mesh->FindSocket(NewFName) != nullptr && Mesh->FindSocket(OldFName) == nullptr;
 
-	TSharedPtr<FJsonObject> Data = SkMesh_NewPayload(MeshPath);
-	Data->SetStringField(TEXT("old_name"), OldName);
-	Data->SetStringField(TEXT("new_name"), NewName);
-	Data->SetBoolField(TEXT("renamed"), true);
-	Data->SetBoolField(TEXT("already_renamed"), false);
-	Data->SetNumberField(TEXT("socket_count"), Mesh->NumSockets());
-	return mcp_common::MakeOkReply(Data);
+	TSharedPtr<FJsonObject> Data = NewReply(bRenamed, /*bAlreadyRenamed=*/false);
+	Data->SetBoolField(TEXT("renamed_on_mesh"), Owners.bMeshSocket);
+	Data->SetBoolField(TEXT("renamed_on_skeleton"), Owners.bSkeletonSocket);
+	FString SaveError;
+	const bool bSaved = SkMesh_SaveSocketOwners(Mesh, Owners, Data, SaveError);
+	if (!bRenamed)
+	{
+		Data->SetBoolField(TEXT("saved"), bSaved);
+		return mcp_common::MakeOutcomeReply(Data, false,
+			mcp_common::MeasuredOutcomeError(TEXT("rename_skeletal_mesh_socket"), TEXT("renamed")));
+	}
+	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("rename_skeletal_mesh_socket"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
 // remove_skeletal_mesh_socket
 // ---------------------------------------------------------------------------
-// MCP:remove_skeletal_mesh_socket - Deletes a socket from a skeletal mesh asset, together with the same-named socket on its skeleton and the preview assets attached to that socket name. One undo step, then the mesh package is saved, and a failed save is an error. The skeleton is only changed in memory and left unsaved (save_asset writes it), so a socket that exists only on the skeleton is deleted there but not on disk. Idempotent: a name neither the mesh nor its skeleton has returns already_removed true, with nothing changed or saved. A socket that should go from a Skeleton asset alone is better deleted with remove_skeleton_socket, which saves it; static meshes use remove_static_mesh_socket. Re-add with add_skeletal_mesh_socket; get_skeletal_mesh_info reports the socket count.
+// MCP:remove_skeletal_mesh_socket - Deletes a socket from a skeletal mesh asset, together with the same-named socket on its skeleton and the preview assets attached to that socket name. One undo step, then every asset that changed is saved: the mesh for its own socket, the skeleton for its socket (saved_assets lists them), so a socket that lives only on the skeleton is deleted from the skeleton's file too; a failed save makes success false with save_error and leaves the deletion in memory. An asset that would change but cannot be saved (engine content, a read-only root) is refused before anything changes. Idempotent: a name neither the mesh nor its skeleton has returns already_removed true, with nothing changed or saved. A socket that should go from a Skeleton asset alone can also be deleted with remove_skeleton_socket; static meshes use remove_static_mesh_socket. Re-add with add_skeletal_mesh_socket; get_skeletal_mesh_info reports the socket count.
 //   @param skeletal_mesh_path - Package or object path of the skeletal mesh asset (e.g. "/Game/Characters/SK_Hero").
 //   @param socket_name - Name of the socket to delete, matched case-insensitively (e.g. "hand_r_socket").
-//   @returns { socket_name: string, skeletal_mesh_path: string, removed: bool, already_removed: bool, socket_count: int }
+//   @returns { socket_name: string, skeletal_mesh_path: string, removed: bool, already_removed: bool, removed_from_mesh: bool, removed_from_skeleton: bool, saved_assets: [string], saved: bool, save_error?: string, socket_count: int } -- removed is read back (the name is no longer found on the mesh or its skeleton)
 
 TSharedPtr<FJsonObject> HandleRemoveSkeletalMeshSocket(
 	const TSharedPtr<FJsonObject>& Params)
@@ -2057,14 +2202,27 @@ TSharedPtr<FJsonObject> HandleRemoveSkeletalMeshSocket(
 		Data->SetStringField(TEXT("socket_name"), SocketName);
 		Data->SetBoolField(TEXT("removed"), false);
 		Data->SetBoolField(TEXT("already_removed"), true);
+		Data->SetBoolField(TEXT("removed_from_mesh"), false);
+		Data->SetBoolField(TEXT("removed_from_skeleton"), false);
+		Data->SetArrayField(TEXT("saved_assets"), TArray<TSharedPtr<FJsonValue>>());
+		Data->SetBoolField(TEXT("saved"), false);
 		Data->SetNumberField(TEXT("socket_count"), SocketsBefore);
 		return mcp_common::MakeOkReply(Data);
+	}
+
+	// The assets the removal writes, refused before anything changes when one of them cannot be saved.
+	const FSkMeshSocketOwners Owners = SkMesh_SocketOwners(Mesh, SocketFName);
+	const FString WriteBlocker = SkMesh_SocketOwnersWriteBlocker(Mesh, Owners);
+	if (!WriteBlocker.IsEmpty())
+	{
+		return mcp_common::MakeErrorReply(FString::Printf(
+			TEXT("Removing socket '%s' would change an asset that %s; nothing was changed"), *SocketName, *WriteBlocker));
 	}
 
 	UE_LOG(LogTemp, Verbose, TEXT("[MCP] remove_skeletal_mesh_socket: '%s' from %s"),
 		*SocketName, *MeshPath);
 
-	Mesh->Modify();
+	// RemoveSocket calls Modify() on each socket it removes and on the mesh or skeleton whose list it changes.
 #if UE_VERSION_OLDER_THAN(5, 8, 0)
 	if (!SkMesh_RemoveSocket(Mesh, SocketFName))
 #else
@@ -2073,15 +2231,25 @@ TSharedPtr<FJsonObject> HandleRemoveSkeletalMeshSocket(
 		return mcp_common::MakeErrorReply(
 			FString::Printf(TEXT("RemoveSocket failed for '%s'"), *SocketName));
 
-	if (TSharedPtr<FJsonObject> SaveFailed = SkMesh_SaveOrReply(Mesh))
-		return SaveFailed;
+	// Read back: the name is no longer found on the mesh or its skeleton.
+	const bool bRemoved = Mesh->FindSocket(SocketFName) == nullptr;
 
 	TSharedPtr<FJsonObject> Data = SkMesh_NewPayload(MeshPath);
 	Data->SetStringField(TEXT("socket_name"), SocketName);
-	Data->SetBoolField(TEXT("removed"), true);
+	Data->SetBoolField(TEXT("removed"), bRemoved);
 	Data->SetBoolField(TEXT("already_removed"), false);
+	Data->SetBoolField(TEXT("removed_from_mesh"), Owners.bMeshSocket);
+	Data->SetBoolField(TEXT("removed_from_skeleton"), Owners.bSkeletonSocket);
 	Data->SetNumberField(TEXT("socket_count"), Mesh->NumSockets());
-	return mcp_common::MakeOkReply(Data);
+	FString SaveError;
+	const bool bSaved = SkMesh_SaveSocketOwners(Mesh, Owners, Data, SaveError);
+	if (!bRemoved)
+	{
+		Data->SetBoolField(TEXT("saved"), bSaved);
+		return mcp_common::MakeOutcomeReply(Data, false,
+			mcp_common::MeasuredOutcomeError(TEXT("remove_skeletal_mesh_socket"), TEXT("removed")));
+	}
+	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("remove_skeletal_mesh_socket"), SaveError);
 }
 
 // ---------------------------------------------------------------------------

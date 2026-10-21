@@ -3258,6 +3258,78 @@ namespace UEAgentSequencerImpl
     }
 }
 
+// The track class a section tool's track_type names (lower-cased), or null for a value it does not know. Shared by
+// ResolveSectionFromParams, which picks the first track of that class, and remove_section, which refuses an unknown
+// value before it can fall back to track_index.
+static UClass* SectionTrackClassFor(const FString& TrackTypeLower)
+{
+    if (TrackTypeLower == TEXT("transform") || TrackTypeLower == TEXT("3dtransform"))
+    {
+        return UMovieScene3DTransformTrack::StaticClass();
+    }
+    else if (TrackTypeLower == TEXT("float") || TrackTypeLower == TEXT("scalar"))
+    {
+        return UMovieSceneFloatTrack::StaticClass();
+    }
+    else if (TrackTypeLower == TEXT("bool") || TrackTypeLower == TEXT("boolean"))
+    {
+        return UMovieSceneBoolTrack::StaticClass();
+    }
+    else if (TrackTypeLower == TEXT("vector"))
+    {
+        return UMovieSceneFloatVectorTrack::StaticClass();
+    }
+    else if (TrackTypeLower == TEXT("color"))
+    {
+        return UMovieSceneColorTrack::StaticClass();
+    }
+    else if (TrackTypeLower == TEXT("visibility"))
+    {
+        return UMovieSceneVisibilityTrack::StaticClass();
+    }
+    else if (TrackTypeLower == TEXT("audio"))
+    {
+        return UMovieSceneAudioTrack::StaticClass();
+    }
+    else if (TrackTypeLower == TEXT("event"))
+    {
+        return UMovieSceneEventTrack::StaticClass();
+    }
+    else if (TrackTypeLower == TEXT("fade"))
+    {
+        return UMovieSceneFadeTrack::StaticClass();
+    }
+    else if (TrackTypeLower == TEXT("skeletalmesh") || TrackTypeLower == TEXT("skeletalmeshanimation") || TrackTypeLower == TEXT("skeletalanimation"))
+    {
+        return UMovieSceneSkeletalAnimationTrack::StaticClass();
+    }
+    else if (TrackTypeLower == TEXT("subsequence") || TrackTypeLower == TEXT("sub"))
+    {
+        return UMovieSceneSubTrack::StaticClass();
+    }
+    else if (TrackTypeLower == TEXT("cameracut") || TrackTypeLower == TEXT("camera_cut"))
+    {
+        return UMovieSceneCameraCutTrack::StaticClass();
+    }
+    else if (TrackTypeLower == TEXT("shot") || TrackTypeLower == TEXT("cinematicshot"))
+    {
+        return UMovieSceneCinematicShotTrack::StaticClass();
+    }
+    else if (TrackTypeLower == TEXT("slomo"))
+    {
+        return UMovieSceneSlomoTrack::StaticClass();
+    }
+    else if (TrackTypeLower == TEXT("property"))
+    {
+        return UMovieScenePropertyTrack::StaticClass();
+    }
+    else if (TrackTypeLower == TEXT("attach") || TrackTypeLower == TEXT("3dattach"))
+    {
+        return UMovieScene3DAttachTrack::StaticClass();
+    }
+    return nullptr;
+}
+
 // Helper: resolve a UMovieSceneSection from the common param set (sequence_path/sequence_name, binding_guid,
 // track_type or else track_index, section_index) into OutSequence and OutSection. Returns the error reply on
 // failure.
@@ -3329,71 +3401,7 @@ TSharedPtr<FJsonObject> ResolveSectionFromParams(
     if (!TrackTypeLower.IsEmpty())
     {
         // Map track_type string to UClass filter
-        UClass* TrackClass = nullptr;
-        if (TrackTypeLower == TEXT("transform") || TrackTypeLower == TEXT("3dtransform"))
-        {
-            TrackClass = UMovieScene3DTransformTrack::StaticClass();
-        }
-        else if (TrackTypeLower == TEXT("float") || TrackTypeLower == TEXT("scalar"))
-        {
-            TrackClass = UMovieSceneFloatTrack::StaticClass();
-        }
-        else if (TrackTypeLower == TEXT("bool") || TrackTypeLower == TEXT("boolean"))
-        {
-            TrackClass = UMovieSceneBoolTrack::StaticClass();
-        }
-        else if (TrackTypeLower == TEXT("vector"))
-        {
-            TrackClass = UMovieSceneFloatVectorTrack::StaticClass();
-        }
-        else if (TrackTypeLower == TEXT("color"))
-        {
-            TrackClass = UMovieSceneColorTrack::StaticClass();
-        }
-        else if (TrackTypeLower == TEXT("visibility"))
-        {
-            TrackClass = UMovieSceneVisibilityTrack::StaticClass();
-        }
-        else if (TrackTypeLower == TEXT("audio"))
-        {
-            TrackClass = UMovieSceneAudioTrack::StaticClass();
-        }
-        else if (TrackTypeLower == TEXT("event"))
-        {
-            TrackClass = UMovieSceneEventTrack::StaticClass();
-        }
-        else if (TrackTypeLower == TEXT("fade"))
-        {
-            TrackClass = UMovieSceneFadeTrack::StaticClass();
-        }
-        else if (TrackTypeLower == TEXT("skeletalmesh") || TrackTypeLower == TEXT("skeletalmeshanimation") || TrackTypeLower == TEXT("skeletalanimation"))
-        {
-            TrackClass = UMovieSceneSkeletalAnimationTrack::StaticClass();
-        }
-        else if (TrackTypeLower == TEXT("subsequence") || TrackTypeLower == TEXT("sub"))
-        {
-            TrackClass = UMovieSceneSubTrack::StaticClass();
-        }
-        else if (TrackTypeLower == TEXT("cameracut") || TrackTypeLower == TEXT("camera_cut"))
-        {
-            TrackClass = UMovieSceneCameraCutTrack::StaticClass();
-        }
-        else if (TrackTypeLower == TEXT("shot") || TrackTypeLower == TEXT("cinematicshot"))
-        {
-            TrackClass = UMovieSceneCinematicShotTrack::StaticClass();
-        }
-        else if (TrackTypeLower == TEXT("slomo"))
-        {
-            TrackClass = UMovieSceneSlomoTrack::StaticClass();
-        }
-        else if (TrackTypeLower == TEXT("property"))
-        {
-            TrackClass = UMovieScenePropertyTrack::StaticClass();
-        }
-        else if (TrackTypeLower == TEXT("attach") || TrackTypeLower == TEXT("3dattach"))
-        {
-            TrackClass = UMovieScene3DAttachTrack::StaticClass();
-        }
+        UClass* TrackClass = SectionTrackClassFor(TrackTypeLower);
 
         if (TrackClass)
         {
@@ -3915,17 +3923,29 @@ TSharedPtr<FJsonObject> HandleSetSectionLocked(const TSharedPtr<FJsonObject>& Pa
 // guard, but the resolver has already validated the index before we get here.
 // ---------------------------------------------------------------------------
 
-// MCP:remove_section - Deletes one section, by index, from a track of a Level Sequence in one undo step, then saves the sequence; success requires the save. The section is resolved like get_section_info: with binding_guid, a track of that object binding; without it, a root track (shot, camera cut, audio, event, sub-sequence, fade). track_type picks the first track of that kind, else track_index; section_index picks the section. A missing sequence, binding, track or section index is an error and nothing changes. The track itself stays, even when left empty: remove_sequence_track deletes a whole track, remove_keyframe a single key. A repeat call deletes whatever section now sits at that index, so re-read indexes first with get_sequence_tracks or get_section_info. Inverse of add_audio_section, add_shot_section, add_event_track_section and add_camera_cut.
+// MCP:remove_section - Deletes one section, by index, from a track of a Level Sequence in one undo step, then saves the sequence; success requires the save. The section is resolved like get_section_info: with binding_guid, a track of that object binding; without it, a root track (shot, camera cut, audio, event, sub-sequence, fade). track_type picks the first track of that kind, else track_index; section_index picks the section. A missing sequence, binding, track or section index is an error and nothing changes, and so is a track_type it does not know, so a deletion never falls back to another track; removed is read back from the track. The track itself stays, even when left empty: remove_sequence_track deletes a whole track, remove_keyframe a single key. A repeat call deletes whatever section now sits at that index, so re-read indexes first with get_sequence_tracks or get_section_info. Inverse of add_audio_section, add_shot_section, add_event_track_section and add_camera_cut.
 //   @param sequence_path - Full /Game object path (e.g. "/Game/Cinematics/Intro.Intro") or bare asset name ("Intro") of the Level Sequence; a bare name, or a path that does not load, resolves to the first Level Sequence under /Game with that asset name.
 //   @param sequence_name - Alias for sequence_path, read when sequence_path is absent or empty; same formats.
 //   @param binding_guid - GUID of the binding whose section to remove, as get_sequence_bindings returns it. Omit it (and binding_name_or_guid) for a section of a ROOT track -- shot, camera cut, audio, event, sub-sequence, fade: track_type or track_index then pick among the root tracks in get_sequence_tracks order, camera cut last.
-//   @param track_type - Optional track kind; the first track of exactly that kind wins, else the first subclass: transform, float, bool, vector, color, visibility, audio, event, fade, skeletalanimation, sub, cameracut, shot, slomo, property, attach. An unrecognised value is ignored and track_index is used.
+//   @param track_type - Optional track kind, case-insensitive; the first track of exactly that kind wins, else the first subclass: transform, float, bool, vector, color, visibility, audio, event, fade, skeletalanimation, sub, cameracut, shot, slomo, property, attach. An unrecognised value is an error and nothing is removed; omit it to pick by track_index.
 //   @param track_index - 0-based index into the binding's tracks, or into the root tracks without binding_guid, in get_sequence_tracks order (default 0); used when track_type is omitted.
 //   @param section_index - 0-based index of the section to delete on the resolved track (default 0); out of range is an error.
 //   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
 //   @returns { sequence_path: string, section_index: int, track_type: string, track_index: int, removed: bool, remaining_sections: int, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleRemoveSection(const TSharedPtr<FJsonObject>& Params)
 {
+    // A deletion must not land on a track the caller did not name: an unknown track_type is refused here, before
+    // the resolver could fall back to track_index.
+    FString RequestedTrackType;
+    Params->TryGetStringField(TEXT("track_type"), RequestedTrackType);
+    if (!RequestedTrackType.IsEmpty() && SectionTrackClassFor(RequestedTrackType.ToLower()) == nullptr)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("remove_section: unknown track_type '%s'; use one of transform, float, bool, vector, color, visibility, audio, event, ")
+            TEXT("fade, skeletalanimation, subsequence (sub), cameracut, shot, slomo, property, attach, or omit it and pass track_index. ")
+            TEXT("Nothing was removed."), *RequestedTrackType));
+    }
+
     ULevelSequence* Sequence = nullptr;
     UMovieSceneSection* Section = nullptr;
     if (TSharedPtr<FJsonObject> Failure = ResolveSectionFromParams(Params, Sequence, Section)) { return Failure; }
@@ -3950,10 +3970,13 @@ TSharedPtr<FJsonObject> HandleRemoveSection(const TSharedPtr<FJsonObject>& Param
         TEXT("[remove_section] seq='%s' binding track_type='%s' track_index=%d section_index=%d sections_before=%d"),
         *Sequence->GetPathName(), *TrackTypeRaw, TrackIndex, SectionIndex, Track->GetAllSections().Num());
 
+    const int32 SectionsBefore = Track->GetAllSections().Num();
     const FScopedTransaction Transaction(LOCTEXT("RemoveSection", "MCP: Remove Section"));
     Track->Modify();
     Track->RemoveSectionAt(SectionIndex);
     const int32 RemainingSections = Track->GetAllSections().Num();
+    // Read back: the resolved section has left the track.
+    const bool bRemoved = !Track->GetAllSections().Contains(Section) && RemainingSections == SectionsBefore - 1;
     FString SaveError;
     const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
@@ -3965,8 +3988,14 @@ TSharedPtr<FJsonObject> HandleRemoveSection(const TSharedPtr<FJsonObject>& Param
     Response->SetNumberField(TEXT("section_index"), SectionIndex);
     Response->SetStringField(TEXT("track_type"), TrackTypeRaw);
     Response->SetNumberField(TEXT("track_index"), TrackIndex);
-    Response->SetBoolField(TEXT("removed"), true);
+    Response->SetBoolField(TEXT("removed"), bRemoved);
     Response->SetNumberField(TEXT("remaining_sections"), RemainingSections);
+    if (!bRemoved)
+    {
+        Response->SetBoolField(TEXT("saved"), bSaved);
+        return mcp_common::MakeOutcomeReply(Response, false,
+            mcp_common::MeasuredOutcomeError(TEXT("remove_section"), TEXT("removed")));
+    }
     return mcp_common::MakeSavedReply(Response, bSaved, TEXT("remove_section"), SaveError);
 }
 

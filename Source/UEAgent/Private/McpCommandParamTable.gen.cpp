@@ -3085,7 +3085,7 @@ static const TCHAR* const GFlatCommandParams[] =
         TEXT("metasound_path"),
     nullptr,
     TEXT("list_metasound_node_types"),
-        TEXT("include_unloaded"),
+        TEXT("include_unloaded"), TEXT("max_results"), TEXT("name_filter"),
     nullptr,
     TEXT("list_metasound_nodes"),
         TEXT("metasound_path"),
@@ -5981,7 +5981,7 @@ static const TCHAR* const GFlatCommandParams[] =
 };
 
 static constexpr int32 GNumCommands = 1789;
-static constexpr int32 GNumParamNames = 6032;
+static constexpr int32 GNumParamNames = 6034;
 
 // Built ONCE, on first use (function-local static => thread-safe init). The
 // dispatcher is game-thread only, so there is no contention after that.

@@ -2119,6 +2119,29 @@ namespace
         return GeometryScript_ResolveLiveMesh(Params, Target, OutError) ? Target.Mesh : nullptr;
     }
 
+    // The point Items holds when it is exactly three JSON numbers, [x, y, z]: false with OutError naming the accepted
+    // form for anything else (a shorter or longer array, a string or null element), so a malformed point is refused
+    // instead of read as zeros. Field names the param in the error.
+    bool ReadStrictPoint3(const TArray<TSharedPtr<FJsonValue>>& Items, const TCHAR* Field, FVector& OutPoint, FString& OutError)
+    {
+        if (Items.Num() != 3)
+        {
+            OutError = FString::Printf(TEXT("%s must be an array of three numbers [x, y, z]; it has %d element(s)"), Field, Items.Num());
+            return false;
+        }
+        for (int32 Axis = 0; Axis < 3; ++Axis)
+        {
+            const TSharedPtr<FJsonValue>& Item = Items[Axis];
+            if (!Item.IsValid() || Item->Type != EJson::Number)
+            {
+                OutError = FString::Printf(TEXT("%s must be an array of three numbers [x, y, z]; element %d is not a number"), Field, Axis);
+                return false;
+            }
+            OutPoint[Axis] = Item->AsNumber();
+        }
+        return true;
+    }
+
     // Common spatial-query options: optional max_distance / unsafe-modified / winding threshold.
     FGeometryScriptSpatialQueryOptions ReadSpatialOptions(const TSharedPtr<FJsonObject>& Params)
     {
@@ -2278,9 +2301,9 @@ TSharedPtr<FJsonObject> HandleFindNearestRayIntersectionWithMesh(
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:is_point_inside_mesh - Tests whether a point lies inside the live dynamic mesh of a DynamicMeshActor in the editor world, with the engine's fast winding number (IsPointInsideMesh), which also gives a sensible answer for meshes with small holes. Every call builds a fresh BVH and winding tree from the mesh as it is now, so the answer reflects the latest edits; nothing is changed or saved. An unknown actor or a missing query_point is an error. Use it for inside/outside tests; for the closest surface point use find_nearest_point_on_mesh, for a ray hit find_nearest_ray_intersection_with_mesh; build_mesh_bvh is never needed first. The point is in mesh-local space: subtract the actor's location (and undo its rotation and scale) to test a world position.
+// MCP:is_point_inside_mesh - Tests whether a point lies inside the live dynamic mesh of a DynamicMeshActor in the editor world, with the engine's fast winding number (IsPointInsideMesh), which also gives a sensible answer for meshes with small holes. Every call builds a fresh BVH and winding tree from the mesh as it is now, so the answer reflects the latest edits; nothing is changed or saved. An unknown actor is an error, and so is a query_point that is missing or not exactly three numbers (a malformed point is refused, never read as the origin). Use it for inside/outside tests; for the closest surface point use find_nearest_point_on_mesh, for a ray hit find_nearest_ray_intersection_with_mesh; build_mesh_bvh is never needed first. The point is in mesh-local space: subtract the actor's location (and undo its rotation and scale) to test a world position.
 //   @param actor_name - Label or object name (case-insensitive) of the DynamicMeshActor in the editor world.
-//   @param query_point - [x, y, z] point in the mesh's local space, in cm (e.g. [0, 0, 50]).
+//   @param query_point - [x, y, z] point in the mesh's local space, in cm (e.g. [0, 0, 50]): exactly three JSON numbers, anything else is an error.
 //   @param winding_threshold - Optional float, default 0.5: the winding number above which the point counts as inside; higher values shrink the inside region, lower ones grow it.
 //   @param max_distance - Optional float; it has no effect on this query, whose winding-number test uses no search distance.
 //   @param allow_unsafe_modified [bool] - Optional; maps to bAllowUnsafeModifiedQueries (default false). It has no effect: the BVH is built fresh on every call, so it always matches the mesh.
@@ -2293,10 +2316,12 @@ TSharedPtr<FJsonObject> HandleIsPointInsideMesh(
     if (!DynMesh)
         return mcp_common::MakeErrorReply(Error);
     const TArray<TSharedPtr<FJsonValue>>* QueryPointJson = nullptr;
-    if (!Params->TryGetArrayField(TEXT("query_point"), QueryPointJson))
-        return mcp_common::MakeErrorReply(TEXT("query_point is required"));
+    if (!Params->TryGetArrayField(TEXT("query_point"), QueryPointJson) || QueryPointJson == nullptr)
+        return mcp_common::MakeErrorReply(TEXT("query_point is required: an array of three numbers [x, y, z]"));
+    FVector QueryPoint = FVector::ZeroVector;
+    if (!ReadStrictPoint3(*QueryPointJson, TEXT("query_point"), QueryPoint, Error))
+        return mcp_common::MakeErrorReply(Error);
 
-    const FVector QueryPoint = mcp_common::ReadJsonVector(Params, TEXT("query_point"));
     FGeometryScriptSpatialQueryOptions Options = ReadSpatialOptions(Params);
 
     double WindingThreshold = 0.5;

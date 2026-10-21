@@ -185,13 +185,25 @@ namespace McpPreconditionsPrivate
 	static TSet<FString> GWpMapsCreated; // World Partition maps created this session (normalized, lowercase)
 	static TSet<FString> GSaveAsUsed;    // save_level filenames already used this session
 
-	// Delegates AActor declares SPARSE: the family that crashes subscribe_to_delegate.
+	// Delegates the engine declares SPARSE (DECLARE_DYNAMIC_MULTICAST_SPARSE_DELEGATE) on AActor and on the component
+	// bases every component inherits -- UActorComponent, USceneComponent, UPrimitiveComponent (UE 5.7 and 5.8): the
+	// family that crashes subscribe_to_delegate. Matched case-insensitively, as the property lookup is.
 	static const TCHAR* const ActorSparseDelegates[] = {
+		// AActor
 		TEXT("OnTakeAnyDamage"), TEXT("OnTakePointDamage"), TEXT("OnTakeRadialDamage"),
 		TEXT("OnActorBeginOverlap"), TEXT("OnActorEndOverlap"), TEXT("OnActorHit"),
 		TEXT("OnDestroyed"), TEXT("OnEndPlay"),
 		TEXT("OnBeginCursorOver"), TEXT("OnEndCursorOver"), TEXT("OnClicked"), TEXT("OnReleased"),
-		TEXT("OnInputTouchBegin"), TEXT("OnInputTouchEnd"), TEXT("OnInputTouchEnter"), TEXT("OnInputTouchLeave") };
+		TEXT("OnInputTouchBegin"), TEXT("OnInputTouchEnd"), TEXT("OnInputTouchEnter"), TEXT("OnInputTouchLeave"),
+		// UActorComponent
+		TEXT("OnComponentActivated"), TEXT("OnComponentDeactivated"),
+		// USceneComponent
+		TEXT("PhysicsVolumeChangedDelegate"), TEXT("IsRootComponentChanged"),
+		// UPrimitiveComponent (its cursor, click and input-touch events share the AActor names above)
+		TEXT("OnComponentHit"), TEXT("OnComponentBeginOverlap"), TEXT("OnComponentEndOverlap"),
+		TEXT("OnComponentWake"), TEXT("OnComponentSleep"), TEXT("OnComponentCollisionSettingsChangedEvent"),
+		TEXT("OnComponentPhysicsStateChanged"),
+		TEXT("OnTouchBegan"), TEXT("OnTouchEnded"), TEXT("OnTouchEntered"), TEXT("OnTouchExited") };
 
 	/** Replaces each %s with the next argument and %% with %. */
 	static FString Fill(const TCHAR* Template, const TArray<FString>& Args)
@@ -660,7 +672,7 @@ namespace McpPreconditionsPrivate
 		bool bFatalFamily = false;
 		for (const TCHAR* Sparse : ActorSparseDelegates)
 		{
-			bFatalFamily |= Delegate.Equals(Sparse, ESearchCase::CaseSensitive);
+			bFatalFamily |= Delegate.Equals(Sparse, ESearchCase::IgnoreCase);
 		}
 		if (!bFatalFamily)
 		{
@@ -703,7 +715,7 @@ namespace McpPreconditionsPrivate
 				{
 					const TSharedPtr<FJsonObject>* EntryObject = nullptr;
 					if (Entry.IsValid() && Entry->TryGetObject(EntryObject) && EntryObject
-						&& TextOf(*EntryObject, TEXT("name")).Equals(Delegate, ESearchCase::CaseSensitive)
+						&& TextOf(*EntryObject, TEXT("name")).Equals(Delegate, ESearchCase::IgnoreCase)
 						&& !Truthy(*EntryObject, TEXT("is_inherited")))
 					{
 						bDeclared = true; // belt and braces: an inherited one does NOT clear it

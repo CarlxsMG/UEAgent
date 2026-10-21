@@ -285,22 +285,46 @@ namespace
         return false;
     }
 
-    // Deletes the asset at PackagePath/Name if there is one, so the command rebuilds it deterministically (NewObject
-    // never lands on an occupied name and the payload stays stable), then creates its package and a new AssetType in
-    // it; null on success, else the error reply (FailureMessage when the object cannot be created).
+    // The refusal a creator answers when an asset is already at ObjectPath -- on disk (asset registry) or only in
+    // memory -- naming its class, or null when the path is free. What is there was not made by this call, so it is
+    // never deleted or replaced: the caller removes it (delete_asset) or picks another name.
+    TSharedPtr<FJsonObject> Texture_RefuseExisting(const FString& ObjectPath, const TCHAR* ToolName)
+    {
+        UObject* InMemory = FindObject<UObject>(nullptr, *ObjectPath);
+        const bool bOnDisk = UEditorAssetLibrary::DoesAssetExist(ObjectPath);
+        if (!InMemory && !bOnDisk)
+        {
+            return nullptr;
+        }
+        FString ExistingClass = InMemory ? InMemory->GetClass()->GetName() : FString();
+        if (ExistingClass.IsEmpty())
+        {
+            ExistingClass = UEditorAssetLibrary::FindAssetData(ObjectPath).AssetClassPath.GetAssetName().ToString();
+        }
+        TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+        Data->SetStringField(TEXT("asset_path"), ObjectPath);
+        Data->SetStringField(TEXT("existing_class"), ExistingClass);
+        Data->SetBoolField(TEXT("created"), false);
+        Data->SetBoolField(TEXT("saved"), false);
+        return mcp_common::MakeOutcomeReply(Data, false, FString::Printf(
+            TEXT("%s: an asset already exists at %s (class %s); nothing was deleted or created. Choose another name, or ")
+            TEXT("remove that asset first with delete_asset (get_asset_referencers shows what uses it)."),
+            ToolName, *ObjectPath, ExistingClass.IsEmpty() ? TEXT("unknown") : *ExistingClass));
+    }
+
+    // Creates the package PackagePath/Name and a new AssetType in it; null on success, else the error reply
+    // (FailureMessage when the object cannot be created). An asset already there is refused (Texture_RefuseExisting,
+    // ToolName naming the command), with nothing deleted or created.
     template <typename AssetType>
     TSharedPtr<FJsonObject> Texture_CreateFreshAsset(const FString& PackagePath, const FString& Name, const TCHAR* FailureMessage,
-        FString& OutObjectPath, UPackage*& OutPackage, AssetType*& OutAsset)
+        FString& OutObjectPath, UPackage*& OutPackage, AssetType*& OutAsset, const TCHAR* ToolName)
     {
         const FString PackageName = FString::Printf(TEXT("%s/%s"), *PackagePath, *Name);
         OutObjectPath = FString::Printf(TEXT("%s.%s"), *PackageName, *Name);
-        // Before the lookup and its delete: the folder and the name each fit an FName and can still join past one,
-        // which the lookup aborts the editor on.
+        // Before the lookup: the folder and the name each fit an FName and can still join past one, which the lookup
+        // aborts the editor on.
         if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(PackageName)) { return Invalid; }
-        if (UEditorAssetLibrary::DoesAssetExist(OutObjectPath))
-        {
-            UEditorAssetLibrary::DeleteAsset(OutObjectPath);
-        }
+        if (TSharedPtr<FJsonObject> Taken = Texture_RefuseExisting(OutObjectPath, ToolName)) { return Taken; }
 
         FString CreateError;
         OutAsset = mcp_common::NewAssetInPackage<AssetType>(PackageName, Name, FailureMessage, CreateError);
@@ -327,15 +351,15 @@ namespace
 // Creates a real persisted UTexture2D. Allocates FTextureSource via Init(W,H,1,1,
 // TSF_BGRA8), fills every pixel with fill_color (RGBA 0-255), UpdateResource(),
 // AssetRegistry::AssetCreated, save. Verified by reading width/height/format back.
-// Idempotent: if the asset exists, it is deleted+rebuilt so the payload is stable.
+// An asset already at the path is refused, never deleted: it was not made by this call.
 // ---------------------------------------------------------------------------
-// MCP:create_texture_2d_from_data - Create a UTexture2D asset filled with one solid color, with no source file: it allocates a BGRA8 editor source of width x height, fills every pixel with fill_color, sets sRGB with default compression, builds the resource and saves the asset to disk; no undo step. Use it for placeholder or mask textures; to bring in an image file use import_texture_file, to bake a render target create_static_texture_from_render_target, to change compression or sRGB afterwards set_texture_settings, and get_texture_info to read it back. WARNING: an asset already at package_path/name is force-deleted first, whatever its class and even if other assets reference it, so every call rebuilds the texture (not idempotent). An invalid package path is an error. A failed save (always while PIE runs) makes success false, with saved=false and save_error, the texture kept in memory.
+// MCP:create_texture_2d_from_data - Create a UTexture2D asset filled with one solid color, with no source file: it allocates a BGRA8 editor source of width x height, fills every pixel with fill_color, sets sRGB with default compression, builds the resource and saves the asset to disk; no undo step. Use it for placeholder or mask textures; to bring in an image file use import_texture_file, to bake a render target create_static_texture_from_render_target, to change compression or sRGB afterwards set_texture_settings, and get_texture_info to read it back. It only creates: an asset already at package_path/name, of any class, is refused with success=false, its existing_class named, and nothing is deleted or created; to rebuild a texture, delete it first with delete_asset or pick a new name. An invalid package path is an error. A failed save (always while PIE runs) makes success false, with saved=false and save_error, the texture kept in memory.
 //   @param name - Asset name of the texture, no folder, e.g. "T_Mask_White".
 //   @param package_path - Content folder as a long package path, e.g. "/Game/Textures/Placeholders" (default /Game/Textures; one trailing slash is dropped).
 //   @param width - Width in pixels, a whole number clamped to 1..8192 (default 64).
 //   @param height - Height in pixels, a whole number clamped to 1..8192 (default 64).
 //   @param fill_color - [R, G, B, A] as 0-255 numbers, each rounded and clamped, e.g. [255, 0, 0, 255] for opaque red; missing trailing entries keep the default 255 (opaque white).
-//   @returns { texture_name: string, asset_path: string, created: bool, saved: bool, width: int, height: int, format: string, has_source: bool, fill_color: [int, int, int, int], save_error?: string }
+//   @returns { texture_name: string, asset_path: string, created: bool, saved: bool, width: int, height: int, format: string, has_source: bool, fill_color: [int, int, int, int], save_error?: string, existing_class?: string }
 
 TSharedPtr<FJsonObject> HandleCreateTexture2DFromData(const TSharedPtr<FJsonObject>& Params)
 {
@@ -372,7 +396,7 @@ TSharedPtr<FJsonObject> HandleCreateTexture2DFromData(const TSharedPtr<FJsonObje
     UPackage* Package = nullptr;
     UTexture2D* NewTex = nullptr;
     if (TSharedPtr<FJsonObject> Error = Texture_CreateFreshAsset(PackagePath, Name, TEXT("Failed to create UTexture2D object"),
-        ObjectPath, Package, NewTex))
+        ObjectPath, Package, NewTex, TEXT("create_texture_2d_from_data")))
     {
         return Error;
     }
@@ -410,14 +434,14 @@ TSharedPtr<FJsonObject> HandleCreateTexture2DFromData(const TSharedPtr<FJsonObje
 // create_static_texture_from_render_target
 // UKismetRenderingLibrary::RenderTargetCreateStaticTexture2DEditorOnly(RT, FullPath,
 // CompressionSettings, MipSettings). The full /Game path is passed so the asset
-// lands exactly where requested. The Kismet helper uses CreateUniqueAssetName, so
-// any existing asset is deleted first for idempotency; we then save to disk.
+// lands exactly where requested. An asset already at the path is refused, never deleted
+// (the helper's CreateUniqueAssetName then keeps the exact name); we then save to disk.
 // ---------------------------------------------------------------------------
-// MCP:create_static_texture_from_render_target - Bakes a UTexture2D from an existing UTextureRenderTarget2D (editor only).  Wraps UKismetRenderingLibrary::RenderTargetCreateStaticTexture2DEditorOnly and saves the resulting static texture to disk. Re-running deletes and rebuilds the asset deterministically.  render_target_path accepts either short "/Game/MyGame/RT_Example" or fully-qualified "...RT_Example.RT_Example" asset paths.
+// MCP:create_static_texture_from_render_target - Bakes a UTexture2D from an existing UTextureRenderTarget2D (editor only).  Wraps UKismetRenderingLibrary::RenderTargetCreateStaticTexture2DEditorOnly and saves the resulting static texture to disk. An asset already at package_path/name, of any class, is refused with success=false, its existing_class named, and nothing is deleted or created; to rebuild one, delete it first with delete_asset or pick a new name.  render_target_path accepts either short "/Game/MyGame/RT_Example" or fully-qualified "...RT_Example.RT_Example" asset paths.
 //   @param render_target_path - Asset path of the source render target (e.g. "/Game/MyGame/RT_Example" or fully-qualified "...RT_Example.RT_Example")
 //   @param name - Name of the static texture asset to create
 //   @param package_path - Content folder; defaults to /Game/Textures
-//   @returns { texture_name: string, asset_path: string, render_target_path: string, created: bool, saved: bool, width: int, height: int, format: string, save_error?: string }
+//   @returns { texture_name: string, asset_path: string, render_target_path: string, created: bool, saved: bool, width: int, height: int, format: string, save_error?: string, existing_class?: string }
 
 TSharedPtr<FJsonObject> HandleCreateStaticTextureFromRenderTarget(const TSharedPtr<FJsonObject>& Params)
 {
@@ -442,12 +466,9 @@ TSharedPtr<FJsonObject> HandleCreateStaticTextureFromRenderTarget(const TSharedP
     const FString ObjectPath  = FString::Printf(TEXT("%s.%s"), *PackageName, *Name);
     if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(PackageName)) { return Invalid; }
 
-    // Idempotent: delete any existing asset at the destination so the Kismet
-    // CreateUniqueAssetName path produces our exact requested name (no _1 suffix).
-    if (UEditorAssetLibrary::DoesAssetExist(ObjectPath))
-    {
-        UEditorAssetLibrary::DeleteAsset(ObjectPath);
-    }
+    // An asset already at the destination is refused, never deleted: it was not made by this call. A free path also
+    // keeps the Kismet helper's CreateUniqueAssetName on the exact requested name (no _1 suffix).
+    if (TSharedPtr<FJsonObject> Taken = Texture_RefuseExisting(ObjectPath, TEXT("create_static_texture_from_render_target"))) { return Taken; }
 
     // Pass the full long package path so the helper places the asset deterministically.
     UTexture2D* NewTex = UKismetRenderingLibrary::RenderTargetCreateStaticTexture2DEditorOnly(
@@ -654,15 +675,15 @@ TSharedPtr<FJsonObject> HandleGetTextureInfo(const TSharedPtr<FJsonObject>& Para
 // which builds the array Source (Source.Init(W,H,ArraySize,1,Format)) and
 // UpdateResource(). Verified by reading GetSizeX/GetSizeY/GetArraySize back, and
 // the cov test loads the saved asset back to confirm num_slices persisted.
-// Idempotent: an existing asset is deleted + rebuilt so the payload is stable.
+// An asset already at the path is refused, never deleted.
 // ---------------------------------------------------------------------------
-// MCP:create_texture_2d_array - Creates a persisted UTexture2DArray from slices (no external file import).  If ``source_texture_paths`` is given, those UTexture2D assets are loaded into the array's SourceTextures; otherwise ``slice_count`` small solid-color slices of ``size`` x ``size`` are generated. The array Source is then built via UTexture2DArray::UpdateSourceFromSourceTextures(true) and the asset is saved.  source_texture_paths is an optional array of UTexture2D asset paths used as the array's slices. Each must have a valid editor source. If omitted, slices are generated.  size is the per-slice pixel size (clamped 1..2048).
+// MCP:create_texture_2d_array - Creates a persisted UTexture2DArray from slices (no external file import).  If ``source_texture_paths`` is given, those UTexture2D assets are loaded into the array's SourceTextures; otherwise ``slice_count`` small solid-color slices of ``size`` x ``size`` are generated. The array Source is then built via UTexture2DArray::UpdateSourceFromSourceTextures(true) and the asset is saved. An asset already at package_path/name, of any class, is refused with success=false, its existing_class named, and nothing is deleted or created; to rebuild one, delete it first with delete_asset or pick a new name.  source_texture_paths is an optional array of UTexture2D asset paths used as the array's slices. Each must have a valid editor source. If omitted, slices are generated.  size is the per-slice pixel size (clamped 1..2048).
 //   @param name - Name of the texture-array asset to create
 //   @param package_path - Content folder; defaults to /Game/Textures
 //   @param slice_count - Optional number of generated slices when source_texture_paths is omitted; clamped 1..64; defaults to 2
 //   @param size - Optional per-slice pixel size; clamped 1..2048; defaults to 64
 //   @param source_texture_paths - Optional array of UTexture2D asset paths used as slices
-//   @returns { texture_array_name: string, asset_path: string, width: int, height: int, num_slices: int, format: string, created: bool, saved: bool, save_error?: string }
+//   @returns { texture_array_name: string, asset_path: string, width: int, height: int, num_slices: int, format: string, created: bool, saved: bool, save_error?: string, existing_class?: string }
 
 TSharedPtr<FJsonObject> HandleCreateTexture2DArray(const TSharedPtr<FJsonObject>& Params)
 {
@@ -689,7 +710,7 @@ TSharedPtr<FJsonObject> HandleCreateTexture2DArray(const TSharedPtr<FJsonObject>
     UPackage* Package = nullptr;
     UTexture2DArray* NewArray = nullptr;
     if (TSharedPtr<FJsonObject> Error = Texture_CreateFreshAsset(PackagePath, Name, TEXT("Failed to create UTexture2DArray object"),
-        ObjectPath, Package, NewArray))
+        ObjectPath, Package, NewArray, TEXT("create_texture_2d_array")))
     {
         return Error;
     }
@@ -782,15 +803,15 @@ TSharedPtr<FJsonObject> HandleCreateTexture2DArray(const TSharedPtr<FJsonObject>
 // create_render_target_2d_array
 // Creates a real persisted UTextureRenderTarget2DArray via
 // Init(SizeX, SizeY, Slices, Format). Verified by reading SizeX/SizeY/Slices back.
-// Idempotent: an existing asset is deleted + rebuilt so the payload is stable.
+// An asset already at the path is refused, never deleted.
 // ---------------------------------------------------------------------------
-// MCP:create_render_target_2d_array - Creates a persisted UTextureRenderTarget2DArray.  Wraps UTextureRenderTarget2DArray::Init(SizeX, SizeY, Slices, Format) and saves the asset to disk. Re-running deletes and rebuilds the asset deterministically.  format accepts one of "B8G8R8A8"/"BGRA8" (default), "FloatRGBA"/"RGBA16F", "RGBA32F", "R16F".
+// MCP:create_render_target_2d_array - Creates a persisted UTextureRenderTarget2DArray.  Wraps UTextureRenderTarget2DArray::Init(SizeX, SizeY, Slices, Format) and saves the asset to disk. An asset already at package_path/name, of any class, is refused with success=false, its existing_class named, and nothing is deleted or created; to rebuild one, delete it first with delete_asset or pick a new name.  format accepts one of "B8G8R8A8"/"BGRA8" (default), "FloatRGBA"/"RGBA16F", "RGBA32F", "R16F".
 //   @param name - Name of the render-target-array asset to create
 //   @param package_path - Content folder; defaults to /Game/Textures
 //   @param size - Optional square edge in pixels; clamped 1..8192
 //   @param slices - Optional slice count; clamped 1..512
 //   @param format - Optional EPixelFormat name; defaults to BGRA8
-//   @returns { render_target_name: string, asset_path: string, size_x: int, size_y: int, slices: int, format: string, created: bool, saved: bool, save_error?: string }
+//   @returns { render_target_name: string, asset_path: string, size_x: int, size_y: int, slices: int, format: string, created: bool, saved: bool, save_error?: string, existing_class?: string }
 
 TSharedPtr<FJsonObject> HandleCreateRenderTarget2DArray(const TSharedPtr<FJsonObject>& Params)
 {
@@ -817,7 +838,7 @@ TSharedPtr<FJsonObject> HandleCreateRenderTarget2DArray(const TSharedPtr<FJsonOb
     UPackage* Package = nullptr;
     UTextureRenderTarget2DArray* NewRT = nullptr;
     if (TSharedPtr<FJsonObject> Error = Texture_CreateFreshAsset(PackagePath, Name, TEXT("Failed to create UTextureRenderTarget2DArray object"),
-        ObjectPath, Package, NewRT))
+        ObjectPath, Package, NewRT, TEXT("create_render_target_2d_array")))
     {
         return Error;
     }
@@ -848,14 +869,14 @@ TSharedPtr<FJsonObject> HandleCreateRenderTarget2DArray(const TSharedPtr<FJsonOb
 // create_render_target_cube
 // Creates a real persisted UTextureRenderTargetCube. If a format is given uses
 // Init(SizeX, Format); otherwise InitAutoFormat(SizeX). Verified by reading SizeX
-// back. Idempotent: an existing asset is deleted + rebuilt so the payload is stable.
+// back. An asset already at the path is refused, never deleted.
 // ---------------------------------------------------------------------------
-// MCP:create_render_target_cube - Creates a persisted UTextureRenderTargetCube (6-face cube render target).  Wraps UTextureRenderTargetCube::Init(SizeX, Format) when a format is given, or InitAutoFormat(SizeX) otherwise, and saves the asset to disk. Re-running deletes and rebuilds the asset deterministically.  format accepts one of "B8G8R8A8"/"BGRA8", "FloatRGBA"/"RGBA16F", "RGBA32F". When omitted the format is auto-derived (InitAutoFormat).
+// MCP:create_render_target_cube - Creates a persisted UTextureRenderTargetCube (6-face cube render target).  Wraps UTextureRenderTargetCube::Init(SizeX, Format) when a format is given, or InitAutoFormat(SizeX) otherwise, and saves the asset to disk. An asset already at package_path/name, of any class, is refused with success=false, its existing_class named, and nothing is deleted or created; to rebuild one, delete it first with delete_asset or pick a new name.  format accepts one of "B8G8R8A8"/"BGRA8", "FloatRGBA"/"RGBA16F", "RGBA32F". When omitted the format is auto-derived (InitAutoFormat).
 //   @param name - Name of the cube render-target asset to create
 //   @param package_path - Content folder; defaults to /Game/Textures
 //   @param size - Optional cube edge in pixels; clamped 1..8192
 //   @param format - Optional EPixelFormat name; defaults to auto-derived
-//   @returns { render_target_name: string, asset_path: string, size_x: int, format: string, created: bool, saved: bool, save_error?: string }
+//   @returns { render_target_name: string, asset_path: string, size_x: int, format: string, created: bool, saved: bool, save_error?: string, existing_class?: string }
 
 TSharedPtr<FJsonObject> HandleCreateRenderTargetCube(const TSharedPtr<FJsonObject>& Params)
 {
@@ -880,7 +901,7 @@ TSharedPtr<FJsonObject> HandleCreateRenderTargetCube(const TSharedPtr<FJsonObjec
     UPackage* Package = nullptr;
     UTextureRenderTargetCube* NewRT = nullptr;
     if (TSharedPtr<FJsonObject> Error = Texture_CreateFreshAsset(PackagePath, Name, TEXT("Failed to create UTextureRenderTargetCube object"),
-        ObjectPath, Package, NewRT))
+        ObjectPath, Package, NewRT, TEXT("create_render_target_cube")))
     {
         return Error;
     }

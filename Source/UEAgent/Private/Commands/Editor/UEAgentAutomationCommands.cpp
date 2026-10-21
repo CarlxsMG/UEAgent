@@ -28,6 +28,8 @@
 #include "IAssetTools.h"
 #include "LevelEditor.h"  // ULevelEditorSubsystem (EditorPlaySimulate / StopPlayInEditor)
 #include "LevelEditorSubsystem.h"  // ULevelEditorSubsystem explicit (LevelEditor/Public/)
+#include "Editor.h"                 // GEditor: play-session state (IsPlayingSessionInEditor / IsPlaySessionRequestQueued / PlayWorld)
+#include "Containers/Ticker.h"      // FTSTicker: run_functional_test_in_pie ends the session it requested once it starts
 // MCP-DOMAIN: Editor
 
 #include "Misc/OutputDevice.h"
@@ -768,7 +770,7 @@ TSharedPtr<FJsonObject> HandleListAutomationTests(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:run_automation_test - Run ONE registered automation test in this editor, synchronously, and return its verdict (pass, fail or skipped) with its errors, warnings and log entries. Find the name first with list_automation_tests; re-read the last result later without running anything with get_automation_test_results; run every smoke test at once with run_smoke_tests. A test that needs several ticks (PIE, a map load, a wait) is not run here but answered verdict skipped with the reason -- drive it with run_functional_test_in_pie -- and so is one that needs an interactive user or a real renderer in a headless editor; an editor busy with a slow task or PIE refuses the start. Marked destructive and not idempotent because the test's own code runs in the editor and can create, change or delete assets and actors as it was written to, so two runs need not do the same; this tool itself saves nothing and adds no undo step for what the test did.
+// MCP:run_automation_test - Run ONE registered automation test in this editor, synchronously, and return its verdict (pass, fail or skipped) with its errors, warnings and log entries. Find the name first with list_automation_tests; re-read the last result later without running anything with get_automation_test_results; run every smoke test at once with run_smoke_tests. A test that needs several ticks (PIE, a map load, a wait) cannot be run here: it is answered verdict skipped with the reason, and no tool runs it for you -- run_functional_test_in_pie does not start a test, it only reads the verdict a Functional Test actor reports in a session where something else ran it. The same skipped answer comes for a test that needs an interactive user or a real renderer in a headless editor; an editor busy with a slow task or PIE refuses the start. Marked destructive and not idempotent because the test's own code runs in the editor and can create, change or delete assets and actors as it was written to, so two runs need not do the same; this tool itself saves nothing and adds no undo step for what the test did.
 //   @param test_name - The test's test_name or its full_test_path, exactly as list_automation_tests gives them (e.g. "UEAgent.ClaudeCode")
 //   @returns { test_name, started, completed, passed, verdict, duration_s, errors, warnings, entries:[{type,message,context,filename,line}], entry_count, note }
 TSharedPtr<FJsonObject> HandleRunAutomationTest(const TSharedPtr<FJsonObject>& Params)
@@ -840,8 +842,9 @@ TSharedPtr<FJsonObject> HandleGetAutomationTestResults(const TSharedPtr<FJsonObj
 //   * create_functional_test    -- BP subclass of AFunctionalTest, the canonical
 //                                 UE pattern for a multiplayer-friendly,
 //                                 Blueprint-scriptable test actor.
-//   * run_functional_test_in_pie -- start a PIE session that runs the named
-//                                 functional test, return its verdict.
+//   * run_functional_test_in_pie -- place the test in the level and request a
+//                                 Simulate session, or read the test actor's
+//                                 Result in a session already running.
 //
 // Gauntlet proper is a separate runtime harness (a dedicated UnrealEditor-Cmd.exe
 // -Gauntlet=<controller> subprocess) that this server does not spawn; run_automation_test
@@ -849,10 +852,10 @@ TSharedPtr<FJsonObject> HandleGetAutomationTestResults(const TSharedPtr<FJsonObj
 //
 // Both are Editor-only (FunctionalTestingEditor is an editor module).
 
-// MCP:create_functional_test - Create a Blueprint subclass of AFunctionalTest (an actor placed in a test map that runs scripted checks and reports pass or fail to the automation framework) at package_path/asset_name, then save it; there is no undo step. Use it to author a level-based gameplay test; for an ordinary actor Blueprint use create_blueprint, and to run registered tests use run_automation_test (list them with list_automation_tests). Idempotent: when a Blueprint already exists at that path it is returned as it is, with already_existed true, and saved again; its parent is not checked and parent_class echoes the requested one. A parent that is not found or is not a Functional Test, or an asset of another type at the path, is an error and nothing changes. A failed save makes success false, with saved false and the Blueprint only in memory. Refused while Play-in-Editor runs unless force=true. Then script it with add_blueprint_function and add_graph_node, and place it in a map with spawn_actor.
+// MCP:create_functional_test - Create a Blueprint subclass of AFunctionalTest (an actor placed in a test map that runs scripted checks and reports pass or fail to the automation framework) at package_path/asset_name, then save it; there is no undo step. Use it to author a level-based gameplay test; for an ordinary actor Blueprint use create_blueprint, and to run registered tests use run_automation_test (list them with list_automation_tests). Idempotent: a Functional Test Blueprint already at that path whose parent is parent_class (or a subclass of it) is returned as it is, with already_existed true, and saved again; parent_class is the parent read from the Blueprint. A Blueprint there that is not a Functional Test, or whose parent is not parent_class or a subclass of it, is refused and nothing is saved (remove it with delete_asset or pick another asset_name). A parent that is not found or is not a Functional Test, or an asset of another type at the path, is an error and nothing changes. A failed save makes success false, with saved false and the Blueprint only in memory. Refused while Play-in-Editor runs unless force=true. Then script it with add_blueprint_function and add_graph_node, and place it in a map with spawn_actor.
 //   @param asset_name - Asset name of the new Blueprint without folder, e.g. "BP_FT_PlayerHealth".
 //   @param package_path - Content folder for the asset, e.g. "/Game/Tests" (default /Game/MCP).
-//   @param parent_class - Optional parent: a class deriving from AFunctionalTest, by name without prefix (e.g. "FunctionalTest", the default) or by /Script/ path; a Blueprint parent must be loaded and named by its generated class (e.g. "BP_FT_Base_C").
+//   @param parent_class - Optional parent: a class deriving from AFunctionalTest, by name without prefix (e.g. "FunctionalTest", the default, or "FunctionalAITest") or by /Script/ path; a Blueprint parent must be loaded and named by its generated class (e.g. "BP_FT_Base_C"). A Blueprint already at the path must have this parent or a subclass of it.
 //   @returns { asset_name, asset_path, package_class, parent_class, already_existed, saved }
 TSharedPtr<FJsonObject> HandleCreateFunctionalTest(
     const TSharedPtr<FJsonObject>& Params)
@@ -908,7 +911,25 @@ TSharedPtr<FJsonObject> HandleCreateFunctionalTest(
     // already exists in the package.
     UBlueprint* BP = FindObject<UBlueprint>(Package, *AssetName);
     const bool bAlreadyExisted = (BP != nullptr);
-    if (!BP)
+    if (BP)
+    {
+        // A Blueprint already there is returned only when it is the Functional Test asked for (its parent is the
+        // requested parent or a subclass of it); anything else is refused before it is saved.
+        const UClass* ExistingParent = BP->ParentClass;
+        if (!ExistingParent || !ExistingParent->IsChildOf(AFunctionalTest::StaticClass()))
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("A Blueprint already exists at %s and is not a Functional Test (its parent is %s); nothing was changed. Pick another asset_name, or remove it first with delete_asset."),
+                *BP->GetPathName(), ExistingParent ? *ExistingParent->GetName() : TEXT("none")));
+        }
+        if (!ExistingParent->IsChildOf(ParentClass))
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("The Functional Test Blueprint already at %s has parent %s, which is not %s or a subclass of it; nothing was changed. Pass parent_class %s, pick another asset_name, or remove it first with delete_asset."),
+                *BP->GetPathName(), *ExistingParent->GetName(), *ParentClass->GetName(), *ExistingParent->GetName()));
+        }
+    }
+    else
     {
         BP = Cast<UBlueprint>(
             FKismetEditorUtilities::CreateBlueprint(
@@ -927,15 +948,138 @@ TSharedPtr<FJsonObject> HandleCreateFunctionalTest(
     Data->SetStringField(TEXT("asset_path"), BP->GetPathName());
     Data->SetStringField(TEXT("package_class"),
         BP->GeneratedClass ? BP->GeneratedClass->GetPathName() : FString());
-    Data->SetStringField(TEXT("parent_class"), ParentClass->GetName());
+    // The parent read from the Blueprint itself, not the one requested.
+    Data->SetStringField(TEXT("parent_class"), BP->ParentClass ? BP->ParentClass->GetName() : FString());
     Data->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("create_functional_test"), SaveErr);
 }
 
-// MCP:run_functional_test_in_pie - Place one instance of a Functional Test Blueprint class in the editor level (unless one is already there), then ask the editor to start a Simulate-in-Editor session and, with auto_stop_pie (default), to end it again. It does not wait for the test or read its result: verdict is "pass" whenever a session is running right after the request and "not_run" otherwise, so it is no test verdict -- read the outcome in the output log (get_output_log_lines), or run a registered test with run_automation_test, whose verdict is real. The start request is deferred (and with no level viewport, headless, nothing starts), so on a first call pie_started is usually false and the session starts after the reply without being stopped: end it with stop_play_in_editor. With a session already running it answers pass and, with auto_stop_pie, ends that session. The placed actor stays in the level, unsaved and with no undo step. Create the test first with create_functional_test; a class that is not found, or is not a Functional Test, is an error.
-//   @param test_asset_path - Functional Test Blueprint, as an asset path ("/Game/Tests/BP_FT_PlayerHealth"), object path or generated-class path ("/Game/Tests/BP_FT_PlayerHealth.BP_FT_PlayerHealth_C"); when none loads, the first loaded Functional Test class whose name contains the last path segment is used.
-//   @param auto_stop_pie - Optional bool (default true): request the end of the session right after it is seen running, including a session that was already running before the call.
-//   @returns { test_asset_path, pie_started, verdict: "pass"|"not_run", pie_stopped?, already_in_pie?, spawned?, already_in_world?, note? }
+/**
+ * The Functional Test class test_asset_path names: the path loaded as a class as given, then as <asset>.<asset>_C
+ * (asset path) or <package>.<object>_C (object path); when neither loads, the one loaded Functional Test class whose
+ * name is exactly the last path segment, with or without _C. Null with OutError when nothing matches, when what loads
+ * is not a Functional Test, or when several loaded classes have that name (they are listed).
+ */
+static UClass* ResolveFunctionalTestClass(const FString& TestPath, FString& OutError)
+{
+    UClass* TestClass = LoadObject<UClass>(nullptr, *TestPath, nullptr, LOAD_NoWarn | LOAD_Quiet);
+    if (!TestClass)
+    {
+        FString FullPath = TestPath;
+        if (!FullPath.Contains(TEXT(".")))
+        {
+            // A package path: its asset's generated class is <path>.<name>_C.
+            const FString AssetName = FPaths::GetCleanFilename(FullPath);
+            FullPath = TestPath + TEXT(".") + AssetName + TEXT("_C");
+        }
+        else
+        {
+            // An object path without _C: the generated class of that object.
+            FString PackagePath, ObjectName;
+            TestPath.Split(TEXT("."), &PackagePath, &ObjectName);
+            if (!ObjectName.EndsWith(TEXT("_C")))
+            {
+                FullPath = PackagePath + TEXT(".") + ObjectName + TEXT("_C");
+            }
+        }
+        TestClass = LoadObject<UClass>(nullptr, *FullPath, nullptr, LOAD_NoWarn | LOAD_Quiet);
+    }
+    if (TestClass)
+    {
+        if (!TestClass->IsChildOf(AFunctionalTest::StaticClass()))
+        {
+            OutError = FString::Printf(TEXT("%s is not a Functional Test: its class %s does not derive from AFunctionalTest."),
+                *TestPath, *TestClass->GetPathName());
+            return nullptr;
+        }
+        return TestClass;
+    }
+
+    // Nothing loads from the path: a loaded Functional Test class whose name is exactly its last segment.
+    FString Stem = TestPath;
+    Stem.Split(TEXT("."), nullptr, &Stem);
+    Stem = FPaths::GetBaseFilename(Stem);
+    if (Stem.EndsWith(TEXT("_C"))) { Stem.LeftChopInline(2); }
+    TArray<UClass*> Matches;
+    for (TObjectIterator<UClass> It; It; ++It)
+    {
+        UClass* Candidate = *It;
+        if (!Candidate->IsChildOf(AFunctionalTest::StaticClass())
+            || Candidate->HasAnyClassFlags(CLASS_NewerVersionExists | CLASS_Deprecated))
+        {
+            continue;
+        }
+        const FString Name = Candidate->GetName();
+        if (Name == Stem || Name == Stem + TEXT("_C"))
+        {
+            Matches.Add(Candidate);
+        }
+    }
+    if (Matches.Num() == 1)
+    {
+        return Matches[0];
+    }
+    if (Matches.Num() > 1)
+    {
+        TArray<FString> Paths;
+        for (const UClass* Match : Matches) { Paths.Add(Match->GetPathName()); }
+        OutError = FString::Printf(TEXT("'%s' names %d loaded Functional Test classes: %s. Pass the full path of one."),
+            *TestPath, Matches.Num(), *FString::Join(Paths, TEXT(", ")));
+        return nullptr;
+    }
+    OutError = FString::Printf(
+        TEXT("Functional Test class not found: %s. Pass the Blueprint's asset path, as create_functional_test returns it (asset_path)."),
+        *TestPath);
+    return nullptr;
+}
+
+/** The verdict a Functional Test actor reports: running, pass, fail, not_run (Invalid, its value before it ran) or
+ *  unknown (Default: finished leaving the verdict to the automation framework's assertions). */
+static const TCHAR* FunctionalTestVerdict(const AFunctionalTest& Test)
+{
+    if (Test.IsRunning() || Test.Result == EFunctionalTestResult::Running)
+    {
+        return TEXT("running");
+    }
+    switch (Test.Result)
+    {
+    case EFunctionalTestResult::Succeeded: return TEXT("pass");
+    case EFunctionalTestResult::Failed:
+    case EFunctionalTestResult::Error:     return TEXT("fail");
+    case EFunctionalTestResult::Invalid:   return TEXT("not_run");
+    default:                                return TEXT("unknown");
+    }
+}
+
+/**
+ * Ends the Simulate session a run_functional_test_in_pie call requested, on the first tick it is running. The request
+ * is served on a later tick, so this is the only point where the session exists. It gives up, ending nothing, when the
+ * request is dropped without a session or after TimeoutSeconds.
+ */
+static void EndRequestedSessionOnceStarted(double TimeoutSeconds)
+{
+    const double Deadline = FPlatformTime::Seconds() + TimeoutSeconds;
+    FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([Deadline](float) -> bool
+    {
+        if (!GEditor)
+        {
+            return false;
+        }
+        if (GEditor->IsPlayingSessionInEditor())
+        {
+            UE_LOG(LogTemp, Display, TEXT("run_functional_test_in_pie: ending the Simulate session it started (auto_stop_pie)."));
+            GEditor->RequestEndPlayMap();
+            return false;
+        }
+        // Still queued: wait for the editor to serve it; dropped or too late: nothing of ours to end.
+        return GEditor->IsPlaySessionRequestQueued() && FPlatformTime::Seconds() < Deadline;
+    }));
+}
+
+// MCP:run_functional_test_in_pie - Place one instance of a Functional Test Blueprint class in the editor level (unless one is already there) and, when no Play-in-Editor session is running or starting, request a Simulate-in-Editor session. It does not run the test (the engine's functional testing manager does, in a Play session with a player) and cannot wait for it: verdict comes from the test actor's own Result, read in the running session's world -- pass, fail, running, not_run (it has not run) or unknown (it finished with Default) -- and is not_run when no session was running at the call, since the requested one starts only after the reply (pie_requested true, pie_started usually false). With auto_stop_pie (default) the session this call requests is ended as soon as it has started; with false it keeps running until stop_play_in_editor. A session that was already running or starting is never ended. Call it again while a session runs to read the test's state; confirm the session with is_play_in_editor_active. The placed actor stays in the level, unsaved and with no undo step. Create the test first with create_functional_test; a class that is not found, is not a Functional Test, or whose name matches several loaded classes is an error.
+//   @param test_asset_path - Functional Test Blueprint, as an asset path ("/Game/Tests/BP_FT_PlayerHealth", as create_functional_test returns it), object path or generated-class path ("/Game/Tests/BP_FT_PlayerHealth.BP_FT_PlayerHealth_C"); when none loads, a loaded Functional Test class named exactly like the last path segment (with or without _C) is used.
+//   @param auto_stop_pie - Optional bool (default true): end the Simulate session this call requests as soon as it has started; false leaves it running. A session that was already running is never ended.
+//   @returns { test_asset_path, test_class, verdict: "pass"|"fail"|"running"|"not_run"|"unknown", test_result?, test_in_session, already_in_pie, pie_requested, pie_started, pie_stop_scheduled, spawned, already_in_world, note }
 TSharedPtr<FJsonObject> HandleRunFunctionalTestInPie(
     const TSharedPtr<FJsonObject>& Params)
 {
@@ -944,59 +1088,21 @@ TSharedPtr<FJsonObject> HandleRunFunctionalTestInPie(
     bool bAutoStopPie = true;
     Params->TryGetBoolField(TEXT("auto_stop_pie"), bAutoStopPie);
 
-// Resolve the test class. AFunctionalTest BPs are reached via their
-    // GENERATED class (suffix `_C`), e.g. `/Game/Foo/BP_Foo.BP_Foo_C`. We try
-    // the path as-is first; if the path ends in the BP's outer (no `_C`), try
-    // appending it. If still missing, scan the package for any AFunctionalTest
-    // subclass -- the dev may have used an unusual naming convention.
-    UClass* TestClass = LoadObject<UClass>(nullptr, *TestPath);
+    FString ResolveError;
+    UClass* TestClass = ResolveFunctionalTestClass(TestPath, ResolveError);
     if (!TestClass)
     {
-        FString FullPath = TestPath;
-        if (!FullPath.Contains(TEXT(".")))
-        {
-            // No dot at all -- treat the path as a package path and append <name>.BP_<name>_C.
-            const FString AssetName = FPaths::GetCleanFilename(FullPath);
-            FullPath = TestPath + TEXT(".") + AssetName + TEXT("_C");
-        }
-        else
-        {
-            // Has a dot but no `_C` -- replace the trailing name with `_C`.
-            FString PackagePath, ObjectName;
-            TestPath.Split(TEXT("."), &PackagePath, &ObjectName);
-            if (!ObjectName.EndsWith(TEXT("_C")))
-            {
-                FullPath = PackagePath + TEXT(".") + ObjectName + TEXT("_C");
-            }
-        }
-        TestClass = LoadObject<UClass>(nullptr, *FullPath);
-    }
-    if (!TestClass || !TestClass->IsChildOf(AFunctionalTest::StaticClass()))
-    {
-        // Last-resort scan: search all packages for any UClass whose name ends
-        // with the user-provided stem (stripped of /Game/ prefix and any _C).
-        FString Stem = TestPath;
-        Stem.Split(TEXT("."), nullptr, &Stem);
-        Stem = FPaths::GetBaseFilename(Stem);  // last component, no ext
-        if (Stem.EndsWith(TEXT("_C"))) { Stem.LeftChopInline(2); }
-        for (TObjectIterator<UClass> It; It; ++It)
-        {
-            if (It->IsChildOf(AFunctionalTest::StaticClass()) && It->GetName().Contains(Stem))
-            {
-                TestClass = *It;
-                break;
-            }
-        }
-    }
-    if (!TestClass || !TestClass->IsChildOf(AFunctionalTest::StaticClass()))
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Functional Test class not found: %s"), *TestPath));
+        return mcp_common::MakeErrorReply(ResolveError);
     }
 
-    // Place one instance of the test in the current editor world (so PIE picks it up via
-    // GameplayDebugger / FunctionalTest runner). Idempotent: only spawn if no instance
-    // already exists for this class.
+    ULevelEditorSubsystem* LevelEditorSubsystem = GEditor ? GEditor->GetEditorSubsystem<ULevelEditorSubsystem>() : nullptr;
+    if (!LevelEditorSubsystem)
+    {
+        return mcp_common::MakeErrorReply(TEXT("Level Editor Subsystem not found"));
+    }
+
+    // Place one instance of the test in the current editor world. Idempotent: only spawn if no instance already
+    // exists for this class.
     UWorld* World = nullptr;
     if (TSharedPtr<FJsonObject> NoWorld = mcp_common::RequireEditorWorld(World)) { return NoWorld; }
     bool bSpawned = false;
@@ -1022,45 +1128,70 @@ TSharedPtr<FJsonObject> HandleRunFunctionalTestInPie(
         bSpawned = true;
     }
 
-    // Start PIE.
-    ULevelEditorSubsystem* LevelEditorSubsystem = GEditor->GetEditorSubsystem<ULevelEditorSubsystem>();
-    if (!LevelEditorSubsystem)
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("test_asset_path"), TestPath);
+    Data->SetStringField(TEXT("test_class"), TestClass->GetPathName());
+    Data->SetBoolField(TEXT("spawned"), bSpawned);
+    Data->SetBoolField(TEXT("already_in_world"), bAlreadyInWorld);
+
+    // A session that is running or starting belongs to whoever started it: it is read, never started or ended here.
+    const bool bSessionRunning = GEditor->IsPlayingSessionInEditor();
+    const bool bSessionQueued = GEditor->IsPlaySessionRequestQueued();
+    Data->SetBoolField(TEXT("already_in_pie"), bSessionRunning || bSessionQueued);
+    if (bSessionRunning || bSessionQueued)
     {
-        return mcp_common::MakeErrorReply(TEXT("Level Editor Subsystem not found"));
-    }
-    const bool bAlreadyInPIE = LevelEditorSubsystem->IsInPlayInEditor();
-    if (!bAlreadyInPIE)
-    {
-        LevelEditorSubsystem->EditorPlaySimulate();
-    }
-    const bool bPieStarted = LevelEditorSubsystem->IsInPlayInEditor();
-    if (!bPieStarted)
-    {
-        TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-        Data->SetStringField(TEXT("test_asset_path"), TestPath);
-        Data->SetBoolField(TEXT("pie_started"), false);
-        Data->SetStringField(TEXT("verdict"), TEXT("not_run"));
-        Data->SetStringField(TEXT("note"), TEXT("PIE did not start; check Output Log for engine errors"));
+        const AFunctionalTest* SessionTest = nullptr;
+        if (UWorld* PlayWorld = GEditor->PlayWorld)
+        {
+            for (TActorIterator<AFunctionalTest> It(PlayWorld); It; ++It)
+            {
+                if (It->GetClass() == TestClass)
+                {
+                    SessionTest = *It;
+                    break;
+                }
+            }
+        }
+        Data->SetBoolField(TEXT("pie_requested"), false);
+        Data->SetBoolField(TEXT("pie_started"), bSessionRunning);
+        Data->SetBoolField(TEXT("pie_stop_scheduled"), false);
+        Data->SetBoolField(TEXT("test_in_session"), SessionTest != nullptr);
+        if (SessionTest)
+        {
+            Data->SetStringField(TEXT("verdict"), FunctionalTestVerdict(*SessionTest));
+            Data->SetStringField(TEXT("test_result"), LexToString(SessionTest->Result));
+            Data->SetStringField(TEXT("note"), TEXT("Read from the test actor in the running session, which was neither started nor ended by this call."));
+        }
+        else
+        {
+            Data->SetStringField(TEXT("verdict"), TEXT("not_run"));
+            Data->SetStringField(TEXT("note"), bSessionRunning
+                ? TEXT("The running session has no instance of this test (a session copies the level when it starts, so a test placed after that is not in it); it was neither started nor ended by this call.")
+                : TEXT("A session is starting; call again once is_play_in_editor_active answers true to read the test in it. It was neither started nor ended by this call."));
+        }
         return mcp_common::MakeOkReply(Data);
     }
 
-// Stop PIE if requested.
-    bool bPieStopped = false;
-    if (bAutoStopPie)
+    // No session: request one. The request is served on a later tick (and needs a level viewport to simulate in).
+    LevelEditorSubsystem->EditorPlaySimulate();
+    const bool bRequested = GEditor->IsPlaySessionRequestQueued() || GEditor->IsPlayingSessionInEditor();
+    const bool bStopScheduled = bRequested && bAutoStopPie;
+    if (bStopScheduled)
     {
-        LevelEditorSubsystem->EditorRequestEndPlay();
-        bPieStopped = !LevelEditorSubsystem->IsInPlayInEditor();
+        EndRequestedSessionOnceStarted(/*TimeoutSeconds=*/30.0);
     }
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("test_asset_path"), TestPath);
-    Data->SetBoolField(TEXT("pie_started"), true);
-    Data->SetStringField(TEXT("verdict"), TEXT("pass"));  // optimistic; precise verdict requires per-test inspection
-    Data->SetBoolField(TEXT("pie_stopped"), bPieStopped);
-    Data->SetBoolField(TEXT("already_in_pie"), bAlreadyInPIE);
-    Data->SetBoolField(TEXT("spawned"), bSpawned);
-    Data->SetBoolField(TEXT("already_in_world"), bAlreadyInWorld);
-    return mcp_common::MakeOkReply(Data);
+    Data->SetBoolField(TEXT("pie_requested"), bRequested);
+    Data->SetBoolField(TEXT("pie_started"), GEditor->IsPlayingSessionInEditor());
+    Data->SetBoolField(TEXT("pie_stop_scheduled"), bStopScheduled);
+    Data->SetBoolField(TEXT("test_in_session"), false);
+    Data->SetStringField(TEXT("verdict"), TEXT("not_run"));
+    Data->SetStringField(TEXT("note"), bRequested
+        ? (bStopScheduled
+            ? TEXT("A Simulate session was requested; the editor serves it after this reply (confirm with is_play_in_editor_active) and it is ended as soon as it has started (auto_stop_pie). Nothing ran during this call.")
+            : TEXT("A Simulate session was requested; the editor serves it after this reply (confirm with is_play_in_editor_active) and it keeps running until stop_play_in_editor. Nothing ran during this call."))
+        : TEXT("The editor did not take the Simulate request (no active level viewport to simulate in); no session was started."));
+    return mcp_common::MakeOutcomeReply(Data, bRequested, bRequested ? FString()
+        : FString(TEXT("run_functional_test_in_pie: the editor did not take the Simulate request (no active level viewport); the test actor was placed but no session started.")));
 }
 
 // MCP:get_output_log_lines - Read the single per-editor-session log buffer UEAgent attaches to GLog (general editor output, not PIE-only -- Serialize() captures every category/verbosity that passes through GLog, regardless of PIE state; usable for PIE Functional Test / wait_for_pie_completion orchestration too). NON-DESTRUCTIVE cursor read (since_sequence_id, same idiom as poll_gameplay_messages), structured entries. Supports all three filters (message text, verbosity level, category).

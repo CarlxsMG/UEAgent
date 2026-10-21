@@ -9,6 +9,7 @@
 #include "Editor/EditorEngine.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
+#include "Engine/Level.h"   // ULevel::LoadAllExternalObjectsTag (validate_asset loads the asset as IsAssetValid does)
 
 // Asset registry (enumerate assets / resolve a single asset path)
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -332,6 +333,22 @@ namespace
         }
     }
 
+    /**
+     * The subsystem's own per-asset validation, ValidateObjectInternal, which IsAssetValid runs without asking it for
+     * statistics: with them it records, per validator class, how many assets that validator actually validated (a
+     * result other than NotValidated). It is protected, so it is called through a pointer to member formed in this
+     * derived type, which C++ allows for a protected member; the type is never instantiated.
+     */
+    struct FValidatorSubsystemAccess : public UEditorValidatorSubsystem
+    {
+        static EDataValidationResult ValidateWithStatistics(const UEditorValidatorSubsystem& Subsystem,
+            const FAssetData& AssetData, UObject* Asset, FDataValidationContext& Context,
+            TMap<FTopLevelAssetPath, FValidatorStatistics>& OutStatistics)
+        {
+            return (Subsystem.*(&FValidatorSubsystemAccess::ValidateObjectInternal))(AssetData, Asset, Context, &OutStatistics);
+        }
+    };
+
     // Resolve an FAssetData for an object path like "/Game/MyGame/M_Example" or
     // "/Game/MyGame/M_Example.M_Example". Returns whether a valid asset was found.
     bool ResolveAssetData(const FString& AssetPath, FAssetData& OutAssetData)
@@ -346,9 +363,9 @@ namespace
 // validate_asset
 // ---------------------------------------------------------------------------
 
-// MCP:validate_asset - Run the editor's enabled data validators (the Data Validation plugin, in its Script use case) on one asset and report the verdict, without changing or saving it (the asset gets loaded): validation_result is Valid, Invalid or NotValidated (no validator applies to that asset), is_valid is false only for Invalid, and errors and warnings carry the validators' messages. Use it to check one asset after editing it, e.g. before a commit or a cook; for a whole folder use validate_assets_in_path, to see which validators exist list_validators, and for a level's actors run_map_check. validators_run counts the enabled validators, not the ones that applied to this asset, so a NotValidated result is the sign that none did. An asset the Asset Registry cannot find, or the Data Validation plugin being off, is an error.
+// MCP:validate_asset - Run the editor's enabled data validators (the Data Validation plugin, in its Script use case) on one asset and report the verdict, without changing or saving it (the asset gets loaded): validation_result is Valid, Invalid or NotValidated (no validator applies to that asset), is_valid is false only for Invalid, and errors and warnings carry the validators' messages. Use it to check one asset after editing it, e.g. before a commit or a cook; for a whole folder use validate_assets_in_path, to see which validators exist list_validators, and for a level's actors run_map_check. validators_run counts the validators that actually validated this asset (returned a result other than NotValidated), validators_applied names their classes, and validators_enabled counts every enabled validator; none run when the asset's own class-level check already finds it Invalid. An asset the Asset Registry cannot find, or the Data Validation plugin being off, is an error.
 //   @param asset_path - Asset to validate, as an object path ("/Game/MyGame/M_Example.M_Example") or a package path ("/Game/MyGame/M_Example", which names its primary asset).
-//   @returns { asset_path: string, resolved_object_path: string, validation_result: string, is_valid: bool, errors: [string], warnings: [string], error_count: number, warning_count: number, validators_run: number }
+//   @returns { asset_path: string, resolved_object_path: string, validation_result: string, is_valid: bool, errors: [string], warnings: [string], error_count: number, warning_count: number, validators_run: number, validators_applied: [string], validators_enabled: number }
 
 TSharedPtr<FJsonObject> HandleValidateAsset(const TSharedPtr<FJsonObject>& Params)
 {
@@ -369,22 +386,37 @@ TSharedPtr<FJsonObject> HandleValidateAsset(const TSharedPtr<FJsonObject>& Param
             FString::Printf(TEXT("Asset not found: %s"), *AssetPath));
     }
 
-    // Run all registered validators on the asset. IsAssetValid does NOT touch
-    // any FMessageLog tabs; it just collects errors/warnings for us.
+    // What IsAssetValid does -- load the asset, the class-level IsDataValid, then every enabled validator, collecting
+    // errors and warnings without touching any FMessageLog tab -- plus the per-validator statistics, from which
+    // validators_run counts the validators that actually validated this asset. An asset that does not load is
+    // NotValidated, as IsAssetValid answers.
     TArray<FText> Errors;
     TArray<FText> Warnings;
-    const EDataValidationResult Result =
-        Subsystem->IsAssetValid(AssetData, Errors, Warnings, EDataValidationUsecase::Script);
+    TMap<FTopLevelAssetPath, FValidatorStatistics> ValidatorStatistics;
+    EDataValidationResult Result = EDataValidationResult::NotValidated;
+    if (UObject* Asset = AssetData.GetAsset({ ULevel::LoadAllExternalObjectsTag }))
+    {
+        FDataValidationContext Context(false, EDataValidationUsecase::Script, {});
+        Result = FValidatorSubsystemAccess::ValidateWithStatistics(*Subsystem, AssetData, Asset, Context, ValidatorStatistics);
+        Context.SplitIssues(Warnings, Errors);
+    }
+    TArray<FString> ValidatorsApplied;
+    for (const TPair<FTopLevelAssetPath, FValidatorStatistics>& Stat : ValidatorStatistics)
+    {
+        if (Stat.Value.AssetsValidated > 0)
+        {
+            ValidatorsApplied.Add(Stat.Key.GetAssetName().ToString());
+        }
+    }
+    ValidatorsApplied.Sort();
 
-    // Count enabled validators available to the subsystem (validators_run).
-    // The subsystem internally dispatches each applicable validator during
-    // IsAssetValid; here we report how many enabled validators exist.
-    int32 ValidatorsRun = 0;
-    Subsystem->ForEachEnabledValidator([&](UEditorValidatorBase* Validator) -> bool
+    // How many validators are enabled, applicable to this asset or not.
+    int32 ValidatorsEnabled = 0;
+    Subsystem->ForEachEnabledValidator([&ValidatorsEnabled](UEditorValidatorBase* Validator) -> bool
     {
         if (Validator)
         {
-            ++ValidatorsRun;
+            ++ValidatorsEnabled;
         }
         return true; // continue iteration
     });
@@ -406,7 +438,14 @@ TSharedPtr<FJsonObject> HandleValidateAsset(const TSharedPtr<FJsonObject>& Param
 
     Response->SetNumberField(TEXT("error_count"), Errors.Num());
     Response->SetNumberField(TEXT("warning_count"), Warnings.Num());
-    Response->SetNumberField(TEXT("validators_run"), ValidatorsRun);
+    Response->SetNumberField(TEXT("validators_run"), ValidatorsApplied.Num());
+    TArray<TSharedPtr<FJsonValue>> AppliedJson;
+    for (const FString& Name : ValidatorsApplied)
+    {
+        AppliedJson.Add(MakeShared<FJsonValueString>(Name));
+    }
+    Response->SetArrayField(TEXT("validators_applied"), AppliedJson);
+    Response->SetNumberField(TEXT("validators_enabled"), ValidatorsEnabled);
 
     return mcp_common::MakeOkReply(Response);
 }

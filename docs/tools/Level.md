@@ -140,7 +140,7 @@ Add a USplineMeshComponent to a named editor-world actor (name or label) as an u
 
 *Additive, idempotent.*
 
-Adds a saved level package to the editor world as a streaming sub-level.  Creates a ULevelStreamingDynamic wrapper referencing the given level package and attaches it to the current editor world's StreamingLevels array. The package must already exist on disk (a streaming level references a saved .umap). Idempotent: if the level is already a streaming level, returns its current state with added=false.          (an object path "/Game/Maps/SubLevel.SubLevel" is also accepted).
+Adds a saved level package to the editor world as a streaming sub-level.  Creates a ULevelStreamingDynamic wrapper referencing the given level package and attaches it to the current editor world's StreamingLevels array. The package must already exist on disk (a streaming level references a saved .umap). Idempotent: if this exact package is already a streaming level, returns its current state with added=false (another sub-level with the same name in another folder is a different level and does not count). An object path "/Game/Maps/SubLevel.SubLevel" is also accepted.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1032,11 +1032,11 @@ Honest-gated deletion of __ExternalActors__ (OFPA) orphan packages. Every entry 
 
 *Destructive.*
 
-Detach a streaming sub-level from the current editor world: a loaded one is unloaded and taken out with UEditorLevelUtils::RemoveLevelFromWorld (unsaved edits in it are lost), an unloaded one has its streaming wrapper dropped with UWorld::RemoveStreamingLevel; method says which. The sub-level's .umap stays on disk; the persistent map is marked dirty, not saved (save_level keeps the change), and the change is wrapped in an undo transaction, but add_streaming_level is the reliable way back. To only hide or unload it while keeping it in the world, use set_streaming_level_visible or set_streaming_level_loaded instead. removed is re-checked by listing the world's sub-levels again; success stays true even when removed=false, so read removed. A level that is not a sub-level of the editor world is an error and nothing changes; a second call on the same level is therefore an error (not idempotent).
+Detach a streaming sub-level from the current editor world: a loaded one is unloaded and taken out with UEditorLevelUtils::RemoveLevelFromWorld (unsaved edits in it are lost), an unloaded one has its streaming wrapper dropped with UWorld::RemoveStreamingLevel; method says which. The sub-level's .umap stays on disk; the persistent map is marked dirty, not saved (save_level keeps the change), and the change is wrapped in an undo transaction, but add_streaming_level is the reliable way back. To only hide or unload it while keeping it in the world, use set_streaming_level_visible or set_streaming_level_loaded instead. removed is re-checked by listing the world's sub-levels again, and a sub-level still listed afterwards makes success false. A path matches only the sub-level with exactly that package, and a bare name only when one sub-level has it (two are refused, listing them); a level that is not a sub-level of the editor world is an error and nothing changes, so a second call on the same level is an error (not idempotent).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `level_package_path` | string | yes | Package path of an existing streaming sub-level, e.g. "/Game/Maps/Arena_Lighting", as get_streaming_levels returns it; an object path or the bare level name ("Arena_Lighting") also matches, case ignored. |
+| `level_package_path` | string | yes | Package path of an existing streaming sub-level, e.g. "/Game/Maps/Arena_Lighting", as get_streaming_levels returns it, or its object path; the bare level name ("Arena_Lighting") also matches, case ignored, when no other sub-level has that name. |
 
 **Returns:** `{ package_name: string, removed: bool, method: string, streaming_level_count: number }`
 
@@ -1404,11 +1404,11 @@ Replace every control point of the first spline component on an editor-world act
 
 *Destructive, idempotent.*
 
-Set the should-be-loaded request flag of a streaming sub-level of the editor world (ULevelStreaming::SetShouldBeLoaded), found by package path, object path or short name (case-insensitive), inside an undo transaction that marks the map dirty without saving. It is a request: this call streams nothing in or out itself, so is_level_loaded may not change. Only a sub-level class that stores the flag honors it, such as ULevelStreamingDynamic (what add_streaming_level creates); an always-loaded sub-level keeps reporting should_be_loaded true, so asking to unload it gives applied false (applied compares ShouldBeLoaded with loaded). Repeating it leaves the same state, though each call still adds an undo step. An unknown level is an error. Visibility: set_streaming_level_visible; current state: get_streaming_levels; detaching a sub-level: remove_streaming_level.
+Set the should-be-loaded request flag of a streaming sub-level of the editor world (ULevelStreaming::SetShouldBeLoaded), found by package path, object path or short name (case-insensitive; a path matches only the sub-level with exactly that package, and a bare name only when one sub-level has it, two being refused with their list), inside an undo transaction that marks the map dirty without saving. It is a request: this call streams nothing in or out itself, so is_level_loaded may not change. Only a sub-level class that stores the flag honors it, such as ULevelStreamingDynamic (what add_streaming_level creates); an always-loaded sub-level keeps reporting should_be_loaded true, so asking to unload it gives applied false (applied compares ShouldBeLoaded with loaded). Repeating it leaves the same state, though each call still adds an undo step. An unknown level is an error. Visibility: set_streaming_level_visible; current state: get_streaming_levels; detaching a sub-level: remove_streaming_level.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `level_package_path` | string | yes | Package path of an existing streaming sub-level, e.g. "/Game/Maps/SubLevel"; an object path or the bare level name also matches. |
+| `level_package_path` | string | yes | Package path of an existing streaming sub-level, e.g. "/Game/Maps/SubLevel", or its object path; the bare level name also matches when no other sub-level has it. |
 | `loaded` | boolean | yes | Desired should-be-loaded state; required. |
 
 **Returns:** `{ package_name: string, name: string, streaming_class: string, should_be_loaded: bool, should_be_visible: bool, is_level_loaded: bool, is_level_visible: bool, requested_loaded: bool, applied: bool }`
@@ -1417,11 +1417,11 @@ Set the should-be-loaded request flag of a streaming sub-level of the editor wor
 
 *Destructive, idempotent.*
 
-Set the game-time should-be-visible request flag (ULevelStreaming bShouldBeVisible) of a streaming sub-level of the editor world, found by package path or short name, inside an undo transaction. It is a request, not an immediate change, and the editor viewport follows the level's separate editor-visibility flag, so is_level_visible may not change. Marks the map dirty without saving; an unknown level is an error. applied compares the flag with visible. Loading: set_streaming_level_loaded; current state: get_streaming_levels; adding a sub-level: add_streaming_level.
+Set the game-time should-be-visible request flag (ULevelStreaming bShouldBeVisible) of a streaming sub-level of the editor world, found by package path or short name (a path matches only the sub-level with exactly that package, and a bare name only when one sub-level has it, two being refused with their list), inside an undo transaction. It is a request, not an immediate change, and the editor viewport follows the level's separate editor-visibility flag, so is_level_visible may not change. Marks the map dirty without saving; an unknown level is an error. applied compares the flag with visible. Loading: set_streaming_level_loaded; current state: get_streaming_levels; adding a sub-level: add_streaming_level.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `level_package_path` | string | yes | Package path of an existing streaming sub-level. |
+| `level_package_path` | string | yes | Package path of an existing streaming sub-level, or its object path; the bare level name also matches when no other sub-level has it. |
 | `visible` | boolean | yes | Desired should-be-visible state. |
 
 **Returns:** `{ package_name: string, name: string, streaming_class: string, should_be_loaded: bool, should_be_visible: bool, is_level_loaded: bool, is_level_visible: bool, requested_visible: bool, applied: bool }`
@@ -1475,11 +1475,11 @@ Soften terrain: run a 3x3 box blur over the heightmap inside a world-space box, 
 
 *Additive.*
 
-Spawn an ALevelStreamingVolume in the editor world with a real box brush (half-extent extent) and bind it to an existing streaming sub-level, setting its usage, editor_pre_vis_only and disabled flags, in one undo step. Over spawn_box_volume(volume_class='LevelStreamingVolume') it adds the binding: the volume is appended to the sub-level's EditorStreamingVolumes, which no other tool writes. Each call spawns a NEW volume; an extent axis of 0 or less becomes 100; an unknown usage or sub-level is an error before anything spawns. Not saved (save_level). The load/unload itself happens only at PIE/runtime, when a viewpoint enters the volume.
+Spawn an ALevelStreamingVolume in the editor world with a real box brush (half-extent extent) and bind it to an existing streaming sub-level, setting its usage, editor_pre_vis_only and disabled flags, in one undo step. Over spawn_box_volume(volume_class='LevelStreamingVolume') it adds the binding: the volume is appended to the sub-level's EditorStreamingVolumes, which no other tool writes. Each call spawns a NEW volume; an extent axis of 0 or less becomes 100; an unknown usage or sub-level is an error before anything spawns. A path matches only the sub-level with exactly that package, and a bare name only when one sub-level has it (two are refused, listing them). Not saved (save_level). The load/unload itself happens only at PIE/runtime, when a viewpoint enters the volume.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `streaming_level_name` | string | yes | Package path (or short name) of an existing streaming sub-level to bind the volume to. |
+| `streaming_level_name` | string | yes | Package path of an existing streaming sub-level to bind the volume to, or its bare name when no other sub-level has it. |
 | `location` | array | no | [x, y, z] world location for the volume (default [0,0,0]). |
 | `extent` | array | no | Optional [x, y, z] box half-extent (default [100,100,100]); each axis is clamped > 0. |
 | `usage` | string | no | Optional EStreamingVolumeUsage: one of Loading, LoadingAndVisibility (default), VisibilityBlockingOnLoad, BlockingOnLoad, LoadingNotVisible. |

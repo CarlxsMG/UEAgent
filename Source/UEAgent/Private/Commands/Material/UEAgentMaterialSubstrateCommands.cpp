@@ -10,6 +10,7 @@
 #include "Materials/MaterialExpression.h"
 #include "Materials/MaterialExpressionConstant.h"
 #include "Materials/MaterialExpressionSubstrate.h"
+#include "MaterialGraph/MaterialGraphNode.h"   // UMaterialGraphNode::GetShortenPinName -- the pin names ConnectMaterialExpressions matches
 #include "SceneTypes.h"                  // EMaterialProperty / MP_FrontMaterial
 #include "UObject/SavePackage.h"
 #include "Misc/PackageName.h"
@@ -89,6 +90,29 @@ namespace
 	bool SaveMaterialPackage(UMaterial* Material)
 	{
 		return mcp_common::SaveAssetPackage(Material ? Material->GetPackage() : nullptr, Material);
+	}
+
+	/**
+	 * The input of Expression named PinName, matched the way UMaterialEditingLibrary::ConnectMaterialExpressions
+	 * matches it (each input's name shortened by UMaterialGraphNode::GetShortenPinName, compared as an FName, so
+	 * without case); null when there is none, with OutNames listing the names it has.
+	 */
+	FExpressionInput* Substrate_FindInput(UMaterialExpression* Expression, const FString& PinName, TArray<FString>& OutNames)
+	{
+		const FName Wanted(*PinName);
+		for (FExpressionInputIterator It{ Expression }; It; ++It)
+		{
+			const FName InputName = UMaterialGraphNode::GetShortenPinName(Expression->GetInputName(It.Index));
+			if (InputName == Wanted)
+			{
+				return It.Input;
+			}
+			if (!InputName.IsNone())
+			{
+				OutNames.Add(InputName.ToString());
+			}
+		}
+		return nullptr;
 	}
 
 	/** Report the live Substrate state into a Json object. Never fails. */
@@ -189,12 +213,12 @@ TSharedPtr<FJsonObject> HandleCreateSubstrateSlabNode(
 // ---------------------------------------------------------------------------
 // set_substrate_slab_scalar  (drives a slab pin via a Constant node; works regardless of Substrate)
 // ---------------------------------------------------------------------------
-// MCP:set_substrate_slab_scalar - Drives one input pin of the Substrate Slab BSDF node of a material with a constant: adds a NEW Constant expression holding value to the material graph and wires it into the named pin of the material's first Slab node, replacing whatever fed that pin, then saves the material. Each call adds another Constant node, even for the same pin and value; a constant that fed the pin before stays in the graph, unwired. Not recorded for undo, and the save result is not checked. Works whether Substrate is enabled or not (substrate_enabled reports it). The material needs a Slab node from create_substrate_slab_node; connect_substrate_slab_to_material wires the slab to the output. An unknown pin name is an error, but the Constant created before the failed wire stays in the graph. To change a constant already wired, use set_material_expression_property on its constant_node_id; delete stray nodes with delete_material_expression.
+// MCP:set_substrate_slab_scalar - Drives one input pin of the Substrate Slab BSDF node of a material with a constant: adds a NEW Constant expression holding value to the material graph and wires it into the named pin of the material's first Slab node, replacing whatever fed that pin, then saves the material. Each call adds another Constant node, even for the same pin and value; a constant that fed the pin before stays in the graph, unwired. One undo step removes the new constant and restores what fed the pin. A failed save (a read-only file, PIE running) makes success false with saved=false and save_error, the change kept in memory. Works whether Substrate is enabled or not (substrate_enabled reports it). The material needs a Slab node from create_substrate_slab_node; connect_substrate_slab_to_material wires the slab to the output. A pin name the Slab node does not have is an error that names its pins, and nothing is added. To change a constant already wired, use set_material_expression_property on its constant_node_id; delete stray nodes with delete_material_expression.
 //   @hints not-idempotent
 //   @param material_path - Package or object path of the UMaterial holding the slab node (e.g. "/Game/Materials/M_Substrate").
-//   @param pin_name - Slab input pin to drive, by its input name: e.g. "Roughness", "Anisotropy", "F0" or "DiffuseAlbedo" (a color pin receives the scalar on all channels).
+//   @param pin_name - Slab input pin to drive, by its input name as get_material_graph_info lists it (input_name), without case: e.g. "Roughness", "Anisotropy", "F0" or "Diffuse Albedo" (a color pin receives the scalar on all channels).
 //   @param value - Scalar the Constant node holds (e.g. 0.35 for Roughness); not range-checked.
-//   @returns { material_path: string, slab_node_id: string, constant_node_id: string, pin_name: string, value: number, connected: bool, substrate_enabled: bool, r_substrate_cvar: int, note?: string }
+//   @returns { material_path: string, slab_node_id: string, constant_node_id: string, pin_name: string, value: number, connected: bool, saved: bool, save_error?: string, substrate_enabled: bool, r_substrate_cvar: int, note?: string } -- connected is read back from the slab pin
 
 TSharedPtr<FJsonObject> HandleSetSubstrateSlabScalar(
 	const TSharedPtr<FJsonObject>& Params)
@@ -206,7 +230,7 @@ TSharedPtr<FJsonObject> HandleSetSubstrateSlabScalar(
 	if (!Params->TryGetStringField(TEXT("pin_name"), PinName) || PinName.IsEmpty())
 	{
 		return mcp_common::MakeErrorReply(
-			TEXT("pin_name is required (e.g. Roughness, F0, DiffuseAlbedo)"));
+			TEXT("pin_name is required (e.g. Roughness, F0, Diffuse Albedo)"));
 	}
 
 	double ValueD = 0.0;
@@ -219,6 +243,27 @@ TSharedPtr<FJsonObject> HandleSetSubstrateSlabScalar(
 	UMaterialExpressionSubstrateSlabBSDF* Slab = nullptr;
 	if (TSharedPtr<FJsonObject> LoadError = Substrate_LoadMaterialSlab(MaterialPath, Material, Slab)) { return LoadError; }
 
+	// The pin is resolved before anything is created, so a name the Slab node does not have changes nothing.
+	TArray<FString> PinNames;
+	FExpressionInput* SlabInput = Substrate_FindInput(Slab, PinName, PinNames);
+	if (!SlabInput)
+	{
+		return mcp_common::MakeErrorReply(FString::Printf(
+			TEXT("The Slab node has no input pin '%s'; nothing was added. Its pins: %s"),
+			*PinName, *FString::Join(PinNames, TEXT(", "))));
+	}
+
+	// The material (with its editor-only data, which holds the expression collection) and the slab are recorded
+	// for undo before the new node and the new wire; the Constant is created transactional.
+	Material->SetFlags(RF_Transactional);
+	if (UMaterialEditorOnlyData* EditorOnly = Material->GetEditorOnlyData())
+	{
+		EditorOnly->SetFlags(RF_Transactional);
+	}
+	Slab->SetFlags(RF_Transactional);
+	Material->Modify();
+	Slab->Modify();
+
 	// Create a Constant node carrying the scalar value, then connect it to the named slab pin.
 	UMaterialExpression* ConstExpr = UMaterialEditingLibrary::CreateMaterialExpression(
 		Material, UMaterialExpressionConstant::StaticClass(), -700, 0);
@@ -230,18 +275,13 @@ TSharedPtr<FJsonObject> HandleSetSubstrateSlabScalar(
 	Constant->R = (float)ValueD;
 	Constant->PostEditChange();
 
-	const bool bConnected = UMaterialEditingLibrary::ConnectMaterialExpressions(
-		Constant, FString(), Slab, PinName);
-	if (!bConnected)
-	{
-		return mcp_common::MakeErrorReply(
-			FString::Printf(TEXT("Could not connect Constant to slab pin '%s' (invalid pin name?)"), *PinName));
-	}
+	UMaterialEditingLibrary::ConnectMaterialExpressions(Constant, FString(), Slab, PinName);
+	// Read back from the pin itself.
+	const bool bConnected = SlabInput->Expression == Constant;
 
 	Slab->PostEditChange();
 	Material->PostEditChange();
 	Material->MarkPackageDirty();
-	SaveMaterialPackage(Material);
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("material_path"), Material->GetPathName());
@@ -249,9 +289,21 @@ TSharedPtr<FJsonObject> HandleSetSubstrateSlabScalar(
 	Data->SetStringField(TEXT("constant_node_id"), Constant->GetName());
 	Data->SetStringField(TEXT("pin_name"), PinName);
 	Data->SetNumberField(TEXT("value"), ValueD);
-	Data->SetBoolField(TEXT("connected"), true);
+	Data->SetBoolField(TEXT("connected"), bConnected);
 	FillSubstrateState(Data);
-	return mcp_common::MakeOkReply(Data);
+	if (!bConnected)
+	{
+		// The unwired Constant goes back out, so a failed call leaves the graph as it was.
+		UMaterialEditingLibrary::DeleteMaterialExpression(Material, Constant);
+		Data->SetBoolField(TEXT("saved"), false);
+		return mcp_common::MakeOutcomeReply(Data, false, FString::Printf(
+			TEXT("set_substrate_slab_scalar: slab pin '%s' does not read back as fed by the new Constant, so the Constant was ")
+			TEXT("deleted again and nothing was saved."), *PinName));
+	}
+
+	FString SaveError;
+	const bool bSaved = mcp_common::SaveAssetPackage(Material->GetPackage(), Material, SaveError);
+	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_substrate_slab_scalar"), SaveError);
 }
 
 // ---------------------------------------------------------------------------

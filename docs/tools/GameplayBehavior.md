@@ -10,26 +10,26 @@ Back to the [index](README.md).
 
 *Destructive, idempotent.*
 
-Get or create a UGameplayBehaviorConfig data asset at package_path/config_name: create it, or load the one already there, set its protected BehaviorClass by reflection when behavior_class resolves (on an existing config this overwrites its class), then save it in every case; no undo step. Use it as the entry point before trigger_behavior_on_actor; to change only the class of a config use set_behavior_class (which errors on a bad class instead of ignoring it), to read one get_behavior_config_info, to find them list_behavior_configs, and to delete one remove_behavior_config. An unresolved behavior_class is ignored without error, so check behavior_class in the reply (empty when unset); created tells new from existing. Idempotent: the same call again leaves the same asset. An asset of another class at that path is an error. A failed save (always while PIE runs) makes success false with saved=false.
+Get or create a UGameplayBehaviorConfig data asset at package_path/config_name: create it, or load the one already there, set its protected BehaviorClass by reflection when behavior_class is given (on an existing config this overwrites its class), then save it in every case; no undo step. Use it as the entry point before trigger_behavior_on_actor; to change only the class of a config use set_behavior_class, to read one get_behavior_config_info, to find them list_behavior_configs, and to delete one remove_behavior_config. A behavior_class that does not resolve, names two classes, or is not a UGameplayBehavior subclass is an error, checked before anything is created or loaded, so nothing changes. behavior_class and behavior_class_path in the reply are read back from the config (empty when unset); created tells new from existing. Idempotent: the same call again leaves the same asset. An asset of another class at that path is an error. A failed save (always while PIE runs) makes success false with saved=false.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `config_name` | string | yes | Asset name of the config, no folder, e.g. "BC_Patrol". |
 | `package_path` | string | no | Destination content folder as a long package path, e.g. "/Game/AI/Behaviors" (default /Game/MCP). |
-| `behavior_class` | string | no | Full path of a loaded UGameplayBehavior subclass, e.g. "/Script/GameplayBehaviorsModule.GameplayBehavior_AnimationBased", or "/Game/AI/GB_Sit.GB_Sit_C" for a Blueprint already loaded; a short name never resolves, and a miss or a non-behavior class is ignored. Omit it to leave the class as it is. |
+| `behavior_class` | string | no | UGameplayBehavior subclass to run: a class path, e.g. "/Script/GameplayBehaviorsModule.GameplayBehavior_AnimationBased" or "/Game/AI/GB_Sit.GB_Sit_C", a Blueprint asset path ("/Game/AI/GB_Sit"), loaded if needed, or the exact name of a loaded class ("GameplayBehavior_AnimationBased", "GB_Sit_C"). Omit it to leave the class as it is. |
 
-**Returns:** `{ config_path: string, config_name: string, behavior_class: string, created: bool, saved: bool }`
+**Returns:** `{ config_path: string, config_name: string, behavior_class: string, behavior_class_path: string, created: bool, saved: bool }`
 
 ## `end_behavior_on_actor`
 
 *Destructive, idempotent.*
 
-Interrupt the gameplay behaviors that the editor world UGameplayBehaviorSubsystem runs on a Pawn found by its label: every running behavior that is a behavior_class (subclasses included), or every one when behavior_class is omitted, gets EndBehavior with interrupted=true. behavior_class must be the full class path of a UGameplayBehavior subclass; a short name, or a path that does not resolve to one, is an error and nothing stops. ended is read back from the subsystem: true once every matching behavior stopped, while still_running counts the ones that did not and makes success false. With none running it succeeds with ended false and a note, so a repeat call is idempotent. Runtime only: nothing is saved or undoable. A missing actor, a non-Pawn or no subsystem is an error. Start one: trigger_behavior_on_actor; subsystem check: get_behavior_subsystem_info.
+Interrupt the gameplay behaviors that the editor world UGameplayBehaviorSubsystem runs on a Pawn found by its label: every running behavior that is a behavior_class (subclasses included), or every one when behavior_class is omitted, gets EndBehavior with interrupted=true. behavior_class is a class path, or the exact name of a loaded UGameplayBehavior subclass; a name two classes share, or one that does not resolve to such a class, is an error and nothing stops. ended is read back from the subsystem: true once every matching behavior stopped, while still_running counts the ones that did not and makes success false. With none running it succeeds with ended false and a note, so a repeat call is idempotent. Runtime only: nothing is saved or undoable. A missing actor, a non-Pawn or no subsystem is an error. Start one: trigger_behavior_on_actor; subsystem check: get_behavior_subsystem_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_label` | string | yes | Label of the Pawn actor in the editor world. |
-| `behavior_class` | string | no | Optional full path of the UGameplayBehavior subclass to stop, e.g. "/Script/GameplayBehaviorsModule.GameplayBehavior_AnimationBased"; omitted stops every behavior on the pawn, and a path that does not resolve to such a class is an error |
+| `behavior_class` | string | no | Optional UGameplayBehavior subclass to stop: its path, e.g. "/Script/GameplayBehaviorsModule.GameplayBehavior_AnimationBased", or its exact class name ("GameplayBehavior_AnimationBased"); omitted stops every behavior on the pawn, and one that does not resolve to such a class is an error |
 
 **Returns:** `{ actor_label: string, behavior_class: string, ended: bool, stopped_count: int, still_running: int, note?: string }`
 
@@ -83,14 +83,14 @@ Destroy a UGameplayBehaviorConfig data asset (mirror of create_behavior_config).
 
 *Destructive, idempotent.*
 
-Set which UGameplayBehavior class an existing UGameplayBehaviorConfig asset runs (its protected BehaviorClass, written by reflection), then save the asset; no undo step. Use it to repoint a config; create_behavior_config makes a new one (and ignores a bad class instead of failing), get_behavior_config_info reads the class back, list_behavior_configs finds configs. A config that does not load, a class that is not found or is not a UGameplayBehavior subclass is an error and nothing changes. set is true whenever the class resolved, without a read-back, so confirm with get_behavior_config_info. Idempotent: the same class again writes and saves again. A failed save (always while PIE runs) makes success false with saved=false.
+Set which UGameplayBehavior class an existing UGameplayBehaviorConfig asset runs (its protected BehaviorClass, written by reflection), then save the asset; no undo step. Use it to repoint a config; create_behavior_config makes a new one, get_behavior_config_info reads the class back, list_behavior_configs finds configs. A config that does not load, a class that is not found, names two classes, or is not a UGameplayBehavior subclass is an error and nothing changes. The class is read back from the config after the write: set is true only when it holds the class asked for, and otherwise success is false and nothing is saved. Idempotent: the same class again writes and saves again. A failed save (always while PIE runs) makes success false with saved=false.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `config_path` | string | yes | UGameplayBehaviorConfig asset as an object or package path, e.g. "/Game/MCP/BC_Patrol", as list_behavior_configs returns it. |
-| `behavior_class` | string | yes | Full path of a loaded UGameplayBehavior subclass, e.g. "/Script/GameplayBehaviorsModule.GameplayBehavior_AnimationBased", or "/Game/AI/GB_Sit.GB_Sit_C" for a Blueprint already loaded. A bare class name is looked up as given and then with a "U" prefix, but neither form finds a class, so pass the path. |
+| `behavior_class` | string | yes | UGameplayBehavior subclass to run: a class path, e.g. "/Script/GameplayBehaviorsModule.GameplayBehavior_AnimationBased" or "/Game/AI/GB_Sit.GB_Sit_C", a Blueprint asset path ("/Game/AI/GB_Sit"), loaded if needed, or the exact name of a loaded class ("GameplayBehavior_AnimationBased", also with the C++ "U" prefix, or "GB_Sit_C"). |
 
-**Returns:** `{ config_path: string, behavior_class: string, set: bool, saved: bool }`
+**Returns:** `{ config_path: string, behavior_class: string, behavior_class_path: string, set: bool, saved: bool }`
 
 ## `trigger_behavior_on_actor`
 

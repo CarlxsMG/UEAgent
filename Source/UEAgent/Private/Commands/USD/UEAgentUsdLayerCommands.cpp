@@ -317,11 +317,11 @@ TSharedPtr<FJsonObject> HandleListUsdStageLayers(const TSharedPtr<FJsonObject>& 
 // ---------------------------------------------------------------------------
 // insert_usd_sublayer
 // ---------------------------------------------------------------------------
-// MCP:insert_usd_sublayer - Add a sublayer path to the root layer of a registered USD stage, so that layer's opinions compose into the stage, then save the root layer to disk (Save without force: the whole root layer, including any other unsaved edits on it). Read the stack and its indices with list_usd_stage_layers, take a sublayer out by index with remove_usd_sublayer, and to author into the new layer point set_usd_edit_target at it. The path is not checked to exist; USD complaints come back in errors. No undo step. success means the root layer was saved, so read inserted and already_present: a path already in the list changes nothing (already_present=true, nothing saved) and answers success=false, and an in-memory stage (anonymous root layer, nothing to save to) answers success=false even with inserted=true. Idempotent in effect: a repeat adds nothing. An unregistered stage_name is an error.
+// MCP:insert_usd_sublayer - Add a sublayer path to the root layer of a registered USD stage, so that layer's opinions compose into the stage, then save the root layer to disk (Save without force: the whole root layer, including any other unsaved edits on it). Read the stack and its indices with list_usd_stage_layers, take a sublayer out by index with remove_usd_sublayer, and to author into the new layer point set_usd_edit_target at it. The path is not checked to exist; USD complaints come back in errors. No undo step. inserted is read back from the root layer's list. A path already in the list is a success that changes nothing (already_present=true, saved=false). On an in-memory stage (anonymous root layer, in_memory=true) the insert is a success with saved=false, since there is no file to save to. On a file-backed stage success requires the save: a failed save answers success=false with saved=false. Idempotent in effect: a repeat adds nothing. An unregistered stage_name is an error.
 //   @param stage_name [string!] - Exact name the stage was registered under by create_usd_stage or open_usd_stage (a stage only in the USD cache is not found here).
 //   @param sublayer_path [string!] - Path or USD identifier of the layer to insert, e.g. "D:/USD/props.usda" or "./props.usda" (resolved relative to the root layer); compared with the existing entries as text, case ignored.
 //   @param index [integer] - 0-based position in the root layer's sublayer list, where 0 is the strongest; -1 (default) appends as the weakest. The reply's index echoes this value, not the resulting position.
-//   @returns { stage_name: string, sublayer_path: string, index: int, inserted: bool, already_present: bool, new_count: int, saved: bool, errors: [string]? }
+//   @returns { stage_name: string, sublayer_path: string, index: int, inserted: bool, already_present: bool, in_memory: bool, new_count: int, saved: bool, note?: string, errors: [string]? }
 
 TSharedPtr<FJsonObject> HandleInsertUsdSublayer(const TSharedPtr<FJsonObject>& Params)
 {
@@ -339,19 +339,25 @@ TSharedPtr<FJsonObject> HandleInsertUsdSublayer(const TSharedPtr<FJsonObject>& P
 	Result->SetStringField(TEXT("sublayer_path"), SublayerPath);
 	Result->SetNumberField(TEXT("index"), Index);
 
+	bool bRootFound = false;
 	bool bInserted = false;
 	bool bAlreadyPresent = false;
+	bool bInMemory = false;
 	int32 NewCount = 0;
 	bool bSaved = false;
 
 	UEAgent::UsdCommon::CaptureUsdErrors(
-		[&StageName, &SublayerPath, Index, &bInserted, &bAlreadyPresent, &NewCount, &bSaved]()
+		[&StageName, &SublayerPath, Index, &bRootFound, &bInserted, &bAlreadyPresent, &bInMemory, &NewCount, &bSaved]()
 		{
 			UE::FUsdStage Stage = UsdLayer_FindStage(StageName);
 			if (!Stage) { return; }
 
 			UE::FSdfLayer Root = Stage.GetRootLayer();
 			if (!Root) { return; }
+			bRootFound = true;
+			// An anonymous root layer (a stage created without a file) has no file to save to: the edit lives in
+			// memory with the stage, which is all such a stage ever has.
+			bInMemory = Root.IsAnonymous();
 
 			const TArray<FString> Current = Root.GetSubLayerPaths();
 			if (Current.Contains(SublayerPath))
@@ -363,15 +369,18 @@ TSharedPtr<FJsonObject> HandleInsertUsdSublayer(const TSharedPtr<FJsonObject>& P
 			}
 
 			Root.InsertSubLayerPath(SublayerPath, Index);
-			bInserted = true;
-			NewCount = Root.GetSubLayerPaths().Num();
-			// Save(false) is idempotent — for an in-memory stage the root layer
-			// is anonymous, so Save() is a no-op (returns false, NOT an error).
-			bSaved = Root.Save(/*bForce*/ false);
+			// Read back: inserted means the root layer's list grew (USD may store the path in another spelling).
+			const TArray<FString> After = Root.GetSubLayerPaths();
+			bInserted = After.Num() > Current.Num() || After.Contains(SublayerPath);
+			NewCount = After.Num();
+			if (bInserted && !bInMemory)
+			{
+				bSaved = Root.Save(/*bForce*/ false);
+			}
 		},
 		Result);
 
-	if (!Result->HasField(TEXT("errors")) && !bInserted && !bAlreadyPresent)
+	if (!bRootFound)
 	{
 		// Stage resolved to nothing — flag honestly rather than returning
 		// success with empty values.
@@ -381,7 +390,27 @@ TSharedPtr<FJsonObject> HandleInsertUsdSublayer(const TSharedPtr<FJsonObject>& P
 
 	Result->SetBoolField(TEXT("inserted"), bInserted);
 	Result->SetBoolField(TEXT("already_present"), bAlreadyPresent);
+	Result->SetBoolField(TEXT("in_memory"), bInMemory);
 	Result->SetNumberField(TEXT("new_count"), NewCount);
+	if (bAlreadyPresent)
+	{
+		// Nothing to do: the list already has the path, so nothing changed and nothing needed saving.
+		Result->SetBoolField(TEXT("saved"), false);
+		Result->SetStringField(TEXT("note"), TEXT("The sublayer path is already in the root layer's list; nothing changed, nothing saved."));
+		return mcp_common::MakeOkReply(Result);
+	}
+	if (!bInserted)
+	{
+		return UEAgent::UsdCommon::FailReply(Result, FString::Printf(
+			TEXT("insert_usd_sublayer: the root layer's sublayer list did not take '%s' (see errors); nothing was saved."), *SublayerPath));
+	}
+	if (bInMemory)
+	{
+		// An in-memory stage cannot be saved, and has nothing on disk to fall out of step with.
+		Result->SetBoolField(TEXT("saved"), false);
+		Result->SetStringField(TEXT("note"), TEXT("In-memory stage (anonymous root layer): the sublayer is inserted in memory; there is no file to save it to."));
+		return mcp_common::MakeOkReply(Result);
+	}
 	return mcp_common::MakeSavedReply(Result, bSaved, TEXT("insert_usd_sublayer"));
 }
 

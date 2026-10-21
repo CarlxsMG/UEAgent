@@ -380,20 +380,20 @@ No parameters.
 
 *Destructive.*
 
-Plays an animation of a Widget Blueprint on a live instance of that widget in a running Play-In-Editor session (UUserWidget::PlayAnimation): the first on-screen instance of the Blueprint's class in the PIE world that world selects. Without a PIE session, or without such an instance, nothing plays and the call still succeeds with played false, headless true, requires_pie true and a note: start PIE with start_play_in_editor and get the widget on screen first. It changes only the running widget, never the asset (saved is always false), and played true means PlayAnimation was called, not read back; a repeat call starts the animation again. An animation name the Blueprint does not have is an error. Names come from get_widget_animations; stop playback with stop_widget_animation; list_pie_widgets shows which widgets are on screen.
+Plays an animation of a Widget Blueprint on a live instance of that widget in a running Play-In-Editor session (UUserWidget::PlayAnimation): the first on-screen instance of the Blueprint's class in the PIE world that world selects. Without a PIE session, or without such an instance, nothing plays and the call still succeeds with played false, headless true, requires_pie true and a note: start PIE with start_play_in_editor and get the widget on screen first. A world selector that names no running PIE world while a session runs is an error naming the worlds there. It changes only the running widget, never the asset (saved is always false), and played true means PlayAnimation was called, not read back; a repeat call starts the animation again. An animation name the Blueprint does not have, a world that is not a PIE selector, a num_loops that is not a whole number of 0 or more, and an unknown play_mode are errors, refused before anything plays. Names come from get_widget_animations; stop playback with stop_widget_animation; list_pie_widgets shows which widgets are on screen.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `widget_bp_path` | string | yes | Asset path of the Widget Blueprint (e.g. "/Game/UI/WBP_HUD"); it must exist. |
 | `animation_name` | string | yes | Object name or display label of the animation, as get_widget_animations lists it (case-insensitive). |
 | `start_at_time` | number | no | Optional time in seconds into the animation to start from (default 0). |
-| `num_loops` | number | no | Optional whole number of times to play (default 1); values below 1 play once, so the engine's endless loop (0) is not available. |
-| `play_mode` | string | no | Optional "Forward" (default) \| "Reverse" \| "PingPong", case-insensitive; any other value plays Forward. |
+| `num_loops` | number | no | Optional whole number of times to play (default 1); 0 loops until stopped (stop_widget_animation), as the engine's PlayAnimation takes it. A negative or fractional number is an error. |
+| `play_mode` | string | no | Optional "Forward" (default) \| "Reverse" \| "PingPong", case-insensitive; any other value is an error. |
 | `playback_speed` | number | no | Optional speed multiplier (default 1.0; 2.0 plays twice as fast). |
 | `restore_state` | boolean | no | Optional bool: restore the pre-animation state on finish (default false). |
-| `world` | string | no | Optional world selector: absent/'pie' (default: PlayWorld, else the first PIE context) \| 'server' (the PIE world with authority) \| 'client' \| 'pie:N' \| 'game' (alias of 'pie'). In a 2-player PIE session EVERY client has its OWN widgets, so the default may well read the other player's HUD. |
+| `world` | string | no | Optional world selector: absent/'pie' (default: PlayWorld, else the first PIE context) \| 'server' (the PIE world with authority) \| 'client' \| 'pie:N' \| 'game' (alias of 'pie'); any other value is an error. In a 2-player PIE session EVERY client has its OWN widgets, so the default may well read the other player's HUD. |
 
-**Returns:** `{ widget_bp_path: string, animation_name: string, animation_exists: bool, played: bool, headless: bool, requires_pie: bool, note: string, saved: bool, live_widget_name?: string, live_animation_name?: string, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }`
+**Returns:** `{ widget_bp_path: string, animation_name: string, animation_exists: bool, played: bool, headless: bool, requires_pie: bool, note: string, saved: bool, num_loops?: number, play_mode?: string, live_widget_name?: string, live_animation_name?: string, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }`
 
 ## `pop_common_ui_widget`
 

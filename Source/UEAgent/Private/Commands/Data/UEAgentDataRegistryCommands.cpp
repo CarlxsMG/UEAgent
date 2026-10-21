@@ -945,17 +945,65 @@ TSharedPtr<FJsonObject> HandleRemoveDataRegistrySource(const TSharedPtr<FJsonObj
     return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("remove_data_registry_source"));
 }
 
-// MCP:refresh_data_registry_map - Make the DataRegistry subsystem rebuild, for this editor session, its map from registry type to registry asset out of the registry assets loaded in memory under its scan paths, so edits to registry assets (a changed registry_type, sources changed with add_data_registry_source or remove_data_registry_source) are seen without restarting the editor. A registry whose type drops out of the map is deinitialized, losing its cached items. It changes no asset and saves nothing, and it neither loads nor initializes a registry: use initialize_data_registry for that, then get_data_registry_item to read items. Idempotent: a repeat call rebuilds the same map. refreshed is always true, since the engine call reports nothing; check the outcome with list_data_registry_types. A missing subsystem (DataRegistry plugin off) is an error.
-//   @returns { refreshed: bool }
+// MCP:refresh_data_registry_map - Make the DataRegistry subsystem rebuild, for this editor session, its map from registry type to registry asset out of the registry assets loaded in memory under its scan paths, so edits to registry assets (a changed registry_type, sources changed with add_data_registry_source or remove_data_registry_source) are seen without restarting the editor. A registry whose type drops out of the map is deinitialized, losing its cached items. It changes no asset and saves nothing, and it neither loads nor initializes a registry: use initialize_data_registry for that, then get_data_registry_item to read items. Idempotent: a repeat call rebuilds the same map (map_changed false). The engine call reports nothing, so refreshed is null and the outcome is the subsystem's type -> registry map read before and after: the counts, the types added, removed or pointed at another asset, and map_changed; list_data_registry_types lists the map. A missing subsystem (DataRegistry plugin off) is an error.
+//   @returns { refreshed: null, registry_count_before: int, registry_count_after: int, added_types: [string], removed_types: [string], changed_types: [string], map_changed: bool, note: string }
 
 TSharedPtr<FJsonObject> HandleRefreshDataRegistryMap(const TSharedPtr<FJsonObject>& Params)
 {
     UDataRegistrySubsystem* Subsystem = nullptr;
     if (TSharedPtr<FJsonObject> NoSubsystem = DataRegistry_GetSubsystem(Subsystem)) { return NoSubsystem; }
+
+    // The engine call returns nothing, so what it did is read from the subsystem: its type -> registry map before
+    // and after the rebuild.
+    const auto ReadRegistryMap = [Subsystem]()
+    {
+        TMap<FString, FString> Map;
+        TArray<UDataRegistry*> Registries;
+        Subsystem->GetAllRegistries(Registries, /*bSortByType*/ true);
+        for (const UDataRegistry* Registry : Registries)
+        {
+            if (Registry)
+            {
+                Map.Add(Registry->GetRegistryType().ToString(), Registry->GetPathName());
+            }
+        }
+        return Map;
+    };
+    const TMap<FString, FString> Before = ReadRegistryMap();
     Subsystem->RefreshRegistryMap();
+    const TMap<FString, FString> After = ReadRegistryMap();
+
+    TArray<TSharedPtr<FJsonValue>> Added, Removed, Changed;
+    for (const TPair<FString, FString>& Entry : After)
+    {
+        const FString* Previous = Before.Find(Entry.Key);
+        if (!Previous)
+        {
+            Added.Add(MakeShared<FJsonValueString>(Entry.Key));
+        }
+        else if (*Previous != Entry.Value)
+        {
+            Changed.Add(MakeShared<FJsonValueString>(Entry.Key));
+        }
+    }
+    for (const TPair<FString, FString>& Entry : Before)
+    {
+        if (!After.Contains(Entry.Key))
+        {
+            Removed.Add(MakeShared<FJsonValueString>(Entry.Key));
+        }
+    }
 
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-    ResultObj->SetBoolField(TEXT("refreshed"), true);
+    // Not measurable: the engine call reports nothing, and a rebuild that changes nothing looks like no rebuild.
+    ResultObj->SetField(TEXT("refreshed"), MakeShared<FJsonValueNull>());
+    ResultObj->SetNumberField(TEXT("registry_count_before"), Before.Num());
+    ResultObj->SetNumberField(TEXT("registry_count_after"), After.Num());
+    ResultObj->SetArrayField(TEXT("added_types"), Added);
+    ResultObj->SetArrayField(TEXT("removed_types"), Removed);
+    ResultObj->SetArrayField(TEXT("changed_types"), Changed);
+    ResultObj->SetBoolField(TEXT("map_changed"), Added.Num() + Removed.Num() + Changed.Num() > 0);
+    ResultObj->SetStringField(TEXT("note"), TEXT("refreshed is null: the engine call reports nothing. The other fields are the subsystem's type -> registry map read before and after the rebuild."));
     return mcp_common::MakeOkReply(ResultObj);
 }
 

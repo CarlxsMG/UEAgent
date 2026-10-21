@@ -238,13 +238,13 @@ Create a UFileMediaSource asset at package_path/name that points at a movie file
 
 *Additive, idempotent.*
 
-Create a Blueprint subclass of AFunctionalTest (an actor placed in a test map that runs scripted checks and reports pass or fail to the automation framework) at package_path/asset_name, then save it; there is no undo step. Use it to author a level-based gameplay test; for an ordinary actor Blueprint use create_blueprint, and to run registered tests use run_automation_test (list them with list_automation_tests). Idempotent: when a Blueprint already exists at that path it is returned as it is, with already_existed true, and saved again; its parent is not checked and parent_class echoes the requested one. A parent that is not found or is not a Functional Test, or an asset of another type at the path, is an error and nothing changes. A failed save makes success false, with saved false and the Blueprint only in memory. Refused while Play-in-Editor runs unless force=true. Then script it with add_blueprint_function and add_graph_node, and place it in a map with spawn_actor.
+Create a Blueprint subclass of AFunctionalTest (an actor placed in a test map that runs scripted checks and reports pass or fail to the automation framework) at package_path/asset_name, then save it; there is no undo step. Use it to author a level-based gameplay test; for an ordinary actor Blueprint use create_blueprint, and to run registered tests use run_automation_test (list them with list_automation_tests). Idempotent: a Functional Test Blueprint already at that path whose parent is parent_class (or a subclass of it) is returned as it is, with already_existed true, and saved again; parent_class is the parent read from the Blueprint. A Blueprint there that is not a Functional Test, or whose parent is not parent_class or a subclass of it, is refused and nothing is saved (remove it with delete_asset or pick another asset_name). A parent that is not found or is not a Functional Test, or an asset of another type at the path, is an error and nothing changes. A failed save makes success false, with saved false and the Blueprint only in memory. Refused while Play-in-Editor runs unless force=true. Then script it with add_blueprint_function and add_graph_node, and place it in a map with spawn_actor.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `asset_name` | string | yes | Asset name of the new Blueprint without folder, e.g. "BP_FT_PlayerHealth". |
 | `package_path` | string | no | Content folder for the asset, e.g. "/Game/Tests" (default /Game/MCP). |
-| `parent_class` | string | no | Optional parent: a class deriving from AFunctionalTest, by name without prefix (e.g. "FunctionalTest", the default) or by /Script/ path; a Blueprint parent must be loaded and named by its generated class (e.g. "BP_FT_Base_C"). |
+| `parent_class` | string | no | Optional parent: a class deriving from AFunctionalTest, by name without prefix (e.g. "FunctionalTest", the default, or "FunctionalAITest") or by /Script/ path; a Blueprint parent must be loaded and named by its generated class (e.g. "BP_FT_Base_C"). A Blueprint already at the path must have this parent or a subclass of it. |
 
 **Returns:** `{ asset_name, asset_path, package_class, parent_class, already_existed, saved }`
 
@@ -760,14 +760,14 @@ What is UNSAVED in the editor right now: every dirty package with its disk path,
 
 *Read-only.*
 
-List the section names of one INI (Engine, Game, Input, Editor, Scalability...) as the running editor holds it in GConfig, the in-memory merge of every config layer, without changing anything. An INI GConfig does not know (a misspelt name, say) is a success with found=false and an empty list. Use it to discover a section before reading one key with get_engine_ini_value or writing one with set_engine_ini_value; for UDeveloperSettings classes use get_project_settings_value. file_path is the saved-config path Saved/Config/&lt;Platform>/&lt;name>.ini built from the name, not a file that was read or checked to exist.
+List the section names of one INI (Engine, Game, Input, Editor, Scalability...) without changing anything: by default as the running editor holds it in GConfig, the in-memory merge of every config layer (the engine's Base ini included); with include_base=false only the sections the project itself defines, read from disk in its Config/Default&lt;name>.ini and its saved Saved/Config/&lt;Platform>/&lt;name>.ini (files_read lists the ones that exist). An INI GConfig does not know (a misspelt name, say) is a success with found=false. Use it to discover a section before reading one key with get_engine_ini_value or writing one with set_engine_ini_value; for UDeveloperSettings classes use get_project_settings_value. file_path is the saved-config path Saved/Config/&lt;Platform>/&lt;name>.ini built from the name.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `config_file` | string | no | INI base name, e.g. "Engine" (default), "Game", "Input", "Editor", "Scalability"; a trailing ".ini" is dropped. |
-| `include_base` | boolean | no | Ignored: the code reads it but never uses it, so the list is the same whatever you pass. |
+| `include_base` | boolean | no | true (default) lists the whole in-memory merge, engine Base ini layers included; false lists only the sections in the project's Config/Default&lt;name>.ini and Saved/Config/&lt;Platform>/&lt;name>.ini, as they are on disk. |
 
-**Returns:** `{ count, sections: [string], found: bool, config_file, file_path }`
+**Returns:** `{ count, sections: [string], found: bool, include_base: bool, config_file, file_path, files_read?: [string] }`
 
 ## `load_level`
 
@@ -984,7 +984,7 @@ IRREVERSIBLE: wipes the editor's ENTIRE undo AND redo history (the human's entri
 
 *Destructive.*
 
-Run ONE registered automation test in this editor, synchronously, and return its verdict (pass, fail or skipped) with its errors, warnings and log entries. Find the name first with list_automation_tests; re-read the last result later without running anything with get_automation_test_results; run every smoke test at once with run_smoke_tests. A test that needs several ticks (PIE, a map load, a wait) is not run here but answered verdict skipped with the reason -- drive it with run_functional_test_in_pie -- and so is one that needs an interactive user or a real renderer in a headless editor; an editor busy with a slow task or PIE refuses the start. Marked destructive and not idempotent because the test's own code runs in the editor and can create, change or delete assets and actors as it was written to, so two runs need not do the same; this tool itself saves nothing and adds no undo step for what the test did.
+Run ONE registered automation test in this editor, synchronously, and return its verdict (pass, fail or skipped) with its errors, warnings and log entries. Find the name first with list_automation_tests; re-read the last result later without running anything with get_automation_test_results; run every smoke test at once with run_smoke_tests. A test that needs several ticks (PIE, a map load, a wait) cannot be run here: it is answered verdict skipped with the reason, and no tool runs it for you -- run_functional_test_in_pie does not start a test, it only reads the verdict a Functional Test actor reports in a session where something else ran it. The same skipped answer comes for a test that needs an interactive user or a real renderer in a headless editor; an editor busy with a slow task or PIE refuses the start. Marked destructive and not idempotent because the test's own code runs in the editor and can create, change or delete assets and actors as it was written to, so two runs need not do the same; this tool itself saves nothing and adds no undo step for what the test did.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -996,14 +996,14 @@ Run ONE registered automation test in this editor, synchronously, and return its
 
 *Destructive.*
 
-Place one instance of a Functional Test Blueprint class in the editor level (unless one is already there), then ask the editor to start a Simulate-in-Editor session and, with auto_stop_pie (default), to end it again. It does not wait for the test or read its result: verdict is "pass" whenever a session is running right after the request and "not_run" otherwise, so it is no test verdict -- read the outcome in the output log (get_output_log_lines), or run a registered test with run_automation_test, whose verdict is real. The start request is deferred (and with no level viewport, headless, nothing starts), so on a first call pie_started is usually false and the session starts after the reply without being stopped: end it with stop_play_in_editor. With a session already running it answers pass and, with auto_stop_pie, ends that session. The placed actor stays in the level, unsaved and with no undo step. Create the test first with create_functional_test; a class that is not found, or is not a Functional Test, is an error.
+Place one instance of a Functional Test Blueprint class in the editor level (unless one is already there) and, when no Play-in-Editor session is running or starting, request a Simulate-in-Editor session. It does not run the test (the engine's functional testing manager does, in a Play session with a player) and cannot wait for it: verdict comes from the test actor's own Result, read in the running session's world -- pass, fail, running, not_run (it has not run) or unknown (it finished with Default) -- and is not_run when no session was running at the call, since the requested one starts only after the reply (pie_requested true, pie_started usually false). With auto_stop_pie (default) the session this call requests is ended as soon as it has started; with false it keeps running until stop_play_in_editor. A session that was already running or starting is never ended. Call it again while a session runs to read the test's state; confirm the session with is_play_in_editor_active. The placed actor stays in the level, unsaved and with no undo step. Create the test first with create_functional_test; a class that is not found, is not a Functional Test, or whose name matches several loaded classes is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `test_asset_path` | string | yes | Functional Test Blueprint, as an asset path ("/Game/Tests/BP_FT_PlayerHealth"), object path or generated-class path ("/Game/Tests/BP_FT_PlayerHealth.BP_FT_PlayerHealth_C"); when none loads, the first loaded Functional Test class whose name contains the last path segment is used. |
-| `auto_stop_pie` | boolean | no | Optional bool (default true): request the end of the session right after it is seen running, including a session that was already running before the call. |
+| `test_asset_path` | string | yes | Functional Test Blueprint, as an asset path ("/Game/Tests/BP_FT_PlayerHealth", as create_functional_test returns it), object path or generated-class path ("/Game/Tests/BP_FT_PlayerHealth.BP_FT_PlayerHealth_C"); when none loads, a loaded Functional Test class named exactly like the last path segment (with or without _C) is used. |
+| `auto_stop_pie` | boolean | no | Optional bool (default true): end the Simulate session this call requests as soon as it has started; false leaves it running. A session that was already running is never ended. |
 
-**Returns:** `{ test_asset_path, pie_started, verdict: "pass"|"not_run", pie_stopped?, already_in_pie?, spawned?, already_in_world?, note? }`
+**Returns:** `{ test_asset_path, test_class, verdict: "pass"|"fail"|"running"|"not_run"|"unknown", test_result?, test_in_session, already_in_pie, pie_requested, pie_started, pie_stop_scheduled, spawned, already_in_world, note }`
 
 ## `run_smoke_tests`
 
@@ -1100,13 +1100,13 @@ Sets a console variable via IConsoleManager and reads the value back.  Uses ICon
 
 *Destructive, idempotent.*
 
-Set several console variables of the running editor in one call, from a JSON object of name/value pairs, each through IConsoleManager at SetByCode priority. Not atomic: names are applied one by one, an unknown name goes to errors and the others still apply. Unlike set_cvar (one variable, console priority, read back) it reads nothing back, and applied counts every name found, including a set the engine ignores because the variable was last set at a higher priority (by the console or by set_cvar), so confirm values with get_cvar. Find names with list_cvars. The values live in this editor session only: nothing is written to an INI (set_engine_ini_value does that) and nothing is undoable. Text that is not a JSON object is an error and nothing changes. Repeating the call sets the same values again.
+Set several console variables of the running editor in one call, from a JSON object of name/value pairs, each through IConsoleManager at SetByCode priority, then read each one back. Not atomic: names are applied one by one, and the others still apply when one fails. applied counts only the variables that hold the new value afterwards; results gives each one's read-back value and set_by. A variable last set at a higher priority (by the console or by set_cvar) ignores this write and goes to errors, as do an unknown name and a value the variable would misread; then success is false (use set_cvar, console priority, for those). Find names with list_cvars. The values live in this editor session only: nothing is written to an INI (set_engine_ini_value does that) and nothing is undoable. Text that is not a JSON object is an error and nothing changes. Repeating the call sets the same values again.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `cvars` | string | yes | A STRING holding a JSON object of exact cvar names to values, e.g. '{"r.ScreenPercentage":"75","t.MaxFPS":"60"}'; names as list_cvars returns them. Give values as text such as "1": a JSON number is passed as its text, and a JSON true/false as the words true/false, which an integer cvar reads as 0. |
+| `cvars` | string | yes | A STRING holding a JSON object of exact cvar names to values, e.g. '{"r.ScreenPercentage":"75","t.MaxFPS":60}'; names as list_cvars returns them. A value is text, a number (passed as its text) or a bool (passed as 1/0); a numeric or bool cvar takes only a number or one of the words true/false/yes/no/on/off (as 1/0), and other text, null, an array or an object is refused for that name. |
 
-**Returns:** `{ applied, requested, errors: [{name, error}] }`
+**Returns:** `{ applied, requested, results: [{name, requested_value, value, set_by, applied}], errors: [{name, error}] }`
 
 ## `set_engine_ini_value`
 
@@ -1154,14 +1154,14 @@ Turn a plugin on (or off, with enabled=false) in the .uproject and save the proj
 
 *Destructive, idempotent.*
 
-Set the running editor's scalability quality, every sg.* group at once (category all, the default) or one group, through Scalability::SetQualityLevels + ApplyCachedQualityLevels, then read all the levels back. It starts from the current levels, so a single-group change leaves the other groups as they were. The change lives in this editor session only: it is not undoable and is not written to GameUserSettings, an INI or a device profile. Check the levels before with get_scalability_levels; for one sg.* or r.* variable use set_cvar instead. An unknown quality word or category is an error and nothing changes; a number outside 0-4 is clamped. set is always true, so compare the returned levels with requested_level. Repeating the call sets the same levels again (idempotent).
+Set the running editor's scalability quality, every sg.* group at once (category all, the default) or one group, through Scalability::SetQualityLevels + ApplyCachedQualityLevels, then read all the levels back. It starts from the current levels, so a single-group change leaves the other groups as they were. The change lives in this editor session only: it is not undoable and is not written to GameUserSettings, an INI or a device profile. Check the levels before with get_scalability_levels; for one sg.* or r.* variable use set_cvar instead. An unknown quality word or category is an error and nothing changes; a number outside 0-4 is clamped. The levels are read back after the change: set is true only when every group asked for now holds its level, and otherwise success is false, with mismatches naming each group the engine left elsewhere. Repeating the call sets the same levels again (idempotent).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `quality` | any | no | Level as a number 0-4 (0 Low, 1 Medium, 2 High, 3 Epic, 4 Cinematic; others clamped) or one of "Low", "Medium", "High", "Epic", "Cinematic", case ignored. Required. |
 | `category` | string | no | One group, case ignored: "ViewDistance", "AntiAliasing", "Shadows", "GlobalIllumination" (or "GI"), "Reflection", "PostProcess", "Texture", "Effects", "Foliage", "Shading", "Landscape"; or "all" (the default) for every group. |
 
-**Returns:** `{ set: bool, requested_level: int, category: string, ResolutionQuality: int, ViewDistanceQuality: int, AntiAliasingQuality: int, ShadowQuality: int, GlobalIlluminationQuality: int, ReflectionQuality: int, PostProcessQuality: int, TextureQuality: int, EffectsQuality: int, FoliageQuality: int, ShadingQuality: int, LandscapeQuality: int }`
+**Returns:** `{ set: bool, requested_level: int, category: string, ResolutionQuality: int, ViewDistanceQuality: int, AntiAliasingQuality: int, ShadowQuality: int, GlobalIlluminationQuality: int, ReflectionQuality: int, PostProcessQuality: int, TextureQuality: int, EffectsQuality: int, FoliageQuality: int, ShadingQuality: int, LandscapeQuality: int, mismatches?: [string] }`
 
 ## `set_struct_member_default`
 

@@ -543,7 +543,7 @@ Drop the edge that feeds the input to_input_name of node to_node_id in a MetaSou
 
 *Destructive.*
 
-Unwires one input of a node in a USoundCue asset: the parent's input slot, picked by the child wired into it or by its index, is emptied, in one undo step, then the cue is saved; a failed save, as during PIE, makes success false with save_error. Inverse of connect_sound_cue_nodes. The slot itself is kept (empty, -1 in get_sound_cue_graph) so other input indexes do not shift, and the child node stays in the cue: remove_sound_cue_node deletes a node. A slot that is already empty or out of range, or a child not wired into the parent, succeeds with already_disconnected true and nothing changed or saved. A cue that does not load, a node id out of range, or neither child_node_id nor input_index is an error. Read ids and wiring first with get_sound_cue_graph; the cue's output node is set with set_sound_cue_first_node.
+Unwires one input of a node in a USoundCue asset: the parent's input slot, picked by the child wired into it or by its index, is emptied, in one undo step, then the cue is saved; a failed save, as during PIE, makes success false with save_error. Inverse of connect_sound_cue_nodes. When the cue has an editor graph (it was made or edited in the Sound Cue editor), the wire into that input pin is broken too (graph_links_broken counts it), so the editor does not rebuild the slot from its graph. The slot itself is kept (empty, -1 in get_sound_cue_graph) so other input indexes do not shift, and the child node stays in the cue: remove_sound_cue_node deletes a node. A slot that is already empty or out of range, or a child not wired into the parent, succeeds with already_disconnected true and nothing changed or saved. A cue that does not load, a node id out of range, or neither child_node_id nor input_index is an error. Read ids and wiring first with get_sound_cue_graph; the cue's output node is set with set_sound_cue_first_node.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -552,7 +552,7 @@ Unwires one input of a node in a USoundCue asset: the parent's input slot, picke
 | `child_node_id` | number | no | Optional node_id of the wired child; the first slot of the parent holding it is emptied. Wins over input_index when both are given. |
 | `input_index` | number | no | Optional 0-based input slot of the parent to empty directly (its position in that node's child_ids); supply this OR child_node_id. |
 
-**Returns:** `{ cue_path: string, parent_node_id: int, child_node_id: int, input_index: int, parent_class: string, child_class: string, parent_child_count: int, disconnected: bool, already_disconnected: bool, saved: bool }`
+**Returns:** `{ cue_path: string, parent_node_id: int, child_node_id: int, input_index: int, parent_class: string, child_class: string, parent_child_count: int, graph_links_broken: int, disconnected: bool, already_disconnected: bool, saved: bool, save_error?: string }`
 
 ## `get_audio_bus`
 
@@ -766,13 +766,15 @@ List every edge of the default graph of a MetaSound Source: from which node and 
 
 *Read-only.*
 
-List the MetaSound node classes the editor's MetaSound search engine knows, without changing anything: per class its class_name, class_path (Namespace.Name.Variant, e.g. UE.Sine.Audio: the three parts add_metasound_node takes as class_namespace, class_name and class_variant), type (e.g. External, the type of node classes and MetaSound assets), highest version (major.minor; the major is add_metasound_node's major_version), access_flags and is_native (true when the class name has a namespace, as engine and plugin nodes do). Deprecated classes are left out and only the highest version of each is listed; with include_unloaded (default) MetaSound assets not loaded yet are included too. The list is long (hundreds of classes) and has no filter. Use it to find a class before add_metasound_node; the nodes already in one MetaSound's graph are list_metasound_nodes, and one node's pins get_metasound_node_info. Editor only.
+List the MetaSound node classes the editor's MetaSound search engine knows, without changing anything: per class its class_name, class_path (Namespace.Name.Variant, e.g. UE.Sine.Audio: the three parts add_metasound_node takes as class_namespace, class_name and class_variant), type (e.g. External, the type of node classes and MetaSound assets), highest version (major.minor; the major is add_metasound_node's major_version), access_flags, is_native (false for a class a MetaSound asset defines, as the MetaSound asset manager knows it, true for one registered by engine or plugin code; null if the asset manager is unavailable) and asset_path (the defining asset, empty for a native class). Deprecated classes are left out and only the highest version of each is listed; with include_unloaded (default) MetaSound assets not loaded yet are included too. The full list is long (hundreds of classes, too long to come back inline), so narrow it with name_filter and max_results; count is what came back, matched_count what matched the filter and total_count every class. Use it to find a class before add_metasound_node; the nodes already in one MetaSound's graph are list_metasound_nodes, and one node's pins get_metasound_node_info. Editor only.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `include_unloaded` | boolean | no | true (default) also lists the classes of MetaSound assets not loaded into memory yet, from the MetaSound asset manager's tag data; false lists only the classes registered now. |
+| `name_filter` | string | no | Optional text matched, case-insensitively, inside each class_path or asset_path, e.g. "Sine" or "/Game/Audio/MS_"; empty lists every class. |
+| `max_results` | number | no | Optional cap on the classes returned after the filter (default 0, no cap); truncated says whether it cut the list. |
 
-**Returns:** `{ count, types: [{ class_name, class_path, type, version, access_flags, is_native }] }`
+**Returns:** `{ count, matched_count, total_count, truncated, types: [{ class_name, class_path, type, version, access_flags, is_native, asset_path }] }`
 
 ## `list_metasound_nodes`
 
@@ -936,14 +938,14 @@ Remove the sound class adjuster for one sound class from a USoundMix, in one und
 
 *Destructive.*
 
-Detach the effect at effect_index from the effect chain of a soundfield submix asset, in one undo step, then save the submix; later effects shift down one index and the effect object itself stays in the package. The inverse of add_soundfield_effect_to_submix; find the index with get_soundfield_submix_info. The same index again removes the next effect, and an index past the end of the chain is an error with nothing changed. Success needs the save: a failed save makes success false, with saved false, save_error and the change only in memory. When no concrete soundfield effect class is loaded (stock Unreal ships none; a spatial audio plugin adds them) the chain is not touched and the call fails with removed false and a note. A path that does not load as a soundfield submix is an error. For an ordinary submix use remove_submix_effect_from_chain.
+Detach the effect at effect_index from the effect chain of a soundfield submix asset, in one undo step, then save the submix; later effects shift down one index and the effect object itself stays in the package. The inverse of add_soundfield_effect_to_submix; find the index with get_soundfield_submix_info. The same index again removes the next effect, and an index past the end of the chain is an error with nothing changed. Success needs the save: a failed save makes success false, with saved false, save_error and the change only in memory. It works whether or not a concrete soundfield effect class is loaded (stock Unreal ships none; a spatial audio plugin adds them): any entry of the chain, a null slot included, is detached. A path that does not load as a soundfield submix is an error. For an ordinary submix use remove_submix_effect_from_chain.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `submix_path` | string | yes | Asset path of the soundfield submix, e.g. "/Game/Audio/SFS_Ambisonics", as create_soundfield_submix returns it (submix_path). |
 | `effect_index` | number | yes | 0-based position in the effect chain, as get_soundfield_submix_info returns it (effect_chain[].index); a negative value is an error. |
 
-**Returns:** `{ submix_path, effect_index, removed_effect_class, removed_effect_path, removed: true, already_absent: false, chain_length, saved, save_error? } -- success only when saved; with no concrete effect class loaded the call fails with { submix_path, effect_index, removed: false, saved: false, note } and the chain is not touched.`
+**Returns:** `{ submix_path, effect_index, removed_effect_class, removed_effect_path, removed: true, already_absent: false, chain_length, saved, save_error? } -- success only when saved; removed_effect_class and removed_effect_path are empty for a null slot.`
 
 ## `remove_submix_effect_from_chain`
 
@@ -1016,7 +1018,7 @@ Sets the sound asset of an audio component of the editor world, found by object 
 
 *Destructive, idempotent.*
 
-Sets the VolumeMultiplier of one audio component placed in the editor world (not PIE); the engine setter also resets its VolumeModulationMin/Max to 1. The component is found by object name (case-insensitive) among EVERY audio component of every actor; a name that components of several actors carry is an error listing the owners, nothing changed, unless actor_name (object name, not label) picks one. No undo step and no dirty mark: the value is lost on reload unless the level gets saved for another reason. A volume outside 0-10 is an error and nothing changes; the same value again gives the same result. Find components with get_audio_settings and read one with get_audio_component_properties; set_audio_sound changes its sound, set_audio_3d_settings its attenuation; to scale a whole sound class use set_sound_mix_class_override.
+Sets the VolumeMultiplier of one audio component placed in the editor world (not PIE); the engine setter also resets its VolumeModulationMin/Max to 1. The component is found by object name (case-insensitive) among EVERY audio component of every actor; a name that components of several actors carry is an error listing the owners, nothing changed, unless actor_name (object name, not label) picks one. No undo step and no dirty mark: the value is lost on reload unless the level gets saved for another reason. A volume outside 0-10 is an error and nothing changes; the same value again gives the same result. The multiplier is read back: new_volume is the value the component holds, and one that does not match the request makes success false with volume_set false. Find components with get_audio_settings and read one with get_audio_component_properties; set_audio_sound changes its sound, set_audio_3d_settings its attenuation; to scale a whole sound class use set_sound_mix_class_override.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

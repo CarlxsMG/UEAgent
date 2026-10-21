@@ -2745,7 +2745,7 @@ namespace
     }
 }
 
-// MCP:attach_blueprint_component - Re-parents a component already in a Blueprint's Components tree (an SCS component), at an optional socket or bone: under another SCS component, under a native scene component inherited from a C++ parent (e.g. ACharacter's "CharacterMesh0", so its sockets are reachable), or under the scene root when parent_component_name is omitted or "root". The Blueprint is then compiled and left unsaved (save_asset writes it). Idempotent: a component already under that parent with the same socket returns already_attached true and nothing is recompiled. Refused with nothing changed when the Blueprint, the component or the parent is not found, or when the parent is the component itself or one of its descendants. Refused while Play-in-Editor runs unless force=true. To add a new component use add_component_to_blueprint (inverse: remove_component_from_blueprint); read the tree with get_blueprint_components; for actors placed in a level use attach_actor.
+// MCP:attach_blueprint_component - Re-parents a component already in a Blueprint's Components tree (an SCS component), at an optional socket or bone: under another SCS component, under a native scene component inherited from a C++ parent (e.g. ACharacter's "CharacterMesh0", so its sockets are reachable), or under the scene root when parent_component_name is omitted or "root". The Blueprint is then compiled and left unsaved (save_asset writes it); the call is one undo step that restores the previous parent and socket. Idempotent: a component already under that parent with the same socket returns already_attached true and nothing is recompiled. Refused with nothing changed when the Blueprint, the component or the parent is not found, or when the parent is the component itself or one of its descendants. Refused while Play-in-Editor runs unless force=true. To add a new component use add_component_to_blueprint (inverse: remove_component_from_blueprint); read the tree with get_blueprint_components; for actors placed in a level use attach_actor.
 //   @param blueprint_name - Blueprint asset path (e.g. "/Game/Characters/BP_Hero") or bare asset name, looked up under /Game/Blueprints first and then anywhere under /Game.
 //   @param component_name - Variable name of the SCS component to move (the child), as get_blueprint_components lists it; inherited native components cannot be moved.
 //   @param parent_component_name - Optional parent component name, as get_blueprint_components lists it; omit / "root" / the native root name attaches to the scene root. May also name a NATIVE inherited scene component (e.g. "CharacterMesh0") to parent the child natively to it.
@@ -2803,6 +2803,16 @@ TSharedPtr<FJsonObject> HandleAttachBlueprintComponent(const TSharedPtr<FJsonObj
         return Obj;
     };
 
+    // Records the construction script and the child node for undo before the first change: AttachToName and the
+    // parent fields live on the node, and a re-parent that only changes those is not recorded by the SCS calls.
+    auto RecordForUndo = [&]()
+    {
+        SCS->SetFlags(RF_Transactional);
+        SCS->Modify();
+        ChildNode->SetFlags(RF_Transactional);
+        ChildNode->Modify();
+    };
+
     // Keeps the child a ROOT SCS node (native-parented nodes live in RootNodes). It is restructured only when it
     // is currently a child of another node (the detach removes it from AllNodes; AddNode re-adds it once); a node
     // that is already a root leaves the root set untouched.
@@ -2857,6 +2867,7 @@ TSharedPtr<FJsonObject> HandleAttachBlueprintComponent(const TSharedPtr<FJsonObj
                 {
                     return MakeLinkagePayload(/*bAlreadyAttached=*/true);
                 }
+                RecordForUndo();
                 KeepAsRootNode();
                 ChildNode->SetParent(NativeParent); // const USceneComponent* overload: sets bIsParentComponentNative=true
                 ChildNode->AttachToName = SocketFName;
@@ -2883,6 +2894,7 @@ TSharedPtr<FJsonObject> HandleAttachBlueprintComponent(const TSharedPtr<FJsonObj
             return MakeLinkagePayload(/*bAlreadyAttached=*/true);
         }
 
+        RecordForUndo();
         MakeChildOfSCSNode(SCS, ChildNode, ParentNode, SocketFName);
         return CommitLinkage();
     }
@@ -2896,6 +2908,7 @@ TSharedPtr<FJsonObject> HandleAttachBlueprintComponent(const TSharedPtr<FJsonObj
         {
             return MakeLinkagePayload(/*bAlreadyAttached=*/true);
         }
+        RecordForUndo();
         MakeChildOfSCSNode(SCS, ChildNode, SceneRootNode, SocketFName);
         return CommitLinkage();
     }
@@ -2908,6 +2921,7 @@ TSharedPtr<FJsonObject> HandleAttachBlueprintComponent(const TSharedPtr<FJsonObj
         {
             return MakeLinkagePayload(/*bAlreadyAttached=*/true);
         }
+        RecordForUndo();
         KeepAsRootNode();
         ChildNode->SetParent(NativeRoot); // const USceneComponent* overload: sets bIsParentComponentNative=true
         ChildNode->AttachToName = SocketFName;
@@ -2924,6 +2938,7 @@ TSharedPtr<FJsonObject> HandleAttachBlueprintComponent(const TSharedPtr<FJsonObj
         return MakeLinkagePayload(/*bAlreadyAttached=*/true);
     }
 
+    RecordForUndo();
     KeepAsRootNode();
     ChildNode->ParentComponentOrVariableName = NAME_None;
     ChildNode->ParentComponentOwnerClassName = NAME_None;

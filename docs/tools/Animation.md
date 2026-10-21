@@ -10,17 +10,17 @@ Back to the [index](README.md).
 
 *Additive.*
 
-Add an FAnimSegment that plays a whole UAnimSequence to a UAnimComposite's AnimationTrack in one undo step, re-stack all segments end to end, recompute the composite length and save the asset. The segments are ordered by start_pos before the re-stack, so to append at the end pass start_pos at or past the current composite_length; the default 0 ties with the first segment and normally sorts in front of it. Every call adds another segment (not idempotent). Create the composite first with create_anim_composite, check it with get_anim_asset_info, and take a segment out by index with remove_anim_composite_segment. A composite and sequence on different skeletons, or a path that does not load, is an error and nothing changes. A failed save (always while PIE runs) makes the reply's success false with saved=false and save_error; the success field inside the data stays true, so read saved.
+Add an FAnimSegment that plays a whole UAnimSequence to a UAnimComposite's AnimationTrack in one undo step, re-stack all segments end to end, recompute the composite length and save the asset. Without start_pos the new segment is appended after the last one; with start_pos it goes in front of the first segment that starts at or after that time (0 puts it first), and segment_index says where it landed. Every call adds another segment (not idempotent). Create the composite first with create_anim_composite, check it with get_anim_asset_info, and take a segment out by index with remove_anim_composite_segment. A composite and sequence on different skeletons, a start_pos that is not a number, or a path that does not load, is an error and nothing changes. A failed save (always while PIE runs) makes success false, with saved=false and save_error, the segment kept in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `composite_path` | string | yes | Object path of the UAnimComposite, e.g. '/Game/Animation/AC_Example' (create_anim_composite makes one). |
 | `animation_path` | string | yes | Object path of the UAnimSequence to play, on the composite's skeleton, e.g. '/Game/Anims/A_Walk'; the segment covers its full length. |
-| `start_pos` | number | no | Start time in seconds used only to order the new segment among the existing ones before all are re-stacked end to end (default 0, which normally sorts it first); pass the current composite_length or more to append. |
+| `start_pos` | number | no | Optional time in seconds that places the new segment: in front of the first segment starting at or after it (0 = first), after every segment when it is at or past composite_length; all segments are then re-stacked end to end. Omit it to append at the end. |
 | `play_rate` | number | no | Playback rate of the segment, 1.0 = normal speed, 2.0 = twice as fast (default 1.0). |
 | `loop_count` | number | no | How many times the segment repeats, a whole number; values below 1 become 1 (default 1). |
 
-**Returns:** `{ composite_path, animation_path, num_segments, composite_length, segments, success, saved, save_error }`
+**Returns:** `{ composite_path, animation_path, segment_index, num_segments, composite_length, segments, success, saved, save_error }`
 
 ## `add_anim_conduit`
 
@@ -1500,14 +1500,14 @@ Re-run UAnimMontage::RefreshCacheData on a UAnimMontage in an undo transaction (
 
 *Destructive.*
 
-Reimport a UAnimSequence from a source file you name (source_file_path), or else from its first recorded source, through FReimportManager, fully automated with no dialogs. The class is not checked, so any asset a legacy reimport handler accepts works. The new content lands in memory only and is not saved (save it with save_asset), and it cannot be undone. Use reimport_asset for a plain reimport from the recorded sources, reimport_interchange_asset for an asset imported through Interchange, and get_asset_import_data to see the recorded source first. Before reimporting it checks the one source file it will use: none recorded, or the file missing on disk (the engine would crash on it), is refused with success=false, reimported=false, source_validated=false and a note, and nothing changes; a reimport the handler reports as failed is success=false too. An asset no handler accepts, or a path that does not load, is an error. Every call reimports again.
+Reimport a UAnimSequence from a source file you name (source_file_path), or else from its first recorded source, through FReimportManager, fully automated with no dialogs. The class is not checked, so any asset a legacy reimport handler accepts works. The new content lands in memory only and is not saved (save it with save_asset), and it cannot be undone. Use reimport_asset for a plain reimport from the recorded sources, reimport_interchange_asset for an asset imported through Interchange, and get_asset_import_data to see the recorded source first. Before reimporting it checks on disk every file the reimport reads, as reimport_asset does: the source_file_path you give, or else every source file the asset records. No source recorded, or any of those files missing (the engine would crash on it; missing_files lists them), is refused with success=false, reimported=false, source_validated=false and a note, and nothing changes; a reimport the handler reports as failed is success=false too. An asset no handler accepts, or a path that does not load, is an error. Every call reimports again.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `anim_sequence_path` | string | yes | Object path of the UAnimSequence, e.g. '/Game/Anims/A_Walk' or '/Game/Anims/A_Walk.A_Walk'. |
-| `source_file_path` | string | no | Absolute path on disk of the file to reimport from, e.g. "D:/Art/Walk.fbx"; omit it to use the first source file recorded in the asset's import data (get_asset_import_data shows it). |
+| `source_file_path` | string | no | Absolute path on disk of the file to reimport from, e.g. "D:/Art/Walk.fbx"; it replaces the recorded sources. Omit it to reimport from the source files recorded in the asset's import data (get_asset_import_data shows them), which must all exist. |
 
-**Returns:** `{ anim_sequence_path, source_file_path, reimported, source_validated, note? }`
+**Returns:** `{ anim_sequence_path, source_file_path, source_files, reimported, source_validated, missing_files?, note? }`
 
 ## `remove_anim_bone_track`
 
@@ -1807,7 +1807,7 @@ Remove one slot animation track (the FSlotAnimationTrack and every segment on it
 
 *Destructive, idempotent.*
 
-Destroy the UMotionWarpingComponent of an actor (the first one found), with all its warp targets; the inverse of add_motion_warping_component. The actor is recorded in the call's undo step (Actor->Modify) and its level is marked dirty, not saved (save_level persists it). Only an instance component stays gone: one that the actor's Blueprint or C++ class defines comes back (when its construction script reruns, or on reload), so remove that one from the class instead. To clear targets but keep the component use remove_motion_warping_target (all=true); check the result with get_motion_warping_component_info. Idempotent: an actor without one returns already_existed=false, removed=false and a note, not an error. An actor that is not found is an error and nothing changes.
+Destroy the UMotionWarpingComponent of an actor (the first one found), with all its warp targets; the inverse of add_motion_warping_component. The actor is recorded in the call's undo step (Actor->Modify) and its level is marked dirty, not saved (save_level persists it). Only an instance component stays gone: one that the actor's Blueprint or C++ class defines comes back (when its construction script reruns, or on reload), so remove that one from the class instead. To clear targets but keep the component use remove_motion_warping_target (all=true); check the result with get_motion_warping_component_info. removed is read back from the actor: true once the component is off its component list and being destroyed, and a component still there makes success false. Idempotent: an actor without one returns already_existed=false, removed=false and a note, not an error. An actor that is not found is an error and nothing changes.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1873,7 +1873,7 @@ Delete the named pose from a UPoseAsset (UPoseAsset::DeletePoses, which also fix
 
 *Destructive.*
 
-Remove one feature channel (a UPoseSearchFeatureChannel_* such as Pose or Trajectory) from a motion-matching UPoseSearchSchema, chosen by index or by type, in one undo step; the schema is then re-finalized (PostEditChange) and saved. The inverse of add_pose_search_channel_to_schema; to only lower a channel's influence, set its weight with that tool instead. List the channels first with get_pose_search_schema_info, and rebuild every database that uses the schema with build_pose_search_database_index afterwards, since the old index no longer matches. An index out of range or no channel of that type is a success with removed=false, already_absent=true and nothing saved. Not idempotent: indices shift after a removal, and by type each call takes the next channel of that class. Passing neither selector, an unknown channel_type, or a schema that does not load is an error. previous_count counts the schema's source channels, while channel_count counts the finalized ones, which can be 0 when finalizing fails. A failed save (always while PIE runs) makes success false, with saved=false and save_error.
+Remove one feature channel (a UPoseSearchFeatureChannel_* such as Pose or Trajectory) from a motion-matching UPoseSearchSchema, chosen by index or by type, in one undo step; the schema is then re-finalized (PostEditChange) and saved. The inverse of add_pose_search_channel_to_schema; to only lower a channel's influence, set its weight with that tool instead. List the channels first with get_pose_search_schema_info, and rebuild every database that uses the schema with build_pose_search_database_index afterwards, since the old index no longer matches. An index out of range or no channel of that type is a success with removed=false, already_absent=true and nothing saved. Not idempotent: indices shift after a removal, and by type each call takes the next channel of that class. Passing neither selector, an unknown channel_type, or a schema that does not load is an error. previous_count and channel_count count the schema's source channels (the list channel_index indexes) before and after the call, so a removal shows as one less; finalized_channel_count is the finalized view, 0 when finalizing fails, and finalized and finalize_warning say whether the schema finalized. A failed save (always while PIE runs) makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1881,7 +1881,7 @@ Remove one feature channel (a UPoseSearchFeatureChannel_* such as Pose or Trajec
 | `channel_index` | number | no | 0-based index into the schema's source channel list (the order of get_pose_search_schema_info's finalized_channels once the schema is finalized; that tool lists none before); takes precedence over channel_type when both are given. |
 | `channel_type` | string | no | "Pose", "Trajectory", "Position", "Velocity" or "Heading", case ignored; removes the first channel of that class, subclasses included. Used only when channel_index is absent. |
 
-**Returns:** `{ schema_path, channel_index, channel_type, channel_class, schema_cardinality, channel_count, previous_count, removed, already_absent, saved, save_error?, message }`
+**Returns:** `{ schema_path, channel_index, channel_type, channel_class, schema_cardinality, channel_count (source, after), previous_count (source, before), finalized_channel_count, source_channel_count, finalized, finalize_warning?, removed, already_absent, saved, save_error?, message }`
 
 ## `remove_pose_search_roled_skeleton`
 
@@ -1995,14 +1995,14 @@ Delete one morph target, by name, from a skeletal mesh asset found by content pa
 
 *Destructive, idempotent.*
 
-Deletes a socket from a skeletal mesh asset, together with the same-named socket on its skeleton and the preview assets attached to that socket name. One undo step, then the mesh package is saved, and a failed save is an error. The skeleton is only changed in memory and left unsaved (save_asset writes it), so a socket that exists only on the skeleton is deleted there but not on disk. Idempotent: a name neither the mesh nor its skeleton has returns already_removed true, with nothing changed or saved. A socket that should go from a Skeleton asset alone is better deleted with remove_skeleton_socket, which saves it; static meshes use remove_static_mesh_socket. Re-add with add_skeletal_mesh_socket; get_skeletal_mesh_info reports the socket count.
+Deletes a socket from a skeletal mesh asset, together with the same-named socket on its skeleton and the preview assets attached to that socket name. One undo step, then every asset that changed is saved: the mesh for its own socket, the skeleton for its socket (saved_assets lists them), so a socket that lives only on the skeleton is deleted from the skeleton's file too; a failed save makes success false with save_error and leaves the deletion in memory. An asset that would change but cannot be saved (engine content, a read-only root) is refused before anything changes. Idempotent: a name neither the mesh nor its skeleton has returns already_removed true, with nothing changed or saved. A socket that should go from a Skeleton asset alone can also be deleted with remove_skeleton_socket; static meshes use remove_static_mesh_socket. Re-add with add_skeletal_mesh_socket; get_skeletal_mesh_info reports the socket count.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `skeletal_mesh_path` | string | yes | Package or object path of the skeletal mesh asset (e.g. "/Game/Characters/SK_Hero"). |
 | `socket_name` | string | yes | Name of the socket to delete, matched case-insensitively (e.g. "hand_r_socket"). |
 
-**Returns:** `{ socket_name: string, skeletal_mesh_path: string, removed: bool, already_removed: bool, socket_count: int }`
+**Returns:** `{ socket_name: string, skeletal_mesh_path: string, removed: bool, already_removed: bool, removed_from_mesh: bool, removed_from_skeleton: bool, saved_assets: [string], saved: bool, save_error?: string, socket_count: int } -- removed is read back (the name is no longer found on the mesh or its skeleton)`
 
 ## `remove_skeleton_socket`
 
@@ -2134,9 +2134,9 @@ Rename a morph target on a skeletal mesh asset and save the mesh. Fails if old_n
 
 ## `rename_skeletal_mesh_socket`
 
-*Destructive.*
+*Destructive, idempotent.*
 
-Renames a socket of a skeletal mesh asset; a socket of the same name on the mesh's skeleton is renamed too. One undo step, then the mesh package is saved, and a failed save is an error (the rename stays in memory). The skeleton is only changed in memory and left unsaved (save_asset writes it), so a socket that exists only on the skeleton is renamed there but not written to disk. Refused with nothing changed when new_name equals old_name, a socket called new_name already exists on the mesh or its skeleton, or old_name is not found, so a repeat call fails because old_name is gone. Add a socket with add_skeletal_mesh_socket, re-parent one with set_skeletal_mesh_socket_parent, delete one with remove_skeletal_mesh_socket; Skeleton assets: add_skeleton_socket and remove_skeleton_socket; static meshes: rename_static_mesh_socket.
+Renames a socket of a skeletal mesh asset; a socket of the same name on the mesh's skeleton is renamed too, and preview assets attached to the old name follow it. One undo step, then every asset that changed is saved: the mesh for its own socket, the skeleton for its socket (saved_assets lists them), so a socket that lives only on the skeleton is written to the skeleton's file; a failed save makes success false with save_error and leaves the rename in memory. Refused with nothing changed when new_name equals old_name, a socket called new_name already exists on the mesh or its skeleton while old_name is still there, old_name is not found, or an asset that would change cannot be saved (engine content, a read-only root). Idempotent: when old_name is gone and new_name is there, it succeeds with already_renamed true and nothing changed or saved. Add a socket with add_skeletal_mesh_socket, re-parent one with set_skeletal_mesh_socket_parent, delete one with remove_skeletal_mesh_socket; Skeleton assets: add_skeleton_socket and remove_skeleton_socket; static meshes: rename_static_mesh_socket.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2144,7 +2144,7 @@ Renames a socket of a skeletal mesh asset; a socket of the same name on the mesh
 | `old_name` | string | yes | Current socket name, matched case-insensitively (e.g. "hand_r_socket"). |
 | `new_name` | string | yes | New socket name; must differ from old_name and be free on the mesh and its skeleton (a change of letter case only counts as taken). |
 
-**Returns:** `{ old_name: string, new_name: string, skeletal_mesh_path: string, renamed: bool, already_renamed: bool, socket_count: int } -- already_renamed is always false (a repeat call is an error instead); socket_count adds the mesh's sockets and its skeleton's`
+**Returns:** `{ old_name: string, new_name: string, skeletal_mesh_path: string, renamed: bool, already_renamed: bool, renamed_on_mesh: bool, renamed_on_skeleton: bool, saved_assets: [string], saved: bool, save_error?: string, socket_count: int } -- renamed is read back (new_name found, old_name gone); socket_count adds the mesh's sockets and its skeleton's`
 
 ## `scale_anim_curve`
 

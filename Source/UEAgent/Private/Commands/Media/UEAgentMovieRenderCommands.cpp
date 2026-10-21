@@ -5,6 +5,8 @@
 #include "Commands/Media/LevelSequenceUtils.h"
 
 #include "Editor.h"
+#include "Engine/World.h"           // render_sequence_to_movie: the editor world as the default job map
+#include "Misc/PackageName.h"       // FPackageName::IsValidLongPackageName -- the map check the PIE executor makes
 #include "UObject/SoftObjectPath.h" // FSoftObjectPath + FDirectoryPath
 #include "Math/IntPoint.h"
 
@@ -65,6 +67,42 @@ namespace UEAgentMovieRenderImpl
         }
         return Queue;
     }
+
+    // Whether the PIE render executor accepts Map as a job's map: before rendering it checks every job of the queue
+    // with UMoviePipelineEditorBlueprintLibrary::IsMapValidForRemoteRender -- a valid long package name under a
+    // writable root, so neither an empty map nor an unsaved level (under the read-only /Temp root) -- and stops the
+    // whole render at once when one fails.
+    bool IsRenderableMap(const FSoftObjectPath& Map)
+    {
+        return FPackageName::IsValidLongPackageName(Map.GetLongPackageName());
+    }
+
+    // The map a new job renders in: MapPath when given, else the level open in the editor (what the Movie Render Queue
+    // window gives a new job). Null with OutMap set when the PIE executor accepts it, else the error reply of Tool,
+    // so no job is added that would stop every render of the queue.
+    TSharedPtr<FJsonObject> ResolveJobMap(const FString& MapPath, const TCHAR* Tool, FSoftObjectPath& OutMap)
+    {
+        OutMap.Reset();
+        if (!MapPath.IsEmpty())
+        {
+            OutMap = FSoftObjectPath(MapPath);
+        }
+        else if (UWorld* EditorWorld = mcp_common::GetEditorWorld())
+        {
+            OutMap = FSoftObjectPath(EditorWorld);
+        }
+        if (IsRenderableMap(OutMap))
+        {
+            return nullptr;
+        }
+        const FString MapLabel = MapPath.IsEmpty()
+            ? FString::Printf(TEXT("of the level open in the editor ('%s')"), *OutMap.ToString())
+            : FString::Printf(TEXT("'%s'"), *MapPath);
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("%s: the map %s is not the package path of a saved map (such as /Game/Maps/MyMap.MyMap; an unsaved level lives ")
+            TEXT("under /Temp), so the renderer would stop at once; nothing was added. Pass map_path, or save the level first."),
+            Tool, *MapLabel));
+    }
 }
 
 UMoviePipelineQueueSubsystem* GetQueueSubsystem()
@@ -101,10 +139,10 @@ UMoviePipelineExecutorJob* FindJobByName(const FString& JobName)
 // ---------------------------------------------------------------------------
 // create_render_job
 // ---------------------------------------------------------------------------
-// MCP:create_render_job - Adds a new job for a Level Sequence to this editor session's Movie Render Queue, without rendering: the job points at the sequence, takes map_path as its map when given, and has its default primary configuration. One undo step; the queue lives in memory, so nothing is saved to disk and the job is gone when the editor closes. Works headless. Each call adds another job, even with a job_name the queue already has (tools that take job_name then act on the first match). Next, set resolution, folder and image format with set_render_job_output and render with render_sequence_to_movie, which renders every job in the queue; get_render_queue lists the jobs and delete_render_job takes one out. For a quick render with default PNG output, render_sequence_to_movie alone is enough.
+// MCP:create_render_job - Adds a new job for a Level Sequence to this editor session's Movie Render Queue, without rendering: the job points at the sequence, renders in map_path or, without it, in the level open in the editor (as the Movie Render Queue window does), and has its default primary configuration. A map that is not the package path of a saved map (an unsaved level included) is refused before the job is added, since the renderer would stop the whole queue at once. One undo step; the queue lives in memory, so nothing is saved to disk and the job is gone when the editor closes. Works headless. Each call adds another job, even with a job_name the queue already has (tools that take job_name then act on the first match). Next, set resolution, folder and image format with set_render_job_output and render with render_sequence_to_movie, which renders every job in the queue; get_render_queue lists the jobs and delete_render_job takes one out. For a quick render with default PNG output, render_sequence_to_movie alone is enough.
 //   @param sequence_name - Asset name of the Level Sequence, not a path (e.g. "Intro"): the first Level Sequence under /Game with that name, case-insensitive; get_level_sequences lists them.
 //   @param job_name - Optional job name (default "RenderJob_<sequence_name>"), the name set_render_job_output and delete_render_job take; not checked for uniqueness.
-//   @param map_path - Optional object path of the map the job renders in (e.g. "/Game/Maps/MyMap.MyMap"), stored as given and not checked; without it the render plays the level open in the editor.
+//   @param map_path - Optional object path of the map the job renders in (e.g. "/Game/Maps/MyMap.MyMap"); without it the job takes the level open in the editor. A map that is not the package path of a saved map (a long package name under a writable root; an unsaved level is under /Temp) is an error and no job is added.
 //   @returns { job_name: string, sequence_name: string, sequence_path: string, map: string, has_configuration: bool, job_created: bool, queue_job_count: number }
 
 TSharedPtr<FJsonObject> HandleCreateRenderJob(const TSharedPtr<FJsonObject>& Params)
@@ -126,6 +164,16 @@ TSharedPtr<FJsonObject> HandleCreateRenderJob(const TSharedPtr<FJsonObject>& Par
         return Error;
     }
 
+    // The map is resolved, and one the renderer would reject refused, before the job is added: a job with such a map
+    // would make every later render of the queue stop at once.
+    FString MapPath;
+    Params->TryGetStringField(TEXT("map_path"), MapPath);
+    FSoftObjectPath JobMap;
+    if (TSharedPtr<FJsonObject> BadMap = UEAgentMovieRenderImpl::ResolveJobMap(MapPath, TEXT("create_render_job"), JobMap))
+    {
+        return BadMap;
+    }
+
     // Allocate the real job in the editor queue.
     UMoviePipelineExecutorJob* Job = Queue->AllocateNewJob(UMoviePipelineExecutorJob::StaticClass());
     if (!Job)
@@ -145,13 +193,8 @@ TSharedPtr<FJsonObject> HandleCreateRenderJob(const TSharedPtr<FJsonObject>& Par
     const FString SequencePath = Sequence->GetPathName();
     Job->SetSequence(FSoftObjectPath(SequencePath));
 
-    // Map: explicit param, else the sequence's owning world if discoverable. Headless-safe
-    // to leave this as whatever was supplied; the actual render later resolves the map.
-    FString MapPath;
-    if (Params->TryGetStringField(TEXT("map_path"), MapPath) && !MapPath.IsEmpty())
-    {
-        Job->Map = FSoftObjectPath(MapPath);
-    }
+    // Map: map_path, else the level open in the editor (resolved and checked above).
+    Job->Map = JobMap;
 
     // Ensure the job has a primary configuration (it auto-creates a DefaultConfig in its
     // constructor; read it back to confirm and report).
@@ -361,10 +404,10 @@ TSharedPtr<FJsonObject> HandleGetRenderQueue(const TSharedPtr<FJsonObject>& Para
 // ---------------------------------------------------------------------------
 // render_sequence_to_movie
 // ---------------------------------------------------------------------------
-// MCP:render_sequence_to_movie - Renders a Level Sequence to PNG frames with Movie Render Queue: adds a job named OneShot_<sequence_name> with the engine's default output (1920x1080 into {project_dir}/Saved/MovieRenders/) and starts rendering the whole editor queue, jobs from create_render_job included, in a Play-In-Editor session. Asynchronous: it returns at once without waiting for frames, and render_started only says a render executor was launched, not that frames were written; while a render is already running it starts nothing new. Needs an interactive editor, since it starts its own PIE session; headless, the job is still added. Frames overwrite earlier files of the same name in the output folder, and each call adds another job. For another resolution or format use create_render_job and set_render_job_output first; follow progress with get_render_queue and stop with cancel_render_job.
+// MCP:render_sequence_to_movie - Renders a Level Sequence to PNG frames with Movie Render Queue: adds a job named OneShot_<sequence_name> with the engine's default output (1920x1080 into {project_dir}/Saved/MovieRenders/) and starts rendering the whole editor queue, jobs from create_render_job included, in a Play-In-Editor session. Asynchronous: the editor starts that session on its next frame, so the call returns before any frame is written, and render_state is the renderer read right after the start: waiting_for_pie or rendering (render_started true); already_rendering when a render was running, which starts nothing new and the job joins its queue; ended_without_rendering when the renderer stopped at once, which makes success false (the editor log, category LogMovieRenderPipeline, says why; the job stays queued). The job renders in map_path, or without it in the level open in the editor; a map that is not the package path of a saved map (an unsaved level included) is refused before the job is added, and so is a start while the queue holds another job with such a map, since the renderer would abort the whole queue (delete_render_job removes it). The frames need an interactive editor, since they are drawn in that PIE session. Frames overwrite earlier files of the same name in the output folder, and each call adds another job. For another resolution or format use create_render_job and set_render_job_output first; follow progress with get_render_queue and stop with cancel_render_job.
 //   @param sequence_name - Asset name of the Level Sequence, not a path (e.g. "Intro"): the first Level Sequence under /Game with that name, case-insensitive; get_level_sequences lists them.
-//   @param map_path - Optional object path of the map to render in (e.g. "/Game/Maps/MyMap.MyMap"), stored as given and not checked; without it the render plays the level open in the editor.
-//   @returns { sequence_name: string, job_name: string, job_created: bool, queue_job_count: number, render_started: bool, render_async: bool, note: string }
+//   @param map_path - Optional object path of the map to render in (e.g. "/Game/Maps/MyMap.MyMap"); without it the job takes the level open in the editor, as the Movie Render Queue window does. A map that is not the package path of a saved map (a long package name under a writable root; an unsaved level is under /Temp) is refused before anything changes.
+//   @returns { sequence_name: string, job_name: string, job_created: bool, map_path: string, queue_job_count: number, render_started: bool, render_state: "waiting_for_pie"|"rendering"|"already_rendering"|"ended_without_rendering", render_async: bool, note: string }
 
 TSharedPtr<FJsonObject> HandleRenderSequenceToMovie(const TSharedPtr<FJsonObject>& Params)
 {
@@ -386,6 +429,36 @@ TSharedPtr<FJsonObject> HandleRenderSequenceToMovie(const TSharedPtr<FJsonObject
         return Error;
     }
 
+    // The map the job renders in: map_path, else the level open in the editor, which is what the engine's own
+    // Movie Render Queue window gives a new job. The PIE executor stops the whole queue at once when any job's
+    // map is not a long package name, so such a map is refused here, before the job is added.
+    FString MapPath;
+    Params->TryGetStringField(TEXT("map_path"), MapPath);
+    FSoftObjectPath JobMap;
+    if (TSharedPtr<FJsonObject> BadMap = UEAgentMovieRenderImpl::ResolveJobMap(MapPath, TEXT("render_sequence_to_movie"), JobMap))
+    {
+        return BadMap;
+    }
+    const bool bAlreadyRendering = QueueSubsystem->IsRendering();
+    if (!bAlreadyRendering)
+    {
+        TArray<FString> UnrenderableJobs;
+        for (const UMoviePipelineExecutorJob* Existing : Queue->GetJobs())
+        {
+            if (Existing && !UEAgentMovieRenderImpl::IsRenderableMap(Existing->Map))
+            {
+                UnrenderableJobs.Add(FString::Printf(TEXT("'%s' (map '%s')"), *Existing->JobName, *Existing->Map.ToString()));
+            }
+        }
+        if (UnrenderableJobs.Num() > 0)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("render_sequence_to_movie: the queue holds job(s) whose map is not the package path of a saved map: %s. The renderer would stop ")
+                TEXT("at once for the whole queue, so nothing was added or started; remove them with delete_render_job and re-add them with create_render_job and a map_path."),
+                *FString::Join(UnrenderableJobs, TEXT(", "))));
+        }
+    }
+
     // Author a real one-off job for this sequence with a default PNG output container.
     UMoviePipelineExecutorJob* Job = Queue->AllocateNewJob(UMoviePipelineExecutorJob::StaticClass());
     if (!Job)
@@ -394,12 +467,7 @@ TSharedPtr<FJsonObject> HandleRenderSequenceToMovie(const TSharedPtr<FJsonObject
     }
     Job->JobName = FString::Printf(TEXT("OneShot_%s"), *SequenceName);
     Job->SetSequence(FSoftObjectPath(Sequence->GetPathName()));
-
-    FString MapPath;
-    if (Params->TryGetStringField(TEXT("map_path"), MapPath) && !MapPath.IsEmpty())
-    {
-        Job->Map = FSoftObjectPath(MapPath);
-    }
+    Job->Map = JobMap;
 
     if (UMoviePipelinePrimaryConfig* Config = Job->GetConfiguration())
     {
@@ -409,35 +477,54 @@ TSharedPtr<FJsonObject> HandleRenderSequenceToMovie(const TSharedPtr<FJsonObject
 
     const int32 JobCount = Queue->GetJobs().Num();
 
-    // The render is asynchronous: RenderQueueWithExecutor spins up a Play-In-Editor session
-    // through UMoviePipelinePIEExecutor. We start it but do NOT block on completion -- that
-    // happens across PIE ticks and is reported async. We only attempt the kick if the queue
-    // is not already rendering, and we report honestly whether it started.
-    bool bRenderStarted = false;
+    // The render is asynchronous: the PIE executor requests a Play-In-Editor session, which the editor starts on its
+    // next frame, and renders there. What is measured is the executor right after the start: the subsystem drops an
+    // executor as soon as it finishes -- RenderQueueWithExecutor then returns null, since it returns the active
+    // executor after starting it -- so a null or no-longer-active executor ended without rendering, and one still
+    // active is waiting for its PIE session or already rendering.
+    FString RenderState;
     FString Note;
-    if (QueueSubsystem->IsRendering())
+    if (bAlreadyRendering)
     {
-        Note = TEXT("A movie pipeline render is already in progress; queued job will be picked up. Completion is asynchronous (PIE).");
+        RenderState = TEXT("already_rendering");
+        Note = TEXT("A movie render was already in progress, so nothing new was started; the job joins the running queue. Completion is asynchronous (PIE).");
     }
     else
     {
         UMoviePipelineExecutorBase* Executor =
             QueueSubsystem->RenderQueueWithExecutor(UMoviePipelinePIEExecutor::StaticClass());
-        bRenderStarted = (Executor != nullptr);
-        Note = bRenderStarted
-            ? TEXT("Render started via UMoviePipelinePIEExecutor. Completion is asynchronous (runs in PIE); poll get_render_queue / the editor for progress.")
-            : TEXT("Render executor could not be started in this context (requires an interactive editor / PIE). The queue + job + config were authored for real.");
+        if (!Executor || QueueSubsystem->GetActiveExecutor() != Executor)
+        {
+            RenderState = TEXT("ended_without_rendering");
+            Note = TEXT("The render executor finished at once without rendering a frame; the editor log (LogMovieRenderPipeline) says why.");
+        }
+        else if (Executor->IsRendering())
+        {
+            RenderState = TEXT("rendering");
+            Note = TEXT("Rendering in the PIE session. Completion is asynchronous: frames land in the output folder as they are drawn.");
+        }
+        else
+        {
+            RenderState = TEXT("waiting_for_pie");
+            Note = TEXT("The render executor is waiting for its PIE session, which the editor starts on its next frame; frames land in the output folder as they are drawn.");
+        }
     }
+    const bool bRenderStarted = RenderState == TEXT("rendering") || RenderState == TEXT("waiting_for_pie");
+    const bool bRenderGoing = bRenderStarted || bAlreadyRendering;
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("sequence_name"), SequenceName);
     Data->SetStringField(TEXT("job_name"), Job->JobName);
     Data->SetBoolField(TEXT("job_created"), true);
+    Data->SetStringField(TEXT("map_path"), Job->Map.ToString());
     Data->SetNumberField(TEXT("queue_job_count"), JobCount);
     Data->SetBoolField(TEXT("render_started"), bRenderStarted);
+    Data->SetStringField(TEXT("render_state"), RenderState);
     Data->SetBoolField(TEXT("render_async"), true);
     Data->SetStringField(TEXT("note"), Note);
-    return mcp_common::MakeOkReply(Data);
+    return mcp_common::MakeOutcomeReply(Data, bRenderGoing, bRenderGoing ? FString() : FString::Printf(
+        TEXT("render_sequence_to_movie: the job %s was added but no render is running (render_state %s): %s ")
+        TEXT("The job stays in the queue; delete_render_job removes it."), *Job->JobName, *RenderState, *Note));
 }
 
 // ---------------------------------------------------------------------------

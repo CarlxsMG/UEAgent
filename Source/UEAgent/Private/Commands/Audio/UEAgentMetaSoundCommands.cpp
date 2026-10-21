@@ -29,6 +29,8 @@
 // Reflection-driven node reads (ISearchEngine + reflection on TInstancedStruct<FMetaSoundFrontendNodeConfiguration>).
 #include "MetasoundFrontendQuery.h"                             // FMetaSoundClassInfo (must precede SearchEngine)
 #include "MetasoundFrontendSearchEngine.h"                      // Metasound::Frontend::ISearchEngine
+#include "MetasoundAssetManager.h"                               // IMetaSoundAssetManager: list_metasound_node_types is_native
+#include "MetasoundAssetKey.h"                                   // FMetaSoundAssetKey
 #if UE_VERSION_OLDER_THAN(5, 8, 0)
 #include "MetasoundAssetSubsystem.h"                            // UE 5.7 list_metasound_node_types: FMetaSoundAssetManager::IterateAssetTagData
 #include "MetasoundFrontendRegistryKey.h"                       // UE 5.7 list_metasound_node_types: FNodeClassRegistryKey
@@ -1769,12 +1771,59 @@ TSharedPtr<FJsonObject> HandleRemoveMetaSoundGraphOutput(const TSharedPtr<FJsonO
 //   - The UMetaSoundSource::Document getter is private; only GetConstDocument() (via
 //     IMetaSoundDocumentInterface) is public.
 
+/**
+ * Whether the MetaSound class ClassName at Version is defined by a MetaSound asset, as the MetaSound asset manager
+ * knows it (its class info map covers the assets loaded and those only listed in the Asset Registry), and that
+ * asset's path in OutAssetPath. Only External and Graph classes can be asset classes. A class no asset defines is
+ * native: registered by C++ code (an engine or plugin node, or an input/output/variable template). OutMeasured is
+ * false when there is no asset manager to ask.
+ */
+static bool MetaSound_IsAssetClass(EMetasoundFrontendClassType ClassType, const FMetasoundFrontendClassName& ClassName,
+	const FMetasoundFrontendVersionNumber& Version, FString& OutAssetPath, bool& OutMeasured)
+{
+	OutAssetPath.Reset();
+	const Metasound::Frontend::IMetaSoundAssetManager* AssetManager = Metasound::Frontend::IMetaSoundAssetManager::Get();
+	OutMeasured = AssetManager != nullptr;
+	if (!AssetManager || !FMetaSoundAssetKey::IsValidType(ClassType))
+	{
+		return false;
+	}
+	const FMetaSoundAssetKey Key(ClassName, Version);
+	if (!AssetManager->ContainsKey(Key))
+	{
+		return false;
+	}
+	OutAssetPath = AssetManager->FindAssetPath(Key).ToString();
+	return true;
+}
+
+/** is_native and asset_path of a list_metasound_node_types entry: measured with MetaSound_IsAssetClass, is_native
+ *  null when the asset manager cannot be asked. */
+static void MetaSound_AddNativeFields(const TSharedPtr<FJsonObject>& Entry, EMetasoundFrontendClassType ClassType,
+	const FMetasoundFrontendClassName& ClassName, const FMetasoundFrontendVersionNumber& Version)
+{
+	FString AssetPath;
+	bool bMeasured = false;
+	const bool bAssetClass = MetaSound_IsAssetClass(ClassType, ClassName, Version, AssetPath, bMeasured);
+	if (bMeasured)
+	{
+		Entry->SetBoolField(TEXT("is_native"), !bAssetClass);
+	}
+	else
+	{
+		Entry->SetField(TEXT("is_native"), MakeShared<FJsonValueNull>());
+	}
+	Entry->SetStringField(TEXT("asset_path"), AssetPath);
+}
+
 // ---------------------------------------------------------------------------
 // list_metasound_node_types — ISearchEngine reflection of registered node classes
 // ---------------------------------------------------------------------------
-// MCP:list_metasound_node_types - List the MetaSound node classes the editor's MetaSound search engine knows, without changing anything: per class its class_name, class_path (Namespace.Name.Variant, e.g. UE.Sine.Audio: the three parts add_metasound_node takes as class_namespace, class_name and class_variant), type (e.g. External, the type of node classes and MetaSound assets), highest version (major.minor; the major is add_metasound_node's major_version), access_flags and is_native (true when the class name has a namespace, as engine and plugin nodes do). Deprecated classes are left out and only the highest version of each is listed; with include_unloaded (default) MetaSound assets not loaded yet are included too. The list is long (hundreds of classes) and has no filter. Use it to find a class before add_metasound_node; the nodes already in one MetaSound's graph are list_metasound_nodes, and one node's pins get_metasound_node_info. Editor only.
+// MCP:list_metasound_node_types - List the MetaSound node classes the editor's MetaSound search engine knows, without changing anything: per class its class_name, class_path (Namespace.Name.Variant, e.g. UE.Sine.Audio: the three parts add_metasound_node takes as class_namespace, class_name and class_variant), type (e.g. External, the type of node classes and MetaSound assets), highest version (major.minor; the major is add_metasound_node's major_version), access_flags, is_native (false for a class a MetaSound asset defines, as the MetaSound asset manager knows it, true for one registered by engine or plugin code; null if the asset manager is unavailable) and asset_path (the defining asset, empty for a native class). Deprecated classes are left out and only the highest version of each is listed; with include_unloaded (default) MetaSound assets not loaded yet are included too. The full list is long (hundreds of classes, too long to come back inline), so narrow it with name_filter and max_results; count is what came back, matched_count what matched the filter and total_count every class. Use it to find a class before add_metasound_node; the nodes already in one MetaSound's graph are list_metasound_nodes, and one node's pins get_metasound_node_info. Editor only.
 //   @param include_unloaded - true (default) also lists the classes of MetaSound assets not loaded into memory yet, from the MetaSound asset manager's tag data; false lists only the classes registered now.
-//   @returns { count, types: [{ class_name, class_path, type, version, access_flags, is_native }] }
+//   @param name_filter - Optional text matched, case-insensitively, inside each class_path or asset_path, e.g. "Sine" or "/Game/Audio/MS_"; empty lists every class.
+//   @param max_results - Optional cap on the classes returned after the filter (default 0, no cap); truncated says whether it cut the list.
+//   @returns { count, matched_count, total_count, truncated, types: [{ class_name, class_path, type, version, access_flags, is_native, asset_path }] }
 TSharedPtr<FJsonObject> HandleListMetaSoundNodeTypes(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -1806,7 +1855,7 @@ try
 				Version.ToString());
 			Entry->SetStringField(TEXT("access_flags"),
 				UEnum::GetValueAsString(AccessFlags));
-			Entry->SetBoolField  (TEXT("is_native"), !ClassName.Namespace.IsNone());
+			MetaSound_AddNativeFields(Entry, ClassType, ClassName, Version);
 			TypesJson.Add(MakeShared<FJsonValueObject>(Entry));
 		};
 
@@ -1854,7 +1903,7 @@ try
 				Info.Version.ToString());
 			Entry->SetStringField(TEXT("access_flags"),
 				UEnum::GetValueAsString(Info.AccessFlags));
-			Entry->SetBoolField  (TEXT("is_native"), !Info.ClassName.Namespace.IsNone());
+			MetaSound_AddNativeFields(Entry, Info.ClassType, Info.ClassName, Info.Version);
 			TypesJson.Add(MakeShared<FJsonValueObject>(Entry));
 		}
 #endif
@@ -1865,8 +1914,44 @@ try
 			TEXT("ISearchEngine::Get() failed (MetaSound search engine not initialized in this build)"));
 	}
 
+	// The full list runs to thousands of classes (264,000 characters measured in a blank project), past the size
+	// the reply carries inline, so it is offloaded to a file. name_filter and max_results narrow it.
+	const int32 TotalCount = TypesJson.Num();
+	FString NameFilter;
+	Params->TryGetStringField(TEXT("name_filter"), NameFilter);
+	if (!NameFilter.IsEmpty())
+	{
+		TypesJson.RemoveAll([&NameFilter](const TSharedPtr<FJsonValue>& Value)
+		{
+			const TSharedPtr<FJsonObject>* Entry = nullptr;
+			if (!Value.IsValid() || !Value->TryGetObject(Entry))
+			{
+				return true;
+			}
+			FString ClassPath;
+			FString AssetPath;
+			(*Entry)->TryGetStringField(TEXT("class_path"), ClassPath);
+			(*Entry)->TryGetStringField(TEXT("asset_path"), AssetPath);
+			return !ClassPath.Contains(NameFilter, ESearchCase::IgnoreCase) && !AssetPath.Contains(NameFilter, ESearchCase::IgnoreCase);
+		});
+	}
+	const int32 MatchedCount = TypesJson.Num();
+	int32 MaxResults = 0;
+	Params->TryGetNumberField(TEXT("max_results"), MaxResults);
+	if (MaxResults < 0)
+	{
+		return mcp_common::MakeErrorReply(TEXT("list_metasound_node_types: max_results must be 0 (no limit) or more"));
+	}
+	if (MaxResults > 0 && TypesJson.Num() > MaxResults)
+	{
+		TypesJson.SetNum(MaxResults);
+	}
+
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetNumberField(TEXT("count"), TypesJson.Num());
+	Data->SetNumberField(TEXT("matched_count"), MatchedCount);
+	Data->SetNumberField(TEXT("total_count"), TotalCount);
+	Data->SetBoolField(TEXT("truncated"), TypesJson.Num() < MatchedCount);
 	Data->SetArrayField (TEXT("types"), TypesJson);
 	return mcp_common::MakeOkReply(Data);
 }

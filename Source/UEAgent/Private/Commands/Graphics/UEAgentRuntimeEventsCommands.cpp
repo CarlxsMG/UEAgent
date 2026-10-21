@@ -209,10 +209,10 @@ UObject* ResolveObjectForEvents(const FString& ObjectPath)
     return Resolved;
 }
 
-// MCP:subscribe_to_delegate - Start recording a dynamic multicast delegate (an event such as OnComponentHit or a Blueprint event dispatcher, with any number of parameters) of a live object: a rooted observer is bound to it and every fire is kept with its parameters as text, the latest 512 per subscription. It is the first of three steps: read the fires with poll_delegate_events (subscription_id plus a cursor), and stop with unsubscribe_delegate, which frees the observer; the subscription otherwise stays until the editor closes, and stops recording when the object goes away. Find event names with get_component_events, or get_event_dispatchers for a Blueprint; for gameplay tag count changes use register_gameplay_tag_event instead. It observes only: nothing in the object or level changes, and nothing is saved. Idempotent per the exact (object_path, delegate_name) text: the same pair returns the existing subscription_id with already_existed=true (a different spelling of the same object makes a second subscription, and a target that no longer exists is subscribed afresh). An object that is not found, or a delegate_name that is not a multicast delegate of its class, is an error.
+// MCP:subscribe_to_delegate - Start recording a dynamic multicast delegate (an event such as OnComponentHit or a Blueprint event dispatcher, with any number of parameters) of a live object: a rooted observer is bound to it and every fire is kept with its parameters as text, the latest 512 per subscription. It is the first of three steps: read the fires with poll_delegate_events (subscription_id plus a cursor), and stop with unsubscribe_delegate, which frees the observer; the subscription otherwise stays until the editor closes, and stops recording when the object goes away. Find event names with get_component_events, or get_event_dispatchers for a Blueprint; for gameplay tag count changes use register_gameplay_tag_event instead. It observes only: nothing in the object or level changes, and nothing is saved. Idempotent per resolved object and delegate: any spelling that resolves to the same object (its full path, "Actor.Component", the actor's name) and the same delegate property returns the existing subscription_id with already_existed=true, and the reply's object_path and delegate_name give the resolved pair; a target that no longer exists is subscribed afresh. An object that is not found, a delegate_name that is not a multicast delegate of its class, or a SPARSE engine delegate (OnComponentHit, OnComponentBeginOverlap, OnActorHit, OnTakeAnyDamage and the like, which would crash the editor) is an error and nothing is subscribed.
 //   @param object_path - Object owning the delegate: a full object path (an asset, or a live object's path, including a PIE actor's), the internal name of an editor-world actor ("BP_Door_C_1"), or "Actor.Component" for one of its components ("BP_Door_C_1.TriggerBox"). Bare names search the editor world only.
 //   @param delegate_name - Exact name of the dynamic multicast delegate property on that object's class, e.g. "OnComponentBeginOverlap" or "OnDoorOpened", as get_component_events or get_event_dispatchers list it.
-//   @returns { subscription_id: int, signature: string, already_existed: bool }
+//   @returns { subscription_id: int, signature: string, object_path: string, delegate_name: string, already_existed: bool }
 
 TSharedPtr<FJsonObject> HandleSubscribeToDelegate(const TSharedPtr<FJsonObject>& Params)
 {
@@ -231,6 +231,16 @@ TSharedPtr<FJsonObject> HandleSubscribeToDelegate(const TSharedPtr<FJsonObject>&
     {
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("Delegate not found: %s"), *DelegateName));
     }
+    // A SPARSE multicast delegate (DECLARE_DYNAMIC_MULTICAST_SPARSE_DELEGATE: OnComponentHit, OnActorHit, ...) has a
+    // USparseDelegateFunction signature, and cloning it for the observer aborts the editor. Refused here by its type,
+    // whatever its name or spelling, before anything is created.
+    if (CastField<FMulticastSparseDelegateProperty>(Property))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("'%s' on %s is a SPARSE engine delegate, which subscribe_to_delegate cannot observe (binding it would crash the editor); ")
+            TEXT("nothing was subscribed. Subscribe to a dispatcher declared in Blueprint instead (get_event_dispatchers lists them)."),
+            *Property->GetName(), *Object->GetClass()->GetName()));
+    }
 
     // A fixed parameterless observer function
     // would be undefined behavior against a parameterized delegate (ProcessEvent does no
@@ -246,15 +256,22 @@ TSharedPtr<FJsonObject> HandleSubscribeToDelegate(const TSharedPtr<FJsonObject>&
     }
 
     FScopeLock Lock(&GSubscriptionsMutex);
-    const FString Key = MakeSubscriptionKey(ObjectPath, DelegateName);
+    // The idempotency key is what was resolved, not how it was spelled: the object's full path and the delegate
+    // property's own name, so "Actor.Component", the component's full path, or another case of the delegate name
+    // all find the same subscription.
+    const FString ResolvedPath = Object->GetPathName();
+    const FString ResolvedDelegate = Property->GetName();
+    const FString Key = MakeSubscriptionKey(ResolvedPath, ResolvedDelegate);
     if (const int64* ExistingId = GKeyToSubscriptionId.Find(Key))
     {
         FMcpDelegateSubscription* Existing = GSubscriptions.Find(*ExistingId);
-        if (Existing && Existing->TargetObject.IsValid())
+        if (Existing && Existing->TargetObject.IsValid() && Existing->TargetObject.Get() == Object)
         {
             TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
             Out->SetNumberField(TEXT("subscription_id"), static_cast<double>(*ExistingId));
             Out->SetStringField(TEXT("signature"), Signature ? Signature->GetName() : FString());
+            Out->SetStringField(TEXT("object_path"), ResolvedPath);
+            Out->SetStringField(TEXT("delegate_name"), ResolvedDelegate);
             Out->SetBoolField(TEXT("already_existed"), true);
             return mcp_common::MakeOkReply(Out);
         }
@@ -274,8 +291,8 @@ TSharedPtr<FJsonObject> HandleSubscribeToDelegate(const TSharedPtr<FJsonObject>&
     Delegate.BindUFunction(Observer, DynamicObserverFunction->GetFName());
 
     FMcpDelegateSubscription Sub;
-    Sub.ObjectPath = ObjectPath;
-    Sub.DelegateName = DelegateName;
+    Sub.ObjectPath = ResolvedPath;          // the key's parts, so unsubscribe_delegate removes this same key
+    Sub.DelegateName = ResolvedDelegate;
     Sub.TargetObject = Object;
     Sub.Property = Property;
     Sub.PropertyValuePtr = PropertyValuePtr;
@@ -289,6 +306,8 @@ TSharedPtr<FJsonObject> HandleSubscribeToDelegate(const TSharedPtr<FJsonObject>&
     TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
     Out->SetNumberField(TEXT("subscription_id"), static_cast<double>(SubscriptionId));
     Out->SetStringField(TEXT("signature"), Signature ? Signature->GetName() : FString());
+    Out->SetStringField(TEXT("object_path"), ResolvedPath);
+    Out->SetStringField(TEXT("delegate_name"), ResolvedDelegate);
     Out->SetBoolField(TEXT("already_existed"), false);
     return mcp_common::MakeOkReply(Out);
 }

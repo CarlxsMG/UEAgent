@@ -4784,10 +4784,10 @@ else if (const FTransformCurve* C = Model->FindTransformCurve(CurveId))
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:reimport_anim_sequence - Reimport a UAnimSequence from a source file you name (source_file_path), or else from its first recorded source, through FReimportManager, fully automated with no dialogs. The class is not checked, so any asset a legacy reimport handler accepts works. The new content lands in memory only and is not saved (save it with save_asset), and it cannot be undone. Use reimport_asset for a plain reimport from the recorded sources, reimport_interchange_asset for an asset imported through Interchange, and get_asset_import_data to see the recorded source first. Before reimporting it checks the one source file it will use: none recorded, or the file missing on disk (the engine would crash on it), is refused with success=false, reimported=false, source_validated=false and a note, and nothing changes; a reimport the handler reports as failed is success=false too. An asset no handler accepts, or a path that does not load, is an error. Every call reimports again.
+// MCP:reimport_anim_sequence - Reimport a UAnimSequence from a source file you name (source_file_path), or else from its first recorded source, through FReimportManager, fully automated with no dialogs. The class is not checked, so any asset a legacy reimport handler accepts works. The new content lands in memory only and is not saved (save it with save_asset), and it cannot be undone. Use reimport_asset for a plain reimport from the recorded sources, reimport_interchange_asset for an asset imported through Interchange, and get_asset_import_data to see the recorded source first. Before reimporting it checks on disk every file the reimport reads, as reimport_asset does: the source_file_path you give, or else every source file the asset records. No source recorded, or any of those files missing (the engine would crash on it; missing_files lists them), is refused with success=false, reimported=false, source_validated=false and a note, and nothing changes; a reimport the handler reports as failed is success=false too. An asset no handler accepts, or a path that does not load, is an error. Every call reimports again.
 //   @param anim_sequence_path - Object path of the UAnimSequence, e.g. '/Game/Anims/A_Walk' or '/Game/Anims/A_Walk.A_Walk'.
-//   @param source_file_path - Absolute path on disk of the file to reimport from, e.g. "D:/Art/Walk.fbx"; omit it to use the first source file recorded in the asset's import data (get_asset_import_data shows it).
-//   @returns { anim_sequence_path, source_file_path, reimported, source_validated, note? }
+//   @param source_file_path - Absolute path on disk of the file to reimport from, e.g. "D:/Art/Walk.fbx"; it replaces the recorded sources. Omit it to reimport from the source files recorded in the asset's import data (get_asset_import_data shows them), which must all exist.
+//   @returns { anim_sequence_path, source_file_path, source_files, reimported, source_validated, missing_files?, note? }
 //
 // FReimportManager::Reimport() crashes the editor
 // when called against an asset whose registered factory exists (CanReimport
@@ -4795,8 +4795,8 @@ else if (const FTransformCurve* C = Model->FindTransformCurve(CurveId))
 // a runtime-created or copy-pasted asset whose FBX path does not resolve on
 // disk.
 //
-// So the effective source path is checked BEFORE invoking Reimport. If the
-// asset has no factory, no source filenames, or the resolved source file does
+// So the source files are checked BEFORE invoking Reimport. If the
+// asset has no factory, no source filenames, or a file the reimport reads does
 // not exist on disk, return a clean error payload with `reimported:false` +
 // `source_validated:false` + a descriptive `note` instead of crashing the editor
 // (honest headless behavior). The actual `FReimportManager::Reimport()`
@@ -4835,7 +4835,7 @@ TSharedPtr<FJsonObject> HandleReimportAnimSequence(const TSharedPtr<FJsonObject>
         ? (SourceFilenames.Num() > 0 ? SourceFilenames[0] : TEXT(""))
         : SourceFilePath;
 
-    // ----- Validate the source path on disk BEFORE
+    // ----- Validate the source files on disk BEFORE
     // calling FReimportManager::Reimport. Reimport() crashes the editor when
     // the asset's recorded source is missing/invalid (CanReimport is true
     // because the factory is registered, but the file path is stale). This
@@ -4843,13 +4843,19 @@ TSharedPtr<FJsonObject> HandleReimportAnimSequence(const TSharedPtr<FJsonObject>
     // honest error) and "editor crash".
     // A reimport that cannot run, or that the handler reports as failed, is a failure: the payload says which
     // step stopped it.
-    if (EffectiveSource.IsEmpty())
+    auto NewResult = [&](const FString& SourceShown)
     {
         TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
         Result->SetStringField(TEXT("anim_sequence_path"), Asset->GetPathName());
-        Result->SetStringField(TEXT("source_file_path"), FString());
+        Result->SetStringField(TEXT("source_file_path"), SourceShown);
+        Result->SetArrayField(TEXT("source_files"), mcp_common::StringsToJson(SourceFilenames));
         Result->SetBoolField(TEXT("reimported"), false);
         Result->SetBoolField(TEXT("source_validated"), false);
+        return Result;
+    };
+    if (EffectiveSource.IsEmpty())
+    {
+        TSharedPtr<FJsonObject> Result = NewResult(FString());
         const FString Note =
             TEXT("Asset has a registered reimport factory but no source filename is recorded -- "
                  "the sequence was likely created at runtime or its FBX was relocated. "
@@ -4858,18 +4864,42 @@ TSharedPtr<FJsonObject> HandleReimportAnimSequence(const TSharedPtr<FJsonObject>
         return mcp_common::MakeOutcomeReply(Result, false, TEXT("reimport_anim_sequence: not reimported. ") + Note);
     }
 
-    IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
-    if (!PlatformFile.FileExists(*EffectiveSource))
+    // The files the reimport reads: the one source_file_path names (the engine then reimports from it in place of the
+    // recorded ones), or else every file the asset records, as reimport_asset checks them -- a handler reimports from
+    // all of its recorded sources, so checking only the first let a missing second one through.
+    TArray<FString> FilesToCheck;
+    if (!SourceFilePath.IsEmpty())
     {
-        TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-        Result->SetStringField(TEXT("anim_sequence_path"), Asset->GetPathName());
-        Result->SetStringField(TEXT("source_file_path"), EffectiveSource);
-        Result->SetBoolField(TEXT("reimported"), false);
-        Result->SetBoolField(TEXT("source_validated"), false);
+        FilesToCheck.Add(SourceFilePath);
+    }
+    else
+    {
+        for (const FString& Recorded : SourceFilenames)
+        {
+            if (!Recorded.IsEmpty())
+            {
+                FilesToCheck.AddUnique(Recorded);
+            }
+        }
+    }
+    IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+    TArray<FString> MissingFiles;
+    for (const FString& File : FilesToCheck)
+    {
+        if (!PlatformFile.FileExists(*File))
+        {
+            MissingFiles.Add(File);
+        }
+    }
+    if (MissingFiles.Num() > 0)
+    {
+        TSharedPtr<FJsonObject> Result = NewResult(EffectiveSource);
+        Result->SetArrayField(TEXT("missing_files"), mcp_common::StringsToJson(MissingFiles));
         const FString Note = FString::Printf(TEXT("Source file does not exist on disk: %s -- "
                                  "FReimportManager::Reimport would crash the editor on a missing source. "
-                                 "Provide a valid 'source_file_path' or fix the asset's import path."),
-                             *EffectiveSource);
+                                 "Provide a valid 'source_file_path' or fix the asset's import path "
+                                 "(get_asset_import_data shows the recorded files)."),
+                             *FString::Join(MissingFiles, TEXT(", ")));
         Result->SetStringField(TEXT("note"), Note);
         return mcp_common::MakeOutcomeReply(Result, false, TEXT("reimport_anim_sequence: not reimported. ") + Note);
     }
@@ -4884,9 +4914,7 @@ TSharedPtr<FJsonObject> HandleReimportAnimSequence(const TSharedPtr<FJsonObject>
         /*bForceNewFile=*/false,
         /*bAutomated=*/true);
 
-    TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-    Result->SetStringField(TEXT("anim_sequence_path"), Asset->GetPathName());
-    Result->SetStringField(TEXT("source_file_path"), EffectiveSource);
+    TSharedPtr<FJsonObject> Result = NewResult(EffectiveSource);
     Result->SetBoolField(TEXT("reimported"), bReimported);
     Result->SetBoolField(TEXT("source_validated"), true);
     return mcp_common::MakeOutcomeReply(Result, bReimported, bReimported ? FString() : FString::Printf(
@@ -5301,15 +5329,34 @@ namespace
         }
         return Out;
     }
+
+    // Lays the track's segments end to end in their array order, as FAnimTrack::ValidateSegmentTimes does (it is not
+    // exported): the first starts at 0, each next one where the previous ends, and a segment's AnimEndTime is clamped
+    // to its animation's play length. Unlike SortAnimSegments it never reorders, so the order the caller chose is kept
+    // (that sort is unstable, and segments with equal start times came out in any order).
+    void AnimAuthoring_RestackSegments(FAnimTrack& Track)
+    {
+        float NextStart = 0.f;
+        for (FAnimSegment& Segment : Track.AnimSegments)
+        {
+            Segment.StartPos = NextStart;
+            const UAnimSequenceBase* Anim = Segment.GetAnimReference();
+            if (Anim && Segment.AnimEndTime > Anim->GetPlayLength())
+            {
+                Segment.AnimEndTime = Anim->GetPlayLength();
+            }
+            NextStart = Segment.StartPos + Segment.GetLength();
+        }
+    }
 }
 
-// MCP:add_anim_composite_segment - Add an FAnimSegment that plays a whole UAnimSequence to a UAnimComposite's AnimationTrack in one undo step, re-stack all segments end to end, recompute the composite length and save the asset. The segments are ordered by start_pos before the re-stack, so to append at the end pass start_pos at or past the current composite_length; the default 0 ties with the first segment and normally sorts in front of it. Every call adds another segment (not idempotent). Create the composite first with create_anim_composite, check it with get_anim_asset_info, and take a segment out by index with remove_anim_composite_segment. A composite and sequence on different skeletons, or a path that does not load, is an error and nothing changes. A failed save (always while PIE runs) makes the reply's success false with saved=false and save_error; the success field inside the data stays true, so read saved.
+// MCP:add_anim_composite_segment - Add an FAnimSegment that plays a whole UAnimSequence to a UAnimComposite's AnimationTrack in one undo step, re-stack all segments end to end, recompute the composite length and save the asset. Without start_pos the new segment is appended after the last one; with start_pos it goes in front of the first segment that starts at or after that time (0 puts it first), and segment_index says where it landed. Every call adds another segment (not idempotent). Create the composite first with create_anim_composite, check it with get_anim_asset_info, and take a segment out by index with remove_anim_composite_segment. A composite and sequence on different skeletons, a start_pos that is not a number, or a path that does not load, is an error and nothing changes. A failed save (always while PIE runs) makes success false, with saved=false and save_error, the segment kept in memory.
 //   @param composite_path - Object path of the UAnimComposite, e.g. '/Game/Animation/AC_Example' (create_anim_composite makes one).
 //   @param animation_path - Object path of the UAnimSequence to play, on the composite's skeleton, e.g. '/Game/Anims/A_Walk'; the segment covers its full length.
-//   @param start_pos - Start time in seconds used only to order the new segment among the existing ones before all are re-stacked end to end (default 0, which normally sorts it first); pass the current composite_length or more to append.
+//   @param start_pos - Optional time in seconds that places the new segment: in front of the first segment starting at or after it (0 = first), after every segment when it is at or past composite_length; all segments are then re-stacked end to end. Omit it to append at the end.
 //   @param play_rate - Playback rate of the segment, 1.0 = normal speed, 2.0 = twice as fast (default 1.0).
 //   @param loop_count - How many times the segment repeats, a whole number; values below 1 become 1 (default 1).
-//   @returns { composite_path, animation_path, num_segments, composite_length, segments, success, saved, save_error }
+//   @returns { composite_path, animation_path, segment_index, num_segments, composite_length, segments, success, saved, save_error }
 TSharedPtr<FJsonObject> HandleAddAnimCompositeSegment(const TSharedPtr<FJsonObject>& Params)
 {
     FString CompositePath;
@@ -5317,7 +5364,12 @@ TSharedPtr<FJsonObject> HandleAddAnimCompositeSegment(const TSharedPtr<FJsonObje
     FString AnimPath;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("animation_path"), AnimPath)) { return Missing; }
 
-    double StartPos = 0.0; Params->TryGetNumberField(TEXT("start_pos"), StartPos);
+    double StartPos = 0.0;
+    const bool bHasStartPos = Params->TryGetNumberField(TEXT("start_pos"), StartPos);
+    if (!bHasStartPos && Params->HasField(TEXT("start_pos")))
+    {
+        return mcp_common::MakeErrorReply(TEXT("start_pos must be a number of seconds (omit it to append the segment at the end); nothing changed"));
+    }
     double PlayRate = 1.0; Params->TryGetNumberField(TEXT("play_rate"), PlayRate);
     double LoopCountD = 1.0; Params->TryGetNumberField(TEXT("loop_count"), LoopCountD);
 
@@ -5335,17 +5387,29 @@ TSharedPtr<FJsonObject> HandleAddAnimCompositeSegment(const TSharedPtr<FJsonObje
 
     FAnimSegment Seg;
     Seg.SetAnimReference(Seq, /*bInitialize=*/true);   // sets AnimStartTime=0, AnimEndTime=anim length
-    Seg.StartPos = static_cast<float>(StartPos);
     Seg.AnimPlayRate = static_cast<float>(PlayRate);
     Seg.LoopingCount = FMath::Max(1, static_cast<int32>(LoopCountD));
-    Composite->AnimationTrack.AnimSegments.Add(Seg);
 
-    Composite->AnimationTrack.SortAnimSegments();   // re-stacks StartPos contiguously + validates times
+    // The position is chosen here, not by SortAnimSegments: that sort is unstable, so a segment whose start
+    // tied with another's (the old default 0 against the first segment) landed on either side of it.
+    TArray<FAnimSegment>& Segments = Composite->AnimationTrack.AnimSegments;
+    int32 InsertIndex = Segments.Num();
+    if (bHasStartPos)
+    {
+        InsertIndex = 0;
+        while (InsertIndex < Segments.Num() && Segments[InsertIndex].StartPos < static_cast<float>(StartPos))
+        {
+            ++InsertIndex;
+        }
+    }
+    Segments.Insert(Seg, InsertIndex);
+
+    AnimAuthoring_RestackSegments(Composite->AnimationTrack);   // StartPos end to end, in this order
 
     Composite->SetCompositeLength(Composite->AnimationTrack.GetLength());
 
-    UE_LOG(LogTemp, Verbose, TEXT("[add_anim_composite_segment] %s += %s -> %d segs, length %.4f"),
-        *Composite->GetPathName(), *Seq->GetPathName(),
+    UE_LOG(LogTemp, Verbose, TEXT("[add_anim_composite_segment] %s += %s at %d -> %d segs, length %.4f"),
+        *Composite->GetPathName(), *Seq->GetPathName(), InsertIndex,
         Composite->AnimationTrack.AnimSegments.Num(), Composite->AnimationTrack.GetLength());
 
     FString SaveError;
@@ -5354,10 +5418,12 @@ TSharedPtr<FJsonObject> HandleAddAnimCompositeSegment(const TSharedPtr<FJsonObje
     TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
     Obj->SetStringField(TEXT("composite_path"), Composite->GetPathName());
     Obj->SetStringField(TEXT("animation_path"), Seq->GetPathName());
+    Obj->SetNumberField(TEXT("segment_index"), InsertIndex);
     Obj->SetNumberField(TEXT("num_segments"), Composite->AnimationTrack.AnimSegments.Num());
     Obj->SetNumberField(TEXT("composite_length"), Composite->AnimationTrack.GetLength());
     Obj->SetArrayField(TEXT("segments"), CompositeSegmentsJson(Composite));
-    Obj->SetBoolField(TEXT("success"), true);
+    // The same verdict as the reply's: the segment is in the asset on disk only when the save worked.
+    Obj->SetBoolField(TEXT("success"), bSaved);
     return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("add_anim_composite_segment"), SaveError);
 }
 

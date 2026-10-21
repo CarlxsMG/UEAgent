@@ -199,12 +199,12 @@ Set the DefaultRowValue of one UChooserTable column, the cell value rows appende
 
 *Destructive, idempotent.*
 
-Sets the object a Chooser Table row outputs: writes an FAssetChooser holding asset_path into that row's cell of the table's FIRST OutputObject column, in one undo step, then compiles and saves the table; success is false, with save_error, when the save fails. Idempotent: a row already holding that asset is left as it is (already_existed true, saved false). Refused with nothing changed when the table has no OutputObject column (add one with add_chooser_column, column_type OutputObject), row_index is out of range, or the asset does not load. The row's filter cells and its primary result entry are not touched. For a cell of another column, or of a second OutputObject column, use set_chooser_cell; read the row back with get_chooser_row_values; add rows with add_chooser_row.
+Sets the result a Chooser Table row returns -- the row's entry in the table's results, which evaluate_chooser_table returns when that row is chosen: an Asset result holding asset_path on an Object table, or a Class result holding the class on a Class table (asset_path may then name a Blueprint, whose generated class is used). One undo step, then the table is compiled and saved; success is false, with save_error, when the save fails. Idempotent: a row already returning that asset or class is left as it is (already_existed true, saved false). Refused with nothing changed when row_index is out of range of the table's results, the asset does not load, the table returns no primary result (NoPrimaryResult), or the asset or class is not of the table's output_object_class. The row's filter and output-column cells are not touched: set_chooser_cell writes those (an OutputObject column included). Read the result back with evaluate_chooser_table; add rows with add_chooser_row; get_chooser_table_info gives the row count and result type.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `table_path` | string | yes | Long package path of an existing UChooserTable (e.g. "/Game/Choosers/CT_Locomotion"), as list_chooser_tables lists it. |
-| `row_index` | number | yes | 0-based row index, below the row count get_chooser_table_info reports (checked against the OutputObject column's rows). |
-| `asset_path` | string | yes | Long package path (e.g. "/Game/Anims/AS_Run") or object path of the asset the row outputs; it must load, or the call is refused. |
+| `row_index` | number | yes | 0-based row index, below the table's result count (results_count in get_chooser_table_info). |
+| `asset_path` | string | yes | Long package path (e.g. "/Game/Anims/AS_Run") or object path of the asset the row returns; on a Class table a class path or a Blueprint. It must load, or the call is refused. |
 
-**Returns:** `{ table_path: string, row_index: int, asset_path: string, already_existed: bool, saved: bool, save_error?: string }`
+**Returns:** `{ table_path: string, row_index: int, asset_path: string, result_type: "Object"|"Class", result_struct: string, already_existed: bool, saved: bool, save_error?: string } -- asset_path is what the row now returns, read back from its result entry`

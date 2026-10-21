@@ -110,14 +110,71 @@ namespace
 		}
 		return nullptr;
 	}
+
+	/**
+	 * Whether Sub is still held by the subsystem collection it was created in: the collection of its outer (the
+	 * engine, the editor, a game instance, a world or a local player) returns it for its class. A deinitialized
+	 * instance is out of its collection but lives on until garbage collection, so being a live object proves nothing.
+	 * OutMeasurable is false for a subsystem of another family, which this cannot tell.
+	 */
+	bool SubsystemAuthoring_IsHeldByCollection(USubsystem* Sub, bool& OutMeasurable)
+	{
+		OutMeasurable = true;
+		UClass* Cls = Sub->GetClass();
+		UObject* Outer = Sub->GetOuter();
+		if (Cls->IsChildOf(UWorldSubsystem::StaticClass()))
+		{
+			const UWorld* World = Cast<UWorld>(Outer);
+			return World && World->GetSubsystemBase(Cls) == Sub;
+		}
+		if (Cls->IsChildOf(UGameInstanceSubsystem::StaticClass()))
+		{
+			const UGameInstance* GameInstance = Cast<UGameInstance>(Outer);
+			return GameInstance && GameInstance->GetSubsystemBase(Cls) == Sub;
+		}
+		if (Cls->IsChildOf(ULocalPlayerSubsystem::StaticClass()))
+		{
+			const ULocalPlayer* LocalPlayer = Cast<ULocalPlayer>(Outer);
+			return LocalPlayer && LocalPlayer->GetSubsystemBase(Cls) == Sub;
+		}
+		if (Cls->IsChildOf(UEditorSubsystem::StaticClass()))
+		{
+			return GEditor && GEditor->GetEditorSubsystemBase(Cls) == Sub;
+		}
+		if (Cls->IsChildOf(UEngineSubsystem::StaticClass()))
+		{
+			return GEngine && GEngine->GetEngineSubsystemBase(Cls) == Sub;
+		}
+		OutMeasurable = false;
+		return false;
+	}
+
+	/** How many instances of Cls (or a subclass) are held by a subsystem collection; OutMeasurable as above. */
+	int32 SubsystemAuthoring_CountHeldInstances(const UClass* Cls, bool& OutMeasurable)
+	{
+		OutMeasurable = true;
+		int32 Held = 0;
+		for (TObjectIterator<USubsystem> It; It; ++It)
+		{
+			USubsystem* Sub = *It;
+			if (!IsValid(Sub) || Sub->HasAnyFlags(RF_ClassDefaultObject) || !Sub->GetClass()->IsChildOf(Cls))
+			{
+				continue;
+			}
+			bool bMeasurable = true;
+			Held += SubsystemAuthoring_IsHeldByCollection(Sub, bMeasurable) ? 1 : 0;
+			OutMeasurable &= bMeasurable;
+		}
+		return Held;
+	}
 }
 
 // ---------------------------------------------------------------------------
 // activate_external_subsystem
 // ---------------------------------------------------------------------------
-// MCP:activate_external_subsystem - Externally activate a Blueprint-authored USubsystem via FSubsystemCollectionBase::ActivateExternalSubsystem. Refuses to toggle native / abstract / base classes.
+// MCP:activate_external_subsystem - Externally activate a Blueprint-authored USubsystem via FSubsystemCollectionBase::ActivateExternalSubsystem: every live collection of its family (engine, editor, game instance, world or local player) creates and initializes an instance, unless the class's ShouldCreateSubsystem declines. Refuses to toggle native / abstract / base classes. The engine call reports nothing, so the instances the collections hold are counted before and after it: activated is true when at least one is held afterwards, already_active when one was held before (a repeat call adds nothing), and success is false when none is held. Inverse: deactivate_external_subsystem.
 //   @param class_name - Short class name or /Script/ path of a Blueprint-derived USubsystem
-//   @returns { class_name: string, activated: bool }
+//   @returns { class_name: string, lifetime: string, instances_before: int, instances_after: int, activated: bool, already_active: bool } -- for a subsystem of another family than those five, activated is null with a note and no counts.
 
 TSharedPtr<FJsonObject> HandleActivateExternalSubsystem(
 	const TSharedPtr<FJsonObject>& Params)
@@ -127,19 +184,37 @@ TSharedPtr<FJsonObject> HandleActivateExternalSubsystem(
 	{
 		return Refusal;
 	}
+	// The engine call reports nothing: the instances its collections hold are counted before and after it.
+	bool bMeasurableBefore = true;
+	bool bMeasurableAfter = true;
+	const int32 HeldBefore = SubsystemAuthoring_CountHeldInstances(Cls, bMeasurableBefore);
 	FSubsystemCollectionBase::ActivateExternalSubsystem(Cls);
+	const int32 HeldAfter = SubsystemAuthoring_CountHeldInstances(Cls, bMeasurableAfter);
+
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("class_name"), Cls->GetName());
-	Data->SetBoolField(TEXT("activated"), true);
-	return mcp_common::MakeOkReply(Data);
+	Data->SetStringField(TEXT("lifetime"), UEAgentSubsystemLifetime::DetectLifetimeCategory(Cls));
+	if (!bMeasurableBefore || !bMeasurableAfter)
+	{
+		// A subsystem family whose collections cannot be asked: the call ran, its effect is not known.
+		Data->SetField(TEXT("activated"), MakeShared<FJsonValueNull>());
+		Data->SetStringField(TEXT("note"), TEXT("This subsystem's family (not Engine, Editor, GameInstance, World or LocalPlayer) cannot be read back, so whether it was activated is unknown."));
+		return mcp_common::MakeOkReply(Data);
+	}
+	Data->SetNumberField(TEXT("instances_before"), HeldBefore);
+	Data->SetNumberField(TEXT("instances_after"), HeldAfter);
+	Data->SetBoolField(TEXT("activated"), HeldAfter > 0);
+	Data->SetBoolField(TEXT("already_active"), HeldBefore > 0);
+	return mcp_common::MakeOutcomeReply(Data, HeldAfter > 0, HeldAfter > 0 ? FString()
+		: FString::Printf(TEXT("activate_external_subsystem: no collection holds an instance of %s after the call (its ShouldCreateSubsystem may decline every outer)."), *Cls->GetName()));
 }
 
 // ---------------------------------------------------------------------------
 // deactivate_external_subsystem
 // ---------------------------------------------------------------------------
-// MCP:deactivate_external_subsystem - Tear down a Blueprint-authored subsystem (a non-native, non-abstract USubsystem class) in every live subsystem collection of its family (engine, editor, game instance, world or local player), through the engine's external-subsystem switch: its Deinitialize runs and its runtime state is lost. Runtime only: nothing is saved and there is no undo, and a world or game instance created later builds it again. The inverse is activate_external_subsystem; check what is live with list_subsystem_instances (with class_name it answers active true or false), and find candidate classes with list_derived_classes. Native engine subsystems, the subsystem base classes and abstract classes are refused, since tearing them down can crash the editor; a class that is not found or is not a subsystem is an error. Idempotent: a repeat call, or one for a subsystem that is not active, changes nothing. deactivated is always true, since the engine call reports nothing, so confirm with list_subsystem_instances.
+// MCP:deactivate_external_subsystem - Tear down a Blueprint-authored subsystem (a non-native, non-abstract USubsystem class) in every live subsystem collection of its family (engine, editor, game instance, world or local player), through the engine's external-subsystem switch: its Deinitialize runs and its runtime state is lost. Runtime only: nothing is saved and there is no undo, and a world or game instance created later builds it again. The inverse is activate_external_subsystem; check what is live with list_subsystem_instances (with class_name it answers active true or false), and find candidate classes with list_derived_classes. Native engine subsystems, the subsystem base classes and abstract classes are refused, since tearing them down can crash the editor; a class that is not found or is not a subsystem is an error. Idempotent: a repeat call, or one for a subsystem that is not active, changes nothing and answers deactivated false with a note. The engine call reports nothing, so the instances the collections hold are counted before and after it: deactivated is true when some were held and none are left, and success is false if any is still held.
 //   @param class_name - Blueprint subsystem class, by its Blueprint asset path (e.g. "/Game/Systems/BP_ScoreSubsystem"), generated class path, or loaded generated class name (e.g. "BP_ScoreSubsystem_C"); a native /Script/ class resolves but is refused.
-//   @returns { class_name: string, deactivated: bool }
+//   @returns { class_name: string, lifetime: string, instances_before: int, instances_after: int, deactivated: bool, note? } -- for a subsystem of another family than those five, deactivated is null with a note and no counts.
 
 TSharedPtr<FJsonObject> HandleDeactivateExternalSubsystem(
 	const TSharedPtr<FJsonObject>& Params)
@@ -149,11 +224,33 @@ TSharedPtr<FJsonObject> HandleDeactivateExternalSubsystem(
 	{
 		return Refusal;
 	}
+	// The engine call reports nothing: the instances its collections hold are counted before and after it.
+	bool bMeasurableBefore = true;
+	bool bMeasurableAfter = true;
+	const int32 HeldBefore = SubsystemAuthoring_CountHeldInstances(Cls, bMeasurableBefore);
 	FSubsystemCollectionBase::DeactivateExternalSubsystem(Cls);
+	const int32 HeldAfter = SubsystemAuthoring_CountHeldInstances(Cls, bMeasurableAfter);
+
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("class_name"), Cls->GetName());
-	Data->SetBoolField(TEXT("deactivated"), true);
-	return mcp_common::MakeOkReply(Data);
+	Data->SetStringField(TEXT("lifetime"), UEAgentSubsystemLifetime::DetectLifetimeCategory(Cls));
+	if (!bMeasurableBefore || !bMeasurableAfter)
+	{
+		// A subsystem family whose collections cannot be asked: the call ran, its effect is not known.
+		Data->SetField(TEXT("deactivated"), MakeShared<FJsonValueNull>());
+		Data->SetStringField(TEXT("note"), TEXT("This subsystem's family (not Engine, Editor, GameInstance, World or LocalPlayer) cannot be read back, so whether it was torn down is unknown."));
+		return mcp_common::MakeOkReply(Data);
+	}
+	Data->SetNumberField(TEXT("instances_before"), HeldBefore);
+	Data->SetNumberField(TEXT("instances_after"), HeldAfter);
+	Data->SetBoolField(TEXT("deactivated"), HeldBefore > 0 && HeldAfter == 0);
+	if (HeldBefore == 0)
+	{
+		Data->SetStringField(TEXT("note"), TEXT("No collection held an instance of this class, so there was nothing to tear down (idempotent no-op)."));
+		return mcp_common::MakeOkReply(Data);
+	}
+	return mcp_common::MakeOutcomeReply(Data, HeldAfter == 0, HeldAfter == 0 ? FString()
+		: FString::Printf(TEXT("deactivate_external_subsystem: %d instance(s) of %s are still held by their collections after the call."), HeldAfter, *Cls->GetName()));
 }
 
 // ---------------------------------------------------------------------------

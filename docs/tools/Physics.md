@@ -705,7 +705,7 @@ Set linear/angular drives (motors), breakable thresholds, projection, and collis
 
 *Destructive, idempotent.*
 
-Sets the motion limits of a Physics Constraint actor placed in the editor world, on its UPhysicsConstraintComponent, and reads them back: each limit given switches that axis to Limited with that size (linear_limit is one value for X, Y and Z together; swing and twist are in degrees). Axes whose limit is not given keep their motion type and size, and no axis can be set to Free or Locked here. One undo step; the level is marked dirty, not saved (save_level). The same values again give the same result; with no limit given nothing changes, though updated still reads true. An actor that is not a Physics Constraint actor is an error. Create one with spawn_physics_constraint and read it with get_physics_constraint_info; motors, breaking and projection are set with set_physics_constraint_drives; for a ragdoll joint inside a Physics Asset use set_physics_asset_constraint_limits instead.
+Sets the motion limits of a Physics Constraint actor placed in the editor world, on its UPhysicsConstraintComponent, and reads them back: each limit given switches that axis to Limited with that size (linear_limit is one value for X, Y and Z together; swing and twist are in degrees). Axes whose limit is not given keep their motion type and size, and no axis can be set to Free or Locked here. One undo step; the level is marked dirty, not saved (save_level). The same values again give the same result. updated is read back: every limit given reads Limited with the requested size, and one that does not makes success false. A call with no limit is an error that names the four limit parameters, and nothing changes; so is an actor that is not a Physics Constraint actor. Create one with spawn_physics_constraint and read it with get_physics_constraint_info; motors, breaking and projection are set with set_physics_constraint_drives; for a ragdoll joint inside a Physics Asset use set_physics_asset_constraint_limits instead.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -715,7 +715,7 @@ Sets the motion limits of a Physics Constraint actor placed in the editor world,
 | `swing2_limit` | number | no | Optional swing2 angular limit in degrees, the second symmetric angle of the swing cone (e.g. 45); the Details panel range is 0-180 and this value is not range-checked. |
 | `twist_limit` | number | no | Optional twist angular limit in degrees, the symmetric rotation about the twist axis (e.g. 30); the Details panel range is 0-180 and this value is not range-checked. |
 
-**Returns:** `{ constraint_actor_name: string, constraint_component: string, linear_limit: number, linear_x_motion: string, linear_y_motion: string, linear_z_motion: string, swing1_limit: number, swing1_motion: string, swing2_limit: number, swing2_motion: string, twist_limit: number, twist_motion: string, linear_applied: bool, swing1_applied: bool, swing2_applied: bool, twist_applied: bool, updated: bool }`
+**Returns:** `{ constraint_actor_name: string, constraint_component: string, linear_limit: number, linear_x_motion: string, linear_y_motion: string, linear_z_motion: string, swing1_limit: number, swing1_motion: string, swing2_limit: number, swing2_motion: string, twist_limit: number, twist_motion: string, linear_applied: bool, swing1_applied: bool, swing2_applied: bool, twist_applied: bool, updated: bool } -- updated is true when every limit given reads back Limited with the requested size`
 
 ## `set_static_mesh_convex_collision`
 

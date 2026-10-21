@@ -318,12 +318,12 @@ Measure one LOD of a UStaticMesh asset on a transient dynamic-mesh copy with the
 
 *Read-only.*
 
-Tests whether a point lies inside the live dynamic mesh of a DynamicMeshActor in the editor world, with the engine's fast winding number (IsPointInsideMesh), which also gives a sensible answer for meshes with small holes. Every call builds a fresh BVH and winding tree from the mesh as it is now, so the answer reflects the latest edits; nothing is changed or saved. An unknown actor or a missing query_point is an error. Use it for inside/outside tests; for the closest surface point use find_nearest_point_on_mesh, for a ray hit find_nearest_ray_intersection_with_mesh; build_mesh_bvh is never needed first. The point is in mesh-local space: subtract the actor's location (and undo its rotation and scale) to test a world position.
+Tests whether a point lies inside the live dynamic mesh of a DynamicMeshActor in the editor world, with the engine's fast winding number (IsPointInsideMesh), which also gives a sensible answer for meshes with small holes. Every call builds a fresh BVH and winding tree from the mesh as it is now, so the answer reflects the latest edits; nothing is changed or saved. An unknown actor is an error, and so is a query_point that is missing or not exactly three numbers (a malformed point is refused, never read as the origin). Use it for inside/outside tests; for the closest surface point use find_nearest_point_on_mesh, for a ray hit find_nearest_ray_intersection_with_mesh; build_mesh_bvh is never needed first. The point is in mesh-local space: subtract the actor's location (and undo its rotation and scale) to test a world position.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Label or object name (case-insensitive) of the DynamicMeshActor in the editor world. |
-| `query_point` | array | yes | [x, y, z] point in the mesh's local space, in cm (e.g. [0, 0, 50]). |
+| `query_point` | array | yes | [x, y, z] point in the mesh's local space, in cm (e.g. [0, 0, 50]): exactly three JSON numbers, anything else is an error. |
 | `winding_threshold` | number | no | Optional float, default 0.5: the winding number above which the point counts as inside; higher values shrink the inside region, lower ones grow it. |
 | `max_distance` | number | no | Optional float; it has no effect on this query, whose winding-number test uses no search distance. |
 | `allow_unsafe_modified` | boolean | no | Optional; maps to bAllowUnsafeModifiedQueries (default false). It has no effect: the BVH is built fresh on every call, so it always matches the mesh. |

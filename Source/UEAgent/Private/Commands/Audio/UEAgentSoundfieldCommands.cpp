@@ -34,9 +34,10 @@
  *
  * IMPORTANT, engine stock constraint: USoundfieldEffectBase ships as `abstract` and stock UE 5.8 has NO
  * concrete subclass, so the effect chain of a freshly created soundfield submix is always empty. The
- * add / remove effect commands still implement the FULL path, so they work WITHOUT touching
- * this code the moment a third-party audio plugin (Resonance Audio, Steam Audio, Oculus Audio, ...)
- * provides a concrete subclass; until then they return an honest `note` payload explaining the constraint.
+ * add effect command still implements the FULL path, so it works WITHOUT touching this code the
+ * moment a third-party audio plugin (Resonance Audio, Steam Audio, Oculus Audio, ...) provides a
+ * concrete subclass; until then it returns an honest `note` payload explaining the constraint. Removing
+ * an effect needs no effect class.
  */
 namespace UEAgentSoundfieldCommands
 {
@@ -135,8 +136,8 @@ namespace
 
     /**
      * Returns the standardized honest-gate note for the "no concrete soundfield
-     * effect subclasses shipped in stock UE 5.8" case. Same text used by the add,
-     * info and remove commands so the wire-level behavior is consistent.
+     * effect subclasses shipped in stock UE 5.8" case. Same text used by the add
+     * and info commands so the wire-level behavior is consistent.
      */
     FString SoundfieldHonestGateNote()
     {
@@ -396,32 +397,22 @@ TSharedPtr<FJsonObject> HandleGetSoundfieldSubmixInfo(const TSharedPtr<FJsonObje
 }
 
 // ---------------------------------------------------------------------------
-// MCP:remove_soundfield_effect - Detach the effect at effect_index from the effect chain of a soundfield submix asset, in one undo step, then save the submix; later effects shift down one index and the effect object itself stays in the package. The inverse of add_soundfield_effect_to_submix; find the index with get_soundfield_submix_info. The same index again removes the next effect, and an index past the end of the chain is an error with nothing changed. Success needs the save: a failed save makes success false, with saved false, save_error and the change only in memory. When no concrete soundfield effect class is loaded (stock Unreal ships none; a spatial audio plugin adds them) the chain is not touched and the call fails with removed false and a note. A path that does not load as a soundfield submix is an error. For an ordinary submix use remove_submix_effect_from_chain.
+// MCP:remove_soundfield_effect - Detach the effect at effect_index from the effect chain of a soundfield submix asset, in one undo step, then save the submix; later effects shift down one index and the effect object itself stays in the package. The inverse of add_soundfield_effect_to_submix; find the index with get_soundfield_submix_info. The same index again removes the next effect, and an index past the end of the chain is an error with nothing changed. Success needs the save: a failed save makes success false, with saved false, save_error and the change only in memory. It works whether or not a concrete soundfield effect class is loaded (stock Unreal ships none; a spatial audio plugin adds them): any entry of the chain, a null slot included, is detached. A path that does not load as a soundfield submix is an error. For an ordinary submix use remove_submix_effect_from_chain.
 //   @param submix_path - Asset path of the soundfield submix, e.g. "/Game/Audio/SFS_Ambisonics", as create_soundfield_submix returns it (submix_path).
 //   @param effect_index - 0-based position in the effect chain, as get_soundfield_submix_info returns it (effect_chain[].index); a negative value is an error.
-//   @returns { submix_path, effect_index, removed_effect_class, removed_effect_path, removed: true, already_absent: false, chain_length, saved, save_error? } -- success only when saved; with no concrete effect class loaded the call fails with { submix_path, effect_index, removed: false, saved: false, note } and the chain is not touched.
+//   @returns { submix_path, effect_index, removed_effect_class, removed_effect_path, removed: true, already_absent: false, chain_length, saved, save_error? } -- success only when saved; removed_effect_class and removed_effect_path are empty for a null slot.
 // ---------------------------------------------------------------------------
 // 5. remove_soundfield_effect — RemoveAt on SoundfieldEffectChain[effect_index] (soft remove:
-//    only detaches from chain, leaves the asset on disk for reversibility). Honest-gated
-//    when chain empty.
+//    only detaches from chain, leaves the asset on disk for reversibility). Needs no
+//    concrete effect class; an index outside the chain is an error.
 TSharedPtr<FJsonObject> HandleRemoveSoundfieldEffect(const TSharedPtr<FJsonObject>& Params)
 {
     FString SubmixPath;
     int32 EffectIndex = -1;
     if (TSharedPtr<FJsonObject> Error = Soundfield_ReadEffectSlot(Params, SubmixPath, EffectIndex)) { return Error; }
 
-    if (!FindAnyConcreteSoundfieldEffectClass())
-    {
-        TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-        ResultObj->SetStringField(TEXT("submix_path"), SubmixPath);
-        ResultObj->SetNumberField(TEXT("effect_index"), EffectIndex);
-        ResultObj->SetBoolField(TEXT("removed"), false);
-        ResultObj->SetBoolField(TEXT("saved"), false);
-        ResultObj->SetStringField(TEXT("note"), SoundfieldHonestGateNote());
-        return mcp_common::MakeOutcomeReply(ResultObj, false,
-            TEXT("remove_soundfield_effect: no concrete soundfield effect class is loaded, so the chain was not touched (see note)."));
-    }
-
+    // Removing needs no effect class: whatever sits in the chain (an entry whose class is no longer loaded, a null
+    // slot) is detached the same way, so there is no gate on concrete effect classes here.
     USoundfieldSubmix* Submix = nullptr;
     if (TSharedPtr<FJsonObject> Error = Soundfield_LoadSubmix(SubmixPath, Submix)) { return Error; }
     if (!Submix->SoundfieldEffectChain.IsValidIndex(EffectIndex))

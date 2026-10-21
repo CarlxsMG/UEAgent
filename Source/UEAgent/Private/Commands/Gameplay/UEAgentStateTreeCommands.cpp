@@ -43,7 +43,7 @@
 // types without engine-doc lookup.
 #include "JsonObjectConverter.h"
 #include "UObject/UObjectIterator.h"
-#include "UObject/Class.h"  // CLASS_Abstract (ListDerivedStructNames filter)
+#include "UObject/Class.h"  // CLASS_Abstract (ListDerivedStructs filter)
 // Component-side state tree resolution: TActorIterator over the editor world.
 #include "EngineUtils.h"
 
@@ -798,7 +798,7 @@ TSharedPtr<FJsonObject> HandleGetStateTreeInfo(
 // Task / condition node authoring + state type/selection + compile
 // ---------------------------------------------------------------------------
 
-// MCP:add_state_task - Append a task node, of the struct named by task_struct with its default values, to the Tasks of one state of a StateTree asset, then save the asset without compiling it; there is no undo step. Use it for work that runs while that state is active; for a task that runs as long as the whole tree runs use add_state_tree_global_task. Each call appends another node, so a repeat call stacks a duplicate task. A missing tree, editor data or state, or a struct that is not found or does not derive from FStateTreeTaskBase, is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. Struct names: list_task_types; make the state first with add_state; set a field: set_task_property; list: list_tasks; inverse: remove_task; check the tree with compile_state_tree.
+// MCP:add_state_task - Append a task node, of the struct named by task_struct with its default values, to the Tasks of one state of a StateTree asset, in one undo step, then save the asset without compiling it. Use it for work that runs while that state is active; for a task that runs as long as the whole tree runs use add_state_tree_global_task. Each call appends another node, so a repeat call stacks a duplicate task. A missing tree, editor data or state, or a struct that is not found or does not derive from FStateTreeTaskBase, is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. Struct names: list_task_types; make the state first with add_state; set a field: set_task_property; list: list_tasks; inverse: remove_task; check the tree with compile_state_tree.
 //   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as list_state_trees (trees[].path) returns it.
 //   @param state_name [string!] - Name of the state that gets the task, as get_state_tree_info lists it; the first state with that name in a depth-first walk is used.
 //   @param task_struct - Task struct name or /Script path, as list_task_types returns it; must derive from StateTreeTaskBase (e.g. "StateTreeDebugTextTask"); a leading F is optional.
@@ -816,6 +816,8 @@ TSharedPtr<FJsonObject> HandleAddStateTask(
 		FString::Printf(TEXT("Task struct not found: %s"), *TaskStruct), Err);
 	if (!TaskType) { return Err; }
 
+	// The state owns Tasks: recorded before the append, so the call is one undo step.
+	State->Modify();
 	// AddDefaulted then initialize as the resolved struct (the editor's add-node path).
 	FStateTreeEditorNode& Node = State->Tasks.AddDefaulted_GetRef();
 #if UE_VERSION_OLDER_THAN(5, 8, 0)
@@ -832,7 +834,7 @@ TSharedPtr<FJsonObject> HandleAddStateTask(
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("add_state_task"));
 }
 
-// MCP:add_state_enter_condition - Append a new enter-condition node, of the struct named by condition_struct and with that struct's default values, to the EnterConditions of one state of a StateTree asset, then save the asset without compiling it; there is no undo step. Each call appends another node, so repeating it stacks a duplicate condition. A missing tree, editor data, state or struct, or a struct that does not derive from FStateTreeConditionBase, is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. Struct names: list_condition_types; list them: list_conditions; set a field: set_condition_property; inverse: remove_state_enter_condition; a condition on a transition: add_state_transition_condition; check the result with compile_state_tree.
+// MCP:add_state_enter_condition - Append a new enter-condition node, of the struct named by condition_struct and with that struct's default values, to the EnterConditions of one state of a StateTree asset, in one undo step, then save the asset without compiling it. Each call appends another node, so repeating it stacks a duplicate condition. A missing tree, editor data, state or struct, or a struct that does not derive from FStateTreeConditionBase, is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. Struct names: list_condition_types; list them: list_conditions; set a field: set_condition_property; inverse: remove_state_enter_condition; a condition on a transition: add_state_transition_condition; check the result with compile_state_tree.
 //   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
 //   @param state_name [string!] - Name of the state that gets the condition; the first state with that name in a depth-first walk of the hierarchy is used
 //   @param condition_struct - Condition struct name or /Script path; must derive from StateTreeConditionBase (e.g. "StateTreeRandomCondition"); a leading F is optional
@@ -850,6 +852,8 @@ TSharedPtr<FJsonObject> HandleAddStateEnterCondition(
 		FString::Printf(TEXT("Condition struct not found: %s"), *CondStruct), Err);
 	if (!CondType) { return Err; }
 
+	// The state owns EnterConditions: recorded before the append, so the call is one undo step.
+	State->Modify();
 	FStateTreeEditorNode& Node = State->EnterConditions.AddDefaulted_GetRef();
 #if UE_VERSION_OLDER_THAN(5, 8, 0)
 	StateTree_InitializeEditorNode(Node, ED, CondType);
@@ -1756,10 +1760,10 @@ TSharedPtr<FJsonObject> HandleRemoveStateTreeGlobalTask(
 //   `removed` flag and stay idempotent when the parameter is already absent.
 //   Addressing is by name (mirrors add_state_tree_parameter's `parameter_name`).
 // ---------------------------------------------------------------------------
-// MCP:remove_state_tree_parameter - Remove one parameter, by name, from the root parameter bag of a StateTree asset (the parameters that bindings and per-component overrides read), in one undo step, then save the asset without compiling it. Idempotent: a name the tree does not have (compared case-insensitively) changes and saves nothing and answers removed false with a note. Bindings that read the parameter are left in place: find them with list_state_tree_bindings and drop them with remove_state_tree_binding. Inverse: add_state_tree_parameter; to change only its value use set_state_tree_parameter; the current parameters: get_state_tree_info. A tree that does not load or has no editor data is an error. A failed save still answers success, with saved false and the change only in memory.
+// MCP:remove_state_tree_parameter - Remove one parameter, by name, from the root parameter bag of a StateTree asset (the parameters that bindings and per-component overrides read), in one undo step, then save the asset without compiling it. Idempotent: a name the tree does not have (compared case-insensitively) changes and saves nothing and answers removed false with a note. Bindings that read the parameter are left in place: find them with list_state_tree_bindings and drop them with remove_state_tree_binding. Inverse: add_state_tree_parameter; to change only its value use set_state_tree_parameter; the current parameters: get_state_tree_info. A tree that does not load or has no editor data is an error. A failed save (for example while PIE runs, or with the .uasset read-only) makes success false, with saved false, save_error and the removal only in memory.
 //   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as list_state_trees (trees[].path) returns it.
 //   @param parameter_name - Name of the root parameter, as get_state_tree_info lists it in parameters[].name, e.g. "Speed"; compared case-insensitively.
-//   @returns { tree_path, parameter_name, removed, parameter_count, saved, note? }
+//   @returns { tree_path, parameter_name, removed, parameter_count, saved, save_error?, note? }
 TSharedPtr<FJsonObject> HandleRemoveTreeParameter(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -1798,14 +1802,15 @@ TSharedPtr<FJsonObject> HandleRemoveTreeParameter(
 			FString::Printf(TEXT("Failed to remove parameter '%s' (EPropertyBagAlterationResult=%d)"),
 				*ParamName, (int32)RemoveResult));
 	}
-	const bool bSaved = mcp_common::SaveAssetPackage(Tree->GetPackage(), Tree);
+	FString SaveError;
+	const bool bSaved = mcp_common::SaveAssetPackage(Tree->GetPackage(), Tree, SaveError);
 
 	TSharedPtr<FJsonObject> Data = StateTree_NewTreeData(Tree);
 	Data->SetStringField(TEXT("parameter_name"),  ParamName);
 	Data->SetBoolField  (TEXT("removed"),         true);
 	Data->SetNumberField(TEXT("parameter_count"), StateTree_RootParameterCount(ED));
-	Data->SetBoolField  (TEXT("saved"),           bSaved);
-	return mcp_common::MakeOkReply(Data);
+	// A failed save answers success false with saved false and save_error: the removal is only in memory.
+	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("remove_state_tree_parameter"), SaveError);
 }
 // =========================================================================
 // StateTree task & condition introspection + property get/set
@@ -1823,11 +1828,11 @@ TSharedPtr<FJsonObject> HandleRemoveTreeParameter(
 // ---------------------------------------------------------------------------
 namespace
 {
-	/** Walk every loaded UScriptStruct and collect names of those that derive from
-	 *  `Base` (excluding RF_Abstract so the agent only sees instantiable structs). */
-	TArray<FString> ListDerivedStructNames(const UScriptStruct* Base)
+	/** Walk every loaded UScriptStruct and collect those that derive from `Base` (excluding the ones tagged
+	 *  Abstract so the agent only sees instantiable structs), sorted by name, then by path. */
+	TArray<const UScriptStruct*> ListDerivedStructs(const UScriptStruct* Base)
 	{
-		TArray<FString> Out;
+		TArray<const UScriptStruct*> Out;
 		if (!Base) { return Out; }
 		for (TObjectIterator<UScriptStruct> It; It; ++It)
 		{
@@ -1837,9 +1842,13 @@ namespace
 			// exposed via the "Abstract" UHT metadata tag.
 			if (S->HasMetaData(TEXT("Abstract"))) { continue; }
 			if (!S->IsChildOf(Base)) { continue; }
-			Out.AddUnique(S->GetName());
+			Out.AddUnique(S);
 		}
-		Out.Sort();
+		Out.Sort([](const UScriptStruct& A, const UScriptStruct& B)
+		{
+			const int32 ByName = A.GetName().Compare(B.GetName());
+			return ByName != 0 ? ByName < 0 : A.GetPathName() < B.GetPathName();
+		});
 		return Out;
 	}
 
@@ -1953,21 +1962,22 @@ namespace
 		return nullptr;
 	}
 
-	/** { count, types: [{ name, struct_path }] } of the concrete structs deriving from Base. */
+	/** { count, types: [{ name, struct_path }] } of the concrete structs deriving from Base; struct_path is the
+	 *  struct's own path, in whichever module declares it. */
 	TSharedPtr<FJsonObject> StateTree_DerivedTypesData(const UScriptStruct* Base)
 	{
-		const TArray<FString> Names = ListDerivedStructNames(Base);
+		const TArray<const UScriptStruct*> Structs = ListDerivedStructs(Base);
 		TArray<TSharedPtr<FJsonValue>> TypesJson;
-		TypesJson.Reserve(Names.Num());
-		for (const FString& N : Names)
+		TypesJson.Reserve(Structs.Num());
+		for (const UScriptStruct* S : Structs)
 		{
 			TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
-			Entry->SetStringField(TEXT("name"),        N);
-			Entry->SetStringField(TEXT("struct_path"), TEXT("/Script/StateTreeModule.") + N);
+			Entry->SetStringField(TEXT("name"),        S->GetName());
+			Entry->SetStringField(TEXT("struct_path"), S->GetPathName());
 			TypesJson.Add(MakeShared<FJsonValueObject>(Entry));
 		}
 		TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-		Data->SetNumberField(TEXT("count"), Names.Num());
+		Data->SetNumberField(TEXT("count"), Structs.Num());
 		Data->SetArrayField (TEXT("types"), TypesJson);
 		return Data;
 	}
@@ -2093,7 +2103,7 @@ namespace
 // ---------------------------------------------------------------------------
 // list_task_types — enumerate StateTreeTaskBase derivatives
 // ---------------------------------------------------------------------------
-// MCP:list_task_types - List the StateTree task struct types (FStateTreeTaskBase and its children; structs tagged Abstract are skipped) of the modules loaded now, sorted by name, without changing anything: the names add_state_task and add_state_tree_global_task take as task_struct. A task from a plugin whose module is not loaded is not listed. struct_path always assumes /Script/StateTreeModule, so pass name for a task from another module. Other node types: list_condition_types, list_evaluator_types; the tasks already on a state: list_tasks; on the whole tree: list_state_tree_global_tasks.
+// MCP:list_task_types - List the StateTree task struct types (FStateTreeTaskBase and its children; structs tagged Abstract are skipped) of the modules loaded now, sorted by name, without changing anything: the names add_state_task and add_state_tree_global_task take as task_struct. A task from a plugin whose module is not loaded is not listed. struct_path is the struct's own path in the module that declares it (e.g. /Script/StateTreeModule.StateTreeDelayTask, /Script/GameplayStateTreeModule.StateTreeRunEnvQueryTask), so either field can be passed. Other node types: list_condition_types, list_evaluator_types; the tasks already on a state: list_tasks; on the whole tree: list_state_tree_global_tasks.
 //   @returns { count, types: [{ name, struct_path }] }
 TSharedPtr<FJsonObject> HandleListTaskTypes(
 	const TSharedPtr<FJsonObject>& Params)
@@ -2400,7 +2410,7 @@ TSharedPtr<FJsonObject> HandleGetConsiderationProperty(
 // ---------------------------------------------------------------------------
 // list_condition_types — enumerate StateTreeConditionBase derivatives
 // ---------------------------------------------------------------------------
-// MCP:list_condition_types - List the concrete condition struct types (children of FStateTreeConditionBase, abstract ones skipped) of the loaded modules, sorted by name, for add_state_enter_condition and add_state_transition_condition. Returns count and types [{name, struct_path}]; struct_path always assumes /Script/StateTreeModule, so pass name for other modules.
+// MCP:list_condition_types - List the concrete condition struct types (children of FStateTreeConditionBase, abstract ones skipped) of the loaded modules, sorted by name, for add_state_enter_condition and add_state_transition_condition. Returns count and types [{name, struct_path}]; struct_path is the struct's own path in the module that declares it, so either field can be passed.
 //   @returns { count, types: [{ name, struct_path }] }
 TSharedPtr<FJsonObject> HandleListConditionTypes(
 	const TSharedPtr<FJsonObject>& Params)
@@ -2648,7 +2658,7 @@ TSharedPtr<FJsonObject> HandleRemoveTransitionCondition(
 // ---------------------------------------------------------------------------
 // list_evaluator_types — enumerate StateTreeEvaluatorBase derivatives
 // ---------------------------------------------------------------------------
-// MCP:list_evaluator_types - List the concrete evaluator struct types (children of FStateTreeEvaluatorBase, abstract ones skipped) of the loaded modules, sorted by name, for add_evaluator. Returns count and types [{name, struct_path}]; struct_path always assumes /Script/StateTreeModule, so pass name for other modules.
+// MCP:list_evaluator_types - List the concrete evaluator struct types (children of FStateTreeEvaluatorBase, abstract ones skipped) of the loaded modules, sorted by name, for add_evaluator. Returns count and types [{name, struct_path}]; struct_path is the struct's own path in the module that declares it, so either field can be passed.
 //   @returns { count, types: [{ name, struct_path }] }
 TSharedPtr<FJsonObject> HandleListEvaluatorTypes(
 	const TSharedPtr<FJsonObject>& Params)
@@ -3203,7 +3213,7 @@ TSharedPtr<FJsonObject> HandleGetComponentStateTreePath(const TSharedPtr<FJsonOb
 // add_consideration (utility AI on a state)
 // ===========================================================================
 
-// MCP:add_consideration - Append a utility consideration node (a struct deriving from FStateTreeConsiderationBase, with its default values) to the Considerations of one state of a StateTree asset, then save the asset without compiling it; there is no undo step. Considerations score the state 0..1 when its parent picks children by utility (set_state_selection_behavior, e.g. TrySelectChildrenWithHighestUtility). Each call appends another node, even of a type the state already has, so a repeat call stacks a duplicate. A missing tree, editor data or state, or a struct that is not found or is not a consideration, is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. Set its values (Constant, Input...) with set_consideration_property; list them: list_considerations; inverse: remove_consideration; check the tree with compile_state_tree.
+// MCP:add_consideration - Append a utility consideration node (a struct deriving from FStateTreeConsiderationBase, with its default values) to the Considerations of one state of a StateTree asset, in one undo step, then save the asset without compiling it. Considerations score the state 0..1 when its parent picks children by utility (set_state_selection_behavior, e.g. TrySelectChildrenWithHighestUtility). Each call appends another node, even of a type the state already has, so a repeat call stacks a duplicate. A missing tree, editor data or state, or a struct that is not found or is not a consideration, is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. Set its values (Constant, Input...) with set_consideration_property; list them: list_considerations; inverse: remove_consideration; check the tree with compile_state_tree.
 //   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as list_state_trees (trees[].path) returns it.
 //   @param state_name [string!] - Name of the state that gets the consideration, as get_state_tree_info lists it; the first state with that name in a depth-first walk is used.
 //   @param consideration_class - Consideration struct name or /Script path, a leading F optional (e.g. "StateTreeFloatInputConsideration"), or one of the aliases Constant, FloatInput / Float Input, EnumInput / Enum Input.
@@ -3235,7 +3245,9 @@ TSharedPtr<FJsonObject> HandleAddConsideration(
 		FString::Printf(TEXT("Consideration struct not found: %s (alias or /Script path also tried)"), *ClassStr), Err);
 	if (!ConsType) { return Err; }
 
-	// Outer is the state (Considerations are state-scoped, unlike Evaluators/GlobalTasks which are tree-scoped).
+	// The state owns Considerations (state-scoped, unlike Evaluators/GlobalTasks which are tree-scoped): recorded
+	// before the append, so the call is one undo step.
+	State->Modify();
 	FStateTreeEditorNode& Node = State->Considerations.AddDefaulted_GetRef();
 #if UE_VERSION_OLDER_THAN(5, 8, 0)
 	StateTree_InitializeEditorNode(Node, ED, ConsType);

@@ -988,7 +988,7 @@
       "commands": [
         {
           "name": "add_anim_composite_segment",
-          "description": "Add an FAnimSegment that plays a whole UAnimSequence to a UAnimComposite's AnimationTrack in one undo step, re-stack all segments end to end, recompute the composite length and save the asset. The segments are ordered by start_pos before the re-stack, so to append at the end pass start_pos at or past the current composite_length; the default 0 ties with the first segment and normally sorts in front of it. Every call adds another segment (not idempotent). Create the composite first with create_anim_composite, check it with get_anim_asset_info, and take a segment out by index with remove_anim_composite_segment. A composite and sequence on different skeletons, or a path that does not load, is an error and nothing changes. A failed save (always while PIE runs) makes the reply's success false with saved=false and save_error; the success field inside the data stays true, so read saved.",
+          "description": "Add an FAnimSegment that plays a whole UAnimSequence to a UAnimComposite's AnimationTrack in one undo step, re-stack all segments end to end, recompute the composite length and save the asset. Without start_pos the new segment is appended after the last one; with start_pos it goes in front of the first segment that starts at or after that time (0 puts it first), and segment_index says where it landed. Every call adds another segment (not idempotent). Create the composite first with create_anim_composite, check it with get_anim_asset_info, and take a segment out by index with remove_anim_composite_segment. A composite and sequence on different skeletons, a start_pos that is not a number, or a path that does not load, is an error and nothing changes. A failed save (always while PIE runs) makes success false, with saved=false and save_error, the segment kept in memory.",
           "params": [
             {
               "name": "composite_path",
@@ -1008,7 +1008,7 @@
               "name": "start_pos",
               "jsonType": "number",
               "required": false,
-              "description": "Start time in seconds used only to order the new segment among the existing ones before all are re-stacked end to end (default 0, which normally sorts it first); pass the current composite_length or more to append."
+              "description": "Optional time in seconds that places the new segment: in front of the first segment starting at or after it (0 = first), after every segment when it is at or past composite_length; all segments are then re-stacked end to end. Omit it to append at the end."
             },
             {
               "name": "play_rate",
@@ -1023,7 +1023,7 @@
               "description": "How many times the segment repeats, a whole number; values below 1 become 1 (default 1)."
             }
           ],
-          "returns": "{ composite_path, animation_path, num_segments, composite_length, segments, success, saved, save_error }",
+          "returns": "{ composite_path, animation_path, segment_index, num_segments, composite_length, segments, success, saved, save_error }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
@@ -4706,7 +4706,7 @@
         },
         {
           "name": "reimport_anim_sequence",
-          "description": "Reimport a UAnimSequence from a source file you name (source_file_path), or else from its first recorded source, through FReimportManager, fully automated with no dialogs. The class is not checked, so any asset a legacy reimport handler accepts works. The new content lands in memory only and is not saved (save it with save_asset), and it cannot be undone. Use reimport_asset for a plain reimport from the recorded sources, reimport_interchange_asset for an asset imported through Interchange, and get_asset_import_data to see the recorded source first. Before reimporting it checks the one source file it will use: none recorded, or the file missing on disk (the engine would crash on it), is refused with success=false, reimported=false, source_validated=false and a note, and nothing changes; a reimport the handler reports as failed is success=false too. An asset no handler accepts, or a path that does not load, is an error. Every call reimports again.",
+          "description": "Reimport a UAnimSequence from a source file you name (source_file_path), or else from its first recorded source, through FReimportManager, fully automated with no dialogs. The class is not checked, so any asset a legacy reimport handler accepts works. The new content lands in memory only and is not saved (save it with save_asset), and it cannot be undone. Use reimport_asset for a plain reimport from the recorded sources, reimport_interchange_asset for an asset imported through Interchange, and get_asset_import_data to see the recorded source first. Before reimporting it checks on disk every file the reimport reads, as reimport_asset does: the source_file_path you give, or else every source file the asset records. No source recorded, or any of those files missing (the engine would crash on it; missing_files lists them), is refused with success=false, reimported=false, source_validated=false and a note, and nothing changes; a reimport the handler reports as failed is success=false too. An asset no handler accepts, or a path that does not load, is an error. Every call reimports again.",
           "params": [
             {
               "name": "anim_sequence_path",
@@ -4719,10 +4719,10 @@
               "name": "source_file_path",
               "jsonType": "string",
               "required": false,
-              "description": "Absolute path on disk of the file to reimport from, e.g. \"D:/Art/Walk.fbx\"; omit it to use the first source file recorded in the asset's import data (get_asset_import_data shows it)."
+              "description": "Absolute path on disk of the file to reimport from, e.g. \"D:/Art/Walk.fbx\"; it replaces the recorded sources. Omit it to reimport from the source files recorded in the asset's import data (get_asset_import_data shows them), which must all exist."
             }
           ],
-          "returns": "{ anim_sequence_path, source_file_path, reimported, source_validated, note? }",
+          "returns": "{ anim_sequence_path, source_file_path, source_files, reimported, source_validated, missing_files?, note? }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -5390,7 +5390,7 @@
         },
         {
           "name": "remove_motion_warping_component",
-          "description": "Destroy the UMotionWarpingComponent of an actor (the first one found), with all its warp targets; the inverse of add_motion_warping_component. The actor is recorded in the call's undo step (Actor->Modify) and its level is marked dirty, not saved (save_level persists it). Only an instance component stays gone: one that the actor's Blueprint or C++ class defines comes back (when its construction script reruns, or on reload), so remove that one from the class instead. To clear targets but keep the component use remove_motion_warping_target (all=true); check the result with get_motion_warping_component_info. Idempotent: an actor without one returns already_existed=false, removed=false and a note, not an error. An actor that is not found is an error and nothing changes.",
+          "description": "Destroy the UMotionWarpingComponent of an actor (the first one found), with all its warp targets; the inverse of add_motion_warping_component. The actor is recorded in the call's undo step (Actor->Modify) and its level is marked dirty, not saved (save_level persists it). Only an instance component stays gone: one that the actor's Blueprint or C++ class defines comes back (when its construction script reruns, or on reload), so remove that one from the class instead. To clear targets but keep the component use remove_motion_warping_target (all=true); check the result with get_motion_warping_component_info. removed is read back from the actor: true once the component is off its component list and being destroyed, and a component still there makes success false. Idempotent: an actor without one returns already_existed=false, removed=false and a note, not an error. An actor that is not found is an error and nothing changes.",
           "params": [
             {
               "name": "actor_path",
@@ -5532,7 +5532,7 @@
         },
         {
           "name": "remove_pose_search_channel_from_schema",
-          "description": "Remove one feature channel (a UPoseSearchFeatureChannel_* such as Pose or Trajectory) from a motion-matching UPoseSearchSchema, chosen by index or by type, in one undo step; the schema is then re-finalized (PostEditChange) and saved. The inverse of add_pose_search_channel_to_schema; to only lower a channel's influence, set its weight with that tool instead. List the channels first with get_pose_search_schema_info, and rebuild every database that uses the schema with build_pose_search_database_index afterwards, since the old index no longer matches. An index out of range or no channel of that type is a success with removed=false, already_absent=true and nothing saved. Not idempotent: indices shift after a removal, and by type each call takes the next channel of that class. Passing neither selector, an unknown channel_type, or a schema that does not load is an error. previous_count counts the schema's source channels, while channel_count counts the finalized ones, which can be 0 when finalizing fails. A failed save (always while PIE runs) makes success false, with saved=false and save_error.",
+          "description": "Remove one feature channel (a UPoseSearchFeatureChannel_* such as Pose or Trajectory) from a motion-matching UPoseSearchSchema, chosen by index or by type, in one undo step; the schema is then re-finalized (PostEditChange) and saved. The inverse of add_pose_search_channel_to_schema; to only lower a channel's influence, set its weight with that tool instead. List the channels first with get_pose_search_schema_info, and rebuild every database that uses the schema with build_pose_search_database_index afterwards, since the old index no longer matches. An index out of range or no channel of that type is a success with removed=false, already_absent=true and nothing saved. Not idempotent: indices shift after a removal, and by type each call takes the next channel of that class. Passing neither selector, an unknown channel_type, or a schema that does not load is an error. previous_count and channel_count count the schema's source channels (the list channel_index indexes) before and after the call, so a removal shows as one less; finalized_channel_count is the finalized view, 0 when finalizing fails, and finalized and finalize_warning say whether the schema finalized. A failed save (always while PIE runs) makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "schema_path",
@@ -5559,7 +5559,7 @@
               "description": "\"Pose\", \"Trajectory\", \"Position\", \"Velocity\" or \"Heading\", case ignored; removes the first channel of that class, subclasses included. Used only when channel_index is absent."
             }
           ],
-          "returns": "{ schema_path, channel_index, channel_type, channel_class, schema_cardinality, channel_count, previous_count, removed, already_absent, saved, save_error?, message }",
+          "returns": "{ schema_path, channel_index, channel_type, channel_class, schema_cardinality, channel_count (source, after), previous_count (source, before), finalized_channel_count, source_channel_count, finalized, finalize_warning?, removed, already_absent, saved, save_error?, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -5821,7 +5821,7 @@
         },
         {
           "name": "remove_skeletal_mesh_socket",
-          "description": "Deletes a socket from a skeletal mesh asset, together with the same-named socket on its skeleton and the preview assets attached to that socket name. One undo step, then the mesh package is saved, and a failed save is an error. The skeleton is only changed in memory and left unsaved (save_asset writes it), so a socket that exists only on the skeleton is deleted there but not on disk. Idempotent: a name neither the mesh nor its skeleton has returns already_removed true, with nothing changed or saved. A socket that should go from a Skeleton asset alone is better deleted with remove_skeleton_socket, which saves it; static meshes use remove_static_mesh_socket. Re-add with add_skeletal_mesh_socket; get_skeletal_mesh_info reports the socket count.",
+          "description": "Deletes a socket from a skeletal mesh asset, together with the same-named socket on its skeleton and the preview assets attached to that socket name. One undo step, then every asset that changed is saved: the mesh for its own socket, the skeleton for its socket (saved_assets lists them), so a socket that lives only on the skeleton is deleted from the skeleton's file too; a failed save makes success false with save_error and leaves the deletion in memory. An asset that would change but cannot be saved (engine content, a read-only root) is refused before anything changes. Idempotent: a name neither the mesh nor its skeleton has returns already_removed true, with nothing changed or saved. A socket that should go from a Skeleton asset alone can also be deleted with remove_skeleton_socket; static meshes use remove_static_mesh_socket. Re-add with add_skeletal_mesh_socket; get_skeletal_mesh_info reports the socket count.",
           "params": [
             {
               "name": "skeletal_mesh_path",
@@ -5838,7 +5838,7 @@
               "description": "Name of the socket to delete, matched case-insensitively (e.g. \"hand_r_socket\")."
             }
           ],
-          "returns": "{ socket_name: string, skeletal_mesh_path: string, removed: bool, already_removed: bool, socket_count: int }",
+          "returns": "{ socket_name: string, skeletal_mesh_path: string, removed: bool, already_removed: bool, removed_from_mesh: bool, removed_from_skeleton: bool, saved_assets: [string], saved: bool, save_error?: string, socket_count: int } -- removed is read back (the name is no longer found on the mesh or its skeleton)",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -6167,7 +6167,7 @@
         },
         {
           "name": "rename_skeletal_mesh_socket",
-          "description": "Renames a socket of a skeletal mesh asset; a socket of the same name on the mesh's skeleton is renamed too. One undo step, then the mesh package is saved, and a failed save is an error (the rename stays in memory). The skeleton is only changed in memory and left unsaved (save_asset writes it), so a socket that exists only on the skeleton is renamed there but not written to disk. Refused with nothing changed when new_name equals old_name, a socket called new_name already exists on the mesh or its skeleton, or old_name is not found, so a repeat call fails because old_name is gone. Add a socket with add_skeletal_mesh_socket, re-parent one with set_skeletal_mesh_socket_parent, delete one with remove_skeletal_mesh_socket; Skeleton assets: add_skeleton_socket and remove_skeleton_socket; static meshes: rename_static_mesh_socket.",
+          "description": "Renames a socket of a skeletal mesh asset; a socket of the same name on the mesh's skeleton is renamed too, and preview assets attached to the old name follow it. One undo step, then every asset that changed is saved: the mesh for its own socket, the skeleton for its socket (saved_assets lists them), so a socket that lives only on the skeleton is written to the skeleton's file; a failed save makes success false with save_error and leaves the rename in memory. Refused with nothing changed when new_name equals old_name, a socket called new_name already exists on the mesh or its skeleton while old_name is still there, old_name is not found, or an asset that would change cannot be saved (engine content, a read-only root). Idempotent: when old_name is gone and new_name is there, it succeeds with already_renamed true and nothing changed or saved. Add a socket with add_skeletal_mesh_socket, re-parent one with set_skeletal_mesh_socket_parent, delete one with remove_skeletal_mesh_socket; Skeleton assets: add_skeleton_socket and remove_skeleton_socket; static meshes: rename_static_mesh_socket.",
           "params": [
             {
               "name": "skeletal_mesh_path",
@@ -6191,11 +6191,11 @@
               "description": "New socket name; must differ from old_name and be free on the mesh and its skeleton (a change of letter case only counts as taken)."
             }
           ],
-          "returns": "{ old_name: string, new_name: string, skeletal_mesh_path: string, renamed: bool, already_renamed: bool, socket_count: int } -- already_renamed is always false (a repeat call is an error instead); socket_count adds the mesh's sockets and its skeleton's",
+          "returns": "{ old_name: string, new_name: string, skeletal_mesh_path: string, renamed: bool, already_renamed: bool, renamed_on_mesh: bool, renamed_on_skeleton: bool, saved_assets: [string], saved: bool, save_error?: string, socket_count: int } -- renamed is read back (new_name found, old_name gone); socket_count adds the mesh's sockets and its skeleton's",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
-            "idempotentHint": false,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },
@@ -9484,7 +9484,7 @@
         },
         {
           "name": "create_render_target_2d_array",
-          "description": "Creates a persisted UTextureRenderTarget2DArray.  Wraps UTextureRenderTarget2DArray::Init(SizeX, SizeY, Slices, Format) and saves the asset to disk. Re-running deletes and rebuilds the asset deterministically.  format accepts one of \"B8G8R8A8\"/\"BGRA8\" (default), \"FloatRGBA\"/\"RGBA16F\", \"RGBA32F\", \"R16F\".",
+          "description": "Creates a persisted UTextureRenderTarget2DArray.  Wraps UTextureRenderTarget2DArray::Init(SizeX, SizeY, Slices, Format) and saves the asset to disk. An asset already at package_path/name, of any class, is refused with success=false, its existing_class named, and nothing is deleted or created; to rebuild one, delete it first with delete_asset or pick a new name.  format accepts one of \"B8G8R8A8\"/\"BGRA8\" (default), \"FloatRGBA\"/\"RGBA16F\", \"RGBA32F\", \"R16F\".",
           "params": [
             {
               "name": "name",
@@ -9519,7 +9519,7 @@
               "description": "Optional EPixelFormat name; defaults to BGRA8"
             }
           ],
-          "returns": "{ render_target_name: string, asset_path: string, size_x: int, size_y: int, slices: int, format: string, created: bool, saved: bool, save_error?: string }",
+          "returns": "{ render_target_name: string, asset_path: string, size_x: int, size_y: int, slices: int, format: string, created: bool, saved: bool, save_error?: string, existing_class?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -9529,7 +9529,7 @@
         },
         {
           "name": "create_render_target_cube",
-          "description": "Creates a persisted UTextureRenderTargetCube (6-face cube render target).  Wraps UTextureRenderTargetCube::Init(SizeX, Format) when a format is given, or InitAutoFormat(SizeX) otherwise, and saves the asset to disk. Re-running deletes and rebuilds the asset deterministically.  format accepts one of \"B8G8R8A8\"/\"BGRA8\", \"FloatRGBA\"/\"RGBA16F\", \"RGBA32F\". When omitted the format is auto-derived (InitAutoFormat).",
+          "description": "Creates a persisted UTextureRenderTargetCube (6-face cube render target).  Wraps UTextureRenderTargetCube::Init(SizeX, Format) when a format is given, or InitAutoFormat(SizeX) otherwise, and saves the asset to disk. An asset already at package_path/name, of any class, is refused with success=false, its existing_class named, and nothing is deleted or created; to rebuild one, delete it first with delete_asset or pick a new name.  format accepts one of \"B8G8R8A8\"/\"BGRA8\", \"FloatRGBA\"/\"RGBA16F\", \"RGBA32F\". When omitted the format is auto-derived (InitAutoFormat).",
           "params": [
             {
               "name": "name",
@@ -9558,7 +9558,7 @@
               "description": "Optional EPixelFormat name; defaults to auto-derived"
             }
           ],
-          "returns": "{ render_target_name: string, asset_path: string, size_x: int, format: string, created: bool, saved: bool, save_error?: string }",
+          "returns": "{ render_target_name: string, asset_path: string, size_x: int, format: string, created: bool, saved: bool, save_error?: string, existing_class?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -9568,7 +9568,7 @@
         },
         {
           "name": "create_static_texture_from_render_target",
-          "description": "Bakes a UTexture2D from an existing UTextureRenderTarget2D (editor only).  Wraps UKismetRenderingLibrary::RenderTargetCreateStaticTexture2DEditorOnly and saves the resulting static texture to disk. Re-running deletes and rebuilds the asset deterministically.  render_target_path accepts either short \"/Game/MyGame/RT_Example\" or fully-qualified \"...RT_Example.RT_Example\" asset paths.",
+          "description": "Bakes a UTexture2D from an existing UTextureRenderTarget2D (editor only).  Wraps UKismetRenderingLibrary::RenderTargetCreateStaticTexture2DEditorOnly and saves the resulting static texture to disk. An asset already at package_path/name, of any class, is refused with success=false, its existing_class named, and nothing is deleted or created; to rebuild one, delete it first with delete_asset or pick a new name.  render_target_path accepts either short \"/Game/MyGame/RT_Example\" or fully-qualified \"...RT_Example.RT_Example\" asset paths.",
           "params": [
             {
               "name": "render_target_path",
@@ -9592,7 +9592,7 @@
               "description": "Content folder; defaults to /Game/Textures"
             }
           ],
-          "returns": "{ texture_name: string, asset_path: string, render_target_path: string, created: bool, saved: bool, width: int, height: int, format: string, save_error?: string }",
+          "returns": "{ texture_name: string, asset_path: string, render_target_path: string, created: bool, saved: bool, width: int, height: int, format: string, save_error?: string, existing_class?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -9602,7 +9602,7 @@
         },
         {
           "name": "create_texture_2d_array",
-          "description": "Creates a persisted UTexture2DArray from slices (no external file import).  If ``source_texture_paths`` is given, those UTexture2D assets are loaded into the array's SourceTextures; otherwise ``slice_count`` small solid-color slices of ``size`` x ``size`` are generated. The array Source is then built via UTexture2DArray::UpdateSourceFromSourceTextures(true) and the asset is saved.  source_texture_paths is an optional array of UTexture2D asset paths used as the array's slices. Each must have a valid editor source. If omitted, slices are generated.  size is the per-slice pixel size (clamped 1..2048).",
+          "description": "Creates a persisted UTexture2DArray from slices (no external file import).  If ``source_texture_paths`` is given, those UTexture2D assets are loaded into the array's SourceTextures; otherwise ``slice_count`` small solid-color slices of ``size`` x ``size`` are generated. The array Source is then built via UTexture2DArray::UpdateSourceFromSourceTextures(true) and the asset is saved. An asset already at package_path/name, of any class, is refused with success=false, its existing_class named, and nothing is deleted or created; to rebuild one, delete it first with delete_asset or pick a new name.  source_texture_paths is an optional array of UTexture2D asset paths used as the array's slices. Each must have a valid editor source. If omitted, slices are generated.  size is the per-slice pixel size (clamped 1..2048).",
           "params": [
             {
               "name": "name",
@@ -9638,7 +9638,7 @@
               "description": "Optional array of UTexture2D asset paths used as slices"
             }
           ],
-          "returns": "{ texture_array_name: string, asset_path: string, width: int, height: int, num_slices: int, format: string, created: bool, saved: bool, save_error?: string }",
+          "returns": "{ texture_array_name: string, asset_path: string, width: int, height: int, num_slices: int, format: string, created: bool, saved: bool, save_error?: string, existing_class?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -9648,7 +9648,7 @@
         },
         {
           "name": "create_texture_2d_from_data",
-          "description": "Create a UTexture2D asset filled with one solid color, with no source file: it allocates a BGRA8 editor source of width x height, fills every pixel with fill_color, sets sRGB with default compression, builds the resource and saves the asset to disk; no undo step. Use it for placeholder or mask textures; to bring in an image file use import_texture_file, to bake a render target create_static_texture_from_render_target, to change compression or sRGB afterwards set_texture_settings, and get_texture_info to read it back. WARNING: an asset already at package_path/name is force-deleted first, whatever its class and even if other assets reference it, so every call rebuilds the texture (not idempotent). An invalid package path is an error. A failed save (always while PIE runs) makes success false, with saved=false and save_error, the texture kept in memory.",
+          "description": "Create a UTexture2D asset filled with one solid color, with no source file: it allocates a BGRA8 editor source of width x height, fills every pixel with fill_color, sets sRGB with default compression, builds the resource and saves the asset to disk; no undo step. Use it for placeholder or mask textures; to bring in an image file use import_texture_file, to bake a render target create_static_texture_from_render_target, to change compression or sRGB afterwards set_texture_settings, and get_texture_info to read it back. It only creates: an asset already at package_path/name, of any class, is refused with success=false, its existing_class named, and nothing is deleted or created; to rebuild a texture, delete it first with delete_asset or pick a new name. An invalid package path is an error. A failed save (always while PIE runs) makes success false, with saved=false and save_error, the texture kept in memory.",
           "params": [
             {
               "name": "name",
@@ -9683,7 +9683,7 @@
               "description": "[R, G, B, A] as 0-255 numbers, each rounded and clamped, e.g. [255, 0, 0, 255] for opaque red; missing trailing entries keep the default 255 (opaque white)."
             }
           ],
-          "returns": "{ texture_name: string, asset_path: string, created: bool, saved: bool, width: int, height: int, format: string, has_source: bool, fill_color: [int, int, int, int], save_error?: string }",
+          "returns": "{ texture_name: string, asset_path: string, created: bool, saved: bool, width: int, height: int, format: string, has_source: bool, fill_color: [int, int, int, int], save_error?: string, existing_class?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -12549,7 +12549,7 @@
         },
         {
           "name": "disconnect_sound_cue_nodes",
-          "description": "Unwires one input of a node in a USoundCue asset: the parent's input slot, picked by the child wired into it or by its index, is emptied, in one undo step, then the cue is saved; a failed save, as during PIE, makes success false with save_error. Inverse of connect_sound_cue_nodes. The slot itself is kept (empty, -1 in get_sound_cue_graph) so other input indexes do not shift, and the child node stays in the cue: remove_sound_cue_node deletes a node. A slot that is already empty or out of range, or a child not wired into the parent, succeeds with already_disconnected true and nothing changed or saved. A cue that does not load, a node id out of range, or neither child_node_id nor input_index is an error. Read ids and wiring first with get_sound_cue_graph; the cue's output node is set with set_sound_cue_first_node.",
+          "description": "Unwires one input of a node in a USoundCue asset: the parent's input slot, picked by the child wired into it or by its index, is emptied, in one undo step, then the cue is saved; a failed save, as during PIE, makes success false with save_error. Inverse of connect_sound_cue_nodes. When the cue has an editor graph (it was made or edited in the Sound Cue editor), the wire into that input pin is broken too (graph_links_broken counts it), so the editor does not rebuild the slot from its graph. The slot itself is kept (empty, -1 in get_sound_cue_graph) so other input indexes do not shift, and the child node stays in the cue: remove_sound_cue_node deletes a node. A slot that is already empty or out of range, or a child not wired into the parent, succeeds with already_disconnected true and nothing changed or saved. A cue that does not load, a node id out of range, or neither child_node_id nor input_index is an error. Read ids and wiring first with get_sound_cue_graph; the cue's output node is set with set_sound_cue_first_node.",
           "params": [
             {
               "name": "cue_path",
@@ -12577,7 +12577,7 @@
               "description": "Optional 0-based input slot of the parent to empty directly (its position in that node's child_ids); supply this OR child_node_id."
             }
           ],
-          "returns": "{ cue_path: string, parent_node_id: int, child_node_id: int, input_index: int, parent_class: string, child_class: string, parent_child_count: int, disconnected: bool, already_disconnected: bool, saved: bool }",
+          "returns": "{ cue_path: string, parent_node_id: int, child_node_id: int, input_index: int, parent_class: string, child_class: string, parent_child_count: int, graph_links_broken: int, disconnected: bool, already_disconnected: bool, saved: bool, save_error?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -13032,16 +13032,32 @@
         },
         {
           "name": "list_metasound_node_types",
-          "description": "List the MetaSound node classes the editor's MetaSound search engine knows, without changing anything: per class its class_name, class_path (Namespace.Name.Variant, e.g. UE.Sine.Audio: the three parts add_metasound_node takes as class_namespace, class_name and class_variant), type (e.g. External, the type of node classes and MetaSound assets), highest version (major.minor; the major is add_metasound_node's major_version), access_flags and is_native (true when the class name has a namespace, as engine and plugin nodes do). Deprecated classes are left out and only the highest version of each is listed; with include_unloaded (default) MetaSound assets not loaded yet are included too. The list is long (hundreds of classes) and has no filter. Use it to find a class before add_metasound_node; the nodes already in one MetaSound's graph are list_metasound_nodes, and one node's pins get_metasound_node_info. Editor only.",
+          "description": "List the MetaSound node classes the editor's MetaSound search engine knows, without changing anything: per class its class_name, class_path (Namespace.Name.Variant, e.g. UE.Sine.Audio: the three parts add_metasound_node takes as class_namespace, class_name and class_variant), type (e.g. External, the type of node classes and MetaSound assets), highest version (major.minor; the major is add_metasound_node's major_version), access_flags, is_native (false for a class a MetaSound asset defines, as the MetaSound asset manager knows it, true for one registered by engine or plugin code; null if the asset manager is unavailable) and asset_path (the defining asset, empty for a native class). Deprecated classes are left out and only the highest version of each is listed; with include_unloaded (default) MetaSound assets not loaded yet are included too. The full list is long (hundreds of classes, too long to come back inline), so narrow it with name_filter and max_results; count is what came back, matched_count what matched the filter and total_count every class. Use it to find a class before add_metasound_node; the nodes already in one MetaSound's graph are list_metasound_nodes, and one node's pins get_metasound_node_info. Editor only.",
           "params": [
             {
               "name": "include_unloaded",
               "jsonType": "boolean",
               "required": false,
               "description": "true (default) also lists the classes of MetaSound assets not loaded into memory yet, from the MetaSound asset manager's tag data; false lists only the classes registered now."
+            },
+            {
+              "name": "name_filter",
+              "jsonType": "string",
+              "required": false,
+              "description": "Optional text matched, case-insensitively, inside each class_path or asset_path, e.g. \"Sine\" or \"/Game/Audio/MS_\"; empty lists every class."
+            },
+            {
+              "name": "max_results",
+              "jsonType": "number",
+              "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
+              "description": "Optional cap on the classes returned after the filter (default 0, no cap); truncated says whether it cut the list."
             }
           ],
-          "returns": "{ count, types: [{ class_name, class_path, type, version, access_flags, is_native }] }",
+          "returns": "{ count, matched_count, total_count, truncated, types: [{ class_name, class_path, type, version, access_flags, is_native, asset_path }] }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -13384,7 +13400,7 @@
         },
         {
           "name": "remove_soundfield_effect",
-          "description": "Detach the effect at effect_index from the effect chain of a soundfield submix asset, in one undo step, then save the submix; later effects shift down one index and the effect object itself stays in the package. The inverse of add_soundfield_effect_to_submix; find the index with get_soundfield_submix_info. The same index again removes the next effect, and an index past the end of the chain is an error with nothing changed. Success needs the save: a failed save makes success false, with saved false, save_error and the change only in memory. When no concrete soundfield effect class is loaded (stock Unreal ships none; a spatial audio plugin adds them) the chain is not touched and the call fails with removed false and a note. A path that does not load as a soundfield submix is an error. For an ordinary submix use remove_submix_effect_from_chain.",
+          "description": "Detach the effect at effect_index from the effect chain of a soundfield submix asset, in one undo step, then save the submix; later effects shift down one index and the effect object itself stays in the package. The inverse of add_soundfield_effect_to_submix; find the index with get_soundfield_submix_info. The same index again removes the next effect, and an index past the end of the chain is an error with nothing changed. Success needs the save: a failed save makes success false, with saved false, save_error and the change only in memory. It works whether or not a concrete soundfield effect class is loaded (stock Unreal ships none; a spatial audio plugin adds them): any entry of the chain, a null slot included, is detached. A path that does not load as a soundfield submix is an error. For an ordinary submix use remove_submix_effect_from_chain.",
           "params": [
             {
               "name": "submix_path",
@@ -13400,7 +13416,7 @@
               "description": "0-based position in the effect chain, as get_soundfield_submix_info returns it (effect_chain[].index); a negative value is an error."
             }
           ],
-          "returns": "{ submix_path, effect_index, removed_effect_class, removed_effect_path, removed: true, already_absent: false, chain_length, saved, save_error? } -- success only when saved; with no concrete effect class loaded the call fails with { submix_path, effect_index, removed: false, saved: false, note } and the chain is not touched.",
+          "returns": "{ submix_path, effect_index, removed_effect_class, removed_effect_path, removed: true, already_absent: false, chain_length, saved, save_error? } -- success only when saved; removed_effect_class and removed_effect_path are empty for a null slot.",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -13563,7 +13579,7 @@
         },
         {
           "name": "set_audio_volume",
-          "description": "Sets the VolumeMultiplier of one audio component placed in the editor world (not PIE); the engine setter also resets its VolumeModulationMin/Max to 1. The component is found by object name (case-insensitive) among EVERY audio component of every actor; a name that components of several actors carry is an error listing the owners, nothing changed, unless actor_name (object name, not label) picks one. No undo step and no dirty mark: the value is lost on reload unless the level gets saved for another reason. A volume outside 0-10 is an error and nothing changes; the same value again gives the same result. Find components with get_audio_settings and read one with get_audio_component_properties; set_audio_sound changes its sound, set_audio_3d_settings its attenuation; to scale a whole sound class use set_sound_mix_class_override.",
+          "description": "Sets the VolumeMultiplier of one audio component placed in the editor world (not PIE); the engine setter also resets its VolumeModulationMin/Max to 1. The component is found by object name (case-insensitive) among EVERY audio component of every actor; a name that components of several actors carry is an error listing the owners, nothing changed, unless actor_name (object name, not label) picks one. No undo step and no dirty mark: the value is lost on reload unless the level gets saved for another reason. A volume outside 0-10 is an error and nothing changes; the same value again gives the same result. The multiplier is read back: new_volume is the value the component holds, and one that does not match the request makes success false with volume_set false. Find components with get_audio_settings and read one with get_audio_component_properties; set_audio_sound changes its sound, set_audio_3d_settings its attenuation; to scale a whole sound class use set_sound_mix_class_override.",
           "params": [
             {
               "name": "audio_component_name",
@@ -16868,7 +16884,7 @@
         },
         {
           "name": "attach_blueprint_component",
-          "description": "Re-parents a component already in a Blueprint's Components tree (an SCS component), at an optional socket or bone: under another SCS component, under a native scene component inherited from a C++ parent (e.g. ACharacter's \"CharacterMesh0\", so its sockets are reachable), or under the scene root when parent_component_name is omitted or \"root\". The Blueprint is then compiled and left unsaved (save_asset writes it). Idempotent: a component already under that parent with the same socket returns already_attached true and nothing is recompiled. Refused with nothing changed when the Blueprint, the component or the parent is not found, or when the parent is the component itself or one of its descendants. Refused while Play-in-Editor runs unless force=true. To add a new component use add_component_to_blueprint (inverse: remove_component_from_blueprint); read the tree with get_blueprint_components; for actors placed in a level use attach_actor.",
+          "description": "Re-parents a component already in a Blueprint's Components tree (an SCS component), at an optional socket or bone: under another SCS component, under a native scene component inherited from a C++ parent (e.g. ACharacter's \"CharacterMesh0\", so its sockets are reachable), or under the scene root when parent_component_name is omitted or \"root\". The Blueprint is then compiled and left unsaved (save_asset writes it); the call is one undo step that restores the previous parent and socket. Idempotent: a component already under that parent with the same socket returns already_attached true and nothing is recompiled. Refused with nothing changed when the Blueprint, the component or the parent is not found, or when the parent is the component itself or one of its descendants. Refused while Play-in-Editor runs unless force=true. To add a new component use add_component_to_blueprint (inverse: remove_component_from_blueprint); read the tree with get_blueprint_components; for actors placed in a level use attach_actor.",
           "params": [
             {
               "name": "blueprint_name",
@@ -21359,7 +21375,7 @@
         },
         {
           "name": "set_chooser_row_outcome",
-          "description": "Sets the object a Chooser Table row outputs: writes an FAssetChooser holding asset_path into that row's cell of the table's FIRST OutputObject column, in one undo step, then compiles and saves the table; success is false, with save_error, when the save fails. Idempotent: a row already holding that asset is left as it is (already_existed true, saved false). Refused with nothing changed when the table has no OutputObject column (add one with add_chooser_column, column_type OutputObject), row_index is out of range, or the asset does not load. The row's filter cells and its primary result entry are not touched. For a cell of another column, or of a second OutputObject column, use set_chooser_cell; read the row back with get_chooser_row_values; add rows with add_chooser_row.",
+          "description": "Sets the result a Chooser Table row returns -- the row's entry in the table's results, which evaluate_chooser_table returns when that row is chosen: an Asset result holding asset_path on an Object table, or a Class result holding the class on a Class table (asset_path may then name a Blueprint, whose generated class is used). One undo step, then the table is compiled and saved; success is false, with save_error, when the save fails. Idempotent: a row already returning that asset or class is left as it is (already_existed true, saved false). Refused with nothing changed when row_index is out of range of the table's results, the asset does not load, the table returns no primary result (NoPrimaryResult), or the asset or class is not of the table's output_object_class. The row's filter and output-column cells are not touched: set_chooser_cell writes those (an OutputObject column included). Read the result back with evaluate_chooser_table; add rows with add_chooser_row; get_chooser_table_info gives the row count and result type.",
           "params": [
             {
               "name": "table_path",
@@ -21376,17 +21392,17 @@
                 -2147483648,
                 2147483647
               ],
-              "description": "0-based row index, below the row count get_chooser_table_info reports (checked against the OutputObject column's rows)."
+              "description": "0-based row index, below the table's result count (results_count in get_chooser_table_info)."
             },
             {
               "name": "asset_path",
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Long package path (e.g. \"/Game/Anims/AS_Run\") or object path of the asset the row outputs; it must load, or the call is refused."
+              "description": "Long package path (e.g. \"/Game/Anims/AS_Run\") or object path of the asset the row returns; on a Class table a class path or a Blueprint. It must load, or the call is refused."
             }
           ],
-          "returns": "{ table_path: string, row_index: int, asset_path: string, already_existed: bool, saved: bool, save_error?: string }",
+          "returns": "{ table_path: string, row_index: int, asset_path: string, result_type: \"Object\"|\"Class\", result_struct: string, already_existed: bool, saved: bool, save_error?: string } -- asset_path is what the row now returns, read back from its result entry",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -21784,7 +21800,7 @@
         },
         {
           "name": "set_default_game_map",
-          "description": "Set UGameMapsSettings EditorStartupMap / GameDefaultMap, persist them to the VERSIONED Config/DefaultEngine.ini (TryUpdateDefaultConfigFile) and re-read that .ini FROM DISK to prove it landed.",
+          "description": "Set UGameMapsSettings EditorStartupMap / GameDefaultMap, persist them to the VERSIONED Config/DefaultEngine.ini (TryUpdateDefaultConfigFile) and re-read that .ini FROM DISK to prove it landed. When the .ini cannot be written (read-only) the call fails and both maps are put back in memory as they were: reverted and in_memory_editor_startup_map / in_memory_game_default_map say so, read back.",
           "params": [
             {
               "name": "editor_startup_map",
@@ -21807,7 +21823,7 @@
               "description": "Optional bool, default true. Re-read Config/DefaultEngine.ini with FConfigFile::Read (never GConfig, which is the in-memory cache) and report disk_value per map."
             }
           ],
-          "returns": "{ editor_startup_map: string, game_default_map: string, ini_path: string, is_default_config_class: bool, versioned_ini: bool, write_reported: bool, persist_method: string, disk_value: { editor_startup_map: string, game_default_map: string }, disk_checks: [object], verification: object, verification_checks: [object] }",
+          "returns": "{ editor_startup_map: string, game_default_map: string, ini_path: string, is_default_config_class: bool, versioned_ini: bool, write_reported: bool, persist_method: string, disk_value: { editor_startup_map: string, game_default_map: string }, disk_checks: [object], reverted?: bool, in_memory_editor_startup_map?: string, in_memory_game_default_map?: string, persist_error?: string, verification: object, verification_checks: [object] }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -21817,7 +21833,7 @@
         },
         {
           "name": "set_project_settings_value",
-          "description": "Set one property of a Project Settings class (the class default object of a UDeveloperSettings subclass such as RendererSettings), the way the Project Settings panel does, and persist it: a defaultconfig class goes to the versioned Config/Default<Base>.ini through TryUpdateDefaultConfigFile, any other config class through SaveConfig to its saved ini under Saved/Config (versioned_ini=false). With verify_disk it re-reads that .ini from disk (FConfigFile::Read, not the in-memory GConfig) and fails when the value is not there. Read the current value first with get_project_settings_value; for a raw INI key with no settings class use set_engine_ini_value (it writes only Saved/Config). It runs no PostEditChange, so systems that react to edits in the panel are not notified (some settings need an editor restart), and there is no undo step. A value the property cannot parse, an unknown class or property is an error and nothing changes; a class that is not a config class, or a read-only .ini, fails after the in-memory value has already changed. Idempotent: the same value again rewrites the same line.",
+          "description": "Set one property of a Project Settings class (the class default object of a UDeveloperSettings subclass such as RendererSettings), the way the Project Settings panel does, and persist it: a defaultconfig class goes to the versioned Config/Default<Base>.ini through TryUpdateDefaultConfigFile, any other config class through SaveConfig to its saved ini under Saved/Config (versioned_ini=false). With verify_disk it re-reads that .ini from disk (FConfigFile::Read, not the in-memory GConfig) and fails when the value is not there. Read the current value first with get_project_settings_value; for a raw INI key with no settings class use set_engine_ini_value (it writes only Saved/Config). It runs no PostEditChange, so systems that react to edits in the panel are not notified (some settings need an editor restart), and there is no undo step. A value the property cannot parse, an unknown class or property, or a class that is not a config class is an error and nothing changes. When the .ini cannot be written (read-only) the call fails and the in-memory value is put back as it was: reverted and in_memory_value say so, read back. Idempotent: the same value again rewrites the same line.",
           "params": [
             {
               "name": "class_name",
@@ -21846,7 +21862,7 @@
               "description": "Optional bool, default true. Re-read the target .ini with FConfigFile::Read (never GConfig, which is the in-memory cache and would just echo the write back) and report disk_value / disk_matches_memory."
             }
           ],
-          "returns": "{ class_name: string, property_name: string, round_tripped_value: string, ini_path: string, is_default_config_class: bool, versioned_ini: bool, write_reported: bool, persist_method: string, ini_section: string, ini_key: string, property_is_config: bool, disk_present: bool, disk_value: string, disk_values: [string], disk_matches_memory: bool, verification: object, verification_checks: [object] }",
+          "returns": "{ class_name: string, property_name: string, round_tripped_value: string, ini_path: string, is_default_config_class: bool, versioned_ini: bool, write_reported: bool, persist_method: string, ini_section: string, ini_key: string, property_is_config: bool, disk_present: bool, disk_value: string, disk_values: [string], disk_matches_memory: bool, reverted?: bool, in_memory_value?: string, persist_error?: string, verification: object, verification_checks: [object] }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -22939,9 +22955,9 @@
         },
         {
           "name": "refresh_data_registry_map",
-          "description": "Make the DataRegistry subsystem rebuild, for this editor session, its map from registry type to registry asset out of the registry assets loaded in memory under its scan paths, so edits to registry assets (a changed registry_type, sources changed with add_data_registry_source or remove_data_registry_source) are seen without restarting the editor. A registry whose type drops out of the map is deinitialized, losing its cached items. It changes no asset and saves nothing, and it neither loads nor initializes a registry: use initialize_data_registry for that, then get_data_registry_item to read items. Idempotent: a repeat call rebuilds the same map. refreshed is always true, since the engine call reports nothing; check the outcome with list_data_registry_types. A missing subsystem (DataRegistry plugin off) is an error.",
+          "description": "Make the DataRegistry subsystem rebuild, for this editor session, its map from registry type to registry asset out of the registry assets loaded in memory under its scan paths, so edits to registry assets (a changed registry_type, sources changed with add_data_registry_source or remove_data_registry_source) are seen without restarting the editor. A registry whose type drops out of the map is deinitialized, losing its cached items. It changes no asset and saves nothing, and it neither loads nor initializes a registry: use initialize_data_registry for that, then get_data_registry_item to read items. Idempotent: a repeat call rebuilds the same map (map_changed false). The engine call reports nothing, so refreshed is null and the outcome is the subsystem's type -> registry map read before and after: the counts, the types added, removed or pointed at another asset, and map_changed; list_data_registry_types lists the map. A missing subsystem (DataRegistry plugin off) is an error.",
           "params": [],
-          "returns": "{ refreshed: bool }",
+          "returns": "{ refreshed: null, registry_count_before: int, registry_count_after: int, added_types: [string], removed_types: [string], changed_types: [string], map_changed: bool, note: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -23579,7 +23595,7 @@
       "commands": [
         {
           "name": "create_asset_documentation",
-          "description": "Builds a documentation record of one asset from the Asset Registry, without loading it: name, class, package and object path, .uasset size and timestamp, a coarse category and usage line chosen by exact class (StaticMesh, Material, Texture2D, Blueprint; every other class, sound waves and material instances included, is Other), and its direct package dependencies and referencers, 100 of each at most with truncation flags. Read-only despite its name: nothing is loaded, written or saved, and the record comes back in the reply only. An asset the registry does not know, or no editor world, is an error. For complete edge lists use get_asset_dependencies and get_asset_referencers (get_asset_dependencies_recursive beyond depth 1); for every Blueprint at once, generate_blueprint_docs; for project-wide counts, create_project_overview.",
+          "description": "Builds a documentation record of one asset from the Asset Registry, without loading it: name, class, package and object path, .uasset size and timestamp, a coarse category and usage line chosen by class hierarchy, so subclasses count (3D Model for static meshes, Material for materials and material instances, Texture for every texture, Blueprint for every Blueprint kind, Audio for sound waves, cues and other sounds; any other class is Other), and its direct package dependencies and referencers, 100 of each at most with truncation flags. Read-only despite its name: nothing is loaded, written or saved, and the record comes back in the reply only. An asset the registry does not know, or no editor world, is an error. For complete edge lists use get_asset_dependencies and get_asset_referencers (get_asset_dependencies_recursive beyond depth 1); for every Blueprint at once, generate_blueprint_docs; for project-wide counts, create_project_overview.",
           "params": [
             {
               "name": "asset_name",
@@ -23611,9 +23627,9 @@
         },
         {
           "name": "generate_blueprint_docs",
-          "description": "Documents every Blueprint asset under /Game in one reply, subclasses included (Widget, Anim and other Blueprints): per Blueprint its name, package path, class, parent class, type, compile state, component templates, the names of its function and event graphs, and its own variables with their pin category. Read-only despite its name: it loads every Blueprint to read it, but writes and saves nothing, and the result comes back in the reply only, never as a file. On a big project it can take long and return a very large reply; plugin and engine content are not included, and an editor world is required. For one Blueprint use get_blueprint_info (get_blueprint_components for its real component tree) or export_blueprint_data; for one asset of any kind, create_asset_documentation; for project-wide counts without loading, create_project_overview.",
+          "description": "Documents every Blueprint asset under /Game in one reply, subclasses included (Widget, Anim and other Blueprints): per Blueprint its name, package path, class, parent class, type, compile state, the components its own Components panel adds, the names of its function and event graphs, and its own variables with their pin category. Read-only despite its name: it loads every Blueprint to read it, but writes and saves nothing, and the result comes back in the reply only, never as a file. On a big project it can take long and return a very large reply; plugin and engine content are not included, and an editor world is required. For one Blueprint use get_blueprint_info (get_blueprint_components for its real component tree) or export_blueprint_data; for one asset of any kind, create_asset_documentation; for project-wide counts without loading, create_project_overview.",
           "params": [],
-          "returns": "{ blueprint_documentation: [{ blueprint_name, blueprint_path, blueprint_class, parent_class, blueprint_type, compilation_status, components, functions: [string], variables: [{name, type}] }], total_blueprints: int, generation_date: string, project_name: string } -- blueprint_type is Normal, or MacroLibrary for every other kind (interfaces and function libraries included); compilation_status is UpToDate or NeedsCompilation (errors included); components are the Blueprint's ComponentTemplates, which do not include the components of its Components panel",
+          "returns": "{ blueprint_documentation: [{ blueprint_name, blueprint_path, blueprint_class, parent_class, blueprint_type, compilation_status, components: [{ component_name, component_class, parent_component, is_editable }], functions: [string], variables: [{name, type}] }], total_blueprints: int, generation_date: string, project_name: string } -- blueprint_type is Normal, Const, MacroLibrary, Interface, LevelScript or FunctionLibrary; compilation_status is UpToDate, UpToDateWithWarnings, Error, NeedsCompilation (changed since its last compile), BeingCreated or Unknown; components are the Blueprint's own construction-script nodes (its Components panel), each named by its variable name with the component it attaches to (empty for a root), and leave out the components it inherits",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -24135,7 +24151,7 @@
         },
         {
           "name": "create_functional_test",
-          "description": "Create a Blueprint subclass of AFunctionalTest (an actor placed in a test map that runs scripted checks and reports pass or fail to the automation framework) at package_path/asset_name, then save it; there is no undo step. Use it to author a level-based gameplay test; for an ordinary actor Blueprint use create_blueprint, and to run registered tests use run_automation_test (list them with list_automation_tests). Idempotent: when a Blueprint already exists at that path it is returned as it is, with already_existed true, and saved again; its parent is not checked and parent_class echoes the requested one. A parent that is not found or is not a Functional Test, or an asset of another type at the path, is an error and nothing changes. A failed save makes success false, with saved false and the Blueprint only in memory. Refused while Play-in-Editor runs unless force=true. Then script it with add_blueprint_function and add_graph_node, and place it in a map with spawn_actor.",
+          "description": "Create a Blueprint subclass of AFunctionalTest (an actor placed in a test map that runs scripted checks and reports pass or fail to the automation framework) at package_path/asset_name, then save it; there is no undo step. Use it to author a level-based gameplay test; for an ordinary actor Blueprint use create_blueprint, and to run registered tests use run_automation_test (list them with list_automation_tests). Idempotent: a Functional Test Blueprint already at that path whose parent is parent_class (or a subclass of it) is returned as it is, with already_existed true, and saved again; parent_class is the parent read from the Blueprint. A Blueprint there that is not a Functional Test, or whose parent is not parent_class or a subclass of it, is refused and nothing is saved (remove it with delete_asset or pick another asset_name). A parent that is not found or is not a Functional Test, or an asset of another type at the path, is an error and nothing changes. A failed save makes success false, with saved false and the Blueprint only in memory. Refused while Play-in-Editor runs unless force=true. Then script it with add_blueprint_function and add_graph_node, and place it in a map with spawn_actor.",
           "params": [
             {
               "name": "asset_name",
@@ -24156,7 +24172,7 @@
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "description": "Optional parent: a class deriving from AFunctionalTest, by name without prefix (e.g. \"FunctionalTest\", the default) or by /Script/ path; a Blueprint parent must be loaded and named by its generated class (e.g. \"BP_FT_Base_C\")."
+              "description": "Optional parent: a class deriving from AFunctionalTest, by name without prefix (e.g. \"FunctionalTest\", the default, or \"FunctionalAITest\") or by /Script/ path; a Blueprint parent must be loaded and named by its generated class (e.g. \"BP_FT_Base_C\"). A Blueprint already at the path must have this parent or a subclass of it."
             }
           ],
           "returns": "{ asset_name, asset_path, package_class, parent_class, already_existed, saved }",
@@ -25233,7 +25249,7 @@
         },
         {
           "name": "list_engine_ini_sections",
-          "description": "List the section names of one INI (Engine, Game, Input, Editor, Scalability...) as the running editor holds it in GConfig, the in-memory merge of every config layer, without changing anything. An INI GConfig does not know (a misspelt name, say) is a success with found=false and an empty list. Use it to discover a section before reading one key with get_engine_ini_value or writing one with set_engine_ini_value; for UDeveloperSettings classes use get_project_settings_value. file_path is the saved-config path Saved/Config/<Platform>/<name>.ini built from the name, not a file that was read or checked to exist.",
+          "description": "List the section names of one INI (Engine, Game, Input, Editor, Scalability...) without changing anything: by default as the running editor holds it in GConfig, the in-memory merge of every config layer (the engine's Base ini included); with include_base=false only the sections the project itself defines, read from disk in its Config/Default<name>.ini and its saved Saved/Config/<Platform>/<name>.ini (files_read lists the ones that exist). An INI GConfig does not know (a misspelt name, say) is a success with found=false. Use it to discover a section before reading one key with get_engine_ini_value or writing one with set_engine_ini_value; for UDeveloperSettings classes use get_project_settings_value. file_path is the saved-config path Saved/Config/<Platform>/<name>.ini built from the name.",
           "params": [
             {
               "name": "config_file",
@@ -25245,10 +25261,10 @@
               "name": "include_base",
               "jsonType": "boolean",
               "required": false,
-              "description": "Ignored: the code reads it but never uses it, so the list is the same whatever you pass."
+              "description": "true (default) lists the whole in-memory merge, engine Base ini layers included; false lists only the sections in the project's Config/Default<name>.ini and Saved/Config/<Platform>/<name>.ini, as they are on disk."
             }
           ],
-          "returns": "{ count, sections: [string], found: bool, config_file, file_path }",
+          "returns": "{ count, sections: [string], found: bool, include_base: bool, config_file, file_path, files_read?: [string] }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -25741,7 +25757,7 @@
         },
         {
           "name": "run_automation_test",
-          "description": "Run ONE registered automation test in this editor, synchronously, and return its verdict (pass, fail or skipped) with its errors, warnings and log entries. Find the name first with list_automation_tests; re-read the last result later without running anything with get_automation_test_results; run every smoke test at once with run_smoke_tests. A test that needs several ticks (PIE, a map load, a wait) is not run here but answered verdict skipped with the reason -- drive it with run_functional_test_in_pie -- and so is one that needs an interactive user or a real renderer in a headless editor; an editor busy with a slow task or PIE refuses the start. Marked destructive and not idempotent because the test's own code runs in the editor and can create, change or delete assets and actors as it was written to, so two runs need not do the same; this tool itself saves nothing and adds no undo step for what the test did.",
+          "description": "Run ONE registered automation test in this editor, synchronously, and return its verdict (pass, fail or skipped) with its errors, warnings and log entries. Find the name first with list_automation_tests; re-read the last result later without running anything with get_automation_test_results; run every smoke test at once with run_smoke_tests. A test that needs several ticks (PIE, a map load, a wait) cannot be run here: it is answered verdict skipped with the reason, and no tool runs it for you -- run_functional_test_in_pie does not start a test, it only reads the verdict a Functional Test actor reports in a session where something else ran it. The same skipped answer comes for a test that needs an interactive user or a real renderer in a headless editor; an editor busy with a slow task or PIE refuses the start. Marked destructive and not idempotent because the test's own code runs in the editor and can create, change or delete assets and actors as it was written to, so two runs need not do the same; this tool itself saves nothing and adds no undo step for what the test did.",
           "params": [
             {
               "name": "test_name",
@@ -25761,23 +25777,23 @@
         },
         {
           "name": "run_functional_test_in_pie",
-          "description": "Place one instance of a Functional Test Blueprint class in the editor level (unless one is already there), then ask the editor to start a Simulate-in-Editor session and, with auto_stop_pie (default), to end it again. It does not wait for the test or read its result: verdict is \"pass\" whenever a session is running right after the request and \"not_run\" otherwise, so it is no test verdict -- read the outcome in the output log (get_output_log_lines), or run a registered test with run_automation_test, whose verdict is real. The start request is deferred (and with no level viewport, headless, nothing starts), so on a first call pie_started is usually false and the session starts after the reply without being stopped: end it with stop_play_in_editor. With a session already running it answers pass and, with auto_stop_pie, ends that session. The placed actor stays in the level, unsaved and with no undo step. Create the test first with create_functional_test; a class that is not found, or is not a Functional Test, is an error.",
+          "description": "Place one instance of a Functional Test Blueprint class in the editor level (unless one is already there) and, when no Play-in-Editor session is running or starting, request a Simulate-in-Editor session. It does not run the test (the engine's functional testing manager does, in a Play session with a player) and cannot wait for it: verdict comes from the test actor's own Result, read in the running session's world -- pass, fail, running, not_run (it has not run) or unknown (it finished with Default) -- and is not_run when no session was running at the call, since the requested one starts only after the reply (pie_requested true, pie_started usually false). With auto_stop_pie (default) the session this call requests is ended as soon as it has started; with false it keeps running until stop_play_in_editor. A session that was already running or starting is never ended. Call it again while a session runs to read the test's state; confirm the session with is_play_in_editor_active. The placed actor stays in the level, unsaved and with no undo step. Create the test first with create_functional_test; a class that is not found, is not a Functional Test, or whose name matches several loaded classes is an error.",
           "params": [
             {
               "name": "test_asset_path",
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Functional Test Blueprint, as an asset path (\"/Game/Tests/BP_FT_PlayerHealth\"), object path or generated-class path (\"/Game/Tests/BP_FT_PlayerHealth.BP_FT_PlayerHealth_C\"); when none loads, the first loaded Functional Test class whose name contains the last path segment is used."
+              "description": "Functional Test Blueprint, as an asset path (\"/Game/Tests/BP_FT_PlayerHealth\", as create_functional_test returns it), object path or generated-class path (\"/Game/Tests/BP_FT_PlayerHealth.BP_FT_PlayerHealth_C\"); when none loads, a loaded Functional Test class named exactly like the last path segment (with or without _C) is used."
             },
             {
               "name": "auto_stop_pie",
               "jsonType": "boolean",
               "required": false,
-              "description": "Optional bool (default true): request the end of the session right after it is seen running, including a session that was already running before the call."
+              "description": "Optional bool (default true): end the Simulate session this call requests as soon as it has started; false leaves it running. A session that was already running is never ended."
             }
           ],
-          "returns": "{ test_asset_path, pie_started, verdict: \"pass\"|\"not_run\", pie_stopped?, already_in_pie?, spawned?, already_in_world?, note? }",
+          "returns": "{ test_asset_path, test_class, verdict: \"pass\"|\"fail\"|\"running\"|\"not_run\"|\"unknown\", test_result?, test_in_session, already_in_pie, pie_requested, pie_started, pie_stop_scheduled, spawned, already_in_world, note }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -26052,16 +26068,16 @@
         },
         {
           "name": "set_cvars_from_json",
-          "description": "Set several console variables of the running editor in one call, from a JSON object of name/value pairs, each through IConsoleManager at SetByCode priority. Not atomic: names are applied one by one, an unknown name goes to errors and the others still apply. Unlike set_cvar (one variable, console priority, read back) it reads nothing back, and applied counts every name found, including a set the engine ignores because the variable was last set at a higher priority (by the console or by set_cvar), so confirm values with get_cvar. Find names with list_cvars. The values live in this editor session only: nothing is written to an INI (set_engine_ini_value does that) and nothing is undoable. Text that is not a JSON object is an error and nothing changes. Repeating the call sets the same values again.",
+          "description": "Set several console variables of the running editor in one call, from a JSON object of name/value pairs, each through IConsoleManager at SetByCode priority, then read each one back. Not atomic: names are applied one by one, and the others still apply when one fails. applied counts only the variables that hold the new value afterwards; results gives each one's read-back value and set_by. A variable last set at a higher priority (by the console or by set_cvar) ignores this write and goes to errors, as do an unknown name and a value the variable would misread; then success is false (use set_cvar, console priority, for those). Find names with list_cvars. The values live in this editor session only: nothing is written to an INI (set_engine_ini_value does that) and nothing is undoable. Text that is not a JSON object is an error and nothing changes. Repeating the call sets the same values again.",
           "params": [
             {
               "name": "cvars",
               "jsonType": "string",
               "required": true,
-              "description": "A STRING holding a JSON object of exact cvar names to values, e.g. '{\"r.ScreenPercentage\":\"75\",\"t.MaxFPS\":\"60\"}'; names as list_cvars returns them. Give values as text such as \"1\": a JSON number is passed as its text, and a JSON true/false as the words true/false, which an integer cvar reads as 0."
+              "description": "A STRING holding a JSON object of exact cvar names to values, e.g. '{\"r.ScreenPercentage\":\"75\",\"t.MaxFPS\":60}'; names as list_cvars returns them. A value is text, a number (passed as its text) or a bool (passed as 1/0); a numeric or bool cvar takes only a number or one of the words true/false/yes/no/on/off (as 1/0), and other text, null, an array or an object is refused for that name."
             }
           ],
-          "returns": "{ applied, requested, errors: [{name, error}] }",
+          "returns": "{ applied, requested, results: [{name, requested_value, value, set_by, applied}], errors: [{name, error}] }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -26237,7 +26253,7 @@
         },
         {
           "name": "set_scalability_quality",
-          "description": "Set the running editor's scalability quality, every sg.* group at once (category all, the default) or one group, through Scalability::SetQualityLevels + ApplyCachedQualityLevels, then read all the levels back. It starts from the current levels, so a single-group change leaves the other groups as they were. The change lives in this editor session only: it is not undoable and is not written to GameUserSettings, an INI or a device profile. Check the levels before with get_scalability_levels; for one sg.* or r.* variable use set_cvar instead. An unknown quality word or category is an error and nothing changes; a number outside 0-4 is clamped. set is always true, so compare the returned levels with requested_level. Repeating the call sets the same levels again (idempotent).",
+          "description": "Set the running editor's scalability quality, every sg.* group at once (category all, the default) or one group, through Scalability::SetQualityLevels + ApplyCachedQualityLevels, then read all the levels back. It starts from the current levels, so a single-group change leaves the other groups as they were. The change lives in this editor session only: it is not undoable and is not written to GameUserSettings, an INI or a device profile. Check the levels before with get_scalability_levels; for one sg.* or r.* variable use set_cvar instead. An unknown quality word or category is an error and nothing changes; a number outside 0-4 is clamped. The levels are read back after the change: set is true only when every group asked for now holds its level, and otherwise success is false, with mismatches naming each group the engine left elsewhere. Repeating the call sets the same levels again (idempotent).",
           "params": [
             {
               "name": "quality",
@@ -26252,7 +26268,7 @@
               "description": "One group, case ignored: \"ViewDistance\", \"AntiAliasing\", \"Shadows\", \"GlobalIllumination\" (or \"GI\"), \"Reflection\", \"PostProcess\", \"Texture\", \"Effects\", \"Foliage\", \"Shading\", \"Landscape\"; or \"all\" (the default) for every group."
             }
           ],
-          "returns": "{ set: bool, requested_level: int, category: string, ResolutionQuality: int, ViewDistanceQuality: int, AntiAliasingQuality: int, ShadowQuality: int, GlobalIlluminationQuality: int, ReflectionQuality: int, PostProcessQuality: int, TextureQuality: int, EffectsQuality: int, FoliageQuality: int, ShadingQuality: int, LandscapeQuality: int }",
+          "returns": "{ set: bool, requested_level: int, category: string, ResolutionQuality: int, ViewDistanceQuality: int, AntiAliasingQuality: int, ShadowQuality: int, GlobalIlluminationQuality: int, ReflectionQuality: int, PostProcessQuality: int, TextureQuality: int, EffectsQuality: int, FoliageQuality: int, ShadingQuality: int, LandscapeQuality: int, mismatches?: [string] }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -30107,7 +30123,7 @@
         },
         {
           "name": "create_render_job",
-          "description": "Adds a new job for a Level Sequence to this editor session's Movie Render Queue, without rendering: the job points at the sequence, takes map_path as its map when given, and has its default primary configuration. One undo step; the queue lives in memory, so nothing is saved to disk and the job is gone when the editor closes. Works headless. Each call adds another job, even with a job_name the queue already has (tools that take job_name then act on the first match). Next, set resolution, folder and image format with set_render_job_output and render with render_sequence_to_movie, which renders every job in the queue; get_render_queue lists the jobs and delete_render_job takes one out. For a quick render with default PNG output, render_sequence_to_movie alone is enough.",
+          "description": "Adds a new job for a Level Sequence to this editor session's Movie Render Queue, without rendering: the job points at the sequence, renders in map_path or, without it, in the level open in the editor (as the Movie Render Queue window does), and has its default primary configuration. A map that is not the package path of a saved map (an unsaved level included) is refused before the job is added, since the renderer would stop the whole queue at once. One undo step; the queue lives in memory, so nothing is saved to disk and the job is gone when the editor closes. Works headless. Each call adds another job, even with a job_name the queue already has (tools that take job_name then act on the first match). Next, set resolution, folder and image format with set_render_job_output and render with render_sequence_to_movie, which renders every job in the queue; get_render_queue lists the jobs and delete_render_job takes one out. For a quick render with default PNG output, render_sequence_to_movie alone is enough.",
           "params": [
             {
               "name": "sequence_name",
@@ -30128,7 +30144,7 @@
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "description": "Optional object path of the map the job renders in (e.g. \"/Game/Maps/MyMap.MyMap\"), stored as given and not checked; without it the render plays the level open in the editor."
+              "description": "Optional object path of the map the job renders in (e.g. \"/Game/Maps/MyMap.MyMap\"); without it the job takes the level open in the editor. A map that is not the package path of a saved map (a long package name under a writable root; an unsaved level is under /Temp) is an error and no job is added."
             }
           ],
           "returns": "{ job_name: string, sequence_name: string, sequence_path: string, map: string, has_configuration: bool, job_created: bool, queue_job_count: number }",
@@ -30319,7 +30335,7 @@
         },
         {
           "name": "render_sequence_to_movie",
-          "description": "Renders a Level Sequence to PNG frames with Movie Render Queue: adds a job named OneShot_<sequence_name> with the engine's default output (1920x1080 into {project_dir}/Saved/MovieRenders/) and starts rendering the whole editor queue, jobs from create_render_job included, in a Play-In-Editor session. Asynchronous: it returns at once without waiting for frames, and render_started only says a render executor was launched, not that frames were written; while a render is already running it starts nothing new. Needs an interactive editor, since it starts its own PIE session; headless, the job is still added. Frames overwrite earlier files of the same name in the output folder, and each call adds another job. For another resolution or format use create_render_job and set_render_job_output first; follow progress with get_render_queue and stop with cancel_render_job.",
+          "description": "Renders a Level Sequence to PNG frames with Movie Render Queue: adds a job named OneShot_<sequence_name> with the engine's default output (1920x1080 into {project_dir}/Saved/MovieRenders/) and starts rendering the whole editor queue, jobs from create_render_job included, in a Play-In-Editor session. Asynchronous: the editor starts that session on its next frame, so the call returns before any frame is written, and render_state is the renderer read right after the start: waiting_for_pie or rendering (render_started true); already_rendering when a render was running, which starts nothing new and the job joins its queue; ended_without_rendering when the renderer stopped at once, which makes success false (the editor log, category LogMovieRenderPipeline, says why; the job stays queued). The job renders in map_path, or without it in the level open in the editor; a map that is not the package path of a saved map (an unsaved level included) is refused before the job is added, and so is a start while the queue holds another job with such a map, since the renderer would abort the whole queue (delete_render_job removes it). The frames need an interactive editor, since they are drawn in that PIE session. Frames overwrite earlier files of the same name in the output folder, and each call adds another job. For another resolution or format use create_render_job and set_render_job_output first; follow progress with get_render_queue and stop with cancel_render_job.",
           "params": [
             {
               "name": "sequence_name",
@@ -30333,10 +30349,10 @@
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "description": "Optional object path of the map to render in (e.g. \"/Game/Maps/MyMap.MyMap\"), stored as given and not checked; without it the render plays the level open in the editor."
+              "description": "Optional object path of the map to render in (e.g. \"/Game/Maps/MyMap.MyMap\"); without it the job takes the level open in the editor, as the Movie Render Queue window does. A map that is not the package path of a saved map (a long package name under a writable root; an unsaved level is under /Temp) is refused before anything changes."
             }
           ],
-          "returns": "{ sequence_name: string, job_name: string, job_created: bool, queue_job_count: number, render_started: bool, render_async: bool, note: string }",
+          "returns": "{ sequence_name: string, job_name: string, job_created: bool, map_path: string, queue_job_count: number, render_started: bool, render_state: \"waiting_for_pie\"|\"rendering\"|\"already_rendering\"|\"ended_without_rendering\", render_async: bool, note: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -31043,7 +31059,7 @@
         },
         {
           "name": "create_gameplay_effect_asset",
-          "description": "Create a native UGameplayEffect data asset (not a Blueprint, and not a container) at package_path/name with the given duration policy, and save it; no undo transaction. apply_gameplay_effect needs a class, so for an effect you will apply use create_gameplay_effect_blueprint instead; read the result back with get_gameplay_effect_info. Idempotent: a GameplayEffect already at that path, native or Blueprint, is returned untouched with already_existed=true and nothing saved, but the duration_policy in that reply echoes your request, not the asset; an asset of another class there is refused. An unknown duration_policy is an error and nothing is created. A failed save (always while PIE runs) is an error, and the new asset stays in memory unsaved.",
+          "description": "Create a native UGameplayEffect data asset (not a Blueprint, and not a container) at package_path/name with the given duration policy, and save it; no undo transaction. apply_gameplay_effect needs a class, so for an effect you will apply use create_gameplay_effect_blueprint instead; read the result back with get_gameplay_effect_info. Idempotent: a GameplayEffect already at that path, native or Blueprint, is returned untouched with already_existed=true and nothing saved; its duration_policy and duration_magnitude are read from the asset, and requested_duration_policy echoes the request that was not applied. An asset of another class there is refused. An unknown duration_policy is an error and nothing is created. A failed save (always while PIE runs) is an error, and the new asset stays in memory unsaved.",
           "params": [
             {
               "name": "name",
@@ -31072,7 +31088,7 @@
               "description": "Duration in seconds as a constant magnitude, e.g. 5.0; used only with HasDuration and ignored otherwise (default 0.0)."
             }
           ],
-          "returns": "{ name, asset_path, already_existed, duration_policy, duration_magnitude?, created? }",
+          "returns": "{ name, asset_path, already_existed, duration_policy, duration_magnitude?, requested_duration_policy?, created? }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
@@ -31700,7 +31716,7 @@
         },
         {
           "name": "set_ability_cooldown",
-          "description": "Point CooldownGameplayEffectClass on the class default object of a GameplayAbility Blueprint at the generated class of a GameplayEffect Blueprint, both loaded by asset path, then save the ability without recompiling. That effect is applied when the ability commits and the tags it grants block re-activation while it lasts, so give it a duration with set_gameplay_effect_duration and a cooldown tag with set_gameplay_effect_component. Any cooldown class already set is overwritten, and every call writes and saves, even with the same class; there is no way to clear it here. A path that is not a GameplayAbility or GameplayEffect Blueprint, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. The cost effect: set_ability_cost; a new effect: create_gameplay_effect_blueprint.",
+          "description": "Point CooldownGameplayEffectClass on the class default object of a GameplayAbility Blueprint at the generated class of a GameplayEffect Blueprint, both loaded by asset path, then save the ability without recompiling. That effect is applied when the ability commits and the tags it grants block re-activation while it lasts, so give it a duration with set_gameplay_effect_duration and a cooldown tag with set_gameplay_effect_component. Any cooldown class already set is overwritten, and every call writes and saves, even with the same class; there is no way to clear it here. A path that is not a GameplayAbility or GameplayEffect Blueprint, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. cooldown_effect_class, cooldown_effect_class_matches and set are read back from the class defaults after the save, and success is false when they do not hold the requested class. The cost effect: set_ability_cost; a new effect: create_gameplay_effect_blueprint.",
           "params": [
             {
               "name": "ability_blueprint_path",
@@ -31727,7 +31743,7 @@
         },
         {
           "name": "set_ability_cost",
-          "description": "Point CostGameplayEffectClass on the class defaults of a GameplayAbility Blueprint at the generated class of a GameplayEffect Blueprint, both loaded by asset path, then save the ability without recompiling. That effect is applied when the ability commits, and its modifiers (usually a negative add to an attribute such as Mana) are the price: the commit fails when the owner cannot pay. Give the effect its modifier with add_gameplay_effect_modifier; for the effect that blocks re-use use set_ability_cooldown instead; make a new effect with create_gameplay_effect_blueprint; read the value back with get_properties on the ability's class defaults. Any cost class already set is overwritten and every call writes and saves, so a repeat call leaves the same state; there is no way to clear it here. A path that is not a GameplayAbility or GameplayEffect Blueprint, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. set and cost_effect_class_matches are the value read back after the save.",
+          "description": "Point CostGameplayEffectClass on the class defaults of a GameplayAbility Blueprint at the generated class of a GameplayEffect Blueprint, both loaded by asset path, then save the ability without recompiling. That effect is applied when the ability commits, and its modifiers (usually a negative add to an attribute such as Mana) are the price: the commit fails when the owner cannot pay. Give the effect its modifier with add_gameplay_effect_modifier; for the effect that blocks re-use use set_ability_cooldown instead; make a new effect with create_gameplay_effect_blueprint; read the value back with get_properties on the ability's class defaults. Any cost class already set is overwritten and every call writes and saves, so a repeat call leaves the same state; there is no way to clear it here. A path that is not a GameplayAbility or GameplayEffect Blueprint, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. cost_effect_class, cost_effect_class_matches and set are read back from the class defaults after the save, and success is false when they do not hold the requested class.",
           "params": [
             {
               "name": "ability_blueprint_path",
@@ -32845,7 +32861,7 @@
       "commands": [
         {
           "name": "create_behavior_config",
-          "description": "Get or create a UGameplayBehaviorConfig data asset at package_path/config_name: create it, or load the one already there, set its protected BehaviorClass by reflection when behavior_class resolves (on an existing config this overwrites its class), then save it in every case; no undo step. Use it as the entry point before trigger_behavior_on_actor; to change only the class of a config use set_behavior_class (which errors on a bad class instead of ignoring it), to read one get_behavior_config_info, to find them list_behavior_configs, and to delete one remove_behavior_config. An unresolved behavior_class is ignored without error, so check behavior_class in the reply (empty when unset); created tells new from existing. Idempotent: the same call again leaves the same asset. An asset of another class at that path is an error. A failed save (always while PIE runs) makes success false with saved=false.",
+          "description": "Get or create a UGameplayBehaviorConfig data asset at package_path/config_name: create it, or load the one already there, set its protected BehaviorClass by reflection when behavior_class is given (on an existing config this overwrites its class), then save it in every case; no undo step. Use it as the entry point before trigger_behavior_on_actor; to change only the class of a config use set_behavior_class, to read one get_behavior_config_info, to find them list_behavior_configs, and to delete one remove_behavior_config. A behavior_class that does not resolve, names two classes, or is not a UGameplayBehavior subclass is an error, checked before anything is created or loaded, so nothing changes. behavior_class and behavior_class_path in the reply are read back from the config (empty when unset); created tells new from existing. Idempotent: the same call again leaves the same asset. An asset of another class at that path is an error. A failed save (always while PIE runs) makes success false with saved=false.",
           "params": [
             {
               "name": "config_name",
@@ -32866,10 +32882,10 @@
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "description": "Full path of a loaded UGameplayBehavior subclass, e.g. \"/Script/GameplayBehaviorsModule.GameplayBehavior_AnimationBased\", or \"/Game/AI/GB_Sit.GB_Sit_C\" for a Blueprint already loaded; a short name never resolves, and a miss or a non-behavior class is ignored. Omit it to leave the class as it is."
+              "description": "UGameplayBehavior subclass to run: a class path, e.g. \"/Script/GameplayBehaviorsModule.GameplayBehavior_AnimationBased\" or \"/Game/AI/GB_Sit.GB_Sit_C\", a Blueprint asset path (\"/Game/AI/GB_Sit\"), loaded if needed, or the exact name of a loaded class (\"GameplayBehavior_AnimationBased\", \"GB_Sit_C\"). Omit it to leave the class as it is."
             }
           ],
-          "returns": "{ config_path: string, config_name: string, behavior_class: string, created: bool, saved: bool }",
+          "returns": "{ config_path: string, config_name: string, behavior_class: string, behavior_class_path: string, created: bool, saved: bool }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -32879,7 +32895,7 @@
         },
         {
           "name": "end_behavior_on_actor",
-          "description": "Interrupt the gameplay behaviors that the editor world UGameplayBehaviorSubsystem runs on a Pawn found by its label: every running behavior that is a behavior_class (subclasses included), or every one when behavior_class is omitted, gets EndBehavior with interrupted=true. behavior_class must be the full class path of a UGameplayBehavior subclass; a short name, or a path that does not resolve to one, is an error and nothing stops. ended is read back from the subsystem: true once every matching behavior stopped, while still_running counts the ones that did not and makes success false. With none running it succeeds with ended false and a note, so a repeat call is idempotent. Runtime only: nothing is saved or undoable. A missing actor, a non-Pawn or no subsystem is an error. Start one: trigger_behavior_on_actor; subsystem check: get_behavior_subsystem_info.",
+          "description": "Interrupt the gameplay behaviors that the editor world UGameplayBehaviorSubsystem runs on a Pawn found by its label: every running behavior that is a behavior_class (subclasses included), or every one when behavior_class is omitted, gets EndBehavior with interrupted=true. behavior_class is a class path, or the exact name of a loaded UGameplayBehavior subclass; a name two classes share, or one that does not resolve to such a class, is an error and nothing stops. ended is read back from the subsystem: true once every matching behavior stopped, while still_running counts the ones that did not and makes success false. With none running it succeeds with ended false and a note, so a repeat call is idempotent. Runtime only: nothing is saved or undoable. A missing actor, a non-Pawn or no subsystem is an error. Start one: trigger_behavior_on_actor; subsystem check: get_behavior_subsystem_info.",
           "params": [
             {
               "name": "actor_label",
@@ -32893,7 +32909,7 @@
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "description": "Optional full path of the UGameplayBehavior subclass to stop, e.g. \"/Script/GameplayBehaviorsModule.GameplayBehavior_AnimationBased\"; omitted stops every behavior on the pawn, and a path that does not resolve to such a class is an error"
+              "description": "Optional UGameplayBehavior subclass to stop: its path, e.g. \"/Script/GameplayBehaviorsModule.GameplayBehavior_AnimationBased\", or its exact class name (\"GameplayBehavior_AnimationBased\"); omitted stops every behavior on the pawn, and one that does not resolve to such a class is an error"
             }
           ],
           "returns": "{ actor_label: string, behavior_class: string, ended: bool, stopped_count: int, still_running: int, note?: string }",
@@ -32978,7 +32994,7 @@
         },
         {
           "name": "set_behavior_class",
-          "description": "Set which UGameplayBehavior class an existing UGameplayBehaviorConfig asset runs (its protected BehaviorClass, written by reflection), then save the asset; no undo step. Use it to repoint a config; create_behavior_config makes a new one (and ignores a bad class instead of failing), get_behavior_config_info reads the class back, list_behavior_configs finds configs. A config that does not load, a class that is not found or is not a UGameplayBehavior subclass is an error and nothing changes. set is true whenever the class resolved, without a read-back, so confirm with get_behavior_config_info. Idempotent: the same class again writes and saves again. A failed save (always while PIE runs) makes success false with saved=false.",
+          "description": "Set which UGameplayBehavior class an existing UGameplayBehaviorConfig asset runs (its protected BehaviorClass, written by reflection), then save the asset; no undo step. Use it to repoint a config; create_behavior_config makes a new one, get_behavior_config_info reads the class back, list_behavior_configs finds configs. A config that does not load, a class that is not found, names two classes, or is not a UGameplayBehavior subclass is an error and nothing changes. The class is read back from the config after the write: set is true only when it holds the class asked for, and otherwise success is false and nothing is saved. Idempotent: the same class again writes and saves again. A failed save (always while PIE runs) makes success false with saved=false.",
           "params": [
             {
               "name": "config_path",
@@ -32992,10 +33008,10 @@
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Full path of a loaded UGameplayBehavior subclass, e.g. \"/Script/GameplayBehaviorsModule.GameplayBehavior_AnimationBased\", or \"/Game/AI/GB_Sit.GB_Sit_C\" for a Blueprint already loaded. A bare class name is looked up as given and then with a \"U\" prefix, but neither form finds a class, so pass the path."
+              "description": "UGameplayBehavior subclass to run: a class path, e.g. \"/Script/GameplayBehaviorsModule.GameplayBehavior_AnimationBased\" or \"/Game/AI/GB_Sit.GB_Sit_C\", a Blueprint asset path (\"/Game/AI/GB_Sit\"), loaded if needed, or the exact name of a loaded class (\"GameplayBehavior_AnimationBased\", also with the C++ \"U\" prefix, or \"GB_Sit_C\")."
             }
           ],
-          "returns": "{ config_path: string, behavior_class: string, set: bool, saved: bool }",
+          "returns": "{ config_path: string, behavior_class: string, behavior_class_path: string, set: bool, saved: bool }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -34255,7 +34271,7 @@
         },
         {
           "name": "is_point_inside_mesh",
-          "description": "Tests whether a point lies inside the live dynamic mesh of a DynamicMeshActor in the editor world, with the engine's fast winding number (IsPointInsideMesh), which also gives a sensible answer for meshes with small holes. Every call builds a fresh BVH and winding tree from the mesh as it is now, so the answer reflects the latest edits; nothing is changed or saved. An unknown actor or a missing query_point is an error. Use it for inside/outside tests; for the closest surface point use find_nearest_point_on_mesh, for a ray hit find_nearest_ray_intersection_with_mesh; build_mesh_bvh is never needed first. The point is in mesh-local space: subtract the actor's location (and undo its rotation and scale) to test a world position.",
+          "description": "Tests whether a point lies inside the live dynamic mesh of a DynamicMeshActor in the editor world, with the engine's fast winding number (IsPointInsideMesh), which also gives a sensible answer for meshes with small holes. Every call builds a fresh BVH and winding tree from the mesh as it is now, so the answer reflects the latest edits; nothing is changed or saved. An unknown actor is an error, and so is a query_point that is missing or not exactly three numbers (a malformed point is refused, never read as the origin). Use it for inside/outside tests; for the closest surface point use find_nearest_point_on_mesh, for a ray hit find_nearest_ray_intersection_with_mesh; build_mesh_bvh is never needed first. The point is in mesh-local space: subtract the actor's location (and undo its rotation and scale) to test a world position.",
           "params": [
             {
               "name": "actor_name",
@@ -34268,7 +34284,7 @@
               "name": "query_point",
               "jsonType": "array",
               "required": true,
-              "description": "[x, y, z] point in the mesh's local space, in cm (e.g. [0, 0, 50])."
+              "description": "[x, y, z] point in the mesh's local space, in cm (e.g. [0, 0, 50]): exactly three JSON numbers, anything else is an error."
             },
             {
               "name": "winding_threshold",
@@ -37101,7 +37117,7 @@
         },
         {
           "name": "reimport_interchange_asset",
-          "description": "Reimports an asset that was imported through Interchange, from the source file and pipeline stack stored on its Interchange import data, synchronously and without dialogs: the asset's content in memory is overwritten with the file's current content. This tool does not save it (save_asset writes it). An asset without Interchange import data -- a legacy-importer asset, or one never imported -- is an error and nothing changes: use reimport_asset for those. Check which kind an asset has, and its source file, with get_interchange_asset_import_data; change the stored pipelines first with set_interchange_pipelines. A reimport the engine reports as failed still answers success, with reimported false and a note pointing to the editor log, so read reimported.",
+          "description": "Reimports an asset that was imported through Interchange, from the source file and pipeline stack stored on its Interchange import data, synchronously and without dialogs: the asset's content in memory is overwritten with the file's current content. This tool does not save it (save_asset writes it). An asset without Interchange import data -- a legacy-importer asset, or one never imported -- is an error and nothing changes: use reimport_asset for those. Check which kind an asset has, and its source file, with get_interchange_asset_import_data; change the stored pipelines first with set_interchange_pipelines. A reimport that brings nothing back -- the stored source file is gone, does not translate, or has an extension no registered translator reads -- makes success false, with reimported false, count 0 and an error naming the stored source file; the editor log has the translator's reason.",
           "params": [
             {
               "name": "asset_path",
@@ -37111,7 +37127,7 @@
               "description": "Package path (e.g. \"/Game/Meshes/SM_Rock\") or object path (\"/Game/Meshes/SM_Rock.SM_Rock\") of the asset to reimport; it is loaded if needed."
             }
           ],
-          "returns": "{ asset_path: string, reimported: bool, count: number, note: string }",
+          "returns": "{ asset_path: string, reimported: bool, count: number, note: string } -- reimported is true when the engine ran the reimport and handed back at least one object (count)",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -37606,7 +37622,7 @@
         },
         {
           "name": "add_streaming_level",
-          "description": "Adds a saved level package to the editor world as a streaming sub-level.  Creates a ULevelStreamingDynamic wrapper referencing the given level package and attaches it to the current editor world's StreamingLevels array. The package must already exist on disk (a streaming level references a saved .umap). Idempotent: if the level is already a streaming level, returns its current state with added=false.          (an object path \"/Game/Maps/SubLevel.SubLevel\" is also accepted).",
+          "description": "Adds a saved level package to the editor world as a streaming sub-level.  Creates a ULevelStreamingDynamic wrapper referencing the given level package and attaches it to the current editor world's StreamingLevels array. The package must already exist on disk (a streaming level references a saved .umap). Idempotent: if this exact package is already a streaming level, returns its current state with added=false (another sub-level with the same name in another folder is a different level and does not count). An object path \"/Game/Maps/SubLevel.SubLevel\" is also accepted.",
           "params": [
             {
               "name": "level_package_path",
@@ -39506,14 +39522,14 @@
         },
         {
           "name": "remove_streaming_level",
-          "description": "Detach a streaming sub-level from the current editor world: a loaded one is unloaded and taken out with UEditorLevelUtils::RemoveLevelFromWorld (unsaved edits in it are lost), an unloaded one has its streaming wrapper dropped with UWorld::RemoveStreamingLevel; method says which. The sub-level's .umap stays on disk; the persistent map is marked dirty, not saved (save_level keeps the change), and the change is wrapped in an undo transaction, but add_streaming_level is the reliable way back. To only hide or unload it while keeping it in the world, use set_streaming_level_visible or set_streaming_level_loaded instead. removed is re-checked by listing the world's sub-levels again; success stays true even when removed=false, so read removed. A level that is not a sub-level of the editor world is an error and nothing changes; a second call on the same level is therefore an error (not idempotent).",
+          "description": "Detach a streaming sub-level from the current editor world: a loaded one is unloaded and taken out with UEditorLevelUtils::RemoveLevelFromWorld (unsaved edits in it are lost), an unloaded one has its streaming wrapper dropped with UWorld::RemoveStreamingLevel; method says which. The sub-level's .umap stays on disk; the persistent map is marked dirty, not saved (save_level keeps the change), and the change is wrapped in an undo transaction, but add_streaming_level is the reliable way back. To only hide or unload it while keeping it in the world, use set_streaming_level_visible or set_streaming_level_loaded instead. removed is re-checked by listing the world's sub-levels again, and a sub-level still listed afterwards makes success false. A path matches only the sub-level with exactly that package, and a bare name only when one sub-level has it (two are refused, listing them); a level that is not a sub-level of the editor world is an error and nothing changes, so a second call on the same level is an error (not idempotent).",
           "params": [
             {
               "name": "level_package_path",
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Package path of an existing streaming sub-level, e.g. \"/Game/Maps/Arena_Lighting\", as get_streaming_levels returns it; an object path or the bare level name (\"Arena_Lighting\") also matches, case ignored."
+              "description": "Package path of an existing streaming sub-level, e.g. \"/Game/Maps/Arena_Lighting\", as get_streaming_levels returns it, or its object path; the bare level name (\"Arena_Lighting\") also matches, case ignored, when no other sub-level has that name."
             }
           ],
           "returns": "{ package_name: string, removed: bool, method: string, streaming_level_count: number }",
@@ -40569,14 +40585,14 @@
         },
         {
           "name": "set_streaming_level_loaded",
-          "description": "Set the should-be-loaded request flag of a streaming sub-level of the editor world (ULevelStreaming::SetShouldBeLoaded), found by package path, object path or short name (case-insensitive), inside an undo transaction that marks the map dirty without saving. It is a request: this call streams nothing in or out itself, so is_level_loaded may not change. Only a sub-level class that stores the flag honors it, such as ULevelStreamingDynamic (what add_streaming_level creates); an always-loaded sub-level keeps reporting should_be_loaded true, so asking to unload it gives applied false (applied compares ShouldBeLoaded with loaded). Repeating it leaves the same state, though each call still adds an undo step. An unknown level is an error. Visibility: set_streaming_level_visible; current state: get_streaming_levels; detaching a sub-level: remove_streaming_level.",
+          "description": "Set the should-be-loaded request flag of a streaming sub-level of the editor world (ULevelStreaming::SetShouldBeLoaded), found by package path, object path or short name (case-insensitive; a path matches only the sub-level with exactly that package, and a bare name only when one sub-level has it, two being refused with their list), inside an undo transaction that marks the map dirty without saving. It is a request: this call streams nothing in or out itself, so is_level_loaded may not change. Only a sub-level class that stores the flag honors it, such as ULevelStreamingDynamic (what add_streaming_level creates); an always-loaded sub-level keeps reporting should_be_loaded true, so asking to unload it gives applied false (applied compares ShouldBeLoaded with loaded). Repeating it leaves the same state, though each call still adds an undo step. An unknown level is an error. Visibility: set_streaming_level_visible; current state: get_streaming_levels; detaching a sub-level: remove_streaming_level.",
           "params": [
             {
               "name": "level_package_path",
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Package path of an existing streaming sub-level, e.g. \"/Game/Maps/SubLevel\"; an object path or the bare level name also matches."
+              "description": "Package path of an existing streaming sub-level, e.g. \"/Game/Maps/SubLevel\", or its object path; the bare level name also matches when no other sub-level has it."
             },
             {
               "name": "loaded",
@@ -40595,14 +40611,14 @@
         },
         {
           "name": "set_streaming_level_visible",
-          "description": "Set the game-time should-be-visible request flag (ULevelStreaming bShouldBeVisible) of a streaming sub-level of the editor world, found by package path or short name, inside an undo transaction. It is a request, not an immediate change, and the editor viewport follows the level's separate editor-visibility flag, so is_level_visible may not change. Marks the map dirty without saving; an unknown level is an error. applied compares the flag with visible. Loading: set_streaming_level_loaded; current state: get_streaming_levels; adding a sub-level: add_streaming_level.",
+          "description": "Set the game-time should-be-visible request flag (ULevelStreaming bShouldBeVisible) of a streaming sub-level of the editor world, found by package path or short name (a path matches only the sub-level with exactly that package, and a bare name only when one sub-level has it, two being refused with their list), inside an undo transaction. It is a request, not an immediate change, and the editor viewport follows the level's separate editor-visibility flag, so is_level_visible may not change. Marks the map dirty without saving; an unknown level is an error. applied compares the flag with visible. Loading: set_streaming_level_loaded; current state: get_streaming_levels; adding a sub-level: add_streaming_level.",
           "params": [
             {
               "name": "level_package_path",
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Package path of an existing streaming sub-level."
+              "description": "Package path of an existing streaming sub-level, or its object path; the bare level name also matches when no other sub-level has it."
             },
             {
               "name": "visible",
@@ -40734,14 +40750,14 @@
         },
         {
           "name": "spawn_level_streaming_volume",
-          "description": "Spawn an ALevelStreamingVolume in the editor world with a real box brush (half-extent extent) and bind it to an existing streaming sub-level, setting its usage, editor_pre_vis_only and disabled flags, in one undo step. Over spawn_box_volume(volume_class='LevelStreamingVolume') it adds the binding: the volume is appended to the sub-level's EditorStreamingVolumes, which no other tool writes. Each call spawns a NEW volume; an extent axis of 0 or less becomes 100; an unknown usage or sub-level is an error before anything spawns. Not saved (save_level). The load/unload itself happens only at PIE/runtime, when a viewpoint enters the volume.",
+          "description": "Spawn an ALevelStreamingVolume in the editor world with a real box brush (half-extent extent) and bind it to an existing streaming sub-level, setting its usage, editor_pre_vis_only and disabled flags, in one undo step. Over spawn_box_volume(volume_class='LevelStreamingVolume') it adds the binding: the volume is appended to the sub-level's EditorStreamingVolumes, which no other tool writes. Each call spawns a NEW volume; an extent axis of 0 or less becomes 100; an unknown usage or sub-level is an error before anything spawns. A path matches only the sub-level with exactly that package, and a bare name only when one sub-level has it (two are refused, listing them). Not saved (save_level). The load/unload itself happens only at PIE/runtime, when a viewpoint enters the volume.",
           "params": [
             {
               "name": "streaming_level_name",
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Package path (or short name) of an existing streaming sub-level to bind the volume to."
+              "description": "Package path of an existing streaming sub-level to bind the volume to, or its bare name when no other sub-level has it."
             },
             {
               "name": "location",
@@ -45013,7 +45029,7 @@
         },
         {
           "name": "get_material_parameter_collection_instance_info",
-          "description": "Read the live per-world values of a Material Parameter Collection (its transient instance on one world) without changing any value: current_value per scalar and current_rgba per vector, each with readback_ok (false when the instance lacks that parameter, the value then being the asset default), plus parent_collection_path and is_valid. The world is the editor world by default, or the Play-in-Editor world world_label selects; the world fields and pie_instance (-1 outside PIE) say which one answered. Use it to check set_material_parameter_collection_instance_value or reset_material_parameter_collection_instance; for the saved defaults use get_collection_info. The engine lookup creates the instance at the defaults when the world has none, so instance_exists is true in practice, and scalar_override_count and vector_override_count are only the parameter counts, not overrides. A collection that does not load, or a world_label no live world matches, is an error.",
+          "description": "Read the live per-world values of a Material Parameter Collection (its transient instance on one world) without changing any value: current_value per scalar and current_rgba per vector, each with readback_ok (false when the instance lacks that parameter, the value then being the asset default) and overridden (the instance holds its own value for it, even one equal to the default), plus parent_collection_path and is_valid. The world is the editor world by default, or the Play-in-Editor world world_label selects; the world fields and pie_instance (-1 outside PIE) say which one answered. Use it to check set_material_parameter_collection_instance_value or reset_material_parameter_collection_instance; for the saved defaults use get_collection_info. The engine lookup creates the instance at the defaults when the world has none, so instance_exists is true in practice; scalar_override_count and vector_override_count count the parameters the instance overrides (0 right after reset_material_parameter_collection_instance). A collection that does not load, or a world_label no live world matches, is an error.",
           "params": [
             {
               "name": "collection_path",
@@ -45030,7 +45046,7 @@
               "description": "Which world: empty or \"editor\" for the editor world (the default), even while Play-in-Editor runs; \"pie\" (alias \"game\") for the running PIE world, \"server\" or \"client\" for that PIE world, \"pie:N\" for PIE instance N. any other value names a live world by its object name (the editor world is checked first, so a map name selects it) or by its package name (UEDPIE_N_ and the map name for a PIE world), and a value no world has fails and lists the worlds present"
             }
           ],
-          "returns": "{ collection_path: string, world_name: string, world_package: string, world_type: string, net_mode: string, pie_instance: int, instance_exists: bool, is_valid: bool, parent_collection_path: string, scalar_override_count: int, vector_override_count: int, scalars: [object], vectors: [object] }",
+          "returns": "{ collection_path: string, world_name: string, world_package: string, world_type: string, net_mode: string, pie_instance: int, instance_exists: bool, is_valid: bool, parent_collection_path: string, scalar_override_count: int, vector_override_count: int, scalars: [{ name, current_value, readback_ok, overridden }], vectors: [{ name, current_rgba, readback_ok, overridden }] }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -46190,7 +46206,7 @@
         },
         {
           "name": "set_substrate_slab_scalar",
-          "description": "Drives one input pin of the Substrate Slab BSDF node of a material with a constant: adds a NEW Constant expression holding value to the material graph and wires it into the named pin of the material's first Slab node, replacing whatever fed that pin, then saves the material. Each call adds another Constant node, even for the same pin and value; a constant that fed the pin before stays in the graph, unwired. Not recorded for undo, and the save result is not checked. Works whether Substrate is enabled or not (substrate_enabled reports it). The material needs a Slab node from create_substrate_slab_node; connect_substrate_slab_to_material wires the slab to the output. An unknown pin name is an error, but the Constant created before the failed wire stays in the graph. To change a constant already wired, use set_material_expression_property on its constant_node_id; delete stray nodes with delete_material_expression.",
+          "description": "Drives one input pin of the Substrate Slab BSDF node of a material with a constant: adds a NEW Constant expression holding value to the material graph and wires it into the named pin of the material's first Slab node, replacing whatever fed that pin, then saves the material. Each call adds another Constant node, even for the same pin and value; a constant that fed the pin before stays in the graph, unwired. One undo step removes the new constant and restores what fed the pin. A failed save (a read-only file, PIE running) makes success false with saved=false and save_error, the change kept in memory. Works whether Substrate is enabled or not (substrate_enabled reports it). The material needs a Slab node from create_substrate_slab_node; connect_substrate_slab_to_material wires the slab to the output. A pin name the Slab node does not have is an error that names its pins, and nothing is added. To change a constant already wired, use set_material_expression_property on its constant_node_id; delete stray nodes with delete_material_expression.",
           "params": [
             {
               "name": "material_path",
@@ -46204,7 +46220,7 @@
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Slab input pin to drive, by its input name: e.g. \"Roughness\", \"Anisotropy\", \"F0\" or \"DiffuseAlbedo\" (a color pin receives the scalar on all channels)."
+              "description": "Slab input pin to drive, by its input name as get_material_graph_info lists it (input_name), without case: e.g. \"Roughness\", \"Anisotropy\", \"F0\" or \"Diffuse Albedo\" (a color pin receives the scalar on all channels)."
             },
             {
               "name": "value",
@@ -46213,7 +46229,7 @@
               "description": "Scalar the Constant node holds (e.g. 0.35 for Roughness); not range-checked."
             }
           ],
-          "returns": "{ material_path: string, slab_node_id: string, constant_node_id: string, pin_name: string, value: number, connected: bool, substrate_enabled: bool, r_substrate_cvar: int, note?: string }",
+          "returns": "{ material_path: string, slab_node_id: string, constant_node_id: string, pin_name: string, value: number, connected: bool, saved: bool, save_error?: string, substrate_enabled: bool, r_substrate_cvar: int, note?: string } -- connected is read back from the slab pin",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -48201,7 +48217,7 @@
         },
         {
           "name": "start_trace",
-          "description": "Starts recording an Unreal Insights trace of this editor process to a new .utrace file, for profiling CPU, GPU and frame timing with the chosen channels. Idempotent: while any trace is active, including one started with -trace on the command line, it starts nothing and returns already_tracing true with the current destination; call stop_trace first for a new recording. The engine will not write over an existing file: an output_path that already exists makes the call fail with nothing started. Only the trace file is written; assets and levels are untouched. Flow: start_trace, reproduce the problem, mark moments with add_trace_bookmark, stop_trace to flush, list_traces to find the file; get_trace_status tells whether a trace is running. For a quick reading without a file use get_frame_timing or get_fps_info.",
+          "description": "Starts recording an Unreal Insights trace of this editor process to a new .utrace file, for profiling CPU, GPU and frame timing with the chosen channels. Idempotent: while any trace is active, including one started with -trace on the command line, it starts nothing and returns already_tracing true with the current destination; call stop_trace first for a new recording. The engine will not write over an existing file: an output_path that already exists makes the call fail with nothing started. Only the trace file is written; assets and levels are untouched. Flow: start_trace, reproduce the problem, mark moments with add_trace_bookmark, stop_trace to flush, list_traces to find the file; get_trace_status tells whether a trace is running. Of the marking tools only add_trace_bookmark writes into the trace: start_timing_region timers are kept in memory and never written to it. For a quick reading without a file use get_frame_timing or get_fps_info.",
           "params": [
             {
               "name": "channels",
@@ -50402,7 +50418,7 @@
         },
         {
           "name": "set_physics_constraint_limits",
-          "description": "Sets the motion limits of a Physics Constraint actor placed in the editor world, on its UPhysicsConstraintComponent, and reads them back: each limit given switches that axis to Limited with that size (linear_limit is one value for X, Y and Z together; swing and twist are in degrees). Axes whose limit is not given keep their motion type and size, and no axis can be set to Free or Locked here. One undo step; the level is marked dirty, not saved (save_level). The same values again give the same result; with no limit given nothing changes, though updated still reads true. An actor that is not a Physics Constraint actor is an error. Create one with spawn_physics_constraint and read it with get_physics_constraint_info; motors, breaking and projection are set with set_physics_constraint_drives; for a ragdoll joint inside a Physics Asset use set_physics_asset_constraint_limits instead.",
+          "description": "Sets the motion limits of a Physics Constraint actor placed in the editor world, on its UPhysicsConstraintComponent, and reads them back: each limit given switches that axis to Limited with that size (linear_limit is one value for X, Y and Z together; swing and twist are in degrees). Axes whose limit is not given keep their motion type and size, and no axis can be set to Free or Locked here. One undo step; the level is marked dirty, not saved (save_level). The same values again give the same result. updated is read back: every limit given reads Limited with the requested size, and one that does not makes success false. A call with no limit is an error that names the four limit parameters, and nothing changes; so is an actor that is not a Physics Constraint actor. Create one with spawn_physics_constraint and read it with get_physics_constraint_info; motors, breaking and projection are set with set_physics_constraint_drives; for a ragdoll joint inside a Physics Asset use set_physics_asset_constraint_limits instead.",
           "params": [
             {
               "name": "constraint_actor_name",
@@ -50436,7 +50452,7 @@
               "description": "Optional twist angular limit in degrees, the symmetric rotation about the twist axis (e.g. 30); the Details panel range is 0-180 and this value is not range-checked."
             }
           ],
-          "returns": "{ constraint_actor_name: string, constraint_component: string, linear_limit: number, linear_x_motion: string, linear_y_motion: string, linear_z_motion: string, swing1_limit: number, swing1_motion: string, swing2_limit: number, swing2_motion: string, twist_limit: number, twist_motion: string, linear_applied: bool, swing1_applied: bool, swing2_applied: bool, twist_applied: bool, updated: bool }",
+          "returns": "{ constraint_actor_name: string, constraint_component: string, linear_limit: number, linear_x_motion: string, linear_y_motion: string, linear_z_motion: string, swing1_limit: number, swing1_motion: string, swing2_limit: number, swing2_motion: string, twist_limit: number, twist_motion: string, linear_applied: bool, swing1_applied: bool, swing2_applied: bool, twist_applied: bool, updated: bool } -- updated is true when every limit given reads back Limited with the requested size",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -52065,7 +52081,7 @@
         },
         {
           "name": "subscribe_to_delegate",
-          "description": "Start recording a dynamic multicast delegate (an event such as OnComponentHit or a Blueprint event dispatcher, with any number of parameters) of a live object: a rooted observer is bound to it and every fire is kept with its parameters as text, the latest 512 per subscription. It is the first of three steps: read the fires with poll_delegate_events (subscription_id plus a cursor), and stop with unsubscribe_delegate, which frees the observer; the subscription otherwise stays until the editor closes, and stops recording when the object goes away. Find event names with get_component_events, or get_event_dispatchers for a Blueprint; for gameplay tag count changes use register_gameplay_tag_event instead. It observes only: nothing in the object or level changes, and nothing is saved. Idempotent per the exact (object_path, delegate_name) text: the same pair returns the existing subscription_id with already_existed=true (a different spelling of the same object makes a second subscription, and a target that no longer exists is subscribed afresh). An object that is not found, or a delegate_name that is not a multicast delegate of its class, is an error.",
+          "description": "Start recording a dynamic multicast delegate (an event such as OnComponentHit or a Blueprint event dispatcher, with any number of parameters) of a live object: a rooted observer is bound to it and every fire is kept with its parameters as text, the latest 512 per subscription. It is the first of three steps: read the fires with poll_delegate_events (subscription_id plus a cursor), and stop with unsubscribe_delegate, which frees the observer; the subscription otherwise stays until the editor closes, and stops recording when the object goes away. Find event names with get_component_events, or get_event_dispatchers for a Blueprint; for gameplay tag count changes use register_gameplay_tag_event instead. It observes only: nothing in the object or level changes, and nothing is saved. Idempotent per resolved object and delegate: any spelling that resolves to the same object (its full path, \"Actor.Component\", the actor's name) and the same delegate property returns the existing subscription_id with already_existed=true, and the reply's object_path and delegate_name give the resolved pair; a target that no longer exists is subscribed afresh. An object that is not found, a delegate_name that is not a multicast delegate of its class, or a SPARSE engine delegate (OnComponentHit, OnComponentBeginOverlap, OnActorHit, OnTakeAnyDamage and the like, which would crash the editor) is an error and nothing is subscribed.",
           "params": [
             {
               "name": "object_path",
@@ -52082,7 +52098,7 @@
               "description": "Exact name of the dynamic multicast delegate property on that object's class, e.g. \"OnComponentBeginOverlap\" or \"OnDoorOpened\", as get_component_events or get_event_dispatchers list it."
             }
           ],
-          "returns": "{ subscription_id: int, signature: string, already_existed: bool }",
+          "returns": "{ subscription_id: int, signature: string, object_path: string, delegate_name: string, already_existed: bool }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
@@ -53440,7 +53456,7 @@
       "commands": [
         {
           "name": "add_consideration",
-          "description": "Append a utility consideration node (a struct deriving from FStateTreeConsiderationBase, with its default values) to the Considerations of one state of a StateTree asset, then save the asset without compiling it; there is no undo step. Considerations score the state 0..1 when its parent picks children by utility (set_state_selection_behavior, e.g. TrySelectChildrenWithHighestUtility). Each call appends another node, even of a type the state already has, so a repeat call stacks a duplicate. A missing tree, editor data or state, or a struct that is not found or is not a consideration, is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. Set its values (Constant, Input...) with set_consideration_property; list them: list_considerations; inverse: remove_consideration; check the tree with compile_state_tree.",
+          "description": "Append a utility consideration node (a struct deriving from FStateTreeConsiderationBase, with its default values) to the Considerations of one state of a StateTree asset, in one undo step, then save the asset without compiling it. Considerations score the state 0..1 when its parent picks children by utility (set_state_selection_behavior, e.g. TrySelectChildrenWithHighestUtility). Each call appends another node, even of a type the state already has, so a repeat call stacks a duplicate. A missing tree, editor data or state, or a struct that is not found or is not a consideration, is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. Set its values (Constant, Input...) with set_consideration_property; list them: list_considerations; inverse: remove_consideration; check the tree with compile_state_tree.",
           "params": [
             {
               "name": "tree_path",
@@ -53528,7 +53544,7 @@
         },
         {
           "name": "add_state_enter_condition",
-          "description": "Append a new enter-condition node, of the struct named by condition_struct and with that struct's default values, to the EnterConditions of one state of a StateTree asset, then save the asset without compiling it; there is no undo step. Each call appends another node, so repeating it stacks a duplicate condition. A missing tree, editor data, state or struct, or a struct that does not derive from FStateTreeConditionBase, is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. Struct names: list_condition_types; list them: list_conditions; set a field: set_condition_property; inverse: remove_state_enter_condition; a condition on a transition: add_state_transition_condition; check the result with compile_state_tree.",
+          "description": "Append a new enter-condition node, of the struct named by condition_struct and with that struct's default values, to the EnterConditions of one state of a StateTree asset, in one undo step, then save the asset without compiling it. Each call appends another node, so repeating it stacks a duplicate condition. A missing tree, editor data, state or struct, or a struct that does not derive from FStateTreeConditionBase, is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. Struct names: list_condition_types; list them: list_conditions; set a field: set_condition_property; inverse: remove_state_enter_condition; a condition on a transition: add_state_transition_condition; check the result with compile_state_tree.",
           "params": [
             {
               "name": "tree_path",
@@ -53562,7 +53578,7 @@
         },
         {
           "name": "add_state_task",
-          "description": "Append a task node, of the struct named by task_struct with its default values, to the Tasks of one state of a StateTree asset, then save the asset without compiling it; there is no undo step. Use it for work that runs while that state is active; for a task that runs as long as the whole tree runs use add_state_tree_global_task. Each call appends another node, so a repeat call stacks a duplicate task. A missing tree, editor data or state, or a struct that is not found or does not derive from FStateTreeTaskBase, is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. Struct names: list_task_types; make the state first with add_state; set a field: set_task_property; list: list_tasks; inverse: remove_task; check the tree with compile_state_tree.",
+          "description": "Append a task node, of the struct named by task_struct with its default values, to the Tasks of one state of a StateTree asset, in one undo step, then save the asset without compiling it. Use it for work that runs while that state is active; for a task that runs as long as the whole tree runs use add_state_tree_global_task. Each call appends another node, so a repeat call stacks a duplicate task. A missing tree, editor data or state, or a struct that is not found or does not derive from FStateTreeTaskBase, is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. Struct names: list_task_types; make the state first with add_state; set a field: set_task_property; list: list_tasks; inverse: remove_task; check the tree with compile_state_tree.",
           "params": [
             {
               "name": "tree_path",
@@ -54251,7 +54267,7 @@
         },
         {
           "name": "list_condition_types",
-          "description": "List the concrete condition struct types (children of FStateTreeConditionBase, abstract ones skipped) of the loaded modules, sorted by name, for add_state_enter_condition and add_state_transition_condition. Returns count and types [{name, struct_path}]; struct_path always assumes /Script/StateTreeModule, so pass name for other modules.",
+          "description": "List the concrete condition struct types (children of FStateTreeConditionBase, abstract ones skipped) of the loaded modules, sorted by name, for add_state_enter_condition and add_state_transition_condition. Returns count and types [{name, struct_path}]; struct_path is the struct's own path in the module that declares it, so either field can be passed.",
           "params": [],
           "returns": "{ count, types: [{ name, struct_path }] }",
           "annotations": {
@@ -54317,7 +54333,7 @@
         },
         {
           "name": "list_evaluator_types",
-          "description": "List the concrete evaluator struct types (children of FStateTreeEvaluatorBase, abstract ones skipped) of the loaded modules, sorted by name, for add_evaluator. Returns count and types [{name, struct_path}]; struct_path always assumes /Script/StateTreeModule, so pass name for other modules.",
+          "description": "List the concrete evaluator struct types (children of FStateTreeEvaluatorBase, abstract ones skipped) of the loaded modules, sorted by name, for add_evaluator. Returns count and types [{name, struct_path}]; struct_path is the struct's own path in the module that declares it, so either field can be passed.",
           "params": [],
           "returns": "{ count, types: [{ name, struct_path }] }",
           "annotations": {
@@ -54409,7 +54425,7 @@
         },
         {
           "name": "list_task_types",
-          "description": "List the StateTree task struct types (FStateTreeTaskBase and its children; structs tagged Abstract are skipped) of the modules loaded now, sorted by name, without changing anything: the names add_state_task and add_state_tree_global_task take as task_struct. A task from a plugin whose module is not loaded is not listed. struct_path always assumes /Script/StateTreeModule, so pass name for a task from another module. Other node types: list_condition_types, list_evaluator_types; the tasks already on a state: list_tasks; on the whole tree: list_state_tree_global_tasks.",
+          "description": "List the StateTree task struct types (FStateTreeTaskBase and its children; structs tagged Abstract are skipped) of the modules loaded now, sorted by name, without changing anything: the names add_state_task and add_state_tree_global_task take as task_struct. A task from a plugin whose module is not loaded is not listed. struct_path is the struct's own path in the module that declares it (e.g. /Script/StateTreeModule.StateTreeDelayTask, /Script/GameplayStateTreeModule.StateTreeRunEnvQueryTask), so either field can be passed. Other node types: list_condition_types, list_evaluator_types; the tasks already on a state: list_tasks; on the whole tree: list_state_tree_global_tasks.",
           "params": [],
           "returns": "{ count, types: [{ name, struct_path }] }",
           "annotations": {
@@ -54759,7 +54775,7 @@
         },
         {
           "name": "remove_state_tree_parameter",
-          "description": "Remove one parameter, by name, from the root parameter bag of a StateTree asset (the parameters that bindings and per-component overrides read), in one undo step, then save the asset without compiling it. Idempotent: a name the tree does not have (compared case-insensitively) changes and saves nothing and answers removed false with a note. Bindings that read the parameter are left in place: find them with list_state_tree_bindings and drop them with remove_state_tree_binding. Inverse: add_state_tree_parameter; to change only its value use set_state_tree_parameter; the current parameters: get_state_tree_info. A tree that does not load or has no editor data is an error. A failed save still answers success, with saved false and the change only in memory.",
+          "description": "Remove one parameter, by name, from the root parameter bag of a StateTree asset (the parameters that bindings and per-component overrides read), in one undo step, then save the asset without compiling it. Idempotent: a name the tree does not have (compared case-insensitively) changes and saves nothing and answers removed false with a note. Bindings that read the parameter are left in place: find them with list_state_tree_bindings and drop them with remove_state_tree_binding. Inverse: add_state_tree_parameter; to change only its value use set_state_tree_parameter; the current parameters: get_state_tree_info. A tree that does not load or has no editor data is an error. A failed save (for example while PIE runs, or with the .uasset read-only) makes success false, with saved false, save_error and the removal only in memory.",
           "params": [
             {
               "name": "tree_path",
@@ -54776,7 +54792,7 @@
               "description": "Name of the root parameter, as get_state_tree_info lists it in parameters[].name, e.g. \"Speed\"; compared case-insensitively."
             }
           ],
-          "returns": "{ tree_path, parameter_name, removed, parameter_count, saved, note? }",
+          "returns": "{ tree_path, parameter_name, removed, parameter_count, saved, save_error?, note? }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -55549,7 +55565,7 @@
       "commands": [
         {
           "name": "activate_external_subsystem",
-          "description": "Externally activate a Blueprint-authored USubsystem via FSubsystemCollectionBase::ActivateExternalSubsystem. Refuses to toggle native / abstract / base classes.",
+          "description": "Externally activate a Blueprint-authored USubsystem via FSubsystemCollectionBase::ActivateExternalSubsystem: every live collection of its family (engine, editor, game instance, world or local player) creates and initializes an instance, unless the class's ShouldCreateSubsystem declines. Refuses to toggle native / abstract / base classes. The engine call reports nothing, so the instances the collections hold are counted before and after it: activated is true when at least one is held afterwards, already_active when one was held before (a repeat call adds nothing), and success is false when none is held. Inverse: deactivate_external_subsystem.",
           "params": [
             {
               "name": "class_name",
@@ -55559,7 +55575,7 @@
               "description": "Short class name or /Script/ path of a Blueprint-derived USubsystem"
             }
           ],
-          "returns": "{ class_name: string, activated: bool }",
+          "returns": "{ class_name: string, lifetime: string, instances_before: int, instances_after: int, activated: bool, already_active: bool } -- for a subsystem of another family than those five, activated is null with a note and no counts.",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -55569,7 +55585,7 @@
         },
         {
           "name": "deactivate_external_subsystem",
-          "description": "Tear down a Blueprint-authored subsystem (a non-native, non-abstract USubsystem class) in every live subsystem collection of its family (engine, editor, game instance, world or local player), through the engine's external-subsystem switch: its Deinitialize runs and its runtime state is lost. Runtime only: nothing is saved and there is no undo, and a world or game instance created later builds it again. The inverse is activate_external_subsystem; check what is live with list_subsystem_instances (with class_name it answers active true or false), and find candidate classes with list_derived_classes. Native engine subsystems, the subsystem base classes and abstract classes are refused, since tearing them down can crash the editor; a class that is not found or is not a subsystem is an error. Idempotent: a repeat call, or one for a subsystem that is not active, changes nothing. deactivated is always true, since the engine call reports nothing, so confirm with list_subsystem_instances.",
+          "description": "Tear down a Blueprint-authored subsystem (a non-native, non-abstract USubsystem class) in every live subsystem collection of its family (engine, editor, game instance, world or local player), through the engine's external-subsystem switch: its Deinitialize runs and its runtime state is lost. Runtime only: nothing is saved and there is no undo, and a world or game instance created later builds it again. The inverse is activate_external_subsystem; check what is live with list_subsystem_instances (with class_name it answers active true or false), and find candidate classes with list_derived_classes. Native engine subsystems, the subsystem base classes and abstract classes are refused, since tearing them down can crash the editor; a class that is not found or is not a subsystem is an error. Idempotent: a repeat call, or one for a subsystem that is not active, changes nothing and answers deactivated false with a note. The engine call reports nothing, so the instances the collections hold are counted before and after it: deactivated is true when some were held and none are left, and success is false if any is still held.",
           "params": [
             {
               "name": "class_name",
@@ -55579,7 +55595,7 @@
               "description": "Blueprint subsystem class, by its Blueprint asset path (e.g. \"/Game/Systems/BP_ScoreSubsystem\"), generated class path, or loaded generated class name (e.g. \"BP_ScoreSubsystem_C\"); a native /Script/ class resolves but is refused."
             }
           ],
-          "returns": "{ class_name: string, deactivated: bool }",
+          "returns": "{ class_name: string, lifetime: string, instances_before: int, instances_after: int, deactivated: bool, note? } -- for a subsystem of another family than those five, deactivated is null with a note and no counts.",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -55770,7 +55786,7 @@
         },
         {
           "name": "validate_asset",
-          "description": "Run the editor's enabled data validators (the Data Validation plugin, in its Script use case) on one asset and report the verdict, without changing or saving it (the asset gets loaded): validation_result is Valid, Invalid or NotValidated (no validator applies to that asset), is_valid is false only for Invalid, and errors and warnings carry the validators' messages. Use it to check one asset after editing it, e.g. before a commit or a cook; for a whole folder use validate_assets_in_path, to see which validators exist list_validators, and for a level's actors run_map_check. validators_run counts the enabled validators, not the ones that applied to this asset, so a NotValidated result is the sign that none did. An asset the Asset Registry cannot find, or the Data Validation plugin being off, is an error.",
+          "description": "Run the editor's enabled data validators (the Data Validation plugin, in its Script use case) on one asset and report the verdict, without changing or saving it (the asset gets loaded): validation_result is Valid, Invalid or NotValidated (no validator applies to that asset), is_valid is false only for Invalid, and errors and warnings carry the validators' messages. Use it to check one asset after editing it, e.g. before a commit or a cook; for a whole folder use validate_assets_in_path, to see which validators exist list_validators, and for a level's actors run_map_check. validators_run counts the validators that actually validated this asset (returned a result other than NotValidated), validators_applied names their classes, and validators_enabled counts every enabled validator; none run when the asset's own class-level check already finds it Invalid. An asset the Asset Registry cannot find, or the Data Validation plugin being off, is an error.",
           "params": [
             {
               "name": "asset_path",
@@ -55780,7 +55796,7 @@
               "description": "Asset to validate, as an object path (\"/Game/MyGame/M_Example.M_Example\") or a package path (\"/Game/MyGame/M_Example\", which names its primary asset)."
             }
           ],
-          "returns": "{ asset_path: string, resolved_object_path: string, validation_result: string, is_valid: bool, errors: [string], warnings: [string], error_count: number, warning_count: number, validators_run: number }",
+          "returns": "{ asset_path: string, resolved_object_path: string, validation_result: string, is_valid: bool, errors: [string], warnings: [string], error_count: number, warning_count: number, validators_run: number, validators_applied: [string], validators_enabled: number }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -57813,7 +57829,7 @@
         },
         {
           "name": "remove_section",
-          "description": "Deletes one section, by index, from a track of a Level Sequence in one undo step, then saves the sequence; success requires the save. The section is resolved like get_section_info: with binding_guid, a track of that object binding; without it, a root track (shot, camera cut, audio, event, sub-sequence, fade). track_type picks the first track of that kind, else track_index; section_index picks the section. A missing sequence, binding, track or section index is an error and nothing changes. The track itself stays, even when left empty: remove_sequence_track deletes a whole track, remove_keyframe a single key. A repeat call deletes whatever section now sits at that index, so re-read indexes first with get_sequence_tracks or get_section_info. Inverse of add_audio_section, add_shot_section, add_event_track_section and add_camera_cut.",
+          "description": "Deletes one section, by index, from a track of a Level Sequence in one undo step, then saves the sequence; success requires the save. The section is resolved like get_section_info: with binding_guid, a track of that object binding; without it, a root track (shot, camera cut, audio, event, sub-sequence, fade). track_type picks the first track of that kind, else track_index; section_index picks the section. A missing sequence, binding, track or section index is an error and nothing changes, and so is a track_type it does not know, so a deletion never falls back to another track; removed is read back from the track. The track itself stays, even when left empty: remove_sequence_track deletes a whole track, remove_keyframe a single key. A repeat call deletes whatever section now sits at that index, so re-read indexes first with get_sequence_tracks or get_section_info. Inverse of add_audio_section, add_shot_section, add_event_track_section and add_camera_cut.",
           "params": [
             {
               "name": "sequence_path",
@@ -57842,7 +57858,7 @@
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "description": "Optional track kind; the first track of exactly that kind wins, else the first subclass: transform, float, bool, vector, color, visibility, audio, event, fade, skeletalanimation, sub, cameracut, shot, slomo, property, attach. An unrecognised value is ignored and track_index is used."
+              "description": "Optional track kind, case-insensitive; the first track of exactly that kind wins, else the first subclass: transform, float, bool, vector, color, visibility, audio, event, fade, skeletalanimation, sub, cameracut, shot, slomo, property, attach. An unrecognised value is an error and nothing is removed; omit it to pick by track_index."
             },
             {
               "name": "track_index",
@@ -61490,7 +61506,7 @@
         },
         {
           "name": "play_widget_animation",
-          "description": "Plays an animation of a Widget Blueprint on a live instance of that widget in a running Play-In-Editor session (UUserWidget::PlayAnimation): the first on-screen instance of the Blueprint's class in the PIE world that world selects. Without a PIE session, or without such an instance, nothing plays and the call still succeeds with played false, headless true, requires_pie true and a note: start PIE with start_play_in_editor and get the widget on screen first. It changes only the running widget, never the asset (saved is always false), and played true means PlayAnimation was called, not read back; a repeat call starts the animation again. An animation name the Blueprint does not have is an error. Names come from get_widget_animations; stop playback with stop_widget_animation; list_pie_widgets shows which widgets are on screen.",
+          "description": "Plays an animation of a Widget Blueprint on a live instance of that widget in a running Play-In-Editor session (UUserWidget::PlayAnimation): the first on-screen instance of the Blueprint's class in the PIE world that world selects. Without a PIE session, or without such an instance, nothing plays and the call still succeeds with played false, headless true, requires_pie true and a note: start PIE with start_play_in_editor and get the widget on screen first. A world selector that names no running PIE world while a session runs is an error naming the worlds there. It changes only the running widget, never the asset (saved is always false), and played true means PlayAnimation was called, not read back; a repeat call starts the animation again. An animation name the Blueprint does not have, a world that is not a PIE selector, a num_loops that is not a whole number of 0 or more, and an unknown play_mode are errors, refused before anything plays. Names come from get_widget_animations; stop playback with stop_widget_animation; list_pie_widgets shows which widgets are on screen.",
           "params": [
             {
               "name": "widget_bp_path",
@@ -61516,14 +61532,14 @@
               "name": "num_loops",
               "jsonType": "number",
               "required": false,
-              "description": "Optional whole number of times to play (default 1); values below 1 play once, so the engine's endless loop (0) is not available."
+              "description": "Optional whole number of times to play (default 1); 0 loops until stopped (stop_widget_animation), as the engine's PlayAnimation takes it. A negative or fractional number is an error."
             },
             {
               "name": "play_mode",
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "description": "Optional \"Forward\" (default) | \"Reverse\" | \"PingPong\", case-insensitive; any other value plays Forward."
+              "description": "Optional \"Forward\" (default) | \"Reverse\" | \"PingPong\", case-insensitive; any other value is an error."
             },
             {
               "name": "playback_speed",
@@ -61542,10 +61558,10 @@
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "description": "Optional world selector: absent/'pie' (default: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie'). In a 2-player PIE session EVERY client has its OWN widgets, so the default may well read the other player's HUD."
+              "description": "Optional world selector: absent/'pie' (default: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie'); any other value is an error. In a 2-player PIE session EVERY client has its OWN widgets, so the default may well read the other player's HUD."
             }
           ],
-          "returns": "{ widget_bp_path: string, animation_name: string, animation_exists: bool, played: bool, headless: bool, requires_pie: bool, note: string, saved: bool, live_widget_name?: string, live_animation_name?: string, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }",
+          "returns": "{ widget_bp_path: string, animation_name: string, animation_exists: bool, played: bool, headless: bool, requires_pie: bool, note: string, saved: bool, num_loops?: number, play_mode?: string, live_widget_name?: string, live_animation_name?: string, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -63525,7 +63541,7 @@
         },
         {
           "name": "get_usd_stage_actor_info",
-          "description": "Reads the live state of a USD stage actor (AUsdStageActor) in the editor world: the root layer identifier and file path of the stage it displays (the isolated stage while isolate_usd_layer is active), its load state (stage_state 0 = Closed, 1 = Opened, 2 = OpenedAndLoaded, with its name), whether it has generated a Level Sequence for animated prims, how many scene components it holds, and whether a layer is isolated. Read-only: changes, loads and saves nothing; with no stage open, root_layer and real_path are empty. An actor_path that matches no stage actor is an error. Use it after create_usd_stage_actor and set_usd_stage_actor_root_layer to check the stage loaded; for one prim's component or assets use get_usd_generated_component or get_usd_generated_assets. Stages opened by the stage tools, not by an actor, are read with get_usd_stage_info and list_usd_stages.",
+          "description": "Reads the live state of a USD stage actor (AUsdStageActor) in the editor world: the root layer identifier and file path of the stage it displays (the isolated stage while isolate_usd_layer is active), its load state (stage_state 0 = Closed, 1 = Opened, 2 = OpenedAndLoaded, with its name), whether it has generated a Level Sequence for animated prims, how many scene components the stage generated under it, and whether a layer is isolated. Read-only: changes, loads and saves nothing; with no stage open, root_layer and real_path are empty. An actor_path that matches no stage actor is an error. Use it after create_usd_stage_actor and set_usd_stage_actor_root_layer to check the stage loaded; for one prim's component or assets use get_usd_generated_component or get_usd_generated_assets. Stages opened by the stage tools, not by an actor, are read with get_usd_stage_info and list_usd_stages.",
           "params": [
             {
               "name": "actor_path",
@@ -63535,7 +63551,7 @@
               "description": "The stage actor: its full path as create_usd_stage_actor returns it (actor_path), or its object name or editor label, e.g. \"UsdStageActor\"."
             }
           ],
-          "returns": "{ actor_path: string, root_layer: string, real_path: string, stage_state: int, stage_state_name: string, has_level_sequence: bool, generated_component_count: int, has_isolated_stage: bool } -- actor_path is the resolved full path; generated_component_count counts every scene component the actor owns, its own root included",
+          "returns": "{ actor_path: string, root_layer: string, real_path: string, stage_state: int, stage_state_name: string, has_level_sequence: bool, generated_component_count: int, has_isolated_stage: bool } -- actor_path is the resolved full path; generated_component_count counts the scene components the loaded stage generated, not the actor's own root (0 with no stage loaded)",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -63570,7 +63586,7 @@
         },
         {
           "name": "insert_usd_sublayer",
-          "description": "Add a sublayer path to the root layer of a registered USD stage, so that layer's opinions compose into the stage, then save the root layer to disk (Save without force: the whole root layer, including any other unsaved edits on it). Read the stack and its indices with list_usd_stage_layers, take a sublayer out by index with remove_usd_sublayer, and to author into the new layer point set_usd_edit_target at it. The path is not checked to exist; USD complaints come back in errors. No undo step. success means the root layer was saved, so read inserted and already_present: a path already in the list changes nothing (already_present=true, nothing saved) and answers success=false, and an in-memory stage (anonymous root layer, nothing to save to) answers success=false even with inserted=true. Idempotent in effect: a repeat adds nothing. An unregistered stage_name is an error.",
+          "description": "Add a sublayer path to the root layer of a registered USD stage, so that layer's opinions compose into the stage, then save the root layer to disk (Save without force: the whole root layer, including any other unsaved edits on it). Read the stack and its indices with list_usd_stage_layers, take a sublayer out by index with remove_usd_sublayer, and to author into the new layer point set_usd_edit_target at it. The path is not checked to exist; USD complaints come back in errors. No undo step. inserted is read back from the root layer's list. A path already in the list is a success that changes nothing (already_present=true, saved=false). On an in-memory stage (anonymous root layer, in_memory=true) the insert is a success with saved=false, since there is no file to save to. On a file-backed stage success requires the save: a failed save answers success=false with saved=false. Idempotent in effect: a repeat adds nothing. An unregistered stage_name is an error.",
           "params": [
             {
               "name": "stage_name",
@@ -63595,7 +63611,7 @@
               "description": "0-based position in the root layer's sublayer list, where 0 is the strongest; -1 (default) appends as the weakest. The reply's index echoes this value, not the resulting position."
             }
           ],
-          "returns": "{ stage_name: string, sublayer_path: string, index: int, inserted: bool, already_present: bool, new_count: int, saved: bool, errors: [string]? }",
+          "returns": "{ stage_name: string, sublayer_path: string, index: int, inserted: bool, already_present: bool, in_memory: bool, new_count: int, saved: bool, note?: string, errors: [string]? }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,

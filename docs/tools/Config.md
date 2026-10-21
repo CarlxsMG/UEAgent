@@ -192,7 +192,7 @@ Set ONE property on a component of a placed level actor, in the editor world by 
 
 *Destructive, idempotent.*
 
-Set UGameMapsSettings EditorStartupMap / GameDefaultMap, persist them to the VERSIONED Config/DefaultEngine.ini (TryUpdateDefaultConfigFile) and re-read that .ini FROM DISK to prove it landed.
+Set UGameMapsSettings EditorStartupMap / GameDefaultMap, persist them to the VERSIONED Config/DefaultEngine.ini (TryUpdateDefaultConfigFile) and re-read that .ini FROM DISK to prove it landed. When the .ini cannot be written (read-only) the call fails and both maps are put back in memory as they were: reverted and in_memory_editor_startup_map / in_memory_game_default_map say so, read back.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -200,13 +200,13 @@ Set UGameMapsSettings EditorStartupMap / GameDefaultMap, persist them to the VER
 | `game_default_map` | string | no | Optional long package path of the default game map |
 | `verify_disk` | boolean | no | Optional bool, default true. Re-read Config/DefaultEngine.ini with FConfigFile::Read (never GConfig, which is the in-memory cache) and report disk_value per map. |
 
-**Returns:** `{ editor_startup_map: string, game_default_map: string, ini_path: string, is_default_config_class: bool, versioned_ini: bool, write_reported: bool, persist_method: string, disk_value: { editor_startup_map: string, game_default_map: string }, disk_checks: [object], verification: object, verification_checks: [object] }`
+**Returns:** `{ editor_startup_map: string, game_default_map: string, ini_path: string, is_default_config_class: bool, versioned_ini: bool, write_reported: bool, persist_method: string, disk_value: { editor_startup_map: string, game_default_map: string }, disk_checks: [object], reverted?: bool, in_memory_editor_startup_map?: string, in_memory_game_default_map?: string, persist_error?: string, verification: object, verification_checks: [object] }`
 
 ## `set_project_settings_value`
 
 *Destructive, idempotent.*
 
-Set one property of a Project Settings class (the class default object of a UDeveloperSettings subclass such as RendererSettings), the way the Project Settings panel does, and persist it: a defaultconfig class goes to the versioned Config/Default&lt;Base>.ini through TryUpdateDefaultConfigFile, any other config class through SaveConfig to its saved ini under Saved/Config (versioned_ini=false). With verify_disk it re-reads that .ini from disk (FConfigFile::Read, not the in-memory GConfig) and fails when the value is not there. Read the current value first with get_project_settings_value; for a raw INI key with no settings class use set_engine_ini_value (it writes only Saved/Config). It runs no PostEditChange, so systems that react to edits in the panel are not notified (some settings need an editor restart), and there is no undo step. A value the property cannot parse, an unknown class or property is an error and nothing changes; a class that is not a config class, or a read-only .ini, fails after the in-memory value has already changed. Idempotent: the same value again rewrites the same line.
+Set one property of a Project Settings class (the class default object of a UDeveloperSettings subclass such as RendererSettings), the way the Project Settings panel does, and persist it: a defaultconfig class goes to the versioned Config/Default&lt;Base>.ini through TryUpdateDefaultConfigFile, any other config class through SaveConfig to its saved ini under Saved/Config (versioned_ini=false). With verify_disk it re-reads that .ini from disk (FConfigFile::Read, not the in-memory GConfig) and fails when the value is not there. Read the current value first with get_project_settings_value; for a raw INI key with no settings class use set_engine_ini_value (it writes only Saved/Config). It runs no PostEditChange, so systems that react to edits in the panel are not notified (some settings need an editor restart), and there is no undo step. A value the property cannot parse, an unknown class or property, or a class that is not a config class is an error and nothing changes. When the .ini cannot be written (read-only) the call fails and the in-memory value is put back as it was: reverted and in_memory_value say so, read back. Idempotent: the same value again rewrites the same line.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -215,4 +215,4 @@ Set one property of a Project Settings class (the class default object of a UDev
 | `value` | string | yes | New value as Unreal import text: "True"/"False" for a bool, "1.5" for a float, the enumerator name for an enum, "(X=1,Y=2,Z=3)" for a vector, "/Game/Maps/Main.Main" for an object or soft path. |
 | `verify_disk` | boolean | no | Optional bool, default true. Re-read the target .ini with FConfigFile::Read (never GConfig, which is the in-memory cache and would just echo the write back) and report disk_value / disk_matches_memory. |
 
-**Returns:** `{ class_name: string, property_name: string, round_tripped_value: string, ini_path: string, is_default_config_class: bool, versioned_ini: bool, write_reported: bool, persist_method: string, ini_section: string, ini_key: string, property_is_config: bool, disk_present: bool, disk_value: string, disk_values: [string], disk_matches_memory: bool, verification: object, verification_checks: [object] }`
+**Returns:** `{ class_name: string, property_name: string, round_tripped_value: string, ini_path: string, is_default_config_class: bool, versioned_ini: bool, write_reported: bool, persist_method: string, ini_section: string, ini_key: string, property_is_config: bool, disk_present: bool, disk_value: string, disk_values: [string], disk_matches_memory: bool, reverted?: bool, in_memory_value?: string, persist_error?: string, verification: object, verification_checks: [object] }`

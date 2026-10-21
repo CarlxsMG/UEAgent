@@ -461,7 +461,7 @@ TSharedPtr<FJsonObject> HandleFrameTiming(const TSharedPtr<FJsonObject>& Params)
     return mcp_common::MakeOkReply(Response);
 }
 
-// MCP:start_trace - Starts recording an Unreal Insights trace of this editor process to a new .utrace file, for profiling CPU, GPU and frame timing with the chosen channels. Idempotent: while any trace is active, including one started with -trace on the command line, it starts nothing and returns already_tracing true with the current destination; call stop_trace first for a new recording. The engine will not write over an existing file: an output_path that already exists makes the call fail with nothing started. Only the trace file is written; assets and levels are untouched. Flow: start_trace, reproduce the problem, mark moments with add_trace_bookmark, stop_trace to flush, list_traces to find the file; get_trace_status tells whether a trace is running. For a quick reading without a file use get_frame_timing or get_fps_info.
+// MCP:start_trace - Starts recording an Unreal Insights trace of this editor process to a new .utrace file, for profiling CPU, GPU and frame timing with the chosen channels. Idempotent: while any trace is active, including one started with -trace on the command line, it starts nothing and returns already_tracing true with the current destination; call stop_trace first for a new recording. The engine will not write over an existing file: an output_path that already exists makes the call fail with nothing started. Only the trace file is written; assets and levels are untouched. Flow: start_trace, reproduce the problem, mark moments with add_trace_bookmark, stop_trace to flush, list_traces to find the file; get_trace_status tells whether a trace is running. Of the marking tools only add_trace_bookmark writes into the trace: start_timing_region timers are kept in memory and never written to it. For a quick reading without a file use get_frame_timing or get_fps_info.
 //   @hints additive
 //   @param channels - Comma-separated Insights channels to enable (default "cpu,frame,bookmark"; others: gpu, region, memtag, counters, log, screenshot), e.g. "cpu,gpu,frame,bookmark".
 //   @param output_path - Path of the .utrace file to create, absolute (e.g. "D:/Traces/run1.utrace") or relative to <ProjectDir>/Saved/Profiling; another extension is changed to .utrace and the folder is created. Default <ProjectDir>/Saved/Profiling/MCP_<YYYYMMDD_HHMMSS>.utrace.
@@ -536,7 +536,8 @@ TSharedPtr<FJsonObject> HandleStartTrace(const TSharedPtr<FJsonObject>& Params)
     Resp->SetStringField(TEXT("destination"),     OutputPath);
     Resp->SetStringField(TEXT("channels"),        Channels);
     Resp->SetNumberField(TEXT("started_at_s"),    TraceStartTime);
-    Resp->SetStringField(TEXT("note"),            TEXT("Trace active. Use add_trace_bookmark and start_timing_region/end_timing_region to annotate, then stop_trace to flush."));
+    Resp->SetStringField(TEXT("note"),            TEXT("Trace active. Mark moments in it with add_trace_bookmark (the bookmark channel must be on), then stop_trace to flush. ")
+                                                  TEXT("start_timing_region/end_timing_region time a stretch of work in memory only and write nothing into the trace."));
     return mcp_common::MakeOkReply(Resp);
 }
 
