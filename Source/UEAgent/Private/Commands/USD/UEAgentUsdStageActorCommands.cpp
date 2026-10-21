@@ -318,9 +318,9 @@ TSharedPtr<FJsonObject> HandleSetUsdStageActorRootLayer(
 // ---------------------------------------------------------------------------
 // get_usd_stage_actor_info
 // ---------------------------------------------------------------------------
-// MCP:get_usd_stage_actor_info - Read live metadata from an AUsdStageActor.  Returns the root layer identifier + real path from the actor's currently-open UE::FUsdStage (via GetUsdStage()), the integer EUsdStageState (0=Closed, 1=Opened, 2=OpenedAndLoaded), the presence of a generated ULevelSequence (a non-null GetLevelSequence()), and the count of USceneComponents the actor has spawned (via GetComponents()). All read-only.
-//   @param actor_path [string!] - Full actor path (or short name) of the AUsdStageActor.
-//   @returns { actor_path: string, root_layer: string, real_path: string, stage_state: int, stage_state_name: string, has_level_sequence: bool, generated_component_count: int, has_isolated_stage: bool, errors: [string]? }
+// MCP:get_usd_stage_actor_info - Reads the live state of a USD stage actor (AUsdStageActor) in the editor world: the root layer identifier and file path of the stage it displays (the isolated stage while isolate_usd_layer is active), its load state (stage_state 0 = Closed, 1 = Opened, 2 = OpenedAndLoaded, with its name), whether it has generated a Level Sequence for animated prims, how many scene components it holds, and whether a layer is isolated. Read-only: changes, loads and saves nothing; with no stage open, root_layer and real_path are empty. An actor_path that matches no stage actor is an error. Use it after create_usd_stage_actor and set_usd_stage_actor_root_layer to check the stage loaded; for one prim's component or assets use get_usd_generated_component or get_usd_generated_assets. Stages opened by the stage tools, not by an actor, are read with get_usd_stage_info and list_usd_stages.
+//   @param actor_path [string!] - The stage actor: its full path as create_usd_stage_actor returns it (actor_path), or its object name or editor label, e.g. "UsdStageActor".
+//   @returns { actor_path: string, root_layer: string, real_path: string, stage_state: int, stage_state_name: string, has_level_sequence: bool, generated_component_count: int, has_isolated_stage: bool } -- actor_path is the resolved full path; generated_component_count counts every scene component the actor owns, its own root included
 
 TSharedPtr<FJsonObject> HandleGetUsdStageActorInfo(
 	const TSharedPtr<FJsonObject>& Params)

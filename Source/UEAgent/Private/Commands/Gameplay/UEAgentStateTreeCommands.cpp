@@ -798,10 +798,10 @@ TSharedPtr<FJsonObject> HandleGetStateTreeInfo(
 // Task / condition node authoring + state type/selection + compile
 // ---------------------------------------------------------------------------
 
-// MCP:add_state_task - Attach a task node (by struct name, resolved via reflection) to a state's Tasks list on a UStateTree.
-//   @param tree_path - Asset path to the UStateTree
-//   @param state_name [string!] - Name of the state to add the task to
-//   @param task_struct - Task struct name or /Script path; must derive from StateTreeTaskBase (e.g. "StateTreeDebugTextTask")
+// MCP:add_state_task - Append a task node, of the struct named by task_struct with its default values, to the Tasks of one state of a StateTree asset, then save the asset without compiling it; there is no undo step. Use it for work that runs while that state is active; for a task that runs as long as the whole tree runs use add_state_tree_global_task. Each call appends another node, so a repeat call stacks a duplicate task. A missing tree, editor data or state, or a struct that is not found or does not derive from FStateTreeTaskBase, is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. Struct names: list_task_types; make the state first with add_state; set a field: set_task_property; list: list_tasks; inverse: remove_task; check the tree with compile_state_tree.
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as list_state_trees (trees[].path) returns it.
+//   @param state_name [string!] - Name of the state that gets the task, as get_state_tree_info lists it; the first state with that name in a depth-first walk is used.
+//   @param task_struct - Task struct name or /Script path, as list_task_types returns it; must derive from StateTreeTaskBase (e.g. "StateTreeDebugTextTask"); a leading F is optional.
 //   @returns { tree_path, state_name, task_struct, task_count, added, saved }
 TSharedPtr<FJsonObject> HandleAddStateTask(
 	const TSharedPtr<FJsonObject>& Params)
@@ -1342,8 +1342,8 @@ TSharedPtr<FJsonObject> HandleAddStateEvaluator(
 // ---------------------------------------------------------------------------
 // list_state_trees — enumerate UStateTree assets under a content path
 // ---------------------------------------------------------------------------
-// MCP:list_state_trees - List all UStateTree assets under a content path (default /Game).
-//   @param package_path - Content path to filter on (default "/Game").
+// MCP:list_state_trees - List the StateTree assets (subclasses included) in a content folder and all its subfolders, from the Asset Registry, without loading or changing them: per tree its object path, asset name and class. A folder with no trees, or one that does not exist, gives count 0 rather than an error. Use it to find the tree_path every other StateTree tool takes; then read one tree's states, transitions and parameters with get_state_tree_info, or create a new one with create_state_tree; the tree a placed component runs: get_component_state_tree_path.
+//   @param package_path - Content folder to search, recursively, as a long package path with no trailing slash, e.g. "/Game/AI" (default "/Game"); a plugin's content lives under its mount point, e.g. "/MyPlugin".
 //   @returns { package_path, count, trees: [{ path, name, class }] }
 TSharedPtr<FJsonObject> HandleListStateTrees(
 	const TSharedPtr<FJsonObject>& Params)
@@ -1403,8 +1403,8 @@ TSharedPtr<FJsonObject> HandleListTasks(
 // ---------------------------------------------------------------------------
 // list_evaluators — tree-scoped evaluators
 // ---------------------------------------------------------------------------
-// MCP:list_evaluators - List all evaluators on the tree (UStateTreeEditorData::Evaluators — tree-scoped).
-//   @param tree_path - Asset path to the UStateTree.
+// MCP:list_evaluators - List the evaluators of a StateTree asset without changing it, as they are in memory (unsaved edits included): count and, per evaluator in array order, its index, class (the evaluator struct name) and instance_id (the node GUID). Evaluators belong to the tree, not to a state, so no state is named; a tree without any gives count 0 and an empty list. A tree that does not load or has no editor data is an error. index is what get_evaluator_info, get_evaluator_property, set_evaluator_property and remove_evaluator take; add one with add_evaluator; the evaluator struct types that exist: list_evaluator_types; tree-scoped tasks: list_state_tree_global_tasks.
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as list_state_trees (trees[].path) returns it.
 //   @returns { tree_path, count, evaluators: [{ index, class, instance_id }] }
 TSharedPtr<FJsonObject> HandleListEvaluators(
 	const TSharedPtr<FJsonObject>& Params)
@@ -1756,10 +1756,10 @@ TSharedPtr<FJsonObject> HandleRemoveStateTreeGlobalTask(
 //   `removed` flag and stay idempotent when the parameter is already absent.
 //   Addressing is by name (mirrors add_state_tree_parameter's `parameter_name`).
 // ---------------------------------------------------------------------------
-// MCP:remove_state_tree_parameter - Remove a named parameter from a UStateTree's root parameter bag. Idempotent — removing an absent parameter is a no-op (removed:false).
-//   @param tree_path - Asset path to the UStateTree.
-//   @param parameter_name - Name of the root parameter to remove.
-//   @returns { tree_path, parameter_name, removed, parameter_count, saved }
+// MCP:remove_state_tree_parameter - Remove one parameter, by name, from the root parameter bag of a StateTree asset (the parameters that bindings and per-component overrides read), in one undo step, then save the asset without compiling it. Idempotent: a name the tree does not have (compared case-insensitively) changes and saves nothing and answers removed false with a note. Bindings that read the parameter are left in place: find them with list_state_tree_bindings and drop them with remove_state_tree_binding. Inverse: add_state_tree_parameter; to change only its value use set_state_tree_parameter; the current parameters: get_state_tree_info. A tree that does not load or has no editor data is an error. A failed save still answers success, with saved false and the change only in memory.
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as list_state_trees (trees[].path) returns it.
+//   @param parameter_name - Name of the root parameter, as get_state_tree_info lists it in parameters[].name, e.g. "Speed"; compared case-insensitively.
+//   @returns { tree_path, parameter_name, removed, parameter_count, saved, note? }
 TSharedPtr<FJsonObject> HandleRemoveTreeParameter(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -2093,7 +2093,7 @@ namespace
 // ---------------------------------------------------------------------------
 // list_task_types — enumerate StateTreeTaskBase derivatives
 // ---------------------------------------------------------------------------
-// MCP:list_task_types - Enumerate all concrete UScriptStructs deriving from FStateTreeTaskBase (instantiable, RF_Abstract excluded), via TObjectIterator<UScriptStruct>.
+// MCP:list_task_types - List the StateTree task struct types (FStateTreeTaskBase and its children; structs tagged Abstract are skipped) of the modules loaded now, sorted by name, without changing anything: the names add_state_task and add_state_tree_global_task take as task_struct. A task from a plugin whose module is not loaded is not listed. struct_path always assumes /Script/StateTreeModule, so pass name for a task from another module. Other node types: list_condition_types, list_evaluator_types; the tasks already on a state: list_tasks; on the whole tree: list_state_tree_global_tasks.
 //   @returns { count, types: [{ name, struct_path }] }
 TSharedPtr<FJsonObject> HandleListTaskTypes(
 	const TSharedPtr<FJsonObject>& Params)
@@ -2228,11 +2228,11 @@ TSharedPtr<FJsonObject> HandleGetTaskProperty(
 // ---------------------------------------------------------------------------
 // remove_consideration — remove a consideration (by index) from a state's Considerations
 // ---------------------------------------------------------------------------
-// MCP:remove_consideration - Remove a consideration (by index) from a state and save the asset. Idempotent at the index-out-of-range boundary. A failed save makes success false, with saved false and save_error.
-//   @param tree_path - Asset path to the UStateTree.
-//   @param state_name [string!] - Name of the state.
-//   @param consideration_index - 0-based index into the state's Considerations array.
-//   @returns { tree_path, state_name, consideration_index, removed, remaining, saved }
+// MCP:remove_consideration - Remove one utility consideration, by 0-based index, from the Considerations of one state of a StateTree asset, in one undo step, then save the asset without compiling it; later considerations shift down one index, so a repeat call with the same index removes the next one. Find the index with list_considerations, or check the node first with get_consideration_info. An out-of-range index removes and saves nothing and still succeeds, with removed false and a note. A missing tree, editor data or state, or a missing consideration_index, is an error. A failed save makes success false, with saved false, save_error and the change only in memory. Inverse: add_consideration; other nodes of a state: remove_task, remove_state_enter_condition.
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as list_state_trees (trees[].path) returns it.
+//   @param state_name [string!] - Name of the state that owns the consideration, as get_state_tree_info lists it; the first state with that name in a depth-first walk is used.
+//   @param consideration_index - 0-based index into the state's Considerations, as list_considerations returns it (considerations[].index).
+//   @returns { tree_path, state_name, consideration_index, removed, remaining, saved, note?, save_error? }
 TSharedPtr<FJsonObject> HandleRemoveConsideration(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -3203,10 +3203,10 @@ TSharedPtr<FJsonObject> HandleGetComponentStateTreePath(const TSharedPtr<FJsonOb
 // add_consideration (utility AI on a state)
 // ===========================================================================
 
-// MCP:add_consideration - Attach a utility-AI consideration (any struct deriving from FStateTreeConsiderationBase) to a state's Considerations array on a UStateTree. Considerations rank selectable children by score (0..1) when the state's selection behavior is utility-driven (e.g. TrySelectChildrenWithHighestUtility). Friendlier aliases are accepted in addition to the full struct name: "Constant" -> StateTreeConstantConsideration, "FloatInput"/"Float Input" -> StateTreeFloatInputConsideration, "EnumInput"/"Enum Input" -> StateTreeEnumInputConsideration. Use set_consideration_property to set initial values like Constant.Constant or FloatInput.Input. Idempotent: re-adding the same struct-type appends another consideration (engine semantics; considerations of the same type are valid).
-//   @param tree_path - Asset path of the UStateTree
-//   @param state_name [string!] - Name of the state to attach the consideration to
-//   @param consideration_class - Struct name (FStateTreeConstantConsideration / StateTreeConstantConsideration) or alias (Constant|FloatInput|Enum Input|...)
+// MCP:add_consideration - Append a utility consideration node (a struct deriving from FStateTreeConsiderationBase, with its default values) to the Considerations of one state of a StateTree asset, then save the asset without compiling it; there is no undo step. Considerations score the state 0..1 when its parent picks children by utility (set_state_selection_behavior, e.g. TrySelectChildrenWithHighestUtility). Each call appends another node, even of a type the state already has, so a repeat call stacks a duplicate. A missing tree, editor data or state, or a struct that is not found or is not a consideration, is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. Set its values (Constant, Input...) with set_consideration_property; list them: list_considerations; inverse: remove_consideration; check the tree with compile_state_tree.
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as list_state_trees (trees[].path) returns it.
+//   @param state_name [string!] - Name of the state that gets the consideration, as get_state_tree_info lists it; the first state with that name in a depth-first walk is used.
+//   @param consideration_class - Consideration struct name or /Script path, a leading F optional (e.g. "StateTreeFloatInputConsideration"), or one of the aliases Constant, FloatInput / Float Input, EnumInput / Enum Input.
 //   @returns { tree_path, state_name, consideration_class, consideration_count, added, saved }
 TSharedPtr<FJsonObject> HandleAddConsideration(
 	const TSharedPtr<FJsonObject>& Params)

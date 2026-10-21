@@ -524,10 +524,10 @@ TSharedPtr<FJsonObject> HandleCreateSoundAttenuation(const TSharedPtr<FJsonObjec
 // ---------------------------------------------------------------------------- //
 // create_sound_concurrency
 // ---------------------------------------------------------------------------- //
-// MCP:create_sound_concurrency - Create a USoundConcurrency asset at package_path/name, or load the one already there, optionally set MaxCount, and save it. Returns max_count read back, created, already_exists and saved; set_properties edits the other concurrency settings.
-//   @param name - Name of the new Sound Concurrency asset
-//   @param package_path - Target content path, defaults to /Game/Audio
-//   @param max_count - Most sounds of this group that play at once (MaxCount); values below 1 become 1 and fractions are truncated. Unchanged when omitted.
+// MCP:create_sound_concurrency - Creates a Sound Concurrency asset (USoundConcurrency, the rule that caps how many sounds of a group play at once) at package_path/name, or loads the one already there instead of making a duplicate (created and already_exists say which), then saves it; success is false, with save_error, when the save fails. With max_count it also sets MaxCount, which on an existing asset overwrites the old value, as one undo step; without it an existing asset is left as it was. Idempotent: the same call again gives the same asset and value. An invalid path, or an asset of another class at that path, is an error. The other concurrency settings (resolution rule, volume scaling, retrigger time) are edited with set_properties on the asset_path this returns, and read with get_properties; sibling audio assets come from create_sound_class, create_sound_attenuation and create_sound_mix.
+//   @param name - Asset name of the Sound Concurrency, without a folder (e.g. "SCon_Footsteps").
+//   @param package_path - Content folder for the asset, e.g. "/Game/Audio/Concurrency"; defaults to /Game/Audio.
+//   @param max_count - Optional whole number: most sounds of this group that play at once (MaxCount); values below 1 become 1 and fractions are truncated. Unchanged when omitted.
 //   @returns { name: string, package_path: string, asset_path: string, asset_class: string, max_count: int, applied_max_count: bool, created: bool, already_exists: bool, saved: bool }
 TSharedPtr<FJsonObject> HandleCreateSoundConcurrency(const TSharedPtr<FJsonObject>& Params)
 {

@@ -346,8 +346,8 @@ namespace
 // validate_asset
 // ---------------------------------------------------------------------------
 
-// MCP:validate_asset - Run the enabled editor data validators (UEditorValidatorSubsystem::IsAssetValid, Script use case) on one asset: validation_result (Valid, Invalid or NotValidated), is_valid (NotValidated counts as valid), errors and warnings. Read-only; validators_run counts the enabled validators, not those that applied.
-//   @param asset_path - Object/package path of the asset, e.g. "/Game/MyGame/M_Example".
+// MCP:validate_asset - Run the editor's enabled data validators (the Data Validation plugin, in its Script use case) on one asset and report the verdict, without changing or saving it (the asset gets loaded): validation_result is Valid, Invalid or NotValidated (no validator applies to that asset), is_valid is false only for Invalid, and errors and warnings carry the validators' messages. Use it to check one asset after editing it, e.g. before a commit or a cook; for a whole folder use validate_assets_in_path, to see which validators exist list_validators, and for a level's actors run_map_check. validators_run counts the enabled validators, not the ones that applied to this asset, so a NotValidated result is the sign that none did. An asset the Asset Registry cannot find, or the Data Validation plugin being off, is an error.
+//   @param asset_path - Asset to validate, as an object path ("/Game/MyGame/M_Example.M_Example") or a package path ("/Game/MyGame/M_Example", which names its primary asset).
 //   @returns { asset_path: string, resolved_object_path: string, validation_result: string, is_valid: bool, errors: [string], warnings: [string], error_count: number, warning_count: number, validators_run: number }
 
 TSharedPtr<FJsonObject> HandleValidateAsset(const TSharedPtr<FJsonObject>& Params)

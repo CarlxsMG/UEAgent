@@ -189,10 +189,11 @@ TSharedPtr<FJsonObject> HandleCreateSubstrateSlabNode(
 // ---------------------------------------------------------------------------
 // set_substrate_slab_scalar  (drives a slab pin via a Constant node; works regardless of Substrate)
 // ---------------------------------------------------------------------------
-// MCP:set_substrate_slab_scalar - Drive a Substrate Slab BSDF scalar pin with a Constant node.  Creates a Constant expression set to `value` and connects it to the named slab pin (e.g. Roughness, F0, DiffuseAlbedo, Anisotropy). Works regardless of whether Substrate is enabled. Requires create_substrate_slab_node first.
-//   @param material_path - Content path to the UMaterial holding the slab node
-//   @param pin_name - Slab input pin to drive (e.g. "Roughness")
-//   @param value - Scalar constant value to feed into the pin
+// MCP:set_substrate_slab_scalar - Drives one input pin of the Substrate Slab BSDF node of a material with a constant: adds a NEW Constant expression holding value to the material graph and wires it into the named pin of the material's first Slab node, replacing whatever fed that pin, then saves the material. Each call adds another Constant node, even for the same pin and value; a constant that fed the pin before stays in the graph, unwired. Not recorded for undo, and the save result is not checked. Works whether Substrate is enabled or not (substrate_enabled reports it). The material needs a Slab node from create_substrate_slab_node; connect_substrate_slab_to_material wires the slab to the output. An unknown pin name is an error, but the Constant created before the failed wire stays in the graph. To change a constant already wired, use set_material_expression_property on its constant_node_id; delete stray nodes with delete_material_expression.
+//   @hints not-idempotent
+//   @param material_path - Package or object path of the UMaterial holding the slab node (e.g. "/Game/Materials/M_Substrate").
+//   @param pin_name - Slab input pin to drive, by its input name: e.g. "Roughness", "Anisotropy", "F0" or "DiffuseAlbedo" (a color pin receives the scalar on all channels).
+//   @param value - Scalar the Constant node holds (e.g. 0.35 for Roughness); not range-checked.
 //   @returns { material_path: string, slab_node_id: string, constant_node_id: string, pin_name: string, value: number, connected: bool, substrate_enabled: bool, r_substrate_cvar: int, note?: string }
 
 TSharedPtr<FJsonObject> HandleSetSubstrateSlabScalar(

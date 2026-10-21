@@ -568,9 +568,9 @@ TSharedPtr<FJsonObject> HandleCreateIKRig(const TSharedPtr<FJsonObject>& Params)
 // ---------------------------------------------------------------------------
 // add_ik_solver
 // ---------------------------------------------------------------------------
-// MCP:add_ik_solver - Add an IK solver to the bottom of an IK Rig's solver stack.  Solver type is one of "FullBodyIK", "Limb", "Pole", "BodyMover", "SetTransform" or "StretchLimb" (default "FullBodyIK"). Unknown types are rejected with an honest error. A failed save makes success false, with saved=false and save_error.
-//   @param ik_rig_path - Path to the UIKRigDefinition asset
-//   @param solver_type - Optional solver type: "FullBodyIK"|"Limb"|"Pole"|"BodyMover"|"SetTransform"|"StretchLimb"; defaults to "FullBodyIK"
+// MCP:add_ik_solver - Add a new, unconfigured IK solver at the bottom of an existing IK Rig's solver stack through the IK Rig controller (one undo step), then save the asset. Every call adds another solver (not idempotent); solver_index in the reply is the handle the other solver tools take. Create the rig first with create_ik_rig; then set its bones with set_ik_solver_bones, its settings with set_ik_solver_settings, attach goals (add_ik_goal) with connect_ik_goal_to_solver, reorder with move_ik_solver_in_stack, take one out with remove_ik_solver, and read the stack back with get_ik_rig_info or one solver with get_ik_solver_details. An unknown solver_type, or a rig that does not load, is an error and nothing changes. A failed save (always while PIE runs) makes success false, with saved=false and save_error, the solver kept in memory.
+//   @param ik_rig_path - IK Rig (UIKRigDefinition) asset as a package or object path, e.g. "/Game/Rigs/IK_Mannequin".
+//   @param solver_type - "FullBodyIK" (default; also "FBIK"), "Limb", "Pole", "BodyMover", "SetTransform" or "StretchLimb", case ignored; spaced forms ("Full Body IK") and the struct names ("FIKRigLimbSolver") are accepted too. solver_type in the reply is the canonical name and solver_struct the engine struct.
 //   @returns { asset_path: string, solver_index: int, solver_type: string, solver_struct: string, solver_count: int, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleAddIKSolver(const TSharedPtr<FJsonObject>& Params)
@@ -2482,8 +2482,8 @@ TSharedPtr<FJsonObject> HandleGetIKRetargeterInfo(const TSharedPtr<FJsonObject>&
 // ---------------------------------------------------------------------------
 // get_retarget_poses
 // ---------------------------------------------------------------------------
-// MCP:get_retarget_poses - List every retarget pose (source and target) of an IK Retargeter with its root translation delta and per-bone rotation deltas.  Read-only. Bone rotation deltas use the same quat keys as set_retarget_pose_bone_rotation (quat_x, quat_y, quat_z, quat_w).
-//   @param ik_retargeter_path - Content path to the UIKRetargeter asset.
+// MCP:get_retarget_poses - List every retarget pose of an IK Retargeter, for the source and the target side, without changing anything: per pose its name, whether it is the side's current pose, its root translation offset and the per-bone rotation deltas it stores (only the bones that were rotated), as quaternions with the same quat_x/quat_y/quat_z/quat_w keys set_retarget_pose_bone_rotation takes. Use it to check a pose before or after set_retarget_pose_bone_rotation; create one with create_retarget_pose, delete one with remove_retarget_pose. For the retargeter's rigs, chains and op stack use get_ik_retargeter_info, for one op's settings get_retargeter_op_info. A path that does not load as a UIKRetargeter is an error.
+//   @param ik_retargeter_path - IK Retargeter asset as a package or object path, e.g. "/Game/Retarget/RTG_Manny_To_Hero".
 //   @returns { asset_path: string, source: [{ name, is_current, root_translation_offset: {x,y,z}, bone_rotations: [{ bone, quat_x, quat_y, quat_z, quat_w }] }], target: [ ... same shape ... ] }
 TSharedPtr<FJsonObject> HandleGetRetargetPoses(const TSharedPtr<FJsonObject>& Params)
 {

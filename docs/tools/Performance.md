@@ -123,7 +123,7 @@ Read a URuntimeVirtualTexture asset without changing it: material_type (full enu
 
 *Read-only.*
 
-Report whether Unreal Insights tracing is compiled in, currently connected, and to what destination.
+Reports whether Unreal Insights tracing is available in this build, whether a trace is recording right now, and to which file or server. Read-only and instant: it starts and stops nothing. Call it before start_trace to see whether a trace is already running (for example one started with -trace on the command line, which start_trace would not replace), or after stop_trace to confirm the recording ended. list_traces lists the recorded .utrace files on disk, and list_timing_regions the open timers of start_timing_region, which are not traces.
 
 No parameters.
 
@@ -166,28 +166,28 @@ Fit an existing ARuntimeVirtualTextureVolume's bounds to an actor -- the engine 
 
 ## `start_timing_region`
 
-*Destructive, idempotent.*
+*Additive, idempotent.*
 
-Begin tracking an in-process named region. Region start time is stored in this bridge instance and matched by end_timing_region for duration calculation. Idempotent — calling start_timing_region twice with the same name returns already_started:true.
+Starts a named wall-clock timer in this editor session, to measure how long a stretch of work (several tool calls, a PIE run) takes; end_timing_region with the same name stops it and returns the elapsed time in ms. It needs no Insights trace and writes nothing to a trace or to disk: the start time is kept in memory only and is lost when the editor restarts. Idempotent: a name that is already open keeps its original start time and returns already_started true with started false. list_timing_regions shows the open timers; for engine-level profiling use start_trace with add_trace_bookmark instead.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `name` | string | yes | Region identifier. Required. |
+| `name` | string | yes | Required timer name, any non-empty string (e.g. "import_pass"); pass the same name to end_timing_region (names match case-insensitively). |
 
-**Returns:** `{ started: bool, already_started: bool, name: string, started_at_s: float }`
+**Returns:** `{ started: bool, already_started: bool, name: string, started_at_s: float, note?: string } -- started_at_s is the editor's platform clock in seconds; note only when the region was already open`
 
 ## `start_trace`
 
-*Destructive, idempotent.*
+*Additive, idempotent.*
 
-Start an Unreal Insights trace recording to a .utrace file. Idempotent — if a trace is already active, returns already_tracing:true with the current destination instead of failing.
+Starts recording an Unreal Insights trace of this editor process to a new .utrace file, for profiling CPU, GPU and frame timing with the chosen channels. Idempotent: while any trace is active, including one started with -trace on the command line, it starts nothing and returns already_tracing true with the current destination; call stop_trace first for a new recording. The engine will not write over an existing file: an output_path that already exists makes the call fail with nothing started. Only the trace file is written; assets and levels are untouched. Flow: start_trace, reproduce the problem, mark moments with add_trace_bookmark, stop_trace to flush, list_traces to find the file; get_trace_status tells whether a trace is running. For a quick reading without a file use get_frame_timing or get_fps_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `channels` | string | no | Comma-separated channel list (default "cpu,frame,bookmark"; also: gpu, region, memtag, counters, log, screenshot) |
-| `output_path` | string | no | Absolute .utrace path. If empty, defaults to &lt;ProjectDir>/Saved/Profiling/MCP_&lt;timestamp>.utrace |
+| `channels` | string | no | Comma-separated Insights channels to enable (default "cpu,frame,bookmark"; others: gpu, region, memtag, counters, log, screenshot), e.g. "cpu,gpu,frame,bookmark". |
+| `output_path` | string | no | Path of the .utrace file to create, absolute (e.g. "D:/Traces/run1.utrace") or relative to &lt;ProjectDir>/Saved/Profiling; another extension is changed to .utrace and the folder is created. Default &lt;ProjectDir>/Saved/Profiling/MCP_&lt;YYYYMMDD_HHMMSS>.utrace. |
 
-**Returns:** `{ tracing: bool, already_tracing: bool, destination: string, channels: string, note: string }`
+**Returns:** `{ tracing: bool, already_tracing: bool, destination: string, channels?: string, started_at_s?: number, connection_type?: string, elapsed_s?: number, note: string } -- channels and started_at_s for a new trace; connection_type (file, server, custom_relay...) and elapsed_s when a trace was already active`
 
 ## `stop_trace`
 

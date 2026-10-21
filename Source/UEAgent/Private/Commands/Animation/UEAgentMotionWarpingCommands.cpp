@@ -310,9 +310,9 @@ namespace
 // ---------------------------------------------------------------------------
 // get_motion_warping_component_info
 // ---------------------------------------------------------------------------
-// MCP:get_motion_warping_component_info - Read the full data-layer state of a UMotionWarpingComponent: the b_search_for_windows_in_anims_within_montages flag, every warp target (via GetWarpTargets(): its FName, static location/rotation, component path or null, bone name, b_follow_component, location/rotation offsets and location_offset_direction enum integer), the modifier count (via GetModifiers()), the runtime adapter class (GetOwnerAdapter()->GetClass()), and the protected switch-off-conditions array count (via reflection — FindFProperty<FArrayProperty> + FScriptArrayHelper). Read-only, idempotent.
+// MCP:get_motion_warping_component_info - Read the UMotionWarpingComponent of an actor without changing anything: whether warp windows are also searched in animations inside montages, every warp target (name, location, rotation, the component it follows or null, bone name, follow flag, location and rotation offsets, and location_offset_direction as the enum's integer), the modifier count, the owner adapter class (None when unset) and the number of switch-off conditions (a protected array read by reflection; -1 if the engine renames it). Warp targets are transient, so on an editor actor they are the ones added this session with add_motion_warping_target. Change a target with set_motion_warping_target, take one out with remove_motion_warping_target, and flip the montage search with set_properties on "<actor>.<component name>" (property bSearchForWindowsInAnimsWithinMontages). An actor that is not found, or one without a UMotionWarpingComponent (add_motion_warping_component adds it), is an error. For a generic component property dump use get_component_properties.
 //   @renamed-from inspect_motion_warping_component
-//   @param actor_path [string!] - Full editor path or short name of the actor.
+//   @param actor_path [string!] - Actor as a full object path ('/Game/Maps/Arena.Arena:PersistentLevel.BP_Hero_C_1'), or the internal name or label of an editor-world actor ('BP_Hero_C_1', 'Hero').
 //   @returns { actor_path: string, b_search_for_windows_in_anims_within_montages: bool, warp_target_count: int, modifier_count: int, owner_adapter_class: string, switch_off_condition_count: int, warp_targets: array }
 
 TSharedPtr<FJsonObject> HandleAddMotionWarpingComponent(
@@ -657,8 +657,8 @@ TSharedPtr<FJsonObject> HandleInspectMotionWarpingComponent(
 // ---------------------------------------------------------------------------
 // remove_motion_warping_component
 // ---------------------------------------------------------------------------
-// MCP:remove_motion_warping_component - Detach the UMotionWarpingComponent from an actor (mirror of add_motion_warping_component). Idempotent: an actor that has no such component returns already_existed:false + removed:false + note, not an error.
-//   @param actor_path [string!] - Full editor path or short name of the actor.
+// MCP:remove_motion_warping_component - Destroy the UMotionWarpingComponent of an actor (the first one found), with all its warp targets; the inverse of add_motion_warping_component. The actor is recorded in the call's undo step (Actor->Modify) and its level is marked dirty, not saved (save_level persists it). Only an instance component stays gone: one that the actor's Blueprint or C++ class defines comes back (when its construction script reruns, or on reload), so remove that one from the class instead. To clear targets but keep the component use remove_motion_warping_target (all=true); check the result with get_motion_warping_component_info. Idempotent: an actor without one returns already_existed=false, removed=false and a note, not an error. An actor that is not found is an error and nothing changes.
+//   @param actor_path [string!] - Actor as a full object path ('/Game/Maps/Arena.Arena:PersistentLevel.BP_Hero_C_1'), or the internal name or label of an editor-world actor ('BP_Hero_C_1', 'Hero').
 //   @returns { actor_path: string, component_path?: string, removed: bool, already_existed: bool, note?: string }
 //   NOTE (impl): calls Actor->DestroyComponent(Comp), which unregisters the component and marks it for GC.
 TSharedPtr<FJsonObject> HandleRemoveMotionWarpingComponent(

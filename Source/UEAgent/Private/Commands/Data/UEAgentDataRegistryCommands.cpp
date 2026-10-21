@@ -620,9 +620,9 @@ TSharedPtr<FJsonObject> HandleGetDataRegistryInfo(
 // caches on initialize; non-precached sources require an async acquire + runtime
 // tick which is unavailable in this headless command path).
 // ---------------------------------------------------------------------------
-// MCP:get_data_registry_item - Synchronously look up a precached item by registry type and item name.  Uses UDataRegistrySubsystem::GetCachedItemRaw. Only returns data for items backed by a precached source (the registry must be initialized first). Returns a clean error if the item is not cached.
-//   @param registry_type - The registry type name.
-//   @param item_name - The item (row) name.
+// MCP:get_data_registry_item - Read one item of a data registry from the DataRegistry subsystem's cache, by registry type and item name, without changing anything: item_data is the item struct exported as Unreal text, e.g. (Damage=10.0,Name="Sword"), and item_struct names its struct. Only cached items can be read, which means a precached source (a DataTable source) of a registry initialized this session with initialize_data_registry; an item that is not cached, or a registry type the subsystem does not know, is an error, so found is true in every reply. Find registry types with list_data_registry_types and item names with get_data_registry_info (item_names); for the source DataTable row itself use get_data_table_row. A missing subsystem (DataRegistry plugin off) is an error.
+//   @param registry_type - Registry type name the asset declares, as list_data_registry_types returns it (registries[].registry_type), e.g. "Items".
+//   @param item_name - Item name, as get_data_registry_info lists it in item_names; for a DataTable source it is the row name, e.g. "Sword".
 //   @returns { registry_type: string, item_name: string, item_struct: string, found: bool, item_data: string }
 
 TSharedPtr<FJsonObject> HandleGetDataRegistryItem(
@@ -945,7 +945,7 @@ TSharedPtr<FJsonObject> HandleRemoveDataRegistrySource(const TSharedPtr<FJsonObj
     return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("remove_data_registry_source"));
 }
 
-// MCP:refresh_data_registry_map - Force UDataRegistrySubsystem::RefreshRegistryMap().  Call this after editing registry assets (e.g. add/remove sources, change registry_type) to make the subsystem re-read its registry map without needing an editor restart.
+// MCP:refresh_data_registry_map - Make the DataRegistry subsystem rebuild, for this editor session, its map from registry type to registry asset out of the registry assets loaded in memory under its scan paths, so edits to registry assets (a changed registry_type, sources changed with add_data_registry_source or remove_data_registry_source) are seen without restarting the editor. A registry whose type drops out of the map is deinitialized, losing its cached items. It changes no asset and saves nothing, and it neither loads nor initializes a registry: use initialize_data_registry for that, then get_data_registry_item to read items. Idempotent: a repeat call rebuilds the same map. refreshed is always true, since the engine call reports nothing; check the outcome with list_data_registry_types. A missing subsystem (DataRegistry plugin off) is an error.
 //   @returns { refreshed: bool }
 
 TSharedPtr<FJsonObject> HandleRefreshDataRegistryMap(const TSharedPtr<FJsonObject>& Params)

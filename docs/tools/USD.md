@@ -145,13 +145,13 @@ Remove every reference arc of a prim of a registered USD stage, external and int
 
 *Destructive, idempotent.*
 
-Clear the active variant selection on a variant set (leaves the set and its variants intact — only the selection arc is removed); HasVariantSet guard
+Clear the selected variant of one variant set on a prim of a cached USD stage, so no variant of that set is selected there; the set and its variants stay. It first moves the stage's edit target to the strongest layer that defines the prim and clears the selection on that layer, so a selection authored on another layer can still apply: check with list_usd_variant_sets. The edit stays in memory until save_usd_stage and has no undo step. A repeat call changes nothing more; cleared is the engine's answer. An unknown stage, an invalid or missing prim, or a variant set the prim does not have is an error and nothing is written. To pick another variant instead use set_usd_variant_selection; to delete the set itself, remove_usd_variant_set.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `prim_path` | string | yes | SdfPath of the prim that authors the variant set |
-| `variant_set_name` | string | yes | Variant set whose selection should be cleared |
-| `stage_name` | string | no | Stage cache key |
+| `prim_path` | string | yes | Absolute SdfPath of the existing prim that has the variant set, e.g. "/World/Car" |
+| `variant_set_name` | string | yes | Variant set whose selection is cleared, as list_usd_variant_sets reports it, e.g. "color" |
+| `stage_name` | string | no | Name the stage was registered under by open_usd_stage or create_usd_stage (list_usd_stages shows it), or the end of a cached stage's root layer identifier, case-insensitive, e.g. "Shot010" |
 
 **Returns:** `{ prim_path: string, variant_set_name: string, cleared: bool }`
 
@@ -324,13 +324,13 @@ Read the metadata of a prim on a registered USD stage as USD resolves it: one ke
 
 *Read-only.*
 
-Read live metadata from an AUsdStageActor.  Returns the root layer identifier + real path from the actor's currently-open UE::FUsdStage (via GetUsdStage()), the integer EUsdStageState (0=Closed, 1=Opened, 2=OpenedAndLoaded), the presence of a generated ULevelSequence (a non-null GetLevelSequence()), and the count of USceneComponents the actor has spawned (via GetComponents()). All read-only.
+Reads the live state of a USD stage actor (AUsdStageActor) in the editor world: the root layer identifier and file path of the stage it displays (the isolated stage while isolate_usd_layer is active), its load state (stage_state 0 = Closed, 1 = Opened, 2 = OpenedAndLoaded, with its name), whether it has generated a Level Sequence for animated prims, how many scene components it holds, and whether a layer is isolated. Read-only: changes, loads and saves nothing; with no stage open, root_layer and real_path are empty. An actor_path that matches no stage actor is an error. Use it after create_usd_stage_actor and set_usd_stage_actor_root_layer to check the stage loaded; for one prim's component or assets use get_usd_generated_component or get_usd_generated_assets. Stages opened by the stage tools, not by an actor, are read with get_usd_stage_info and list_usd_stages.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_path` | string | yes | Full actor path (or short name) of the AUsdStageActor. |
+| `actor_path` | string | yes | The stage actor: its full path as create_usd_stage_actor returns it (actor_path), or its object name or editor label, e.g. "UsdStageActor". |
 
-**Returns:** `{ actor_path: string, root_layer: string, real_path: string, stage_state: int, stage_state_name: string, has_level_sequence: bool, generated_component_count: int, has_isolated_stage: bool, errors: [string]? }`
+**Returns:** `{ actor_path: string, root_layer: string, real_path: string, stage_state: int, stage_state_name: string, has_level_sequence: bool, generated_component_count: int, has_isolated_stage: bool } -- actor_path is the resolved full path; generated_component_count counts every scene component the actor owns, its own root included`
 
 ## `get_usd_stage_info`
 
@@ -349,13 +349,13 @@ Read metadata about a USD stage: root layer identifier, real path, dirty flag, t
 
 *Additive, idempotent.*
 
-Add a sublayer path to the stage's root layer's composition stack (idempotent — re-running with the same path returns already_present without erroring).
+Add a sublayer path to the root layer of a registered USD stage, so that layer's opinions compose into the stage, then save the root layer to disk (Save without force: the whole root layer, including any other unsaved edits on it). Read the stack and its indices with list_usd_stage_layers, take a sublayer out by index with remove_usd_sublayer, and to author into the new layer point set_usd_edit_target at it. The path is not checked to exist; USD complaints come back in errors. No undo step. success means the root layer was saved, so read inserted and already_present: a path already in the list changes nothing (already_present=true, nothing saved) and answers success=false, and an in-memory stage (anonymous root layer, nothing to save to) answers success=false even with inserted=true. Idempotent in effect: a repeat adds nothing. An unregistered stage_name is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `stage_name` | string | yes | Name the stage was registered under. |
-| `sublayer_path` | string | yes | Path or USD identifier of the layer to insert (e.g. an absolute .usd path or a "//sub.usd" relative identifier). |
-| `index` | number | no | 0-based insertion position; -1 (default) appends to the back of the prepend list. |
+| `stage_name` | string | yes | Exact name the stage was registered under by create_usd_stage or open_usd_stage (a stage only in the USD cache is not found here). |
+| `sublayer_path` | string | yes | Path or USD identifier of the layer to insert, e.g. "D:/USD/props.usda" or "./props.usda" (resolved relative to the root layer); compared with the existing entries as text, case ignored. |
+| `index` | number | no | 0-based position in the root layer's sublayer list, where 0 is the strongest; -1 (default) appends as the weakest. The reply's index echoes this value, not the resulting position. |
 
 **Returns:** `{ stage_name: string, sublayer_path: string, index: int, inserted: bool, already_present: bool, new_count: int, saved: bool, errors: [string]? }`
 
@@ -402,12 +402,12 @@ List every attribute of one prim on a USD stage this server has open, with each 
 
 *Read-only.*
 
-List the prims under one prim (default the pseudo root "/") on a registered USD stage, each with prim_path, type_name and active, plus count: its direct children, or with recursive=true its whole subtree in depth-first order. Only active, loaded, defined, non-abstract prims appear, and instance proxies are not traversed. Read-only.
+List the prims under one prim (default the pseudo root "/") of a registered USD stage without changing anything, each with prim_path and type_name, plus count: its direct children, or with recursive=true its whole subtree in depth-first order (each parent before its children, siblings in stage order). Only active, loaded, defined, non-abstract prims appear (so active is always true here), and instance proxies are not traversed: a deactivated prim, an over-only prim or a Class prim needs get_usd_prim_info by path. Use it to discover prim paths before get_usd_prim_info (one prim's schemas and variant sets), list_usd_prim_attributes or the authoring tools; list_usd_stages shows which stages are open and get_usd_stage_info the total prim count. An unregistered stage_name, a malformed prim_path_prefix or a prim that does not exist is an error; a prim without children is a success with count 0.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `stage_name` | string | no | Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier. |
-| `prim_path_prefix` | string | no | SdfPath of the prim whose children are listed; it must exist. Default "/" (the pseudo root). |
+| `prim_path_prefix` | string | no | Absolute SdfPath of the prim whose children are listed, e.g. "/World"; it must exist (it is a parent path, not a text prefix). Default "/" (the pseudo root). |
 | `recursive` | boolean | no | false (default) lists the direct children only; true lists every descendant, each parent before its children. |
 
 **Returns:** `{ prims: [{ prim_path, type_name, active }], count: number }`
@@ -440,13 +440,13 @@ No parameters.
 
 *Read-only.*
 
-List every variant set authored on a prim with its variant names and the current selection for each set (the selections map may be empty when no selection is authored), or with variant_set_name only that set, reported also as variant_set_name, current_selection and variant_count. A variant_set_name the prim does not author is an error.
+List the variant sets a prim of a cached USD stage has, without changing anything: their names, each set's variant names (variants) and the selected variant of each set that has one (selections, empty when none is authored). With variant_set_name only that set is reported, also as variant_set_name, current_selection (empty when none) and variant_count, and a set the prim does not have is an error. Use it before set_usd_variant_selection or clear_usd_variant_selection, which take these names; author sets and variants with add_usd_variant_set and add_usd_variant, delete them with remove_usd_variant_set and remove_usd_variant. An unknown stage, an invalid prim path or a prim that does not exist is an error; open a stage first with open_usd_stage.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `prim_path` | string | yes | SdfPath of the prim to inspect |
-| `stage_name` | string | no | Stage cache key |
-| `variant_set_name` | string | no | Optional name of the one variant set to report |
+| `prim_path` | string | yes | Absolute SdfPath of the existing prim to inspect, e.g. "/World/Car" |
+| `stage_name` | string | no | Name the stage was registered under by open_usd_stage or create_usd_stage (list_usd_stages shows it), or the end of a cached stage's root layer identifier, case-insensitive, e.g. "Shot010" |
+| `variant_set_name` | string | no | Optional name of the one variant set to report, e.g. "color"; omitted or empty reports every set |
 
 **Returns:** `{ prim_path: string, names: [string], selections: object, variants: object (set name -> [variant name]), count: int, variant_set_name?: string, current_selection?: string, variant_count?: int }`
 
@@ -638,11 +638,11 @@ Author one metadata field (e.g. "comment", "kind", "customData", "apiSchemas", o
 
 *Destructive, idempotent.*
 
-Change the specifier ("Def", "Over" or "Class") of an existing prim on a registered USD stage, at the current edit target. An unknown specifier is refused before anything is authored. specifier reports the one written, only when the write succeeded (set); a failed write fails the call. Not saved to disk.
+Change the specifier of an existing prim on a registered USD stage to Def (a concrete prim), Over (opinions that define nothing on their own) or Class (an abstract template that does not render), authored on the stage's current edit target layer (pick it with set_usd_edit_target). Use it to convert a prim in place; to create one use define_usd_prim, and to add an over where nothing is defined yet override_usd_prim. The edit stays in memory until save_usd_stage, with no undo step. An unknown specifier, an unregistered stage_name or a prim that does not exist is an error and nothing is authored; a write USD refuses fails the call with set=false. specifier is reported only after a successful write (there is no getter to read it back); inspect the prim with get_usd_prim_info. Setting the same specifier again writes it again (idempotent). A prim made Class, or Over with no def on any layer, no longer appears in list_usd_prims, which lists defined, non-abstract prims only.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `prim_path` | string | yes | Absolute SdfPath of an existing prim, e.g. "/World/Cube". |
+| `prim_path` | string | yes | Absolute SdfPath of an existing prim, e.g. "/World/Cube", as list_usd_prims returns it. |
 | `specifier` | string | yes | "Def", "Over" or "Class", case-insensitive; anything else is refused. |
 | `stage_name` | string | no | Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier. |
 

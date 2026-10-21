@@ -37,14 +37,14 @@ Expose a tunable on a PCG graph (bool / int / float / double / string) so densit
 
 *Additive.*
 
-Adds a node of the given UPCGSettings subclass to a PCG graph.  Uses UPCGGraph::AddNodeOfType, which creates the node's settings in the transient package and reparents the node into the graph (headless-safe). The graph is re-saved after the mutation.
+Add one unconnected node of a PCG settings class (the node type: surface sampler, static mesh spawner, filter...) with its default settings to a PCG graph asset, in one undo step, then save the graph. Each call adds another node, so a repeat call makes a duplicate. Get valid node_type names from list_pcg_node_types; wire the new node with connect_pcg_nodes using the node_name it returns, set its fields with set_pcg_node_properties, and check the graph with get_pcg_graph_info. To embed a whole graph use add_pcg_subgraph_node instead; inverse: remove_pcg_node; make the graph first with create_pcg_graph. A graph that does not load, or a node_type that is not a concrete PCG settings class, is an error and nothing changes. A failed save makes success false, with saved false, save_error and the node only in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `pcg_graph_path` | string | yes | Asset path of the PCG Graph (e.g. "/Game/PCG/PCG_Example" or fully-qualified "/Game/PCG/PCG_Example.PCG_Example"). |
-| `node_type` | string | yes | A concrete UPCGSettings subclass name, e.g. "PCGSurfaceSamplerSettings", "PCGStaticMeshSpawnerSettings", or a fully-qualified "/Script/PCG.PCGSurfaceSamplerSettings". |
+| `pcg_graph_path` | string | yes | Asset path of the PCG Graph (e.g. "/Game/PCG/PCG_Example" or fully-qualified "/Game/PCG/PCG_Example.PCG_Example"), as create_pcg_graph returns it. |
+| `node_type` | string | yes | A concrete UPCGSettings subclass, as list_pcg_node_types returns it (types[].name or types[].path): e.g. "PCGSurfaceSamplerSettings", "PCGStaticMeshSpawnerSettings", or "/Script/PCG.PCGSurfaceSamplerSettings"; the U prefix is optional. |
 
-**Returns:** `{ graph_name: string, asset_path: string, node_title: string, node_name: string, settings_class: string, node_count: int, saved: bool, save_error: string }`
+**Returns:** `{ graph_name: string, asset_path: string, node_title: string, node_name: string, settings_class: string, node_count: int, saved: bool, save_error?: string }`
 
 ## `add_pcg_subgraph_node`
 
@@ -146,11 +146,11 @@ Read an actor's PCG component: which graph it runs, its seed, whether it is gene
 
 *Read-only.*
 
-Reports the generated output of an actor's UPCGComponent: per output item, its pin, tags and data class. Read-only; empty until a generation completes (generation is asynchronous).
+Report what the PCG component of an editor-world actor produced in its last generation, without changing anything: per output item its pin, tags and data class (e.g. PCGPointData). Generation is asynchronous, so the list is empty, with a note, until a generate_pcg_component run has completed: poll this or get_pcg_component_info after triggering it. An actor without a PCG component answers has_component false and an empty list rather than an error; an actor that is not found is an error. For the component's graph, seed and generating state use get_pcg_component_info; for the graph's nodes get_pcg_graph_info; to clear the output cleanup_pcg_component.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Actor holding the UPCGComponent (required) |
+| `actor_name` | string | yes | Actor holding the PCG component (an APCGVolume or an actor given one by add_pcg_component), by object name or editor label, e.g. "PCGVolume_0" (required) |
 
 **Returns:** `{ actor_name, has_component, output_data_count, data:[{index, pin, data_class, tags:[...]}], note? }`
 

@@ -558,9 +558,9 @@ static AActor* FindActorFlexible_Anim(UWorld* World, const FString& Name)
     return nullptr;
 }
 
-// MCP:get_active_montages - Report the AnimMontage(s) currently playing on a live PIE actor's skeletal mesh (useful for blend-out debugging).
-//   @param actor - Name, label, or full path of a live actor (resolved in the PIE world by default).
-//   @param component - Optional skeletal mesh component name; defaults to the actor's primary USkeletalMeshComponent.
+// MCP:get_active_montages - Report the animation montages active right now on an actor's skeletal mesh in a running Play-in-Editor session (or the world that world selects), without changing anything: the top montage and every montage still blending out, each with its current section, position (seconds and normalized), length, play rate, blend weights, playing and active flags and the slots it plays on. Use it to debug a montage that does not play, cuts off or blends out too early while the game runs; to read a montage asset's sections, slots and notifies use get_montage_info instead. No montage playing gives montage_count 0, not an error. No resolvable world (for the default, PIE not running), an actor not found in that world, a component that is not found, or a mesh without an anim instance is an error. world_name, world_package, world_type, net_mode and pie_instance say which world answered.
+//   @param actor - Live actor in the selected world, by object name, editor label or full object path (whole string, case-insensitive), e.g. "BP_Hero_C_0".
+//   @param component - Optional skeletal mesh component name on that actor, e.g. "CharacterMesh0" (whole name, case-insensitive); omitted uses the actor's first skeletal mesh component.
 //   @param world - Which world to resolve the actor in: absent/'pie' (default, ambiguous: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'editor' | 'game' (alias of 'pie').
 //   @returns { actor, actor_name, component, world, anim_instance_class, montage_count, is_any_montage_playing, top_montage_id, enumeration, montages: [{ index, montage_path, montage_name, is_top, current_section, position, normalized_position, length, play_rate, blend_weight, desired_weight, blend_time, is_playing, is_active, instance_id, slots:[string] }], world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }
 TSharedPtr<FJsonObject> HandleGetActiveMontages(const TSharedPtr<FJsonObject>& Params)

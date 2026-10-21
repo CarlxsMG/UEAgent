@@ -207,14 +207,14 @@ Start an asynchronous static lighting build of all levels in the editor world (n
 
 *Destructive.*
 
-Write a PNG of the game viewport (else the active editor viewport) from a synchronous ReadPixels, which omits the UMG/Slate HUD; returns output_path, width, height and bytes_written. With include_ui=true during PIE, a cropped HUD version overwrites output_path a frame later (ui_overwrite_next_frame).
+Write a PNG of what the running game shows: the PIE game viewport, or the active editor viewport when there is no game viewport (with PIE not running, saved_to_pie_active=false and a note says so). It reads the pixels synchronously, so the file holds the 3D scene without the UMG/Slate HUD, and an existing file at output_path is overwritten. With include_ui=true during PIE it also queues an engine screenshot that a later frame crops to the game viewport, HUD included, and writes over the same file (ui_overwrite_next_frame=true): re-read the file after the call. Use it to SHOW a play-test result; for the editor viewport with a fresh redraw, resizing or base64 use capture_viewport, for a supersampled image capture_high_res_screenshot, and for actor state instead of pixels capture_pie_state. Start PIE with start_play_in_editor first. No viewport, a zero-size viewport or a failed write is an error. Changes nothing in the level; every call writes the file again.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `output_path` | string | no | Optional string. If empty, auto-names into &lt;Project>/Saved/MCP/PIE_&lt;utc>.png. |
-| `include_ui` | boolean | no | When true and PIE is running with rendering, also request an engine screenshot with the HUD that a later frame crops to the game viewport (editor chrome removed) and writes over output_path; SDR only, given up after 8 s. Default false. |
+| `output_path` | string | no | File path of the PNG, absolute or relative to the editor's working directory, e.g. "D:/Shots/hud.png"; folders are created. Omit it to auto-name &lt;Project>/Saved/MCP/PIE_&lt;yyyyMMdd_HHmmss UTC>.png. |
+| `include_ui` | boolean | no | true to also write the HUD version over output_path on a later frame (PIE with rendering only, SDR only, abandoned after 8 s, e.g. with an HDR editor display); default false keeps only the scene-only PNG. |
 
-**Returns:** `{ saved_to_pie_active, output_path, width, height, bytes_written, includes_ui, ui_overwrite_next_frame, ui_note? }`
+**Returns:** `{ saved_to_pie_active, output_path, width, height, bytes_written, includes_ui, ui_overwrite_next_frame, ui_note?, note? }`
 
 ## `commit_level_instance`
 
@@ -360,13 +360,13 @@ Creates and saves a new World Partition-enabled UWorld map asset on disk.  The e
 
 ## `detach_actor`
 
-*Destructive.*
+*Destructive, idempotent.*
 
-Detach an actor from its current parent keeping world transform
+Detach an editor-world actor from the actor it is attached to, keeping its world transform (it does not move), in one undo step; the level is marked dirty, not saved (save_level keeps it). Its own attached children stay with it. The inverse of attach_actor, which also moves an actor to a new parent directly, so detaching first is not needed for that. Idempotent: an actor with no parent is a success with was_attached=false and detached=false, and nothing changes. detached is read back after the call (former_parent names the old parent), so was_attached=true with detached=false means the engine kept the attachment, still answered as a success. An actor that is not found is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Name or label of the actor to detach from its parent |
+| `actor_name` | string | yes | Internal name or outliner label of the editor-world actor, e.g. "SM_Lamp_3" or "Lamp"; get_actors_in_level or find_actors_by_name list them. |
 
 **Returns:** `{ actor: string, was_attached: bool, detached: bool, former_parent: string }`
 
@@ -556,7 +556,7 @@ Lists the UDataLayerAsset assets (subclasses included) under a content folder an
 
 *Read-only.*
 
-Lists the editor world's data layer instances.  REAL read via UDataLayerManager::ForEachDataLayerInstance. Returns an empty list on a non-WP (default) map, which is the correct result.
+Lists the data layer instances of the level open in the editor (the editor world, not PIE): each with its object name, short and full name, type (Editor or Runtime), runtime flag and the Data Layer asset it instances. Read-only: loads and changes nothing. A map without World Partition succeeds with an empty list and is_world_partition_enabled false, which is the expected answer, not an error. asset_path is the data_layer_asset_path that assign_actor_to_data_layer_instance, set_data_layer_type, set_data_layer_initial_runtime_state and remove_data_layer_instance take. To list the Data Layer assets in the content folders, instanced or not, use get_data_layer_assets; to instance one, create_data_layer_instance; for the map's overall World Partition state, get_world_partition_info.
 
 No parameters.
 
@@ -703,7 +703,7 @@ Summary of a landscape's spline component: whether it has one at all, plus the c
 
 *Read-only.*
 
-Lists every ALevelInstance actor in the editor world.  REAL read via TActorIterator&lt;ALevelInstance>; serialises each actor's referenced world asset and loaded state. An empty list on a map with no level instances is the correct result (honest read).
+List every Level Instance actor (ALevelInstance, Packed Level Actors included) in the editor world, live from the world's actors, without changing anything: per actor its label (or name when unlabeled), the .umap it references, whether that reference is valid, whether its level has finished loading (false right after binding, as loading is deferred) and its location. Use it to find the actor the other level-instance tools take: create_level_instance places one, edit_level_instance and commit_level_instance edit its content in place, break_level_instance turns it into plain actors, pack_level_actors bakes a map into a packed Blueprint. Classic streaming sub-levels are listed by get_streaming_levels instead, and other actors by get_actors_in_level. A map with no level instances is a success with an empty list and count 0. Reads the editor world, not a PIE session.
 
 No parameters.
 
@@ -751,7 +751,7 @@ Reads the control points of a named actor's USplineComponent (reader twin of set
 
 *Read-only.*
 
-Lists every streaming sub-level of the current editor world.  Reads UWorld::GetStreamingLevels(); works even when the world has zero streaming levels (returns an empty array).
+List every streaming sub-level of the current editor world (UWorld::GetStreamingLevels) without changing anything: per sub-level its package, wrapper object name and streaming class, the requested should-be-loaded and should-be-visible flags, and whether it is actually loaded and visible now, plus world_package (the persistent map). A world with no sub-levels is a success with an empty list; a World Partition map normally has none, since its cells stream at runtime (get_world_partition_info, list_world_partition_actors). Use it to find the level_package_path the other tools take: add_streaming_level adds one, set_streaming_level_loaded and set_streaming_level_visible change the requests, remove_streaming_level detaches one. For Level Instance actors use get_level_instance_info; for the map you are on get_current_level. Reads the editor world, not a PIE session.
 
 No parameters.
 
@@ -923,12 +923,12 @@ Paint terrain texture layers headless: write ONE uniform weight (0-255) into a l
 
 *Destructive.*
 
-Possess a pawn (by actor name/label) with the active PIE session's PlayerController (AController::Possess). Honest note (not an error) if the engine's own authority gate silently no-ops the possession (Standalone/ListenServer's local PlayerController normally has authority; a pure Client's does not).
+Make the first PlayerController of a running PIE session possess a pawn of that PIE world (AController::Possess), so input and camera go to it; the pawn it controlled before is unpossessed and stays in the world. Requires PIE: start it with start_play_in_editor; with no PIE session for pie_client_index, or a name that is not a pawn in that world, it is an error and nothing changes. Then drive it with inject_key_input or inject_analog_input, or aim it with set_control_rotation. Runtime only: nothing is saved and there is no undo. A pawn the controller already has is a success with already_possessed=true and no call. The engine's authority gate silently skips the possession on a pure client's PlayerController (Standalone and ListenServer have authority): then possessed=false, had_authority=false and a note, still a success, so always read possessed.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `pawn_actor_name` | string | yes | Required. Name or label of the pawn actor in the PIE world. |
-| `pie_client_index` | number | no | Optional int (default 0). |
+| `pawn_actor_name` | string | yes | Name or label of the pawn actor in the PIE world, e.g. "BP_Vehicle_C_0" or "Truck"; find_actors_by_name or get_actors_in_level with world="pie" list them. |
+| `pie_client_index` | number | no | Which PIE instance, a whole number from 0 (default 0: the first, the server in a ListenServer session); 1, 2... for further clients. |
 
 **Returns:** `{ possessed: bool, already_possessed: bool, had_authority: bool, pawn_actor_name: string, pie_client_index: int, note?: string }`
 
@@ -1032,11 +1032,11 @@ Honest-gated deletion of __ExternalActors__ (OFPA) orphan packages. Every entry 
 
 *Destructive.*
 
-Removes a streaming sub-level from the current editor world.  If the sub-level is loaded, uses UEditorLevelUtils::RemoveLevelFromWorld; otherwise detaches the streaming wrapper via UWorld::RemoveStreamingLevel. The result is verified by re-querying the world's streaming levels.
+Detach a streaming sub-level from the current editor world: a loaded one is unloaded and taken out with UEditorLevelUtils::RemoveLevelFromWorld (unsaved edits in it are lost), an unloaded one has its streaming wrapper dropped with UWorld::RemoveStreamingLevel; method says which. The sub-level's .umap stays on disk; the persistent map is marked dirty, not saved (save_level keeps the change), and the change is wrapped in an undo transaction, but add_streaming_level is the reliable way back. To only hide or unload it while keeping it in the world, use set_streaming_level_visible or set_streaming_level_loaded instead. removed is re-checked by listing the world's sub-levels again; success stays true even when removed=false, so read removed. A level that is not a sub-level of the editor world is an error and nothing changes; a second call on the same level is therefore an error (not idempotent).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `level_package_path` | string | yes | Package path of an existing streaming sub-level. |
+| `level_package_path` | string | yes | Package path of an existing streaming sub-level, e.g. "/Game/Maps/Arena_Lighting", as get_streaming_levels returns it; an object path or the bare level name ("Arena_Lighting") also matches, case ignored. |
 
 **Returns:** `{ package_name: string, removed: bool, method: string, streaming_level_count: number }`
 
@@ -1179,12 +1179,12 @@ Set a component-level override material on one slot of an editor-world actor (fo
 
 *Destructive, idempotent.*
 
-Toggles an editor-world actor's World Partition spatial-loading flag (AActor::SetIsSpatiallyLoaded).  Guarded by AActor::CanChangeIsSpatiallyLoadedFlag() because the setter check()s that precondition (same baked guard as spawn_box_volume) -- so an actor that forbids the change never crashes the editor. Wrapped in FScopedTransaction + Actor->Modify() so the flag change marks the actor's (OFPA) package dirty and survives save_level. applied=false with can_change=false is the honest result for an actor that forbids the change (e.g. a non-partitioned / always-loaded actor); nothing is mutated in that case.
+Sets whether an actor of the editor world is spatially loaded by World Partition: true streams it in and out with the grid cell it sits in, false keeps it always loaded. One undo step; the actor's package (its external actor file on a World Partition map) is marked dirty, not saved: persist with save_level. A value the actor already has succeeds with changed false. Actors the engine pins as always loaded (Info actors such as World Settings, directional lights, unbound post-process volumes) cannot change: the call still succeeds with applied false, can_change false and nothing changed. An unknown actor is an error. On a map without World Partition the flag is stored but has no effect. Read the flags of all actors with list_world_partition_actors (is_spatially_loaded); assign data layers with assign_actor_to_data_layer_instance, and bring unloaded actors into the editor with load_world_partition_region.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Label or name of the actor in the editor world. |
-| `is_spatially_loaded` | boolean | yes | bool desired spatial-loading flag. |
+| `actor_name` | string | yes | Label or object name of the actor in the editor world (case-insensitive), e.g. "SM_Rock_12"; list_world_partition_actors gives labels even for unloaded actors, but the actor must be loaded. |
+| `is_spatially_loaded` | boolean | yes | Required bool: true = streamed with its grid cell, false = always loaded. |
 
 **Returns:** `{ actor_name: string, actor_path: string, requested: bool, is_spatially_loaded: bool, applied: bool, can_change: bool, changed: bool, note: string }`
 
@@ -1390,13 +1390,13 @@ Point the world's GameMode at a PlayerController class, writing the live GameMod
 
 *Destructive, idempotent.*
 
-Replaces the spline points on a named actor's USplineComponent.  ClearSplinePoints + AddSplinePoint each (local space) + optional SetClosedLoop + UpdateSpline.
+Replace every control point of the first spline component on an editor-world actor with the given local-space positions, in order, in one undo step; the level is marked dirty, not saved (save_level). The new points get the default auto-curve tangents, and closed_loop, when given, also sets whether the last point joins the first. An empty points array leaves the spline with no points. Idempotent: the same points again give the same spline. Read the result with get_spline_points (same local space); give an actor a spline first with add_spline_component; to bend a mesh along a spline use add_spline_mesh_component. An unknown actor, an actor without a spline component, or a points entry that is not 3 numbers is an error and nothing changes.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Display label or internal name of the target editor-world actor |
-| `points` | array | yes | [[x, y, z], ...] spline points in local space; an entry that is not 3 numbers is an error and nothing is changed |
-| `closed_loop` | boolean | no | Optional bool; toggles closed-loop mode |
+| `actor_name` | string | yes | Display label or internal name of the target editor-world actor, e.g. "Road_Spline" |
+| `points` | array | yes | [[x, y, z], ...] positions in cm in the spline component's local space (relative to the component, not the world), e.g. [[0,0,0],[500,0,0],[500,500,100]]; an entry that is not 3 numbers is an error and nothing is changed |
+| `closed_loop` | boolean | no | Optional bool: true joins the last point back to the first, false leaves the spline open; omitted keeps the current setting |
 
 **Returns:** `{ actor_name: string, component_name: string, num_points: int, closed_loop: bool, points_set: bool }`
 

@@ -618,12 +618,12 @@ TSharedPtr<FJsonObject> HandleSpawnPhysicsConstraint(const TSharedPtr<FJsonObjec
 // --------------------------------------------------------------------------- //
 // set_physics_constraint_limits
 // --------------------------------------------------------------------------- //
-// MCP:set_physics_constraint_limits - Set linear/angular limits on a physics-constraint actor's UPhysicsConstraintComponent and read back.  Providing a limit sets that axis to a Limited motion type with the given size (linear is shared across X/Y/Z; swing/twist are in degrees).
-//   @param constraint_actor_name - Label/name of the APhysicsConstraintActor.
-//   @param linear_limit - Optional shared linear limit applied to all 3 axes (cm)
-//   @param swing1_limit - Optional swing1 angular limit (degrees)
-//   @param swing2_limit - Optional swing2 angular limit (degrees)
-//   @param twist_limit - Optional twist angular limit (degrees)
+// MCP:set_physics_constraint_limits - Sets the motion limits of a Physics Constraint actor placed in the editor world, on its UPhysicsConstraintComponent, and reads them back: each limit given switches that axis to Limited with that size (linear_limit is one value for X, Y and Z together; swing and twist are in degrees). Axes whose limit is not given keep their motion type and size, and no axis can be set to Free or Locked here. One undo step; the level is marked dirty, not saved (save_level). The same values again give the same result; with no limit given nothing changes, though updated still reads true. An actor that is not a Physics Constraint actor is an error. Create one with spawn_physics_constraint and read it with get_physics_constraint_info; motors, breaking and projection are set with set_physics_constraint_drives; for a ragdoll joint inside a Physics Asset use set_physics_asset_constraint_limits instead.
+//   @param constraint_actor_name - Label or object name of the APhysicsConstraintActor in the editor world (case-insensitive), as spawn_physics_constraint returns it.
+//   @param linear_limit - Optional linear limit in cm, applied to all 3 axes together (e.g. 10); not range-checked.
+//   @param swing1_limit - Optional swing1 angular limit in degrees, the first symmetric angle of the swing cone (e.g. 45); the Details panel range is 0-180 and this value is not range-checked.
+//   @param swing2_limit - Optional swing2 angular limit in degrees, the second symmetric angle of the swing cone (e.g. 45); the Details panel range is 0-180 and this value is not range-checked.
+//   @param twist_limit - Optional twist angular limit in degrees, the symmetric rotation about the twist axis (e.g. 30); the Details panel range is 0-180 and this value is not range-checked.
 //   @returns { constraint_actor_name: string, constraint_component: string, linear_limit: number, linear_x_motion: string, linear_y_motion: string, linear_z_motion: string, swing1_limit: number, swing1_motion: string, swing2_limit: number, swing2_motion: string, twist_limit: number, twist_motion: string, linear_applied: bool, swing1_applied: bool, swing2_applied: bool, twist_applied: bool, updated: bool }
 
 TSharedPtr<FJsonObject> HandleSetConstraintLimits(const TSharedPtr<FJsonObject>& Params)

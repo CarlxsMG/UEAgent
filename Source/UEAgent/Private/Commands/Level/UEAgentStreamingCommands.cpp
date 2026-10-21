@@ -239,7 +239,7 @@ TSharedPtr<FJsonObject> HandleAddStreamingLevel(const TSharedPtr<FJsonObject>& P
 // get_streaming_levels
 // ---------------------------------------------------------------------------
 
-// MCP:get_streaming_levels - Lists every streaming sub-level of the current editor world.  Reads UWorld::GetStreamingLevels(); works even when the world has zero streaming levels (returns an empty array).
+// MCP:get_streaming_levels - List every streaming sub-level of the current editor world (UWorld::GetStreamingLevels) without changing anything: per sub-level its package, wrapper object name and streaming class, the requested should-be-loaded and should-be-visible flags, and whether it is actually loaded and visible now, plus world_package (the persistent map). A world with no sub-levels is a success with an empty list; a World Partition map normally has none, since its cells stream at runtime (get_world_partition_info, list_world_partition_actors). Use it to find the level_package_path the other tools take: add_streaming_level adds one, set_streaming_level_loaded and set_streaming_level_visible change the requests, remove_streaming_level detaches one. For Level Instance actors use get_level_instance_info; for the map you are on get_current_level. Reads the editor world, not a PIE session.
 //   @returns { streaming_levels: [{ package_name: string, name: string, streaming_class: string, should_be_loaded: bool, should_be_visible: bool, is_level_loaded: bool, is_level_visible: bool }], streaming_level_count: number, world_package: string }
 
 TSharedPtr<FJsonObject> HandleGetStreamingLevels(const TSharedPtr<FJsonObject>& Params)
@@ -346,8 +346,8 @@ TSharedPtr<FJsonObject> HandleSetStreamingLevelVisible(const TSharedPtr<FJsonObj
 // remove_streaming_level
 // ---------------------------------------------------------------------------
 
-// MCP:remove_streaming_level - Removes a streaming sub-level from the current editor world.  If the sub-level is loaded, uses UEditorLevelUtils::RemoveLevelFromWorld; otherwise detaches the streaming wrapper via UWorld::RemoveStreamingLevel. The result is verified by re-querying the world's streaming levels.
-//   @param level_package_path - Package path of an existing streaming sub-level.
+// MCP:remove_streaming_level - Detach a streaming sub-level from the current editor world: a loaded one is unloaded and taken out with UEditorLevelUtils::RemoveLevelFromWorld (unsaved edits in it are lost), an unloaded one has its streaming wrapper dropped with UWorld::RemoveStreamingLevel; method says which. The sub-level's .umap stays on disk; the persistent map is marked dirty, not saved (save_level keeps the change), and the change is wrapped in an undo transaction, but add_streaming_level is the reliable way back. To only hide or unload it while keeping it in the world, use set_streaming_level_visible or set_streaming_level_loaded instead. removed is re-checked by listing the world's sub-levels again; success stays true even when removed=false, so read removed. A level that is not a sub-level of the editor world is an error and nothing changes; a second call on the same level is therefore an error (not idempotent).
+//   @param level_package_path - Package path of an existing streaming sub-level, e.g. "/Game/Maps/Arena_Lighting", as get_streaming_levels returns it; an object path or the bare level name ("Arena_Lighting") also matches, case ignored.
 //   @returns { package_name: string, removed: bool, method: string, streaming_level_count: number }
 
 TSharedPtr<FJsonObject> HandleRemoveStreamingLevel(const TSharedPtr<FJsonObject>& Params)

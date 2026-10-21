@@ -1220,9 +1220,9 @@ TSharedPtr<FJsonObject> HandleRemoveMassTraitFromEntity(const TSharedPtr<FJsonOb
 // ---------------------------------------------------------------------------
 // list_mass_tag_types
 // ---------------------------------------------------------------------------
-// MCP:list_mass_tag_types - Enumerate every UScriptStruct class derived from FMassTag (the zero-size tag markers — what BatchChangeTagsForEntities accepts). Filters out abstract and editor-only.
-//   @param include_abstract - If true (default false), include abstract tags too.
-//   @returns { count, traits: [{ name, path }] }
+// MCP:list_mass_tag_types - Lists the Mass tag types loaded in this editor: every struct derived from FMassTag, the zero-size markers an entity carries or not (e.g. MassOffLODTag), each with its reflected name and path, in no particular order. Abstract tag structs are left out unless include_abstract is true; nothing else is filtered. Read-only reflection: changes nothing. The name is what add_mass_tag_to_entity and remove_mass_tag_from_entity take as tag. Tags are not traits: the traits an entity config holds are listed with list_mass_traits and added with add_mass_trait; live entities and their archetypes come from list_mass_archetypes and get_mass_entity_info.
+//   @param include_abstract - Optional bool, default false; true also lists tag structs marked Abstract (bases that are not meant to be set on entities).
+//   @returns { count, traits: [{ name, path }] } -- traits holds the tag types (name without the F prefix, e.g. "MassOffLODTag"; path is the /Script path)
 TSharedPtr<FJsonObject> HandleListMassTraitTypes(const TSharedPtr<FJsonObject>& Params)
 {
 	bool bIncludeAbstract = false;

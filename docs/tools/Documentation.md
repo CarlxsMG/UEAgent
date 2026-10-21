@@ -8,13 +8,13 @@ Back to the [index](README.md).
 
 ## `create_asset_documentation`
 
-*Additive.*
+*Read-only.*
 
-Build a JSON record of one asset from the Asset Registry, without loading it or writing a file: identity, .uasset size and date, a coarse category and usage blurb, and depth-1 dependencies and referencers (100 each at most). Errors without an editor world.
+Builds a documentation record of one asset from the Asset Registry, without loading it: name, class, package and object path, .uasset size and timestamp, a coarse category and usage line chosen by exact class (StaticMesh, Material, Texture2D, Blueprint; every other class, sound waves and material instances included, is Other), and its direct package dependencies and referencers, 100 of each at most with truncation flags. Read-only despite its name: nothing is loaded, written or saved, and the record comes back in the reply only. An asset the registry does not know, or no editor world, is an error. For complete edge lists use get_asset_dependencies and get_asset_referencers (get_asset_dependencies_recursive beyond depth 1); for every Blueprint at once, generate_blueprint_docs; for project-wide counts, create_project_overview.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `asset_name` | string | yes | Package path ("/Game/Props/SM_Chair") or object path ("/Game/Props/SM_Chair.SM_Chair") of the asset; a bare asset name is not resolved |
+| `asset_name` | string | yes | Package path ("/Game/Props/SM_Chair") or object path ("/Game/Props/SM_Chair.SM_Chair") of the asset; a bare asset name is not resolved (find_assets_by_name turns a name into a path). |
 
 **Returns:** `{ asset_documentation: { asset_name, asset_path, asset_class, asset_type, package_name, object_path, file_name, file_size: int (bytes, 0 if file_exists=false), last_modified: string, file_exists: bool, asset_category, usage, dependencies: [string] (package names, depth-1, capped at 100), dependencies_truncated: bool, dependents: [string] (referencers, depth-1, capped at 100), dependents_truncated: bool }, generation_date: string, project_name: string }`
 
@@ -30,10 +30,10 @@ No parameters.
 
 ## `generate_blueprint_docs`
 
-*Additive.*
+*Read-only.*
 
-Generate documentation for all blueprints in the project (includes Blueprint, WidgetBlueprint, AnimBlueprint, and other Blueprint subclasses).
+Documents every Blueprint asset under /Game in one reply, subclasses included (Widget, Anim and other Blueprints): per Blueprint its name, package path, class, parent class, type, compile state, component templates, the names of its function and event graphs, and its own variables with their pin category. Read-only despite its name: it loads every Blueprint to read it, but writes and saves nothing, and the result comes back in the reply only, never as a file. On a big project it can take long and return a very large reply; plugin and engine content are not included, and an editor world is required. For one Blueprint use get_blueprint_info (get_blueprint_components for its real component tree) or export_blueprint_data; for one asset of any kind, create_asset_documentation; for project-wide counts without loading, create_project_overview.
 
 No parameters.
 
-**Returns:** `{ blueprint_documentation: [{ blueprint_name, blueprint_path, blueprint_class, parent_class, blueprint_type, compilation_status, components, functions: [string], variables: [{name, type}] }], total_blueprints: int, generation_date: string, project_name: string }`
+**Returns:** `{ blueprint_documentation: [{ blueprint_name, blueprint_path, blueprint_class, parent_class, blueprint_type, compilation_status, components, functions: [string], variables: [{name, type}] }], total_blueprints: int, generation_date: string, project_name: string } -- blueprint_type is Normal, or MacroLibrary for every other kind (interfaces and function libraries included); compilation_status is UpToDate or NeedsCompilation (errors included); components are the Blueprint's ComponentTemplates, which do not include the components of its Components panel`

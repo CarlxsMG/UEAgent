@@ -132,18 +132,18 @@ Create a GameplayCueNotify Blueprint of the kind notify_type names -- Static (UG
 
 ## `create_gameplay_effect_asset`
 
-*Additive.*
+*Additive, idempotent.*
 
-Create and save a native UGameplayEffect asset (despite the name, not a container and not a Blueprint) at package_path/name. An existing asset there is returned untouched (already_existed=true). apply_gameplay_effect needs a class, so use create_gameplay_effect_blueprint for an effect it can apply.
+Create a native UGameplayEffect data asset (not a Blueprint, and not a container) at package_path/name with the given duration policy, and save it; no undo transaction. apply_gameplay_effect needs a class, so for an effect you will apply use create_gameplay_effect_blueprint instead; read the result back with get_gameplay_effect_info. Idempotent: a GameplayEffect already at that path, native or Blueprint, is returned untouched with already_existed=true and nothing saved, but the duration_policy in that reply echoes your request, not the asset; an asset of another class there is refused. An unknown duration_policy is an error and nothing is created. A failed save (always while PIE runs) is an error, and the new asset stays in memory unsaved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `name` | string | yes | Asset name without a path, e.g. "GE_Damage" |
-| `package_path` | string | no | Target content package path where the asset is created (default /Game/GameplayEffects) |
-| `duration_policy` | string | no | Duration type, case-insensitive: Instant, HasDuration or Infinite (default Instant) |
-| `duration_magnitude` | number | no | Duration in seconds, applied when policy is HasDuration (default 0.0) |
+| `name` | string | yes | Asset name without a folder, e.g. "GE_Damage". |
+| `package_path` | string | no | Content folder as a long package path, e.g. "/Game/GAS/Effects" (default /Game/GameplayEffects; one trailing slash is dropped). |
+| `duration_policy` | string | no | "Instant", "HasDuration" or "Infinite", case ignored (default Instant). |
+| `duration_magnitude` | number | no | Duration in seconds as a constant magnitude, e.g. 5.0; used only with HasDuration and ignored otherwise (default 0.0). |
 
-**Returns:** `{ name, asset_path, already_existed, duration_policy, duration_magnitude, created }`
+**Returns:** `{ name, asset_path, already_existed, duration_policy, duration_magnitude?, created? }`
 
 ## `create_gameplay_effect_blueprint`
 
@@ -335,13 +335,13 @@ Read the attribute modifiers authored on a GameplayEffect asset (a native UGamep
 
 *Additive.*
 
-Grant an ability class to an editor-world actor ability system component with GiveAbility at a whole-number level; granted tells whether a valid spec handle came back. Runtime state only (not saved with the level), and granting the same class again adds another spec.
+Grant a gameplay ability class to the ability system component of an actor in the editor world (not a PIE session) with GiveAbility at a whole-number level; granted says whether a valid spec handle came back, and false is still a success. Runtime state only: no undo step, nothing saved with the level. Not idempotent: granting the same class again adds another spec. Then run it with activate_ability, list the grants with get_active_abilities, and take one away with remove_ability. To grant it only while an effect is active, use set_gameplay_effect_component (component granted_abilities) on a GameplayEffect Blueprint instead. An unknown actor, an actor without an ability system component, or a class that does not load as a UGameplayAbility is an error and nothing is granted.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names |
-| `ability_class` | string | yes | Class path of a UGameplayAbility subclass: "/Game/Abilities/GA_Jump.GA_Jump_C" for a Blueprint, "/Script/MyGame.MyAbility" for C++ |
-| `level` | number | no | Spec level, a whole number; default 1 |
+| `ability_class` | string | yes | Class path of a UGameplayAbility subclass: "/Game/Abilities/GA_Jump.GA_Jump_C" for a Blueprint (note the _C), "/Script/MyGame.MyAbility" for C++; create_gameplay_ability_blueprint makes one. |
+| `level` | number | no | Spec level, a whole number, e.g. 3 (default 1). |
 
 **Returns:** `{ actor_name, ability_class, level, granted }`
 
@@ -470,12 +470,12 @@ Point CooldownGameplayEffectClass on the class default object of a GameplayAbili
 
 *Destructive, idempotent.*
 
-Set the Cost GameplayEffect class on a GameplayAbility CDO (the GE applied when the ability is committed). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
+Point CostGameplayEffectClass on the class defaults of a GameplayAbility Blueprint at the generated class of a GameplayEffect Blueprint, both loaded by asset path, then save the ability without recompiling. That effect is applied when the ability commits, and its modifiers (usually a negative add to an attribute such as Mana) are the price: the commit fails when the owner cannot pay. Give the effect its modifier with add_gameplay_effect_modifier; for the effect that blocks re-use use set_ability_cooldown instead; make a new effect with create_gameplay_effect_blueprint; read the value back with get_properties on the ability's class defaults. Any cost class already set is overwritten and every call writes and saves, so a repeat call leaves the same state; there is no way to clear it here. A path that is not a GameplayAbility or GameplayEffect Blueprint, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. set and cost_effect_class_matches are the value read back after the save.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `ability_blueprint_path` | string | yes | Full asset path of the GameplayAbility Blueprint |
-| `cost_effect_path` | string | no | Full asset path of the GameplayEffect Blueprint to use as the cost |
+| `ability_blueprint_path` | string | yes | Asset path of the GameplayAbility Blueprint, e.g. "/Game/GAS/Abilities/GA_Fireball". |
+| `cost_effect_path` | string | no | Asset path of the GameplayEffect Blueprint used as the cost, e.g. "/Game/GAS/Effects/GE_Cost_Fireball"; typically an Instant effect that subtracts from an attribute. |
 
 **Returns:** `{ ability_blueprint_path: string, cost_effect_path: string, cost_effect_class: string, cost_effect_class_matches: bool, set: bool }`
 
@@ -483,13 +483,13 @@ Set the Cost GameplayEffect class on a GameplayAbility CDO (the GE applied when 
 
 *Destructive, idempotent.*
 
-Set the base value of one attribute on an editor-world actor ability system component (SetNumericAttributeBase); active modifiers keep applying on top. Returns the read-back base_value and current value; set=false, not an error, when no registered attribute set has that attribute.
+Set the base value of one attribute on the ability system component of an actor in the editor world (not a PIE session) with SetNumericAttributeBase; active modifiers keep applying on top, so value (the current value) can differ from base_value, both read back after the write. Use it to set a starting value directly; to change it through gameplay rules (modifiers, duration) apply a GameplayEffect with apply_gameplay_effect, and to change an attribute set class's metadata use set_attribute_meta_on_set_class. Read it with get_attribute_value, all attributes with get_attributes. Runtime state only: no undo step, the level is not marked dirty. When no registered attribute set has that attribute it is still a success with set=false, value echoing the request and no base_value; an unknown actor or one without an ability system component is an error. Repeating the call writes the same base again.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names |
-| `attribute_name` | string | yes | Attribute name ("Health") or "SetClass.Attribute" ("MyAttributeSet.Health"), case-insensitive; the first registered attribute that matches wins |
-| `value` | number | yes | The new base value for the attribute |
+| `attribute_name` | string | yes | Attribute name ("Health") or "SetClass.Attribute" ("MyAttributeSet.Health"), case-insensitive, as get_attributes lists them; the first registered attribute that matches wins |
+| `value` | number | yes | The new base value, a number such as 100 or 0.5; the tool does not clamp it, but the attribute set's own PreAttributeBaseChange may, so check base_value. |
 
 **Returns:** `{ actor_name, attribute_name, value, set, base_value }`
 

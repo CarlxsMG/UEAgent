@@ -201,8 +201,8 @@ TSharedPtr<FJsonObject> HandleAttachActor(const TSharedPtr<FJsonObject>& Params)
     return Result;
 }
 
-// MCP:detach_actor - Detach an actor from its current parent keeping world transform
-//   @param actor_name - Name or label of the actor to detach from its parent
+// MCP:detach_actor - Detach an editor-world actor from the actor it is attached to, keeping its world transform (it does not move), in one undo step; the level is marked dirty, not saved (save_level keeps it). Its own attached children stay with it. The inverse of attach_actor, which also moves an actor to a new parent directly, so detaching first is not needed for that. Idempotent: an actor with no parent is a success with was_attached=false and detached=false, and nothing changes. detached is read back after the call (former_parent names the old parent), so was_attached=true with detached=false means the engine kept the attachment, still answered as a success. An actor that is not found is an error.
+//   @param actor_name - Internal name or outliner label of the editor-world actor, e.g. "SM_Lamp_3" or "Lamp"; get_actors_in_level or find_actors_by_name list them.
 //   @returns { actor: string, was_attached: bool, detached: bool, former_parent: string }
 TSharedPtr<FJsonObject> HandleDetachActor(const TSharedPtr<FJsonObject>& Params)
 {

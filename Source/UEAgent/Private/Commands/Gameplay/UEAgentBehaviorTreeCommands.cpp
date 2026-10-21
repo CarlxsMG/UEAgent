@@ -1615,9 +1615,9 @@ TSharedPtr<FJsonObject> HandleCreateBehaviorTree(const TSharedPtr<FJsonObject>& 
     return mcp_common::MakeSavedReply(Result, bSaved, TEXT("create_behavior_tree"), SaveError);
 }
 
-// MCP:set_behavior_tree_root - Set a BehaviorTree's RootNode to a new composite (Selector or Sequence) and save.
-//   @param behavior_tree_path - Path to the UBehaviorTree asset.
-//   @param composite - Root composite type: "Selector" or "Sequence" (optional, default "Selector")
+// MCP:set_behavior_tree_root - Give a BehaviorTree asset a new, empty root composite (Selector or Sequence) in one undo step, then save the asset. WARNING: the current root and everything under it (children, decorators, services) are dropped from the tree, so use it once on a tree from create_behavior_tree, which starts with no root, or to start a tree over. Then build under the root with add_behavior_tree_child, add_behavior_tree_decorator and add_behavior_tree_service, inspect with get_behavior_tree_info and run it with run_behavior_tree; for a StateTree use set_state_tree_root instead. Each call makes a fresh empty root, so repeating it ends in the same state but discards anything added since. An unsupported composite or a tree that does not load is an error and nothing changes. A failed save (always while PIE runs) makes success false, with saved=false and save_error, the new root kept in memory.
+//   @param behavior_tree_path - UBehaviorTree asset as a package or object path, e.g. "/Game/AI/BT_Guard".
+//   @param composite - "Selector" (default: runs children until one succeeds) or "Sequence" (runs children until one fails), case ignored.
 //   @returns { behavior_tree_path: string, composite: string, has_root_node: bool, root_node_class: string, saved: bool, save_error: string? }
 
 TSharedPtr<FJsonObject> HandleSetBehaviorTreeRoot(const TSharedPtr<FJsonObject>& Params)

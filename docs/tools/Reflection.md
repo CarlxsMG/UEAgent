@@ -49,12 +49,12 @@ Diff TWO LIVE objects property by property at the same instant, using the ENGINE
 
 *Read-only.*
 
-Enumerate every loaded class that implements a given UInterface. No inverse index exists in the engine (confirmed against source) -- this is an O(loaded classes) sweep.
+Find every class loaded in memory that implements an interface (a native UInterface or a Blueprint Interface), directly or through a parent class, without changing anything: per class its name, path, is_blueprint and implemented_by_k2 (the interface was added in a Blueprint). The engine keeps no reverse index, so it sweeps every loaded class (scanned_class_count) and returns the whole list, never truncated; deprecated and replaced classes are skipped. A Blueprint that is not loaded is missed: for a base class rather than an interface use list_derived_classes, which also reads unloaded Blueprints from the Asset Registry. An interface that does not resolve, or a class that is not an interface, is an error. One class's interfaces: get_class_hierarchy; add an interface to a Blueprint: implement_interface.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `interface` | string | yes | Name/path of the interface to search for (resolved via ResolveClass) |
-| `include_blueprints` | boolean | no | Include Blueprint-generated (non-native) classes (default true) |
+| `interface` | string | yes | Interface to search for: bare reflected name (e.g. "Interactable" or "UInteractable"), a /Script/Module.Name path, or a Blueprint Interface asset path (e.g. "/Game/BPI/BPI_Use.BPI_Use"), resolved like list_derived_classes' base_class. |
+| `include_blueprints` | boolean | no | true (default) also returns Blueprint-generated classes; false returns native C++ classes only. |
 
 **Returns:** `{ interface: string, classes: [{class_name, path, is_blueprint, implemented_by_k2}], count: int, scanned_class_count: int }`
 
@@ -226,12 +226,12 @@ Enumerate every class derived from a base class (native + Blueprint, Widget and 
 
 *Read-only.*
 
-Enumerate loaded UEnum types (native + user-defined/Blueprint), optionally filtered by module or name substring.
+List the enum types (UEnum) loaded in memory, native C++ and Blueprint user-defined, with their entries, without changing anything: per enum its name, path, owning module (C++ enums only) and entries [{name, value}], leaving out the _MAX sentinel and entries tagged Hidden. Unfiltered it returns every loaded enum with all its entries, a very large reply, so pass name_pattern or module_filter. module_filter matches C++ enums only, since a Blueprint enum has no module, and a Blueprint enum asset that is not loaded is not listed. No match gives count 0, not an error. For one enum's display names, which differ from the internal names on a Blueprint enum, use get_enum_info; structs: list_structs; author enums with create_enum and add_enum_entry.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `module_filter` | string | no | Optional module name substring filter (case-insensitive) |
-| `name_pattern` | string | no | Optional enum name substring filter (case-insensitive) |
+| `module_filter` | string | no | Optional plain substring of the owning module name, case-insensitive, no wildcards, e.g. "Engine" or "StateTreeModule"; matches C++ enums only. |
+| `name_pattern` | string | no | Optional plain substring of the enum name, case-insensitive, no wildcards, e.g. "Collision"; omitted or empty keeps every name. |
 
 **Returns:** `{ enums: [{enum_name, path, module?, entries:[{name, value}]}], count: int }`
 
@@ -239,12 +239,12 @@ Enumerate loaded UEnum types (native + user-defined/Blueprint), optionally filte
 
 *Read-only.*
 
-Audit a PLACED ACTOR (and every one of its components) against its ARCHETYPE and list the property values that were authored as per-instance overrides in the level, each with its archetype baseline, plus the physical package that carries them (the rotating-hash OFPA .uasset for a World Partition actor) and whether that package is dirty. The tool that answers "did my write actually land on this instance, or only look like it?" — it catches set_properties reporting success on an FGameplayTag while storing an empty "()" override. Component baselines are the SCS TEMPLATE, not the Blueprint CDO (a CDO carries no SCS components at all). Resolves in the EDITOR world by design: an instance override is an on-disk concept, not a runtime one.
+List the property values a placed actor, and each of its components, holds as per-instance overrides in the level -- every property that differs from its archetype (the class defaults for the actor, the Blueprint's component template for a component) -- each with the archetype value beside it, plus the package that stores the actor (for a World Partition actor its own external .uasset) and whether that package is dirty. Use it to confirm that a write such as set_properties really landed on the instance (it catches an empty "()" stored where a gameplay tag was meant); to read named properties of any object use get_properties, and for every property of one component get_component_properties. Read-only: it compares the loaded actor in the editor world, so with a dirty package the result is unsaved state (caveat says which). Properties the engine counts as equal but exports differently are counted in noise_counts and listed only with include_noise. An actor not found in the editor world, or one without an archetype, is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor` | string | yes | Actor to audit: internal object name, editor label, or full object path. Resolved in the EDITOR world — a per-instance override is an editor/on-disk concept, not a runtime one. |
-| `include_components` | boolean | no | Optional (default true). Also diff every UActorComponent of the actor against C->GetArchetype() — the SCS template, NOT the Blueprint CDO (a BP CDO does not carry the SCS components at all, which is why a capture_object_snapshot workaround yields an unusable component half). |
+| `actor` | string | yes | Actor to audit: internal object name, editor label, or full object path, e.g. "BP_Door_C_3" or "Door_Main". Resolved in the EDITOR world, since a per-instance override is an editor/on-disk value, not a runtime one. |
+| `include_components` | boolean | no | Optional (default true). Also compare every component of the actor with its own archetype, the Blueprint's component template rather than the Blueprint class defaults (which hold no components). |
 | `require_edit` | boolean | no | Optional (default true). Only consider properties flagged CPF_Edit, i.e. what a human could actually have authored in the details panel. false widens to every reflected property. |
 | `include_transient` | boolean | no | Optional (default false). Include CPF_Transient / DuplicateTransient / NonPIEDuplicateTransient / Deprecated properties. They are never saved, so they are noise in an override audit. |
 | `include_noise` | boolean | no | Optional (default false). Also list, under `noise[]`, the properties the engine considers EQUAL but whose exported text differs (FText localization identity, object outer). They are ALWAYS counted in `noise_counts` regardless. |
@@ -283,12 +283,12 @@ Enumerate live instances of a class currently in memory, complementing get_actor
 
 *Read-only.*
 
-Enumerate loaded UScriptStruct types (native + user-defined/Blueprint), optionally filtered by module or name substring.
+List the struct types (UScriptStruct) loaded in memory, native C++ and Blueprint user-defined, without changing anything: per struct its name, path, owning module (C++ structs only) and is_user_defined. Unfiltered it returns every loaded struct, thousands of them, so pass name_pattern or module_filter. module_filter matches C++ structs only, since a Blueprint struct has no module, and a Blueprint struct asset that is not loaded is not listed. No match gives count 0, not an error. Read one struct's fields with get_struct_info (by the struct_name given here) or a Blueprint struct's members with get_struct_members (by its asset path); enums: list_enums; author a struct with create_struct.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `module_filter` | string | no | Optional module name substring filter (case-insensitive) |
-| `name_pattern` | string | no | Optional struct name substring filter (case-insensitive) |
+| `module_filter` | string | no | Optional plain substring of the owning module name, case-insensitive, no wildcards, e.g. "CoreUObject" or "StateTreeModule"; matches C++ structs only. |
+| `name_pattern` | string | no | Optional plain substring of the struct name (no F prefix), case-insensitive, no wildcards, e.g. "Vector"; omitted or empty keeps every name. |
 
 **Returns:** `{ structs: [{struct_name, path, module?, is_user_defined}], count: int }`
 
@@ -326,12 +326,12 @@ Write one or several properties on ONE object -- an asset, a CDO/archetype, a pl
 
 *Additive, idempotent.*
 
-Bind a generic observer to any dynamic multicast delegate (0..N parameters) on a live object and start recording every time it fires, including its parameters. Idempotent per (object_path, delegate_name): re-subscribing returns the existing subscription_id.
+Start recording a dynamic multicast delegate (an event such as OnComponentHit or a Blueprint event dispatcher, with any number of parameters) of a live object: a rooted observer is bound to it and every fire is kept with its parameters as text, the latest 512 per subscription. It is the first of three steps: read the fires with poll_delegate_events (subscription_id plus a cursor), and stop with unsubscribe_delegate, which frees the observer; the subscription otherwise stays until the editor closes, and stops recording when the object goes away. Find event names with get_component_events, or get_event_dispatchers for a Blueprint; for gameplay tag count changes use register_gameplay_tag_event instead. It observes only: nothing in the object or level changes, and nothing is saved. Idempotent per the exact (object_path, delegate_name) text: the same pair returns the existing subscription_id with already_existed=true (a different spelling of the same object makes a second subscription, and a target that no longer exists is subscribed afresh). An object that is not found, or a delegate_name that is not a multicast delegate of its class, is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `object_path` | string | yes | Path or name of the object owning the delegate (asset path, live GetPathName(), bare actor name, or dotted "Actor.Component") |
-| `delegate_name` | string | yes | Name of the FMulticastDelegateProperty (BlueprintAssignable/BlueprintCallable dynamic multicast delegate) on that object's class |
+| `object_path` | string | yes | Object owning the delegate: a full object path (an asset, or a live object's path, including a PIE actor's), the internal name of an editor-world actor ("BP_Door_C_1"), or "Actor.Component" for one of its components ("BP_Door_C_1.TriggerBox"). Bare names search the editor world only. |
+| `delegate_name` | string | yes | Exact name of the dynamic multicast delegate property on that object's class, e.g. "OnComponentBeginOverlap" or "OnDoorOpened", as get_component_events or get_event_dispatchers list it. |
 
 **Returns:** `{ subscription_id: int, signature: string, already_existed: bool }`
 

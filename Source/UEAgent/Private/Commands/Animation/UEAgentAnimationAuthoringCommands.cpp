@@ -157,11 +157,11 @@ namespace
 // ---------------------------------------------------------------------------
 // create_anim_montage
 // ---------------------------------------------------------------------------
-// MCP:create_anim_montage - Create and save an empty-but-valid UAnimMontage asset under /Game. Idempotent: a UAnimMontage already at that path is returned unchanged with already_existed=true and saved=false, and nothing is saved. A failed save makes success false, with saved=false and save_error.
-//   @param name - Asset name (e.g. 'AM_Example').
-//   @param package_path - Target content package path where the asset is created (default /Game/Animation)
-//   @param slot_name - Montage slot name (e.g. DefaultSlot)
-//   @param skeleton_path - Asset path of the target Skeleton
+// MCP:create_anim_montage - Create an empty-but-valid UAnimMontage asset at package_path/name, bound to skeleton_path, with a slot track named slot_name and a 'Default' section at time 0 but no animation yet, and save it; no undo transaction. Idempotent: a UAnimMontage already at that path is returned unchanged with already_existed=true and saved=false, even when its skeleton or slot differ, and nothing is saved; an asset of another class at that path is refused and nothing changes. Next, give it an animation with add_montage_segment, sections with add_montage_section and more slots with add_montage_slot, and read it back with get_montage_info. A skeleton_path that does not load is an error. A failed save (always while PIE runs) makes success false, with saved=false and save_error.
+//   @param name - Asset name, no folder or extension, e.g. 'AM_Attack'.
+//   @param package_path - Content folder as a long package path, e.g. '/Game/Animation/Montages' (default /Game/Animation; a trailing slash is ignored).
+//   @param slot_name - Name of the slot track the montage plays on, e.g. 'DefaultSlot' or 'UpperBody' (default DefaultSlot); the AnimBlueprint must have a Slot node with that name to play it.
+//   @param skeleton_path - Object path of the USkeleton the montage plays on, e.g. '/Game/Characters/SK_Hero_Skeleton' (default the engine's /Engine/EngineMeshes/SkeletalCube_Skeleton).
 //   @returns { name, package_path, asset_path, montage_path, skeleton_path, slot_names, slot_name, slot_count, section_count, created, already_existed, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleCreateAnimMontage(const TSharedPtr<FJsonObject>& Params)
 {
@@ -997,8 +997,8 @@ TSharedPtr<FJsonObject> HandleAddMontageNotify(const TSharedPtr<FJsonObject>& Pa
 // ---------------------------------------------------------------------------
 // get_montage_info
 // ---------------------------------------------------------------------------
-// MCP:get_montage_info - Read a UAnimMontage without changing it: skeleton_path, section, slot and notify counts with their name lists, blend_in/blend_out times, blend modes, enable_auto_blend_out, blend_out_trigger_time, sync_group and sync_slot_index. Change them with set_properties.
-//   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
+// MCP:get_montage_info - Read one UAnimMontage asset without changing it: its skeleton, the counts and names of its composite sections, slot tracks and notifies, its blend-in/out times and modes, its auto blend-out settings and its sync group. For a short summary of any animation type use get_anim_asset_info; for the montages playing on a PIE actor use get_active_montages. Change the blend and sync fields with set_properties, sections with add_montage_section / remove_montage_section, slots with add_montage_slot, notifies with add_montage_notify. A path that does not load as a UAnimMontage is an error.
+//   @param montage_path - Object path of the UAnimMontage, package form '/Game/Anims/AM_Attack' or object form '/Game/Anims/AM_Attack.AM_Attack'; list montages with get_assets_by_type (class AnimMontage).
 //   @returns { montage_path, skeleton_path, section_count, slot_count, notify_count, sections, slots, notifies, blend_in, blend_out, blend_mode_in, blend_mode_out, enable_auto_blend_out, blend_out_trigger_time, sync_group, sync_slot_index }
 TSharedPtr<FJsonObject> HandleGetMontageInfo(const TSharedPtr<FJsonObject>& Params)
 {
@@ -3166,9 +3166,9 @@ TSharedPtr<FJsonObject> HandleSetPoseAssetBasePose(const TSharedPtr<FJsonObject>
 // ---------------------------------------------------------------------------
 // remove_pose_curve
 // ---------------------------------------------------------------------------
-// MCP:remove_pose_curve - Delete the named curve from a UPoseAsset (UPoseAsset::DeleteCurves) in an undo transaction and save the asset; an absent curve is a success with removed=false, removed_count 0 and saved=false, and the asset is neither modified nor saved. Returns removed_count, removed and num_curves. A failed save makes success false, with saved=false and save_error.
-//   @param pose_asset_path - Path to the UPoseAsset.
-//   @param curve_name - Name of the curve to remove.
+// MCP:remove_pose_curve - Delete one named curve, with its value in every pose, from a UPoseAsset (UPoseAsset::DeleteCurves) in one undo step and save the asset. To delete a whole pose use remove_pose_from_pose_asset instead; for a curve on a UAnimSequence use remove_anim_curve, and to unregister a curve name from a skeleton remove_anim_curve_name. No tool adds a pose curve back, so only undo restores it. Idempotent in effect: an absent curve is a success with removed=false, removed_count 0 and saved=false, and the asset is neither modified nor saved. get_anim_asset_info reports the pose asset's curve count. A path that does not load as a UPoseAsset is an error. A failed save (always while PIE runs) makes success false, with saved=false and save_error.
+//   @param pose_asset_path - Object path of the UPoseAsset, e.g. '/Game/Anims/PA_Face' or '/Game/Anims/PA_Face.PA_Face'.
+//   @param curve_name - Exact curve name, matched as an FName (case ignored), e.g. 'Blink_L'.
 //   @returns { pose_asset_path, curve_name, removed_count, removed, num_curves, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleRemovePoseCurve(const TSharedPtr<FJsonObject>& Params)
 {
@@ -4721,11 +4721,11 @@ TSharedPtr<FJsonObject> HandleRenameAnimCurve(const TSharedPtr<FJsonObject>& Par
     return mcp_common::MakeSavedReply(Result, bSaved, TEXT("rename_anim_curve"), SaveError);
 }
 
-// MCP:get_anim_curve_data - Read one curve of a UAnimSequence without changing it: for a float curve its flags, num_keys and keys as time/value pairs; for a transform curve only flags and a summed num_keys. found=false (still a success) when the curve does not exist.
-//   @param anim_sequence_path - Full asset path to the UAnimSequence
-//   @param curve_name - Name of the curve to read
-//   @param curve_type - Curve type to target: float (default) or transform
-//   @returns { anim_sequence_path, curve_name, curve_type, found, num_keys, flags, time, value, keys }
+// MCP:get_anim_curve_data - Read one curve of a UAnimSequence's data model without changing it: for a float curve its flags, num_keys and every key as a time/value pair; for a transform curve only its flags and num_keys summed over translation, rotation and scale (no key values). A curve that does not exist is still a success with found=false and no num_keys, flags or keys. Get the curve names first from get_anim_sequence_info (it lists the float and transform curves); rekey a float curve with add_anim_float_curve, retime it with scale_anim_curve, change flags with set_anim_curve_flags. For a standalone UCurveFloat asset use evaluate_curve_at_time instead. A path that does not load as a UAnimSequence is an error.
+//   @param anim_sequence_path - Object path of the UAnimSequence, e.g. '/Game/Anims/A_Walk' or '/Game/Anims/A_Walk.A_Walk'.
+//   @param curve_name - Exact curve name as get_anim_sequence_info lists it, e.g. 'FootLock_L'.
+//   @param curve_type - "float" (default) or "transform", case ignored; any other value reads a float curve.
+//   @returns { anim_sequence_path, curve_name, curve_type, found, num_keys, flags, keys: [{ time, value }] }
 TSharedPtr<FJsonObject> HandleGetAnimCurveData(const TSharedPtr<FJsonObject>& Params)
 {
     FString AnimPath, CurveName;
@@ -4784,9 +4784,9 @@ else if (const FTransformCurve* C = Model->FindTransformCurve(CurveId))
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:reimport_anim_sequence - Reimport a UAnimSequence, or any reimportable asset (the class is not checked), from source_file_path or its first recorded source via FReimportManager, automated (no dialogs) and unsaved. A missing source is refused before the reimport, which would crash the editor on it, and a reimport the handler reports as failed is a failure too: both make success false with reimported=false, and the missing source a note.
-//   @param anim_sequence_path - Full asset path to the UAnimSequence
-//   @param source_file_path - Absolute path of the file to reimport from on disk (e.g. "D:/Art/Walk.fbx"); defaults to the first source file recorded in the asset import data.
+// MCP:reimport_anim_sequence - Reimport a UAnimSequence from a source file you name (source_file_path), or else from its first recorded source, through FReimportManager, fully automated with no dialogs. The class is not checked, so any asset a legacy reimport handler accepts works. The new content lands in memory only and is not saved (save it with save_asset), and it cannot be undone. Use reimport_asset for a plain reimport from the recorded sources, reimport_interchange_asset for an asset imported through Interchange, and get_asset_import_data to see the recorded source first. Before reimporting it checks the one source file it will use: none recorded, or the file missing on disk (the engine would crash on it), is refused with success=false, reimported=false, source_validated=false and a note, and nothing changes; a reimport the handler reports as failed is success=false too. An asset no handler accepts, or a path that does not load, is an error. Every call reimports again.
+//   @param anim_sequence_path - Object path of the UAnimSequence, e.g. '/Game/Anims/A_Walk' or '/Game/Anims/A_Walk.A_Walk'.
+//   @param source_file_path - Absolute path on disk of the file to reimport from, e.g. "D:/Art/Walk.fbx"; omit it to use the first source file recorded in the asset's import data (get_asset_import_data shows it).
 //   @returns { anim_sequence_path, source_file_path, reimported, source_validated, note? }
 //
 // FReimportManager::Reimport() crashes the editor
@@ -5303,12 +5303,12 @@ namespace
     }
 }
 
-// MCP:add_anim_composite_segment - Append an FAnimSegment referencing a real UAnimSequence to a UAnimComposite's AnimationTrack, then recompute its length. A failed save makes success false, with saved=false and save_error.
-//   @param composite_path - Object path of the UAnimComposite (e.g. "/Game/Animation/AC_Example").
-//   @param animation_path - Object path of the UAnimSequence to reference.
-//   @param start_pos - Segment start position; ignored after auto-stacking (default 0)
-//   @param play_rate - Segment play rate (default 1.0)
-//   @param loop_count - Segment loop count, minimum 1 (default 1)
+// MCP:add_anim_composite_segment - Add an FAnimSegment that plays a whole UAnimSequence to a UAnimComposite's AnimationTrack in one undo step, re-stack all segments end to end, recompute the composite length and save the asset. The segments are ordered by start_pos before the re-stack, so to append at the end pass start_pos at or past the current composite_length; the default 0 ties with the first segment and normally sorts in front of it. Every call adds another segment (not idempotent). Create the composite first with create_anim_composite, check it with get_anim_asset_info, and take a segment out by index with remove_anim_composite_segment. A composite and sequence on different skeletons, or a path that does not load, is an error and nothing changes. A failed save (always while PIE runs) makes the reply's success false with saved=false and save_error; the success field inside the data stays true, so read saved.
+//   @param composite_path - Object path of the UAnimComposite, e.g. '/Game/Animation/AC_Example' (create_anim_composite makes one).
+//   @param animation_path - Object path of the UAnimSequence to play, on the composite's skeleton, e.g. '/Game/Anims/A_Walk'; the segment covers its full length.
+//   @param start_pos - Start time in seconds used only to order the new segment among the existing ones before all are re-stacked end to end (default 0, which normally sorts it first); pass the current composite_length or more to append.
+//   @param play_rate - Playback rate of the segment, 1.0 = normal speed, 2.0 = twice as fast (default 1.0).
+//   @param loop_count - How many times the segment repeats, a whole number; values below 1 become 1 (default 1).
 //   @returns { composite_path, animation_path, num_segments, composite_length, segments, success, saved, save_error }
 TSharedPtr<FJsonObject> HandleAddAnimCompositeSegment(const TSharedPtr<FJsonObject>& Params)
 {

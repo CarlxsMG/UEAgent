@@ -275,10 +275,10 @@ TSharedPtr<FJsonObject> HandleAddSplineComponent(const TSharedPtr<FJsonObject>& 
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:set_spline_points - Replaces the spline points on a named actor's USplineComponent.  ClearSplinePoints + AddSplinePoint each (local space) + optional SetClosedLoop + UpdateSpline.
-//   @param actor_name - Display label or internal name of the target editor-world actor
-//   @param points - [[x, y, z], ...] spline points in local space; an entry that is not 3 numbers is an error and nothing is changed
-//   @param closed_loop - Optional bool; toggles closed-loop mode
+// MCP:set_spline_points - Replace every control point of the first spline component on an editor-world actor with the given local-space positions, in order, in one undo step; the level is marked dirty, not saved (save_level). The new points get the default auto-curve tangents, and closed_loop, when given, also sets whether the last point joins the first. An empty points array leaves the spline with no points. Idempotent: the same points again give the same spline. Read the result with get_spline_points (same local space); give an actor a spline first with add_spline_component; to bend a mesh along a spline use add_spline_mesh_component. An unknown actor, an actor without a spline component, or a points entry that is not 3 numbers is an error and nothing changes.
+//   @param actor_name - Display label or internal name of the target editor-world actor, e.g. "Road_Spline"
+//   @param points - [[x, y, z], ...] positions in cm in the spline component's local space (relative to the component, not the world), e.g. [[0,0,0],[500,0,0],[500,500,100]]; an entry that is not 3 numbers is an error and nothing is changed
+//   @param closed_loop - Optional bool: true joins the last point back to the first, false leaves the spline open; omitted keeps the current setting
 //   @returns { actor_name: string, component_name: string, num_points: int, closed_loop: bool, points_set: bool }
 
 TSharedPtr<FJsonObject> HandleSetSplinePoints(const TSharedPtr<FJsonObject>& Params)

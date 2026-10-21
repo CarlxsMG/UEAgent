@@ -329,12 +329,12 @@ namespace
 // AssetRegistry::AssetCreated, save. Verified by reading width/height/format back.
 // Idempotent: if the asset exists, it is deleted+rebuilt so the payload is stable.
 // ---------------------------------------------------------------------------
-// MCP:create_texture_2d_from_data - Creates a persisted UTexture2D filled with a solid color (no external file).  Allocates the editor source (FTextureSource::Init, BGRA8), fills every pixel with ``fill_color``, calls UpdateResource, registers the asset and saves it to disk. Re-running deletes and rebuilds the asset deterministically.  fill_color is an [R, G, B, A] array of 0-255 byte values (default = opaque white).
-//   @param name - Name of the texture asset to create
-//   @param package_path - Content folder; defaults to /Game/Textures
-//   @param width - Optional pixel width; clamped 1..8192; defaults to 64
-//   @param height - Optional pixel height; clamped 1..8192; defaults to 64
-//   @param fill_color - Optional [R, G, B, A] (0-255 each); defaults to opaque white
+// MCP:create_texture_2d_from_data - Create a UTexture2D asset filled with one solid color, with no source file: it allocates a BGRA8 editor source of width x height, fills every pixel with fill_color, sets sRGB with default compression, builds the resource and saves the asset to disk; no undo step. Use it for placeholder or mask textures; to bring in an image file use import_texture_file, to bake a render target create_static_texture_from_render_target, to change compression or sRGB afterwards set_texture_settings, and get_texture_info to read it back. WARNING: an asset already at package_path/name is force-deleted first, whatever its class and even if other assets reference it, so every call rebuilds the texture (not idempotent). An invalid package path is an error. A failed save (always while PIE runs) makes success false, with saved=false and save_error, the texture kept in memory.
+//   @param name - Asset name of the texture, no folder, e.g. "T_Mask_White".
+//   @param package_path - Content folder as a long package path, e.g. "/Game/Textures/Placeholders" (default /Game/Textures; one trailing slash is dropped).
+//   @param width - Width in pixels, a whole number clamped to 1..8192 (default 64).
+//   @param height - Height in pixels, a whole number clamped to 1..8192 (default 64).
+//   @param fill_color - [R, G, B, A] as 0-255 numbers, each rounded and clamped, e.g. [255, 0, 0, 255] for opaque red; missing trailing entries keep the default 255 (opaque white).
 //   @returns { texture_name: string, asset_path: string, created: bool, saved: bool, width: int, height: int, format: string, has_source: bool, fill_color: [int, int, int, int], save_error?: string }
 
 TSharedPtr<FJsonObject> HandleCreateTexture2DFromData(const TSharedPtr<FJsonObject>& Params)

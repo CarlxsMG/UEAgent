@@ -557,9 +557,9 @@ TSharedPtr<FJsonObject> HandleRemoveBusFromMix(
 // ---------------------------------------------------------------------------
 // create_sound_modulation_patch
 // ---------------------------------------------------------------------------
-// MCP:create_sound_modulation_patch - Creates a USoundModulationPatch asset at package_path/patch_name with no inputs or output, bypassed by default (bBypass true), and saves it; a patch already there is returned untouched, not re-saved. Returns patch_path, bBypass, input_count, output_parameter_path, created, already_existed, saved. Fill it with add_modulation_input_to_patch and set_modulation_patch_output_parameter.
-//   @param patch_name - Name of the modulation patch asset (e.g. "Patch_Volume")
-//   @param package_path - Target content package path where the asset is created (default /Game/MCP)
+// MCP:create_sound_modulation_patch - Create an empty sound modulation patch asset at package_path/patch_name (no inputs, no output parameter, bypassed with bBypass true), then save it; there is no undo step. A patch combines control buses into the value of one output parameter; for a single bus use create_control_bus, for a time-varying source create_modulation_generator. Idempotent: a patch already at that path is returned untouched as it stands, nothing is saved and already_existed is true. An invalid path, or an asset of another type at it, is an error and nothing changes; a failed save (for example while PIE runs) makes success false with the asset only in memory. Then add buses with add_modulation_input_to_patch, set the output with set_modulation_patch_output_parameter (a parameter from create_modulation_parameter), turn bypass off with set_modulation_patch_bypass, and read it back with get_sound_modulation_patch_info.
+//   @param patch_name - Asset name of the patch without its folder, e.g. "Patch_Volume"; appended to package_path.
+//   @param package_path - Content folder for the asset, e.g. "/Game/Audio/Mod" (default /Game/MCP); created when missing.
 //   @returns { patch_path, patch_name, bBypass, input_count, output_parameter_path, created, already_existed, saved }
 TSharedPtr<FJsonObject> HandleCreateSoundModulationPatch(
 	const TSharedPtr<FJsonObject>& Params)
@@ -888,9 +888,9 @@ TSharedPtr<FJsonObject> HandleGetSoundModulationPatchInfo(
 // ---------------------------------------------------------------------------
 // create_modulation_parameter
 // ---------------------------------------------------------------------------
-// MCP:create_modulation_parameter - Creates a USoundModulationParameter asset of the chosen concrete class at parameter_path and saves it. An existing parameter there is returned untouched with its real class (not saved). Returns parameter_path, parameter_name, parameter_class, created, already_existed, saved. Tune it with set_modulation_parameter_settings.
-//   @param parameter_path - Full asset path (e.g. /Game/MyGame/Param_Volume); the package path is the directory portion and the leaf becomes the asset name
-//   @param parameter_class - Concrete class name (case-insensitive). One of: Volume, Frequency, LPFrequency, HPFrequency, Bipolar, Additive, Scaled; the engine spellings LPFFrequency and HPFFrequency are accepted too.
+// MCP:create_modulation_parameter - Create a sound modulation parameter asset of one concrete class at parameter_path, with the engine's default settings, then save it; there is no undo step. A parameter is what a modulation patch outputs to (set_modulation_patch_output_parameter), and its class sets the unit and mixing (Volume in decibels, Frequency in hertz...). Idempotent: when a modulation parameter already exists at that path it is returned untouched with its real class, parameter_class is not checked, nothing is saved and already_existed is true. An unknown class, a path that does not split into folder and name, or an asset of another type there is an error and nothing changes; a failed save (for example while PIE runs) makes success false with the asset only in memory. Tune it with set_modulation_parameter_settings and read it with get_modulation_parameter_info.
+//   @param parameter_path - Full asset path, folder plus asset name, e.g. "/Game/Audio/Mod/Param_Volume"; the last segment becomes the asset name and a missing folder is created.
+//   @param parameter_class - Concrete class name (case-insensitive). One of: Volume, Frequency, LPFrequency, HPFrequency, Bipolar, Additive, Scaled; the engine spellings LPFFrequency and HPFFrequency are accepted too. Not checked when a parameter already exists at parameter_path.
 //   @returns { parameter_path, parameter_name, parameter_class, created, already_existed, saved }
 TSharedPtr<FJsonObject> HandleCreateModulationParameter(
 	const TSharedPtr<FJsonObject>& Params)
@@ -1021,9 +1021,9 @@ TSharedPtr<FJsonObject> HandleSetModulationParameterSettings(
 // ---------------------------------------------------------------------------
 // get_modulation_parameter_info
 // ---------------------------------------------------------------------------
-// MCP:get_modulation_parameter_info - Reads a USoundModulationParameter asset without changing it. Returns parameter_path, parameter_class (the concrete class, e.g. SoundModulationParameterVolume) and its settings value_normalized, clamp_to_normalized_range and value_unit. Change them with set_modulation_parameter_settings.
-//   @param parameter_path - Asset path to the USoundModulationParameter
-//   @returns { parameter_path, parameter_class, value_normalized, clamp_to_normalized_range, value_unit }
+// MCP:get_modulation_parameter_info - Read a sound modulation parameter asset without changing it: its concrete class (e.g. SoundModulationParameterVolume) and its settings, value_normalized (the 0-1 default), clamp_to_normalized_range (left out on Unreal Engine 5.7, which lacks it) and value_unit (the default in the parameter's own unit). Use it to check a parameter before making it a patch output with set_modulation_patch_output_parameter, or after set_modulation_parameter_settings changed it. A path that does not load as a modulation parameter is an error. Create one with create_modulation_parameter; patches and generators have their own readers: get_sound_modulation_patch_info, get_modulation_generator_info.
+//   @param parameter_path - Asset path of the modulation parameter, e.g. "/Game/Audio/Mod/Param_Volume", as create_modulation_parameter returns it (parameter_path).
+//   @returns { parameter_path, parameter_class, value_normalized, clamp_to_normalized_range?, value_unit }
 TSharedPtr<FJsonObject> HandleGetModulationParameterInfo(
 	const TSharedPtr<FJsonObject>& Params)
 {

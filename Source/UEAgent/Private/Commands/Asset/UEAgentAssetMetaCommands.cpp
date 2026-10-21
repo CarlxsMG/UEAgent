@@ -269,9 +269,9 @@ TSharedPtr<FJsonObject> HandleCreateCollection(const TSharedPtr<FJsonObject>& Pa
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:delete_collection - Destroys a Content Browser collection (idempotent; inverse of create_collection).  Uses the UE 5.7 project ICollectionContainer::DestroyCollection. If the collection is already absent a stable payload is returned (already_absent=True).          "Private", or "Shared".
-//   @param collection_name - Name of the collection to destroy.
-//   @param share_type - ECollectionShareType: "Local", "Private", or "Shared" (optional, default "Local")
+// MCP:delete_collection - Deletes a Content Browser collection of the project, looked up by name within share_type; only the collection goes, the assets it lists are not touched. The collection manager writes the change to its collection file itself, outside the undo history, so it cannot be undone. Idempotent: a name not found in that share type succeeds with already_absent true and nothing changes, so pass the share type the collection was created with (a wrong one reads as absent); get_collections lists names and share types. A collection that exists but that the manager fails to delete is an error. Inverse of create_collection; to take single assets out instead, use remove_asset_from_collection, and get_collection_assets to see the members first.
+//   @param collection_name - Name of the collection to delete, as get_collections lists it (e.g. "Props_Review").
+//   @param share_type - ECollectionShareType the collection was created with: "Local", "Private", or "Shared" (optional, default "Local"); an unrecognised value falls back to Local.
 //   @returns { collection_name: string, share_type: string, destroyed: bool, already_absent: bool, exists: bool }
 
 TSharedPtr<FJsonObject> HandleDeleteCollection(const TSharedPtr<FJsonObject>& Params)

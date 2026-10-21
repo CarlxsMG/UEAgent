@@ -317,10 +317,10 @@ TSharedPtr<FJsonObject> HandleListUsdStageLayers(const TSharedPtr<FJsonObject>& 
 // ---------------------------------------------------------------------------
 // insert_usd_sublayer
 // ---------------------------------------------------------------------------
-// MCP:insert_usd_sublayer - Add a sublayer path to the stage's root layer's composition stack (idempotent — re-running with the same path returns already_present without erroring).
-//   @param stage_name [string!] - Name the stage was registered under.
-//   @param sublayer_path [string!] - Path or USD identifier of the layer to insert (e.g. an absolute .usd path or a "//sub.usd" relative identifier).
-//   @param index [integer] - 0-based insertion position; -1 (default) appends to the back of the prepend list.
+// MCP:insert_usd_sublayer - Add a sublayer path to the root layer of a registered USD stage, so that layer's opinions compose into the stage, then save the root layer to disk (Save without force: the whole root layer, including any other unsaved edits on it). Read the stack and its indices with list_usd_stage_layers, take a sublayer out by index with remove_usd_sublayer, and to author into the new layer point set_usd_edit_target at it. The path is not checked to exist; USD complaints come back in errors. No undo step. success means the root layer was saved, so read inserted and already_present: a path already in the list changes nothing (already_present=true, nothing saved) and answers success=false, and an in-memory stage (anonymous root layer, nothing to save to) answers success=false even with inserted=true. Idempotent in effect: a repeat adds nothing. An unregistered stage_name is an error.
+//   @param stage_name [string!] - Exact name the stage was registered under by create_usd_stage or open_usd_stage (a stage only in the USD cache is not found here).
+//   @param sublayer_path [string!] - Path or USD identifier of the layer to insert, e.g. "D:/USD/props.usda" or "./props.usda" (resolved relative to the root layer); compared with the existing entries as text, case ignored.
+//   @param index [integer] - 0-based position in the root layer's sublayer list, where 0 is the strongest; -1 (default) appends as the weakest. The reply's index echoes this value, not the resulting position.
 //   @returns { stage_name: string, sublayer_path: string, index: int, inserted: bool, already_present: bool, new_count: int, saved: bool, errors: [string]? }
 
 TSharedPtr<FJsonObject> HandleInsertUsdSublayer(const TSharedPtr<FJsonObject>& Params)

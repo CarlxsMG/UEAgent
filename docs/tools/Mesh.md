@@ -71,12 +71,12 @@ Spawn a bare AActor labelled actor_label in the editor world with a new UProcedu
 
 *Read-only.*
 
-Read summary info for a procedural mesh component on a named actor, without changing it: section count, collision flags, and per section its index, vertex/triangle counts, visibility flag and collision flag.
+Read a summary of one procedural mesh component on an editor-world actor, without changing it: the section count, two collision settings (use_complex_as_simple_collision, use_async_cooking) and, per section, its index, vertex and triangle counts, whether it is visible and whether it has collision. Use it to find the section_index the section tools take, and to check that geometry landed after create_procedural_box_mesh, create_procedural_grid_mesh or set_procedural_mesh_section_vertices; for the raw positions, normals and UVs of one section use get_procedural_mesh_section_data. An actor with no such label, or one with no procedural mesh component at component_index, is an error. Editor world only, not PIE.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_label` | string | yes | Editor label of the actor carrying the PMC |
-| `component_index` | number | no | Optional 0-based PMC index on the actor; defaults to 0 |
+| `actor_label` | string | yes | Editor label of the actor carrying the component (whole label, case-insensitive; the object name is not matched), as create_procedural_mesh_component set it, e.g. "ProcMeshActor". |
+| `component_index` | number | no | Optional 0-based index among the actor's procedural mesh components, in component order (default 0); most actors have only one. |
 
 **Returns:** `{ actor_label: string, num_sections: int, use_complex_as_simple_collision: bool, use_async_cooking: bool, sections: [{ index: int, vertex_count: int, triangle_count: int, visible: bool, collision_enabled: bool }] }`
 

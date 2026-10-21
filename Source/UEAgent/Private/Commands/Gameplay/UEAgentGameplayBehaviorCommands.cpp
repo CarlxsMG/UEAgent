@@ -166,10 +166,10 @@ namespace
 // ---------------------------------------------------------------------------
 // create_behavior_config
 // ---------------------------------------------------------------------------
-// MCP:create_behavior_config - Create a UGameplayBehaviorConfig asset at package_path/config_name, or load the one already there, set its protected BehaviorClass by reflection when behavior_class resolves, then save it. An unresolved behavior_class is ignored without error, so check behavior_class in the reply; created tells new from existing.
-//   @param config_name - Asset name of the config, e.g. "BC_Patrol"
-//   @param package_path - Destination /Game folder (default /Game/MCP).
-//   @param behavior_class - Full path of a loaded UGameplayBehavior subclass, e.g. "/Script/GameplayBehaviorsModule.GameplayBehavior_AnimationBased"; a short name never resolves, and a miss is ignored
+// MCP:create_behavior_config - Get or create a UGameplayBehaviorConfig data asset at package_path/config_name: create it, or load the one already there, set its protected BehaviorClass by reflection when behavior_class resolves (on an existing config this overwrites its class), then save it in every case; no undo step. Use it as the entry point before trigger_behavior_on_actor; to change only the class of a config use set_behavior_class (which errors on a bad class instead of ignoring it), to read one get_behavior_config_info, to find them list_behavior_configs, and to delete one remove_behavior_config. An unresolved behavior_class is ignored without error, so check behavior_class in the reply (empty when unset); created tells new from existing. Idempotent: the same call again leaves the same asset. An asset of another class at that path is an error. A failed save (always while PIE runs) makes success false with saved=false.
+//   @param config_name - Asset name of the config, no folder, e.g. "BC_Patrol".
+//   @param package_path - Destination content folder as a long package path, e.g. "/Game/AI/Behaviors" (default /Game/MCP).
+//   @param behavior_class - Full path of a loaded UGameplayBehavior subclass, e.g. "/Script/GameplayBehaviorsModule.GameplayBehavior_AnimationBased", or "/Game/AI/GB_Sit.GB_Sit_C" for a Blueprint already loaded; a short name never resolves, and a miss or a non-behavior class is ignored. Omit it to leave the class as it is.
 //   @returns { config_path: string, config_name: string, behavior_class: string, created: bool, saved: bool }
 TSharedPtr<FJsonObject> HandleCreateBehaviorConfig(
     const TSharedPtr<FJsonObject>& Params)
@@ -219,9 +219,9 @@ TSharedPtr<FJsonObject> HandleCreateBehaviorConfig(
 // ---------------------------------------------------------------------------
 // set_behavior_class
 // ---------------------------------------------------------------------------
-// MCP:set_behavior_class - Set the BehaviorClass of a UGameplayBehaviorConfig (via reflection; the field is protected in 5.7).
-//   @param config_path - Content path of the UGameplayBehaviorConfig.
-//   @param behavior_class - UGameplayBehavior subclass name (with or without "U" prefix).
+// MCP:set_behavior_class - Set which UGameplayBehavior class an existing UGameplayBehaviorConfig asset runs (its protected BehaviorClass, written by reflection), then save the asset; no undo step. Use it to repoint a config; create_behavior_config makes a new one (and ignores a bad class instead of failing), get_behavior_config_info reads the class back, list_behavior_configs finds configs. A config that does not load, a class that is not found or is not a UGameplayBehavior subclass is an error and nothing changes. set is true whenever the class resolved, without a read-back, so confirm with get_behavior_config_info. Idempotent: the same class again writes and saves again. A failed save (always while PIE runs) makes success false with saved=false.
+//   @param config_path - UGameplayBehaviorConfig asset as an object or package path, e.g. "/Game/MCP/BC_Patrol", as list_behavior_configs returns it.
+//   @param behavior_class - Full path of a loaded UGameplayBehavior subclass, e.g. "/Script/GameplayBehaviorsModule.GameplayBehavior_AnimationBased", or "/Game/AI/GB_Sit.GB_Sit_C" for a Blueprint already loaded. A bare class name is looked up as given and then with a "U" prefix, but neither form finds a class, so pass the path.
 //   @returns { config_path: string, behavior_class: string, set: bool, saved: bool }
 TSharedPtr<FJsonObject> HandleSetBehaviorClass(
     const TSharedPtr<FJsonObject>& Params)

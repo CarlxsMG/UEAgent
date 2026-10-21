@@ -27,15 +27,15 @@ Append a Box, Sphere, Cylinder or Cone to the live dynamic mesh of a DynamicMesh
 
 *Additive.*
 
-Merge another UDynamicMesh into the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_MeshBasicEditFunctions::AppendMesh. One undo step puts the target mesh back as it was; the source mesh is not changed.
+Appends a copy of another DynamicMeshActor's live dynamic mesh to the live dynamic mesh of a target DynamicMeshActor in the editor world, keeping the geometry already there: the source vertices, shifted by append_transform, land in the target's mesh-local space, and neither actor's world transform is applied. One undo step puts the target back as it was; the source is not changed, the level is marked dirty and nothing is saved to an asset. Each call adds another copy. An empty source is a success with appended false and a note; an unknown actor, or one without a dynamic mesh, is an error. For a primitive shape use add_mesh_primitive, for a Static Mesh asset copy_static_mesh_to_dynamic_mesh, for a boolean union apply_mesh_boolean_actor_to_actor; keep the result with copy_dynamic_mesh_to_static_mesh.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Label or name of the target DynamicMeshActor (the receiver) |
-| `source_actor_name` | string | yes | Label or name of the DynamicMeshActor whose dynamic mesh will be merged in |
-| `append_transform` | array | no | Optional [x,y,z] world-space transform applied to the source mesh before merging (default identity) |
+| `actor_name` | string | yes | Label or object name (case-insensitive) of the DynamicMeshActor that receives the geometry, in the editor world. |
+| `source_actor_name` | string | yes | Label or object name (case-insensitive) of the DynamicMeshActor whose dynamic mesh is copied in; it is read, not changed. |
+| `append_transform` | array | no | Optional [x, y, z] translation in cm added to every source vertex before the copy (default [0, 0, 0]); translation only, no rotation or scale. |
 
-**Returns:** `{ actor_name, source_actor_name, triangles_before, triangles_after, triangles_added, vertex_count_after, appended: bool } -- appended is false when the source mesh has no triangles`
+**Returns:** `{ actor_name, source_actor_name, triangles_before, triangles_after, triangles_added, vertex_count_after, appended: bool, note?: string } -- appended is false, with a note, when the source mesh has no triangles`
 
 ## `apply_adaptive_remesh`
 
@@ -318,13 +318,13 @@ Measure one LOD of a UStaticMesh asset on a transient dynamic-mesh copy with the
 
 *Read-only.*
 
-Test whether a 3D point is inside the live dynamic mesh of a DynamicMeshActor using Fast Winding Number via UGeometryScriptLibrary_MeshSpatial::IsPointInsideMesh. Every call builds a fresh BVH and fast winding tree from the mesh as it is now (the plugin keeps none), so the answer always reflects the latest mesh edits. The mesh is not changed.
+Tests whether a point lies inside the live dynamic mesh of a DynamicMeshActor in the editor world, with the engine's fast winding number (IsPointInsideMesh), which also gives a sensible answer for meshes with small holes. Every call builds a fresh BVH and winding tree from the mesh as it is now, so the answer reflects the latest edits; nothing is changed or saved. An unknown actor or a missing query_point is an error. Use it for inside/outside tests; for the closest surface point use find_nearest_point_on_mesh, for a ray hit find_nearest_ray_intersection_with_mesh; build_mesh_bvh is never needed first. The point is in mesh-local space: subtract the actor's location (and undo its rotation and scale) to test a world position.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Label or name of the target DynamicMeshActor. |
-| `query_point` | array | yes | [x, y, z] point in the mesh's local space. |
-| `winding_threshold` | number | no | Optional float; default 0.5 (standard parity test). Higher values shrink the "inside" region. |
+| `actor_name` | string | yes | Label or object name (case-insensitive) of the DynamicMeshActor in the editor world. |
+| `query_point` | array | yes | [x, y, z] point in the mesh's local space, in cm (e.g. [0, 0, 50]). |
+| `winding_threshold` | number | no | Optional float, default 0.5: the winding number above which the point counts as inside; higher values shrink the inside region, lower ones grow it. |
 | `max_distance` | number | no | Optional float; it has no effect on this query, whose winding-number test uses no search distance. |
 | `allow_unsafe_modified` | boolean | no | Optional; maps to bAllowUnsafeModifiedQueries (default false). It has no effect: the BVH is built fresh on every call, so it always matches the mesh. |
 
@@ -392,11 +392,11 @@ Destroy a DynamicMeshActor in the editor world, found by label or object name, i
 
 *Destructive.*
 
-Remove the vertices no triangle references from a DynamicMeshActor's live dynamic mesh in the editor world and refresh its render data. Remaining vertex IDs are not renumbered and a clean mesh is a no-op that adds no undo step; otherwise one undo step restores the mesh. Returns vertex_count_before, vertex_count, vertices_removed and removed.
+Deletes the orphan vertices (those no triangle uses) of a DynamicMeshActor's live dynamic mesh in the editor world and refreshes its render data; triangles and their shape are untouched. Remaining vertex IDs are not renumbered: run compact_mesh afterwards for dense IDs. A mesh without orphan vertices is a success with removed false and adds no undo step; otherwise one undo step restores the mesh. The level is marked dirty, nothing is saved to an asset; an unknown actor or one without a dynamic mesh is an error. Typical after delete_mesh_triangles or apply_mesh_boolean; open seams are closed by weld_mesh_edges, overlaps by repair_mesh_self_intersections, and get_dynamic_mesh_info reads the counts.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Label or object name (case-insensitive) of the target DynamicMeshActor in the editor world. |
+| `actor_name` | string | yes | Label or object name (case-insensitive) of the target DynamicMeshActor in the editor world; create one with spawn_actor. |
 
 **Returns:** `{ actor_name: string, triangle_count: int, vertex_count: int, vertex_count_before: int, vertices_removed: int, removed: bool }`
 
@@ -494,13 +494,13 @@ Resolve a region of a DynamicMeshActor's live dynamic mesh into a triangle selec
 
 *Destructive, idempotent.*
 
-Assign a UMaterialInterface asset to a slot on a DynamicMeshActor's UDynamicMeshComponent, in an editor transaction. applied is the slot read back after the assignment; the call fails when it does not hold the material.
+Sets the material of one slot on a DynamicMeshActor's DynamicMeshComponent in the editor world, in one undo step, and refreshes its render state; the level is marked dirty, not saved. applied is the slot read back; the call fails when the slot does not hold the material. Setting the material a slot already has succeeds again (applied true). A missing actor, component or material, or a slot_index outside the component's slots, is an error and nothing changes. Which triangles use a slot is their MaterialID: paint it with set_mesh_material_id and read it with get_mesh_material_ids. For static mesh actors use set_actor_material; get_available_materials lists material paths.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Label or name of the target DynamicMeshActor (required). |
-| `material_path` | string | yes | Asset path of the UMaterialInterface (e.g. /Engine/EngineMaterials/DefaultMaterial) (required). |
-| `slot_index` | number | no | Material slot to assign. Default 0 (the dynamic mesh only uses slot 0). |
+| `actor_name` | string | yes | Label or object name (case-insensitive) of the DynamicMeshActor in the editor world (required). |
+| `material_path` | string | yes | Object path of a material or material instance (e.g. "/Engine/EngineMaterials/DefaultMaterial.DefaultMaterial"; a path without the .Name suffix also loads), as get_available_materials returns it (required). |
+| `slot_index` | number | no | 0-based material slot, less than the component's slot count (slot 0 is always accepted); default 0. |
 
 **Returns:** `{ actor_name: string, material_path: string, material_name: string, slot_index: int, applied: bool, note?: string }`
 
@@ -608,12 +608,12 @@ Set how many UV channels the live dynamic mesh of a DynamicMeshActor in the edit
 
 *Destructive.*
 
-QEM-simplify a DynamicMeshActor's dynamic mesh to a target triangle count. One undo step restores the mesh; a call that changes nothing adds no undo step.
+Simplifies the live dynamic mesh of a DynamicMeshActor in the editor world down toward target_triangle_count with attribute-aware QEM edge collapse, the shape kept as close as the count allows; the engine stops early when no further collapse is allowed, so triangle_count_after can stay above the target. A target at or above the current count, or an empty mesh, changes nothing (simplified false) and adds no undo step; otherwise one undo step restores the mesh. The level is marked dirty, nothing is saved to an asset. An unknown actor or a target of 0 or less is an error. For evenly sized triangles use apply_uniform_remesh, for density driven by a weight map apply_adaptive_remesh; read counts with get_dynamic_mesh_info and keep the result with copy_dynamic_mesh_to_static_mesh.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Label or name of the target DynamicMeshActor |
-| `target_triangle_count` | number | yes | Target triangle count to simplify down to (must be > 0) |
+| `actor_name` | string | yes | Label or object name of the DynamicMeshActor in the editor world (case-insensitive); create one with spawn_actor. |
+| `target_triangle_count` | number | yes | Triangle count to simplify down to, greater than 0 (e.g. half of the triangle_count get_dynamic_mesh_info reports); at or above the current count nothing changes. |
 
 **Returns:** `{ actor_name: string, target_triangle_count: int, triangle_count_before: int, triangle_count_after: int, vertex_count: int, simplified: bool }`
 

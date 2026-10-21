@@ -1968,11 +1968,11 @@ TSharedPtr<FJsonObject> HandleBakeSkeletalMeshLod(const TSharedPtr<FJsonObject>&
 // ---------------------------------------------------------------------------
 // rename_skeletal_mesh_socket
 // ---------------------------------------------------------------------------
-// MCP:rename_skeletal_mesh_socket - Rename a socket on a skeletal mesh (and its skeleton twin).
-//   @param skeletal_mesh_path - Content path to the skeletal mesh asset
-//   @param old_name - Current name of the socket
-//   @param new_name - New name for the socket
-//   @returns { old_name: string, new_name: string, skeletal_mesh_path: string, renamed: bool, already_renamed: bool, socket_count: int }
+// MCP:rename_skeletal_mesh_socket - Renames a socket of a skeletal mesh asset; a socket of the same name on the mesh's skeleton is renamed too. One undo step, then the mesh package is saved, and a failed save is an error (the rename stays in memory). The skeleton is only changed in memory and left unsaved (save_asset writes it), so a socket that exists only on the skeleton is renamed there but not written to disk. Refused with nothing changed when new_name equals old_name, a socket called new_name already exists on the mesh or its skeleton, or old_name is not found, so a repeat call fails because old_name is gone. Add a socket with add_skeletal_mesh_socket, re-parent one with set_skeletal_mesh_socket_parent, delete one with remove_skeletal_mesh_socket; Skeleton assets: add_skeleton_socket and remove_skeleton_socket; static meshes: rename_static_mesh_socket.
+//   @param skeletal_mesh_path - Package or object path of the skeletal mesh asset (e.g. "/Game/Characters/SK_Hero").
+//   @param old_name - Current socket name, matched case-insensitively (e.g. "hand_r_socket").
+//   @param new_name - New socket name; must differ from old_name and be free on the mesh and its skeleton (a change of letter case only counts as taken).
+//   @returns { old_name: string, new_name: string, skeletal_mesh_path: string, renamed: bool, already_renamed: bool, socket_count: int } -- already_renamed is always false (a repeat call is an error instead); socket_count adds the mesh's sockets and its skeleton's
 
 TSharedPtr<FJsonObject> HandleRenameSkeletalMeshSocket(
 	const TSharedPtr<FJsonObject>& Params)
@@ -2030,9 +2030,9 @@ TSharedPtr<FJsonObject> HandleRenameSkeletalMeshSocket(
 // ---------------------------------------------------------------------------
 // remove_skeletal_mesh_socket
 // ---------------------------------------------------------------------------
-// MCP:remove_skeletal_mesh_socket - Remove a socket from a skeletal mesh (and its skeleton twin). Idempotent: re-running with an absent socket returns already_removed=true without mutating the asset.
-//   @param skeletal_mesh_path - Content path to the skeletal mesh asset
-//   @param socket_name - Name of the socket to remove
+// MCP:remove_skeletal_mesh_socket - Deletes a socket from a skeletal mesh asset, together with the same-named socket on its skeleton and the preview assets attached to that socket name. One undo step, then the mesh package is saved, and a failed save is an error. The skeleton is only changed in memory and left unsaved (save_asset writes it), so a socket that exists only on the skeleton is deleted there but not on disk. Idempotent: a name neither the mesh nor its skeleton has returns already_removed true, with nothing changed or saved. A socket that should go from a Skeleton asset alone is better deleted with remove_skeleton_socket, which saves it; static meshes use remove_static_mesh_socket. Re-add with add_skeletal_mesh_socket; get_skeletal_mesh_info reports the socket count.
+//   @param skeletal_mesh_path - Package or object path of the skeletal mesh asset (e.g. "/Game/Characters/SK_Hero").
+//   @param socket_name - Name of the socket to delete, matched case-insensitively (e.g. "hand_r_socket").
 //   @returns { socket_name: string, skeletal_mesh_path: string, removed: bool, already_removed: bool, socket_count: int }
 
 TSharedPtr<FJsonObject> HandleRemoveSkeletalMeshSocket(

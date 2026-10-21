@@ -849,10 +849,10 @@ TSharedPtr<FJsonObject> HandleGetAutomationTestResults(const TSharedPtr<FJsonObj
 //
 // Both are Editor-only (FunctionalTestingEditor is an editor module).
 
-// MCP:create_functional_test - Create a Blueprint subclass of AFunctionalTest (the canonical UE pattern for a multiplayer-friendly, Blueprint-scriptable test actor) and save it.
-//   @param asset_name - Name for the new Functional Test BP asset.
-//   @param package_path - Target content folder; defaults to /Game/MCP.
-//   @param parent_class - Optional AFunctionalTest-derivative parent (default "FunctionalTest").
+// MCP:create_functional_test - Create a Blueprint subclass of AFunctionalTest (an actor placed in a test map that runs scripted checks and reports pass or fail to the automation framework) at package_path/asset_name, then save it; there is no undo step. Use it to author a level-based gameplay test; for an ordinary actor Blueprint use create_blueprint, and to run registered tests use run_automation_test (list them with list_automation_tests). Idempotent: when a Blueprint already exists at that path it is returned as it is, with already_existed true, and saved again; its parent is not checked and parent_class echoes the requested one. A parent that is not found or is not a Functional Test, or an asset of another type at the path, is an error and nothing changes. A failed save makes success false, with saved false and the Blueprint only in memory. Refused while Play-in-Editor runs unless force=true. Then script it with add_blueprint_function and add_graph_node, and place it in a map with spawn_actor.
+//   @param asset_name - Asset name of the new Blueprint without folder, e.g. "BP_FT_PlayerHealth".
+//   @param package_path - Content folder for the asset, e.g. "/Game/Tests" (default /Game/MCP).
+//   @param parent_class - Optional parent: a class deriving from AFunctionalTest, by name without prefix (e.g. "FunctionalTest", the default) or by /Script/ path; a Blueprint parent must be loaded and named by its generated class (e.g. "BP_FT_Base_C").
 //   @returns { asset_name, asset_path, package_class, parent_class, already_existed, saved }
 TSharedPtr<FJsonObject> HandleCreateFunctionalTest(
     const TSharedPtr<FJsonObject>& Params)
@@ -932,10 +932,10 @@ TSharedPtr<FJsonObject> HandleCreateFunctionalTest(
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("create_functional_test"), SaveErr);
 }
 
-// MCP:run_functional_test_in_pie - Start a Play-in-Editor session that runs the named AFunctionalTest BP and return the test verdict. Requires the named BP to exist; it will be auto-added to the current editor world's "PrepareForPIE" list so PIE picks it up. Honest-gated: returns success=false (not an error) if PIE fails to start -- the harness detects a transport drop separately.
-//   @param test_asset_path - Path to the AFunctionalTest BP asset (e.g. "/Game/Tests/BP_FT_PlayerHealth").
-//   @param auto_stop_pie - Optional bool (default true). After the test completes (pass/fail), stop PIE and return the verdict.
-//   @returns { test_asset_path, pie_started, verdict: "pass"|"fail"|"not_run", pie_stopped, already_in_pie }
+// MCP:run_functional_test_in_pie - Place one instance of a Functional Test Blueprint class in the editor level (unless one is already there), then ask the editor to start a Simulate-in-Editor session and, with auto_stop_pie (default), to end it again. It does not wait for the test or read its result: verdict is "pass" whenever a session is running right after the request and "not_run" otherwise, so it is no test verdict -- read the outcome in the output log (get_output_log_lines), or run a registered test with run_automation_test, whose verdict is real. The start request is deferred (and with no level viewport, headless, nothing starts), so on a first call pie_started is usually false and the session starts after the reply without being stopped: end it with stop_play_in_editor. With a session already running it answers pass and, with auto_stop_pie, ends that session. The placed actor stays in the level, unsaved and with no undo step. Create the test first with create_functional_test; a class that is not found, or is not a Functional Test, is an error.
+//   @param test_asset_path - Functional Test Blueprint, as an asset path ("/Game/Tests/BP_FT_PlayerHealth"), object path or generated-class path ("/Game/Tests/BP_FT_PlayerHealth.BP_FT_PlayerHealth_C"); when none loads, the first loaded Functional Test class whose name contains the last path segment is used.
+//   @param auto_stop_pie - Optional bool (default true): request the end of the session right after it is seen running, including a session that was already running before the call.
+//   @returns { test_asset_path, pie_started, verdict: "pass"|"not_run", pie_stopped?, already_in_pie?, spawned?, already_in_world?, note? }
 TSharedPtr<FJsonObject> HandleRunFunctionalTestInPie(
     const TSharedPtr<FJsonObject>& Params)
 {

@@ -722,7 +722,7 @@ TSharedPtr<FJsonObject> HandleSetDataLayerParent(const TSharedPtr<FJsonObject>& 
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:get_data_layer_instances - Lists the editor world's data layer instances.  REAL read via UDataLayerManager::ForEachDataLayerInstance. Returns an empty list on a non-WP (default) map, which is the correct result.
+// MCP:get_data_layer_instances - Lists the data layer instances of the level open in the editor (the editor world, not PIE): each with its object name, short and full name, type (Editor or Runtime), runtime flag and the Data Layer asset it instances. Read-only: loads and changes nothing. A map without World Partition succeeds with an empty list and is_world_partition_enabled false, which is the expected answer, not an error. asset_path is the data_layer_asset_path that assign_actor_to_data_layer_instance, set_data_layer_type, set_data_layer_initial_runtime_state and remove_data_layer_instance take. To list the Data Layer assets in the content folders, instanced or not, use get_data_layer_assets; to instance one, create_data_layer_instance; for the map's overall World Partition state, get_world_partition_info.
 //   @returns { world_name: string, is_world_partition_enabled: bool, data_layer_instances: [{instance_name, short_name, full_name, data_layer_type, is_runtime, asset_path}], count: int, note: string }
 
 TSharedPtr<FJsonObject> HandleGetDataLayerInstances(const TSharedPtr<FJsonObject>& Params)
@@ -1090,9 +1090,9 @@ TSharedPtr<FJsonObject> HandleUnloadWorldPartitionRegion(const TSharedPtr<FJsonO
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:set_actor_spatially_loaded - Toggles an editor-world actor's World Partition spatial-loading flag (AActor::SetIsSpatiallyLoaded).  Guarded by AActor::CanChangeIsSpatiallyLoadedFlag() because the setter check()s that precondition (same baked guard as spawn_box_volume) -- so an actor that forbids the change never crashes the editor. Wrapped in FScopedTransaction + Actor->Modify() so the flag change marks the actor's (OFPA) package dirty and survives save_level. applied=false with can_change=false is the honest result for an actor that forbids the change (e.g. a non-partitioned / always-loaded actor); nothing is mutated in that case.
-//   @param actor_name - Label or name of the actor in the editor world.
-//   @param is_spatially_loaded - bool desired spatial-loading flag.
+// MCP:set_actor_spatially_loaded - Sets whether an actor of the editor world is spatially loaded by World Partition: true streams it in and out with the grid cell it sits in, false keeps it always loaded. One undo step; the actor's package (its external actor file on a World Partition map) is marked dirty, not saved: persist with save_level. A value the actor already has succeeds with changed false. Actors the engine pins as always loaded (Info actors such as World Settings, directional lights, unbound post-process volumes) cannot change: the call still succeeds with applied false, can_change false and nothing changed. An unknown actor is an error. On a map without World Partition the flag is stored but has no effect. Read the flags of all actors with list_world_partition_actors (is_spatially_loaded); assign data layers with assign_actor_to_data_layer_instance, and bring unloaded actors into the editor with load_world_partition_region.
+//   @param actor_name - Label or object name of the actor in the editor world (case-insensitive), e.g. "SM_Rock_12"; list_world_partition_actors gives labels even for unloaded actors, but the actor must be loaded.
+//   @param is_spatially_loaded - Required bool: true = streamed with its grid cell, false = always loaded.
 //   @returns { actor_name: string, actor_path: string, requested: bool, is_spatially_loaded: bool, applied: bool, can_change: bool, changed: bool, note: string }
 
 TSharedPtr<FJsonObject> HandleSetActorSpatiallyLoaded(const TSharedPtr<FJsonObject>& Params)

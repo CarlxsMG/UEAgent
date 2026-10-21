@@ -845,10 +845,10 @@ TSharedPtr<FJsonObject> HandleAddChooserRow(const TSharedPtr<FJsonObject>& Param
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("add_chooser_row"), SaveError);
 }
 
-// MCP:set_chooser_row_outcome - Set the FAssetChooser outcome (UObject reference) for a specific row in a UChooserTable, as one undo step, then compile and save the table; success is false, with save_error, when the save fails. A row already bound to that asset is left as it is (already_existed true, saved false).
-//   @param table_path - Long package path of an existing UChooserTable.
-//   @param row_index - 0-based row index to assign the outcome to (must be within the OutputObject column's RowValues range).
-//   @param asset_path - Long package path of the UObject to bind as the row's result via FAssetChooser (e.g. "/Game/MyAsset").
+// MCP:set_chooser_row_outcome - Sets the object a Chooser Table row outputs: writes an FAssetChooser holding asset_path into that row's cell of the table's FIRST OutputObject column, in one undo step, then compiles and saves the table; success is false, with save_error, when the save fails. Idempotent: a row already holding that asset is left as it is (already_existed true, saved false). Refused with nothing changed when the table has no OutputObject column (add one with add_chooser_column, column_type OutputObject), row_index is out of range, or the asset does not load. The row's filter cells and its primary result entry are not touched. For a cell of another column, or of a second OutputObject column, use set_chooser_cell; read the row back with get_chooser_row_values; add rows with add_chooser_row.
+//   @param table_path - Long package path of an existing UChooserTable (e.g. "/Game/Choosers/CT_Locomotion"), as list_chooser_tables lists it.
+//   @param row_index - 0-based row index, below the row count get_chooser_table_info reports (checked against the OutputObject column's rows).
+//   @param asset_path - Long package path (e.g. "/Game/Anims/AS_Run") or object path of the asset the row outputs; it must load, or the call is refused.
 //   @returns { table_path: string, row_index: int, asset_path: string, already_existed: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleSetChooserRowOutcome(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1102,8 +1102,8 @@ TSharedPtr<FJsonObject> HandleRemoveChooserRow(const TSharedPtr<FJsonObject>& Pa
 	return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("remove_chooser_row"), SaveError);
 }
 
-// MCP:list_chooser_tables - List every UChooserTable asset under a package path via the AssetRegistry.
-//   @param package_path - Optional path filter (default "/Game"). Pass "" to scan all.
+// MCP:list_chooser_tables - Lists the Chooser Table assets under a content folder and all its sub-folders, found through the Asset Registry, each with its name, object path, class and row and column counts. Each match is loaded to count its rows and columns; nothing is changed or saved. A folder without Chooser Tables returns total 0, not an error, and only assets of exactly the UChooserTable class are listed. Use it to find the table_path the other chooser tools take; then get_chooser_table_info for one table's columns and result type, evaluate_chooser_table to run one, create_chooser_table to make a new one.
+//   @param package_path - Optional content folder to scan, sub-folders included (default "/Game"; an empty string also means /Game), e.g. "/Game/Animation/Choosers"; plugin content lives under its mount point, such as "/MyPlugin".
 //   @returns { package_path, total, tables:[{ asset_name, asset_path, asset_class, row_count, column_count }] }
 
 TSharedPtr<FJsonObject> HandleListChooserTables(const TSharedPtr<FJsonObject>& Params)

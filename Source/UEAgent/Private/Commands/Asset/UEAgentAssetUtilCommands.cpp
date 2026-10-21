@@ -106,10 +106,10 @@ namespace
 // -------------------------------------------------------------------------- //
 // get_asset_dependencies_recursive
 // -------------------------------------------------------------------------- //
-// MCP:get_asset_dependencies_recursive - Recursively walk an asset's package dependencies via the Asset Registry.  Breadth-first, deduplicated, capped at max_depth (default 3). Each returned dependency records the depth at which it was first reached (1 == direct).
-//   @param asset_path - Object path or package path of the root asset.
-//   @param max_depth - Maximum dependency depth to traverse (1..32, default 3).
-//   @param dependency_type - Optional "hard"|"soft"|"all" (case-insensitive, default "all"). Filters every depth level of the walk via the AssetRegistry hard/soft FDependencyQuery split; "all" leaves the walk unfiltered.
+// MCP:get_asset_dependencies_recursive - Walk an asset's package dependencies through the Asset Registry, breadth-first and deduplicated, down to max_depth levels, without loading or changing anything: every package it needs directly (depth 1) or through others, each listed once with the depth where it was first reached, /Script/ packages included. Use it for what an asset drags in with it (migration, cooking, memory); for direct dependencies only, with class and loaded state, use get_asset_dependencies; for who uses an asset get_asset_referencers; for the chain between two assets get_reference_path; for loops check_asset_circular_dependency. An asset the registry does not know gives count 0 rather than an error; a path that is not a valid long package name is an error. Deep walks on a large project return thousands of packages, so start with a low max_depth.
+//   @param asset_path - Root asset, as a package path ("/Game/Characters/BP_Hero") or an object path ("/Game/Characters/BP_Hero.BP_Hero").
+//   @param max_depth - Levels to walk, 1 = direct dependencies only (1..32, default 3; a value outside the range is clamped).
+//   @param dependency_type - Optional "hard"|"soft"|"all" (case-insensitive, default "all"): hard keeps only references loaded with the asset, soft only soft-object references, at every level; any other value counts as "all".
 //   @returns { asset_path: string, package_name: string, max_depth: int, dependency_type: string, dependencies: [{path, depth}], count: int }
 
 TSharedPtr<FJsonObject> HandleGetAssetDependenciesRecursive(const TSharedPtr<FJsonObject>& Params)
@@ -267,11 +267,11 @@ TSharedPtr<FJsonObject> HandleGenerateAssetThumbnail(const TSharedPtr<FJsonObjec
 // -------------------------------------------------------------------------- //
 // evaluate_curve_at_time
 // -------------------------------------------------------------------------- //
-// MCP:evaluate_curve_at_time - Evaluate a curve asset at a given time.  Loads a UCurveFloat / UCurveVector / UCurveLinearColor and evaluates it at the requested time. For multi-channel curves (Vector=3, LinearColor=4) the optional channel selects which component the scalar 'value' field reports; the full component array is always returned in 'values'.
-//   @param curve_path - Object path or package path of the curve asset.
-//   @param time - The time (X) to evaluate at.
-//   @param channel - Optional channel index for multi-channel curves (Vector/LinearColor) to populate 'value'.
-//   @returns { curve_path: string, curve_class: string, time: float, curve_type: string, num_channels: int, channel: int, value: float, values: [float], vector: {x,y,z}, color: {r,g,b,a} }
+// MCP:evaluate_curve_at_time - Sample a curve asset (UCurveFloat, UCurveVector or UCurveLinearColor) at one time without changing it: values holds every channel (1 for a float curve, 3 for a vector, 4 for a color as r,g,b,a), value the channel picks, and vector {x,y,z} or color {r,g,b,a} come with the multi-channel types. A time before the first key or after the last follows the curve's extrapolation. Use it to check what a curve yields at gameplay inputs after editing it; to see the authored keys use get_curve_keys and to add one add_curve_key; a curve table row: get_curve_table_info; an animation curve: get_anim_curve_data. A path that does not load as a curve, or a curve of another class, is an error.
+//   @param curve_path - Asset path of the curve, as a package path ("/Game/Curves/C_Damage") or an object path ("/Game/Curves/C_Damage.C_Damage").
+//   @param time - Time to sample at, on the curve's X axis in its own units, e.g. 0.5; any float, outside the keyed range too.
+//   @param channel - Optional 0-based channel whose value fills the scalar value: 0-2 = x,y,z on a vector curve, 0-3 = r,g,b,a on a color curve (default 0; out of range falls back to 0, and channel reports the one used); ignored on a float curve.
+//   @returns { curve_path: string, curve_class: string, time: float, curve_type: string, num_channels: int, channel: int, value: float, values: [float], vector?: {x,y,z}, color?: {r,g,b,a} }
 
 TSharedPtr<FJsonObject> HandleEvaluateCurveAtTime(const TSharedPtr<FJsonObject>& Params)
 {

@@ -140,13 +140,13 @@ Create a Blueprint asset parented to UCameraShakeBase, compile and save it.  UCa
 
 *Read-only.*
 
-Reports a UCameraAsset's director and, for a SingleCameraDirector, the rig it runs. Read-only.
+Reports which camera director a Gameplay Cameras camera asset (UCameraAsset) uses and, for a SingleCameraDirector (the one-rig director), the camera rig asset it runs. Read-only: loads the asset, changes and saves nothing; a path that does not load a UCameraAsset is an error. An asset without a director gives has_director false and director_class "None"; any director other than SingleCameraDirector gives an empty camera_rig_path, as does one whose rig is unset. To give the asset a one-rig director use set_camera_asset_director; to look inside the rig, get_camera_rig_nodes; to create an asset, create_camera_asset; to use it on an actor, add_gameplay_camera_component.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `camera_asset_path` | string | yes | /Game/... path to the UCameraAsset (required) |
+| `camera_asset_path` | string | yes | Package or object path of the UCameraAsset (required), e.g. "/Game/Cameras/CA_ThirdPerson", as create_camera_asset returns it. |
 
-**Returns:** `{ camera_asset_path, has_director, director_class, camera_rig_path }`
+**Returns:** `{ camera_asset_path, has_director, director_class, camera_rig_path } -- camera_asset_path is the resolved object path; camera_rig_path is empty unless a SingleCameraDirector has a rig`
 
 ## `get_camera_post_process`
 

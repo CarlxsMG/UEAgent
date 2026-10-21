@@ -210,11 +210,11 @@ TSharedPtr<FJsonObject> HandleCreateCurveTable(const TSharedPtr<FJsonObject>& Pa
 // --------------------------------------------------------------------------- //
 // add_curve_table_row
 // --------------------------------------------------------------------------- //
-// MCP:add_curve_table_row - Add (or replace) a named FRichCurve row in a UCurveTable, optionally seeding keys.
-//   @param curve_table_path - Full asset path to the UCurveTable.
-//   @param row_name - Name of the row (rich curve) to add.
-//   @param keys - Optional [[time, value], ...] array of seed keys
-//   @returns { curve_table_path: string, row_name: string, row_added: bool, keys_added: int, key_count: int, row_count: int, curve_table_mode: string, saved: bool, keys: [{ time, value }] }
+// MCP:add_curve_table_row - Create a named row (one rich curve) in a curve table asset, seeded with the given keys, in one undo step, then save the table. A row that already exists is replaced: its old keys are dropped and only the given ones remain (none when keys is omitted). Use it to write a whole row at once; to set one key without touching the others use add_curve_table_key, to delete a key remove_curve_table_key, to delete or rename the row delete_curve_table_row or rename_curve_table_row, and to read it back get_curve_table_info; create the table with create_curve_table. Idempotent: the same row_name and keys again give the same row (rebuilt and saved again). Entries of keys that are not [time, value] pairs are skipped and keys_added counts the ones applied; two keys at the same time keep the later value. A table that does not load, or one in SimpleCurves mode (imported simple curves cannot hold rich rows), is an error before anything changes; a failed save makes success false, with saved false, save_error and the change only in memory.
+//   @param curve_table_path - Asset path of the curve table, e.g. "/Game/Data/CT_Damage", as create_curve_table returns it.
+//   @param row_name - Name of the row (one curve), e.g. "Fireball"; an existing row of that name is replaced.
+//   @param keys - Optional seed keys as [[time, value], ...] floats, e.g. [[1, 10], [10, 250]] (time is the X axis, often a level or seconds); omitted gives a row with no keys.
+//   @returns { curve_table_path: string, row_name: string, row_added: bool, keys_added: int, key_count: int, row_count: int, curve_table_mode: string, saved: bool, keys: [{ time, value }], save_error?: string }
 
 TSharedPtr<FJsonObject> HandleAddCurveTableRow(const TSharedPtr<FJsonObject>& Params)
 {

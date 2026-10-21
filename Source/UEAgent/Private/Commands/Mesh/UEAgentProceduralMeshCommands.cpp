@@ -518,9 +518,9 @@ TSharedPtr<FJsonObject> HandleClearProceduralMesh(
 // ---------------------------------------------------------------------------
 // get_procedural_mesh_info {actor_label, component_index?}
 // ---------------------------------------------------------------------------
-// MCP:get_procedural_mesh_info - Read summary info for a procedural mesh component on a named actor, without changing it: section count, collision flags, and per section its index, vertex/triangle counts, visibility flag and collision flag.
-//   @param actor_label - Editor label of the actor carrying the PMC
-//   @param component_index - Optional 0-based PMC index on the actor; defaults to 0
+// MCP:get_procedural_mesh_info - Read a summary of one procedural mesh component on an editor-world actor, without changing it: the section count, two collision settings (use_complex_as_simple_collision, use_async_cooking) and, per section, its index, vertex and triangle counts, whether it is visible and whether it has collision. Use it to find the section_index the section tools take, and to check that geometry landed after create_procedural_box_mesh, create_procedural_grid_mesh or set_procedural_mesh_section_vertices; for the raw positions, normals and UVs of one section use get_procedural_mesh_section_data. An actor with no such label, or one with no procedural mesh component at component_index, is an error. Editor world only, not PIE.
+//   @param actor_label - Editor label of the actor carrying the component (whole label, case-insensitive; the object name is not matched), as create_procedural_mesh_component set it, e.g. "ProcMeshActor".
+//   @param component_index - Optional 0-based index among the actor's procedural mesh components, in component order (default 0); most actors have only one.
 //   @returns { actor_label: string, num_sections: int, use_complex_as_simple_collision: bool, use_async_cooking: bool, sections: [{ index: int, vertex_count: int, triangle_count: int, visible: bool, collision_enabled: bool }] }
 
 TSharedPtr<FJsonObject> HandleGetProceduralMeshInfo(

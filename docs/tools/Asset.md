@@ -158,15 +158,15 @@ Creates a persisted UTexture2DArray from slices (no external file import).  If `
 
 *Destructive.*
 
-Creates a persisted UTexture2D filled with a solid color (no external file).  Allocates the editor source (FTextureSource::Init, BGRA8), fills every pixel with ``fill_color``, calls UpdateResource, registers the asset and saves it to disk. Re-running deletes and rebuilds the asset deterministically.  fill_color is an [R, G, B, A] array of 0-255 byte values (default = opaque white).
+Create a UTexture2D asset filled with one solid color, with no source file: it allocates a BGRA8 editor source of width x height, fills every pixel with fill_color, sets sRGB with default compression, builds the resource and saves the asset to disk; no undo step. Use it for placeholder or mask textures; to bring in an image file use import_texture_file, to bake a render target create_static_texture_from_render_target, to change compression or sRGB afterwards set_texture_settings, and get_texture_info to read it back. WARNING: an asset already at package_path/name is force-deleted first, whatever its class and even if other assets reference it, so every call rebuilds the texture (not idempotent). An invalid package path is an error. A failed save (always while PIE runs) makes success false, with saved=false and save_error, the texture kept in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `name` | string | yes | Name of the texture asset to create |
-| `package_path` | string | no | Content folder; defaults to /Game/Textures |
-| `width` | number | no | Optional pixel width; clamped 1..8192; defaults to 64 |
-| `height` | number | no | Optional pixel height; clamped 1..8192; defaults to 64 |
-| `fill_color` | array | no | Optional [R, G, B, A] (0-255 each); defaults to opaque white |
+| `name` | string | yes | Asset name of the texture, no folder, e.g. "T_Mask_White". |
+| `package_path` | string | no | Content folder as a long package path, e.g. "/Game/Textures/Placeholders" (default /Game/Textures; one trailing slash is dropped). |
+| `width` | number | no | Width in pixels, a whole number clamped to 1..8192 (default 64). |
+| `height` | number | no | Height in pixels, a whole number clamped to 1..8192 (default 64). |
+| `fill_color` | array | no | [R, G, B, A] as 0-255 numbers, each rounded and clamped, e.g. [255, 0, 0, 255] for opaque red; missing trailing entries keep the default 255 (opaque white). |
 
 **Returns:** `{ texture_name: string, asset_path: string, created: bool, saved: bool, width: int, height: int, format: string, has_source: bool, fill_color: [int, int, int, int], save_error?: string }`
 
@@ -174,12 +174,12 @@ Creates a persisted UTexture2D filled with a solid color (no external file).  Al
 
 *Destructive, idempotent.*
 
-Destroys a Content Browser collection (idempotent; inverse of create_collection).  Uses the UE 5.7 project ICollectionContainer::DestroyCollection. If the collection is already absent a stable payload is returned (already_absent=True).          "Private", or "Shared".
+Deletes a Content Browser collection of the project, looked up by name within share_type; only the collection goes, the assets it lists are not touched. The collection manager writes the change to its collection file itself, outside the undo history, so it cannot be undone. Idempotent: a name not found in that share type succeeds with already_absent true and nothing changes, so pass the share type the collection was created with (a wrong one reads as absent); get_collections lists names and share types. A collection that exists but that the manager fails to delete is an error. Inverse of create_collection; to take single assets out instead, use remove_asset_from_collection, and get_collection_assets to see the members first.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `collection_name` | string | yes | Name of the collection to destroy. |
-| `share_type` | string | no | ECollectionShareType: "Local", "Private", or "Shared" (optional, default "Local") |
+| `collection_name` | string | yes | Name of the collection to delete, as get_collections lists it (e.g. "Props_Review"). |
+| `share_type` | string | no | ECollectionShareType the collection was created with: "Local", "Private", or "Shared" (optional, default "Local"); an unrecognised value falls back to Local. |
 
 **Returns:** `{ collection_name: string, share_type: string, destroyed: bool, already_absent: bool, exists: bool }`
 
@@ -264,15 +264,15 @@ Draw a texture as a rectangle onto a UTextureRenderTarget2D asset in one canvas 
 
 *Read-only.*
 
-Evaluate a curve asset at a given time.  Loads a UCurveFloat / UCurveVector / UCurveLinearColor and evaluates it at the requested time. For multi-channel curves (Vector=3, LinearColor=4) the optional channel selects which component the scalar 'value' field reports; the full component array is always returned in 'values'.
+Sample a curve asset (UCurveFloat, UCurveVector or UCurveLinearColor) at one time without changing it: values holds every channel (1 for a float curve, 3 for a vector, 4 for a color as r,g,b,a), value the channel picks, and vector {x,y,z} or color {r,g,b,a} come with the multi-channel types. A time before the first key or after the last follows the curve's extrapolation. Use it to check what a curve yields at gameplay inputs after editing it; to see the authored keys use get_curve_keys and to add one add_curve_key; a curve table row: get_curve_table_info; an animation curve: get_anim_curve_data. A path that does not load as a curve, or a curve of another class, is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `curve_path` | string | yes | Object path or package path of the curve asset. |
-| `time` | number | yes | The time (X) to evaluate at. |
-| `channel` | number | no | Optional channel index for multi-channel curves (Vector/LinearColor) to populate 'value'. |
+| `curve_path` | string | yes | Asset path of the curve, as a package path ("/Game/Curves/C_Damage") or an object path ("/Game/Curves/C_Damage.C_Damage"). |
+| `time` | number | yes | Time to sample at, on the curve's X axis in its own units, e.g. 0.5; any float, outside the keyed range too. |
+| `channel` | number | no | Optional 0-based channel whose value fills the scalar value: 0-2 = x,y,z on a vector curve, 0-3 = r,g,b,a on a color curve (default 0; out of range falls back to 0, and channel reports the one used); ignored on a float curve. |
 
-**Returns:** `{ curve_path: string, curve_class: string, time: float, curve_type: string, num_channels: int, channel: int, value: float, values: [float], vector: {x,y,z}, color: {r,g,b,a} }`
+**Returns:** `{ curve_path: string, curve_class: string, time: float, curve_type: string, num_channels: int, channel: int, value: float, values: [float], vector?: {x,y,z}, color?: {r,g,b,a} }`
 
 ## `export_render_target`
 
@@ -333,13 +333,13 @@ Retrieve ONE asset by exact name and return its identity (name, class, object pa
 
 *Read-only.*
 
-Recursively walk an asset's package dependencies via the Asset Registry.  Breadth-first, deduplicated, capped at max_depth (default 3). Each returned dependency records the depth at which it was first reached (1 == direct).
+Walk an asset's package dependencies through the Asset Registry, breadth-first and deduplicated, down to max_depth levels, without loading or changing anything: every package it needs directly (depth 1) or through others, each listed once with the depth where it was first reached, /Script/ packages included. Use it for what an asset drags in with it (migration, cooking, memory); for direct dependencies only, with class and loaded state, use get_asset_dependencies; for who uses an asset get_asset_referencers; for the chain between two assets get_reference_path; for loops check_asset_circular_dependency. An asset the registry does not know gives count 0 rather than an error; a path that is not a valid long package name is an error. Deep walks on a large project return thousands of packages, so start with a low max_depth.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `asset_path` | string | yes | Object path or package path of the root asset. |
-| `max_depth` | number | no | Maximum dependency depth to traverse (1..32, default 3). |
-| `dependency_type` | string | no | Optional "hard"\|"soft"\|"all" (case-insensitive, default "all"). Filters every depth level of the walk via the AssetRegistry hard/soft FDependencyQuery split; "all" leaves the walk unfiltered. |
+| `asset_path` | string | yes | Root asset, as a package path ("/Game/Characters/BP_Hero") or an object path ("/Game/Characters/BP_Hero.BP_Hero"). |
+| `max_depth` | number | no | Levels to walk, 1 = direct dependencies only (1..32, default 3; a value outside the range is clamped). |
+| `dependency_type` | string | no | Optional "hard"\|"soft"\|"all" (case-insensitive, default "all"): hard keeps only references loaded with the asset, soft only soft-object references, at every level; any other value counts as "all". |
 
 **Returns:** `{ asset_path: string, package_name: string, max_depth: int, dependency_type: string, dependencies: [{path, depth}], count: int }`
 
@@ -736,13 +736,13 @@ Set the collision complexity (BodySetup CollisionTraceFlag) of a UStaticMesh ass
 
 *Destructive, idempotent.*
 
-Set lightmap resolution and/or lightmap UV coordinate index on a static mesh (no rebuild).
+Sets the lightmap resolution and/or the lightmap UV channel index stored on a static mesh asset, in one undo step, then saves the asset; success is false, with save_error, when the save fails. Only those two properties change: the mesh is not rebuilt and no lighting is rebuilt, so baked lighting picks the values up on the next build_lighting. The values are stored as given, without range checks, and read back into the reply; repeating a call with the same values saves again with the same result. Placed actors that override their own lightmap resolution keep their override. Passing neither value is an error and nothing changes. Read the current values with get_static_mesh_info; check which UV channels exist, and which one is the lightmap, with list_uv_channels and its layout with get_uv_health_report.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `static_mesh_path` | string | yes | Content path to the UStaticMesh asset. |
-| `lightmap_resolution` | number | no | Absolute lightmap texture resolution (optional). |
-| `lightmap_coordinate_index` | number | no | Absolute lightmap UV channel index (optional). |
+| `static_mesh_path` | string | yes | Package or object path of the UStaticMesh asset (e.g. "/Game/Props/SM_Crate"). |
+| `lightmap_resolution` | number | no | Optional lightmap texture size in texels per side, a whole number such as 64, 128 or 256 (powers of two are the usual choice); omitted, it stays as it is. |
+| `lightmap_coordinate_index` | number | no | Optional 0-based UV channel the lightmap uses (typically 1); it should name a channel the mesh has (list_uv_channels), since it is not checked. Omitted, it stays as it is. |
 
 **Returns:** `{ static_mesh_path, lightmap_resolution, lightmap_coordinate_index, applied_count, saved, save_error? }`
 
