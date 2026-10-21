@@ -682,14 +682,14 @@ Reset the Material Parameter Collection Instance (MPCI: the transient per-world 
 
 *Destructive, idempotent.*
 
-Set the default of an existing scalar or vector parameter of a Material Parameter Collection asset and save it: a scalar takes scalar_value, a vector takes vector [r, g, b, a]. Errors when neither array has the name or the needed value is missing.
+Change the default value stored in a Material Parameter Collection asset for one existing parameter, in one undo step, then save the asset; every material reading the collection sees the new default. A scalar parameter takes scalar_value, a vector parameter takes vector [r, g, b, a]; the value is read back from the asset into the reply. This edits the asset; to override the value only in a running world use set_material_parameter_collection_instance_value. Add a parameter first with add_collection_parameter; list names, kinds and current defaults with get_collection_info; rename with rename_collection_parameter. Idempotent: the same value again rewrites it and saves. A collection that does not load, a name that is neither a scalar nor a vector parameter, or a missing value for the parameter's kind is an error and nothing changes; a failed save (for example while PIE runs) makes success false with the change only in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `collection_path` | string | yes | Full /Game path to the MPC asset |
-| `param_name` | string | yes | Name of the existing parameter to update |
-| `scalar_value` | number | no | Optional new float value for a scalar parameter |
-| `vector` | array | no | New linear color for a vector parameter, as a JSON array [r, g, b, a]; alpha is 1 when only three values are given |
+| `collection_path` | string | yes | Asset path of the Material Parameter Collection, e.g. "/Game/Materials/MPC_Weather", as create_material_parameter_collection returns it. |
+| `param_name` | string | yes | Exact name of an existing parameter, e.g. "WindStrength", as get_collection_info lists it. |
+| `scalar_value` | number | no | New float default for a scalar parameter, e.g. 0.75; required when the parameter is scalar, ignored for a vector one. |
+| `vector` | array | no | New linear color default for a vector parameter, as a JSON array [r, g, b, a] of floats, e.g. [1, 0.5, 0, 1]; alpha is 1 when only three values are given. Required when the parameter is a vector. |
 
 **Returns:** `{ collection_path: string, param_name: string, param_type: string, default_set: bool, saved: bool, default_value: number, scalar_value: number, default: object, default_rgba: [number] }`
 
@@ -884,13 +884,13 @@ Link (or clear) the UPhysicalMaterial on a UMaterial asset and persist it to dis
 
 *Destructive, idempotent.*
 
-Enable or disable a usage flag (EMaterialUsage) on a UMaterial asset and persist it to disk.  Idempotent: the engine setter no-ops when the flag already matches (already_set=true).  Recompiles shaders for the affected usage.
+Turn one usage flag (EMaterialUsage: SkeletalMesh, InstancedStaticMeshes, NiagaraSprites, SplineMesh...) on or off on a base UMaterial asset, which recompiles its shaders for that usage, then save the material. Use it when get_material_usage_flag shows the flag off for geometry that renders the material as the default checker; it works on base materials only, so set it on the parent of a material instance. Idempotent: when the flag already has that value the engine setter does nothing (already_set=true), though the material is still saved. Not an undo step. An unknown usage name or a path that does not load as a UMaterial is an error and nothing changes. A failed save shows as saved=false with save_error while success stays true, so check saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `material_path` | string | yes | Full path to the material (e.g., '/Game/Materials/MyMaterial.MyMaterial') |
-| `usage` | string | yes | Usage flag name, with or without the MATUSAGE_ prefix (e.g., 'SkeletalMesh' or 'MATUSAGE_SkeletalMesh') |
-| `enabled` | boolean | no | Whether to enable (true, default) or disable (false) the flag |
+| `material_path` | string | yes | Object or package path of the base material, e.g. '/Game/Materials/M_Base.M_Base' or '/Game/Materials/M_Base'. |
+| `usage` | string | yes | EMaterialUsage name with or without the MATUSAGE_ prefix, e.g. 'SkeletalMesh', 'InstancedStaticMeshes' or 'MATUSAGE_Nanite'; any other name is an error. |
+| `enabled` | boolean | no | true (default) turns the flag on, false turns it off. |
 
 **Returns:** `{ material_path: string, usage: string, enabled: bool, already_set: bool, saved: bool, save_error?: string, success: bool }`
 

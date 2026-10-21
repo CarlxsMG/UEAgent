@@ -293,9 +293,9 @@ TSharedPtr<FJsonObject> HandleSubscribeToDelegate(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeOkReply(Out);
 }
 
-// MCP:poll_delegate_events - Read the events a subscription has recorded so far, including each fire's parameters (non-destructive cursor read).
-//   @param subscription_id - The id returned by subscribe_to_delegate
-//   @param cursor - Optional int64; only events with a higher sequence_id are returned (default 0 = everything currently retained)
+// MCP:poll_delegate_events - Return the fires a subscribe_to_delegate subscription has recorded after cursor, oldest first, each with its sequence_id, a timestamp in seconds (FPlatformTime::Seconds) and the delegate's parameters as payload. It does not wait for new fires and does not consume what it returns, so the same cursor gives the same events again; pass next_cursor back to read only newer ones. Only the latest 512 fires per subscription are kept. subscription_active false means the target object is gone: recorded fires still come back, but no new ones will arrive. An unknown subscription_id is an error. unsubscribe_delegate ends the subscription; poll_gameplay_tag_events is the same reader for register_gameplay_tag_event.
+//   @param subscription_id - The subscription_id that subscribe_to_delegate returned, e.g. 3.
+//   @param cursor - Optional sequence_id: only fires with a higher one are returned; pass the previous reply's next_cursor. Default 0 returns every fire still kept.
 //   @returns { events: [{sequence_id, ts, payload}], next_cursor: int, subscription_active: bool }
 
 TSharedPtr<FJsonObject> HandlePollDelegateEvents(const TSharedPtr<FJsonObject>& Params)
@@ -500,9 +500,9 @@ namespace UEAgentRuntimeEventsImpl
 
 // Component event introspection.
 
-// MCP:get_component_events - Retrieve lifecycle, activation, registration, transform, and input events available on a component.
-//   @param actor_name - Name of the actor containing the component
-//   @param component_name - Name of the component to get events from
+// MCP:get_component_events - List a fixed catalogue of common component events for one component of an actor in the editor world, with facts about it: class with its category, tooltip and display-name metadata, active and registered state, owner and creation method. The event list is not read from the class: every component gets BeginPlay, EndPlay, Tick, Activate, Deactivate, Register and Unregister, scene components add TransformUpdated and static mesh components OnClicked, each reported as an overridable Blueprint event with an illustrative signature. Read-only. For the delegates the class really declares (OnComponentHit and the like) use get_class_properties, then subscribe_to_delegate to record fires or add_component_bound_event to bind one in a Blueprint. An actor or component not found is an error.
+//   @param actor_name - Object name (not the label) of the actor in the editor world, compared without case, e.g. 'StaticMeshActor_0'.
+//   @param component_name - Object name of one of that actor's components, compared without case, e.g. 'StaticMeshComponent0'; get_actor_components lists them.
 //   @returns { actor_name: string, component_name: string, component_class: string, component_category: string, component_tooltip: string, component_display_name: string, events: [{name, type, description, category, is_overrideable, is_blueprint_event, function_signature}], events_count: int, component_is_active: bool, component_is_registered: bool, component_owner: string, component_creation_method: string }
 
 TSharedPtr<FJsonObject> HandleGetComponentEvents(const TSharedPtr<FJsonObject>& Params)

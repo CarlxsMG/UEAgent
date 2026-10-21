@@ -23,13 +23,13 @@ Drop every UV from one UV channel of LOD 0 of a UStaticMesh asset: LOD 0 (its so
 
 *Read-only.*
 
-Read-only diagnostic summary for one UV channel on a static mesh: counts, lightmap status, in-unit-square ratio, overlap count, and unique UVs.
+Check the layout of one UV channel of one LOD of a static mesh asset, reading its built render data: in_unit_square_triangle_ratio (share of triangles with all three UVs inside 0..1), approx_overlap_count (triangle corners whose UV, rounded to 4 decimals, was already seen; corners shared by adjacent triangles count too, so it is a rough signal, not an island-overlap test), approx_unique_islands, plus vertex and triangle counts, lightmap_coordinate_index and is_lightmap_hard_failing (no lightmap index set, or no UV channels). Pick the LOD and channel with list_uv_channels first; change the lightmap channel with set_static_mesh_lightmap, and edit the asset's UVs with set_triangle_uvs or clear_uv_channel. Read-only and idempotent; nothing dirtied or saved. A mesh that does not load, or a LOD or channel out of range, is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `mesh_path` | string | yes | Static mesh path (e.g. /Game/Meshes/Cube) |
-| `lod_index` | number | no | LOD index to inspect (default 0) |
-| `uv_channel` | number | no | UV channel index to inspect (default 0) |
+| `mesh_path` | string | yes | Content path of the UStaticMesh asset, e.g. "/Game/Meshes/SM_Rock" (the object path "/Game/Meshes/SM_Rock.SM_Rock" also works); find_assets_by_name finds it |
+| `lod_index` | number | no | 0-based LOD to inspect (default 0), below the total_lods list_uv_channels reports |
+| `uv_channel` | number | no | 0-based UV channel to inspect (default 0), below that LOD's uv_channel_count from list_uv_channels |
 
 **Returns:** `{ mesh_path, lod_index, uv_channel, vertex_count, triangle_count, lightmap_coordinate_index, no_lightmap_configured: bool, is_lightmap_hard_failing: bool, approx_overlap_count, in_unit_square_triangle_ratio, approx_unique_islands, per_triangle_iteration_error?: string } -- approx_unique_islands counts distinct UV positions (rounded to 4 decimals), not islands; when per_triangle_iteration_error is set the per-triangle counters stay 0.`
 
@@ -37,12 +37,12 @@ Read-only diagnostic summary for one UV channel on a static mesh: counts, lightm
 
 *Read-only.*
 
-Per-LOD inventory of UV channels on a static mesh (read-only, no MarkDirty / no save).
+List the UV channels of a static mesh asset per LOD: for each LOD uv_channel_count, vertex_count, triangle_count, the mesh's lightmap_coordinate_index and has_lightmap (that index names an existing channel), and one entry per channel with is_lightmap. Use it first to see which LODs and channels exist; then get_uv_health_report checks one channel's layout, get_static_mesh_geometry_stats measures UV area, and set_static_mesh_lightmap changes the lightmap channel. Read-only and idempotent: no undo step, nothing dirtied or saved. Channel and vertex counts come from the built render data, triangle_count from the LOD's source mesh description (0 when it has none); each channel's vertex_count is the LOD's vertex count. A mesh that does not load, or a lod_index past the last LOD, is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `mesh_path` | string | yes | Static mesh path (e.g. /Game/Meshes/Cube) |
-| `lod_index` | number | no | Optional LOD index to inspect, or -1 to inventory every LOD (default -1) |
+| `mesh_path` | string | yes | Content path of the UStaticMesh asset, e.g. "/Game/Meshes/SM_Rock" (the object path "/Game/Meshes/SM_Rock.SM_Rock" also works); find_assets_by_name finds it |
+| `lod_index` | number | no | Optional 0-based LOD to inspect, or -1 to list every LOD (default -1); total_lods in the reply says how many exist, and one past the last is an error |
 
 **Returns:** `{ mesh_path: string, total_lods: int, lods: [{lod_index, uv_channel_count, vertex_count, triangle_count, lightmap_coordinate_index, has_lightmap, channels: [{channel, is_lightmap, vertex_count}]}] }`
 

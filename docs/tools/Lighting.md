@@ -56,7 +56,7 @@ Read a Sphere or Box reflection-capture actor of the editor level, found by labe
 
 *Read-only.*
 
-Retrieve current rendering settings including quality levels, rendering mode, world settings, engine version, and rendering feature states.
+Read a one-call summary of how the editor renders right now: the RHI in use (rendering_api), forward or deferred mode (r.ForwardShading), a quality bucket of r.ScreenPercentage (rendering_quality), a quality verdict from r.MaterialQualityLevel and r.ViewDistanceScale, shadow resolutions, renderer feature switches each from its console variable (left out when the build lacks it), display settings from the game user settings (the ? fields, left out without them), engine version, and a census of the engine's first world context, normally the editor level (world_* fields, left out with no world). Use it for an overview; for exact values read one variable with get_cvar, scalability groups with get_scalability_levels, lights with get_lighting_quality, shading and materials with get_shader_info; change them with set_cvar or set_scalability_quality. Read-only and idempotent. rendering_settings_found is always true; platform_architecture and platform_os are fixed strings, and rendering_recommendations is a heuristic of actor counts.
 
 No parameters.
 

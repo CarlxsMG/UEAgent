@@ -762,9 +762,9 @@ TSharedPtr<FJsonObject> HandleSetPhysicsConstraintDrives(const TSharedPtr<FJsonO
 // --------------------------------------------------------------------------- //
 // set_actor_physical_material
 // --------------------------------------------------------------------------- //
-// MCP:set_actor_physical_material - Set the body physical-material override on an actor's primitive (static-mesh) component.  Calls UPrimitiveComponent::SetPhysMaterialOverride and reads the override back.
-//   @param actor_name - Label/name of the target actor.
-//   @param physical_material_path - /Game path to the UPhysicalMaterial asset.
+// MCP:set_actor_physical_material - Override the physical material (friction, restitution, surface type) of one placed actor's collision body in the editor world, through UPrimitiveComponent::SetPhysMaterialOverride on a single component: the StaticMeshComponent of a StaticMeshActor, otherwise the actor's first primitive component. One undo step; the level is marked dirty but not saved (save_level), and neither the mesh asset nor other actors change. verified is true when the override read back from the component's body is that material. Create the material with create_physical_material; for another component of the actor set its BodyInstance through set_component_property; read the actor's components with get_actor_components. Idempotent: the same material again changes nothing new. There is no way to clear the override here. A missing actor, an actor with no primitive component, or a path that does not load as a UPhysicalMaterial is an error and nothing changes.
+//   @param actor_name - Editor label or object name of an actor in the editor world (not PIE), e.g. "Floor_01".
+//   @param physical_material_path - Asset path of the UPhysicalMaterial, e.g. "/Game/Physics/PM_Ice", as create_physical_material returns it (asset_path).
 //   @returns { actor_name: string, component_name: string, physical_material_path: string, physical_material_name: string, applied_material_name?: string, verified: bool, applied: bool }
 
 TSharedPtr<FJsonObject> HandleSetActorPhysicalMaterial(const TSharedPtr<FJsonObject>& Params)

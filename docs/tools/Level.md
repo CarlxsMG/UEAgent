@@ -1208,12 +1208,12 @@ Set a Controller's control rotation (AController::SetControlRotation) in the act
 
 *Destructive, idempotent.*
 
-Sets the debug color of a UDataLayerAsset and saves it.
+Set the debug color of a World Partition data layer asset (UDataLayerAsset), the color the Data Layers outliner and the World Partition debug views show for that layer, in one undo step, then save the asset and read the color back (color_set). Setting the color it already has writes and saves it again with the same result. A path that does not load as a data layer asset or a color that is not an array of 3 or 4 numbers is an error and nothing changes; a failed save is an error, the change kept in memory. Find layer assets with get_data_layer_assets; create one with its color in one call with create_data_layer_asset; change its Editor or Runtime type with set_data_layer_type.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `data_layer_asset_path` | string | yes | Full /Game path to the data layer asset. |
-| `color` | array | yes | [r, g, b] or [r, g, b, a] integers 0-255. |
+| `data_layer_asset_path` | string | yes | Object or package path of the data layer asset, e.g. '/Game/DataLayers/DL_Interiors'. |
+| `color` | array | yes | [r, g, b] or [r, g, b, a] in 0-255, e.g. [255, 128, 0]; values are rounded and clamped to 0-255, and alpha defaults to 255. |
 
 **Returns:** `{ data_layer_asset_path: string, asset_path: string, debug_color: [number, number, number, number], data_layer_type: string, color_set: bool, saved: bool }`
 

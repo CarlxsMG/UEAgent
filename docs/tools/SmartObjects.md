@@ -75,12 +75,12 @@ Add an entrance annotation (an entry and/or exit point) to the slot at slot_inde
 
 *Destructive.*
 
-Claim a free slot on the Smart Object component of an actor in the editor world. Returns the canonical claim_handle (LexToString) for downstream release.
+Reserve the first free slot of the Smart Object component of an editor-world actor (USmartObjectSubsystem::MarkSlotAsClaimed, Normal priority, no user), so other users see it taken; claim_handle and slot_id identify it. To claim and mark the slot occupied in one call use use_smart_object; to find objects by area find_smart_objects. The component must be registered with the subsystem first (register_smart_object_actor; get_smart_object_component_definition shows registered), and the definition needs a behavior or it never registers. The claim is runtime subsystem state: not saved, no undo step. Each call claims another free slot, and once all are claimed the call is an error. Release goes through release_smart_object with actor_label, which unregisters the whole component and frees all its claims; the claim_handle string cannot be passed back. success is false, with an error, when the claim does not read back valid.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_label` | string | yes | Editor label of the actor carrying the USmartObjectComponent |
-| `definition_path` | string | no | Optional path to the definition; only used for reporting |
+| `actor_label` | string | yes | Editor label (not the object name) of the editor-world actor carrying the USmartObjectComponent, e.g. "SO_Bench_1", as register_smart_object_actor set it; whole label, case-insensitive, first match wins |
+| `definition_path` | string | no | Optional path to the definition; only echoed back in the reply, never loaded or checked |
 
 **Returns:** `{ actor_label: string, definition_path: string, claim_handle: string, slot_id: string, is_claimed: bool, success: bool }`
 
@@ -117,11 +117,11 @@ Spatially query the SmartObject subsystem for slots within a box centered on a p
 
 *Read-only.*
 
-Read the USmartObjectDefinition assigned to an actor's USmartObjectComponent and whether it is registered.
+Read which USmartObjectDefinition the USmartObjectComponent of an editor-world actor references (definition, as an object path; has_definition=false and an empty string when none) and whether the component is registered with the editor world's SmartObjectSubsystem (registered, a valid handle), which claim_smart_object and use_smart_object need. The read side of set_smart_object_component_definition; register_smart_object_actor spawns an actor with one. To read the definition asset itself use get_smart_object_definition_summary or get_smart_object_slots_detail. Read-only and idempotent. A label no actor has, or an actor without the component, is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_label` | string | yes | Editor label of the actor carrying the USmartObjectComponent |
+| `actor_label` | string | yes | Editor label (not the object name) of the editor-world actor carrying the USmartObjectComponent, e.g. "SO_Bench_1"; whole label, case-insensitive, first match wins. find_actors_by_name with match='label' finds labels |
 
 **Returns:** `{ actor_label: string, definition: string, has_definition: bool, registered: bool }`
 
@@ -154,11 +154,11 @@ List a slot's entrance annotations with all their fields (round-trip reader for 
 
 *Read-only.*
 
-Read back per-slot detail (name, enabled, offset, rotation, activity tags, behavior/data counts) of a USmartObjectDefinition.
+List every slot of a USmartObjectDefinition asset with its index, name, enabled flag, offset [x, y, z] in cm and rotation [pitch, yaw, roll] in degrees relative to the owner, activity_tags, whether its user tag filter is empty, its behavior classes and counts, data_count and entrance_count. Use it to find the slot_index the set_smart_object_slot_* and remove_smart_object_slot tools take, and to read back their edits; for object-level state (tags, policies, bounds, validation) use get_smart_object_definition_summary, and for entrance fields get_smart_object_slot_entrance_annotations. Read-only and idempotent; reads the asset, not a placed actor. A definition with no slots gives slot_count 0. A missing or unloadable definition_path is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `definition_path` | string | yes | Path to the USmartObjectDefinition asset |
+| `definition_path` | string | yes | Object path of the USmartObjectDefinition asset, e.g. "/Game/AI/SO_Bench.SO_Bench" (the package path "/Game/AI/SO_Bench" also loads); create_smart_object_definition makes one |
 
 **Returns:** `{ definition_path: string, slot_count: int, slots: [{ index: int, name: string, enabled: bool, offset: [number, number, number], rotation: [number, number, number], activity_tags: [string], user_filter_is_empty: bool, behavior_count: int, behavior_classes: [string], data_count: int }] }`
 

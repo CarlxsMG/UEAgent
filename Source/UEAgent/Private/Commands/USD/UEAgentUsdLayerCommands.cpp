@@ -386,12 +386,12 @@ TSharedPtr<FJsonObject> HandleRemoveUsdSublayer(const TSharedPtr<FJsonObject>& P
 // ---------------------------------------------------------------------------
 // add_usd_reference
 // ---------------------------------------------------------------------------
-// MCP:add_usd_reference - Add an external reference composition arc to a prim (asset_path -> target prim, optionally re-targeted by prim_path_for_target).
-//   @param stage_name [string!] - Name the stage was registered under.
-//   @param prim_path [string!] - Prim that owns the reference (target of the composition op on the consumer side).
-//   @param asset_path [string!] - Identifier of the layer to reference (absolute file path or USD-style relative identifier).
-//   @param prim_path_for_target [string] - Prim inside the referenced layer to import. Empty (default) means the referenced layer's pseudo-root '/'. The default matches the common "import the whole layer" use case.
-//   @param position [string] - One of "FrontOfPrependList" / "BackOfPrependList" / "FrontOfAppendList" / "BackOfAppendList" (default BackOfPrependList — pxr::'s default for the strongest-anonymous opinion).
+// MCP:add_usd_reference - Add an external reference arc to a prim of a registered USD stage, so prim_path composes the prim prim_path_for_target of the layer file at asset_path. For a prim of the same stage use add_usd_internal_reference, for a load-on-demand arc add_usd_payload; clear_usd_references is the inverse, and get_usd_prim_info or list_usd_prims shows the composed result. The arc is authored on the stage's current edit target layer (set_usd_edit_target; list_usd_stage_layers shows the stack) and stays in memory until save_usd_stage. No undo step. added=false, with the USD messages in errors, when USD rejects the arc; an unregistered stage_name or a prim that does not exist is an error (success=false) and nothing is authored.
+//   @param stage_name [string!] - Name the stage was registered under by open_usd_stage or create_usd_stage (list_usd_stages shows it), e.g. "Shot010".
+//   @param prim_path [string!] - Absolute SdfPath of the existing prim that receives the reference, e.g. "/World/Chair"; define_usd_prim creates one.
+//   @param asset_path [string!] - Identifier of the layer to reference: an absolute file path such as "C:/Assets/chair.usda", or a path relative to the layer being edited such as "./chair.usda".
+//   @param prim_path_for_target [string] - Absolute path of the prim inside the referenced layer to compose, e.g. "/Chair". Empty (default) sends the absolute root '/', not an empty path, so the layer's defaultPrim is not used and USD, which wants an empty or a prim path here, may reject the arc: name the prim.
+//   @param position [string] - "FrontOfPrependList" | "BackOfPrependList" | "FrontOfAppendList" | "BackOfAppendList", case-insensitive; prepended arcs are stronger than appended ones. Default BackOfPrependList, which is also what any other string means (the reply then echoes the string sent).
 //   @returns { stage_name: string, prim_path: string, asset_path: string, added: bool, position: string, errors: [string]? }
 
 TSharedPtr<FJsonObject> HandleAddUsdReference(const TSharedPtr<FJsonObject>& Params)
@@ -488,9 +488,9 @@ TSharedPtr<FJsonObject> HandleAddUsdInternalReference(const TSharedPtr<FJsonObje
 // ---------------------------------------------------------------------------
 // clear_usd_references
 // ---------------------------------------------------------------------------
-// MCP:clear_usd_references - Remove every reference from a prim's reference list (irreversible — there is no "undo" in USD composition authoring).
-//   @param stage_name [string!] - Name the stage was registered under.
-//   @param prim_path [string!] - Prim whose references should be cleared.
+// MCP:clear_usd_references - Remove every reference arc of a prim of a registered USD stage, external and internal alike (UsdReferences::ClearReferences); payloads stay (clear_usd_payloads removes those). The inverse of add_usd_reference and add_usd_internal_reference; no tool removes a single reference. Only the edits on the stage's current edit target layer go, so references authored on other layers still compose (switch layers with set_usd_edit_target; list_usd_stage_layers shows the stack); check the result with get_usd_prim_info. Irreversible: no undo step. The change stays in memory until save_usd_stage. A repeat call leaves the list empty again. An unregistered stage_name or a prim that does not exist is an error (success=false); USD complaints come back in errors.
+//   @param stage_name [string!] - Name the stage was registered under by open_usd_stage or create_usd_stage (list_usd_stages shows it), e.g. "Shot010".
+//   @param prim_path [string!] - Absolute SdfPath of the existing prim whose references are cleared, e.g. "/World/Chair"; list_usd_prims lists prim paths.
 //   @returns { stage_name: string, prim_path: string, cleared: bool, errors: [string]? }
 
 TSharedPtr<FJsonObject> HandleClearUsdReferences(const TSharedPtr<FJsonObject>& Params)
@@ -645,10 +645,10 @@ TSharedPtr<FJsonObject> HandleClearUsdPayloads(const TSharedPtr<FJsonObject>& Pa
 // ---------------------------------------------------------------------------
 // mute_usd_layer
 // ---------------------------------------------------------------------------
-// MCP:mute_usd_layer - Toggle mute state on a set of layers by their identifiers (mute + unmute are passed in the same call — pxr:: applies them atomically).
-//   @param stage_name [string!] - Name the stage was registered under.
-//   @param mute_paths [array] - Identifiers of layers to mute. Empty/missing is allowed (no-op on the mute side).
-//   @param unmute_paths [array] - Identifiers of layers to unmute. Empty/missing is allowed (no-op on the unmute side).
+// MCP:mute_usd_layer - Mute and unmute layers of a registered USD stage in one atomic call (UsdStage::MuteAndUnmuteLayers): a muted layer's opinions drop out of composition until it is unmuted. Muting is stage state held in memory: no layer file changes and save_usd_stage does not record it. Read layer identifiers, and confirm is_muted afterwards, with list_usd_stage_layers; to send edits to a layer use set_usd_edit_target instead, and to show one layer alone on a stage actor isolate_usd_layer. muted and unmuted echo the identifiers sent, not a read-back. Muting a layer already muted changes nothing, so a repeat call is harmless. An unregistered stage_name is an error (success=false); USD complaints come back in errors. No undo step.
+//   @param stage_name [string!] - Name the stage was registered under by open_usd_stage or create_usd_stage (list_usd_stages shows it), e.g. "Shot010".
+//   @param mute_paths [array] - Layer identifiers to mute, as list_usd_stage_layers reports them, e.g. ["C:/Shots/lighting.usda"]; non-string or empty entries are skipped. Empty/missing is allowed (no-op on the mute side).
+//   @param unmute_paths [array] - Layer identifiers to unmute, same form as mute_paths. Empty/missing is allowed (no-op on the unmute side).
 //   @returns { stage_name: string, muted: [string], unmuted: [string], errors: [string]? }
 
 TSharedPtr<FJsonObject> HandleMuteUsdLayer(const TSharedPtr<FJsonObject>& Params)
@@ -690,9 +690,9 @@ TSharedPtr<FJsonObject> HandleMuteUsdLayer(const TSharedPtr<FJsonObject>& Params
 // ---------------------------------------------------------------------------
 // set_usd_edit_target
 // ---------------------------------------------------------------------------
-// MCP:set_usd_edit_target - Point the stage's edit target at a specific layer in the stack (mutations after this call land on the chosen layer, not the root).
-//   @param stage_name [string!] - Name the stage was registered under.
-//   @param layer_index [integer] - 0-based index into GetLayerStack(true) of the new edit target. Defaults to 0 (the root layer).
+// MCP:set_usd_edit_target - Choose the layer of a registered USD stage that later authoring writes to (its edit target): define_usd_prim, set_usd_attribute_value, add_usd_reference and the other USD edit tools then land on that layer. Read the stack with list_usd_stage_layers first: with include_session_layers=true (its default) it lists the same stack this index counts in, and that stack starts with the stage's session layer, so index 0 is the in-memory session layer, not the root layer. The choice is stage state held in memory, written to no file; save_usd_stage saves only the root layer, so edits aimed at another layer are not saved by it. Idempotent; no undo step. An unregistered stage_name or a layer_index outside the stack is an error (success=false) and the target stays as it was.
+//   @param stage_name [string!] - Name the stage was registered under by open_usd_stage or create_usd_stage (list_usd_stages shows it), e.g. "Shot010".
+//   @param layer_index [integer] - 0-based index into GetLayerStack(true): the session layer and its sublayers first, then the root layer and its sublayers, as list_usd_stage_layers lists them. Defaults to 0, the session layer; the root layer usually sits at 1.
 //   @returns { stage_name: string, layer_index: int, edit_target: string, edit_target_real_path: string, errors: [string]? }
 
 TSharedPtr<FJsonObject> HandleSetUsdEditTarget(const TSharedPtr<FJsonObject>& Params)

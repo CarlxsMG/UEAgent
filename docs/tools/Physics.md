@@ -230,15 +230,15 @@ Create a UPhysicsAsset at package_path/name by generating bodies and constraints
 
 *Destructive.*
 
-Cuts all transforms of a UGeometryCollection asset with num_planes random planes inside its bounds (no noise, islands split by default), then saves it. new_fracture_count is the number of new pieces, measured as the transforms the cut added; the call fails when it added none (an empty collection, or planes that miss every piece) or when the save fails.
+Cut every piece of a UGeometryCollection asset with num_planes flat planes placed at random (seeded) inside its bounds, with no noise on the cut surfaces, in one undo step, then save it. The cut pieces stay in the hierarchy as parents of the new ones, so each call adds pieces on top of the earlier ones; it is not idempotent. Choose it for a few long straight cuts (planks, slabs); for a regular grid of cuts use slice_geometry_collection, for organic Voronoi shards fracture_geometry_collection, and to group pieces afterwards cluster_geometry_collection. Make the collection first with create_geometry_collection; check the result with get_geometry_collection_hierarchy or get_geometry_collection_info. new_fracture_count is the number of transforms the cut added; the call fails when it added none (an empty collection, or planes that miss every piece) even though the asset is still saved, and when the save fails (for example while PIE runs). A path that does not load as a geometry collection is an error and nothing changes.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `geometry_collection_path` | string | yes | Asset path of the UGeometryCollection |
-| `num_planes` | number | no | Number of random cutting planes to generate, minimum 1, default 3 |
-| `random_seed` | number | no | Optional seed for plane generation, default 1337 |
-| `grout` | number | no | Width of the gap left between cut pieces, in cm (default 0) |
-| `split_islands` | boolean | no | Optional, split resulting islands, default true |
+| `geometry_collection_path` | string | yes | Asset path of the UGeometryCollection, e.g. "/Game/Destruction/GC_Wall", as create_geometry_collection returns it (asset_path). |
+| `num_planes` | number | no | Number of random cutting planes, an integer of at least 1 (smaller values become 1), default 3. |
+| `random_seed` | number | no | Integer seed for plane placement, default 1337; the same seed on the same collection gives the same planes. |
+| `grout` | number | no | Width of the gap left between cut pieces, in cm, e.g. 0.5 (default 0, no gap). |
+| `split_islands` | boolean | no | true (default) turns every disconnected part of a cut piece into its own piece; false keeps them together. |
 
 **Returns:** `{ geometry_collection_path: string, num_planes: int, new_fracture_count: int, transform_count: int, success: bool, saved: bool, save_error: string? }`
 
@@ -506,12 +506,12 @@ Clear ALL simple/convex collision primitives from a UStaticMesh's BodySetup (the
 
 *Destructive, idempotent.*
 
-Set the body physical-material override on an actor's primitive (static-mesh) component.  Calls UPrimitiveComponent::SetPhysMaterialOverride and reads the override back.
+Override the physical material (friction, restitution, surface type) of one placed actor's collision body in the editor world, through UPrimitiveComponent::SetPhysMaterialOverride on a single component: the StaticMeshComponent of a StaticMeshActor, otherwise the actor's first primitive component. One undo step; the level is marked dirty but not saved (save_level), and neither the mesh asset nor other actors change. verified is true when the override read back from the component's body is that material. Create the material with create_physical_material; for another component of the actor set its BodyInstance through set_component_property; read the actor's components with get_actor_components. Idempotent: the same material again changes nothing new. There is no way to clear the override here. A missing actor, an actor with no primitive component, or a path that does not load as a UPhysicalMaterial is an error and nothing changes.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Label/name of the target actor. |
-| `physical_material_path` | string | yes | /Game path to the UPhysicalMaterial asset. |
+| `actor_name` | string | yes | Editor label or object name of an actor in the editor world (not PIE), e.g. "Floor_01". |
+| `physical_material_path` | string | yes | Asset path of the UPhysicalMaterial, e.g. "/Game/Physics/PM_Ice", as create_physical_material returns it (asset_path). |
 
 **Returns:** `{ actor_name: string, component_name: string, physical_material_path: string, physical_material_name: string, applied_material_name?: string, verified: bool, applied: bool }`
 

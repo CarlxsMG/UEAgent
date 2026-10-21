@@ -325,8 +325,8 @@ namespace
 // ---------------------------------------------------------------------------
 // get_skeletal_mesh_info
 // ---------------------------------------------------------------------------
-// MCP:get_skeletal_mesh_info - Get detailed info about a skeletal mesh: LODs, materials, morph targets, sockets, bones.
-//   @param skeletal_mesh_path - Content path to the skeletal mesh asset (e.g. /Game/MyMesh)
+// MCP:get_skeletal_mesh_info - Summarise a skeletal mesh asset in one call: its LOD, material slot, morph target, socket and bone counts, the names of its first 20 bones in reference-skeleton order (bone_names), and each LOD's vertex and section count. Read-only: it changes nothing; a path that does not load as a USkeletalMesh is an error. Start here, then drill into one area: get_skeletal_mesh_lod_info for one LOD's settings, get_skeletal_mesh_section_info for its sections, get_skeletal_mesh_material_slots for slot names, get_skeletal_mesh_morph_targets for morph names, and get_skeleton_info with load_full_data for bones past the first 20.
+//   @param skeletal_mesh_path - Content path of the USkeletalMesh asset (object or package path), e.g. '/Game/Characters/SKM_Hero'.
 //   @returns { skeletal_mesh_path: string, num_lods: int, num_materials: int, num_morph_targets: int, num_sockets: int, num_bones: int, bone_names: [string], lod_info: [{lod_index, num_verts, num_sections}] }
 
 TSharedPtr<FJsonObject> HandleGetSkeletalMeshInfo(
@@ -537,8 +537,8 @@ TSharedPtr<FJsonObject> HandleAddSkeletalMeshSocket(
 // ---------------------------------------------------------------------------
 // get_skeletal_mesh_morph_targets
 // ---------------------------------------------------------------------------
-// MCP:get_skeletal_mesh_morph_targets - Get all morph targets on a skeletal mesh with delta counts.
-//   @param skeletal_mesh_path - Content path to the skeletal mesh asset
+// MCP:get_skeletal_mesh_morph_targets - List every morph target on a skeletal mesh asset by name, with whether it holds valid data and how many vertex deltas it has on LOD 0; count is the number of morph targets. Read-only: it changes nothing; a mesh that does not load is an error. Use it to find a morph_target_name, then read one morph's per-vertex deltas on any LOD with get_morph_target_deltas or write them with set_morph_target_deltas; create_skeletal_mesh_morph_target, rename_skeletal_mesh_morph_target and remove_skeletal_mesh_morph_target manage the list itself. get_skeletal_mesh_info only counts them.
+//   @param skeletal_mesh_path - Content path of the USkeletalMesh asset (object or package path), e.g. '/Game/Characters/SKM_Hero'.
 //   @returns { skeletal_mesh_path: string, count: int, morph_targets: [{name, has_valid_data, num_deltas_lod0}] }
 
 TSharedPtr<FJsonObject> HandleGetSkeletalMeshMorphTargets(
@@ -1273,11 +1273,11 @@ TSharedPtr<FJsonObject> HandleRenameSkeletalMeshMorphTarget(
 // ---------------------------------------------------------------------------
 // set_morph_target_deltas
 // ---------------------------------------------------------------------------
-// MCP:set_morph_target_deltas - Set vertex deltas for a morph target on a specific LOD.  Each delta is a dict with keys: vertex_index (int), position_delta ({x,y,z}), normal_delta ({x,y,z}).
-//   @param skeletal_mesh_path - Content path to the skeletal mesh asset
-//   @param morph_target_name - Name of the morph target to modify
-//   @param lod_index - LOD index to populate (default 0)
-//   @param deltas - List of delta dicts, e.g. [{"vertex_index": 0, "position_delta": {"x": 1.0, "y": 0, "z": 0}, "normal_delta": {"x": 0, "y": 0, "z": 0}}]
+// MCP:set_morph_target_deltas - Overwrite all vertex deltas of an existing morph target on one LOD of a skeletal mesh asset with the deltas passed, then save the mesh. The LOD's old deltas are discarded; deltas whose position offset is 0.015 units or less are dropped (normal-only deltas included) and entries that are not objects are skipped, so deltas_set counts what was sent, not what was kept. Not an undo step; repeating the same call writes the same data again. A missing morph target or a lod_index outside the mesh's LODs is an error and nothing changes; a failed save is an error. Find the morph with get_skeletal_mesh_morph_targets (create_skeletal_mesh_morph_target adds one) and read the result back with get_morph_target_deltas, since total_deltas_lod0 only reports LOD 0.
+//   @param skeletal_mesh_path - Content path of the USkeletalMesh asset (object or package path), e.g. '/Game/Characters/SKM_Hero'.
+//   @param morph_target_name - Name of an existing morph target, as get_skeletal_mesh_morph_targets lists it, e.g. 'Smile'.
+//   @param lod_index - 0-based LOD index whose deltas are overwritten (default 0); it must be below num_lods from get_skeletal_mesh_info.
+//   @param deltas - Array of objects {vertex_index, position_delta, normal_delta}: vertex_index is the vertex's index in that LOD's vertex buffer (not range-checked), the two deltas are {x, y, z} offsets in mesh-local units and a missing one is zero, e.g. [{"vertex_index": 0, "position_delta": {"x": 1.0, "y": 0, "z": 0}, "normal_delta": {"x": 0, "y": 0, "z": 0}}]. An empty array leaves the LOD with no deltas.
 //   @returns { morph_target_name: string, lod_index: int, deltas_set: int, total_deltas_lod0: int, saved: bool }
 
 TSharedPtr<FJsonObject> HandleSetMorphTargetDeltas(
@@ -1417,9 +1417,9 @@ TSharedPtr<FJsonObject> HandleGetMorphTargetDeltas(
 // ---------------------------------------------------------------------------
 // get_skeletal_mesh_section_info
 // ---------------------------------------------------------------------------
-// MCP:get_skeletal_mesh_section_info - Get section data for a LOD: material index, triangle count, vertex count, flags.
-//   @param skeletal_mesh_path - Content path to the skeletal mesh asset
-//   @param lod_index - LOD index to query (default 0)
+// MCP:get_skeletal_mesh_section_info - Read the render sections of one LOD of a skeletal mesh asset from its imported model: per section its material slot index, triangle and vertex counts, bone map size and the cast-shadow, recompute-tangent, ray-tracing and disabled flags, plus the LOD's total vertex count. Read-only: it changes nothing. A mesh that does not load, or a lod_index outside the mesh's LOD count, is an error. Use it to pick the section_index that set_skeletal_mesh_section_flags writes; for whole-mesh counts use get_skeletal_mesh_info, for one LOD's settings get_skeletal_mesh_lod_info, and for slot names get_skeletal_mesh_material_slots.
+//   @param skeletal_mesh_path - Content path of the USkeletalMesh asset (object or package path), e.g. '/Game/Characters/SKM_Hero'.
+//   @param lod_index - 0-based LOD index to read (default 0); it must be below num_lods from get_skeletal_mesh_info.
 //   @returns { skeletal_mesh_path: string, lod_index: int, num_sections: int, lod_num_vertices: int, sections: [{section_index, material_index, num_triangles, num_vertices, recompute_tangent, cast_shadow, visible_in_ray_tracing, disabled, bone_map_count}] }
 
 TSharedPtr<FJsonObject> HandleGetSkeletalMeshSectionInfo(
@@ -2106,12 +2106,12 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshSocketParent(
 // ---------------------------------------------------------------------------
 // set_skeletal_mesh_socket_transform
 // ---------------------------------------------------------------------------
-// MCP:set_skeletal_mesh_socket_transform - Set the local transform (relative to parent bone) of a socket on a skeletal mesh. All three of location/rotation/scale are optional; only fields present are written.
-//   @param skeletal_mesh_path - Content path to the skeletal mesh asset
-//   @param socket_name - Name of the socket to modify
-//   @param location - Optional [x, y, z] relative location
-//   @param rotation - Optional [pitch, yaw, roll] relative rotation (degrees)
-//   @param scale - Optional [x, y, z] relative scale
+// MCP:set_skeletal_mesh_socket_transform - Set the local transform (relative to its parent bone) of an existing socket on a skeletal mesh asset and save the mesh. location, rotation and scale are each optional but at least one is required; only those passed are written and the rest keep their current values. Not an undo step; repeating the call writes and saves the same transform again. A missing socket is an error and nothing changes. A socket that exists only on the mesh's skeleton is found too, but only the mesh is saved, so that edit stays unsaved in memory. A failed save is an error. Create the socket with add_skeletal_mesh_socket, move it to another bone with set_skeletal_mesh_socket_parent, rename it with rename_skeletal_mesh_socket.
+//   @param skeletal_mesh_path - Content path of the USkeletalMesh asset (object or package path), e.g. '/Game/Characters/SKM_Hero'.
+//   @param socket_name - Name of an existing socket on the mesh (or its skeleton), as add_skeletal_mesh_socket created it, e.g. 'hand_r_socket'.
+//   @param location - Optional [x, y, z] offset from the parent bone, in centimetres.
+//   @param rotation - Optional [pitch, yaw, roll] rotation relative to the parent bone, in degrees.
+//   @param scale - Optional [x, y, z] scale relative to the parent bone, e.g. [1, 1, 1].
 //   @returns { socket_name: string, skeletal_mesh_path: string, applied: {location, rotation, scale}, location_x: float, location_y: float, location_z: float, rotation_pitch: float, rotation_yaw: float, rotation_roll: float, scale_x: float, scale_y: float, scale_z: float }
 
 TSharedPtr<FJsonObject> HandleSetSkeletalMeshSocketTransform(

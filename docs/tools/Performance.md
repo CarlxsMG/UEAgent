@@ -81,7 +81,7 @@ Close an open named region and return its duration in ms. Removes the region fro
 
 *Read-only.*
 
-Retrieves current and target FPS along with performance settings and world network mode, plus the engine-wide rolling frame averages, the live UObject count, byte-precise process memory and the scalability screen percentage. Read-only.
+Read a one-call frame-rate snapshot of the editor without changing anything: current_fps from the editor world's last tick (0 while paused or before the first tick, and the editor world even while PIE runs), target_fps (the engine max-FPS cap, or 60 when uncapped) and their difference, the engine-wide rolling averages GAverageFPS and GAverageMS, frame pacing (r.VSync, smoothing, max and min FPS), the r.ScreenPercentage in use, the live UObject count, process physical memory in bytes and MB, and the world's name and net mode. Use it for a quick is-it-fast-enough check; for per-thread times and a CPU/GPU bottleneck verdict use get_frame_timing, for a memory breakdown (scene, GPU, system) get_memory_usage, for quality presets get_scalability_levels, and for a profile over time start_trace. The values are instantaneous: an unfocused editor is throttled, so call it twice and compare. Errors only when there is no editor world.
 
 No parameters.
 
@@ -101,7 +101,7 @@ No parameters.
 
 *Read-only.*
 
-Retrieves detailed memory usage including process, scene, GPU, and system information.
+Read a snapshot of memory use for the whole editor process without changing anything, in four blocks: process_memory (used, peak, available and total physical, used and peak virtual, in whole MB), scene_memory (a walk of every actor of the editor world, not a PIE world: actors, components, and on StaticMeshActors only the meshes, distinct materials and the distinct textures those materials use, plus every UTexture2D resident in memory process-wide), gpu_memory (dedicated, shared and total video memory, present only when the RHI reports them, and streaming and non-streaming texture memory) and system_info (platform, CPU brand, cores, threads). Use it to see where memory goes overall; for one asset's own size use get_asset_memory_usage, for byte-precise process memory next to the frame rate get_fps_info. The scene walk visits every actor, so it costs more on big levels. Errors only when there is no editor world.
 
 No parameters.
 

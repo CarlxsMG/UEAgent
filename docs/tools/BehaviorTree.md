@@ -126,13 +126,13 @@ Read the settings of one node of a BehaviorTree asset -- a composite, a task, a 
 
 *Read-only.*
 
-Reader: runtime BT status + active task name (if any) on an AI pawn.
+Read the live state of the behavior tree component driving one actor in the editor world: has_bt (whether a UBehaviorTreeComponent was found, through the actor's AIController brain or on the actor itself), is_running, is_paused and bt_asset_name, the tree it is running. It does not report the active task or a status enum. Read-only. The actor is searched in the editor world only, never PIE, so it sees a tree started there with run_behavior_tree; an actor without a tree is a success with has_bt false, and an actor that is not found is an error. Inspect the tree asset itself with get_behavior_tree_info and blackboard values with get_blackboard_value; change the run state with pause_behavior_tree, resume_behavior_tree, restart_behavior_tree or stop_behavior_tree.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Name or label of the AI-possessed pawn (or AIController) whose UBehaviorTreeComponent to query. |
+| `actor_name` | string | yes | Object name or label of the AI-possessed pawn, or of its AIController, in the editor world, e.g. 'BP_Guard_C_0'. |
 
-**Returns:** `{ actor_name, run_status, run_status_name, active_task_name, bt_asset_name }`
+**Returns:** `{ actor_name, has_bt: bool, is_running: bool, is_paused: bool, bt_asset_name: string }`
 
 ## `get_blackboard_data`
 

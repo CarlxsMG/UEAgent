@@ -204,8 +204,8 @@ TSharedPtr<FJsonObject> HandleImportSoundFile(const TSharedPtr<FJsonObject>& Par
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:reimport_asset - Reimport an asset from its recorded source file via FReimportManager (legacy).  Works on any asset that carries UAssetImportData (e.g. a texture or sound that was imported from a file on disk). Runs fully automated (no dialogs). Returns can_reimport, reimported, and the recorded source_files.
-//   @param asset_path - Object path of the asset, e.g. /Game/Imported/MyTex.MyTex.
+// MCP:reimport_asset - Reimport an asset from the source file it was imported from (texture, sound, mesh or anything with UAssetImportData), through the legacy FReimportManager handlers, fully automated with no dialogs, overwriting the asset's content in memory with the file's current content. The asset is marked dirty but not saved: save it with save_asset. It cannot be undone. Use it after the source file changed on disk; for assets imported through Interchange pipelines use reimport_interchange_asset; to see the recorded source file first use get_asset_import_data; to bring in a new file use import_texture_file or import_sound_file. When no handler can reimport the asset (can_reimport false) nothing happens; when the recorded file is missing or the reimport fails, reimported is false. Both still return success true, so check reimported. Repeating it reimports again. An asset that does not load is an error.
+//   @param asset_path - Asset path in object form, e.g. "/Game/Imported/T_Rock.T_Rock" (package form "/Game/Imported/T_Rock" also loads).
 //   @returns { asset_path: string, can_reimport: bool, reimported: bool, source_files: [string] }
 
 TSharedPtr<FJsonObject> HandleReimportAsset(const TSharedPtr<FJsonObject>& Params)

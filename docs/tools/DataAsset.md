@@ -24,16 +24,16 @@ Add or update a keyframe (time, value) on one channel of a CurveFloat, CurveVect
 
 ## `add_curve_table_key`
 
-*Additive.*
+*Destructive, idempotent.*
 
-Add or update a single key on an existing UCurveTable row's rich curve.  Creates the row on demand if it does not yet exist.
+Set one key (time, value) on a row of a UCurveTable asset with rich curves, in one undo step, then save the table: a key already at that time gets the new value, otherwise a key is added, and a row that does not exist yet is created (created_row true). Use it to key one point at a time; to create or replace a whole row with several keys at once use add_curve_table_row, to delete a key remove_curve_table_key (inverse), to delete the row delete_curve_table_row, and to read rows and keys get_curve_table_info; create the table with create_curve_table. Idempotent: the same time and value again leaves the curve as it was (and saves again). key_added is true for both an added and an updated key; time and value are read back from the stored key, and key_count tells whether a key was added. A table that does not load, or one in SimpleCurves mode (it cannot hold rich keys), is an error before anything changes; a failed save (for example while PIE runs) makes success false with the key only in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `curve_table_path` | string | yes | Full asset path to the UCurveTable. |
-| `row_name` | string | yes | Name of the row (rich curve) to key. |
-| `time` | number | yes | Key time (X). |
-| `value` | number | yes | Key value (Y). |
+| `curve_table_path` | string | yes | Asset path of the UCurveTable, e.g. "/Game/Data/CT_Damage", as create_curve_table returns it. |
+| `row_name` | string | yes | Name of the row (one curve) to key, e.g. "Fireball"; created when missing. |
+| `time` | number | yes | Key time, the curve's X value as a float, e.g. 1 (often a level or seconds). |
+| `value` | number | yes | Key value, the curve's Y value as a float, e.g. 25.5. |
 
 **Returns:** `{ curve_table_path: string, row_name: string, time: number, value: number, key_added: bool, created_row: bool, key_count: int, row_count: int, saved: bool }`
 
@@ -55,13 +55,13 @@ Add (or replace) a named FRichCurve row in a UCurveTable, optionally seeding key
 
 *Additive.*
 
-Attach a DataTable source to a UDataRegistry.  Creates a UDataRegistrySource_DataTable (owned by the registry) pointing at the given DataTable and appends it to the registry's source list. The DataTable RowStruct must match the registry's ItemStruct.
+Attach a DataTable as a source of a UDataRegistry asset: a UDataRegistrySource_DataTable owned by the registry, pointing at the table, is appended to the registry's DataSources list, in one undo step, and the registry is saved. The DataTable RowStruct must match the registry's ItemStruct (create_data_registry sets it); a mismatch, or a registry or table that does not load, is an error and nothing changes. Each call appends another source, even for a table already attached, so check get_data_registry_info (DataSources) first; remove_data_registry_source is the inverse. The running subsystem does not see the new source until initialize_data_registry or refresh_data_registry_map; then get_data_registry_item reads its rows. A failed save makes success false with saved=false and save_error, the source kept in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `registry_path` | string | yes | Content path to the UDataRegistry asset. |
-| `data_table_path` | string | yes | Content path to the source UDataTable. |
-| `precache` | boolean | no | bool, enables synchronous cached lookups (default true). |
+| `registry_path` | string | yes | Content path to the UDataRegistry asset, e.g. "/Game/Data/DR_Items" (the ".DR_Items" suffix optional), as create_data_registry returns it. |
+| `data_table_path` | string | yes | Content path to the source UDataTable, e.g. "/Game/Data/DT_Items"; its RowStruct must equal the registry's ItemStruct. |
+| `precache` | boolean | no | bool, enables synchronous cached lookups (default true): the table is loaded into the cache when the registry initializes, which get_data_registry_item needs. |
 
 **Returns:** `{ registry_path: string, data_table_path: string, source_name: string, success: bool, precache: bool, source_count: int, saved: bool, save_error: string }`
 
@@ -95,16 +95,16 @@ Creates a UCompositeCurveTable at package_path/name that stacks the given UCurve
 
 ## `create_composite_data_table`
 
-*Additive.*
+*Destructive, idempotent.*
 
-Create (or re-converge) a UCompositeDataTable whose row map is the merge of its parent DataTables, so a fork can EXTEND an upstream table instead of replacing it. The parent list is SET, not appended (re-running with a different list rewrites it), the row struct of every parent is validated BEFORE assignment (a mismatch or a cyclic parent chain would make the engine open a modal dialog and hang the editor), and the merge is verified by re-reading the live row map. Re-running with the row struct and parent list it already has changes nothing: saved=false and a note, and nothing is saved.
+Create, or bring up to date, a UCompositeDataTable whose rows are the merge of its parent DataTables, so a project can extend an upstream table without editing it; then save it and verify the merge against the live row map. Idempotent: the parent list is set, not appended, so a re-run with the same row struct and parents changes nothing (saved=false and a note), and one with another list overwrites the old one. Every parent must load and share the row struct, and the chain must not loop; a breach, an asset of another class at that path, or a new row struct for an existing composite is an error before anything is created or modified. Not an undo step. A standalone table is create_data_table; read the merged rows with get_data_table_rows. A failed save makes success false.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `table_name` | string | yes | Name of the composite DataTable asset to create or converge. |
-| `parent_tables` | array | yes | Array of full asset paths of the parent DataTables, LOW precedence first: a row present in several parents is won by the one with the HIGHEST index. |
-| `package_path` | string | no | Target content package path where the asset lives (check the body for the default). |
-| `row_struct` | string | no | Optional UScriptStruct name for the composite rows. Defaults to the row struct of the first resolved parent (or, on an existing composite, to the one it already has -- which cannot be changed in place). |
+| `table_name` | string | yes | Asset name of the composite, e.g. 'DT_Items_Combined'; package_path/table_name must form a valid long package name. |
+| `parent_tables` | array | yes | Array of DataTable asset paths, lowest precedence first: a row present in several parents takes its values from the one with the highest index, e.g. ["/Game/Data/DT_Items", "/Game/Mod/DT_ItemsExtra"]. A path listed twice counts once. |
+| `package_path` | string | no | Content folder as a long package path, e.g. '/Game/Data' (default /Game/DataTables). |
+| `row_struct` | string | no | Optional row struct name without the F prefix, e.g. 'ItemRow', or its path '/Script/MyGame.ItemRow'. Defaults to the existing composite's struct, else the first parent's; an existing composite's struct cannot be changed in place. |
 | `include_row_sources` | boolean | no | Optional bool (default false): also return the winning parent for EVERY merged row. Expensive on large tables. |
 
 **Returns:** `{ table_name, package_path, table_path, table_class, row_struct, created, already_existed, requested_parent_tables, missing_parents, parents_applied, saved, save_error, note, parent_tables, parent_count, contributing_parent_count, merged_row_count, sum_parent_row_counts, expected_merged_row_count, merged_row_count_matches_parents, parent_row_struct_mismatch, shadowed_rows, shadowed_row_count, row_sources_included, row_sources? }`
@@ -242,13 +242,13 @@ Diff two DataTables row by row and cell by cell without modifying either: two as
 
 *Destructive.*
 
-Export a whole DataTable to CSV with the native exporter (read-only), returning row_struct, row_count and the csv string, optionally also written to a UTF-8 file. Use it as the backup before import_data_table_csv; nested structs and TMaps do not survive CSV cleanly, so export_data_table_as_json is the faithful copy.
+Export a whole DataTable to CSV with the engine's native exporter, returning row_struct, row_count and the csv string; with file_path the same text is also written to that file as UTF-8, overwriting any file there. The DataTable asset itself is never changed. Use it as the backup before import_data_table_csv; nested structs and TMaps do not survive CSV cleanly, so export_data_table_as_json is the faithful copy, and get_data_table_rows or get_data_table_column read rows without exporting. A table that does not load or has no row struct is an error, and so is a file that cannot be written (the csv is then not returned either).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `table_path` | string | yes | Full asset path of the DataTable. |
+| `table_path` | string | yes | Object or package path of the DataTable asset, e.g. '/Game/Data/DT_Items'. |
 | `data_table` | string | no | Alias of table_path: pass one of the two. |
-| `file_path` | string | no | Optional OS path to also write the CSV string to (echoed back as written_to) |
+| `file_path` | string | no | Optional absolute OS path of the file to write, e.g. 'C:/Backups/DT_Items.csv'; an existing file is overwritten, and the path is echoed back as written_to. |
 
 **Returns:** `{ table_path, row_struct, row_count, csv, written_to? }`
 
@@ -598,11 +598,11 @@ Rename a DataTable row key, copying its value byte-exact (safer than delete plus
 
 *Destructive, idempotent.*
 
-Set the editor's active culture/locale (FInternationalization::SetCurrentCulture). Honest error if the culture name isn't recognized.
+Switch the running editor's current culture, language and locale together to one culture (FInternationalization::SetCurrentCulture), clearing any per-asset-group culture: localized text across the editor and PIE re-resolves to that language where translations exist, and numbers and dates format in its locale. It lasts for this editor session only; nothing is saved to config and there is no undo. Use it to preview localized text or string table entries in another language; check a name and see the current culture first with get_culture_info. Setting the culture that is already active changes nothing and succeeds. A culture name the engine does not know is an error and the culture stays as it was.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `culture_name` | string | yes | Required culture identifier, e.g. "en", "es-ES", "ja". |
+| `culture_name` | string | yes | Required culture identifier as an IETF language tag, e.g. "en", "es-ES", "ja"; get_culture_info tells whether a name is known. |
 
 **Returns:** `{ culture_name: string, success: bool }`
 

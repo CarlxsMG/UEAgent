@@ -440,8 +440,8 @@ namespace UEAgentHLODImpl
     }
 }
 
-// MCP:get_hlod_layers - Lists all UHLODLayer assets under a content path via the AssetRegistry.
-//   @param path - Optional content path; defaults to /Game
+// MCP:get_hlod_layers - List every World Partition HLOD layer asset (UHLODLayer and subclasses) under a content folder and its subfolders, found through the Asset Registry, with each one's name, object path and layer type (Instancing, MeshMerge, MeshSimplify, MeshApproximate, Custom or CustomHLODActor). Each layer asset is loaded to read its type, but nothing is changed or saved. A folder with no layers, or one that does not exist, gives an empty list and count 0, not an error. Use it to find a layer path, then read one layer's grid settings with get_hlod_layer_info or its assigned actors with get_hlod_layer_actors; create_hlod_layer makes a new one and set_hlod_layer_settings changes one.
+//   @param path - Optional content folder searched recursively, as a long package path, e.g. '/Game/HLOD'; default /Game.
 //   @returns { path: string, hlod_layers: [{ name, path, layer_type }], count: int }
 
 TSharedPtr<FJsonObject> HandleGetHLODLayers(const TSharedPtr<FJsonObject>& Params)
@@ -467,8 +467,8 @@ TSharedPtr<FJsonObject> HandleGetHLODLayers(const TSharedPtr<FJsonObject>& Param
     return mcp_common::MakeOkReply(Listing);
 }
 
-// MCP:get_hlod_layer_info - Reads layer type and streaming-grid settings of a UHLODLayer.
-//   @param hlod_layer_path - Full /Game path to the HLOD layer asset
+// MCP:get_hlod_layer_info - Read one World Partition HLOD layer asset (UHLODLayer): its layer type (Instancing, MeshMerge, MeshSimplify, MeshApproximate, Custom or CustomHLODActor) and its streaming-grid settings, cell_size and loading_range in centimetres and is_spatially_loaded. Read-only: it loads the asset and changes nothing. A path that does not load as an HLOD layer is an error. The grid fields are read by reflection because the engine deprecated them in 5.7; on a build without them they read 0 and false. Find layer paths with get_hlod_layers; change these values with set_hlod_layer_settings, the parent with set_hlod_layer_parent, and list the actors using the layer with get_hlod_layer_actors.
+//   @param hlod_layer_path - Object or package path of the HLOD layer asset, e.g. '/Game/HLOD/HLOD_Instanced' (as get_hlod_layers lists it).
 //   @returns { hlod_layer_path: string, asset_path: string, name: string, layer_type: string, cell_size: int, loading_range: number, is_spatially_loaded: bool }
 
 TSharedPtr<FJsonObject> HandleGetHLODLayerInfo(const TSharedPtr<FJsonObject>& Params)

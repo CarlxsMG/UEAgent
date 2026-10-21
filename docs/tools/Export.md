@@ -113,7 +113,7 @@ Load an asset and write a property report to a new file Saved/Reports/Assets/&lt
 
 *Read-only.*
 
-Lists the jobs currently in the editor Movie Render Queue.
+List the jobs in the editor's Movie Render Queue right now (the queue of this editor session, held by the Movie Pipeline Queue subsystem; nothing is read from disk): each job's job_name, sequence and map paths, enabled flag and setting_count (settings on its configuration), plus queue_job_count. Use it to find job names before set_render_job_output, delete_render_job or render_sequence_to_movie, and to confirm what create_render_job added; cancel_render_job stops a render in progress. Read-only and idempotent. An empty queue gives queue_job_count 0, not an error; an editor without the subsystem (Movie Render Queue plugin off) is an error.
 
 No parameters.
 

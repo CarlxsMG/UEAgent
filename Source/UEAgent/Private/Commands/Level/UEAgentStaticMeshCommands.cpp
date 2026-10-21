@@ -394,12 +394,12 @@ TSharedPtr<FJsonObject> HandleRemoveStaticMeshSocket(
 // ---------------------------------------------------------------------------
 // set_static_mesh_socket_transform
 // ---------------------------------------------------------------------------
-// MCP:set_static_mesh_socket_transform - Update the relative transform of an existing static mesh socket (only the provided fields). A location, rotation or scale that is not three numbers is an error.
-//   @param static_mesh_path - Content path to the UStaticMesh asset.
-//   @param socket_name - Name of the socket to update.
-//   @param location - Socket relative location as [x, y, z] (optional).
-//   @param rotation - Socket relative rotation as [pitch, yaw, roll] (optional).
-//   @param scale - Socket relative scale as [x, y, z] (optional).
+// MCP:set_static_mesh_socket_transform - Move, rotate or scale an existing socket of a UStaticMesh asset relative to the mesh, writing only the fields given (the others keep their value), then save the mesh; undo does not restore the socket. The reply reads back the socket's whole transform. Use it to adjust a socket that add_static_mesh_socket created; to rename one use rename_static_mesh_socket, to delete one remove_static_mesh_socket, to see every socket get_static_mesh_info; skeletal mesh sockets have their own tools. A socket_name the mesh does not have is not an error: updated is false and nothing is touched or saved. A mesh that does not load, or a location, rotation or scale that is not three numbers, is an error before anything changes; a failed save (for example while PIE runs) is an error too, with the new transform already on the mesh in memory. The same values again rewrite them and save.
+//   @param static_mesh_path - Package or object path of the UStaticMesh, e.g. "/Game/Meshes/SM_Crate".
+//   @param socket_name - Name of the existing socket, compared as an FName (case-insensitive), as get_static_mesh_info lists it.
+//   @param location - New relative location [x, y, z] in cm from the mesh origin, e.g. [0, 0, 50] (optional).
+//   @param rotation - New relative rotation [pitch, yaw, roll] in degrees, e.g. [0, 90, 0] (optional).
+//   @param scale - New relative scale [x, y, z] as multipliers, e.g. [1, 1, 1] (optional).
 //   @returns { static_mesh_path, socket_name, updated, location:{x,y,z}, rotation:{pitch,yaw,roll}, scale:{x,y,z}, saved }
 TSharedPtr<FJsonObject> HandleSetStaticMeshSocketTransform(
 	const TSharedPtr<FJsonObject>& Params)

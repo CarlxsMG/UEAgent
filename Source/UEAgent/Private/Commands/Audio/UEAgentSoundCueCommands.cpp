@@ -156,9 +156,9 @@ namespace
 // ---------------------------------------------------------------------------
 // create_sound_cue
 // ---------------------------------------------------------------------------
-// MCP:create_sound_cue - Create an empty USoundCue (no nodes, no first node) at package_path/name and save it; an existing cue there is returned unchanged (already_existed:true). Returns cue_path, asset_path, node_count and saved. Build the graph with add_sound_cue_node, connect_sound_cue_nodes and set_sound_cue_first_node.
-//   @param name - Asset name, e.g. SC_Footsteps
-//   @param package_path - Target content path, defaults to /Game/SoundCues
+// MCP:create_sound_cue - Create an empty USoundCue asset (no nodes and no first node, so it plays nothing yet) at package_path/name and save it. Idempotent: a sound cue already at that path is returned unchanged with created=false and already_existed=true, and nothing is saved; an asset of another class there is an error and nothing is written. Not an undo step. Build the graph next with add_sound_cue_node, connect_sound_cue_nodes and set_sound_cue_first_node, and read it back with get_sound_cue_graph; cue_path is the path those tools take. A failed save makes success false, with saved=false and the new cue left in memory.
+//   @param name - Asset name, e.g. 'SC_Footsteps'; package_path/name must form a valid long package name.
+//   @param package_path - Content folder as a long package path, e.g. '/Game/Audio/Cues' (default /Game/SoundCues); trailing slashes are ignored.
 //   @returns { name: string, package_path: string, asset_path: string, cue_path: string, created: bool, already_existed: bool, node_count: int, saved: bool, message: string }
 TSharedPtr<FJsonObject> HandleCreateSoundCue(const TSharedPtr<FJsonObject>& Params)
 {

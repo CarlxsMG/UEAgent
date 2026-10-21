@@ -1387,10 +1387,10 @@ TSharedPtr<FJsonObject> HandleConsolidateAssets(
 // ---------------------------------------------------------------------------
 // 8. find_duplicate_assets
 // ---------------------------------------------------------------------------
-// MCP:find_duplicate_assets - Find groups of assets sharing the same base name under a folder tree (e.g. same name existing under both a vendored library tree and a first-party fork)
-//   @param folder_path - Content folder to scan, default /Game
+// MCP:find_duplicate_assets - Find groups of assets that share the same asset name under a content folder tree (e.g. the same name under both a vendored library tree and a first-party fork), from Asset Registry metadata only: nothing is loaded and contents are not compared, so a group means same name, not same data. Groups come most-duplicated first, each with name, count, classes and every asset's path, package and class. Use it to triage name clashes before cleanup: get_asset_referencers shows who uses each copy, audit_fork_refs checks references between a library and its fork, consolidate_assets merges copies and find_unused_assets finds unreferenced ones. Read-only and idempotent. group_count counts the groups returned, results_truncated says when max_results cut some, total_duplicate_assets counts the extra copies (count - 1 per group) and assets_scanned the assets left after class_filter. No duplicates gives group_count 0, not an error.
+//   @param folder_path - Content folder to scan, a package path such as /Game/Characters, default /Game
 //   @param recursive - If true, scan subfolders, default true
-//   @param min_group_size - Minimum number of same-named assets to report as a duplicate group, default 2
+//   @param min_group_size - Minimum number of same-named assets to report as a duplicate group, default 2 (a value below 1 counts as 2)
 //   @param class_filter - Optional list of class short names (e.g. "StaticMesh","Material"); only assets whose AssetClassPath short name case-insensitively matches one of these are considered
 //   @param max_results - Cap on the number of duplicate GROUPS returned (not raw assets), clamped 1..20000, default 2000
 //   @returns { folder_path, recursive, class_filter, min_group_size, group_count, total_duplicate_assets, assets_scanned, max_results, results_truncated, groups: [{ name, count, classes: [string], assets: [{path, package, class}] }] } (groups sorted by count descending)

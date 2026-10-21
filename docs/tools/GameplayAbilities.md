@@ -65,26 +65,26 @@ Append one modifier with a constant magnitude to the Modifiers array on the clas
 
 *Destructive.*
 
-Apply a GameplayEffect class to an editor-world actor ability system component: an outgoing spec at the given level, with a fresh context from that component, applied to self. applied tells whether the engine returned a valid handle. execute_batch of apply_gameplay_effect calls applies a list.
+Apply a GameplayEffect class to an editor-world actor's ability system component: an outgoing spec at the given level, with a fresh context from that component, applied to self. Duration and infinite effects then show in get_active_effects and come off with remove_gameplay_effect; an instant effect changes base values at once and leaves nothing active. Check the outcome with get_attributes or get_attribute_value; to set one value directly use set_attribute_base_value. applied is the returned handle's IsValid(), which the engine leaves false for an instant effect even when it executed, and for any effect its requirements or immunity block. Not idempotent: each call adds another application or stack. Runtime state only: no undo step, nothing saved. execute_batch of apply_gameplay_effect calls applies a list.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names |
-| `effect_class` | string | yes | Class path of a UGameplayEffect subclass; a Blueprint GE needs its _C class path, e.g. "/Game/Effects/GE_Burn.GE_Burn_C" |
-| `level` | number | no | Effect level for scalable magnitudes, fractions allowed; default 1.0 |
+| `actor_name` | string | yes | Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1": the whole name, case-insensitive, no wildcards. get_actors_in_level lists names; find_actors_by_name maps a label to its name |
+| `effect_class` | string | yes | Class path of a UGameplayEffect subclass, loaded with LoadClass: a Blueprint GE needs its _C class path, e.g. "/Game/Effects/GE_Burn.GE_Burn_C"; a C++ one "/Script/MyGame.GE_Burn". create_gameplay_effect_blueprint makes one; an unloadable path is an error |
+| `level` | number | no | Effect level that scalable magnitudes are read at, a number, fractions allowed (e.g. 2.5); default 1.0 |
 
 **Returns:** `{ actor_name, effect_class, level, applied }`
 
 ## `cancel_ability`
 
-*Destructive.*
+*Destructive, idempotent.*
 
-Cancel one granted ability on an editor-world actor ability system component (CancelAbilityHandle), reading its spec before and after: returns was_active, still_active and cancelled. success is false, with an error, when the ability is still active afterwards (it may not allow cancelling).
+Stop a running ability on an editor-world actor's ability system component (CancelAbilityHandle) while keeping it granted, reading its spec before and after: was_active, still_active and cancelled. Start it again with activate_ability; to ungrant it use remove_ability instead; get_active_abilities shows which granted abilities are running (is_active). Idempotent: cancelling one that is not running changes nothing and still succeeds with cancelled=false. success is false, with an error, when it is still active afterwards (the ability may not allow cancelling). Runtime state only: no undo step, nothing saved. An unknown actor, a missing component or no matching granted ability is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names |
-| `ability_name` | string | yes | Ability to match among the granted specs: the ability_name from get_active_abilities, the class name with or without _C ("GA_Jump"), the asset path ("/Game/Abilities/GA_Jump") or the class path; case-insensitive, first match wins |
+| `actor_name` | string | yes | Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1": the whole name, case-insensitive, no wildcards. get_actors_in_level lists names; find_actors_by_name maps a label to its name |
+| `ability_name` | string | yes | Granted ability to cancel: the ability_name get_active_abilities returns, the class name with or without _C ("GA_Jump"), the asset path ("/Game/Abilities/GA_Jump") or the class path; case-insensitive, first matching spec wins |
 
 **Returns:** `{ actor_name, ability_name, was_active, still_active, cancelled } -- read back from the spec: cancelled means was_active and not still_active`
 
@@ -200,11 +200,11 @@ Read one ability granted to an editor-world actor ability system component: abil
 
 *Read-only.*
 
-Read the ability system component of an editor-world actor (the IAbilitySystemInterface answer, else its first UAbilitySystemComponent): component_name, active_abilities_count (all granted specs, active or not) and active_effects_count. Read-only; a missing actor or component is an error, not has_ability_system=false.
+Read a short census of an editor-world actor's ability system component: component_name, active_abilities_count (every granted spec, running or not) and active_effects_count. Call it first to confirm an actor has a component before grant_ability, apply_gameplay_effect or send_gameplay_event_to_actor; for the entries behind the counts use get_active_abilities, get_active_effects or get_attributes. The component is the actor's IAbilitySystemInterface answer, else its first UAbilitySystemComponent. Read-only and idempotent; it reads the editor world, not a PIE session. A missing actor or component is an error, so has_ability_system is never false.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names |
+| `actor_name` | string | yes | Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1": the whole name, case-insensitive, no wildcards. get_actors_in_level lists names; find_actors_by_name maps a label to its name |
 
 **Returns:** `{ actor_name, has_ability_system, component_name, active_abilities_count, active_effects_count }`
 
@@ -298,11 +298,11 @@ Read the class default object of a GameplayCueNotify Blueprint, loaded by asset 
 
 *Read-only.*
 
-Read the GEComponents array from a GameplayEffect CDO, round-tripping each component's configured values (granted/asset/blocked tags, chance-to-apply, tag requirements, granted-ability configs)
+List the GameplayEffectComponents (the GEComponents array) on the class default object of a GameplayEffect Blueprint without changing it, in array order, each with its class and, for the standard ones, its configured values: target, asset and blocked-ability tags (with their combined tags), chance to apply (read at level 0), application, ongoing and removal require and ignore tags, and granted abilities (class, path, input_id); any other component class comes back with its class only. Use it to check what add_gameplay_effect_component, set_gameplay_effect_component or the set_gameplay_effect_component_* tools wrote, and to find the index remove_gameplay_effect_component takes; for duration, period, stacking and modifiers use get_gameplay_effect_info and get_gameplay_effect_modifiers. A GE with no components gives component_count 0. A path that does not load as a Blueprint, has no generated class, or is not a GameplayEffect Blueprint is an error; a native GameplayEffect asset (create_gameplay_effect_asset) is not read here.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `gameplay_effect_path` | string | yes | Full asset path of the GE Blueprint |
+| `gameplay_effect_path` | string | yes | Asset path of the GameplayEffect Blueprint, e.g. "/Game/GAS/GE_Burning", as create_gameplay_effect_blueprint returns it (asset_path). |
 
 **Returns:** `{ gameplay_effect_path: string, components: [object], component_count: int }`
 
@@ -323,11 +323,11 @@ Read the first active gameplay effect on an editor-world actor ability system co
 
 *Read-only.*
 
-Read the attribute modifiers of a GameplayEffect asset (native asset, or Blueprint GE class default object): attribute, attribute_set, modifier_op and, when static, the magnitude at level 1, plus duration_policy and modifier_count. Read-only; magnitude_type always says ScalableFloat, whatever the real type.
+Read the attribute modifiers authored on a GameplayEffect asset (a native UGameplayEffect asset, or a Blueprint GE's class default object): for each, attribute, attribute_set, modifier_op (Additive, Multiplicitive, Division or Override) and magnitude_value_at_level_1; plus duration_policy (Instant, HasDuration or Infinite) and modifier_count. Use it to inspect an effect before apply_gameplay_effect; for an effect already active on an actor use get_gameplay_effect_info, for the asset's components get_gameplay_effect_components, and change modifiers with add_gameplay_effect_modifier, set_gameplay_effect_modifier or remove_gameplay_effect_modifier. Read-only and idempotent. magnitude_type always says ScalableFloat whatever the real type; magnitude_value_at_level_1 is present only for a ScalableFloat magnitude, so its absence means attribute-based, SetByCaller or custom. An unknown path is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `effect_path` | string | yes | GameplayEffect asset path: a Blueprint GE ("/Game/Effects/GE_Burn") or a native UGameplayEffect asset |
+| `effect_path` | string | yes | Asset path of the effect, not its _C class path: a Blueprint GE "/Game/Effects/GE_Burn" or a native UGameplayEffect asset "/Game/Effects/GE_Native" (".Name" suffix optional). find_assets_by_name finds it; create_gameplay_effect_blueprint or create_gameplay_effect_asset makes one |
 
 **Returns:** `{ attribute, attribute_set, modifier_op, magnitude_type, magnitude_value_at_level_1, effect_path, duration_policy, modifier_count, modifiers }`
 
@@ -376,12 +376,12 @@ Registers a REAL listener on a target actor's UAbilitySystemComponent for a game
 
 *Destructive.*
 
-Remove one granted ability from an editor-world actor ability system component with ClearAbility. An active ability is only marked, and leaves when it ends (pending_removal=true); removed=true means the spec is gone. success is false with an error otherwise.
+Ungrant one ability from an editor-world actor's ability system component with ClearAbility, the inverse of grant_ability. To only stop a running ability and keep it granted, use cancel_ability instead; get_active_abilities lists what is granted and confirms the result. A running ability is only marked and leaves when it ends (pending_removal=true, still a success); removed=true means the spec is gone now. Only the first matching spec goes, so a class granted twice needs two calls; once none is left a call answers Ability not found. success is false with an error if the spec is still granted afterwards. Runtime state only: no undo step, nothing saved. An unknown actor or missing component is an error and changes nothing.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names |
-| `ability_name` | string | yes | Ability to match among the granted specs: the ability_name from get_active_abilities, the class name with or without _C ("GA_Jump"), the asset path ("/Game/Abilities/GA_Jump") or the class path; case-insensitive, first match wins |
+| `actor_name` | string | yes | Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1": the whole name, case-insensitive, no wildcards. get_actors_in_level lists names; find_actors_by_name maps a label to its name |
+| `ability_name` | string | yes | Granted ability to remove: the ability_name get_active_abilities returns, the class name with or without _C ("GA_Jump"), the asset path ("/Game/Abilities/GA_Jump") or the class path; case-insensitive, first matching spec wins |
 
 **Returns:** `{ actor_name, ability_name, removed, pending_removal } -- read back: removed means the spec is gone; an active ability is only marked, and leaves when it ends (pending_removal)`
 
@@ -389,12 +389,12 @@ Remove one granted ability from an editor-world actor ability system component w
 
 *Destructive.*
 
-Remove the first active gameplay effect on an editor-world actor ability system component whose definition matches effect_name, with all its stacks (RemoveActiveGameplayEffect). removed is the engine answer confirmed by the effect no longer being active; success is false with an error otherwise.
+Remove one active gameplay effect, with all its stacks, from an editor-world actor's ability system component (RemoveActiveGameplayEffect): the first whose definition matches effect_name. The inverse of apply_gameplay_effect; get_active_effects lists what is active and confirms the result. To change the effect asset itself use remove_gameplay_effect_modifier or remove_gameplay_effect_component instead. Instant effects never stay active, so they cannot be removed here (restore a value with set_attribute_base_value). When several active effects share a definition only the first goes, so call again for each; with none left a call answers Effect not found. removed is the engine answer confirmed by the effect no longer being active; success is false with an error otherwise. Runtime state only: no undo step, nothing saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names |
-| `effect_name` | string | yes | Active effect to match by its definition: the effect_name from get_active_effects, the class name with or without _C ("GE_Burn"), the asset path ("/Game/Effects/GE_Burn") or the class path; case-insensitive, first match wins |
+| `actor_name` | string | yes | Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1": the whole name, case-insensitive, no wildcards. get_actors_in_level lists names; find_actors_by_name maps a label to its name |
+| `effect_name` | string | yes | Active effect to remove, matched by its definition: the effect_name get_active_effects returns, the class name with or without _C ("GE_Burn"), the asset path ("/Game/Effects/GE_Burn") or the class path; case-insensitive, first active match wins |
 
 **Returns:** `{ actor_name, effect_name, removed } -- removed is what the engine reports, confirmed by the effect not being active afterwards`
 
@@ -430,13 +430,13 @@ Remove a modifier from a GameplayEffect CDO's Modifiers array by index (the D in
 
 *Destructive.*
 
-Sends a FGameplayEvent to the target actor's UAbilitySystemComponent via UAbilitySystemBlueprintLibrary::SendGameplayEventToActor (AbilitySystemBlueprintLibrary.h). Wraps the engine's Lyra-style event bus entry point.
+Send a gameplay event to an editor-world actor's ability system component (UAbilitySystemBlueprintLibrary::SendGameplayEventToActor): it tries to activate every granted ability whose trigger is a GameplayEvent on event_tag or a parent tag, and wakes listeners such as Wait Gameplay Event tasks. Use it for event-driven abilities; to start an ability directly use activate_ability, to change attributes apply_gameplay_effect, and to watch tag count changes register_gameplay_tag_event. Not idempotent: each call fires the event again. Nothing is saved and there is no undo step. sent and asc_resolved are always true on success and do not say whether anything reacted: check with get_active_abilities (is_active) or get_ability_tasks. An unknown actor, a missing component or an unregistered tag is an error and sends nothing.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Display label or internal name of the target editor-world actor (required) |
-| `event_tag` | string | yes | FGameplayTag name (e.g. "Gameplay.Event.Hit") (required) |
-| `payload_magnitude` | number | no | Optional numeric magnitude placed in FGameplayEventData::EventMagnitude |
+| `actor_name` | string | yes | Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1": the whole name, case-insensitive, no wildcards. get_actors_in_level lists names; find_actors_by_name maps a label to its name (required) |
+| `event_tag` | string | yes | Full name of a registered gameplay tag, e.g. "Gameplay.Event.Hit"; find_gameplay_tags lists them, create_gameplay_tag adds one, and an unregistered tag is an error (required) |
+| `payload_magnitude` | number | no | Optional number placed in the payload's EventMagnitude, e.g. 25.0; omitted leaves 0. The payload carries only EventTag and EventMagnitude (no instigator, target or object) |
 
 **Returns:** `{ actor_name: string, event_tag: string, sent: bool, asc_resolved: bool }`
 

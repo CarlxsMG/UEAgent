@@ -10,12 +10,12 @@ Back to the [index](README.md).
 
 *Read-only.*
 
-Read the AGameModeBase CDO's class slots (DefaultPawnClass, HUDClass, PlayerStateClass, GameStateClass, SpectatorClass, PlayerControllerClass) and the world settings' DefaultGameMode override.
+Read which classes a game mode spawns: DefaultPawnClass, HUDClass, PlayerStateClass, GameStateClass, SpectatorClass and PlayerControllerClass from the class default object of an AGameModeBase subclass, native or Blueprint, plus its parent class, is_multiplayer (true when it derives from AGameMode, the match-state subclass) and the GameMode override in the open editor level's World Settings. Read-only. An empty string means that slot or override is unset; a class that does not resolve or is not a game mode is an error. Change the slots with set_game_mode_classes and the level override with set_game_mode_override; the project-wide default is the GlobalDefaultGameMode of GameMapsSettings (get_project_settings_value), and get_world_settings reads the rest of World Settings.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `game_mode_class` | string | no | Optional AGameModeBase class name (short or /Script/ path) |
-| `game_mode_class_path` | string | no | Optional long /Script/Engine.GameModeBase path (takes precedence) |
+| `game_mode_class` | string | no | Game mode class by name or path: a native short name with or without the A prefix ('GameModeBase'), a /Script path, or a Blueprint asset or class path, e.g. '/Game/Core/BP_MyGameMode'. One of the two class params is required. |
+| `game_mode_class_path` | string | no | Full class path, e.g. '/Script/Engine.GameModeBase' or '/Game/Core/BP_MyGameMode.BP_MyGameMode_C'; tried before game_mode_class. |
 
 **Returns:** `{ game_mode_class: string, parent_class: string, is_multiplayer: bool, default_pawn_class: string, hud_class: string, player_state_class: string, game_state_class: string, spectator_class: string, player_controller_class: string, world_settings_default_game_mode?: string }`
 

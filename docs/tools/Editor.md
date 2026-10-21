@@ -8,15 +8,15 @@ Back to the [index](README.md).
 
 ## `add_component_to_actor`
 
-*Additive, idempotent.*
+*Additive.*
 
-Attach a new component of ANY class to ONE actor already placed in the level: an instance-level component, not a change to its Blueprint. Pick it for a single placed actor; add_component_to_blueprint adds it to the Blueprint so every instance gets it, and a typed add_*_component tool (add_spline_component, add_camera_component...) when you want that class's own fields set in the same call. Returns object_path, the full reflection path to feed straight into set_properties / call_function to configure it. Pass idempotent=true to make re-running safe. Editor world only; the change dirties the actor's package, so save_level to keep it.
+Attach a new component of any class to one actor already placed in the editor world, as an instance component in one undo step; the actor's Blueprint is not changed. Pick it for a single placed actor; add_component_to_blueprint changes the Blueprint so every instance gets it, and a typed add_*_component tool (add_spline_component, add_camera_component...) also sets that class's fields. Each call adds another component, so a retry makes a duplicate; with idempotent=true an existing component of that class is returned instead (already_existed true). The reply's object_path feeds set_properties and call_function; component_name, suffixed when the name is taken, feeds remove_component_from_actor, the inverse. An unknown actor or a class that is not an actor component is an error. It dirties the actor's package; save_level keeps it.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Name of the placed actor to add the component to (editor world). |
-| `component_type` | string | yes | Component class name (e.g., 'StaticMeshComponent', 'BoxComponent', 'UStaticMeshComponent') |
-| `component_name` | string | yes | Name to assign to the new component |
+| `actor_name` | string | yes | Internal object name (not the label) of the placed actor in the editor world, e.g. 'StaticMeshActor_3'. |
+| `component_type` | string | yes | Component class by name or path, with or without the U prefix or the Component suffix, e.g. 'StaticMeshComponent', 'Box' or '/Script/Engine.PointLightComponent'. |
+| `component_name` | string | yes | Name for the new component, e.g. 'TriggerBox'; a taken name gets a unique variant, reported back in component_name. |
 | `location` | array | no | Optional [x, y, z] relative location (for scene components) |
 | `rotation` | array | no | Optional [pitch, yaw, roll] relative rotation (for scene components) |
 | `scale` | array | no | Optional [x, y, z] relative scale (for scene components) |
@@ -453,13 +453,13 @@ Locate actors by a SUBSTRING of their internal name and/or their editor label, r
 
 *Read-only.*
 
-Find groups of assets sharing the same base name under a folder tree (e.g. same name existing under both a vendored library tree and a first-party fork)
+Find groups of assets that share the same asset name under a content folder tree (e.g. the same name under both a vendored library tree and a first-party fork), from Asset Registry metadata only: nothing is loaded and contents are not compared, so a group means same name, not same data. Groups come most-duplicated first, each with name, count, classes and every asset's path, package and class. Use it to triage name clashes before cleanup: get_asset_referencers shows who uses each copy, audit_fork_refs checks references between a library and its fork, consolidate_assets merges copies and find_unused_assets finds unreferenced ones. Read-only and idempotent. group_count counts the groups returned, results_truncated says when max_results cut some, total_duplicate_assets counts the extra copies (count - 1 per group) and assets_scanned the assets left after class_filter. No duplicates gives group_count 0, not an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `folder_path` | string | no | Content folder to scan, default /Game |
+| `folder_path` | string | no | Content folder to scan, a package path such as /Game/Characters, default /Game |
 | `recursive` | boolean | no | If true, scan subfolders, default true |
-| `min_group_size` | number | no | Minimum number of same-named assets to report as a duplicate group, default 2 |
+| `min_group_size` | number | no | Minimum number of same-named assets to report as a duplicate group, default 2 (a value below 1 counts as 2) |
 | `class_filter` | array | no | Optional list of class short names (e.g. "StaticMesh","Material"); only assets whose AssetClassPath short name case-insensitively matches one of these are considered |
 | `max_results` | number | no | Cap on the number of duplicate GROUPS returned (not raw assets), clamped 1..20000, default 2000 |
 
@@ -536,11 +536,11 @@ Which map a world is sitting on: level_name, its package_name (/Game/... or /Eng
 
 *Read-only.*
 
-Reads a console variable's live value, help text, and flags.
+Read the live value of one console variable of the running editor through IConsoleManager, without changing it: the value as a string and parsed as int, float and bool, its help text, its raw flags and set_by (which layer last set it, such as Constructor, Scalability, ProjectSetting or Console). Use it to read one variable by exact name; to find names by substring or prefix use list_cvars; to change a value use set_cvar (or set_cvars_from_json for many); scalability groups as a whole: get_scalability_levels. A name that is not a registered console variable (including a console command, which has no value) is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `name` | string | yes | Console variable name, e.g. "r.ScreenPercentage". |
+| `name` | string | yes | Exact console variable name, e.g. "r.ScreenPercentage" or "t.MaxFPS", as list_cvars returns it (case-insensitive). |
 
 **Returns:** `{ name: string, value: string, string_value: string, int_value: int, float_value: float, bool_value: bool, help: string, flags: int, set_by: string }`
 
@@ -626,7 +626,7 @@ No parameters.
 
 *Read-only.*
 
-Reads the current engine scalability quality levels.  Calls Scalability::GetQualityLevels().
+Read the engine's live scalability quality levels (Scalability::GetQualityLevels, the sg.* groups of the editor session) without changing anything: one level per group, 0 Low, 1 Medium, 2 High, 3 Epic, 4 Cinematic, except ResolutionQuality, which is a screen percentage; single_quality_level is the shared level when every group agrees and -1 when they differ (custom). Use it before and after set_scalability_quality, which changes one group or all; for a single sg.* or r.* console variable use get_cvar; for frame rate under those settings use get_fps_info. These are the editor's current settings, not a per-platform device profile or a saved user setting. Takes no parameters and does not fail.
 
 No parameters.
 
@@ -718,12 +718,12 @@ Bind a UMediaTexture asset to a UMediaPlayer asset (both by asset path) so the t
 
 *Read-only.*
 
-List registered automation tests in the editor (read-only; does not run them)
+List the automation tests registered in this editor without running any: per test its display name, full_test_path, test_name, tags, parameter, source file and line, and participants required. Engine, product and performance tests are listed too, not only smoke tests: the call widens the framework's test filter to every flag and loads the modules that register tests, but changes no asset or level. Tests are returned in registry order up to max_results; total_count counts every registered test, matched_count those the filter matches, and truncated is true when matches were cut off, so narrow the filter or raise max_results. Use it to find the name for run_automation_test; run_smoke_tests runs the smoke set and get_automation_test_results re-reads the last result.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `filter` | string | no | Optional case-insensitive substring matched against the full test path |
-| `max_results` | number | no | Cap on returned entries (default 500) |
+| `filter` | string | no | Optional case-insensitive substring matched against the full test path, e.g. 'UEAgent.' or 'Project.Functional'; empty lists every test. |
+| `max_results` | number | no | Most tests to return, a positive number (default 500); 0 or a negative value also means 500. |
 
 **Returns:** `{ display_name, full_test_path, test_name, test_tags, test_parameter, source_file, source_file_line, num_participants_required, tests, total_count, matched_count, returned_count, max_results, truncated, filter }`
 
@@ -984,7 +984,7 @@ IRREVERSIBLE: wipes the editor's ENTIRE undo AND redo history (the human's entri
 
 *Destructive.*
 
-Run a single automation test by name and return its result (synchronous tests only)
+Run ONE registered automation test in this editor, synchronously, and return its verdict (pass, fail or skipped) with its errors, warnings and log entries. Find the name first with list_automation_tests; re-read the last result later without running anything with get_automation_test_results; run every smoke test at once with run_smoke_tests. A test that needs several ticks (PIE, a map load, a wait) is not run here but answered verdict skipped with the reason -- drive it with run_functional_test_in_pie -- and so is one that needs an interactive user or a real renderer in a headless editor; an editor busy with a slow task or PIE refuses the start. Marked destructive and not idempotent because the test's own code runs in the editor and can create, change or delete assets and actors as it was written to, so two runs need not do the same; this tool itself saves nothing and adds no undo step for what the test did.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1128,11 +1128,11 @@ Write one key into the GConfig copy of an INI (Engine by default), flush it to t
 
 *Destructive, idempotent.*
 
-Toggle the "bitflags" meta on a Blueprint Enum (UUserDefinedEnum) so its enumerators can be combined as bit flags.  Idempotent: re-setting the same state reports already_set with applied=false.
+Turn the "Bitflags" metadata of a Blueprint Enum (UUserDefinedEnum) on or off, as the enum editor's checkbox does: on, its enumerators can be combined as bit flags, so an integer variable marked Bitmask can use it as its Bitmask Enum. Only this flag changes; build the entries with create_enum, add_enum_entry, rename_enum_entry, reorder_enum_entry or remove_enum_entry, and read them with get_enum_info. One undo step; Blueprints that use the enum are notified, and the enum is marked dirty, not saved (save_asset). Idempotent: the state it already has reports already_set=true, applied=false, and changes nothing. A path that does not load a UUserDefinedEnum (a native C++ enum included) is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `enum_path` | string | yes | Full asset path of the UUserDefinedEnum (e.g. /Game/Blueprints/MyEnum). |
+| `enum_path` | string | yes | Full asset path of the UUserDefinedEnum (e.g. /Game/Blueprints/MyEnum, the ".MyEnum" suffix optional), as create_enum returns it or find_assets_by_name finds it. |
 | `bitflags` | boolean | yes | Desired state: true to mark as bitflags, false to clear. |
 
 **Returns:** `{ enum_path: string, bitflags: bool, already_set: bool, applied: bool }`

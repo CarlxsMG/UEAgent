@@ -35,14 +35,14 @@ Attach an evaluator node (by struct name, via reflection) to a UStateTree; evalu
 
 ## `add_state`
 
-*Additive, idempotent.*
+*Destructive, idempotent.*
 
-Add a top-level state (a new SubTree, never a child of another state) to a StateTree asset, then compile and save it. Idempotent: if any state already has that name nothing changes and already_existed is true. Returns state_count, added and saved.
+Add a top-level state of type State (a new SubTree; it cannot create a child of another state) to an existing StateTree asset, then compile and save it; there is no undo step. Create the tree first with create_state_tree; then fill the state with add_state_task, add_state_transition and add_consideration, make it the root with set_state_tree_root, change its type with set_state_type, delete it with remove_state and read the hierarchy back with get_state_tree_info. Idempotent: when a state at any depth already has that name (case-insensitive), nothing is changed or saved and already_existed is true. A tree that does not load or has no editor data is an error; a failed save (for example while PIE runs) makes success false with the state only in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
-| `state_name` | string | yes | Name of the new state, e.g. "Patrol"; the other state commands find states by this name. |
+| `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as create_state_tree or list_state_trees (trees[].path) returns it. |
+| `state_name` | string | yes | Name of the new state, e.g. "Patrol"; it should be unique in the whole tree, because every other state command finds a state by this name (the first match, depth-first). |
 
 **Returns:** `{ tree_path, state_name, state_count, already_existed, added, saved }`
 
@@ -125,12 +125,12 @@ Bind a UStateTree root parameter (source) to a target node's input property (tar
 
 *Additive.*
 
-Attach a global task node (by struct name, via reflection) to a UStateTree; global tasks run for the whole tree's lifetime.
+Append a global task node, of the task struct named by task_struct with its default values, to a StateTree asset, then save the asset without compiling it; there is no undo step. Global tasks belong to the tree, not to a state, and run for as long as the tree runs: for a task that runs only while one state is active use add_state_task instead. Each call appends another node, so repeating it stacks a duplicate task. A tree that does not load or has no editor data, a struct that is not found, or one that does not derive from FStateTreeTaskBase is an error before anything changes; a failed save (for example while PIE runs) makes success false with the task only in memory. Struct names: list_task_types; list them: list_state_tree_global_tasks; set a field: set_state_tree_global_task_property; inverse: remove_state_tree_global_task; check the result with compile_state_tree.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `tree_path` | string | yes | Asset path to the UStateTree |
-| `task_struct` | string | yes | Task struct name or /Script path; must derive from StateTreeTaskBase (e.g. "StateTreeDebugTextTask") |
+| `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as list_state_trees (trees[].path) returns it. |
+| `task_struct` | string | yes | Task struct name as list_task_types returns it, or its /Script path; a leading F is optional; must derive from FStateTreeTaskBase (e.g. "StateTreeDebugTextTask"). |
 
 **Returns:** `{ tree_path, task_struct, global_task_count, added, saved }`
 
@@ -152,11 +152,11 @@ Add a typed parameter to the root parameter bag of a StateTree asset (the parame
 
 *Destructive.*
 
-Compile a UStateTree via the editor subsystem (validate + compile); reports success and error/warning counts.
+Validate and compile a StateTree asset through the StateTree editing subsystem (the editor's Compile button), then save it to disk, and report compiled with the error and warning counts of the compiler log. Use it after authoring with add_state, add_state_task, add_state_transition or set_task_property, which mostly save without compiling; to check a tree without saving it use validate_state_tree, which also returns the messages themselves. The asset is saved even when compilation fails, so compiled false with error_count above 0 still has success true; success is false only when the save fails (for example while PIE runs). A tree that does not load or has no editor data is an error and nothing is compiled. Repeating the call compiles and saves again.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `tree_path` | string | yes | Asset path to the UStateTree |
+| `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as list_state_trees (trees[].path) returns it. |
 
 **Returns:** `{ tree_path, compiled, error_count, warning_count, message_count, saved }`
 
@@ -222,13 +222,13 @@ Read one property of a condition node on a StateTree state by reflection, withou
 
 *Read-only.*
 
-Serialize a single consideration's instance data (FJsonObjectConverter over the consideration struct) for inspection.
+Read one utility consideration of a state of a StateTree asset without changing it: its struct name (class), its instance_id (node GUID) and every property of the node struct as JSON (properties); the consideration's instance data is not included. Use it to see a whole node at once; for one field use get_consideration_property, to write one set_consideration_property, and to find the index list_considerations. A missing tree, editor data or state, a missing consideration_index, or one out of range is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `tree_path` | string | yes | Asset path to the UStateTree. |
-| `state_name` | string | yes | Name of the state. |
-| `consideration_index` | number | yes | 0-based index into State->Considerations. |
+| `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as list_state_trees (trees[].path) returns it. |
+| `state_name` | string | yes | Name of the state that owns the consideration; the first state with that name in a depth-first walk is used. |
+| `consideration_index` | number | yes | 0-based index of the consideration in that state, e.g. 0, as list_considerations reports it (index); required. |
 
 **Returns:** `{ tree_path, state_name, consideration_index, class, instance_id, properties: {...} }`
 
@@ -436,14 +436,14 @@ No parameters.
 
 *Read-only.*
 
-List all tasks of a state, with their struct class name, instance ID, and per-task condition count.
+List the tasks of one state of a StateTree asset without changing it, as they are in memory (unsaved edits included): count and, per task in array order, its index, class (the task struct name) and instance_id (the node GUID). A state with no tasks gives count 0 and an empty list; a missing tree, editor data or state is an error. index is what get_task_info, get_task_property, set_task_property and remove_task take; add a task with add_state_task. Tree-scoped tasks are not here: list_state_tree_global_tasks; other node lists of a state: list_conditions, list_considerations; every state with its counts at once: get_state_tree_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `tree_path` | string | yes | Asset path to the UStateTree. |
-| `state_name` | string | yes | Name of the state. |
+| `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as list_state_trees (trees[].path) returns it. |
+| `state_name` | string | yes | Name of the state, as get_state_tree_info lists it; the first state with that name in a depth-first walk is used. |
 
-**Returns:** `{ tree_path, state_name, count, tasks: [{ index, class, instance_id, condition_count }] }`
+**Returns:** `{ tree_path, state_name, count, tasks: [{ index, class, instance_id }] }`
 
 ## `remove_consideration`
 
@@ -461,14 +461,14 @@ Remove a consideration (by index) from a state. Idempotent at the index-out-of-r
 
 ## `remove_evaluator`
 
-*Destructive, idempotent.*
+*Destructive.*
 
-Remove a tree-scoped evaluator (by index). Idempotent at the index-out-of-range boundary.
+Remove one evaluator node from a StateTree asset (evaluators are tree-scoped, so no state is named) by its 0-based index, in one undo step, then save the asset without compiling it; later evaluators shift down one index, and bindings that read from it are not cleaned up (remove_state_tree_binding). Find the index with list_evaluators. Inverse: add_evaluator; a tree-scoped task instead: remove_state_tree_global_task. An out-of-range index removes and saves nothing and still succeeds, with removed false and a note. A missing tree or editor data, or a missing evaluator_index, is an error. A failed save (for example while PIE runs) leaves saved false while success stays true. Check the tree afterwards with compile_state_tree.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `tree_path` | string | yes | Asset path to the UStateTree. |
-| `evaluator_index` | number | yes | 0-based index into the tree's Evaluators array. |
+| `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as list_state_trees (trees[].path) returns it. |
+| `evaluator_index` | number | yes | 0-based index of the evaluator in the tree, e.g. 0, as list_evaluators reports it; required. |
 
 **Returns:** `{ tree_path, evaluator_index, removed, remaining, saved }`
 
@@ -476,13 +476,13 @@ Remove a tree-scoped evaluator (by index). Idempotent at the index-out-of-range 
 
 *Destructive, idempotent.*
 
-Remove a state from the tree by name.  Idempotent: removing a non-existent state returns removed:false with a note.
+Remove one state, found by name at any depth, from a StateTree asset together with all its child states, its tasks, conditions and transitions, then save the asset without compiling it; undo restores a top-level state but not a nested one (its parent is not recorded). Transitions in other states that pointed at it are left dangling: fix them with set_state_transition or remove_state_transition, then check with compile_state_tree. Idempotent: a name that matches no state changes and saves nothing and returns removed false with a note. A tree that does not load or has no editor data is an error. A failed save (for example while PIE runs) leaves saved false while success stays true, with the removal only in memory. Inverse: add_state (top-level states only); see the hierarchy with get_state_tree_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `tree_path` | string | yes | Asset path to the UStateTree. |
-| `state_name` | string | yes | Name of the state to remove. |
-| `with_descendants` | boolean | no | When true (default), also removes all child states recursively. |
+| `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as list_state_trees (trees[].path) returns it. |
+| `state_name` | string | yes | Name of the state to remove, as get_state_tree_info lists it; the first state with that name in a depth-first walk is removed. |
+| `with_descendants` | boolean | no | Accepted and echoed back, but it changes nothing: the children always go with the state, so there is no way to keep them (default true). |
 
 **Returns:** `{ tree_path, state_name, removed, with_descendants, remaining_top_level, note }`
 
@@ -502,15 +502,15 @@ Remove one enter condition, by index, from a state of a StateTree asset and save
 
 ## `remove_state_transition`
 
-*Destructive, idempotent.*
+*Destructive.*
 
-Remove a transition (by index) from a state. Idempotent at the index-out-of-range boundary.
+Remove one transition, with its conditions, from a state of a StateTree asset by its 0-based index, in one undo step, then save the asset without compiling it; later transitions shift down one index. Find the index in get_state_tree_info (transitions[].index, filtered by from_state). Use it to delete a transition; to change one in place use set_state_transition, to drop only a condition of it use remove_state_transition_condition; inverse: add_state_transition. An out-of-range index removes and saves nothing and still succeeds, with removed false and a note. A missing tree, editor data or state, or a missing transition_index, is an error. A failed save (for example while PIE runs) leaves saved false while success stays true.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `tree_path` | string | yes | Asset path to the UStateTree. |
-| `state_name` | string | yes | Name of the state. |
-| `transition_index` | number | yes | 0-based index into the state's Transitions array. |
+| `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as list_state_trees (trees[].path) returns it. |
+| `state_name` | string | yes | Name of the state that owns the transition (its from_state); the first state with that name in a depth-first walk is used. |
+| `transition_index` | number | yes | 0-based index of the transition in that state's list, e.g. 0, as get_state_tree_info reports it (transitions[].index); required. |
 
 **Returns:** `{ tree_path, state_name, transition_index, removed, remaining, saved }`
 
@@ -548,14 +548,14 @@ Remove the property binding whose target is target_property on one node of a Sta
 
 ## `remove_state_tree_global_task`
 
-*Destructive, idempotent.*
+*Destructive.*
 
-Remove a tree-scoped global task (by index). Idempotent at the index-out-of-range boundary.
+Remove one global task node (a task of the whole tree, not of a state) from a StateTree asset by its 0-based index, in one undo step, then save the asset without compiling it; later global tasks shift down one index. Find the index with list_state_tree_global_tasks. For a task of one state use remove_task; inverse: add_state_tree_global_task. An out-of-range index removes and saves nothing and still succeeds, with removed false and a note. A missing tree or editor data, or a missing global_task_index, is an error. A failed save (for example while PIE runs) leaves saved false while success stays true. Check the tree afterwards with compile_state_tree.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `tree_path` | string | yes | Asset path to the UStateTree. |
-| `global_task_index` | number | yes | 0-based index into the tree's GlobalTasks array. |
+| `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as list_state_trees (trees[].path) returns it. |
+| `global_task_index` | number | yes | 0-based index of the global task, e.g. 0, as list_state_tree_global_tasks reports it (global_tasks[].index); required. |
 
 **Returns:** `{ tree_path, global_task_index, removed, remaining, saved }`
 
@@ -574,15 +574,15 @@ Remove a named parameter from a UStateTree's root parameter bag. Idempotent — 
 
 ## `remove_task`
 
-*Destructive, idempotent.*
+*Destructive.*
 
-Remove a task (by index) from a state. Idempotent at the index-out-of-range boundary.
+Remove one task node from a state of a StateTree asset by its 0-based index, in one undo step, then save the asset without compiling it; later tasks shift down one index, and bindings that targeted the task are not cleaned up (remove_state_tree_binding). Find the index with list_tasks. For a tree-scoped task use remove_state_tree_global_task; inverse: add_state_task. An out-of-range index removes and saves nothing and still succeeds, with removed false and a note. A missing tree, editor data or state, or a missing task_index, is an error. A failed save (for example while PIE runs) leaves saved false while success stays true. Check the tree afterwards with compile_state_tree.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `tree_path` | string | yes | Asset path to the UStateTree. |
-| `state_name` | string | yes | Name of the state. |
-| `task_index` | number | yes | 0-based index into the state's Tasks array. |
+| `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as list_state_trees (trees[].path) returns it. |
+| `state_name` | string | yes | Name of the state that owns the task; the first state with that name in a depth-first walk is used. |
+| `task_index` | number | yes | 0-based index of the task in that state, e.g. 0, as list_tasks reports it (tasks[].index); required. |
 
 **Returns:** `{ tree_path, state_name, task_index, removed, remaining, saved }`
 
@@ -639,13 +639,13 @@ Write one property of a tree-scoped evaluator node of a StateTree asset (evaluat
 
 *Destructive, idempotent.*
 
-Set how a state aggregates its tasks' completion (UStateTreeState::TasksCompletion).  NOTE: this is the tasks-aggregation policy EStateTreeTaskCompletionType {All, Any} (All = the state completes when ALL its tasks complete; Any = when ANY single task completes) — NOT a success/failed result.
+Set when a state of a StateTree asset counts as completed from its tasks (UStateTreeState TasksCompletion): All waits for every task, Any (the engine default) for the first one; it is not a success or failure result. One undo step, then the asset is saved without compiling it. It always writes and saves, even when the state already has that value (set is then still true). An unknown completion_type, a missing tree or editor data, or a missing state is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. The tasks it aggregates: list_tasks, add_state_task; other state settings: set_state_type, set_state_selection_behavior; read back with get_state_tree_info (states[] task completion); check the tree with compile_state_tree.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `tree_path` | string | yes | Asset path to the UStateTree. |
-| `state_name` | string | yes | Name of the state to modify. |
-| `completion_type` | string | yes | Aggregation policy: "All" (default in engine: Any) \| "Any" (case-insensitive). |
+| `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as list_state_trees (trees[].path) returns it. |
+| `state_name` | string | yes | Name of the state, as get_state_tree_info lists it; the first state with that name in a depth-first walk is used. |
+| `completion_type` | string | yes | "All" or "Any" (case-insensitive; the engine default for a new state is Any). |
 
 **Returns:** `{ tree_path, state_name, completion_type, set, saved }`
 

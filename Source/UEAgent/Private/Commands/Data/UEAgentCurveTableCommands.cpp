@@ -292,11 +292,11 @@ TSharedPtr<FJsonObject> HandleAddCurveTableRow(const TSharedPtr<FJsonObject>& Pa
 // --------------------------------------------------------------------------- //
 // add_curve_table_key
 // --------------------------------------------------------------------------- //
-// MCP:add_curve_table_key - Add or update a single key on an existing UCurveTable row's rich curve.  Creates the row on demand if it does not yet exist.
-//   @param curve_table_path - Full asset path to the UCurveTable.
-//   @param row_name - Name of the row (rich curve) to key.
-//   @param time - Key time (X).
-//   @param value - Key value (Y).
+// MCP:add_curve_table_key - Set one key (time, value) on a row of a UCurveTable asset with rich curves, in one undo step, then save the table: a key already at that time gets the new value, otherwise a key is added, and a row that does not exist yet is created (created_row true). Use it to key one point at a time; to create or replace a whole row with several keys at once use add_curve_table_row, to delete a key remove_curve_table_key (inverse), to delete the row delete_curve_table_row, and to read rows and keys get_curve_table_info; create the table with create_curve_table. Idempotent: the same time and value again leaves the curve as it was (and saves again). key_added is true for both an added and an updated key; time and value are read back from the stored key, and key_count tells whether a key was added. A table that does not load, or one in SimpleCurves mode (it cannot hold rich keys), is an error before anything changes; a failed save (for example while PIE runs) makes success false with the key only in memory.
+//   @param curve_table_path - Asset path of the UCurveTable, e.g. "/Game/Data/CT_Damage", as create_curve_table returns it.
+//   @param row_name - Name of the row (one curve) to key, e.g. "Fireball"; created when missing.
+//   @param time - Key time, the curve's X value as a float, e.g. 1 (often a level or seconds).
+//   @param value - Key value, the curve's Y value as a float, e.g. 25.5.
 //   @returns { curve_table_path: string, row_name: string, time: number, value: number, key_added: bool, created_row: bool, key_count: int, row_count: int, saved: bool }
 
 TSharedPtr<FJsonObject> HandleAddCurveTableKey(const TSharedPtr<FJsonObject>& Params)

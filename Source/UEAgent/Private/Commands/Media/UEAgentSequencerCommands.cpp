@@ -593,9 +593,9 @@ namespace UEAgentSequencerImpl
     }
 }
 
-// MCP:add_spawnable_to_sequence - Adds a spawnable actor binding to a Level Sequence (asset-model, headless).
-//   @param sequence_name - Name of the target Level Sequence (found by AssetName under /Game).
-//   @param class_name - AActor subclass name (e.g. "CineCameraActor" default, "StaticMeshActor", "PointLight", or a "/Script/Module.Class" path).
+// MCP:add_spawnable_to_sequence - Add a spawnable binding to a Level Sequence asset: the sequence itself spawns an actor of class_name while it plays and despawns it after, so no level actor is needed or created now and no open Sequencer is needed. To animate an actor already placed in the level use bind_actor_to_sequence (a possessable) instead; for a keyed camera with its camera cut use create_cine_camera_in_sequence. Each call adds another binding (not idempotent). One undo step, then the sequence is saved. Pass the returned binding_guid to add_transform_track_to_binding and the other binding tools; list bindings with get_sequence_bindings; remove_sequence_binding is the inverse. An unknown sequence or a class that is not an AActor subclass is an error and nothing is added; a failed save makes success false with saved=false and save_error, the binding kept in memory.
+//   @param sequence_name - Asset name (not a path) of the target Level Sequence, e.g. "LS_Intro": the first Level Sequence under /Game with that name, case-insensitive; get_level_sequences lists them, create_level_sequence makes one.
+//   @param class_name - AActor subclass to spawn: "CineCameraActor" (default), "StaticMeshActor", "PointLight", another native class by short name (e.g. "SkeletalMeshActor"), or a path such as "/Script/Engine.SkyLight" or a Blueprint's "/Game/BP_Door.BP_Door_C".
 //   @returns { sequence_name: string, binding_guid: string, display_name: string, class_name: string, spawnable: bool, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleAddSpawnableToSequence(const TSharedPtr<FJsonObject>& Params)
@@ -2968,8 +2968,8 @@ TSharedPtr<FJsonObject> HandleAddSubsequenceTrack(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_subsequence_track"), SaveError);
 }
 
-// MCP:add_shot_track - Adds a cinematic shot track (UMovieSceneCinematicShotTrack) to a Level Sequence.
-//   @param sequence_path - Full /Game path OR bare asset name of the target Level Sequence.
+// MCP:add_shot_track - Make sure a Level Sequence has its cinematic shot track (UMovieSceneCinematicShotTrack), the root track that holds shot sections, adding it when missing, in one undo step, then save the sequence. Idempotent: a sequence that already has one keeps it (track_added=false; section_count counts its shots), though the sequence is saved again either way. add_shot_section also creates this track when missing, so call this one only to get an empty shot track; list tracks with get_sequence_tracks; remove_sequence_track is the inverse. The sequence must already exist (create_level_sequence). An unknown sequence is an error and nothing changes; a failed save makes success false with saved=false and save_error, the track kept in memory.
+//   @param sequence_path - Full /Game path, e.g. "/Game/Cinematics/LS_Intro", OR bare asset name "LS_Intro" (the first Level Sequence under /Game with that name); get_level_sequences lists them.
 //   @param sequence_name - Alias for sequence_path.
 //   @returns { sequence_path: string, track_class: string, track_added: bool, section_count: int, saved: bool, save_error?: string }
 
@@ -3738,13 +3738,13 @@ TSharedPtr<FJsonObject> HandleSetSectionBlendType(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_section_blend_type"), SaveError);
 }
 
-// MCP:get_section_info - Get detailed info about a sequencer section: range, easing, completion mode, blend type, lock/infinite state.
-//   @param sequence_path - Full /Game path OR bare asset name of the target Level Sequence.
+// MCP:get_section_info - Read the settings of one section of a Level Sequence: start_frame and end_frame (tick-resolution frames, end exclusive; 0 for an open, infinite bound), ease-in and ease-out lengths and whether they are manual, completion_mode (keep_state, restore_state or project_default), blend_type (absolute, additive, relative, additive_from_base, override, or invalid when unset), is_locked, is_active and, for a 3D-attach section, its six attach_rules. The section is found by binding_guid (none for a root track such as a shot, camera cut or audio track), then track_type or track_index, then section_index: get_sequence_tracks lists tracks with section counts, get_sequence_bindings the bindings. The read side of set_section_properties, set_section_range and set_attach_section_rules. Read-only and idempotent; reads the asset, no open Sequencer needed. An unknown sequence, an invalid GUID, a binding without tracks, a track_type with no such track, or an index out of range is an error.
+//   @param sequence_path - Full /Game path, e.g. "/Game/Cinematics/LS_Intro", OR bare asset name "LS_Intro" of the target Level Sequence.
 //   @param sequence_name - Alias for sequence_path.
-//   @param binding_guid - GUID of the binding whose section to inspect. Omit it (and binding_name_or_guid) for a section of a ROOT track -- shot, camera cut, audio, event, sub-sequence, fade: track_type or track_index then pick among the root tracks in get_sequence_tracks order, camera cut last.
-//   @param track_type - Optional class filter (see set_section_properties).
-//   @param track_index - Index into the binding's tracks (0 = first track, default 0). Without binding_guid it indexes the root tracks.
-//   @param section_index - Index of the section on the resolved track (default 0).
+//   @param binding_guid - GUID of the binding whose section to inspect, as get_sequence_bindings or get_sequence_tracks gives it. Omit it (and binding_name_or_guid) for a section of a ROOT track -- shot, camera cut, audio, event, sub-sequence, fade: track_type or track_index then pick among the root tracks in get_sequence_tracks order, camera cut last.
+//   @param track_type - Optional kind of track, case-insensitive: "transform"|"float"|"bool"|"vector"|"color"|"visibility"|"audio"|"event"|"fade"|"skeletalanimation"|"subsequence"|"cameracut"|"shot"|"slomo"|"property"|"attach"; the first track of that kind wins and none is an error; any other value is ignored and track_index picks.
+//   @param track_index - Index into the binding's tracks (0 = first track, default 0), in get_sequence_tracks order. Without binding_guid it indexes the root tracks.
+//   @param section_index - Index of the section on the resolved track (default 0); get_sequence_tracks gives each track's section_count.
 //   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
 //   @returns { sequence_path: string, section_index: int, start_frame: int, end_frame: int, ease_in_frames: int, ease_out_frames: int, manual_ease_in: bool, manual_ease_out: bool, completion_mode: string, blend_type: string, blend_type_valid: bool, is_locked: bool, is_active: bool, is_attach_section: bool, attach_rules: object? }
 

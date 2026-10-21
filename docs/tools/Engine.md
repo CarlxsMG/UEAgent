@@ -103,14 +103,14 @@ Add a generic simulation stage (UNiagaraSimulationStageGeneric) to one emitter o
 
 ## `create_niagara_system`
 
-*Additive.*
+*Additive, idempotent.*
 
-Creates (or loads, idempotently) an empty UNiagaraSystem asset and saves it.  Uses NewObject + UNiagaraSystemFactoryNew::InitializeSystem (headless-safe); the new system has its system spawn/update scripts wired but no emitters.
+Create an empty UNiagaraSystem asset at package_path/name and save it: its system spawn and update scripts are set up, but it has no emitters. Idempotent: a Niagara System already at that path is returned unchanged with created=false and already_exists=true, and nothing is saved; an asset of another class at that path is an error and nothing is written. Not an undo step. Next, add emitters with add_niagara_emitter_from_template, check the result with get_niagara_system_info or get_niagara_emitter_handles, and place it in a level with spawn_actor (type NiagaraActor). A failed save is an error, the new asset left in memory unsaved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `name` | string | yes | Name of the Niagara System asset to create. |
-| `package_path` | string | no | Target content folder; defaults to /Game/Niagara |
+| `name` | string | yes | Asset name, e.g. 'NS_Sparks'; package_path/name must form a valid long package name. |
+| `package_path` | string | no | Content folder as a long package path, e.g. '/Game/FX' (default /Game/Niagara); a trailing slash is ignored. |
 
 **Returns:** `{ system_name: string, asset_path: string, created: bool, already_exists?: bool, saved?: bool, save_error?: string, emitter_count: int }`
 
@@ -206,12 +206,12 @@ Read which Niagara Effect Type asset a Niagara System asset uses, plus that effe
 
 *Read-only.*
 
-List the data interface bindings on a Niagara emitter (read-only).  Reads the FVersionedNiagaraEmitterData::EmitterDependencies array (TArray&lt;FNiagaraDataInterfaceEmitterBinding>). Each binding has a name, type, interface_class, interface_path, and instance_index.  Adding or removing data interface bindings on a script requires view-models (FNiagaraStackGraphUtilities AddDataInterface) and is editor-only -- this command lists them but does not mutate them.
+List the Emitter Dependencies setting of one emitter of a Niagara System asset: the emitter bindings (FNiagaraDataInterfaceEmitterBinding) that order its particle scripts after other emitters when data interfaces read or write across emitters, each with the bound emitter_name and binding_mode (Self or Other); data_interface_count is the number of entries. It does not list the data interfaces themselves: get_niagara_data_interfaces lists the system's user-parameter data interfaces, and add_niagara_data_interface adds one. Read-only: it changes nothing. An emitter with no dependencies gives an empty list; a missing system or emitter handle is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `system_path` | string | yes | Asset path of the Niagara System. |
-| `emitter_name` | string | yes | Name of the emitter handle. |
+| `system_path` | string | yes | Content path of the UNiagaraSystem asset, package or object form, e.g. '/Game/FX/NS_Sparks'. |
+| `emitter_name` | string | yes | Display name of the emitter handle, as get_niagara_emitter_handles lists it, e.g. 'Fountain'. |
 
 **Returns:** `{ system_path: string, emitter_name: string, data_interface_count: int, data_interfaces: [{ emitter_name, binding_mode }] }`
 
@@ -246,12 +246,12 @@ List all renderers on a Niagara emitter (read-only).  Each entry also dumps the 
 
 *Read-only.*
 
-Flat readback of a Niagara emitter's runtime knobs and counts.
+Read one emitter of a Niagara System asset in a single flat reply: simulation target (CPUSim or GPUComputeSim), bounds mode (Dynamic, Fixed or Programmable) and its fixed box as 'X=.. Y=.. Z=..' strings, particle allocation mode and pre-allocation count, GPU spawn cap per frame (max_gpu_particles), local-space, determinism and persistent-ID flags, and how many renderers, event handlers and simulation stages it has. Read-only: it changes nothing and compiles nothing. The four *_module_count fields all count the function-call nodes (modules and dynamic inputs) of the emitter's one shared script graph, so they are always equal; list_niagara_modules lists a stack's modules. A missing system or emitter handle is an error. Change these settings with set_niagara_emitter_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `system_path` | string | yes | Asset path of the Niagara System. |
-| `emitter_name` | string | yes | Name of the emitter handle. |
+| `system_path` | string | yes | Content path of the UNiagaraSystem asset, package or object form, e.g. '/Game/FX/NS_Sparks'. |
+| `emitter_name` | string | yes | Display name of the emitter handle, as get_niagara_emitter_handles lists it, e.g. 'Fountain'. |
 
 **Returns:** `{ system_path: string, emitter_name: string, sim_target: string, bounds_mode: string, bounds_min: string, bounds_max: string, allocation_mode: string, pre_allocation_count: int, max_gpu_particles: int, local_space: bool, deterministic: bool, requires_persistent_ids: bool, update_module_count: int, spawn_module_count: int, emitter_spawn_module_count: int, emitter_update_module_count: int, renderer_count: int, event_handler_count: int, simulation_stage_count: int }`
 
@@ -522,13 +522,13 @@ Move a module node, found by function name (case-sensitive, as list_niagara_modu
 
 *Destructive, idempotent.*
 
-Sets fixed local-space bounds on a spawned Niagara component.  Resolves the UNiagaraComponent on the owner actor and calls UNiagaraComponent::SetSystemFixedBounds(FBox), then reads back via GetSystemFixedBounds.
+Set the fixed-bounds override of the Niagara component on a placed actor in the editor world (the first UNiagaraComponent of the actor found by internal name or label) to the local-space box min..max, then read it back. The override lives only in memory on that component: it is not a saved property, so it is lost when the level reloads and is not carried into PIE, and it makes no undo step and does not dirty the level. Repeating the call with the same box gives the same result. An actor that is missing or has no Niagara component is an error and nothing changes. For bounds that persist with the asset, set bounds_mode Fixed and the box on an emitter with set_niagara_emitter_properties; place a Niagara actor with spawn_actor (type NiagaraActor).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Owner actor identifier (internal name or editor label). |
-| `min` | array | no | Local-space bounds minimum [X, Y, Z]. |
-| `max` | array | no | Local-space bounds maximum [X, Y, Z]. |
+| `actor_name` | string | yes | Internal name or editor label of an actor in the editor world that has a Niagara component, as get_actors_in_level lists it, e.g. 'NiagaraActor_0'. |
+| `min` | array | no | Box minimum corner in the component's local space, [x, y, z] in centimetres, e.g. [-500, -500, 0]; a missing or short array reads as [0, 0, 0], and it is not checked against max. |
+| `max` | array | no | Box maximum corner in the component's local space, [x, y, z] in centimetres, e.g. [500, 500, 800]; a missing or short array reads as [0, 0, 0]. |
 
 **Returns:** `{ actor_name: string, applied: bool, bounds_valid: bool, min_read_back: [number, number, number], max_read_back: [number, number, number] }`
 

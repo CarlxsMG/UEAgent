@@ -639,11 +639,11 @@ TSharedPtr<FJsonObject> HandleDrawTextToRenderTarget(const TSharedPtr<FJsonObjec
 // draw_line_to_render_target
 // Begin -> Canvas->K2_DrawLine(start, end, thickness, color) -> End.
 // ---------------------------------------------------------------------------
-// MCP:draw_line_to_render_target - Draw a line into a render target via the canvas. drawn is false, and the call fails, when start and end are the same point (the canvas skips a zero-length line).
-//   @param render_target_path - Asset path of the destination render target
-//   @param start [string!] - Line start position [x, y] in screen-space pixels
-//   @param end [string!] - Line end position [x, y] in screen-space pixels
-//   @param color - Optional [r, g, b, a] line color, defaults to opaque white
+// MCP:draw_line_to_render_target - Draw one straight line onto a UTextureRenderTarget2D asset in a single canvas pass in the editor world (UCanvas::K2_DrawLine), from start to end in render-target pixels, with color and thickness. The line blends over the existing pixels: nothing is cleared, saved or undoable, each call adds another line, and render-target contents live on the GPU only, so keep them with create_static_texture_from_render_target or export_render_target. Wipe it first with clear_render_target; for text, a texture or a material use draw_text_to_render_target, draw_texture_to_render_target or draw_material_to_render_target; get_render_target_info gives the size, create_render_target_2d makes a target. A missing render target is an error; drawn is false, and the call fails, when start and end are the same point (the canvas skips a zero-length line).
+//   @param render_target_path - Asset path of the destination UTextureRenderTarget2D, e.g. "/Game/RT/RT_Canvas"
+//   @param start [string!] - Line start [x, y] in render-target pixels from the top-left corner, e.g. [0, 0]
+//   @param end [string!] - Line end [x, y] in render-target pixels from the top-left corner, e.g. [256, 128]; it must differ from start
+//   @param color - Optional [r, g, b, a] linear color, each usually 0..1; channels left out keep opaque white, the default
 //   @param thickness - Optional line thickness in pixels, default 1
 //   @returns { render_target_path: string, drawn: bool, thickness: number, start: [number], end: [number] }
 TSharedPtr<FJsonObject> HandleDrawLineToRenderTarget(const TSharedPtr<FJsonObject>& Params)

@@ -147,9 +147,9 @@ namespace
 // ---------------------------------------------------------------------------
 // list_usd_prim_attributes
 // ---------------------------------------------------------------------------
-// MCP:list_usd_prim_attributes - List every attribute of a prim on an open USD stage without changing it. Returns count and attributes [{name, type_name, cpp_type, has_value, has_authored_value, time_sample_count}]; has_value also counts fallback values, has_authored_value only authored opinions.
+// MCP:list_usd_prim_attributes - List every attribute of one prim on a USD stage this server has open, with each one's name, USD type, C++ type, whether it has a value (fallback values count) or an authored opinion, and how many time samples it has. Read-only: the stage is not changed. Use it to find an attribute name; then read one value with get_usd_attribute_value, its sample times with get_usd_attribute_time_samples, or write it with set_usd_attribute_value. For the prim's own type, specifier and schemas use get_usd_prim_info; to find prim paths use list_usd_prims. A stage that is not open (open_usd_stage or create_usd_stage first) or a prim that does not exist is an error.
 //   @param stage_name [string!] - Name the stage was registered under by open_usd_stage (default the file basename) or create_usd_stage (default "Untitled").
-//   @param prim_path [string!] - Absolute SdfPath of an existing prim on that stage, e.g. "/World/Cube".
+//   @param prim_path [string!] - Absolute SdfPath of an existing prim on that stage, e.g. "/World/Cube", as list_usd_prims returns it.
 //   @returns { prim_path: string, attributes: [{name, type_name, cpp_type, has_value, has_authored_value, time_sample_count}], count: int }
 
 TSharedPtr<FJsonObject> HandleListUsdPrimAttributes(const TSharedPtr<FJsonObject>& Params)
@@ -489,10 +489,10 @@ TSharedPtr<FJsonObject> HandleSetUsdAttributeValue(const TSharedPtr<FJsonObject>
 // ---------------------------------------------------------------------------
 // get_usd_attribute_time_samples
 // ---------------------------------------------------------------------------
-// MCP:get_usd_attribute_time_samples - List the time codes at which a USD attribute on a prim of an open stage has authored time samples, without changing the stage. Returns time_samples, count and present; a missing attribute is not an error but present false with an empty list.
+// MCP:get_usd_attribute_time_samples - List the time codes, in ascending order, at which one attribute of a prim on a USD stage this server has open has authored time samples; the values themselves are not returned (read one with get_usd_attribute_value at that time). Read-only: the stage is not changed. Returns time_samples, count and present; an attribute the prim does not have is not an error but present false with an empty list, while a stage that is not open or a missing prim is an error. Use list_usd_prim_attributes first to see which attributes have samples (time_sample_count); set_usd_attribute_value writes a sample and clear_usd_attribute removes one.
 //   @param stage_name [string!] - Name the stage was registered under by open_usd_stage (default the file basename) or create_usd_stage (default "Untitled").
-//   @param prim_path [string!] - Absolute SdfPath of an existing prim on that stage, e.g. "/World/Cube".
-//   @param attr_name [string!] - Name of the attribute to inspect, e.g. "xformOp:translate".
+//   @param prim_path [string!] - Absolute SdfPath of an existing prim on that stage, e.g. "/World/Cube", as list_usd_prims returns it.
+//   @param attr_name [string!] - Full attribute name including any namespace, as list_usd_prim_attributes returns it, e.g. "xformOp:translate".
 //   @returns { prim_path: string, attr_name: string, time_samples: [number], count: int }
 
 TSharedPtr<FJsonObject> HandleGetUsdAttributeTimeSamples(const TSharedPtr<FJsonObject>& Params)

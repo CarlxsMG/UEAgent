@@ -685,9 +685,9 @@ TSharedPtr<FJsonObject> HandleAddModulationInputToPatch(
 // ---------------------------------------------------------------------------
 // remove_modulation_input_from_patch
 // ---------------------------------------------------------------------------
-// MCP:remove_modulation_input_from_patch - Removes every input of a USoundModulationPatch asset whose bus has the same asset name as bus_path, then saves the patch; a removal succeeds only when the patch reaches disk. When no input matches, the patch is already the state asked for: the call succeeds with removed false and already_removed true, and saves nothing. Returns patch_path, bus_path, removed, already_removed, input_count, saved.
-//   @param patch_path - Asset path to the USoundModulationPatch
-//   @param bus_path - Asset path to the USoundControlBus whose input is removed
+// MCP:remove_modulation_input_from_patch - Remove every input of a USoundModulationPatch asset whose control bus has the same asset name as the bus at bus_path (so a same-named bus in another folder matches too), then save the patch; undo does not restore it. Inverse of add_modulation_input_to_patch; list the inputs first with get_sound_modulation_patch_info. Idempotent: when no input matches, nothing is changed or saved and the call succeeds with removed false and already_removed true. A patch or bus that does not load is an error and nothing changes; a removal succeeds only when the patch reaches disk, so a failed save (for example while PIE runs) makes success false with the inputs gone only in memory. input_count is the number of inputs left.
+//   @param patch_path - Asset path of the USoundModulationPatch, e.g. "/Game/Audio/Mod/MP_Volume", as create_sound_modulation_patch returns it.
+//   @param bus_path - Asset path of an existing USoundControlBus, e.g. "/Game/Audio/Mod/CB_Music"; it must load, and only its asset name is compared with the inputs' buses.
 //   @returns { patch_path, bus_path, removed, already_removed, input_count, saved }
 TSharedPtr<FJsonObject> HandleRemoveModulationInputFromPatch(
 	const TSharedPtr<FJsonObject>& Params)
@@ -734,9 +734,9 @@ TSharedPtr<FJsonObject> HandleRemoveModulationInputFromPatch(
 // ---------------------------------------------------------------------------
 // set_modulation_patch_bypass
 // ---------------------------------------------------------------------------
-// MCP:set_modulation_patch_bypass - Sets the bBypass flag of a USoundModulationPatch asset and saves it. A bypassed patch stays active but outputs the default value of its output parameter; new patches start bypassed. Returns patch_path, bBypass as stored, updated, saved.
-//   @param patch_path - Asset path to the USoundModulationPatch
-//   @param bypass - New bypass value (required bool)
+// MCP:set_modulation_patch_bypass - Set the bBypass flag of a USoundModulationPatch asset and save it; undo does not restore the old value. A bypassed patch stays active but outputs the default value of its output parameter, so a patch made by create_sound_modulation_patch (which starts bypassed) does nothing until this sets bypass false. Typical order: add_modulation_input_to_patch, set_modulation_patch_output_parameter, then this; read the result with get_sound_modulation_patch_info. It always writes and saves, even when the flag already had that value (updated is always true); bBypass is read back after the write. A patch that does not load or a missing bypass is an error and nothing changes; a failed save (for example while PIE runs) makes success false with the change only in memory.
+//   @param patch_path - Asset path of the USoundModulationPatch, e.g. "/Game/Audio/Mod/MP_Volume", as create_sound_modulation_patch returns it.
+//   @param bypass - true bypasses the patch (it outputs its parameter's default); false makes it apply its inputs. Required.
 //   @returns { patch_path, bBypass, updated, saved }
 TSharedPtr<FJsonObject> HandleSetModulationPatchBypass(
 	const TSharedPtr<FJsonObject>& Params)
@@ -1228,8 +1228,8 @@ TSharedPtr<FJsonObject> HandleSetModulationGeneratorSettings(
 // ---------------------------------------------------------------------------
 // get_modulation_generator_info
 // ---------------------------------------------------------------------------
-// MCP:get_modulation_generator_info - Reads a USoundModulationGenerator asset without changing it. Returns generator_path, generator_class and settings by class: LFO shape, frequency, amplitude, offset, phase; ADEnvelope attack_time, decay_time; EnvelopeFollower attack_time, release_time, gain, audio_bus_path; empty for any other class.
-//   @param generator_path - Asset path to the USoundModulationGenerator
+// MCP:get_modulation_generator_info - Read the class and settings of a USoundModulationGenerator asset without changing it. settings depend on the class: LFO gives shape, frequency, amplitude, offset and phase; ADEnvelope gives attack_time and decay_time; EnvelopeFollower gives attack_time, release_time, gain and audio_bus_path (empty when no audio bus is set); any other generator class gives an empty settings object. Use it to check create_modulation_generator or set_modulation_generator_settings; for a modulation parameter use get_modulation_parameter_info, for a control bus get_control_bus_info, for a patch get_sound_modulation_patch_info. A path that does not load as a modulation generator is an error.
+//   @param generator_path - Asset path of the generator, e.g. "/Game/Audio/Mod/LFO_Wobble", as create_modulation_generator returns it.
 //   @returns { generator_path, generator_class, settings: {...} }
 TSharedPtr<FJsonObject> HandleGetModulationGeneratorInfo(
 	const TSharedPtr<FJsonObject>& Params)

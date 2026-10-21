@@ -348,14 +348,14 @@ Recompute the normals of the live dynamic mesh of a DynamicMeshActor in the edit
 
 *Destructive.*
 
-Recompute UVs on a UV channel using the configured flatten method. A channel the mesh does not have, or an empty mesh, is an error; recomputed is false, and the call fails, when the engine refuses (for example polygroups on a mesh without polygroups); a failed call leaves the UVs as they were. One undo step restores the previous UVs.
+Re-flatten the UVs of one channel on a DynamicMeshActor's live dynamic mesh in the editor world island by island: each existing UV island (or polygroup) keeps its triangles and gets new UVs from the chosen flatten method, as one undo step; the level is marked dirty and nothing is saved. Use it to fix stretched islands while keeping the seams, then repack_mesh_uvs to lay them out in the 0-1 square; unwrap_mesh_uvs cuts new seams over the whole mesh and set_mesh_uvs_from_projection projects instead. An unknown actor, a channel the mesh lacks, an empty mesh, or an unknown island_source or method is an error before anything changes; when the engine refuses (polygroups on a mesh without polygroups) recomputed is false, the call fails and the UVs stay as they were.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | DynamicMeshActor name (required) |
-| `uv_channel` | number | no | UV channel index (default 0) |
-| `island_source` | string | no | "uv_islands" \| "polygroups" \| "existing_groups" \| "selection" (default "uv_islands") |
-| `method` | string | no | flatten method: "spectral_conformal" (default), "conformal" or "exp_map" |
+| `actor_name` | string | yes | Label or object name of the target DynamicMeshActor in the editor world, e.g. 'DynamicMeshActor_0'. |
+| `uv_channel` | number | no | 0-based UV channel index (default 0); get_dynamic_mesh_info shows the channels the mesh has. |
+| `island_source` | string | no | What one island is: "uv_islands" (the channel's existing islands, default) or "polygroups" (one island per polygroup); case-insensitive, any other value is an error. |
+| `method` | string | no | Flatten method: "spectral_conformal" (default), "conformal" or "exp_map"; case-insensitive. |
 
 **Returns:** `{ actor_name, uv_channel, island_source, method, recomputed }`
 
@@ -466,9 +466,9 @@ Scale all UVs of one channel on a DynamicMeshActor's live dynamic mesh in the ed
 
 ## `select_mesh_triangles`
 
-*Destructive.*
+*Read-only.*
 
-Resolve a region into a triangle selection and REPORT it, with its local-space bounding box, without modifying anything. Read-only companion of set_mesh_material_id scope='region' (and of the region of set_mesh_uvs_from_projection): same region parameters, same resolver, so a region previewed here paints exactly those triangles there. The bounds are what turn a bisection answer ("the piece is somewhere in X>0") into numbers: centre and size. Use it to avoid the failure mode where a mis-specified box selects 0 triangles and the paint call still returns success. Coordinates are LOCAL to the dynamic mesh, not world.
+Resolve a region of a DynamicMeshActor's live dynamic mesh into a triangle selection and report it, with its count and local-space bounding box, without modifying anything (no undo step, nothing dirtied). Read-only companion of set_mesh_material_id scope='region' (and of the region of set_mesh_uvs_from_projection): same region parameters, same resolver, so a region previewed here paints exactly those triangles there. The bounds are what turn a bisection answer ("the piece is somewhere in X>0") into numbers: centre and size. Use it to avoid the failure mode where a mis-specified box selects 0 triangles and the paint call still returns success. Coordinates are LOCAL to the dynamic mesh, not world.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -637,14 +637,14 @@ Move, rotate and/or scale every vertex of the live dynamic mesh of a DynamicMesh
 
 *Destructive.*
 
-Offset all UVs of one channel on a DynamicMeshActor's live dynamic mesh in the editor world by (translate_u, translate_v); a zero offset changes nothing (translated false) and adds no undo step. One undo step restores the UVs; reply actor_name is the component name, not the actor label.
+Offset every UV of one channel on a DynamicMeshActor's live dynamic mesh in the editor world by (translate_u, translate_v), as one undo step that restores the UVs; the level is marked dirty and nothing is saved. Each call adds its offset again, so a retry shifts twice. A zero offset changes nothing (translated false) and adds no undo step. An unknown actor or a channel the mesh lacks is an error and nothing changes. The reply's actor_name is the component name, not the actor label. Scale or rotate the same channel with scale_mesh_uvs or rotate_mesh_uvs; to lay new UVs instead use set_mesh_uvs_from_projection or unwrap_mesh_uvs; get_dynamic_mesh_info shows the channels the mesh has.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Label or object name (case-insensitive) of the target DynamicMeshActor in the editor world. |
-| `uv_channel` | number | yes | 0-based UV channel index; a channel the mesh does not have fails the call. |
-| `translate_u` | number | yes | Offset added to every U coordinate (1.0 shifts by one full tile). |
-| `translate_v` | number | yes | Offset added to every V coordinate (1.0 shifts by one full tile). |
+| `actor_name` | string | yes | Label or object name (case-insensitive) of the target DynamicMeshActor in the editor world, e.g. 'DynamicMeshActor_0'; spawn_actor with type DynamicMeshActor creates one. |
+| `uv_channel` | number | yes | 0-based UV channel index, e.g. 0; a channel the mesh does not have fails the call. |
+| `translate_u` | number | yes | Offset added to every U coordinate, in UV units: 1.0 shifts by one full tile, 0.5 by half, negative moves left. |
+| `translate_v` | number | yes | Offset added to every V coordinate, in UV units: 1.0 shifts by one full tile, 0.5 by half, negative moves down. |
 
 **Returns:** `{ actor_name: string, uv_channel: int, translate_u: number, translate_v: number, translated: bool }`
 

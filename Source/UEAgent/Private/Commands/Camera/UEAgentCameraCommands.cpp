@@ -142,9 +142,9 @@ namespace
     }
 }
 
-// MCP:create_camera_rig_asset - Creates a UCameraRigAsset (Gameplay Camera System, Experimental). Idempotent (returns the existing asset).
-//   @param name - Asset name (required)
-//   @param package_path - Target content folder (default "/Game/Cameras")
+// MCP:create_camera_rig_asset - Create an empty camera rig asset (UCameraRigAsset, from the Experimental Gameplay Cameras plugin) at package_path/name and save it; it has no root node yet. Idempotent: a camera rig already at that path is returned unchanged with already_existed true, and nothing is written (saved still reads true); an asset of another class there is an error. Not an undo step. Then give it a root node with set_camera_rig_root_node, tune it with set_camera_node_parameters or add_camera_node_child, build it with build_camera_rig, and run it from a camera asset (create_camera_asset) through set_camera_asset_director; get_camera_rig_nodes reads it back. A failed save makes success false, with the new rig left in memory.
+//   @param name - Asset name, e.g. 'CR_Player'; package_path/name must form a valid long package name.
+//   @param package_path - Content folder as a long package path, e.g. '/Game/Cameras/Rigs' (default "/Game/Cameras").
 //   @returns { name, asset_path, asset_class, already_existed, saved }
 TSharedPtr<FJsonObject> HandleCreateCameraRigAsset(const TSharedPtr<FJsonObject>& Params)
 {

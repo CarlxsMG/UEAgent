@@ -652,9 +652,9 @@ TSharedPtr<FJsonObject> HandleAddAnimationAssetToPoseSearchDatabase(const TShare
 // ---------------------------------------------------------------------------
 // build_pose_search_database_index
 // ---------------------------------------------------------------------------
-// MCP:build_pose_search_database_index - Request an async build of the PoseSearch index for a database
-//   @param database_path - Asset path of the UPoseSearchDatabase (required).
-//   @param wait_for_completion - If true, block until the build completes (the engine's FTickableGameObject pumps during the wait).
+// MCP:build_pose_search_database_index - Start a fresh build of the motion-matching search index of a UPoseSearchDatabase (FAsyncPoseSearchDatabasesManagement::RequestAsyncBuildIndex with NewRequest), cancelling any build already running for it and replacing the old index, and by default wait for it to finish. Run it after add_animation_asset_to_pose_search_database, remove_animation_asset_from_pose_search_database, set_pose_search_database_schema or a schema channel change, none of which rebuild the index; then test it with evaluate_pose_search_query. The index is derived data, not saved into the asset: nothing is saved and there is no undo step. A database that does not load, has no schema (set_pose_search_database_schema), or whose schema still has no finalized channels after a re-finalize in memory is an error before any build. success is true only for result Success; Failed (see LogPoseSearch) and InProgress, which is what wait_for_completion false returns, both make success false. Repeating the call rebuilds again.
+//   @param database_path - Asset path of the UPoseSearchDatabase, e.g. "/Game/Anim/PSD_Locomotion", as create_pose_search_database returns it (required).
+//   @param wait_for_completion - true (default) blocks until the build ends, pumping the engine meanwhile, so large databases take a while; false returns at once with result InProgress and success false.
 //   @returns { database_path, schema_path, schema_cardinality, animation_asset_count, wait_for_completion, result, success, in_progress, failed, message }
 TSharedPtr<FJsonObject> HandleBuildPoseSearchDatabaseIndex(const TSharedPtr<FJsonObject>& Params)
 {
@@ -754,9 +754,9 @@ TSharedPtr<FJsonObject> HandleBuildPoseSearchDatabaseIndex(const TSharedPtr<FJso
 // ---------------------------------------------------------------------------
 // get_pose_search_database_info
 // ---------------------------------------------------------------------------
-// MCP:get_pose_search_database_info - Read-only walk of Schema, DatabaseAnimationAssets and Channels on a UPoseSearchDatabase
+// MCP:get_pose_search_database_info - Read a UPoseSearchDatabase without changing it: its schema path, search mode (BruteForce, PCAKDTree, VPTree or EventOnly), KD-tree neighbours, principal components, base cost bias and tags; every animation entry with its index, enabled flag, sampling range (0 to 0 means the whole asset) and asset path; and the schema's channels with class and weight. Use the entry index with remove_animation_asset_from_pose_search_database; for the schema's own settings and finalized channels use get_pose_search_schema_info; to search it at runtime use evaluate_pose_search_query. A database with no schema gives an empty schema_path and no channels rather than an error. schema_cardinality is not recomputed here, so it can read 0 for a schema loaded but not yet finalized (build_pose_search_database_index finalizes it). A path that does not load as a UPoseSearchDatabase is an error.
 //   @renamed-from inspect_pose_search_database
-//   @param database_path - Asset path of the UPoseSearchDatabase (required).
+//   @param database_path - Asset path of the UPoseSearchDatabase, e.g. "/Game/Anim/PSD_Locomotion", as create_pose_search_database returns it (required).
 //   @returns { database_path, schema_path, pose_search_mode, kd_tree_query_num_neighbors, number_of_principal_components, base_cost_bias, tags, schema_cardinality, animation_asset_count, animation_assets[], channel_count, channels[] }
 TSharedPtr<FJsonObject> HandleInspectPoseSearchDatabase(const TSharedPtr<FJsonObject>& Params)
 {

@@ -114,12 +114,12 @@ Create a UCameraAsset (Gameplay Camera System, Experimental plugin) at package_p
 
 *Additive, idempotent.*
 
-Creates a UCameraRigAsset (Gameplay Camera System, Experimental). Idempotent (returns the existing asset).
+Create an empty camera rig asset (UCameraRigAsset, from the Experimental Gameplay Cameras plugin) at package_path/name and save it; it has no root node yet. Idempotent: a camera rig already at that path is returned unchanged with already_existed true, and nothing is written (saved still reads true); an asset of another class there is an error. Not an undo step. Then give it a root node with set_camera_rig_root_node, tune it with set_camera_node_parameters or add_camera_node_child, build it with build_camera_rig, and run it from a camera asset (create_camera_asset) through set_camera_asset_director; get_camera_rig_nodes reads it back. A failed save makes success false, with the new rig left in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `name` | string | yes | Asset name (required) |
-| `package_path` | string | no | Target content folder (default "/Game/Cameras") |
+| `name` | string | yes | Asset name, e.g. 'CR_Player'; package_path/name must form a valid long package name. |
+| `package_path` | string | no | Content folder as a long package path, e.g. '/Game/Cameras/Rigs' (default "/Game/Cameras"). |
 
 **Returns:** `{ name, asset_path, asset_class, already_existed, saved }`
 

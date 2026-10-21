@@ -1245,10 +1245,10 @@ TSharedPtr<FJsonObject> HandleGetSoundWaveProperties(const TSharedPtr<FJsonObjec
 // the preset's typed AUDIOMIXER_API SetSettings; we discover the struct purely
 // through reflection. Mirrors the sound-concurrency merge+clamp+save flow.
 // ---------------------------------------------------------------------------- //
-// MCP:set_submix_effect_settings - Configure a submix effect preset's Settings struct (by chain index) via reflection (partial merge + clamp).
-//   @param submix_path - Full content path of the target USoundSubmix
+// MCP:set_submix_effect_settings - Change the Settings struct of one effect preset in a USoundSubmix's effect chain, picked by chain index, through reflection: only the keys given are written, each clamped to its ClampMin/ClampMax, and settings echoes the whole struct read back. Read the chain first with get_submix_effect_chain; add_submix_effect_to_chain appends a preset and remove_submix_effect_from_chain takes one out. One undo step, then the submix package is saved: that holds the presets add_submix_effect_to_chain created inside it, but a preset appended by path is its own asset, shared by every submix that uses it, and its package is only marked dirty, so save it with save_asset. Repeating the same values changes nothing more. An index out of range, an empty slot, a preset class with no Settings struct or a value that does not convert is an error; a failed save makes success false with saved=false.
+//   @param submix_path - Full content path of the target USoundSubmix, e.g. "/Game/Audio/Submix_Music"
 //   @param effect_index - 0-based index into SubmixEffectChain (same order add_submix_effect_to_chain appended / get_submix_effect_chain reports)
-//   @param settings - Object of fields to merge into the preset's Settings struct; absent keys untouched
+//   @param settings - Object of fields to merge into the preset's Settings struct, keyed by property name (case-insensitive), e.g. {"ThresholdDb": -12, "Ratio": 4} for a dynamics processor; absent keys untouched, unknown keys ignored
 //   @returns { submix_path: string, effect_index: int, preset_class: string, settings: object, saved: bool }
 TSharedPtr<FJsonObject> HandleSetSubmixEffectSettings(const TSharedPtr<FJsonObject>& Params)
 {

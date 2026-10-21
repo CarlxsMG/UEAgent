@@ -695,10 +695,10 @@ TSharedPtr<FJsonObject> HandleAddBone(const TSharedPtr<FJsonObject>& Params)
 // ---------------------------------------------------------------------------
 // remove_bone
 // ---------------------------------------------------------------------------
-// MCP:remove_bone - Remove a bone from a skeleton's reference skeleton (idempotent).
-//   @param skeleton_path - Path to the USkeleton asset
-//   @param bone_name - Name of the bone to remove
-//   @param remove_children - If true, recursively remove all descendant bones (default false)
+// MCP:remove_bone - Remove a bone from the reference skeleton of a USkeleton asset through FReferenceSkeletonModifier, then save the skeleton; no commit_bone_changes is needed afterwards. Without remove_children its child bones are kept and re-parented to the removed bone's parent; with it the whole branch goes. Only the skeleton changes: skeletal meshes, animations and sockets that use the bone are not updated. Inverse: add_bone; to move a bone instead use set_bone_parent; for virtual bones use remove_virtual_bone. Idempotent: a bone that is not there changes and saves nothing and returns removed false and already_absent true. The engine refuses to remove the only root bone, yet removed is still true then, so compare bone_count with the count before. A skeleton that does not load is an error; a failed save makes success false, with saved false and save_error. Work on a project copy (create_editable_skeleton), not engine content.
+//   @param skeleton_path - Asset path of the USkeleton, e.g. "/Game/Characters/SK_Hero_Skeleton", as get_skeleton_info (skeleton_path) or create_editable_skeleton (asset_path) returns it.
+//   @param bone_name - Exact name of the bone to remove, e.g. "twist_01_l".
+//   @param remove_children - true removes every descendant bone too; false (default) keeps the children and re-parents them one level up.
 //   @returns { asset_path, bone_name, removed, already_absent, remove_children, bone_count, saved, op: "remove_bone" }
 TSharedPtr<FJsonObject> HandleRemoveBone(const TSharedPtr<FJsonObject>& Params)
 {
@@ -912,13 +912,13 @@ TSharedPtr<FJsonObject> HandleSetBoneParent(const TSharedPtr<FJsonObject>& Param
 // ---------------------------------------------------------------------------
 // set_blend_profile_bone
 // ---------------------------------------------------------------------------
-// MCP:set_blend_profile_bone - Set a bone's blend scale on a UBlendProfile (creates profile if missing).
-//   @param skeleton_path - Path to the USkeleton asset
-//   @param profile_name - Name of the UBlendProfile (created if absent when create_if_missing=true)
-//   @param bone_name - Bone to scale
-//   @param scale - Blend scale value (clamped to [0, 1] by UBlendProfile)
-//   @param create_if_missing - If true, create the profile when not present (default true)
-//   @returns { asset_path, profile_name, bone_name, scale, updated, created_profile, profile_count, saved, op: "set_blend_profile_bone" }
+// MCP:set_blend_profile_bone - Set the blend scale of one bone (not its children) in a blend profile of a USkeleton asset, creating the profile when it does not exist yet (there is no separate create tool), in one undo step, then save the skeleton. Blend profiles let blends and montages weight bones differently; delete a whole profile with remove_blend_profile. Idempotent: the same scale again rewrites the same value and saves. Writing the profile's default scale (1 for a new weight profile) removes the bone's entry, as the editor does; stored_scale reads the value back. A skeleton that does not load, a bone_name that is not in the skeleton, or a missing profile with create_if_missing false is an error and nothing changes; a failed save makes success false, with saved false and save_error. Work on a project copy (create_editable_skeleton), not engine content.
+//   @param skeleton_path - Asset path of the USkeleton, e.g. "/Game/Characters/SK_Hero_Skeleton", as get_skeleton_info (skeleton_path) or create_editable_skeleton (asset_path) returns it.
+//   @param profile_name - Name of the blend profile on that skeleton, e.g. "UpperBody"; created when absent and create_if_missing is true.
+//   @param bone_name - Exact name of a bone in the skeleton's reference skeleton, e.g. "spine_01".
+//   @param scale - Blend scale for that bone, a float such as 0.5; it is not clamped (weight profiles usually use 0 to 1).
+//   @param create_if_missing - true (default) creates the profile when the skeleton has none of that name; false makes a missing profile an error.
+//   @returns { asset_path, profile_name, bone_name, scale, stored_scale, updated, created_profile, saved, save_error?, op: "set_blend_profile_bone" }
 TSharedPtr<FJsonObject> HandleSetBlendProfileBone(const TSharedPtr<FJsonObject>& Params)
 {
     FString SkeletonPath, ProfileName, BoneName;
@@ -1031,9 +1031,9 @@ TSharedPtr<FJsonObject> HandleCommitBoneChanges(const TSharedPtr<FJsonObject>& P
 // ---------------------------------------------------------------------------
 // remove_anim_curve_name
 // ---------------------------------------------------------------------------
-// MCP:remove_anim_curve_name - Remove a curve metadata entry (curve name) from a USkeleton (idempotent).
-//   @param skeleton_path - Path to the USkeleton asset
-//   @param curve_name - The curve name to remove (e.g. 'Curve_Example').
+// MCP:remove_anim_curve_name - Unregister a curve name from the curve metadata of a USkeleton asset (USkeleton::RemoveCurveMetaData), in one undo step, then save the skeleton. Inverse of add_anim_curve_name. It removes only the skeleton's registration: keyed curves of that name on animation sequences stay, and those are removed with remove_anim_curve (or renamed with rename_anim_curve). Idempotent: a name that is not registered changes and saves nothing and returns removed false and already_absent true. present is read back after the removal and curve_names lists what remains. A skeleton that does not load is an error; a failed save makes success false, with saved false and save_error.
+//   @param skeleton_path - Asset path of the USkeleton, e.g. "/Game/Characters/SK_Hero_Skeleton", as get_skeleton_info (skeleton_path) returns it.
+//   @param curve_name - The registered curve name to remove, exact as listed in curve_names, e.g. "Curve_Example".
 //   @returns { asset_path, curve_name, removed, already_absent, present, curve_count, curve_names, saved }
 TSharedPtr<FJsonObject> HandleRemoveAnimCurveName(const TSharedPtr<FJsonObject>& Params)
 {

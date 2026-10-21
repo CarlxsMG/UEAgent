@@ -2397,11 +2397,11 @@ TSharedPtr<FJsonObject> HandleSetNumUVChannels(
         : FString::Printf(TEXT("set_num_uv_channels: the mesh has %d UV channels after the call, not the %d requested"), Current, NumChannels));
 }
 
-// MCP:translate_mesh_uvs - Offset all UVs of one channel on a DynamicMeshActor's live dynamic mesh in the editor world by (translate_u, translate_v); a zero offset changes nothing (translated false) and adds no undo step. One undo step restores the UVs; reply actor_name is the component name, not the actor label.
-//   @param actor_name [string!] - Label or object name (case-insensitive) of the target DynamicMeshActor in the editor world.
-//   @param uv_channel [number!] - 0-based UV channel index; a channel the mesh does not have fails the call.
-//   @param translate_u [number!] - Offset added to every U coordinate (1.0 shifts by one full tile).
-//   @param translate_v [number!] - Offset added to every V coordinate (1.0 shifts by one full tile).
+// MCP:translate_mesh_uvs - Offset every UV of one channel on a DynamicMeshActor's live dynamic mesh in the editor world by (translate_u, translate_v), as one undo step that restores the UVs; the level is marked dirty and nothing is saved. Each call adds its offset again, so a retry shifts twice. A zero offset changes nothing (translated false) and adds no undo step. An unknown actor or a channel the mesh lacks is an error and nothing changes. The reply's actor_name is the component name, not the actor label. Scale or rotate the same channel with scale_mesh_uvs or rotate_mesh_uvs; to lay new UVs instead use set_mesh_uvs_from_projection or unwrap_mesh_uvs; get_dynamic_mesh_info shows the channels the mesh has.
+//   @param actor_name [string!] - Label or object name (case-insensitive) of the target DynamicMeshActor in the editor world, e.g. 'DynamicMeshActor_0'; spawn_actor with type DynamicMeshActor creates one.
+//   @param uv_channel [number!] - 0-based UV channel index, e.g. 0; a channel the mesh does not have fails the call.
+//   @param translate_u [number!] - Offset added to every U coordinate, in UV units: 1.0 shifts by one full tile, 0.5 by half, negative moves left.
+//   @param translate_v [number!] - Offset added to every V coordinate, in UV units: 1.0 shifts by one full tile, 0.5 by half, negative moves down.
 //   @returns { actor_name: string, uv_channel: int, translate_u: number, translate_v: number, translated: bool }
 TSharedPtr<FJsonObject> HandleTranslateMeshUVs(
     const TSharedPtr<FJsonObject>& Params)
@@ -2895,11 +2895,11 @@ TSharedPtr<FJsonObject> HandleSetMeshUVElementPosition(const TSharedPtr<FJsonObj
 //   * DeleteTrianglesFromMesh   (delete by triangle ID, one or many; complement of apply_mesh_boolean)
 // ============================================================================
 
-// MCP:recompute_mesh_uvs - Recompute UVs on a UV channel using the configured flatten method. A channel the mesh does not have, or an empty mesh, is an error; recomputed is false, and the call fails, when the engine refuses (for example polygroups on a mesh without polygroups); a failed call leaves the UVs as they were. One undo step restores the previous UVs.
-//   @param actor_name [string!] - DynamicMeshActor name (required)
-//   @param uv_channel [number]  - UV channel index (default 0)
-//   @param island_source [string] - "uv_islands" | "polygroups" | "existing_groups" | "selection" (default "uv_islands")
-//   @param method [string]       - flatten method: "spectral_conformal" (default), "conformal" or "exp_map"
+// MCP:recompute_mesh_uvs - Re-flatten the UVs of one channel on a DynamicMeshActor's live dynamic mesh in the editor world island by island: each existing UV island (or polygroup) keeps its triangles and gets new UVs from the chosen flatten method, as one undo step; the level is marked dirty and nothing is saved. Use it to fix stretched islands while keeping the seams, then repack_mesh_uvs to lay them out in the 0-1 square; unwrap_mesh_uvs cuts new seams over the whole mesh and set_mesh_uvs_from_projection projects instead. An unknown actor, a channel the mesh lacks, an empty mesh, or an unknown island_source or method is an error before anything changes; when the engine refuses (polygroups on a mesh without polygroups) recomputed is false, the call fails and the UVs stay as they were.
+//   @param actor_name [string!] - Label or object name of the target DynamicMeshActor in the editor world, e.g. 'DynamicMeshActor_0'.
+//   @param uv_channel [number]  - 0-based UV channel index (default 0); get_dynamic_mesh_info shows the channels the mesh has.
+//   @param island_source [string] - What one island is: "uv_islands" (the channel's existing islands, default) or "polygroups" (one island per polygroup); case-insensitive, any other value is an error.
+//   @param method [string]       - Flatten method: "spectral_conformal" (default), "conformal" or "exp_map"; case-insensitive.
 //   @returns { actor_name, uv_channel, island_source, method, recomputed }
 TSharedPtr<FJsonObject> HandleRecomputeMeshUVs(const TSharedPtr<FJsonObject>& Params)
 {
@@ -4016,7 +4016,7 @@ TSharedPtr<FJsonObject> HandleSetMeshMaterialID(const TSharedPtr<FJsonObject>& P
         FString::Printf(TEXT("%d of the %d targeted triangles carry MaterialID %d after the write"), TrianglesPainted, TrianglesTargeted, MaterialID));
 }
 
-// MCP:select_mesh_triangles - Resolve a region into a triangle selection and REPORT it, with its local-space bounding box, without modifying anything. Read-only companion of set_mesh_material_id scope='region' (and of the region of set_mesh_uvs_from_projection): same region parameters, same resolver, so a region previewed here paints exactly those triangles there. The bounds are what turn a bisection answer ("the piece is somewhere in X>0") into numbers: centre and size. Use it to avoid the failure mode where a mis-specified box selects 0 triangles and the paint call still returns success. Coordinates are LOCAL to the dynamic mesh, not world.
+// MCP:select_mesh_triangles - Resolve a region of a DynamicMeshActor's live dynamic mesh into a triangle selection and report it, with its count and local-space bounding box, without modifying anything (no undo step, nothing dirtied). Read-only companion of set_mesh_material_id scope='region' (and of the region of set_mesh_uvs_from_projection): same region parameters, same resolver, so a region previewed here paints exactly those triangles there. The bounds are what turn a bisection answer ("the piece is somewhere in X>0") into numbers: centre and size. Use it to avoid the failure mode where a mis-specified box selects 0 triangles and the paint call still returns success. Coordinates are LOCAL to the dynamic mesh, not world.
 //   @param actor_name [string!] - Label or name of the target DynamicMeshActor.
 //   @param region [string] - 'all' (default) | 'box' | 'sphere' | 'plane' | 'normal_angle' | 'material_id' | 'polygroup' | 'connected_component' (one physical PIECE, by the island index that get_mesh_components_detail reports).
 //   @param center [array] - Local [x,y,z] centre. Used by box/sphere, and as the plane origin.
@@ -4033,6 +4033,7 @@ TSharedPtr<FJsonObject> HandleSetMeshMaterialID(const TSharedPtr<FJsonObject>& P
 //   @param include_triangle_ids [bool] - Also return the resolved triangle IDs (default false; they can be thousands). The returned array is what set_mesh_material_id scope='triangles' consumes.
 //   @param max_triangle_ids [int] - Cap on how many IDs to return when include_triangle_ids is on (default 1000). When the cap truncates, triangle_ids_truncated is true — the count in triangles_selected is still the real one.
 //   @returns { actor_name, region, triangles_selected: int, mesh_triangle_count: int, is_empty: bool, bounds: { min_x, min_y, min_z, max_x, max_y, max_z, center_x, center_y, center_z, size_x, size_y, size_z }, triangle_ids: [int], triangle_ids_truncated: bool } -- bounds are all 0 when the selection is empty.
+//   @hints read-only
 TSharedPtr<FJsonObject> HandleSelectMeshTriangles(const TSharedPtr<FJsonObject>& Params)
 {
     FString Error;
