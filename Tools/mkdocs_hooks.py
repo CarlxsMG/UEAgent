@@ -11,6 +11,7 @@ The Markdown in docs/ stays readable on GitHub; the site gets, at build time:
 - chips: on a tool page, each tool's annotations ("*Read-only.*") as colored labels, plus one on the tools that
   Play-in-Editor refuses;
 - a description for every page that has none in its front matter: its first paragraph;
+- table cells: `\\|` inside a code span reads as `|`, as on GitHub (Python-Markdown keeps the backslash there);
 - the tool reference's domains in the navigation, read from the catalog;
 - after the build: assets/catalog/tools.json (the tool explorer's data), assets/social-preview.png (the image a
   shared link shows) and llms.txt (the site, for agents).
@@ -236,6 +237,23 @@ def first_paragraph(markdown: str) -> str:
     return text
 
 
+# ------------------------------------------------------------------ table cells
+CELL_RE = re.compile(r"(<t[dh][^>]*>)(.*?)(</t[dh]>)", re.S)
+CODE_RE = re.compile(r"(<code[^>]*>)(.*?)(</code>)", re.S)
+
+
+def unescape_cell_pipes(html: str) -> str:
+    """A table cell's code spans with `\\|` read as `|`. In a table the Markdown has to escape a pipe even inside a
+    code span; GitHub drops the backslash there, Python-Markdown shows it. Outside tables the HTML is left alone."""
+    def code(match: re.Match) -> str:
+        return match.group(1) + match.group(2).replace("\\|", "|") + match.group(3)
+
+    def cell(match: re.Match) -> str:
+        return match.group(1) + CODE_RE.sub(code, match.group(2)) + match.group(3)
+
+    return CELL_RE.sub(cell, html)
+
+
 # ------------------------------------------------------------------ MkDocs events
 def on_config(config):
     with open(catalog_server.CATALOG, encoding="utf-8") as f:
@@ -287,6 +305,10 @@ def on_page_markdown(markdown, page, config, files):
     if source.startswith("tools/") and source != "tools/README.md":
         markdown = chips(markdown)
     return link_tools(markdown, source)
+
+
+def on_page_content(html, page, config, files):
+    return unescape_cell_pipes(html)
 
 
 def on_nav(nav, config, files):
