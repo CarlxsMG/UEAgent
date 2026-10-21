@@ -3,7 +3,7 @@
 	"Version": 19,
 	"VersionName": "2.2.0",
 	"FriendlyName": "UEAgent",
-	"Description": "MCP server for Unreal Engine 5, served by the editor itself: about 2,100 tools for AI agents (Claude Code, Cursor, any MCP client), each call checked before it runs and re-read after.",
+	"Description": "MCP server for Unreal Engine 5, served by the editor itself: more than 1,700 tools for AI agents (Claude Code, Cursor, any MCP client), each call checked before it runs and re-read after.",
 	"Category": "Editor",
 	"CreatedBy": "CarlxsMG",
 	"CreatedByURL": "https://github.com/CarlxsMG",
