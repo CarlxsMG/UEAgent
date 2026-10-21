@@ -209,6 +209,11 @@ comprobación de actualizaciones. El servidor solo escucha en 127.0.0.1, y la re
 herramienta va al cliente MCP que hayas conectado, en la misma máquina. Lo que ese cliente envíe
 después a su proveedor de modelos depende del cliente.
 
+## Accesibilidad
+
+Qué ofrecen en accesibilidad la interfaz del editor y la documentación, qué les falta y cómo informar
+de una barrera: consulta [ACCESSIBILITY.md](ACCESSIBILITY.md) (en inglés).
+
 ## Contribuir
 
 Las preguntas y las ideas van a [Discussions](https://github.com/CarlxsMG/UEAgent/discussions). Los

@@ -203,6 +203,11 @@ UEAgent makes no network connection of its own: no telemetry, no analytics, no u
 server only listens on 127.0.0.1, and a tool's answer goes to the MCP client you connected, on the
 same machine. What that client then sends to its model provider is up to the client.
 
+## Accessibility
+
+What the editor UI and the documentation offer for accessibility, what they lack, and how to report a
+barrier: see [ACCESSIBILITY.md](ACCESSIBILITY.md).
+
 ## Contributing
 
 Questions and ideas go to [Discussions](https://github.com/CarlxsMG/UEAgent/discussions). Bug reports
