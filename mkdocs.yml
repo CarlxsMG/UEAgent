@@ -109,6 +109,7 @@ nav:
   - Home: index.md
   - Get started:
       - Getting started: getting-started.md
+      - Install with your agent: agent-install.md
       - Clients: clients.md
       - Choosing a server: choosing.md
   - Use:

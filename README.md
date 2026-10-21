@@ -61,6 +61,16 @@ for Unreal: [Choosing an MCP server](docs/choosing.md).
 
 ## Quick start
 
+**Let your agent do it.** Open Claude Code, Cursor, Codex or another agent in your project's folder and
+paste:
+
+```
+Install the UEAgent plugin in this Unreal Engine project and connect yourself to it, following https://raw.githubusercontent.com/CarlxsMG/UEAgent/main/llms-install.md
+```
+
+It does the steps below, checks the download's SHA-256 and asks before it changes anything; you reload
+its MCP servers at the end. See [llms-install.md](llms-install.md). Or by hand:
+
 1. **Install.** Download the latest `UEAgent-*-UE5.8-Win64.zip` (or `-UE5.7-`, for your engine) from
    [Releases](https://github.com/CarlxsMG/UEAgent/releases) and unzip it into
    `<YourProject>/Plugins/`, or [build it from source](#build-from-source).

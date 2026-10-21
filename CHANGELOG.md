@@ -4,6 +4,14 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 ## Unreleased
 
+### Added
+
+- **Install with your agent.** Paste one line into Claude Code, Cursor, Codex or another agent opened in your
+  project, and it installs UEAgent following [llms-install.md](llms-install.md). It finds the engine version,
+  downloads and verifies the release, unzips it, opens the editor, connects itself and installs its skills; it asks
+  before changing anything and leaves a git clone alone. See the README's Quick start and
+  [Install with your agent](docs/agent-install.md).
+
 ### Fixed
 
 - On the documentation site, a pipe inside code in a table showed with a backslash, as in

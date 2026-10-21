@@ -1,6 +1,7 @@
 # Getting started
 
-From a project without UEAgent to an agent that builds in its editor, in four steps.
+From a project without UEAgent to an agent that builds in its editor, in four steps. Your agent can also
+do them for you: see [Install with your agent](agent-install.md).
 
 ## What you need
 
