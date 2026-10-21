@@ -657,7 +657,7 @@ TSharedPtr<FJsonObject> HandleInspectMotionWarpingComponent(
 // ---------------------------------------------------------------------------
 // remove_motion_warping_component
 // ---------------------------------------------------------------------------
-// MCP:remove_motion_warping_component - Destroy the UMotionWarpingComponent of an actor (the first one found), with all its warp targets; the inverse of add_motion_warping_component. The actor is recorded in the call's undo step (Actor->Modify) and its level is marked dirty, not saved (save_level persists it). Only an instance component stays gone: one that the actor's Blueprint or C++ class defines comes back (when its construction script reruns, or on reload), so remove that one from the class instead. To clear targets but keep the component use remove_motion_warping_target (all=true); check the result with get_motion_warping_component_info. Idempotent: an actor without one returns already_existed=false, removed=false and a note, not an error. An actor that is not found is an error and nothing changes.
+// MCP:remove_motion_warping_component - Destroy the UMotionWarpingComponent of an actor (the first one found), with all its warp targets; the inverse of add_motion_warping_component. The actor is recorded in the call's undo step (Actor->Modify) and its level is marked dirty, not saved (save_level persists it). Only an instance component stays gone: one that the actor's Blueprint or C++ class defines comes back (when its construction script reruns, or on reload), so remove that one from the class instead. To clear targets but keep the component use remove_motion_warping_target (all=true); check the result with get_motion_warping_component_info. removed is read back from the actor: true once the component is off its component list and being destroyed, and a component still there makes success false. Idempotent: an actor without one returns already_existed=false, removed=false and a note, not an error. An actor that is not found is an error and nothing changes.
 //   @param actor_path [string!] - Actor as a full object path ('/Game/Maps/Arena.Arena:PersistentLevel.BP_Hero_C_1'), or the internal name or label of an editor-world actor ('BP_Hero_C_1', 'Hero').
 //   @returns { actor_path: string, component_path?: string, removed: bool, already_existed: bool, note?: string }
 //   NOTE (impl): calls Actor->DestroyComponent(Comp), which unregisters the component and marks it for GC.
@@ -683,10 +683,11 @@ TSharedPtr<FJsonObject> HandleRemoveMotionWarpingComponent(
 
     const FString ComponentPath = Existing->GetPathName();
     Actor->Modify();
-    // UActorComponent::DestroyComponent returns void; the component is GC-eligible
-    // after this call. Mark success unless we somehow didn't have a component (caught above).
+    // UActorComponent::DestroyComponent returns void, so the outcome is read back from the actor: the component
+    // must be off its component list and marked for destruction.
     Existing->DestroyComponent();
-    const bool bDestroyed = true;
+    TInlineComponentArray<UActorComponent*> Remaining(Actor);
+    const bool bDestroyed = !Remaining.Contains(Existing) && Existing->IsBeingDestroyed();
 
     if (ULevel* Level = Actor->GetLevel())
     {
@@ -697,6 +698,12 @@ TSharedPtr<FJsonObject> HandleRemoveMotionWarpingComponent(
     Data->SetStringField(TEXT("component_path"), ComponentPath);
     Data->SetBoolField(TEXT("already_existed"), true);
     Data->SetBoolField(TEXT("removed"), bDestroyed);
+    if (!bDestroyed)
+    {
+        return mcp_common::MakeOutcomeReply(Data, false, FString::Printf(
+            TEXT("remove_motion_warping_component: %s is still a component of the actor after DestroyComponent; it was not removed."),
+            *ComponentPath));
+    }
     return mcp_common::MakeOkReply(Data);
 }// ---------------------------------------------------------------------------
 // Typed setters on FMotionWarpingTarget fields and the

@@ -134,7 +134,7 @@ Create a GameplayCueNotify Blueprint of the kind notify_type names -- Static (UG
 
 *Additive, idempotent.*
 
-Create a native UGameplayEffect data asset (not a Blueprint, and not a container) at package_path/name with the given duration policy, and save it; no undo transaction. apply_gameplay_effect needs a class, so for an effect you will apply use create_gameplay_effect_blueprint instead; read the result back with get_gameplay_effect_info. Idempotent: a GameplayEffect already at that path, native or Blueprint, is returned untouched with already_existed=true and nothing saved, but the duration_policy in that reply echoes your request, not the asset; an asset of another class there is refused. An unknown duration_policy is an error and nothing is created. A failed save (always while PIE runs) is an error, and the new asset stays in memory unsaved.
+Create a native UGameplayEffect data asset (not a Blueprint, and not a container) at package_path/name with the given duration policy, and save it; no undo transaction. apply_gameplay_effect needs a class, so for an effect you will apply use create_gameplay_effect_blueprint instead; read the result back with get_gameplay_effect_info. Idempotent: a GameplayEffect already at that path, native or Blueprint, is returned untouched with already_existed=true and nothing saved; its duration_policy and duration_magnitude are read from the asset, and requested_duration_policy echoes the request that was not applied. An asset of another class there is refused. An unknown duration_policy is an error and nothing is created. A failed save (always while PIE runs) is an error, and the new asset stays in memory unsaved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -143,7 +143,7 @@ Create a native UGameplayEffect data asset (not a Blueprint, and not a container
 | `duration_policy` | string | no | "Instant", "HasDuration" or "Infinite", case ignored (default Instant). |
 | `duration_magnitude` | number | no | Duration in seconds as a constant magnitude, e.g. 5.0; used only with HasDuration and ignored otherwise (default 0.0). |
 
-**Returns:** `{ name, asset_path, already_existed, duration_policy, duration_magnitude?, created? }`
+**Returns:** `{ name, asset_path, already_existed, duration_policy, duration_magnitude?, requested_duration_policy?, created? }`
 
 ## `create_gameplay_effect_blueprint`
 
@@ -457,7 +457,7 @@ Replace the asset tags on the class default object of a GameplayAbility Blueprin
 
 *Destructive, idempotent.*
 
-Point CooldownGameplayEffectClass on the class default object of a GameplayAbility Blueprint at the generated class of a GameplayEffect Blueprint, both loaded by asset path, then save the ability without recompiling. That effect is applied when the ability commits and the tags it grants block re-activation while it lasts, so give it a duration with set_gameplay_effect_duration and a cooldown tag with set_gameplay_effect_component. Any cooldown class already set is overwritten, and every call writes and saves, even with the same class; there is no way to clear it here. A path that is not a GameplayAbility or GameplayEffect Blueprint, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. The cost effect: set_ability_cost; a new effect: create_gameplay_effect_blueprint.
+Point CooldownGameplayEffectClass on the class default object of a GameplayAbility Blueprint at the generated class of a GameplayEffect Blueprint, both loaded by asset path, then save the ability without recompiling. That effect is applied when the ability commits and the tags it grants block re-activation while it lasts, so give it a duration with set_gameplay_effect_duration and a cooldown tag with set_gameplay_effect_component. Any cooldown class already set is overwritten, and every call writes and saves, even with the same class; there is no way to clear it here. A path that is not a GameplayAbility or GameplayEffect Blueprint, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. cooldown_effect_class, cooldown_effect_class_matches and set are read back from the class defaults after the save, and success is false when they do not hold the requested class. The cost effect: set_ability_cost; a new effect: create_gameplay_effect_blueprint.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -470,7 +470,7 @@ Point CooldownGameplayEffectClass on the class default object of a GameplayAbili
 
 *Destructive, idempotent.*
 
-Point CostGameplayEffectClass on the class defaults of a GameplayAbility Blueprint at the generated class of a GameplayEffect Blueprint, both loaded by asset path, then save the ability without recompiling. That effect is applied when the ability commits, and its modifiers (usually a negative add to an attribute such as Mana) are the price: the commit fails when the owner cannot pay. Give the effect its modifier with add_gameplay_effect_modifier; for the effect that blocks re-use use set_ability_cooldown instead; make a new effect with create_gameplay_effect_blueprint; read the value back with get_properties on the ability's class defaults. Any cost class already set is overwritten and every call writes and saves, so a repeat call leaves the same state; there is no way to clear it here. A path that is not a GameplayAbility or GameplayEffect Blueprint, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. set and cost_effect_class_matches are the value read back after the save.
+Point CostGameplayEffectClass on the class defaults of a GameplayAbility Blueprint at the generated class of a GameplayEffect Blueprint, both loaded by asset path, then save the ability without recompiling. That effect is applied when the ability commits, and its modifiers (usually a negative add to an attribute such as Mana) are the price: the commit fails when the owner cannot pay. Give the effect its modifier with add_gameplay_effect_modifier; for the effect that blocks re-use use set_ability_cooldown instead; make a new effect with create_gameplay_effect_blueprint; read the value back with get_properties on the ability's class defaults. Any cost class already set is overwritten and every call writes and saves, so a repeat call leaves the same state; there is no way to clear it here. A path that is not a GameplayAbility or GameplayEffect Blueprint, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. cost_effect_class, cost_effect_class_matches and set are read back from the class defaults after the save, and success is false when they do not hold the requested class.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

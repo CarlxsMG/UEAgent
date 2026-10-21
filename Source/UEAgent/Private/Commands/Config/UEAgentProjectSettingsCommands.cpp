@@ -90,6 +90,52 @@ namespace
 		return true;
 	}
 
+	/**
+	 * A copy of one property's whole value (every element of a fixed array) in a container, taken when it is built;
+	 * Restore() writes it back and says whether the property then reads identical to the copy. A raw value copy,
+	 * not text, so any property type comes back exactly.
+	 */
+	class FPSCfgPropertySnapshot
+	{
+	public:
+		FPSCfgPropertySnapshot(FProperty* InProp, UObject* InContainer)
+			: Prop(InProp), Container(InContainer)
+		{
+			Storage = FMemory::Malloc(FMath::Max(Prop->GetSize(), 1), Prop->GetMinAlignment());
+			Prop->InitializeValue(Storage);
+			Prop->CopyCompleteValue(Storage, Prop->ContainerPtrToValuePtr<void>(Container));
+		}
+		~FPSCfgPropertySnapshot()
+		{
+			Prop->DestroyValue(Storage);
+			FMemory::Free(Storage);
+		}
+		FPSCfgPropertySnapshot(const FPSCfgPropertySnapshot&) = delete;
+		FPSCfgPropertySnapshot& operator=(const FPSCfgPropertySnapshot&) = delete;
+
+		bool Restore() const
+		{
+			uint8* Live = Prop->ContainerPtrToValuePtr<uint8>(Container);
+			Prop->CopyCompleteValue(Live, Storage);
+			const int32 ElementSize = Prop->GetElementSize();
+			const int32 Elements = ElementSize > 0 ? Prop->GetSize() / ElementSize : 0;
+			for (int32 Index = 0; Index < Elements; ++Index)
+			{
+				const uint8* Kept = static_cast<const uint8*>(Storage) + static_cast<size_t>(ElementSize) * Index;
+				if (!Prop->Identical(Live + static_cast<size_t>(ElementSize) * Index, Kept, PPF_None))
+				{
+					return false;
+				}
+			}
+			return true;
+		}
+
+	private:
+		FProperty* Prop = nullptr;
+		UObject* Container = nullptr;
+		void* Storage = nullptr;
+	};
+
 	// -----------------------------------------------------------------------
 	// VERSIONED-INI PERSISTENCE
 	//
@@ -538,12 +584,12 @@ TSharedPtr<FJsonObject> HandleGetProjectSettingsValue(
 //   classes that genuinely live in the per-user/Saved ini), and finally RE-READS THE
 //   FILE FROM DISK to prove the write landed. See the PSCfg* block at the top.
 // ---------------------------------------------------------------------------
-// MCP:set_project_settings_value - Set one property of a Project Settings class (the class default object of a UDeveloperSettings subclass such as RendererSettings), the way the Project Settings panel does, and persist it: a defaultconfig class goes to the versioned Config/Default<Base>.ini through TryUpdateDefaultConfigFile, any other config class through SaveConfig to its saved ini under Saved/Config (versioned_ini=false). With verify_disk it re-reads that .ini from disk (FConfigFile::Read, not the in-memory GConfig) and fails when the value is not there. Read the current value first with get_project_settings_value; for a raw INI key with no settings class use set_engine_ini_value (it writes only Saved/Config). It runs no PostEditChange, so systems that react to edits in the panel are not notified (some settings need an editor restart), and there is no undo step. A value the property cannot parse, an unknown class or property is an error and nothing changes; a class that is not a config class, or a read-only .ini, fails after the in-memory value has already changed. Idempotent: the same value again rewrites the same line.
+// MCP:set_project_settings_value - Set one property of a Project Settings class (the class default object of a UDeveloperSettings subclass such as RendererSettings), the way the Project Settings panel does, and persist it: a defaultconfig class goes to the versioned Config/Default<Base>.ini through TryUpdateDefaultConfigFile, any other config class through SaveConfig to its saved ini under Saved/Config (versioned_ini=false). With verify_disk it re-reads that .ini from disk (FConfigFile::Read, not the in-memory GConfig) and fails when the value is not there. Read the current value first with get_project_settings_value; for a raw INI key with no settings class use set_engine_ini_value (it writes only Saved/Config). It runs no PostEditChange, so systems that react to edits in the panel are not notified (some settings need an editor restart), and there is no undo step. A value the property cannot parse, an unknown class or property, or a class that is not a config class is an error and nothing changes. When the .ini cannot be written (read-only) the call fails and the in-memory value is put back as it was: reverted and in_memory_value say so, read back. Idempotent: the same value again rewrites the same line.
 //   @param class_name - Settings class short name without the U prefix, e.g. "RendererSettings" (a loaded UDeveloperSettings subclass, case ignored), or a class path such as "/Script/Engine.RendererSettings".
 //   @param property_name - Exact C++ property name on that class, e.g. "bDefaultFeatureBloom" (not the display name shown in the panel); property_is_config in the reply says whether the property is saved to config at all.
 //   @param value - New value as Unreal import text: "True"/"False" for a bool, "1.5" for a float, the enumerator name for an enum, "(X=1,Y=2,Z=3)" for a vector, "/Game/Maps/Main.Main" for an object or soft path.
 //   @param verify_disk - Optional bool, default true. Re-read the target .ini with FConfigFile::Read (never GConfig, which is the in-memory cache and would just echo the write back) and report disk_value / disk_matches_memory.
-//   @returns { class_name: string, property_name: string, round_tripped_value: string, ini_path: string, is_default_config_class: bool, versioned_ini: bool, write_reported: bool, persist_method: string, ini_section: string, ini_key: string, property_is_config: bool, disk_present: bool, disk_value: string, disk_values: [string], disk_matches_memory: bool, verification: object, verification_checks: [object] }
+//   @returns { class_name: string, property_name: string, round_tripped_value: string, ini_path: string, is_default_config_class: bool, versioned_ini: bool, write_reported: bool, persist_method: string, ini_section: string, ini_key: string, property_is_config: bool, disk_present: bool, disk_value: string, disk_values: [string], disk_matches_memory: bool, reverted?: bool, in_memory_value?: string, persist_error?: string, verification: object, verification_checks: [object] }
 TSharedPtr<FJsonObject> HandleSetProjectSettingsValue(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -554,6 +600,16 @@ TSharedPtr<FJsonObject> HandleSetProjectSettingsValue(
 	UObject* CDO = nullptr;
 	FProperty* Prop = nullptr;
 	if (TSharedPtr<FJsonObject> Error = PSCfgResolveSettingsProperty(ClassName, PropertyName, CDO, Prop)) { return Error; }
+	// A class with no config file can never persist the value: refused before the in-memory value changes.
+	if (!CDO->GetClass()->HasAnyClassFlags(CLASS_Config))
+	{
+		return mcp_common::MakeErrorReply(FString::Printf(
+			TEXT("%s is not a UCLASS(config=...) class: no ini is ever written for it, so nothing was changed"), *ClassName));
+	}
+
+	// The value before the write, kept to put back if the write cannot be persisted.
+	FPSCfgPropertySnapshot Before(Prop, CDO);
+
 	// The importer's own verdict decides -- a value the property cannot parse is an
 	// error, not a silent no-op reported as success.
 	if (!WritePropertyByImport(CDO, Prop, Value))
@@ -580,9 +636,18 @@ TSharedPtr<FJsonObject> HandleSetProjectSettingsValue(
 
 	if (!bPersisted)
 	{
+		// Nothing reached the .ini, so the in-memory value goes back to what it was: a failed call leaves no change
+		// that the next editor start would silently drop. reverted and in_memory_value are read back.
+		const bool bReverted = Before.Restore();
+		FString InMemory;
+		ReadPropertyAsString(CDO, Prop, InMemory);
+		Data->SetBoolField(TEXT("reverted"), bReverted);
+		Data->SetStringField(TEXT("in_memory_value"), InMemory);
 		mcp_common::AddVerificationEvidence(Data, mcp_common::EMcpVerification::Failed,
 			TEXT("UObject::TryUpdateDefaultConfigFile"), Target.FailReason);
-		return mcp_common::MakeOutcomeReply(Data, false, Target.FailReason);
+		return mcp_common::MakeOutcomeReply(Data, false, FString::Printf(TEXT("%s. %s"), *Target.FailReason,
+			bReverted ? TEXT("The in-memory value was put back as it was, so nothing changed.")
+			          : TEXT("The in-memory value could NOT be put back: it keeps the new value until the editor restarts (in_memory_value).")));
 	}
 	if (!bVerifyDisk)
 	{
@@ -617,11 +682,11 @@ TSharedPtr<FJsonObject> HandleSetProjectSettingsValue(
 //   Persists through TryUpdateDefaultConfigFile() and verifies with a real FConfigFile::Read
 //   of the file on disk (see VERSIONED-INI PERSISTENCE above).
 // ---------------------------------------------------------------------------
-// MCP:set_default_game_map - Set UGameMapsSettings EditorStartupMap / GameDefaultMap, persist them to the VERSIONED Config/DefaultEngine.ini (TryUpdateDefaultConfigFile) and re-read that .ini FROM DISK to prove it landed.
+// MCP:set_default_game_map - Set UGameMapsSettings EditorStartupMap / GameDefaultMap, persist them to the VERSIONED Config/DefaultEngine.ini (TryUpdateDefaultConfigFile) and re-read that .ini FROM DISK to prove it landed. When the .ini cannot be written (read-only) the call fails and both maps are put back in memory as they were: reverted and in_memory_editor_startup_map / in_memory_game_default_map say so, read back.
 //   @param editor_startup_map - Optional long package path of the editor startup map
 //   @param game_default_map - Optional long package path of the default game map
 //   @param verify_disk - Optional bool, default true. Re-read Config/DefaultEngine.ini with FConfigFile::Read (never GConfig, which is the in-memory cache) and report disk_value per map.
-//   @returns { editor_startup_map: string, game_default_map: string, ini_path: string, is_default_config_class: bool, versioned_ini: bool, write_reported: bool, persist_method: string, disk_value: { editor_startup_map: string, game_default_map: string }, disk_checks: [object], verification: object, verification_checks: [object] }
+//   @returns { editor_startup_map: string, game_default_map: string, ini_path: string, is_default_config_class: bool, versioned_ini: bool, write_reported: bool, persist_method: string, disk_value: { editor_startup_map: string, game_default_map: string }, disk_checks: [object], reverted?: bool, in_memory_editor_startup_map?: string, in_memory_game_default_map?: string, persist_error?: string, verification: object, verification_checks: [object] }
 TSharedPtr<FJsonObject> HandleSetDefaultGameMap(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -638,6 +703,16 @@ TSharedPtr<FJsonObject> HandleSetDefaultGameMap(
 	{
 		return mcp_common::MakeErrorReply(TEXT("No UGameMapsSettings CDO"));
 	}
+	// Both values before the write, kept to put back if the write cannot be persisted.
+	FProperty* EditorMapProp = UGameMapsSettings::StaticClass()->FindPropertyByName(TEXT("EditorStartupMap"));
+	FProperty* GameMapProp = UGameMapsSettings::StaticClass()->FindPropertyByName(TEXT("GameDefaultMap"));
+	if (!EditorMapProp || !GameMapProp)
+	{
+		return mcp_common::MakeErrorReply(TEXT("UGameMapsSettings has no EditorStartupMap/GameDefaultMap property (engine layout changed); nothing was changed"));
+	}
+	const FPSCfgPropertySnapshot EditorMapBefore(EditorMapProp, Settings);
+	const FPSCfgPropertySnapshot GameMapBefore(GameMapProp, Settings);
+
 	if (!EditorMap.IsEmpty()) { Settings->EditorStartupMap = FSoftObjectPath(EditorMap); }
 	if (!GameMap.IsEmpty())   { UGameMapsSettings::SetGameDefaultMap(GameMap); }
 
@@ -654,9 +729,19 @@ TSharedPtr<FJsonObject> HandleSetDefaultGameMap(
 
 	if (!bPersisted)
 	{
+		// Nothing reached the .ini, so both maps go back to what they were in memory; reverted and the in-memory
+		// values are read back.
+		const bool bEditorMapReverted = EditorMapBefore.Restore();
+		const bool bGameMapReverted = GameMapBefore.Restore();
+		const bool bReverted = bEditorMapReverted && bGameMapReverted;
+		Data->SetBoolField(TEXT("reverted"), bReverted);
+		Data->SetStringField(TEXT("in_memory_editor_startup_map"), Settings->EditorStartupMap.ToString());
+		Data->SetStringField(TEXT("in_memory_game_default_map"), UGameMapsSettings::GetGameDefaultMap());
 		mcp_common::AddVerificationEvidence(Data, mcp_common::EMcpVerification::Failed,
 			TEXT("UObject::TryUpdateDefaultConfigFile"), Target.FailReason);
-		return mcp_common::MakeOutcomeReply(Data, false, Target.FailReason);
+		return mcp_common::MakeOutcomeReply(Data, false, FString::Printf(TEXT("%s. %s"), *Target.FailReason,
+			bReverted ? TEXT("The in-memory maps were put back as they were, so nothing changed.")
+			          : TEXT("The in-memory maps could NOT all be put back: they keep the new values until the editor restarts (in_memory_editor_startup_map, in_memory_game_default_map).")));
 	}
 	if (!bVerifyDisk)
 	{

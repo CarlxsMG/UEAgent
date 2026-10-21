@@ -40,6 +40,7 @@
 #include "ScopedTransaction.h"
 #include "EdGraph/EdGraph.h"         // remove_sound_cue_node: the cue editor graph node goes with the sound node
 #include "EdGraph/EdGraphNode.h"
+#include "EdGraph/EdGraphPin.h"       // disconnect_sound_cue_nodes: the editor graph's wire of the emptied slot
 
 #define LOCTEXT_NAMESPACE "UEAgentSoundCueCommands"
 
@@ -123,6 +124,41 @@ namespace
         }
         return false;
     }
+
+#if WITH_EDITORONLY_DATA
+    // The editor-graph twin of emptying input slot SlotIndex of Node: a cue made in the Sound Cue editor keeps a graph
+    // node per sound node whose input pins, in order, are its ChildNodes slots, and the editor rebuilds ChildNodes
+    // from those pins, so the wire into that pin goes too. Returns how many links were broken (0 when the node has no
+    // graph node or the pin holds no link).
+    int32 SoundCue_BreakGraphInputLinks(USoundNode* Node, int32 SlotIndex)
+    {
+        UEdGraphNode* GraphNode = Node ? Node->GraphNode.Get() : nullptr;
+        if (!GraphNode)
+        {
+            return 0;
+        }
+        int32 InputOrdinal = 0;
+        for (UEdGraphPin* Pin : GraphNode->Pins)
+        {
+            if (!Pin || Pin->Direction != EGPD_Input)
+            {
+                continue;
+            }
+            if (InputOrdinal++ != SlotIndex)
+            {
+                continue;
+            }
+            const int32 Links = Pin->LinkedTo.Num();
+            if (Links > 0)
+            {
+                GraphNode->Modify();
+                Pin->BreakAllPinLinks();   // Modify()s both ends' nodes, so undo restores the wire
+            }
+            return Links;
+        }
+        return 0;
+    }
+#endif
 
     // Map a node_type token -> concrete USoundNode subclass. Returns nullptr if unknown.
     UClass* ResolveSoundNodeClass(const FString& NodeType)
@@ -448,12 +484,12 @@ TSharedPtr<FJsonObject> HandleConnectSoundCueNodes(const TSharedPtr<FJsonObject>
 // ---------------------------------------------------------------------------
 // disconnect_sound_cue_nodes
 // ---------------------------------------------------------------------------
-// MCP:disconnect_sound_cue_nodes - Unwires one input of a node in a USoundCue asset: the parent's input slot, picked by the child wired into it or by its index, is emptied, in one undo step, then the cue is saved; a failed save, as during PIE, makes success false with save_error. Inverse of connect_sound_cue_nodes. The slot itself is kept (empty, -1 in get_sound_cue_graph) so other input indexes do not shift, and the child node stays in the cue: remove_sound_cue_node deletes a node. A slot that is already empty or out of range, or a child not wired into the parent, succeeds with already_disconnected true and nothing changed or saved. A cue that does not load, a node id out of range, or neither child_node_id nor input_index is an error. Read ids and wiring first with get_sound_cue_graph; the cue's output node is set with set_sound_cue_first_node.
+// MCP:disconnect_sound_cue_nodes - Unwires one input of a node in a USoundCue asset: the parent's input slot, picked by the child wired into it or by its index, is emptied, in one undo step, then the cue is saved; a failed save, as during PIE, makes success false with save_error. Inverse of connect_sound_cue_nodes. When the cue has an editor graph (it was made or edited in the Sound Cue editor), the wire into that input pin is broken too (graph_links_broken counts it), so the editor does not rebuild the slot from its graph. The slot itself is kept (empty, -1 in get_sound_cue_graph) so other input indexes do not shift, and the child node stays in the cue: remove_sound_cue_node deletes a node. A slot that is already empty or out of range, or a child not wired into the parent, succeeds with already_disconnected true and nothing changed or saved. A cue that does not load, a node id out of range, or neither child_node_id nor input_index is an error. Read ids and wiring first with get_sound_cue_graph; the cue's output node is set with set_sound_cue_first_node.
 //   @param cue_path - Object or package path of the Sound Cue asset (e.g. "/Game/Audio/SC_Footsteps").
 //   @param parent_node_id - node_id (index in the cue's AllNodes, as get_sound_cue_graph lists it) of the node whose input slot is emptied.
 //   @param child_node_id - Optional node_id of the wired child; the first slot of the parent holding it is emptied. Wins over input_index when both are given.
 //   @param input_index - Optional 0-based input slot of the parent to empty directly (its position in that node's child_ids); supply this OR child_node_id.
-//   @returns { cue_path: string, parent_node_id: int, child_node_id: int, input_index: int, parent_class: string, child_class: string, parent_child_count: int, disconnected: bool, already_disconnected: bool, saved: bool }
+//   @returns { cue_path: string, parent_node_id: int, child_node_id: int, input_index: int, parent_class: string, child_class: string, parent_child_count: int, graph_links_broken: int, disconnected: bool, already_disconnected: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleDisconnectSoundCueNodes(const TSharedPtr<FJsonObject>& Params)
 {
     FString CuePath;
@@ -526,6 +562,13 @@ TSharedPtr<FJsonObject> HandleDisconnectSoundCueNodes(const TSharedPtr<FJsonObje
 
     ParentNode->ChildNodes[Idx] = nullptr;
 
+    // A cue with an editor graph wires the same slot there; it is unwired too, or the Sound Cue editor would rebuild
+    // the slot from the graph and bring the child back.
+    int32 GraphLinksBroken = 0;
+#if WITH_EDITORONLY_DATA
+    GraphLinksBroken = SoundCue_BreakGraphInputLinks(ParentNode, Idx);
+#endif
+
     Cue->CacheAggregateValues();
 
     FString SaveError;
@@ -539,8 +582,17 @@ TSharedPtr<FJsonObject> HandleDisconnectSoundCueNodes(const TSharedPtr<FJsonObje
     Obj->SetStringField(TEXT("parent_class"), ParentNode->GetClass()->GetName());
     Obj->SetStringField(TEXT("child_class"), ChildClass);
     Obj->SetNumberField(TEXT("parent_child_count"), ParentNode->ChildNodes.Num());
-    Obj->SetBoolField(TEXT("disconnected"), true);
+    Obj->SetNumberField(TEXT("graph_links_broken"), GraphLinksBroken);
+    // Read back from the slot.
+    const bool bDisconnected = ParentNode->ChildNodes.IsValidIndex(Idx) && ParentNode->ChildNodes[Idx] == nullptr;
+    Obj->SetBoolField(TEXT("disconnected"), bDisconnected);
     Obj->SetBoolField(TEXT("already_disconnected"), false);
+    if (!bDisconnected)
+    {
+        Obj->SetBoolField(TEXT("saved"), bSaved);
+        return mcp_common::MakeOutcomeReply(Obj, false,
+            mcp_common::MeasuredOutcomeError(TEXT("disconnect_sound_cue_nodes"), TEXT("disconnected")));
+    }
     return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("disconnect_sound_cue_nodes"), SaveError);
 }
 

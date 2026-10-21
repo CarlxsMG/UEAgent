@@ -10,7 +10,7 @@ Back to the [index](README.md).
 
 *Additive.*
 
-Append a utility consideration node (a struct deriving from FStateTreeConsiderationBase, with its default values) to the Considerations of one state of a StateTree asset, then save the asset without compiling it; there is no undo step. Considerations score the state 0..1 when its parent picks children by utility (set_state_selection_behavior, e.g. TrySelectChildrenWithHighestUtility). Each call appends another node, even of a type the state already has, so a repeat call stacks a duplicate. A missing tree, editor data or state, or a struct that is not found or is not a consideration, is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. Set its values (Constant, Input...) with set_consideration_property; list them: list_considerations; inverse: remove_consideration; check the tree with compile_state_tree.
+Append a utility consideration node (a struct deriving from FStateTreeConsiderationBase, with its default values) to the Considerations of one state of a StateTree asset, in one undo step, then save the asset without compiling it. Considerations score the state 0..1 when its parent picks children by utility (set_state_selection_behavior, e.g. TrySelectChildrenWithHighestUtility). Each call appends another node, even of a type the state already has, so a repeat call stacks a duplicate. A missing tree, editor data or state, or a struct that is not found or is not a consideration, is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. Set its values (Constant, Input...) with set_consideration_property; list them: list_considerations; inverse: remove_consideration; check the tree with compile_state_tree.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -50,7 +50,7 @@ Add a top-level state of type State (a new SubTree; it cannot create a child of 
 
 *Additive.*
 
-Append a new enter-condition node, of the struct named by condition_struct and with that struct's default values, to the EnterConditions of one state of a StateTree asset, then save the asset without compiling it; there is no undo step. Each call appends another node, so repeating it stacks a duplicate condition. A missing tree, editor data, state or struct, or a struct that does not derive from FStateTreeConditionBase, is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. Struct names: list_condition_types; list them: list_conditions; set a field: set_condition_property; inverse: remove_state_enter_condition; a condition on a transition: add_state_transition_condition; check the result with compile_state_tree.
+Append a new enter-condition node, of the struct named by condition_struct and with that struct's default values, to the EnterConditions of one state of a StateTree asset, in one undo step, then save the asset without compiling it. Each call appends another node, so repeating it stacks a duplicate condition. A missing tree, editor data, state or struct, or a struct that does not derive from FStateTreeConditionBase, is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. Struct names: list_condition_types; list them: list_conditions; set a field: set_condition_property; inverse: remove_state_enter_condition; a condition on a transition: add_state_transition_condition; check the result with compile_state_tree.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -64,7 +64,7 @@ Append a new enter-condition node, of the struct named by condition_struct and w
 
 *Additive.*
 
-Append a task node, of the struct named by task_struct with its default values, to the Tasks of one state of a StateTree asset, then save the asset without compiling it; there is no undo step. Use it for work that runs while that state is active; for a task that runs as long as the whole tree runs use add_state_tree_global_task. Each call appends another node, so a repeat call stacks a duplicate task. A missing tree, editor data or state, or a struct that is not found or does not derive from FStateTreeTaskBase, is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. Struct names: list_task_types; make the state first with add_state; set a field: set_task_property; list: list_tasks; inverse: remove_task; check the tree with compile_state_tree.
+Append a task node, of the struct named by task_struct with its default values, to the Tasks of one state of a StateTree asset, in one undo step, then save the asset without compiling it. Use it for work that runs while that state is active; for a task that runs as long as the whole tree runs use add_state_tree_global_task. Each call appends another node, so a repeat call stacks a duplicate task. A missing tree, editor data or state, or a struct that is not found or does not derive from FStateTreeTaskBase, is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. Struct names: list_task_types; make the state first with add_state; set a field: set_task_property; list: list_tasks; inverse: remove_task; check the tree with compile_state_tree.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -332,7 +332,7 @@ Read one property of a task node on a StateTree state (task_index, from list_tas
 
 *Read-only.*
 
-List the concrete condition struct types (children of FStateTreeConditionBase, abstract ones skipped) of the loaded modules, sorted by name, for add_state_enter_condition and add_state_transition_condition. Returns count and types [{name, struct_path}]; struct_path always assumes /Script/StateTreeModule, so pass name for other modules.
+List the concrete condition struct types (children of FStateTreeConditionBase, abstract ones skipped) of the loaded modules, sorted by name, for add_state_enter_condition and add_state_transition_condition. Returns count and types [{name, struct_path}]; struct_path is the struct's own path in the module that declares it, so either field can be passed.
 
 No parameters.
 
@@ -368,7 +368,7 @@ List the utility considerations of one state of a StateTree asset without changi
 
 *Read-only.*
 
-List the concrete evaluator struct types (children of FStateTreeEvaluatorBase, abstract ones skipped) of the loaded modules, sorted by name, for add_evaluator. Returns count and types [{name, struct_path}]; struct_path always assumes /Script/StateTreeModule, so pass name for other modules.
+List the concrete evaluator struct types (children of FStateTreeEvaluatorBase, abstract ones skipped) of the loaded modules, sorted by name, for add_evaluator. Returns count and types [{name, struct_path}]; struct_path is the struct's own path in the module that declares it, so either field can be passed.
 
 No parameters.
 
@@ -426,7 +426,7 @@ List the StateTree assets (subclasses included) in a content folder and all its 
 
 *Read-only.*
 
-List the StateTree task struct types (FStateTreeTaskBase and its children; structs tagged Abstract are skipped) of the modules loaded now, sorted by name, without changing anything: the names add_state_task and add_state_tree_global_task take as task_struct. A task from a plugin whose module is not loaded is not listed. struct_path always assumes /Script/StateTreeModule, so pass name for a task from another module. Other node types: list_condition_types, list_evaluator_types; the tasks already on a state: list_tasks; on the whole tree: list_state_tree_global_tasks.
+List the StateTree task struct types (FStateTreeTaskBase and its children; structs tagged Abstract are skipped) of the modules loaded now, sorted by name, without changing anything: the names add_state_task and add_state_tree_global_task take as task_struct. A task from a plugin whose module is not loaded is not listed. struct_path is the struct's own path in the module that declares it (e.g. /Script/StateTreeModule.StateTreeDelayTask, /Script/GameplayStateTreeModule.StateTreeRunEnvQueryTask), so either field can be passed. Other node types: list_condition_types, list_evaluator_types; the tasks already on a state: list_tasks; on the whole tree: list_state_tree_global_tasks.
 
 No parameters.
 
@@ -563,14 +563,14 @@ Remove one global task node (a task of the whole tree, not of a state) from a St
 
 *Destructive, idempotent.*
 
-Remove one parameter, by name, from the root parameter bag of a StateTree asset (the parameters that bindings and per-component overrides read), in one undo step, then save the asset without compiling it. Idempotent: a name the tree does not have (compared case-insensitively) changes and saves nothing and answers removed false with a note. Bindings that read the parameter are left in place: find them with list_state_tree_bindings and drop them with remove_state_tree_binding. Inverse: add_state_tree_parameter; to change only its value use set_state_tree_parameter; the current parameters: get_state_tree_info. A tree that does not load or has no editor data is an error. A failed save still answers success, with saved false and the change only in memory.
+Remove one parameter, by name, from the root parameter bag of a StateTree asset (the parameters that bindings and per-component overrides read), in one undo step, then save the asset without compiling it. Idempotent: a name the tree does not have (compared case-insensitively) changes and saves nothing and answers removed false with a note. Bindings that read the parameter are left in place: find them with list_state_tree_bindings and drop them with remove_state_tree_binding. Inverse: add_state_tree_parameter; to change only its value use set_state_tree_parameter; the current parameters: get_state_tree_info. A tree that does not load or has no editor data is an error. A failed save (for example while PIE runs, or with the .uasset read-only) makes success false, with saved false, save_error and the removal only in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as list_state_trees (trees[].path) returns it. |
 | `parameter_name` | string | yes | Name of the root parameter, as get_state_tree_info lists it in parameters[].name, e.g. "Speed"; compared case-insensitively. |
 
-**Returns:** `{ tree_path, parameter_name, removed, parameter_count, saved, note? }`
+**Returns:** `{ tree_path, parameter_name, removed, parameter_count, saved, save_error?, note? }`
 
 ## `remove_task`
 

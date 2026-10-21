@@ -318,9 +318,9 @@ TSharedPtr<FJsonObject> HandleSetUsdStageActorRootLayer(
 // ---------------------------------------------------------------------------
 // get_usd_stage_actor_info
 // ---------------------------------------------------------------------------
-// MCP:get_usd_stage_actor_info - Reads the live state of a USD stage actor (AUsdStageActor) in the editor world: the root layer identifier and file path of the stage it displays (the isolated stage while isolate_usd_layer is active), its load state (stage_state 0 = Closed, 1 = Opened, 2 = OpenedAndLoaded, with its name), whether it has generated a Level Sequence for animated prims, how many scene components it holds, and whether a layer is isolated. Read-only: changes, loads and saves nothing; with no stage open, root_layer and real_path are empty. An actor_path that matches no stage actor is an error. Use it after create_usd_stage_actor and set_usd_stage_actor_root_layer to check the stage loaded; for one prim's component or assets use get_usd_generated_component or get_usd_generated_assets. Stages opened by the stage tools, not by an actor, are read with get_usd_stage_info and list_usd_stages.
+// MCP:get_usd_stage_actor_info - Reads the live state of a USD stage actor (AUsdStageActor) in the editor world: the root layer identifier and file path of the stage it displays (the isolated stage while isolate_usd_layer is active), its load state (stage_state 0 = Closed, 1 = Opened, 2 = OpenedAndLoaded, with its name), whether it has generated a Level Sequence for animated prims, how many scene components the stage generated under it, and whether a layer is isolated. Read-only: changes, loads and saves nothing; with no stage open, root_layer and real_path are empty. An actor_path that matches no stage actor is an error. Use it after create_usd_stage_actor and set_usd_stage_actor_root_layer to check the stage loaded; for one prim's component or assets use get_usd_generated_component or get_usd_generated_assets. Stages opened by the stage tools, not by an actor, are read with get_usd_stage_info and list_usd_stages.
 //   @param actor_path [string!] - The stage actor: its full path as create_usd_stage_actor returns it (actor_path), or its object name or editor label, e.g. "UsdStageActor".
-//   @returns { actor_path: string, root_layer: string, real_path: string, stage_state: int, stage_state_name: string, has_level_sequence: bool, generated_component_count: int, has_isolated_stage: bool } -- actor_path is the resolved full path; generated_component_count counts every scene component the actor owns, its own root included
+//   @returns { actor_path: string, root_layer: string, real_path: string, stage_state: int, stage_state_name: string, has_level_sequence: bool, generated_component_count: int, has_isolated_stage: bool } -- actor_path is the resolved full path; generated_component_count counts the scene components the loaded stage generated, not the actor's own root (0 with no stage loaded)
 
 TSharedPtr<FJsonObject> HandleGetUsdStageActorInfo(
 	const TSharedPtr<FJsonObject>& Params)
@@ -368,14 +368,17 @@ TSharedPtr<FJsonObject> HandleGetUsdStageActorInfo(
 	const ULevelSequence* LevelSeq = Actor->GetLevelSequence();
 	Data->SetBoolField(TEXT("has_level_sequence"), LevelSeq != nullptr);
 
-	// generated_component_count: count of USceneComponents spawned under this
-	// actor — the runtime footprint of the opened USD stage. > 0 means the
-	// stage is at least partially loaded. Uses GetComponents() (AActor API),
-	// not AUsdStageActor::GetGeneratedComponent (which takes a prim path).
+	// generated_component_count: count of USceneComponents the opened USD stage
+	// spawned under this actor -- its runtime footprint; > 0 means the stage is at
+	// least partially loaded. The actor's own components (its root SceneComponent0,
+	// a default subobject of the class) are not generated, so they do not count.
+	// Uses GetComponents() (AActor API), not AUsdStageActor::GetGeneratedComponent
+	// (which takes a prim path).
 	int32 CompCount = 0;
+	const USceneComponent* OwnRoot = Actor->GetRootComponent();
 	for (UActorComponent* Comp : Actor->GetComponents())
 	{
-		if (Comp && Comp->IsA<USceneComponent>())
+		if (Comp && Comp->IsA<USceneComponent>() && Comp != OwnRoot && !Comp->IsDefaultSubobject())
 		{
 			++CompCount;
 		}

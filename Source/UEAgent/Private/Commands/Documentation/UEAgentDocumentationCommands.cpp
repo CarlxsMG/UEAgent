@@ -10,6 +10,8 @@
 #include "Engine/Engine.h"
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
+#include "Engine/SimpleConstructionScript.h" // generate_blueprint_docs: the Components panel tree
+#include "Engine/SCS_Node.h"
 #include "EdGraph/EdGraph.h" // Complete type for UEdGraph (Blueprint->FunctionGraphs/EventGraphs) — only forward-declared by Blueprint.h
 #include "Blueprint/BlueprintSupport.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
@@ -109,25 +111,29 @@ namespace UEAgentDocumentationCommandsImpl
         return Listed;
     }
 
-    /** Category and usage blurb create_asset_documentation gives the main asset kinds; anything else is "Other". */
-    void DescribeAssetKind(const FName& TypeName, FString& OutCategory, FString& OutUsage)
+    /**
+     * Category and usage blurb create_asset_documentation gives the main asset kinds, matched by class hierarchy so a
+     * subclass counts as its base (a material instance as a material, a sound wave or cue as audio, a Widget Blueprint
+     * as a Blueprint); anything else, and a class that is not loaded, is "Other".
+     */
+    void DescribeAssetKind(const UClass* AssetClass, FString& OutCategory, FString& OutUsage)
     {
         struct FKind
         {
-            const TCHAR* Type;
+            UClass* Base;
             const TCHAR* Category;
             const TCHAR* Usage;
         };
-        static const FKind Kinds[] = {
-            { TEXT("StaticMesh"), TEXT("3D Model"),  TEXT("Static mesh for 3D objects") },
-            { TEXT("Material"),   TEXT("Material"),  TEXT("Material for rendering surfaces") },
-            { TEXT("Texture2D"),  TEXT("Texture"),   TEXT("2D texture for materials and UI") },
-            { TEXT("Blueprint"),  TEXT("Blueprint"), TEXT("Blueprint for game logic and behavior") },
-            { TEXT("SoundBase"),  TEXT("Audio"),     TEXT("Audio asset for sound effects and music") },
+        const FKind Kinds[] = {
+            { UStaticMesh::StaticClass(),        TEXT("3D Model"),  TEXT("Static mesh for 3D objects") },
+            { UMaterialInterface::StaticClass(), TEXT("Material"),  TEXT("Material or material instance for rendering surfaces") },
+            { UTexture::StaticClass(),           TEXT("Texture"),   TEXT("Texture for materials and UI") },
+            { UBlueprint::StaticClass(),         TEXT("Blueprint"), TEXT("Blueprint for game logic and behavior") },
+            { USoundBase::StaticClass(),         TEXT("Audio"),     TEXT("Audio asset for sound effects and music") },
         };
         for (const FKind& Kind : Kinds)
         {
-            if (TypeName == Kind.Type)
+            if (AssetClass != nullptr && AssetClass->IsChildOf(Kind.Base))
             {
                 OutCategory = Kind.Category;
                 OutUsage = Kind.Usage;
@@ -138,10 +144,39 @@ namespace UEAgentDocumentationCommandsImpl
         OutUsage = TEXT("General asset");
     }
 
+    /** The blueprint_type label of each EBlueprintType. */
+    const TCHAR* BlueprintTypeLabel(EBlueprintType Type)
+    {
+        switch (Type)
+        {
+        case BPTYPE_Normal:          return TEXT("Normal");
+        case BPTYPE_Const:           return TEXT("Const");
+        case BPTYPE_MacroLibrary:    return TEXT("MacroLibrary");
+        case BPTYPE_Interface:       return TEXT("Interface");
+        case BPTYPE_LevelScript:     return TEXT("LevelScript");
+        case BPTYPE_FunctionLibrary: return TEXT("FunctionLibrary");
+        default:                     return TEXT("Unknown");
+        }
+    }
+
+    /** The compilation_status label of each EBlueprintStatus. */
+    const TCHAR* BlueprintStatusLabel(EBlueprintStatus Status)
+    {
+        switch (Status)
+        {
+        case BS_UpToDate:             return TEXT("UpToDate");
+        case BS_UpToDateWithWarnings: return TEXT("UpToDateWithWarnings");
+        case BS_Error:                return TEXT("Error");
+        case BS_Dirty:                return TEXT("NeedsCompilation");
+        case BS_BeingCreated:         return TEXT("BeingCreated");
+        default:                      return TEXT("Unknown");
+        }
+    }
+
     /**
-     * The generate_blueprint_docs record of one loaded Blueprint: identity, parent, a two-way type label
-     * (anything that is not a normal Blueprint reads MacroLibrary), compile state, component templates,
-     * the names of its function graphs followed by its compiled event graphs, and its own variables.
+     * The generate_blueprint_docs record of one loaded Blueprint: identity, parent, its EBlueprintType, its compile
+     * state, the components its own construction script adds (the Components panel tree, each with its parent), the
+     * names of its function graphs followed by its event graphs, and its own variables.
      */
     TSharedPtr<FJsonObject> DocumentBlueprint(UBlueprint* Blueprint, const FAssetData& Entry)
     {
@@ -151,21 +186,34 @@ namespace UEAgentDocumentationCommandsImpl
         Doc->SetStringField(TEXT("blueprint_class"), Blueprint->GetClass()->GetName());
         UClass* const Parent = Blueprint->ParentClass;
         Doc->SetStringField(TEXT("parent_class"), Parent ? Parent->GetName() : FString(TEXT("None")));
-        Doc->SetStringField(TEXT("blueprint_type"), Blueprint->BlueprintType == BPTYPE_Normal ? TEXT("Normal") : TEXT("MacroLibrary"));
-        Doc->SetStringField(TEXT("compilation_status"), Blueprint->Status == BS_UpToDate ? TEXT("UpToDate") : TEXT("NeedsCompilation"));
+        Doc->SetStringField(TEXT("blueprint_type"), BlueprintTypeLabel(Blueprint->BlueprintType));
+        Doc->SetStringField(TEXT("compilation_status"), BlueprintStatusLabel(Blueprint->Status));
 
+        // The Components panel tree is the Blueprint's construction script (USCS_Node per component); ComponentTemplates
+        // only holds the templates of Add Component nodes in its graphs.
         TArray<TSharedPtr<FJsonValue>> Components;
-        for (UActorComponent* Template : Blueprint->ComponentTemplates)
+        if (USimpleConstructionScript* SCS = Blueprint->SimpleConstructionScript)
         {
-            if (Template == nullptr)
+            for (USCS_Node* Node : SCS->GetAllNodes())
             {
-                continue;
+                if (Node == nullptr)
+                {
+                    continue;
+                }
+                UActorComponent* Template = Node->ComponentTemplate;
+                const UClass* ComponentClass = Template ? Template->GetClass() : Node->ComponentClass.Get();
+                // An in-tree parent is another node; a parent outside this construction script (an inherited or native
+                // component) is only named on the node.
+                const USCS_Node* ParentNode = SCS->FindParentNode(Node);
+                const FString ParentName = ParentNode ? ParentNode->GetVariableName().ToString()
+                    : (Node->ParentComponentOrVariableName.IsNone() ? FString() : Node->ParentComponentOrVariableName.ToString());
+                TSharedPtr<FJsonObject> Info = MakeShared<FJsonObject>();
+                Info->SetStringField(TEXT("component_name"), Node->GetVariableName().ToString());
+                Info->SetStringField(TEXT("component_class"), ComponentClass ? ComponentClass->GetName() : FString(TEXT("None")));
+                Info->SetStringField(TEXT("parent_component"), ParentName);
+                Info->SetBoolField(TEXT("is_editable"), Template != nullptr && Template->IsEditableWhenInherited());
+                Components.Add(MakeShared<FJsonValueObject>(Info));
             }
-            TSharedPtr<FJsonObject> Info = MakeShared<FJsonObject>();
-            Info->SetStringField(TEXT("component_name"), Template->GetName());
-            Info->SetStringField(TEXT("component_class"), Template->GetClass()->GetName());
-            Info->SetBoolField(TEXT("is_editable"), Template->IsEditableWhenInherited());
-            Components.Add(MakeShared<FJsonValueObject>(Info));
         }
         Doc->SetArrayField(TEXT("components"), Components);
 
@@ -197,9 +245,9 @@ namespace UEAgentDocumentationCommandsImpl
     }
 }
 
-// MCP:generate_blueprint_docs - Documents every Blueprint asset under /Game in one reply, subclasses included (Widget, Anim and other Blueprints): per Blueprint its name, package path, class, parent class, type, compile state, component templates, the names of its function and event graphs, and its own variables with their pin category. Read-only despite its name: it loads every Blueprint to read it, but writes and saves nothing, and the result comes back in the reply only, never as a file. On a big project it can take long and return a very large reply; plugin and engine content are not included, and an editor world is required. For one Blueprint use get_blueprint_info (get_blueprint_components for its real component tree) or export_blueprint_data; for one asset of any kind, create_asset_documentation; for project-wide counts without loading, create_project_overview.
+// MCP:generate_blueprint_docs - Documents every Blueprint asset under /Game in one reply, subclasses included (Widget, Anim and other Blueprints): per Blueprint its name, package path, class, parent class, type, compile state, the components its own Components panel adds, the names of its function and event graphs, and its own variables with their pin category. Read-only despite its name: it loads every Blueprint to read it, but writes and saves nothing, and the result comes back in the reply only, never as a file. On a big project it can take long and return a very large reply; plugin and engine content are not included, and an editor world is required. For one Blueprint use get_blueprint_info (get_blueprint_components for its real component tree) or export_blueprint_data; for one asset of any kind, create_asset_documentation; for project-wide counts without loading, create_project_overview.
 //   @hints read-only
-//   @returns { blueprint_documentation: [{ blueprint_name, blueprint_path, blueprint_class, parent_class, blueprint_type, compilation_status, components, functions: [string], variables: [{name, type}] }], total_blueprints: int, generation_date: string, project_name: string } -- blueprint_type is Normal, or MacroLibrary for every other kind (interfaces and function libraries included); compilation_status is UpToDate or NeedsCompilation (errors included); components are the Blueprint's ComponentTemplates, which do not include the components of its Components panel
+//   @returns { blueprint_documentation: [{ blueprint_name, blueprint_path, blueprint_class, parent_class, blueprint_type, compilation_status, components: [{ component_name, component_class, parent_component, is_editable }], functions: [string], variables: [{name, type}] }], total_blueprints: int, generation_date: string, project_name: string } -- blueprint_type is Normal, Const, MacroLibrary, Interface, LevelScript or FunctionLibrary; compilation_status is UpToDate, UpToDateWithWarnings, Error, NeedsCompilation (changed since its last compile), BeingCreated or Unknown; components are the Blueprint's own construction-script nodes (its Components panel), each named by its variable name with the component it attaches to (empty for a root), and leave out the components it inherits
 
 TSharedPtr<FJsonObject> HandleGenerateBlueprintDocs(const TSharedPtr<FJsonObject>& Params)
 {
@@ -231,7 +279,7 @@ TSharedPtr<FJsonObject> HandleGenerateBlueprintDocs(const TSharedPtr<FJsonObject
     return mcp_common::MakeOkReply(Reply);
 }
 
-// MCP:create_asset_documentation - Builds a documentation record of one asset from the Asset Registry, without loading it: name, class, package and object path, .uasset size and timestamp, a coarse category and usage line chosen by exact class (StaticMesh, Material, Texture2D, Blueprint; every other class, sound waves and material instances included, is Other), and its direct package dependencies and referencers, 100 of each at most with truncation flags. Read-only despite its name: nothing is loaded, written or saved, and the record comes back in the reply only. An asset the registry does not know, or no editor world, is an error. For complete edge lists use get_asset_dependencies and get_asset_referencers (get_asset_dependencies_recursive beyond depth 1); for every Blueprint at once, generate_blueprint_docs; for project-wide counts, create_project_overview.
+// MCP:create_asset_documentation - Builds a documentation record of one asset from the Asset Registry, without loading it: name, class, package and object path, .uasset size and timestamp, a coarse category and usage line chosen by class hierarchy, so subclasses count (3D Model for static meshes, Material for materials and material instances, Texture for every texture, Blueprint for every Blueprint kind, Audio for sound waves, cues and other sounds; any other class is Other), and its direct package dependencies and referencers, 100 of each at most with truncation flags. Read-only despite its name: nothing is loaded, written or saved, and the record comes back in the reply only. An asset the registry does not know, or no editor world, is an error. For complete edge lists use get_asset_dependencies and get_asset_referencers (get_asset_dependencies_recursive beyond depth 1); for every Blueprint at once, generate_blueprint_docs; for project-wide counts, create_project_overview.
 //   @hints read-only
 //   @param asset_name - Package path ("/Game/Props/SM_Chair") or object path ("/Game/Props/SM_Chair.SM_Chair") of the asset; a bare asset name is not resolved (find_assets_by_name turns a name into a path).
 //   @returns { asset_documentation: { asset_name, asset_path, asset_class, asset_type, package_name, object_path, file_name, file_size: int (bytes, 0 if file_exists=false), last_modified: string, file_exists: bool, asset_category, usage, dependencies: [string] (package names, depth-1, capped at 100), dependencies_truncated: bool, dependents: [string] (referencers, depth-1, capped at 100), dependents_truncated: bool }, generation_date: string, project_name: string }
@@ -276,9 +324,10 @@ TSharedPtr<FJsonObject> HandleCreateAssetDocumentation(const TSharedPtr<FJsonObj
     Doc->SetNumberField(TEXT("file_size"), bOnDisk ? Files.FileSize(*OnDisk) : 0);
     Doc->SetStringField(TEXT("last_modified"), bOnDisk ? Files.GetTimeStamp(*OnDisk).ToString() : FString(TEXT("Unknown")));
 
+    // The asset's class as already loaded (never loaded here): a class from a plugin that is not loaded reads Other.
     FString Category;
     FString Usage;
-    Impl::DescribeAssetKind(TypeName, Category, Usage);
+    Impl::DescribeAssetKind(Asset.GetClass(), Category, Usage);
     Doc->SetStringField(TEXT("asset_category"), Category);
     Doc->SetStringField(TEXT("usage"), Usage);
 

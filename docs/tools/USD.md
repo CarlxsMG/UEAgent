@@ -324,13 +324,13 @@ Read the metadata of a prim on a registered USD stage as USD resolves it: one ke
 
 *Read-only.*
 
-Reads the live state of a USD stage actor (AUsdStageActor) in the editor world: the root layer identifier and file path of the stage it displays (the isolated stage while isolate_usd_layer is active), its load state (stage_state 0 = Closed, 1 = Opened, 2 = OpenedAndLoaded, with its name), whether it has generated a Level Sequence for animated prims, how many scene components it holds, and whether a layer is isolated. Read-only: changes, loads and saves nothing; with no stage open, root_layer and real_path are empty. An actor_path that matches no stage actor is an error. Use it after create_usd_stage_actor and set_usd_stage_actor_root_layer to check the stage loaded; for one prim's component or assets use get_usd_generated_component or get_usd_generated_assets. Stages opened by the stage tools, not by an actor, are read with get_usd_stage_info and list_usd_stages.
+Reads the live state of a USD stage actor (AUsdStageActor) in the editor world: the root layer identifier and file path of the stage it displays (the isolated stage while isolate_usd_layer is active), its load state (stage_state 0 = Closed, 1 = Opened, 2 = OpenedAndLoaded, with its name), whether it has generated a Level Sequence for animated prims, how many scene components the stage generated under it, and whether a layer is isolated. Read-only: changes, loads and saves nothing; with no stage open, root_layer and real_path are empty. An actor_path that matches no stage actor is an error. Use it after create_usd_stage_actor and set_usd_stage_actor_root_layer to check the stage loaded; for one prim's component or assets use get_usd_generated_component or get_usd_generated_assets. Stages opened by the stage tools, not by an actor, are read with get_usd_stage_info and list_usd_stages.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_path` | string | yes | The stage actor: its full path as create_usd_stage_actor returns it (actor_path), or its object name or editor label, e.g. "UsdStageActor". |
 
-**Returns:** `{ actor_path: string, root_layer: string, real_path: string, stage_state: int, stage_state_name: string, has_level_sequence: bool, generated_component_count: int, has_isolated_stage: bool } -- actor_path is the resolved full path; generated_component_count counts every scene component the actor owns, its own root included`
+**Returns:** `{ actor_path: string, root_layer: string, real_path: string, stage_state: int, stage_state_name: string, has_level_sequence: bool, generated_component_count: int, has_isolated_stage: bool } -- actor_path is the resolved full path; generated_component_count counts the scene components the loaded stage generated, not the actor's own root (0 with no stage loaded)`
 
 ## `get_usd_stage_info`
 
@@ -349,7 +349,7 @@ Read metadata about a USD stage: root layer identifier, real path, dirty flag, t
 
 *Additive, idempotent.*
 
-Add a sublayer path to the root layer of a registered USD stage, so that layer's opinions compose into the stage, then save the root layer to disk (Save without force: the whole root layer, including any other unsaved edits on it). Read the stack and its indices with list_usd_stage_layers, take a sublayer out by index with remove_usd_sublayer, and to author into the new layer point set_usd_edit_target at it. The path is not checked to exist; USD complaints come back in errors. No undo step. success means the root layer was saved, so read inserted and already_present: a path already in the list changes nothing (already_present=true, nothing saved) and answers success=false, and an in-memory stage (anonymous root layer, nothing to save to) answers success=false even with inserted=true. Idempotent in effect: a repeat adds nothing. An unregistered stage_name is an error.
+Add a sublayer path to the root layer of a registered USD stage, so that layer's opinions compose into the stage, then save the root layer to disk (Save without force: the whole root layer, including any other unsaved edits on it). Read the stack and its indices with list_usd_stage_layers, take a sublayer out by index with remove_usd_sublayer, and to author into the new layer point set_usd_edit_target at it. The path is not checked to exist; USD complaints come back in errors. No undo step. inserted is read back from the root layer's list. A path already in the list is a success that changes nothing (already_present=true, saved=false). On an in-memory stage (anonymous root layer, in_memory=true) the insert is a success with saved=false, since there is no file to save to. On a file-backed stage success requires the save: a failed save answers success=false with saved=false. Idempotent in effect: a repeat adds nothing. An unregistered stage_name is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -357,7 +357,7 @@ Add a sublayer path to the root layer of a registered USD stage, so that layer's
 | `sublayer_path` | string | yes | Path or USD identifier of the layer to insert, e.g. "D:/USD/props.usda" or "./props.usda" (resolved relative to the root layer); compared with the existing entries as text, case ignored. |
 | `index` | number | no | 0-based position in the root layer's sublayer list, where 0 is the strongest; -1 (default) appends as the weakest. The reply's index echoes this value, not the resulting position. |
 
-**Returns:** `{ stage_name: string, sublayer_path: string, index: int, inserted: bool, already_present: bool, new_count: int, saved: bool, errors: [string]? }`
+**Returns:** `{ stage_name: string, sublayer_path: string, index: int, inserted: bool, already_present: bool, in_memory: bool, new_count: int, saved: bool, note?: string, errors: [string]? }`
 
 ## `isolate_usd_layer`
 

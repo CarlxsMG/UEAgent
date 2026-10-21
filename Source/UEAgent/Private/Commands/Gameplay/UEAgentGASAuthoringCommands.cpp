@@ -887,7 +887,7 @@ namespace
     // PropName = CostGameplayEffectClass | CooldownGameplayEffectClass.
     TSharedPtr<FJsonObject> SetAbilityGameplayEffectClass(
         const TSharedPtr<FJsonObject>& Params, const TCHAR* PropName,
-        const TCHAR* GEParamName, const TCHAR* RespClassKey)
+        const TCHAR* GEParamName, const TCHAR* RespClassKey, const TCHAR* Command)
     {
         FString AbilityPath;
         if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("ability_blueprint_path"), AbilityPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
@@ -945,10 +945,14 @@ namespace
         TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
         Result->SetStringField(TEXT("ability_blueprint_path"), AbilityPath);
         Result->SetStringField(GEParamName, GEPath);
-        Result->SetStringField(RespClassKey, GEClass->GetName());
+        // The class read back from the saved class defaults, not the one requested.
+        Result->SetStringField(RespClassKey, RBClass ? RBClass->GetName() : FString());
         Result->SetBoolField(FString::Printf(TEXT("%s_matches"), RespClassKey), bMatches);
         Result->SetBoolField(TEXT("set"), bMatches);
-        return mcp_common::MakeOkReply(Result);
+        // The verdict is the read-back: a class defaults object that does not hold the requested class is a failure.
+        return mcp_common::MakeOutcomeReply(Result, bMatches, bMatches ? FString()
+            : FString::Printf(TEXT("%s: after the save the class defaults hold %s, not %s; read them with get_properties."),
+                Command, RBClass ? *RBClass->GetName() : TEXT("no class"), *GEClass->GetName()));
     }
 
     // Resolve a UGameplayModMagnitudeCalculation subclass from a /Game BP asset path
@@ -2268,22 +2272,22 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierAttributeTagFilters(const
 
 // GameplayAbility CDO authoring
 
-// MCP:set_ability_cost - Point CostGameplayEffectClass on the class defaults of a GameplayAbility Blueprint at the generated class of a GameplayEffect Blueprint, both loaded by asset path, then save the ability without recompiling. That effect is applied when the ability commits, and its modifiers (usually a negative add to an attribute such as Mana) are the price: the commit fails when the owner cannot pay. Give the effect its modifier with add_gameplay_effect_modifier; for the effect that blocks re-use use set_ability_cooldown instead; make a new effect with create_gameplay_effect_blueprint; read the value back with get_properties on the ability's class defaults. Any cost class already set is overwritten and every call writes and saves, so a repeat call leaves the same state; there is no way to clear it here. A path that is not a GameplayAbility or GameplayEffect Blueprint, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. set and cost_effect_class_matches are the value read back after the save.
+// MCP:set_ability_cost - Point CostGameplayEffectClass on the class defaults of a GameplayAbility Blueprint at the generated class of a GameplayEffect Blueprint, both loaded by asset path, then save the ability without recompiling. That effect is applied when the ability commits, and its modifiers (usually a negative add to an attribute such as Mana) are the price: the commit fails when the owner cannot pay. Give the effect its modifier with add_gameplay_effect_modifier; for the effect that blocks re-use use set_ability_cooldown instead; make a new effect with create_gameplay_effect_blueprint; read the value back with get_properties on the ability's class defaults. Any cost class already set is overwritten and every call writes and saves, so a repeat call leaves the same state; there is no way to clear it here. A path that is not a GameplayAbility or GameplayEffect Blueprint, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. cost_effect_class, cost_effect_class_matches and set are read back from the class defaults after the save, and success is false when they do not hold the requested class.
 //   @param ability_blueprint_path - Asset path of the GameplayAbility Blueprint, e.g. "/Game/GAS/Abilities/GA_Fireball".
 //   @param cost_effect_path - Asset path of the GameplayEffect Blueprint used as the cost, e.g. "/Game/GAS/Effects/GE_Cost_Fireball"; typically an Instant effect that subtracts from an attribute.
 //   @returns { ability_blueprint_path: string, cost_effect_path: string, cost_effect_class: string, cost_effect_class_matches: bool, set: bool }
 TSharedPtr<FJsonObject> HandleSetAbilityCost(const TSharedPtr<FJsonObject>& Params)
 {
-    return SetAbilityGameplayEffectClass(Params, TEXT("CostGameplayEffectClass"), TEXT("cost_effect_path"), TEXT("cost_effect_class"));
+    return SetAbilityGameplayEffectClass(Params, TEXT("CostGameplayEffectClass"), TEXT("cost_effect_path"), TEXT("cost_effect_class"), TEXT("set_ability_cost"));
 }
 
-// MCP:set_ability_cooldown - Point CooldownGameplayEffectClass on the class default object of a GameplayAbility Blueprint at the generated class of a GameplayEffect Blueprint, both loaded by asset path, then save the ability without recompiling. That effect is applied when the ability commits and the tags it grants block re-activation while it lasts, so give it a duration with set_gameplay_effect_duration and a cooldown tag with set_gameplay_effect_component. Any cooldown class already set is overwritten, and every call writes and saves, even with the same class; there is no way to clear it here. A path that is not a GameplayAbility or GameplayEffect Blueprint, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. The cost effect: set_ability_cost; a new effect: create_gameplay_effect_blueprint.
+// MCP:set_ability_cooldown - Point CooldownGameplayEffectClass on the class default object of a GameplayAbility Blueprint at the generated class of a GameplayEffect Blueprint, both loaded by asset path, then save the ability without recompiling. That effect is applied when the ability commits and the tags it grants block re-activation while it lasts, so give it a duration with set_gameplay_effect_duration and a cooldown tag with set_gameplay_effect_component. Any cooldown class already set is overwritten, and every call writes and saves, even with the same class; there is no way to clear it here. A path that is not a GameplayAbility or GameplayEffect Blueprint, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. cooldown_effect_class, cooldown_effect_class_matches and set are read back from the class defaults after the save, and success is false when they do not hold the requested class. The cost effect: set_ability_cost; a new effect: create_gameplay_effect_blueprint.
 //   @param ability_blueprint_path - Asset path of the GameplayAbility Blueprint, e.g. "/Game/GAS/Abilities/GA_Fireball".
 //   @param cooldown_effect_path - Asset path of the GameplayEffect Blueprint used as the cooldown, e.g. "/Game/GAS/Effects/GE_Cooldown_Fireball"; typically a HasDuration effect.
 //   @returns { ability_blueprint_path: string, cooldown_effect_path: string, cooldown_effect_class: string, cooldown_effect_class_matches: bool, set: bool }
 TSharedPtr<FJsonObject> HandleSetAbilityCooldown(const TSharedPtr<FJsonObject>& Params)
 {
-    return SetAbilityGameplayEffectClass(Params, TEXT("CooldownGameplayEffectClass"), TEXT("cooldown_effect_path"), TEXT("cooldown_effect_class"));
+    return SetAbilityGameplayEffectClass(Params, TEXT("CooldownGameplayEffectClass"), TEXT("cooldown_effect_path"), TEXT("cooldown_effect_class"), TEXT("set_ability_cooldown"));
 }
 
 // MCP:set_ability_asset_tags - Replace the asset tags on the class default object of a GameplayAbility Blueprint, loaded by asset path, with the registered tags in asset_tags, then save the asset without recompiling. The list is the whole new set: tags already there and not listed are dropped, an empty list clears them all, and a string that is not a registered tag is skipped and listed in unknown_tags instead of failing the call. Every call writes and saves, even when the tags are unchanged. A path that is not a GameplayAbility Blueprint, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. Read back: get_ability_asset_tags; register a tag first: create_gameplay_tag; tags a GameplayEffect owns: set_gameplay_effect_component.

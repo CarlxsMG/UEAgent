@@ -22,13 +22,13 @@ Cancels the in-progress movie render, if one is running (honest headless gate). 
 
 *Additive.*
 
-Adds a new job for a Level Sequence to this editor session's Movie Render Queue, without rendering: the job points at the sequence, takes map_path as its map when given, and has its default primary configuration. One undo step; the queue lives in memory, so nothing is saved to disk and the job is gone when the editor closes. Works headless. Each call adds another job, even with a job_name the queue already has (tools that take job_name then act on the first match). Next, set resolution, folder and image format with set_render_job_output and render with render_sequence_to_movie, which renders every job in the queue; get_render_queue lists the jobs and delete_render_job takes one out. For a quick render with default PNG output, render_sequence_to_movie alone is enough.
+Adds a new job for a Level Sequence to this editor session's Movie Render Queue, without rendering: the job points at the sequence, renders in map_path or, without it, in the level open in the editor (as the Movie Render Queue window does), and has its default primary configuration. A map that is not the package path of a saved map (an unsaved level included) is refused before the job is added, since the renderer would stop the whole queue at once. One undo step; the queue lives in memory, so nothing is saved to disk and the job is gone when the editor closes. Works headless. Each call adds another job, even with a job_name the queue already has (tools that take job_name then act on the first match). Next, set resolution, folder and image format with set_render_job_output and render with render_sequence_to_movie, which renders every job in the queue; get_render_queue lists the jobs and delete_render_job takes one out. For a quick render with default PNG output, render_sequence_to_movie alone is enough.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sequence_name` | string | yes | Asset name of the Level Sequence, not a path (e.g. "Intro"): the first Level Sequence under /Game with that name, case-insensitive; get_level_sequences lists them. |
 | `job_name` | string | no | Optional job name (default "RenderJob_&lt;sequence_name>"), the name set_render_job_output and delete_render_job take; not checked for uniqueness. |
-| `map_path` | string | no | Optional object path of the map the job renders in (e.g. "/Game/Maps/MyMap.MyMap"), stored as given and not checked; without it the render plays the level open in the editor. |
+| `map_path` | string | no | Optional object path of the map the job renders in (e.g. "/Game/Maps/MyMap.MyMap"); without it the job takes the level open in the editor. A map that is not the package path of a saved map (a long package name under a writable root; an unsaved level is under /Temp) is an error and no job is added. |
 
 **Returns:** `{ job_name: string, sequence_name: string, sequence_path: string, map: string, has_configuration: bool, job_created: bool, queue_job_count: number }`
 
@@ -133,14 +133,14 @@ No parameters.
 
 *Destructive.*
 
-Renders a Level Sequence to PNG frames with Movie Render Queue: adds a job named OneShot_&lt;sequence_name> with the engine's default output (1920x1080 into {project_dir}/Saved/MovieRenders/) and starts rendering the whole editor queue, jobs from create_render_job included, in a Play-In-Editor session. Asynchronous: it returns at once without waiting for frames, and render_started only says a render executor was launched, not that frames were written; while a render is already running it starts nothing new. Needs an interactive editor, since it starts its own PIE session; headless, the job is still added. Frames overwrite earlier files of the same name in the output folder, and each call adds another job. For another resolution or format use create_render_job and set_render_job_output first; follow progress with get_render_queue and stop with cancel_render_job.
+Renders a Level Sequence to PNG frames with Movie Render Queue: adds a job named OneShot_&lt;sequence_name> with the engine's default output (1920x1080 into {project_dir}/Saved/MovieRenders/) and starts rendering the whole editor queue, jobs from create_render_job included, in a Play-In-Editor session. Asynchronous: the editor starts that session on its next frame, so the call returns before any frame is written, and render_state is the renderer read right after the start: waiting_for_pie or rendering (render_started true); already_rendering when a render was running, which starts nothing new and the job joins its queue; ended_without_rendering when the renderer stopped at once, which makes success false (the editor log, category LogMovieRenderPipeline, says why; the job stays queued). The job renders in map_path, or without it in the level open in the editor; a map that is not the package path of a saved map (an unsaved level included) is refused before the job is added, and so is a start while the queue holds another job with such a map, since the renderer would abort the whole queue (delete_render_job removes it). The frames need an interactive editor, since they are drawn in that PIE session. Frames overwrite earlier files of the same name in the output folder, and each call adds another job. For another resolution or format use create_render_job and set_render_job_output first; follow progress with get_render_queue and stop with cancel_render_job.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sequence_name` | string | yes | Asset name of the Level Sequence, not a path (e.g. "Intro"): the first Level Sequence under /Game with that name, case-insensitive; get_level_sequences lists them. |
-| `map_path` | string | no | Optional object path of the map to render in (e.g. "/Game/Maps/MyMap.MyMap"), stored as given and not checked; without it the render plays the level open in the editor. |
+| `map_path` | string | no | Optional object path of the map to render in (e.g. "/Game/Maps/MyMap.MyMap"); without it the job takes the level open in the editor, as the Movie Render Queue window does. A map that is not the package path of a saved map (a long package name under a writable root; an unsaved level is under /Temp) is refused before anything changes. |
 
-**Returns:** `{ sequence_name: string, job_name: string, job_created: bool, queue_job_count: number, render_started: bool, render_async: bool, note: string }`
+**Returns:** `{ sequence_name: string, job_name: string, job_created: bool, map_path: string, queue_job_count: number, render_started: bool, render_state: "waiting_for_pie"|"rendering"|"already_rendering"|"ended_without_rendering", render_async: bool, note: string }`
 
 ## `set_render_job_output`
 

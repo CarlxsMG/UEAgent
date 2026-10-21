@@ -1350,6 +1350,50 @@ namespace
         Resp->SetObjectField(TEXT("current_values"), CurrentValues);
     }
 
+    /**
+     * play_widget_animation's `world`: the selector read the way FindLiveWidgetAnimation_Widget reads it, refused
+     * when it is not one of the PIE selectors (pie, server, client, pie:N, game): null when accepted, else the error.
+     */
+    TSharedPtr<FJsonObject> CheckPieWorldSelector_Widget(const TSharedPtr<FJsonObject>& Params, const TCHAR* Tool)
+    {
+        FString Selector;
+        FString IgnoredError;
+        mcp_common::ResolveWorldSelector(Params, TEXT("pie"), Selector, IgnoredError);
+        bool bAccepted = Selector == TEXT("pie") || Selector == TEXT("server") || Selector == TEXT("client");
+        if (!bAccepted && Selector.StartsWith(TEXT("pie:")))
+        {
+            const FString Instance = Selector.RightChop(4).TrimStartAndEnd();
+            bAccepted = !Instance.IsEmpty() && Instance.IsNumeric();
+        }
+        if (bAccepted)
+        {
+            return nullptr;
+        }
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("%s: world '%s' is not a PIE world selector; use pie (the default), server, client, pie:N (N a PIE instance) or game. Nothing was played."),
+            Tool, *Selector));
+    }
+
+    /** Whether any PIE session is running (a play world, or a PIE world context). */
+    bool IsAnyPieSessionRunning_Widget()
+    {
+        if (GEditor && GEditor->PlayWorld)
+        {
+            return true;
+        }
+        if (GEngine)
+        {
+            for (const FWorldContext& Context : GEngine->GetWorldContexts())
+            {
+                if (Context.WorldType == EWorldType::PIE && Context.World() != nullptr)
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     /** A live PIE instance of a Widget Blueprint and its compiled copy of one of the blueprint's animations. */
     struct FLiveWidgetAnimation_Widget
     {
@@ -2668,16 +2712,16 @@ TSharedPtr<FJsonObject> HandleRemoveWidgetAnimation(const TSharedPtr<FJsonObject
 // instance's UMovieSceneSequencePlayer, so this re-resolves the SAME animation (by name, which the
 // compiler preserves) on the LIVE instance's generated class before calling PlayAnimation.
 // ---------------------------------------------------------------------------
-// MCP:play_widget_animation - Plays an animation of a Widget Blueprint on a live instance of that widget in a running Play-In-Editor session (UUserWidget::PlayAnimation): the first on-screen instance of the Blueprint's class in the PIE world that world selects. Without a PIE session, or without such an instance, nothing plays and the call still succeeds with played false, headless true, requires_pie true and a note: start PIE with start_play_in_editor and get the widget on screen first. It changes only the running widget, never the asset (saved is always false), and played true means PlayAnimation was called, not read back; a repeat call starts the animation again. An animation name the Blueprint does not have is an error. Names come from get_widget_animations; stop playback with stop_widget_animation; list_pie_widgets shows which widgets are on screen.
+// MCP:play_widget_animation - Plays an animation of a Widget Blueprint on a live instance of that widget in a running Play-In-Editor session (UUserWidget::PlayAnimation): the first on-screen instance of the Blueprint's class in the PIE world that world selects. Without a PIE session, or without such an instance, nothing plays and the call still succeeds with played false, headless true, requires_pie true and a note: start PIE with start_play_in_editor and get the widget on screen first. A world selector that names no running PIE world while a session runs is an error naming the worlds there. It changes only the running widget, never the asset (saved is always false), and played true means PlayAnimation was called, not read back; a repeat call starts the animation again. An animation name the Blueprint does not have, a world that is not a PIE selector, a num_loops that is not a whole number of 0 or more, and an unknown play_mode are errors, refused before anything plays. Names come from get_widget_animations; stop playback with stop_widget_animation; list_pie_widgets shows which widgets are on screen.
 //   @param widget_bp_path - Asset path of the Widget Blueprint (e.g. "/Game/UI/WBP_HUD"); it must exist.
 //   @param animation_name - Object name or display label of the animation, as get_widget_animations lists it (case-insensitive).
 //   @param start_at_time - Optional time in seconds into the animation to start from (default 0).
-//   @param num_loops - Optional whole number of times to play (default 1); values below 1 play once, so the engine's endless loop (0) is not available.
-//   @param play_mode - Optional "Forward" (default) | "Reverse" | "PingPong", case-insensitive; any other value plays Forward.
+//   @param num_loops - Optional whole number of times to play (default 1); 0 loops until stopped (stop_widget_animation), as the engine's PlayAnimation takes it. A negative or fractional number is an error.
+//   @param play_mode - Optional "Forward" (default) | "Reverse" | "PingPong", case-insensitive; any other value is an error.
 //   @param playback_speed - Optional speed multiplier (default 1.0; 2.0 plays twice as fast).
 //   @param restore_state - Optional bool: restore the pre-animation state on finish (default false).
-//   @param world - Optional world selector: absent/'pie' (default: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie'). In a 2-player PIE session EVERY client has its OWN widgets, so the default may well read the other player's HUD.
-//   @returns { widget_bp_path: string, animation_name: string, animation_exists: bool, played: bool, headless: bool, requires_pie: bool, note: string, saved: bool, live_widget_name?: string, live_animation_name?: string, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }
+//   @param world - Optional world selector: absent/'pie' (default: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie'); any other value is an error. In a 2-player PIE session EVERY client has its OWN widgets, so the default may well read the other player's HUD.
+//   @returns { widget_bp_path: string, animation_name: string, animation_exists: bool, played: bool, headless: bool, requires_pie: bool, note: string, saved: bool, num_loops?: number, play_mode?: string, live_widget_name?: string, live_animation_name?: string, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }
 
 TSharedPtr<FJsonObject> HandlePlayWidgetAnimation(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2696,33 +2740,67 @@ TSharedPtr<FJsonObject> HandlePlayWidgetAnimation(const TSharedPtr<FJsonObject>&
             FString::Printf(TEXT("Widget animation '%s' not found on %s"), *AnimationName, *WidgetBPPath));
     }
 
+    // Every playback setting is read, and a bad one refused, before anything plays -- with or without PIE.
+    if (TSharedPtr<FJsonObject> BadWorld = CheckPieWorldSelector_Widget(Params, TEXT("play_widget_animation")))
+    {
+        return BadWorld;
+    }
+    double StartAtTime = 0.0;
+    Params->TryGetNumberField(TEXT("start_at_time"), StartAtTime);
+    // num_loops is optional: read into flags first, so only a value that is there and malformed is refused.
+    double NumLoopsNum = 1.0;
+    const bool bNumLoopsGiven = Params->HasField(TEXT("num_loops"));
+    const bool bNumLoopsIsNumber = Params->TryGetNumberField(TEXT("num_loops"), NumLoopsNum);
+    if (bNumLoopsGiven && (!bNumLoopsIsNumber || NumLoopsNum < 0.0 || NumLoopsNum != FMath::RoundToDouble(NumLoopsNum)
+        || NumLoopsNum > static_cast<double>(MAX_int32)))
+    {
+        return mcp_common::MakeErrorReply(TEXT("play_widget_animation: num_loops must be a whole number of 0 or more ")
+            TEXT("(1 = play once, the default; 0 = loop until stopped). Nothing was played."));
+    }
+    const int32 NumLoops = bNumLoopsGiven ? static_cast<int32>(NumLoopsNum) : 1;
+    FString PlayModeStr = TEXT("Forward");
+    Params->TryGetStringField(TEXT("play_mode"), PlayModeStr);
+    EUMGSequencePlayMode::Type PlayMode = EUMGSequencePlayMode::Forward;
+    if (PlayModeStr.Equals(TEXT("Forward"), ESearchCase::IgnoreCase)) { PlayMode = EUMGSequencePlayMode::Forward; }
+    else if (PlayModeStr.Equals(TEXT("Reverse"), ESearchCase::IgnoreCase)) { PlayMode = EUMGSequencePlayMode::Reverse; }
+    else if (PlayModeStr.Equals(TEXT("PingPong"), ESearchCase::IgnoreCase)) { PlayMode = EUMGSequencePlayMode::PingPong; }
+    else
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("play_widget_animation: unknown play_mode '%s'; use Forward (the default), Reverse or PingPong. Nothing was played."),
+            *PlayModeStr));
+    }
+    double PlaybackSpeed = 1.0;
+    Params->TryGetNumberField(TEXT("playback_speed"), PlaybackSpeed);
+    bool bRestoreState = false;
+    Params->TryGetBoolField(TEXT("restore_state"), bRestoreState);
+
     // Try to find a live instance in a running PIE session and play for real.
     const FLiveWidgetAnimation_Widget Live = FindLiveWidgetAnimation_Widget(Params, WidgetBP, Target, AnimationName);
     TSharedPtr<FJsonObject> Resp = LiveAnimationJson_Widget(WidgetBPPath, AnimationName, Live);
 
+    // A PIE session runs but the selector named none of its worlds: that is the caller's world, not a missing session.
+    if (!Live.PieWorld && IsAnyPieSessionRunning_Widget())
+    {
+        FString Ignored;
+        FString WorldError;
+        mcp_common::ResolveWorldSelector(Params, TEXT("pie"), Ignored, WorldError);
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("play_widget_animation: a PIE session is running, but world '%s' selects none of its worlds: %s. Nothing was played."),
+            *Live.WorldSelector, *WorldError));
+    }
+
     if (Live.Instance && Live.Animation)
     {
-        double StartAtTime = 0.0;
-        Params->TryGetNumberField(TEXT("start_at_time"), StartAtTime);
-        double NumLoopsNum = 1.0;
-        Params->TryGetNumberField(TEXT("num_loops"), NumLoopsNum);
-        FString PlayModeStr = TEXT("Forward");
-        Params->TryGetStringField(TEXT("play_mode"), PlayModeStr);
-        double PlaybackSpeed = 1.0;
-        Params->TryGetNumberField(TEXT("playback_speed"), PlaybackSpeed);
-        bool bRestoreState = false;
-        Params->TryGetBoolField(TEXT("restore_state"), bRestoreState);
-
-        EUMGSequencePlayMode::Type PlayMode = EUMGSequencePlayMode::Forward;
-        if (PlayModeStr.Equals(TEXT("Reverse"), ESearchCase::IgnoreCase)) { PlayMode = EUMGSequencePlayMode::Reverse; }
-        else if (PlayModeStr.Equals(TEXT("PingPong"), ESearchCase::IgnoreCase)) { PlayMode = EUMGSequencePlayMode::PingPong; }
-
         Live.Instance->PlayAnimation(Live.Animation, static_cast<float>(StartAtTime),
-            FMath::Max(1, FMath::RoundToInt(NumLoopsNum)), PlayMode, static_cast<float>(PlaybackSpeed), bRestoreState);
+            NumLoops, PlayMode, static_cast<float>(PlaybackSpeed), bRestoreState);
 
         Resp->SetBoolField(TEXT("played"), true);
         Resp->SetBoolField(TEXT("headless"), false);
         Resp->SetBoolField(TEXT("requires_pie"), false);
+        Resp->SetNumberField(TEXT("num_loops"), NumLoops);
+        Resp->SetStringField(TEXT("play_mode"), PlayMode == EUMGSequencePlayMode::Reverse ? TEXT("Reverse")
+            : PlayMode == EUMGSequencePlayMode::PingPong ? TEXT("PingPong") : TEXT("Forward"));
         Resp->SetStringField(TEXT("live_widget_name"), Live.Instance->GetName());
         Resp->SetStringField(TEXT("live_animation_name"), Live.Animation->GetName());
         Resp->SetStringField(TEXT("note"), TEXT("Played on a live PIE instance via UUserWidget::PlayAnimation."));

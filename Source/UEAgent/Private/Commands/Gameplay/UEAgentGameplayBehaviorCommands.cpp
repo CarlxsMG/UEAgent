@@ -6,6 +6,7 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Editor.h"
 #include "EditorAssetLibrary.h"
+#include "Engine/Blueprint.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameplayBehaviorConfig.h"
@@ -16,6 +17,7 @@
 #include "Misc/PackageName.h"
 #include "UObject/Package.h"
 #include "UObject/SavePackage.h"
+#include "UObject/UObjectIterator.h"   // TObjectIterator<UClass>: a bare behavior_class name
 #include "UObject/UnrealType.h"   // FMapProperty / FScriptMapHelper: the protected list of running behaviors
 
 /**
@@ -74,17 +76,99 @@ namespace
 		ObjProp->SetObjectPropertyValue_InContainer(Config, Cls);
 	}
 
-	/** The UClass named Name (retried with a "U" prefix when Name has none), or null. */
-	UClass* GameplayBehavior_FindClass(const FString& Name)
+	/**
+	 * The class behavior_class names, or null with OutError saying why. A path is found exactly, loaded from disk when
+	 * it is not in memory: a class path ("/Script/GameplayBehaviorsModule.GameplayBehavior_AnimationBased",
+	 * "/Game/AI/GB_Sit.GB_Sit_C") or a Blueprint asset path ("/Game/AI/GB_Sit", its generated class); any class is
+	 * returned, so the caller checks that it is a UGameplayBehavior. A bare name is matched exactly (case ignored) among
+	 * the loaded UGameplayBehavior subclasses, with or without the C++ "U" prefix or a Blueprint's "_C" suffix; two
+	 * classes with that name are refused, listing their paths, rather than one picked.
+	 */
+	UClass* GameplayBehavior_ResolveClass(const FString& InName, FString& OutError)
 	{
-		if (UClass* Cls = FindObject<UClass>(nullptr, *Name))
+		const FString Name = InName.TrimStartAndEnd();
+		if (Name.IsEmpty())
 		{
-			return Cls;
+			OutError = TEXT("behavior_class is empty");
+			return nullptr;
 		}
-		const FString Prefixed = FString::Printf(TEXT("%s%s"),
-			Name.StartsWith(TEXT("U")) ? TEXT("") : TEXT("U"),
-			*Name);
-		return FindObject<UClass>(nullptr, *Prefixed);
+
+		if (Name.Contains(TEXT("/")))
+		{
+			// Loading a path with "//" would create its package, and CreatePackage aborts the editor on such a name.
+			if (Name.Contains(TEXT("//")))
+			{
+				OutError = FString::Printf(TEXT("'%s' has '//' in it; write the path with single slashes"), *Name);
+				return nullptr;
+			}
+			if (UClass* Found = FindObject<UClass>(nullptr, *Name))
+			{
+				return Found;
+			}
+			if (UClass* Loaded = LoadObject<UClass>(nullptr, *Name, nullptr, LOAD_NoWarn | LOAD_Quiet))
+			{
+				return Loaded;
+			}
+			// A Blueprint asset path, as "/Game/AI/GB_Sit" or "/Game/AI/GB_Sit.GB_Sit": its generated class.
+			FString ObjectPath = Name;
+			if (!ObjectPath.Contains(TEXT(".")))
+			{
+				ObjectPath = FString::Printf(TEXT("%s.%s"), *Name, *FPackageName::GetShortName(Name));
+			}
+			if (UBlueprint* Blueprint = LoadObject<UBlueprint>(nullptr, *ObjectPath, nullptr, LOAD_NoWarn | LOAD_Quiet))
+			{
+				if (Blueprint->GeneratedClass)
+				{
+					return Blueprint->GeneratedClass;
+				}
+			}
+			OutError = FString::Printf(TEXT("no class at %s (neither a class path nor a Blueprint asset path)"), *Name);
+			return nullptr;
+		}
+
+		// Bare name: the C++ prefix is not part of a UClass name, and a Blueprint class ends in "_C".
+		TArray<FString> Candidates = { Name, Name + TEXT("_C") };
+		if (Name.Len() > 1 && Name[0] == TEXT('U') && FChar::IsUpper(Name[1]))
+		{
+			Candidates.Add(Name.RightChop(1));
+		}
+		TArray<UClass*> Matches;
+		for (TObjectIterator<UClass> It; It; ++It)
+		{
+			UClass* Cls = *It;
+			if (!Cls->IsChildOf(UGameplayBehavior::StaticClass())
+				|| Cls->HasAnyClassFlags(CLASS_NewerVersionExists)
+				|| Cls->GetName().StartsWith(TEXT("SKEL_")) || Cls->GetName().StartsWith(TEXT("REINST_"))
+				|| Cls->GetName().StartsWith(TEXT("TRASHCLASS_")) || Cls->GetName().StartsWith(TEXT("HOTRELOADED_")))
+			{
+				continue;
+			}
+			for (const FString& Candidate : Candidates)
+			{
+				if (Cls->GetName().Equals(Candidate, ESearchCase::IgnoreCase))
+				{
+					Matches.AddUnique(Cls);
+				}
+			}
+		}
+		if (Matches.Num() == 1)
+		{
+			return Matches[0];
+		}
+		if (Matches.Num() > 1)
+		{
+			TArray<FString> Paths;
+			for (const UClass* Match : Matches)
+			{
+				Paths.Add(Match->GetPathName());
+			}
+			OutError = FString::Printf(TEXT("'%s' names %d UGameplayBehavior classes (%s); pass the full path of the one you mean"),
+				*Name, Matches.Num(), *FString::Join(Paths, TEXT(", ")));
+			return nullptr;
+		}
+		OutError = FString::Printf(TEXT("no loaded UGameplayBehavior subclass is named '%s'; pass its full path "
+			"(\"/Script/Module.Class\", or \"/Game/Folder/BP\" for a Blueprint, which is then loaded)"), *Name);
+		return nullptr;
 	}
 
 	/**
@@ -166,11 +250,11 @@ namespace
 // ---------------------------------------------------------------------------
 // create_behavior_config
 // ---------------------------------------------------------------------------
-// MCP:create_behavior_config - Get or create a UGameplayBehaviorConfig data asset at package_path/config_name: create it, or load the one already there, set its protected BehaviorClass by reflection when behavior_class resolves (on an existing config this overwrites its class), then save it in every case; no undo step. Use it as the entry point before trigger_behavior_on_actor; to change only the class of a config use set_behavior_class (which errors on a bad class instead of ignoring it), to read one get_behavior_config_info, to find them list_behavior_configs, and to delete one remove_behavior_config. An unresolved behavior_class is ignored without error, so check behavior_class in the reply (empty when unset); created tells new from existing. Idempotent: the same call again leaves the same asset. An asset of another class at that path is an error. A failed save (always while PIE runs) makes success false with saved=false.
+// MCP:create_behavior_config - Get or create a UGameplayBehaviorConfig data asset at package_path/config_name: create it, or load the one already there, set its protected BehaviorClass by reflection when behavior_class is given (on an existing config this overwrites its class), then save it in every case; no undo step. Use it as the entry point before trigger_behavior_on_actor; to change only the class of a config use set_behavior_class, to read one get_behavior_config_info, to find them list_behavior_configs, and to delete one remove_behavior_config. A behavior_class that does not resolve, names two classes, or is not a UGameplayBehavior subclass is an error, checked before anything is created or loaded, so nothing changes. behavior_class and behavior_class_path in the reply are read back from the config (empty when unset); created tells new from existing. Idempotent: the same call again leaves the same asset. An asset of another class at that path is an error. A failed save (always while PIE runs) makes success false with saved=false.
 //   @param config_name - Asset name of the config, no folder, e.g. "BC_Patrol".
 //   @param package_path - Destination content folder as a long package path, e.g. "/Game/AI/Behaviors" (default /Game/MCP).
-//   @param behavior_class - Full path of a loaded UGameplayBehavior subclass, e.g. "/Script/GameplayBehaviorsModule.GameplayBehavior_AnimationBased", or "/Game/AI/GB_Sit.GB_Sit_C" for a Blueprint already loaded; a short name never resolves, and a miss or a non-behavior class is ignored. Omit it to leave the class as it is.
-//   @returns { config_path: string, config_name: string, behavior_class: string, created: bool, saved: bool }
+//   @param behavior_class - UGameplayBehavior subclass to run: a class path, e.g. "/Script/GameplayBehaviorsModule.GameplayBehavior_AnimationBased" or "/Game/AI/GB_Sit.GB_Sit_C", a Blueprint asset path ("/Game/AI/GB_Sit"), loaded if needed, or the exact name of a loaded class ("GameplayBehavior_AnimationBased", "GB_Sit_C"). Omit it to leave the class as it is.
+//   @returns { config_path: string, config_name: string, behavior_class: string, behavior_class_path: string, created: bool, saved: bool }
 TSharedPtr<FJsonObject> HandleCreateBehaviorConfig(
     const TSharedPtr<FJsonObject>& Params)
 {
@@ -180,6 +264,25 @@ TSharedPtr<FJsonObject> HandleCreateBehaviorConfig(
 	Params->TryGetStringField(TEXT("package_path"), PackagePath);
 	FString BehaviorClass;
 	Params->TryGetStringField(TEXT("behavior_class"), BehaviorClass);
+
+	// The class is resolved before anything is created or loaded, so a class that does not resolve, or is not a
+	// UGameplayBehavior, is refused with nothing changed instead of being dropped in silence.
+	UClass* Cls = nullptr;
+	if (!BehaviorClass.IsEmpty())
+	{
+		FString ResolveError;
+		Cls = GameplayBehavior_ResolveClass(BehaviorClass, ResolveError);
+		if (!Cls)
+		{
+			return mcp_common::MakeErrorReply(FString::Printf(
+				TEXT("create_behavior_config: behavior_class: %s. Nothing was created or changed."), *ResolveError));
+		}
+		if (!Cls->IsChildOf(UGameplayBehavior::StaticClass()))
+		{
+			return mcp_common::MakeErrorReply(FString::Printf(
+				TEXT("create_behavior_config: %s is not a UGameplayBehavior subclass. Nothing was created or changed."), *Cls->GetPathName()));
+		}
+	}
 
 	FString CreateError;
 	bool bCreated = false;
@@ -192,14 +295,9 @@ TSharedPtr<FJsonObject> HandleCreateBehaviorConfig(
 	}
 
 	// Assign the BehaviorClass via reflection (the field is protected in 5.7).
-	UClass* Cls = nullptr;
-	if (!BehaviorClass.IsEmpty())
+	if (Cls)
 	{
-		Cls = GameplayBehavior_FindClass(BehaviorClass);
-		if (Cls && Cls->IsChildOf(UGameplayBehavior::StaticClass()))
-		{
-			SetBehaviorClassViaReflection(Config, Cls);
-		}
+		SetBehaviorClassViaReflection(Config, Cls);
 	}
 
 	Config->MarkPackageDirty();
@@ -212,17 +310,26 @@ TSharedPtr<FJsonObject> HandleCreateBehaviorConfig(
 	Data->SetStringField(TEXT("config_name"), Config->GetName());
 	Data->SetStringField(TEXT("behavior_class"),
 		ReadBackClass ? ReadBackClass->GetName() : TEXT(""));
+	Data->SetStringField(TEXT("behavior_class_path"),
+		ReadBackClass ? ReadBackClass->GetPathName() : TEXT(""));
 	Data->SetBoolField(TEXT("created"), bCreated);
+	if (Cls && ReadBackClass != Cls)
+	{
+		Data->SetBoolField(TEXT("saved"), bSaved);
+		return mcp_common::MakeOutcomeReply(Data, false, FString::Printf(
+			TEXT("create_behavior_config: BehaviorClass reads back as '%s', not %s (the UGameplayBehaviorConfig layout this writes by reflection was not found)."),
+			ReadBackClass ? *ReadBackClass->GetPathName() : TEXT("none"), *Cls->GetPathName()));
+	}
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("create_behavior_config"));
 }
 
 // ---------------------------------------------------------------------------
 // set_behavior_class
 // ---------------------------------------------------------------------------
-// MCP:set_behavior_class - Set which UGameplayBehavior class an existing UGameplayBehaviorConfig asset runs (its protected BehaviorClass, written by reflection), then save the asset; no undo step. Use it to repoint a config; create_behavior_config makes a new one (and ignores a bad class instead of failing), get_behavior_config_info reads the class back, list_behavior_configs finds configs. A config that does not load, a class that is not found or is not a UGameplayBehavior subclass is an error and nothing changes. set is true whenever the class resolved, without a read-back, so confirm with get_behavior_config_info. Idempotent: the same class again writes and saves again. A failed save (always while PIE runs) makes success false with saved=false.
+// MCP:set_behavior_class - Set which UGameplayBehavior class an existing UGameplayBehaviorConfig asset runs (its protected BehaviorClass, written by reflection), then save the asset; no undo step. Use it to repoint a config; create_behavior_config makes a new one, get_behavior_config_info reads the class back, list_behavior_configs finds configs. A config that does not load, a class that is not found, names two classes, or is not a UGameplayBehavior subclass is an error and nothing changes. The class is read back from the config after the write: set is true only when it holds the class asked for, and otherwise success is false and nothing is saved. Idempotent: the same class again writes and saves again. A failed save (always while PIE runs) makes success false with saved=false.
 //   @param config_path - UGameplayBehaviorConfig asset as an object or package path, e.g. "/Game/MCP/BC_Patrol", as list_behavior_configs returns it.
-//   @param behavior_class - Full path of a loaded UGameplayBehavior subclass, e.g. "/Script/GameplayBehaviorsModule.GameplayBehavior_AnimationBased", or "/Game/AI/GB_Sit.GB_Sit_C" for a Blueprint already loaded. A bare class name is looked up as given and then with a "U" prefix, but neither form finds a class, so pass the path.
-//   @returns { config_path: string, behavior_class: string, set: bool, saved: bool }
+//   @param behavior_class - UGameplayBehavior subclass to run: a class path, e.g. "/Script/GameplayBehaviorsModule.GameplayBehavior_AnimationBased" or "/Game/AI/GB_Sit.GB_Sit_C", a Blueprint asset path ("/Game/AI/GB_Sit"), loaded if needed, or the exact name of a loaded class ("GameplayBehavior_AnimationBased", also with the C++ "U" prefix, or "GB_Sit_C").
+//   @returns { config_path: string, behavior_class: string, behavior_class_path: string, set: bool, saved: bool }
 TSharedPtr<FJsonObject> HandleSetBehaviorClass(
     const TSharedPtr<FJsonObject>& Params)
 {
@@ -237,28 +344,41 @@ TSharedPtr<FJsonObject> HandleSetBehaviorClass(
 			FString::Printf(TEXT("Cannot load config: %s"), *ConfigPath));
 	}
 
-	UClass* Cls = GameplayBehavior_FindClass(BehaviorClass);
+	FString ResolveError;
+	UClass* Cls = GameplayBehavior_ResolveClass(BehaviorClass, ResolveError);
 	if (!Cls)
 	{
 		return mcp_common::MakeErrorReply(
-			FString::Printf(TEXT("Cannot find behavior class: %s"), *BehaviorClass));
+			FString::Printf(TEXT("Cannot find behavior class: %s"), *ResolveError));
 	}
 	if (!Cls->IsChildOf(UGameplayBehavior::StaticClass()))
 	{
 		return mcp_common::MakeErrorReply(
-			FString::Printf(TEXT("Class %s is not a UGameplayBehavior"), *BehaviorClass));
+			FString::Printf(TEXT("Class %s is not a UGameplayBehavior"), *Cls->GetPathName()));
 	}
 
 	// Set via reflection (the field is protected).
 	SetBehaviorClassViaReflection(Config, Cls);
 
-	Config->MarkPackageDirty();
-	const bool bSaved = mcp_common::SaveAssetPackage(Config->GetPackage(), Config);
+	// Read back what the config now holds: set is that value, not the intent.
+	UClass* ReadBackClass = GetBehaviorClassViaReflection(Config);
+	const bool bSet = ReadBackClass == Cls;
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("config_path"), Config->GetPathName());
-	Data->SetStringField(TEXT("behavior_class"), Cls->GetName());
-	Data->SetBoolField(TEXT("set"), true);
+	Data->SetStringField(TEXT("behavior_class"), ReadBackClass ? ReadBackClass->GetName() : TEXT(""));
+	Data->SetStringField(TEXT("behavior_class_path"), ReadBackClass ? ReadBackClass->GetPathName() : TEXT(""));
+	Data->SetBoolField(TEXT("set"), bSet);
+	if (!bSet)
+	{
+		Data->SetBoolField(TEXT("saved"), false);
+		return mcp_common::MakeOutcomeReply(Data, false, FString::Printf(
+			TEXT("set_behavior_class: BehaviorClass reads back as '%s', not %s (the UGameplayBehaviorConfig layout this writes by reflection was not found); nothing was saved."),
+			ReadBackClass ? *ReadBackClass->GetPathName() : TEXT("none"), *Cls->GetPathName()));
+	}
+
+	Config->MarkPackageDirty();
+	const bool bSaved = mcp_common::SaveAssetPackage(Config->GetPackage(), Config);
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_behavior_class"));
 }
 
@@ -343,9 +463,9 @@ TSharedPtr<FJsonObject> HandleTriggerBehaviorOnActor(
 // ---------------------------------------------------------------------------
 // end_behavior_on_actor  — calls StopBehavior on the subsystem, then reads back what still runs
 // ---------------------------------------------------------------------------
-// MCP:end_behavior_on_actor - Interrupt the gameplay behaviors that the editor world UGameplayBehaviorSubsystem runs on a Pawn found by its label: every running behavior that is a behavior_class (subclasses included), or every one when behavior_class is omitted, gets EndBehavior with interrupted=true. behavior_class must be the full class path of a UGameplayBehavior subclass; a short name, or a path that does not resolve to one, is an error and nothing stops. ended is read back from the subsystem: true once every matching behavior stopped, while still_running counts the ones that did not and makes success false. With none running it succeeds with ended false and a note, so a repeat call is idempotent. Runtime only: nothing is saved or undoable. A missing actor, a non-Pawn or no subsystem is an error. Start one: trigger_behavior_on_actor; subsystem check: get_behavior_subsystem_info.
+// MCP:end_behavior_on_actor - Interrupt the gameplay behaviors that the editor world UGameplayBehaviorSubsystem runs on a Pawn found by its label: every running behavior that is a behavior_class (subclasses included), or every one when behavior_class is omitted, gets EndBehavior with interrupted=true. behavior_class is a class path, or the exact name of a loaded UGameplayBehavior subclass; a name two classes share, or one that does not resolve to such a class, is an error and nothing stops. ended is read back from the subsystem: true once every matching behavior stopped, while still_running counts the ones that did not and makes success false. With none running it succeeds with ended false and a note, so a repeat call is idempotent. Runtime only: nothing is saved or undoable. A missing actor, a non-Pawn or no subsystem is an error. Start one: trigger_behavior_on_actor; subsystem check: get_behavior_subsystem_info.
 //   @param actor_label - Label of the Pawn actor in the editor world.
-//   @param behavior_class - Optional full path of the UGameplayBehavior subclass to stop, e.g. "/Script/GameplayBehaviorsModule.GameplayBehavior_AnimationBased"; omitted stops every behavior on the pawn, and a path that does not resolve to such a class is an error
+//   @param behavior_class - Optional UGameplayBehavior subclass to stop: its path, e.g. "/Script/GameplayBehaviorsModule.GameplayBehavior_AnimationBased", or its exact class name ("GameplayBehavior_AnimationBased"); omitted stops every behavior on the pawn, and one that does not resolve to such a class is an error
 //   @returns { actor_label: string, behavior_class: string, ended: bool, stopped_count: int, still_running: int, note?: string }
 TSharedPtr<FJsonObject> HandleEndBehaviorOnActor(
     const TSharedPtr<FJsonObject>& Params)
@@ -359,12 +479,13 @@ TSharedPtr<FJsonObject> HandleEndBehaviorOnActor(
 	UClass* ClsToStop = UGameplayBehavior::StaticClass();
 	if (!BehaviorClass.IsEmpty())
 	{
-		UClass* C = GameplayBehavior_FindClass(BehaviorClass);
+		FString ResolveError;
+		UClass* C = GameplayBehavior_ResolveClass(BehaviorClass, ResolveError);
 		if (!C || !C->IsChildOf(UGameplayBehavior::StaticClass()))
 		{
 			return mcp_common::MakeErrorReply(FString::Printf(
-				TEXT("behavior_class '%s' does not resolve to a UGameplayBehavior subclass (pass a full class path, e.g. /Script/GameplayBehaviorsModule.GameplayBehavior_AnimationBased); nothing was stopped"),
-				*BehaviorClass));
+				TEXT("behavior_class '%s' does not resolve to a UGameplayBehavior subclass (%s); nothing was stopped"),
+				*BehaviorClass, C ? TEXT("it is another class") : *ResolveError));
 		}
 		ClsToStop = C;
 	}

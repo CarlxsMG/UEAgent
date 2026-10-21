@@ -1055,12 +1055,12 @@ TSharedPtr<FJsonObject> HandleGetAbilityTasks(const TSharedPtr<FJsonObject>& Par
     return ResultObj;
 }
 
-// MCP:create_gameplay_effect_asset - Create a native UGameplayEffect data asset (not a Blueprint, and not a container) at package_path/name with the given duration policy, and save it; no undo transaction. apply_gameplay_effect needs a class, so for an effect you will apply use create_gameplay_effect_blueprint instead; read the result back with get_gameplay_effect_info. Idempotent: a GameplayEffect already at that path, native or Blueprint, is returned untouched with already_existed=true and nothing saved, but the duration_policy in that reply echoes your request, not the asset; an asset of another class there is refused. An unknown duration_policy is an error and nothing is created. A failed save (always while PIE runs) is an error, and the new asset stays in memory unsaved.
+// MCP:create_gameplay_effect_asset - Create a native UGameplayEffect data asset (not a Blueprint, and not a container) at package_path/name with the given duration policy, and save it; no undo transaction. apply_gameplay_effect needs a class, so for an effect you will apply use create_gameplay_effect_blueprint instead; read the result back with get_gameplay_effect_info. Idempotent: a GameplayEffect already at that path, native or Blueprint, is returned untouched with already_existed=true and nothing saved; its duration_policy and duration_magnitude are read from the asset, and requested_duration_policy echoes the request that was not applied. An asset of another class there is refused. An unknown duration_policy is an error and nothing is created. A failed save (always while PIE runs) is an error, and the new asset stays in memory unsaved.
 //   @param name - Asset name without a folder, e.g. "GE_Damage".
 //   @param package_path - Content folder as a long package path, e.g. "/Game/GAS/Effects" (default /Game/GameplayEffects; one trailing slash is dropped).
 //   @param duration_policy - "Instant", "HasDuration" or "Infinite", case ignored (default Instant).
 //   @param duration_magnitude - Duration in seconds as a constant magnitude, e.g. 5.0; used only with HasDuration and ignored otherwise (default 0.0).
-//   @returns { name, asset_path, already_existed, duration_policy, duration_magnitude?, created? }
+//   @returns { name, asset_path, already_existed, duration_policy, duration_magnitude?, requested_duration_policy?, created? }
 TSharedPtr<FJsonObject> HandleCreateGameplayEffectContainer(const TSharedPtr<FJsonObject>& Params)
 {
     UE_LOG(LogTemp, Verbose, TEXT("[UEAgent] create_gameplay_effect_asset: enter"));
@@ -1095,7 +1095,9 @@ TSharedPtr<FJsonObject> HandleCreateGameplayEffectContainer(const TSharedPtr<FJs
         ResultObj->SetStringField(TEXT("name"), Name);
         ResultObj->SetStringField(TEXT("asset_path"), AssetPath);
         ResultObj->SetBoolField(TEXT("already_existed"), true);
-        ResultObj->SetStringField(TEXT("duration_policy"), GameplayAbilities_DurationPolicyName(DurationPolicy));
+        // The asset's own policy, read from it: the request is not applied to an existing effect.
+        ResultObj->SetStringField(TEXT("duration_policy"), GameplayAbilities_DurationPolicyName(Existing->DurationPolicy));
+        ResultObj->SetStringField(TEXT("requested_duration_policy"), GameplayAbilities_DurationPolicyName(DurationPolicy));
         float DurationMag = 0.f;
         if (Existing->DurationMagnitude.GetStaticMagnitudeIfPossible(1.f, DurationMag))
         {
@@ -1142,7 +1144,7 @@ TSharedPtr<FJsonObject> HandleCreateGameplayEffectContainer(const TSharedPtr<FJs
     ResultObj->SetStringField(TEXT("asset_path"), AssetPath);
     ResultObj->SetBoolField(TEXT("created"), true);
     ResultObj->SetBoolField(TEXT("already_existed"), false);
-    ResultObj->SetStringField(TEXT("duration_policy"), DurationPolicyStr);
+    ResultObj->SetStringField(TEXT("duration_policy"), GameplayAbilities_DurationPolicyName(NewEffect->DurationPolicy));
     ResultObj->SetNumberField(TEXT("duration_magnitude"), DurationMagnitude);
     UE_LOG(LogTemp, Verbose, TEXT("[UEAgent] create_gameplay_effect_asset: created %s (policy=%s)"),
         *AssetPath, *DurationPolicyStr);

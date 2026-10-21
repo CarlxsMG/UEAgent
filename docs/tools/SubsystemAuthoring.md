@@ -10,25 +10,25 @@ Back to the [index](README.md).
 
 *Destructive.*
 
-Externally activate a Blueprint-authored USubsystem via FSubsystemCollectionBase::ActivateExternalSubsystem. Refuses to toggle native / abstract / base classes.
+Externally activate a Blueprint-authored USubsystem via FSubsystemCollectionBase::ActivateExternalSubsystem: every live collection of its family (engine, editor, game instance, world or local player) creates and initializes an instance, unless the class's ShouldCreateSubsystem declines. Refuses to toggle native / abstract / base classes. The engine call reports nothing, so the instances the collections hold are counted before and after it: activated is true when at least one is held afterwards, already_active when one was held before (a repeat call adds nothing), and success is false when none is held. Inverse: deactivate_external_subsystem.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `class_name` | string | yes | Short class name or /Script/ path of a Blueprint-derived USubsystem |
 
-**Returns:** `{ class_name: string, activated: bool }`
+**Returns:** `{ class_name: string, lifetime: string, instances_before: int, instances_after: int, activated: bool, already_active: bool } -- for a subsystem of another family than those five, activated is null with a note and no counts.`
 
 ## `deactivate_external_subsystem`
 
 *Destructive, idempotent.*
 
-Tear down a Blueprint-authored subsystem (a non-native, non-abstract USubsystem class) in every live subsystem collection of its family (engine, editor, game instance, world or local player), through the engine's external-subsystem switch: its Deinitialize runs and its runtime state is lost. Runtime only: nothing is saved and there is no undo, and a world or game instance created later builds it again. The inverse is activate_external_subsystem; check what is live with list_subsystem_instances (with class_name it answers active true or false), and find candidate classes with list_derived_classes. Native engine subsystems, the subsystem base classes and abstract classes are refused, since tearing them down can crash the editor; a class that is not found or is not a subsystem is an error. Idempotent: a repeat call, or one for a subsystem that is not active, changes nothing. deactivated is always true, since the engine call reports nothing, so confirm with list_subsystem_instances.
+Tear down a Blueprint-authored subsystem (a non-native, non-abstract USubsystem class) in every live subsystem collection of its family (engine, editor, game instance, world or local player), through the engine's external-subsystem switch: its Deinitialize runs and its runtime state is lost. Runtime only: nothing is saved and there is no undo, and a world or game instance created later builds it again. The inverse is activate_external_subsystem; check what is live with list_subsystem_instances (with class_name it answers active true or false), and find candidate classes with list_derived_classes. Native engine subsystems, the subsystem base classes and abstract classes are refused, since tearing them down can crash the editor; a class that is not found or is not a subsystem is an error. Idempotent: a repeat call, or one for a subsystem that is not active, changes nothing and answers deactivated false with a note. The engine call reports nothing, so the instances the collections hold are counted before and after it: deactivated is true when some were held and none are left, and success is false if any is still held.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `class_name` | string | yes | Blueprint subsystem class, by its Blueprint asset path (e.g. "/Game/Systems/BP_ScoreSubsystem"), generated class path, or loaded generated class name (e.g. "BP_ScoreSubsystem_C"); a native /Script/ class resolves but is refused. |
 
-**Returns:** `{ class_name: string, deactivated: bool }`
+**Returns:** `{ class_name: string, lifetime: string, instances_before: int, instances_after: int, deactivated: bool, note? } -- for a subsystem of another family than those five, deactivated is null with a note and no counts.`
 
 ## `list_subsystem_instances`
 

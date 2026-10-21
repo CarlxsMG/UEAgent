@@ -486,11 +486,11 @@ List the localization targets configured in the Localization Dashboard (ULocaliz
 
 *Destructive, idempotent.*
 
-Make the DataRegistry subsystem rebuild, for this editor session, its map from registry type to registry asset out of the registry assets loaded in memory under its scan paths, so edits to registry assets (a changed registry_type, sources changed with add_data_registry_source or remove_data_registry_source) are seen without restarting the editor. A registry whose type drops out of the map is deinitialized, losing its cached items. It changes no asset and saves nothing, and it neither loads nor initializes a registry: use initialize_data_registry for that, then get_data_registry_item to read items. Idempotent: a repeat call rebuilds the same map. refreshed is always true, since the engine call reports nothing; check the outcome with list_data_registry_types. A missing subsystem (DataRegistry plugin off) is an error.
+Make the DataRegistry subsystem rebuild, for this editor session, its map from registry type to registry asset out of the registry assets loaded in memory under its scan paths, so edits to registry assets (a changed registry_type, sources changed with add_data_registry_source or remove_data_registry_source) are seen without restarting the editor. A registry whose type drops out of the map is deinitialized, losing its cached items. It changes no asset and saves nothing, and it neither loads nor initializes a registry: use initialize_data_registry for that, then get_data_registry_item to read items. Idempotent: a repeat call rebuilds the same map (map_changed false). The engine call reports nothing, so refreshed is null and the outcome is the subsystem's type -> registry map read before and after: the counts, the types added, removed or pointed at another asset, and map_changed; list_data_registry_types lists the map. A missing subsystem (DataRegistry plugin off) is an error.
 
 No parameters.
 
-**Returns:** `{ refreshed: bool }`
+**Returns:** `{ refreshed: null, registry_count_before: int, registry_count_after: int, added_types: [string], removed_types: [string], changed_types: [string], map_changed: bool, note: string }`
 
 ## `remove_curve_key`
 

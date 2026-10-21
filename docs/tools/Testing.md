@@ -86,13 +86,13 @@ Add an enabled Blueprint debugger breakpoint on one node of a Blueprint's functi
 
 *Read-only.*
 
-Run the editor's enabled data validators (the Data Validation plugin, in its Script use case) on one asset and report the verdict, without changing or saving it (the asset gets loaded): validation_result is Valid, Invalid or NotValidated (no validator applies to that asset), is_valid is false only for Invalid, and errors and warnings carry the validators' messages. Use it to check one asset after editing it, e.g. before a commit or a cook; for a whole folder use validate_assets_in_path, to see which validators exist list_validators, and for a level's actors run_map_check. validators_run counts the enabled validators, not the ones that applied to this asset, so a NotValidated result is the sign that none did. An asset the Asset Registry cannot find, or the Data Validation plugin being off, is an error.
+Run the editor's enabled data validators (the Data Validation plugin, in its Script use case) on one asset and report the verdict, without changing or saving it (the asset gets loaded): validation_result is Valid, Invalid or NotValidated (no validator applies to that asset), is_valid is false only for Invalid, and errors and warnings carry the validators' messages. Use it to check one asset after editing it, e.g. before a commit or a cook; for a whole folder use validate_assets_in_path, to see which validators exist list_validators, and for a level's actors run_map_check. validators_run counts the validators that actually validated this asset (returned a result other than NotValidated), validators_applied names their classes, and validators_enabled counts every enabled validator; none run when the asset's own class-level check already finds it Invalid. An asset the Asset Registry cannot find, or the Data Validation plugin being off, is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `asset_path` | string | yes | Asset to validate, as an object path ("/Game/MyGame/M_Example.M_Example") or a package path ("/Game/MyGame/M_Example", which names its primary asset). |
 
-**Returns:** `{ asset_path: string, resolved_object_path: string, validation_result: string, is_valid: bool, errors: [string], warnings: [string], error_count: number, warning_count: number, validators_run: number }`
+**Returns:** `{ asset_path: string, resolved_object_path: string, validation_result: string, is_valid: bool, errors: [string], warnings: [string], error_count: number, warning_count: number, validators_run: number, validators_applied: [string], validators_enabled: number }`
 
 ## `validate_assets_in_path`
 

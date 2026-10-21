@@ -21,8 +21,8 @@
  *   - scalability commands -> Scalability:: API (FQualityLevels)
  *   - INI commands         -> GConfig
  *
- * Setters verify by reading the value back (set_cvars_from_json only reports what it applied); a
- * missing cvar produces an honest error.
+ * Setters verify by reading the value back (set_cvars_from_json per name, set_scalability_quality per
+ * group); a missing cvar produces an honest error.
  */
 namespace UEAgentCVarCommands
 {
@@ -120,6 +120,161 @@ namespace
         Out->SetNumberField(TEXT("FoliageQuality"), Q.FoliageQuality);
         Out->SetNumberField(TEXT("ShadingQuality"), Q.ShadingQuality);
         Out->SetNumberField(TEXT("LandscapeQuality"), Q.LandscapeQuality);
+    }
+
+    /**
+     * The groups of Wanted that Got does not hold, as "Group: wanted W, engine has G". bAll compares every group (and
+     * ResolutionQuality); otherwise only the one named Category (as set_scalability_quality reports it).
+     */
+    TArray<FString> ScalabilityMismatches(const Scalability::FQualityLevels& Wanted, const Scalability::FQualityLevels& Got,
+        bool bAll, const FString& Category)
+    {
+        TArray<FString> Out;
+        const auto Check = [&](const TCHAR* Name, const TCHAR* Group, int32 W, int32 G)
+        {
+            if ((bAll || Category == Group) && W != G)
+            {
+                Out.Add(FString::Printf(TEXT("%s: wanted %d, engine has %d"), Name, W, G));
+            }
+        };
+        if (bAll && !FMath::IsNearlyEqual(Wanted.ResolutionQuality, Got.ResolutionQuality, 0.01f))
+        {
+            Out.Add(FString::Printf(TEXT("ResolutionQuality: wanted %g, engine has %g"), Wanted.ResolutionQuality, Got.ResolutionQuality));
+        }
+        Check(TEXT("ViewDistanceQuality"), TEXT("ViewDistance"), Wanted.ViewDistanceQuality, Got.ViewDistanceQuality);
+        Check(TEXT("AntiAliasingQuality"), TEXT("AntiAliasing"), Wanted.AntiAliasingQuality, Got.AntiAliasingQuality);
+        Check(TEXT("ShadowQuality"), TEXT("Shadows"), Wanted.ShadowQuality, Got.ShadowQuality);
+        Check(TEXT("GlobalIlluminationQuality"), TEXT("GlobalIllumination"), Wanted.GlobalIlluminationQuality, Got.GlobalIlluminationQuality);
+        Check(TEXT("ReflectionQuality"), TEXT("Reflection"), Wanted.ReflectionQuality, Got.ReflectionQuality);
+        Check(TEXT("PostProcessQuality"), TEXT("PostProcess"), Wanted.PostProcessQuality, Got.PostProcessQuality);
+        Check(TEXT("TextureQuality"), TEXT("Texture"), Wanted.TextureQuality, Got.TextureQuality);
+        Check(TEXT("EffectsQuality"), TEXT("Effects"), Wanted.EffectsQuality, Got.EffectsQuality);
+        Check(TEXT("FoliageQuality"), TEXT("Foliage"), Wanted.FoliageQuality, Got.FoliageQuality);
+        Check(TEXT("ShadingQuality"), TEXT("Shading"), Wanted.ShadingQuality, Got.ShadingQuality);
+        Check(TEXT("LandscapeQuality"), TEXT("Landscape"), Wanted.LandscapeQuality, Got.LandscapeQuality);
+        return Out;
+    }
+
+    /** Text that reads whole as a number: an optional sign, digits with at most one '.', and an optional exponent. */
+    bool CVar_IsNumberText(const FString& Text)
+    {
+        int32 ExponentAt = INDEX_NONE;
+        if (!Text.FindChar(TEXT('e'), ExponentAt))
+        {
+            Text.FindChar(TEXT('E'), ExponentAt);
+        }
+        const FString Mantissa = ExponentAt == INDEX_NONE ? Text : Text.Left(ExponentAt);
+        bool bHasDigit = false;
+        for (const TCHAR Char : Mantissa)
+        {
+            bHasDigit |= FChar::IsDigit(Char);
+        }
+        if (!bHasDigit || !FCString::IsNumeric(*Mantissa))
+        {
+            return false;
+        }
+        if (ExponentAt == INDEX_NONE)
+        {
+            return true;
+        }
+        FString Exponent = Text.Mid(ExponentAt + 1);
+        if (Exponent.StartsWith(TEXT("+")) || Exponent.StartsWith(TEXT("-")))
+        {
+            Exponent.RightChopInline(1);
+        }
+        if (Exponent.IsEmpty())
+        {
+            return false;
+        }
+        for (const TCHAR Char : Exponent)
+        {
+            if (!FChar::IsDigit(Char))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * The text IConsoleVariable::Set gets for one set_cvars_from_json entry, or false with OutError when the cvar would
+     * read it as something else. A JSON bool becomes 1/0 and a number its text; a string is passed as it is, except
+     * that a numeric or bool cvar takes only a number or one of the words true/false/yes/no/on/off (case ignored,
+     * turned into 1/0 as the engine does for .ini values): any other text would be read as 0 without a word.
+     */
+    bool CVar_ValueText(IConsoleVariable* CVar, const TSharedPtr<FJsonValue>& Value, FString& Out, FString& OutError)
+    {
+        switch (Value.IsValid() ? Value->Type : EJson::None)
+        {
+        case EJson::Boolean:
+            Out = Value->AsBool() ? TEXT("1") : TEXT("0");
+            return true;
+        case EJson::Number:
+        {
+            const double Number = Value->AsNumber();
+            const bool bIntegral = FMath::IsFinite(Number) && FMath::Abs(Number) < 9.0e15 && FMath::FloorToDouble(Number) == Number;
+            Out = bIntegral ? FString::Printf(TEXT("%lld"), static_cast<int64>(Number)) : FString::SanitizeFloat(Number);
+            return true;
+        }
+        case EJson::String:
+            Out = Value->AsString();
+            break;
+        default:
+            OutError = TEXT("the value must be a string, number or bool (true/false); this one is null, an array or an object");
+            return false;
+        }
+
+        if (CVar->IsVariableString())
+        {
+            return true;
+        }
+        const FString Trimmed = Out.TrimStartAndEnd();
+        if (Trimmed.Equals(TEXT("true"), ESearchCase::IgnoreCase) || Trimmed.Equals(TEXT("yes"), ESearchCase::IgnoreCase)
+            || Trimmed.Equals(TEXT("on"), ESearchCase::IgnoreCase))
+        {
+            Out = TEXT("1");
+            return true;
+        }
+        if (Trimmed.Equals(TEXT("false"), ESearchCase::IgnoreCase) || Trimmed.Equals(TEXT("no"), ESearchCase::IgnoreCase)
+            || Trimmed.Equals(TEXT("off"), ESearchCase::IgnoreCase))
+        {
+            Out = TEXT("0");
+            return true;
+        }
+        if (CVar->IsVariableInt() || CVar->IsVariableFloat() || CVar->IsVariableBool())
+        {
+            if (!CVar_IsNumberText(Trimmed))
+            {
+                OutError = FString::Printf(TEXT("'%s' is not a number, and this %s console variable would read it as 0; give a number, or true/false/yes/no/on/off"),
+                    *Out, CVar->IsVariableFloat() ? TEXT("float") : (CVar->IsVariableBool() ? TEXT("bool") : TEXT("integer")));
+                return false;
+            }
+            Out = Trimmed;
+        }
+        return true;
+    }
+
+    /** Whether CVar now holds the value Text sets, compared in the cvar's own type (so "75" matches a float's "75.0"). */
+    bool CVar_Holds(IConsoleVariable* CVar, const FString& Text)
+    {
+        if (CVar->IsVariableString())
+        {
+            return CVar->GetString() == Text;
+        }
+        if (CVar->IsVariableBool())
+        {
+            return CVar->GetBool() == FCString::ToBool(*Text);
+        }
+        if (CVar->IsVariableInt())
+        {
+            return CVar->GetInt() == FCString::Atoi(*Text);
+        }
+        if (CVar->IsVariableFloat() || CVar_IsNumberText(Text))
+        {
+            const float Wanted = FCString::Atof(*Text);
+            return FMath::IsNearlyEqual(CVar->GetFloat(), Wanted, FMath::Max(1.e-6f, FMath::Abs(Wanted) * 1.e-6f));
+        }
+        return CVar->GetString().Equals(Text, ESearchCase::IgnoreCase);
     }
 }
 
@@ -295,10 +450,10 @@ TSharedPtr<FJsonObject> HandleListCVars(const TSharedPtr<FJsonObject>& Params)
 // ---------------------------------------------------------------------------
 // set_scalability_quality
 // ---------------------------------------------------------------------------
-// MCP:set_scalability_quality - Set the running editor's scalability quality, every sg.* group at once (category all, the default) or one group, through Scalability::SetQualityLevels + ApplyCachedQualityLevels, then read all the levels back. It starts from the current levels, so a single-group change leaves the other groups as they were. The change lives in this editor session only: it is not undoable and is not written to GameUserSettings, an INI or a device profile. Check the levels before with get_scalability_levels; for one sg.* or r.* variable use set_cvar instead. An unknown quality word or category is an error and nothing changes; a number outside 0-4 is clamped. set is always true, so compare the returned levels with requested_level. Repeating the call sets the same levels again (idempotent).
+// MCP:set_scalability_quality - Set the running editor's scalability quality, every sg.* group at once (category all, the default) or one group, through Scalability::SetQualityLevels + ApplyCachedQualityLevels, then read all the levels back. It starts from the current levels, so a single-group change leaves the other groups as they were. The change lives in this editor session only: it is not undoable and is not written to GameUserSettings, an INI or a device profile. Check the levels before with get_scalability_levels; for one sg.* or r.* variable use set_cvar instead. An unknown quality word or category is an error and nothing changes; a number outside 0-4 is clamped. The levels are read back after the change: set is true only when every group asked for now holds its level, and otherwise success is false, with mismatches naming each group the engine left elsewhere. Repeating the call sets the same levels again (idempotent).
 //   @param quality - Level as a number 0-4 (0 Low, 1 Medium, 2 High, 3 Epic, 4 Cinematic; others clamped) or one of "Low", "Medium", "High", "Epic", "Cinematic", case ignored. Required.
 //   @param category - One group, case ignored: "ViewDistance", "AntiAliasing", "Shadows", "GlobalIllumination" (or "GI"), "Reflection", "PostProcess", "Texture", "Effects", "Foliage", "Shading", "Landscape"; or "all" (the default) for every group.
-//   @returns { set: bool, requested_level: int, category: string, ResolutionQuality: int, ViewDistanceQuality: int, AntiAliasingQuality: int, ShadowQuality: int, GlobalIlluminationQuality: int, ReflectionQuality: int, PostProcessQuality: int, TextureQuality: int, EffectsQuality: int, FoliageQuality: int, ShadingQuality: int, LandscapeQuality: int }
+//   @returns { set: bool, requested_level: int, category: string, ResolutionQuality: int, ViewDistanceQuality: int, AntiAliasingQuality: int, ShadowQuality: int, GlobalIlluminationQuality: int, ReflectionQuality: int, PostProcessQuality: int, TextureQuality: int, EffectsQuality: int, FoliageQuality: int, ShadingQuality: int, LandscapeQuality: int, mismatches?: [string] }
 
 TSharedPtr<FJsonObject> HandleSetScalabilityQuality(const TSharedPtr<FJsonObject>& Params)
 {
@@ -343,14 +498,24 @@ TSharedPtr<FJsonObject> HandleSetScalabilityQuality(const TSharedPtr<FJsonObject
     Scalability::SetQualityLevels(Quality, /*bForce=*/true);
     Scalability::ApplyCachedQualityLevels();
 
-    // Read back the live state to confirm.
+    // Read back the live state and compare it with what was asked: the engine ignores the sg.* write of a group
+    // last set at a higher priority (by the console, set_cvar or a device profile), and then the group keeps its level.
     const Scalability::FQualityLevels Verified = Scalability::GetQualityLevels();
+    const TArray<FString> Mismatches = ScalabilityMismatches(Quality, Verified, AppliedCategory == TEXT("all"), AppliedCategory);
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetBoolField(TEXT("set"), true);
+    Data->SetBoolField(TEXT("set"), Mismatches.Num() == 0);
     Data->SetNumberField(TEXT("requested_level"), Level);
     Data->SetStringField(TEXT("category"), AppliedCategory);
     FillScalabilityLevels(Data, Verified);
+    if (Mismatches.Num() > 0)
+    {
+        Data->SetArrayField(TEXT("mismatches"), mcp_common::StringsToJson(Mismatches));
+        return mcp_common::MakeOutcomeReply(Data, false, FString::Printf(
+            TEXT("set_scalability_quality: the engine did not take the level for %s. A group last set at a higher priority than ")
+            TEXT("scalability (with set_cvar or the console on its sg.* variable, or by a device profile) keeps its value; get_cvar ")
+            TEXT("on that sg.* variable shows set_by."), *FString::Join(Mismatches, TEXT("; "))));
+    }
     return mcp_common::MakeOkReply(Data);
 }
 
@@ -374,9 +539,9 @@ TSharedPtr<FJsonObject> HandleGetScalabilityLevels(const TSharedPtr<FJsonObject>
 // ===========================================================================
 // Engine settings: bulk cvar set and direct INI access.
 
-// MCP:set_cvars_from_json - Set several console variables of the running editor in one call, from a JSON object of name/value pairs, each through IConsoleManager at SetByCode priority. Not atomic: names are applied one by one, an unknown name goes to errors and the others still apply. Unlike set_cvar (one variable, console priority, read back) it reads nothing back, and applied counts every name found, including a set the engine ignores because the variable was last set at a higher priority (by the console or by set_cvar), so confirm values with get_cvar. Find names with list_cvars. The values live in this editor session only: nothing is written to an INI (set_engine_ini_value does that) and nothing is undoable. Text that is not a JSON object is an error and nothing changes. Repeating the call sets the same values again.
-//   @param cvars - A STRING holding a JSON object of exact cvar names to values, e.g. '{"r.ScreenPercentage":"75","t.MaxFPS":"60"}'; names as list_cvars returns them. Give values as text such as "1": a JSON number is passed as its text, and a JSON true/false as the words true/false, which an integer cvar reads as 0.
-//   @returns { applied, requested, errors: [{name, error}] }
+// MCP:set_cvars_from_json - Set several console variables of the running editor in one call, from a JSON object of name/value pairs, each through IConsoleManager at SetByCode priority, then read each one back. Not atomic: names are applied one by one, and the others still apply when one fails. applied counts only the variables that hold the new value afterwards; results gives each one's read-back value and set_by. A variable last set at a higher priority (by the console or by set_cvar) ignores this write and goes to errors, as do an unknown name and a value the variable would misread; then success is false (use set_cvar, console priority, for those). Find names with list_cvars. The values live in this editor session only: nothing is written to an INI (set_engine_ini_value does that) and nothing is undoable. Text that is not a JSON object is an error and nothing changes. Repeating the call sets the same values again.
+//   @param cvars - A STRING holding a JSON object of exact cvar names to values, e.g. '{"r.ScreenPercentage":"75","t.MaxFPS":60}'; names as list_cvars returns them. A value is text, a number (passed as its text) or a bool (passed as 1/0); a numeric or bool cvar takes only a number or one of the words true/false/yes/no/on/off (as 1/0), and other text, null, an array or an object is refused for that name.
+//   @returns { applied, requested, results: [{name, requested_value, value, set_by, applied}], errors: [{name, error}] }
 TSharedPtr<FJsonObject> HandleSetCVarsFromJson(const TSharedPtr<FJsonObject>& Params)
 {
     FString CvarsJson;
@@ -393,43 +558,83 @@ TSharedPtr<FJsonObject> HandleSetCVarsFromJson(const TSharedPtr<FJsonObject>& Pa
 
     int32 Applied = 0;
     TArray<TSharedPtr<FJsonValue>> ErrArr;
+    TArray<TSharedPtr<FJsonValue>> ResultArr;
     IConsoleManager& CM = IConsoleManager::Get();
+    const auto AddError = [&ErrArr](const FString& Name, const FString& Error)
+    {
+        TSharedPtr<FJsonObject> E = MakeShared<FJsonObject>();
+        E->SetStringField(TEXT("name"), Name);
+        E->SetStringField(TEXT("error"), Error);
+        ErrArr.Add(MakeShared<FJsonValueObject>(E));
+    };
     for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : JsonObj->Values)
     {
         IConsoleVariable* V = CM.FindConsoleVariable(*Pair.Key);
         if (!V)
         {
-            TSharedPtr<FJsonObject> E = MakeShared<FJsonObject>();
-            E->SetStringField(TEXT("name"), Pair.Key);
-            E->SetStringField(TEXT("error"), TEXT("cvar not found"));
-            ErrArr.Add(MakeShared<FJsonValueObject>(E));
+            AddError(Pair.Key, TEXT("cvar not found"));
             continue;
         }
-        FString ValueStr;
-        if (!Pair.Value->TryGetString(ValueStr))
+        // A value the cvar would misread (JSON null/array/object, or words in a numeric cvar) is refused before
+        // anything is set for that name.
+        FString ValueStr, ValueError;
+        if (!CVar_ValueText(V, Pair.Value, ValueStr, ValueError))
         {
-            ValueStr = Pair.Value->AsString();
+            AddError(Pair.Key, ValueError + TEXT("; nothing was set for it"));
+            continue;
         }
         V->Set(*ValueStr, ECVF_SetByCode);
-        ++Applied;
+
+        // Read back: the engine ignores a SetByCode write to a cvar last set at a higher priority (the console or
+        // set_cvar), and a cvar can clamp or reject a value, so applied counts only the values the cvar now holds.
+        const bool bHolds = CVar_Holds(V, ValueStr);
+        const EConsoleVariableFlags SetBy = static_cast<EConsoleVariableFlags>(V->GetFlags() & ECVF_SetByMask);
+        const TCHAR* SetByName = GetConsoleVariableSetByName(SetBy);
+        TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+        Entry->SetStringField(TEXT("name"), Pair.Key);
+        Entry->SetStringField(TEXT("requested_value"), ValueStr);
+        Entry->SetStringField(TEXT("value"), V->GetString());
+        Entry->SetStringField(TEXT("set_by"), SetByName ? FString(SetByName) : FString());
+        Entry->SetBoolField(TEXT("applied"), bHolds);
+        ResultArr.Add(MakeShared<FJsonValueObject>(Entry));
+        if (bHolds)
+        {
+            ++Applied;
+            continue;
+        }
+        AddError(Pair.Key, FString::Printf(
+            TEXT("not applied: the cvar still reads '%s' (set_by %s). A cvar last set by the console or set_cvar ignores this lower-priority write; use set_cvar for it"),
+            *V->GetString(), SetByName ? SetByName : TEXT("unknown")));
     }
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetNumberField(TEXT("applied"), Applied);
     Data->SetNumberField(TEXT("requested"), JsonObj->Values.Num());
+    Data->SetArrayField(TEXT("results"), ResultArr);
     Data->SetArrayField(TEXT("errors"), ErrArr);
+    if (ErrArr.Num() > 0)
+    {
+        return mcp_common::MakeOutcomeReply(Data, false, FString::Printf(
+            TEXT("set_cvars_from_json: %d of %d console variables were applied; errors says why each other one was not (the applied ones keep their new values)."),
+            Applied, JsonObj->Values.Num()));
+    }
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:list_engine_ini_sections - List the section names of one INI (Engine, Game, Input, Editor, Scalability...) as the running editor holds it in GConfig, the in-memory merge of every config layer, without changing anything. An INI GConfig does not know (a misspelt name, say) is a success with found=false and an empty list. Use it to discover a section before reading one key with get_engine_ini_value or writing one with set_engine_ini_value; for UDeveloperSettings classes use get_project_settings_value. file_path is the saved-config path Saved/Config/<Platform>/<name>.ini built from the name, not a file that was read or checked to exist.
+// MCP:list_engine_ini_sections - List the section names of one INI (Engine, Game, Input, Editor, Scalability...) without changing anything: by default as the running editor holds it in GConfig, the in-memory merge of every config layer (the engine's Base ini included); with include_base=false only the sections the project itself defines, read from disk in its Config/Default<name>.ini and its saved Saved/Config/<Platform>/<name>.ini (files_read lists the ones that exist). An INI GConfig does not know (a misspelt name, say) is a success with found=false. Use it to discover a section before reading one key with get_engine_ini_value or writing one with set_engine_ini_value; for UDeveloperSettings classes use get_project_settings_value. file_path is the saved-config path Saved/Config/<Platform>/<name>.ini built from the name.
 //   @param config_file - INI base name, e.g. "Engine" (default), "Game", "Input", "Editor", "Scalability"; a trailing ".ini" is dropped.
-//   @param include_base - Ignored: the code reads it but never uses it, so the list is the same whatever you pass.
-//   @returns { count, sections: [string], found: bool, config_file, file_path }
+//   @param include_base - true (default) lists the whole in-memory merge, engine Base ini layers included; false lists only the sections in the project's Config/Default<name>.ini and Saved/Config/<Platform>/<name>.ini, as they are on disk.
+//   @returns { count, sections: [string], found: bool, include_base: bool, config_file, file_path, files_read?: [string] }
 TSharedPtr<FJsonObject> HandleListEngineIniSections(const TSharedPtr<FJsonObject>& Params)
 {
     FString ConfigFile = TEXT("Engine");
     Params->TryGetStringField(TEXT("config_file"), ConfigFile);
-    bool bIncludeBase = false;
-    Params->TryGetBoolField(TEXT("include_base"), bIncludeBase);
+    // The default is what the tool always listed: the whole merge.
+    bool bIncludeBase = true;
+    const bool bIncludeBaseRead = Params->TryGetBoolField(TEXT("include_base"), bIncludeBase);
+    if (!bIncludeBaseRead && Params->HasField(TEXT("include_base")))
+    {
+        return mcp_common::MakeErrorReply(TEXT("include_base must be true or false"));
+    }
 
     if (!GConfig)
     {
@@ -444,8 +649,38 @@ TSharedPtr<FJsonObject> HandleListEngineIniSections(const TSharedPtr<FJsonObject
     const bool bFound = GConfig->GetSectionNames(ConfigFile, SectionNames);
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    if (!bIncludeBase)
+    {
+        // Only the project's own layers, read from the files on disk (FConfigFile::Read is one file, no merge):
+        // what Config/Default<name>.ini and the saved Saved/Config/<Platform>/<name>.ini define.
+        const FString ProjectIni = FPaths::ConvertRelativePathToFull(
+            FPaths::SourceConfigDir() / FString::Printf(TEXT("Default%s.ini"), *ConfigFile));
+        const FString SavedIni = FPaths::ConvertRelativePathToFull(
+            FConfigCacheIni::GetDestIniFilename(*ConfigFile, nullptr, *FPaths::GeneratedConfigDir()));
+        TArray<FString> FilesRead;
+        SectionNames.Reset();
+        for (const FString& IniPath : { ProjectIni, SavedIni })
+        {
+            if (!FPaths::FileExists(IniPath) || FilesRead.Contains(IniPath))
+            {
+                continue;
+            }
+            FConfigFile Layer;
+            Layer.Read(IniPath);
+            TArray<FString> LayerSections;
+            Layer.GetKeys(LayerSections);
+            for (const FString& Section : LayerSections)
+            {
+                SectionNames.AddUnique(Section);
+            }
+            FilesRead.Add(IniPath);
+        }
+        Data->SetArrayField(TEXT("files_read"), mcp_common::StringsToJson(FilesRead));
+    }
+
     Data->SetNumberField(TEXT("count"), SectionNames.Num());
     Data->SetBoolField(TEXT("found"), bFound);
+    Data->SetBoolField(TEXT("include_base"), bIncludeBase);
     Data->SetStringField(TEXT("config_file"), ConfigFile);
     Data->SetStringField(TEXT("file_path"), FilePath);
     Data->SetArrayField(TEXT("sections"), mcp_common::StringsToJson(SectionNames));

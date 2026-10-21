@@ -477,11 +477,11 @@ TSharedPtr<FJsonObject> HandleAddPoseSearchChannelToSchema(const TSharedPtr<FJso
 // ---------------------------------------------------------------------------
 // remove_pose_search_channel_from_schema  (inverse of add_pose_search_channel_to_schema)
 // ---------------------------------------------------------------------------
-// MCP:remove_pose_search_channel_from_schema - Remove one feature channel (a UPoseSearchFeatureChannel_* such as Pose or Trajectory) from a motion-matching UPoseSearchSchema, chosen by index or by type, in one undo step; the schema is then re-finalized (PostEditChange) and saved. The inverse of add_pose_search_channel_to_schema; to only lower a channel's influence, set its weight with that tool instead. List the channels first with get_pose_search_schema_info, and rebuild every database that uses the schema with build_pose_search_database_index afterwards, since the old index no longer matches. An index out of range or no channel of that type is a success with removed=false, already_absent=true and nothing saved. Not idempotent: indices shift after a removal, and by type each call takes the next channel of that class. Passing neither selector, an unknown channel_type, or a schema that does not load is an error. previous_count counts the schema's source channels, while channel_count counts the finalized ones, which can be 0 when finalizing fails. A failed save (always while PIE runs) makes success false, with saved=false and save_error.
+// MCP:remove_pose_search_channel_from_schema - Remove one feature channel (a UPoseSearchFeatureChannel_* such as Pose or Trajectory) from a motion-matching UPoseSearchSchema, chosen by index or by type, in one undo step; the schema is then re-finalized (PostEditChange) and saved. The inverse of add_pose_search_channel_to_schema; to only lower a channel's influence, set its weight with that tool instead. List the channels first with get_pose_search_schema_info, and rebuild every database that uses the schema with build_pose_search_database_index afterwards, since the old index no longer matches. An index out of range or no channel of that type is a success with removed=false, already_absent=true and nothing saved. Not idempotent: indices shift after a removal, and by type each call takes the next channel of that class. Passing neither selector, an unknown channel_type, or a schema that does not load is an error. previous_count and channel_count count the schema's source channels (the list channel_index indexes) before and after the call, so a removal shows as one less; finalized_channel_count is the finalized view, 0 when finalizing fails, and finalized and finalize_warning say whether the schema finalized. A failed save (always while PIE runs) makes success false, with saved=false and save_error.
 //   @param schema_path - UPoseSearchSchema asset as a package or object path, e.g. "/Game/MotionMatching/PSS_Locomotion" (required).
 //   @param channel_index - 0-based index into the schema's source channel list (the order of get_pose_search_schema_info's finalized_channels once the schema is finalized; that tool lists none before); takes precedence over channel_type when both are given.
 //   @param channel_type - "Pose", "Trajectory", "Position", "Velocity" or "Heading", case ignored; removes the first channel of that class, subclasses included. Used only when channel_index is absent.
-//   @returns { schema_path, channel_index, channel_type, channel_class, schema_cardinality, channel_count, previous_count, removed, already_absent, saved, save_error?, message }
+//   @returns { schema_path, channel_index, channel_type, channel_class, schema_cardinality, channel_count (source, after), previous_count (source, before), finalized_channel_count, source_channel_count, finalized, finalize_warning?, removed, already_absent, saved, save_error?, message }
 TSharedPtr<FJsonObject> HandleRemovePoseSearchChannelFromSchema(const TSharedPtr<FJsonObject>& Params)
 {
     FString SchemaPath;
@@ -581,8 +581,12 @@ TSharedPtr<FJsonObject> HandleRemovePoseSearchChannelFromSchema(const TSharedPtr
             ResolvedClass ? ResolvedClass->GetName()
                           : (ChannelClass ? ChannelClass->GetName() : FString()));
         Obj->SetNumberField(TEXT("schema_cardinality"), Schema->SchemaCardinality);
-        Obj->SetNumberField(TEXT("channel_count"), Schema->GetChannels().Num());
+        // channel_count and previous_count count the same list, the schema's source channels (the one channel_index
+        // indexes), after and before; the finalized view, empty when finalizing fails, is finalized_channel_count.
+        Obj->SetNumberField(TEXT("channel_count"), Helper.Num());
         Obj->SetNumberField(TEXT("previous_count"), PreviousCount);
+        Obj->SetNumberField(TEXT("finalized_channel_count"), Schema->GetChannels().Num());
+        PoseSearch_AddFinalizeState(Obj, Schema);
         Obj->SetBoolField(TEXT("removed"), bRemoved);
         Obj->SetBoolField(TEXT("already_absent"), !bRemoved);
         return Obj;

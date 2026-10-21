@@ -960,9 +960,9 @@ TSharedPtr<FJsonObject> HandleInterchangeImportAsset(const TSharedPtr<FJsonObjec
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:reimport_interchange_asset - Reimports an asset that was imported through Interchange, from the source file and pipeline stack stored on its Interchange import data, synchronously and without dialogs: the asset's content in memory is overwritten with the file's current content. This tool does not save it (save_asset writes it). An asset without Interchange import data -- a legacy-importer asset, or one never imported -- is an error and nothing changes: use reimport_asset for those. Check which kind an asset has, and its source file, with get_interchange_asset_import_data; change the stored pipelines first with set_interchange_pipelines. A reimport the engine reports as failed still answers success, with reimported false and a note pointing to the editor log, so read reimported.
+// MCP:reimport_interchange_asset - Reimports an asset that was imported through Interchange, from the source file and pipeline stack stored on its Interchange import data, synchronously and without dialogs: the asset's content in memory is overwritten with the file's current content. This tool does not save it (save_asset writes it). An asset without Interchange import data -- a legacy-importer asset, or one never imported -- is an error and nothing changes: use reimport_asset for those. Check which kind an asset has, and its source file, with get_interchange_asset_import_data; change the stored pipelines first with set_interchange_pipelines. A reimport that brings nothing back -- the stored source file is gone, does not translate, or has an extension no registered translator reads -- makes success false, with reimported false, count 0 and an error naming the stored source file; the editor log has the translator's reason.
 //   @param asset_path [string!] - Package path (e.g. "/Game/Meshes/SM_Rock") or object path ("/Game/Meshes/SM_Rock.SM_Rock") of the asset to reimport; it is loaded if needed.
-//   @returns { asset_path: string, reimported: bool, count: number, note: string }
+//   @returns { asset_path: string, reimported: bool, count: number, note: string } -- reimported is true when the engine ran the reimport and handed back at least one object (count)
 TSharedPtr<FJsonObject> HandleInterchangeReimportAsset(const TSharedPtr<FJsonObject>& Params)
 {
     FString AssetPath;
@@ -979,23 +979,39 @@ TSharedPtr<FJsonObject> HandleInterchangeReimportAsset(const TSharedPtr<FJsonObj
             FString::Printf(TEXT("asset '%s' has no UInterchangeAssetImportData (legacy factory import or not Interchange-managed)"), *AssetPath));
     }
 
+    // The source file the reimport reads, for the reply and for the error of a failed one (read first: a
+    // reimport may give the asset new import data).
+    const FString SourceFile = ID->GetFirstFilename();
+
     FImportAssetParameters ImportParams;
     ImportParams.bIsAutomated = true;
     ImportParams.bReplaceExisting = true;
     ImportParams.ReimportAsset = Asset;
 
     TArray<UObject*> ReimportedObjects;
-    const bool bReimported = M.ReimportAsset(Asset, ImportParams, ReimportedObjects);
+    // ReimportAsset is false only when the reimport cannot start (no translator reads the stored source file, or no
+    // factory makes the asset's class); a reimport that started and then failed -- a source file that is gone or
+    // does not translate -- still returns true, with no object back. So the objects it hands back are the measure.
+    const bool bStarted = M.ReimportAsset(Asset, ImportParams, ReimportedObjects);
+    const bool bReimported = bStarted && ReimportedObjects.Num() > 0;
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("asset_path"), AssetPath);
     Data->SetBoolField(TEXT("reimported"), bReimported);
     Data->SetNumberField(TEXT("count"), ReimportedObjects.Num());
+    const FString SourceLabel = SourceFile.IsEmpty() ? FString(TEXT("(no stored source file)")) : SourceFile;
     Data->SetStringField(TEXT("note"),
-        FString::Printf(TEXT("ReimportAsset %s. Reimported %d object(s)."),
-            bReimported ? TEXT("succeeded") : TEXT("returned false (check editor log for translator failures)"),
-            ReimportedObjects.Num()));
-    return mcp_common::MakeOkReply(Data);
+        FString::Printf(TEXT("ReimportAsset %s. Reimported %d object(s) from %s."),
+            bReimported ? TEXT("succeeded")
+                : bStarted ? TEXT("started but produced no object (the source file is gone or did not translate; see the editor log)")
+                : TEXT("could not start (no registered translator reads the source file, or no factory makes this asset class)"),
+            ReimportedObjects.Num(), *SourceLabel));
+    // A reimport that did not bring the asset back from its file is a failed call.
+    return mcp_common::MakeOutcomeReply(Data, bReimported, bReimported ? FString() : FString::Printf(
+        TEXT("reimport_interchange_asset: '%s' was not reimported -- the reimport %s. Its stored source file is %s; it must exist ")
+        TEXT("with an extension a registered translator reads (can_translate_interchange_source_data checks it), and the ")
+        TEXT("editor log has the translator's reason."),
+        *AssetPath, bStarted ? TEXT("started but produced no object") : TEXT("could not start"), *SourceLabel));
 }
 
 const McpCommandFamilies::FRegistrar Registration =

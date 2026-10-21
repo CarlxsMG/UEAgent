@@ -618,13 +618,13 @@ TSharedPtr<FJsonObject> HandleSpawnPhysicsConstraint(const TSharedPtr<FJsonObjec
 // --------------------------------------------------------------------------- //
 // set_physics_constraint_limits
 // --------------------------------------------------------------------------- //
-// MCP:set_physics_constraint_limits - Sets the motion limits of a Physics Constraint actor placed in the editor world, on its UPhysicsConstraintComponent, and reads them back: each limit given switches that axis to Limited with that size (linear_limit is one value for X, Y and Z together; swing and twist are in degrees). Axes whose limit is not given keep their motion type and size, and no axis can be set to Free or Locked here. One undo step; the level is marked dirty, not saved (save_level). The same values again give the same result; with no limit given nothing changes, though updated still reads true. An actor that is not a Physics Constraint actor is an error. Create one with spawn_physics_constraint and read it with get_physics_constraint_info; motors, breaking and projection are set with set_physics_constraint_drives; for a ragdoll joint inside a Physics Asset use set_physics_asset_constraint_limits instead.
+// MCP:set_physics_constraint_limits - Sets the motion limits of a Physics Constraint actor placed in the editor world, on its UPhysicsConstraintComponent, and reads them back: each limit given switches that axis to Limited with that size (linear_limit is one value for X, Y and Z together; swing and twist are in degrees). Axes whose limit is not given keep their motion type and size, and no axis can be set to Free or Locked here. One undo step; the level is marked dirty, not saved (save_level). The same values again give the same result. updated is read back: every limit given reads Limited with the requested size, and one that does not makes success false. A call with no limit is an error that names the four limit parameters, and nothing changes; so is an actor that is not a Physics Constraint actor. Create one with spawn_physics_constraint and read it with get_physics_constraint_info; motors, breaking and projection are set with set_physics_constraint_drives; for a ragdoll joint inside a Physics Asset use set_physics_asset_constraint_limits instead.
 //   @param constraint_actor_name - Label or object name of the APhysicsConstraintActor in the editor world (case-insensitive), as spawn_physics_constraint returns it.
 //   @param linear_limit - Optional linear limit in cm, applied to all 3 axes together (e.g. 10); not range-checked.
 //   @param swing1_limit - Optional swing1 angular limit in degrees, the first symmetric angle of the swing cone (e.g. 45); the Details panel range is 0-180 and this value is not range-checked.
 //   @param swing2_limit - Optional swing2 angular limit in degrees, the second symmetric angle of the swing cone (e.g. 45); the Details panel range is 0-180 and this value is not range-checked.
 //   @param twist_limit - Optional twist angular limit in degrees, the symmetric rotation about the twist axis (e.g. 30); the Details panel range is 0-180 and this value is not range-checked.
-//   @returns { constraint_actor_name: string, constraint_component: string, linear_limit: number, linear_x_motion: string, linear_y_motion: string, linear_z_motion: string, swing1_limit: number, swing1_motion: string, swing2_limit: number, swing2_motion: string, twist_limit: number, twist_motion: string, linear_applied: bool, swing1_applied: bool, swing2_applied: bool, twist_applied: bool, updated: bool }
+//   @returns { constraint_actor_name: string, constraint_component: string, linear_limit: number, linear_x_motion: string, linear_y_motion: string, linear_z_motion: string, swing1_limit: number, swing1_motion: string, swing2_limit: number, swing2_motion: string, twist_limit: number, twist_motion: string, linear_applied: bool, swing1_applied: bool, swing2_applied: bool, twist_applied: bool, updated: bool } -- updated is true when every limit given reads back Limited with the requested size
 
 TSharedPtr<FJsonObject> HandleSetConstraintLimits(const TSharedPtr<FJsonObject>& Params)
 {
@@ -640,6 +640,11 @@ TSharedPtr<FJsonObject> HandleSetConstraintLimits(const TSharedPtr<FJsonObject>&
     const bool bHasSwing1 = Params->TryGetNumberField(TEXT("swing1_limit"), Swing1);
     const bool bHasSwing2 = Params->TryGetNumberField(TEXT("swing2_limit"), Swing2);
     const bool bHasTwist  = Params->TryGetNumberField(TEXT("twist_limit"), Twist);
+    if (!bHasLinear && !bHasSwing1 && !bHasSwing2 && !bHasTwist)
+    {
+        return mcp_common::MakeErrorReply(TEXT("set_physics_constraint_limits: no limit was given; pass at least one of linear_limit, ")
+            TEXT("swing1_limit, swing2_limit or twist_limit (numbers). Nothing was changed."));
+    }
 
     {
         const FScopedTransaction Transaction(LOCTEXT("SetConstraintLimits", "MCP: Set Constraint Limits"));
@@ -666,8 +671,19 @@ TSharedPtr<FJsonObject> HandleSetConstraintLimits(const TSharedPtr<FJsonObject>&
     Result->SetBoolField(TEXT("swing1_applied"), bHasSwing1);
     Result->SetBoolField(TEXT("swing2_applied"), bHasSwing2);
     Result->SetBoolField(TEXT("twist_applied"), bHasTwist);
-    Result->SetBoolField(TEXT("updated"), true);
-    return mcp_common::MakeOkReply(Result);
+
+    // updated is measured: every limit given reads back Limited with the size written (as float, the setters' type).
+    const FConstraintInstance& CI = ConstraintComp->ConstraintInstance;
+    auto Matches = [](double Wanted, float Read) { return FMath::IsNearlyEqual(static_cast<float>(Wanted), Read, KINDA_SMALL_NUMBER); };
+    const bool bLinearOk = !bHasLinear || (CI.GetLinearXMotion() == LCM_Limited && CI.GetLinearYMotion() == LCM_Limited
+        && CI.GetLinearZMotion() == LCM_Limited && Matches(LinearLimit, CI.GetLinearLimit()));
+    const bool bSwing1Ok = !bHasSwing1 || (CI.GetAngularSwing1Motion() == ACM_Limited && Matches(Swing1, CI.GetAngularSwing1Limit()));
+    const bool bSwing2Ok = !bHasSwing2 || (CI.GetAngularSwing2Motion() == ACM_Limited && Matches(Swing2, CI.GetAngularSwing2Limit()));
+    const bool bTwistOk  = !bHasTwist  || (CI.GetAngularTwistMotion() == ACM_Limited && Matches(Twist, CI.GetAngularTwistLimit()));
+    const bool bUpdated = bLinearOk && bSwing1Ok && bSwing2Ok && bTwistOk;
+    Result->SetBoolField(TEXT("updated"), bUpdated);
+    return mcp_common::MakeOutcomeReply(Result, bUpdated,
+        bUpdated ? FString() : mcp_common::MeasuredOutcomeError(TEXT("set_physics_constraint_limits"), TEXT("updated")));
 }
 
 // --------------------------------------------------------------------------- //

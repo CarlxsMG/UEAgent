@@ -2,6 +2,83 @@
 
 Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](https://semver.org).
 
+## 2.4.3 - 2026-10-21
+
+The 134 tool definitions Glama scored below 4 now say when to use the tool, what each parameter takes and what it
+does. Rewriting them against their code found 58 defects, all fixed here: one of them killed the editor.
+
+### Changed
+
+- **134 tool definitions explain their use**: when to use the tool and what to use instead, what each parameter
+  takes, and what is undone, saved or refused. Nine annotations move to match the code.
+- **`run_functional_test_in_pie` reports what it can see.** It never ran the test: a Simulate session has no player
+  controller, so the functional test manager cannot start a test there. It reads the test actor's `Result` in a
+  session that is already running (pass, fail, running, not_run, unknown) instead of always saying "pass". It stops
+  only a session it started, never one you had running. A test name must match one class exactly; a name that
+  matches several is refused with the candidates.
+- **These tools no longer delete whatever asset is at the path.** They refuse an existing asset and name its class:
+  `create_texture_2d_from_data`, `create_texture_2d_array`, `create_render_target_2d_array`,
+  `create_render_target_cube`, `create_static_texture_from_render_target`.
+- **The streaming level tools match a path exactly.** `add_streaming_level`, `remove_streaming_level`,
+  `set_streaming_level_loaded`, `set_streaming_level_visible` and `spawn_level_streaming_volume` used to fall back to
+  the leaf name, and could act on a different level of the same name. A bare name that several levels share is
+  refused.
+- `set_cvars_from_json` reads each value back, so `applied` counts only what the cvar holds, with a `results` list.
+  A JSON `true`/`false` sets an integer cvar to 1/0 (it used to read as 0), and any error makes the call fail.
+- `create_render_job` and `render_sequence_to_movie` use the open editor level when no `map_path` is given, as their
+  descriptions said, and refuse a map the renderer would reject (not a package path, or an unsaved level).
+  `render_sequence_to_movie` reports `render_state`: it waits for PIE, renders, or ends without rendering (a
+  failure).
+- `list_metasound_node_types` takes `name_filter` and `max_results`. The full list is too long to come back inline.
+- `set_chooser_row_outcome` writes the row's result, the value `evaluate_chooser_table` returns; it used to write
+  only the first output column's cell.
+- `generate_blueprint_docs` lists the components of the Components panel, and labels every Blueprint type and
+  compile state. `create_asset_documentation` matches subclasses: a SoundCue is audio, a material instance is a
+  material.
+- `list_engine_ini_sections` honours `include_base`: false lists only the project's own sections.
+- `play_widget_animation` refuses an unknown `play_mode`, a negative `num_loops` and a bad world selector; 0 loops
+  until stopped, as in the engine.
+- `is_point_inside_mesh` and `remove_section` refuse a malformed `query_point` or an unknown `track_type`, which
+  they used to read as `[0,0,0]` or ignore.
+- `validate_asset` counts the validators that ran (`validators_run`), not those enabled.
+- `get_material_parameter_collection_instance_info` counts real overrides.
+- `list_task_types` and its condition and evaluator siblings give each struct's real path.
+
+### Fixed
+
+- **`subscribe_to_delegate` killed the editor on a component's sparse delegate**, such as `OnComponentHit`. Sparse
+  delegates are refused now by property type, and the name check ignores case.
+- **These reported success, or a result, they had not measured:**
+  - `refresh_data_registry_map` and `deactivate_external_subsystem` / `activate_external_subsystem` said `true`;
+    they now compare before and after.
+  - `remove_motion_warping_component`, `set_behavior_class` and `set_physics_constraint_limits` hard-coded their
+    result; they read it back. `set_physics_constraint_limits` refuses a call with no limit.
+  - `set_scalability_quality` said `set` without comparing; a mismatch fails.
+  - `set_ability_cost` and `set_ability_cooldown` answered success when the read-back did not match.
+  - `reimport_interchange_asset` answered success when nothing was reimported.
+  - `remove_streaming_level` answered success with `removed` false.
+  - `set_audio_volume` answered success with `volume_set` false.
+  - `create_gameplay_effect_asset` reported the requested duration policy for an existing asset, not the asset's.
+  - `get_usd_stage_actor_info` counted the actor's own root as a generated component.
+  - `start_trace` said timing regions go into the trace; only bookmarks do.
+- **These answered success when the save failed:** `remove_state_tree_parameter`, `add_anim_composite_segment`,
+  `set_substrate_slab_scalar`. `rename_skeletal_mesh_socket` and `remove_skeletal_mesh_socket` now save the skeleton
+  when the socket lives there.
+- **Undo now restores** `add_state_task`, `add_consideration`, `add_state_enter_condition`, `set_substrate_slab_scalar`
+  (and a bad pin leaves no node behind) and `attach_blueprint_component`, which used to drop its step so that undo
+  removed the component added before.
+- `set_project_settings_value` and `set_default_game_map` restore the value in memory when it cannot be saved to the
+  config file.
+- `add_anim_composite_segment` appends when no `start_pos` is given; it used to land at the start.
+- `reimport_anim_sequence` checks every recorded source file before reimporting.
+- `create_functional_test` refuses a Blueprint at the path that is not a Functional Test, and reports its real parent.
+- `insert_usd_sublayer` answers success for a sublayer already there and for an in-memory stage.
+- `remove_soundfield_effect` no longer needs a concrete effect class to clear a slot.
+- `subscribe_to_delegate` finds an existing subscription by the resolved object, whatever the spelling.
+- `disconnect_sound_cue_nodes` also breaks the wire in the cue editor's graph.
+- `set_behavior_class` and `create_behavior_config` find a class by its bare name.
+- `list_metasound_node_types` reads `is_native` from the MetaSound asset manager and gives each class's asset.
+
 ## 2.4.2 - 2026-10-21
 
 The review behind 2.4.1 left eight known defects. This release fixes them, and your agent can now install UEAgent

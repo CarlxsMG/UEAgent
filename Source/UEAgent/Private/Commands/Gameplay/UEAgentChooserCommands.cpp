@@ -6,6 +6,7 @@
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "EditorAssetLibrary.h"
+#include "Engine/Blueprint.h"                  // set_chooser_row_outcome: a Blueprint named as a Class result
 #include "Misc/PackageName.h"
 #include "ScopedTransaction.h"                 // FScopedTransaction: every table edit is one undo step
 #include "UObject/Package.h"
@@ -25,6 +26,7 @@
 #include "ObjectColumn.h"                  // FObjectColumn / FChooserObjectRowData
 #include "OutputObjectColumn.h"            // FOutputObjectColumn / FChooserOutputObjectRowData
 #include "ObjectChooser_Asset.h"           // FAssetChooser (TObjectPtr<UObject> Asset)
+#include "ObjectChooser_Class.h"           // FClassChooser (TObjectPtr<UClass> Class) -- set_chooser_row_outcome on a Class table
 #include "OutputFloatColumn.h"              // FOutputFloatColumn
 #include "OutputBoolColumn.h"               // FOutputBoolColumn
 #if !UE_VERSION_OLDER_THAN(5, 8, 0) // UE 5.7: the Chooser plugin has no Name or OutputName column (no NameColumn.h / OutputNameColumn.h)
@@ -145,25 +147,6 @@ namespace
 		if (S.Equals(TEXT("Class"), ESearchCase::IgnoreCase))           { Out = EObjectChooserResultType::ClassResult; return true; }
 		if (S.Equals(TEXT("NoPrimaryResult"), ESearchCase::IgnoreCase)) { Out = EObjectChooserResultType::NoPrimaryResult; return true; }
 		return false;
-	}
-
-	/**
-	 * Get the row-values array index of the OutputObject column (or INDEX_NONE).
-	 * Chooser keeps row data in parallel arrays per column; the FOutputObjectColumn
-	 * uses TArray<FChooserOutputObjectRowData> RowValues.
-	 */
-	int32 FindOutputObjectColumnIndex(const UChooserTable* Table)
-	{
-		if (!Table) { return INDEX_NONE; }
-		for (int32 i = 0; i < Table->ColumnsStructs.Num(); ++i)
-		{
-			const FInstancedStruct& Col = Table->ColumnsStructs[i];
-			if (Col.GetScriptStruct() == FOutputObjectColumn::StaticStruct())
-			{
-				return i;
-			}
-		}
-		return INDEX_NONE;
 	}
 
 	/** The typed column a column struct holds, or null when it holds another type. */
@@ -845,11 +828,11 @@ TSharedPtr<FJsonObject> HandleAddChooserRow(const TSharedPtr<FJsonObject>& Param
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("add_chooser_row"), SaveError);
 }
 
-// MCP:set_chooser_row_outcome - Sets the object a Chooser Table row outputs: writes an FAssetChooser holding asset_path into that row's cell of the table's FIRST OutputObject column, in one undo step, then compiles and saves the table; success is false, with save_error, when the save fails. Idempotent: a row already holding that asset is left as it is (already_existed true, saved false). Refused with nothing changed when the table has no OutputObject column (add one with add_chooser_column, column_type OutputObject), row_index is out of range, or the asset does not load. The row's filter cells and its primary result entry are not touched. For a cell of another column, or of a second OutputObject column, use set_chooser_cell; read the row back with get_chooser_row_values; add rows with add_chooser_row.
+// MCP:set_chooser_row_outcome - Sets the result a Chooser Table row returns -- the row's entry in the table's results, which evaluate_chooser_table returns when that row is chosen: an Asset result holding asset_path on an Object table, or a Class result holding the class on a Class table (asset_path may then name a Blueprint, whose generated class is used). One undo step, then the table is compiled and saved; success is false, with save_error, when the save fails. Idempotent: a row already returning that asset or class is left as it is (already_existed true, saved false). Refused with nothing changed when row_index is out of range of the table's results, the asset does not load, the table returns no primary result (NoPrimaryResult), or the asset or class is not of the table's output_object_class. The row's filter and output-column cells are not touched: set_chooser_cell writes those (an OutputObject column included). Read the result back with evaluate_chooser_table; add rows with add_chooser_row; get_chooser_table_info gives the row count and result type.
 //   @param table_path - Long package path of an existing UChooserTable (e.g. "/Game/Choosers/CT_Locomotion"), as list_chooser_tables lists it.
-//   @param row_index - 0-based row index, below the row count get_chooser_table_info reports (checked against the OutputObject column's rows).
-//   @param asset_path - Long package path (e.g. "/Game/Anims/AS_Run") or object path of the asset the row outputs; it must load, or the call is refused.
-//   @returns { table_path: string, row_index: int, asset_path: string, already_existed: bool, saved: bool, save_error?: string }
+//   @param row_index - 0-based row index, below the table's result count (results_count in get_chooser_table_info).
+//   @param asset_path - Long package path (e.g. "/Game/Anims/AS_Run") or object path of the asset the row returns; on a Class table a class path or a Blueprint. It must load, or the call is refused.
+//   @returns { table_path: string, row_index: int, asset_path: string, result_type: "Object"|"Class", result_struct: string, already_existed: bool, saved: bool, save_error?: string } -- asset_path is what the row now returns, read back from its result entry
 TSharedPtr<FJsonObject> HandleSetChooserRowOutcome(const TSharedPtr<FJsonObject>& Params)
 {
 	FString TablePath;
@@ -875,19 +858,18 @@ TSharedPtr<FJsonObject> HandleSetChooserRowOutcome(const TSharedPtr<FJsonObject>
 		return LoadError;
 	}
 
-	const int32 OutColIndex = FindOutputObjectColumnIndex(Table);
-	if (OutColIndex == INDEX_NONE)
+	// A row's result is its entry in ResultsStructs: what EvaluateChooser returns when the row is chosen.
+	if (Table->ResultType == EObjectChooserResultType::NoPrimaryResult)
 	{
-		return mcp_common::MakeErrorReply(
-			FString::Printf(TEXT("set_chooser_row_outcome: no FOutputObjectColumn on table %s (add one with column_type='OutputObject' first)"), *TablePath));
+		return mcp_common::MakeErrorReply(FString::Printf(
+			TEXT("set_chooser_row_outcome: table %s returns no primary result (result_type NoPrimaryResult), so its rows have no result to set; ")
+			TEXT("write its output columns with set_chooser_cell, or change result_type with create_chooser_table. Nothing was changed."), *TablePath));
 	}
-
-	FOutputObjectColumn& OutCol = Table->ColumnsStructs[OutColIndex].GetMutable<FOutputObjectColumn>();
-	if (RowIndex < 0 || RowIndex >= OutCol.RowValues.Num())
+	if (RowIndex < 0 || RowIndex >= Table->ResultsStructs.Num())
 	{
 		return mcp_common::MakeErrorReply(
-			FString::Printf(TEXT("set_chooser_row_outcome: row_index %d out of range [0,%d)"),
-				RowIndex, OutCol.RowValues.Num()));
+			FString::Printf(TEXT("set_chooser_row_outcome: row_index %d out of range [0,%d) of the table's results"),
+				RowIndex, Table->ResultsStructs.Num()));
 	}
 
 	UObject* Asset = LoadObject<UObject>(nullptr, *AssetPath);
@@ -897,17 +879,66 @@ TSharedPtr<FJsonObject> HandleSetChooserRowOutcome(const TSharedPtr<FJsonObject>
 			FString::Printf(TEXT("set_chooser_row_outcome: could not load UObject at %s"), *AssetPath));
 	}
 
-	// Idempotency: if the existing FAssetChooser already points at the same asset, return already_existed.
-	bool bAlreadyExisted = false;
-	if (OutCol.RowValues[RowIndex].Value.IsValid()
-		&& OutCol.RowValues[RowIndex].Value.GetScriptStruct() == FAssetChooser::StaticStruct())
+	// The result entry the row gets: an Asset result on an Object table, a Class result on a Class table, of the
+	// table's output class (OutputObjectType: the object's class, or the parent of the returned classes).
+	const bool bClassResult = Table->ResultType == EObjectChooserResultType::ClassResult;
+	UClass* const OutputType = Table->OutputObjectType;
+	FInstancedStruct NewResult;
+	if (bClassResult)
 	{
-		const FAssetChooser* Existing = OutCol.RowValues[RowIndex].Value.GetPtr<FAssetChooser>();
-		if (Existing && Existing->Asset == Asset)
+		UClass* ResultClass = Cast<UClass>(Asset);
+		if (!ResultClass)
 		{
-			bAlreadyExisted = true;
+			if (const UBlueprint* Blueprint = Cast<UBlueprint>(Asset))
+			{
+				ResultClass = Blueprint->GeneratedClass;
+			}
 		}
+		if (!ResultClass)
+		{
+			return mcp_common::MakeErrorReply(FString::Printf(
+				TEXT("set_chooser_row_outcome: table %s returns classes (result_type Class) and %s is a %s, not a class or a Blueprint; nothing was changed"),
+				*TablePath, *AssetPath, *Asset->GetClass()->GetName()));
+		}
+		if (OutputType && !ResultClass->IsChildOf(OutputType))
+		{
+			return mcp_common::MakeErrorReply(FString::Printf(
+				TEXT("set_chooser_row_outcome: class %s is not a subclass of the table's output_object_class %s; nothing was changed"),
+				*ResultClass->GetPathName(), *OutputType->GetPathName()));
+		}
+		FClassChooser ClassResult;
+		ClassResult.Class = ResultClass;
+		NewResult = FInstancedStruct::Make<FClassChooser>(ClassResult);
 	}
+	else
+	{
+		if (OutputType && !Asset->IsA(OutputType))
+		{
+			return mcp_common::MakeErrorReply(FString::Printf(
+				TEXT("set_chooser_row_outcome: %s is a %s, not of the table's output_object_class %s; nothing was changed"),
+				*Asset->GetPathName(), *Asset->GetClass()->GetName(), *OutputType->GetPathName()));
+		}
+		FAssetChooser AssetResult;
+		AssetResult.Asset = Asset;
+		NewResult = FInstancedStruct::Make<FAssetChooser>(AssetResult);
+	}
+
+	// What a result entry returns, for the idempotency check and the read-back.
+	auto ResultTarget = [](const FInstancedStruct& Result) -> const UObject*
+	{
+		if (const FAssetChooser* AssetResult = Result.GetPtr<FAssetChooser>())
+		{
+			return AssetResult->Asset.Get();
+		}
+		if (const FClassChooser* ClassResult = Result.GetPtr<FClassChooser>())
+		{
+			return ClassResult->Class.Get();
+		}
+		return nullptr;
+	};
+	const UObject* Wanted = ResultTarget(NewResult);
+	const bool bAlreadyExisted = Table->ResultsStructs[RowIndex].GetScriptStruct() == NewResult.GetScriptStruct()
+		&& ResultTarget(Table->ResultsStructs[RowIndex]) == Wanted;
 
 	bool bSaved = false;
 	FString SaveError;
@@ -915,22 +946,32 @@ TSharedPtr<FJsonObject> HandleSetChooserRowOutcome(const TSharedPtr<FJsonObject>
 	{
 		const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetChooserRowOutcome", "Set Chooser Row Outcome (MCP)"));
 		Table->Modify();
-		FAssetChooser NewOutcome;
-		NewOutcome.Asset = Asset;
-		OutCol.RowValues[RowIndex].Value = FInstancedStruct::Make<FAssetChooser>(NewOutcome);
+		Table->ResultsStructs[RowIndex] = NewResult;
 		bSaved = Chooser_CompileAndSave(Table, SaveError);
 	}
+
+	// Read back from the row's result entry.
+	const FInstancedStruct& RowResult = Table->ResultsStructs[RowIndex];
+	const UObject* Returned = ResultTarget(RowResult);
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("table_path"), Table->GetPathName());
 	Data->SetNumberField(TEXT("row_index"), RowIndex);
-	Data->SetStringField(TEXT("asset_path"), Asset->GetPathName());
+	Data->SetStringField(TEXT("asset_path"), Returned ? Returned->GetPathName() : FString());
+	Data->SetStringField(TEXT("result_type"), ResultTypeToString(Table->ResultType));
+	Data->SetStringField(TEXT("result_struct"), RowResult.GetScriptStruct() ? RowResult.GetScriptStruct()->GetName() : FString());
 	Data->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
 	if (bAlreadyExisted)
 	{
 		// Nothing was written, so nothing was saved.
 		Data->SetBoolField(TEXT("saved"), false);
 		return mcp_common::MakeOkReply(Data);
+	}
+	if (Returned != Wanted)
+	{
+		Data->SetBoolField(TEXT("saved"), bSaved);
+		return mcp_common::MakeOutcomeReply(Data, false, FString::Printf(
+			TEXT("set_chooser_row_outcome: row %d's result does not read back as %s after the write."), RowIndex, *Wanted->GetPathName()));
 	}
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_chooser_row_outcome"), SaveError);
 }

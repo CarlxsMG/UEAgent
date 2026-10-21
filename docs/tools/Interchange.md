@@ -134,13 +134,13 @@ Register a translator class -- the Interchange reader of one or more source file
 
 *Destructive.*
 
-Reimports an asset that was imported through Interchange, from the source file and pipeline stack stored on its Interchange import data, synchronously and without dialogs: the asset's content in memory is overwritten with the file's current content. This tool does not save it (save_asset writes it). An asset without Interchange import data -- a legacy-importer asset, or one never imported -- is an error and nothing changes: use reimport_asset for those. Check which kind an asset has, and its source file, with get_interchange_asset_import_data; change the stored pipelines first with set_interchange_pipelines. A reimport the engine reports as failed still answers success, with reimported false and a note pointing to the editor log, so read reimported.
+Reimports an asset that was imported through Interchange, from the source file and pipeline stack stored on its Interchange import data, synchronously and without dialogs: the asset's content in memory is overwritten with the file's current content. This tool does not save it (save_asset writes it). An asset without Interchange import data -- a legacy-importer asset, or one never imported -- is an error and nothing changes: use reimport_asset for those. Check which kind an asset has, and its source file, with get_interchange_asset_import_data; change the stored pipelines first with set_interchange_pipelines. A reimport that brings nothing back -- the stored source file is gone, does not translate, or has an extension no registered translator reads -- makes success false, with reimported false, count 0 and an error naming the stored source file; the editor log has the translator's reason.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `asset_path` | string | yes | Package path (e.g. "/Game/Meshes/SM_Rock") or object path ("/Game/Meshes/SM_Rock.SM_Rock") of the asset to reimport; it is loaded if needed. |
 
-**Returns:** `{ asset_path: string, reimported: bool, count: number, note: string }`
+**Returns:** `{ asset_path: string, reimported: bool, count: number, note: string } -- reimported is true when the engine ran the reimport and handed back at least one object (count)`
 
 ## `reset_interchange_actors`
 

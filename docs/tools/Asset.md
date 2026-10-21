@@ -97,7 +97,7 @@ Create a UTextureRenderTarget2D asset at package_path/name with the given size a
 
 *Destructive.*
 
-Creates a persisted UTextureRenderTarget2DArray.  Wraps UTextureRenderTarget2DArray::Init(SizeX, SizeY, Slices, Format) and saves the asset to disk. Re-running deletes and rebuilds the asset deterministically.  format accepts one of "B8G8R8A8"/"BGRA8" (default), "FloatRGBA"/"RGBA16F", "RGBA32F", "R16F".
+Creates a persisted UTextureRenderTarget2DArray.  Wraps UTextureRenderTarget2DArray::Init(SizeX, SizeY, Slices, Format) and saves the asset to disk. An asset already at package_path/name, of any class, is refused with success=false, its existing_class named, and nothing is deleted or created; to rebuild one, delete it first with delete_asset or pick a new name.  format accepts one of "B8G8R8A8"/"BGRA8" (default), "FloatRGBA"/"RGBA16F", "RGBA32F", "R16F".
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -107,13 +107,13 @@ Creates a persisted UTextureRenderTarget2DArray.  Wraps UTextureRenderTarget2DAr
 | `slices` | number | no | Optional slice count; clamped 1..512 |
 | `format` | string | no | Optional EPixelFormat name; defaults to BGRA8 |
 
-**Returns:** `{ render_target_name: string, asset_path: string, size_x: int, size_y: int, slices: int, format: string, created: bool, saved: bool, save_error?: string }`
+**Returns:** `{ render_target_name: string, asset_path: string, size_x: int, size_y: int, slices: int, format: string, created: bool, saved: bool, save_error?: string, existing_class?: string }`
 
 ## `create_render_target_cube`
 
 *Destructive.*
 
-Creates a persisted UTextureRenderTargetCube (6-face cube render target).  Wraps UTextureRenderTargetCube::Init(SizeX, Format) when a format is given, or InitAutoFormat(SizeX) otherwise, and saves the asset to disk. Re-running deletes and rebuilds the asset deterministically.  format accepts one of "B8G8R8A8"/"BGRA8", "FloatRGBA"/"RGBA16F", "RGBA32F". When omitted the format is auto-derived (InitAutoFormat).
+Creates a persisted UTextureRenderTargetCube (6-face cube render target).  Wraps UTextureRenderTargetCube::Init(SizeX, Format) when a format is given, or InitAutoFormat(SizeX) otherwise, and saves the asset to disk. An asset already at package_path/name, of any class, is refused with success=false, its existing_class named, and nothing is deleted or created; to rebuild one, delete it first with delete_asset or pick a new name.  format accepts one of "B8G8R8A8"/"BGRA8", "FloatRGBA"/"RGBA16F", "RGBA32F". When omitted the format is auto-derived (InitAutoFormat).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -122,13 +122,13 @@ Creates a persisted UTextureRenderTargetCube (6-face cube render target).  Wraps
 | `size` | number | no | Optional cube edge in pixels; clamped 1..8192 |
 | `format` | string | no | Optional EPixelFormat name; defaults to auto-derived |
 
-**Returns:** `{ render_target_name: string, asset_path: string, size_x: int, format: string, created: bool, saved: bool, save_error?: string }`
+**Returns:** `{ render_target_name: string, asset_path: string, size_x: int, format: string, created: bool, saved: bool, save_error?: string, existing_class?: string }`
 
 ## `create_static_texture_from_render_target`
 
 *Destructive.*
 
-Bakes a UTexture2D from an existing UTextureRenderTarget2D (editor only).  Wraps UKismetRenderingLibrary::RenderTargetCreateStaticTexture2DEditorOnly and saves the resulting static texture to disk. Re-running deletes and rebuilds the asset deterministically.  render_target_path accepts either short "/Game/MyGame/RT_Example" or fully-qualified "...RT_Example.RT_Example" asset paths.
+Bakes a UTexture2D from an existing UTextureRenderTarget2D (editor only).  Wraps UKismetRenderingLibrary::RenderTargetCreateStaticTexture2DEditorOnly and saves the resulting static texture to disk. An asset already at package_path/name, of any class, is refused with success=false, its existing_class named, and nothing is deleted or created; to rebuild one, delete it first with delete_asset or pick a new name.  render_target_path accepts either short "/Game/MyGame/RT_Example" or fully-qualified "...RT_Example.RT_Example" asset paths.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -136,13 +136,13 @@ Bakes a UTexture2D from an existing UTextureRenderTarget2D (editor only).  Wraps
 | `name` | string | yes | Name of the static texture asset to create |
 | `package_path` | string | no | Content folder; defaults to /Game/Textures |
 
-**Returns:** `{ texture_name: string, asset_path: string, render_target_path: string, created: bool, saved: bool, width: int, height: int, format: string, save_error?: string }`
+**Returns:** `{ texture_name: string, asset_path: string, render_target_path: string, created: bool, saved: bool, width: int, height: int, format: string, save_error?: string, existing_class?: string }`
 
 ## `create_texture_2d_array`
 
 *Destructive.*
 
-Creates a persisted UTexture2DArray from slices (no external file import).  If ``source_texture_paths`` is given, those UTexture2D assets are loaded into the array's SourceTextures; otherwise ``slice_count`` small solid-color slices of ``size`` x ``size`` are generated. The array Source is then built via UTexture2DArray::UpdateSourceFromSourceTextures(true) and the asset is saved.  source_texture_paths is an optional array of UTexture2D asset paths used as the array's slices. Each must have a valid editor source. If omitted, slices are generated.  size is the per-slice pixel size (clamped 1..2048).
+Creates a persisted UTexture2DArray from slices (no external file import).  If ``source_texture_paths`` is given, those UTexture2D assets are loaded into the array's SourceTextures; otherwise ``slice_count`` small solid-color slices of ``size`` x ``size`` are generated. The array Source is then built via UTexture2DArray::UpdateSourceFromSourceTextures(true) and the asset is saved. An asset already at package_path/name, of any class, is refused with success=false, its existing_class named, and nothing is deleted or created; to rebuild one, delete it first with delete_asset or pick a new name.  source_texture_paths is an optional array of UTexture2D asset paths used as the array's slices. Each must have a valid editor source. If omitted, slices are generated.  size is the per-slice pixel size (clamped 1..2048).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -152,13 +152,13 @@ Creates a persisted UTexture2DArray from slices (no external file import).  If `
 | `size` | number | no | Optional per-slice pixel size; clamped 1..2048; defaults to 64 |
 | `source_texture_paths` | array | no | Optional array of UTexture2D asset paths used as slices |
 
-**Returns:** `{ texture_array_name: string, asset_path: string, width: int, height: int, num_slices: int, format: string, created: bool, saved: bool, save_error?: string }`
+**Returns:** `{ texture_array_name: string, asset_path: string, width: int, height: int, num_slices: int, format: string, created: bool, saved: bool, save_error?: string, existing_class?: string }`
 
 ## `create_texture_2d_from_data`
 
 *Destructive.*
 
-Create a UTexture2D asset filled with one solid color, with no source file: it allocates a BGRA8 editor source of width x height, fills every pixel with fill_color, sets sRGB with default compression, builds the resource and saves the asset to disk; no undo step. Use it for placeholder or mask textures; to bring in an image file use import_texture_file, to bake a render target create_static_texture_from_render_target, to change compression or sRGB afterwards set_texture_settings, and get_texture_info to read it back. WARNING: an asset already at package_path/name is force-deleted first, whatever its class and even if other assets reference it, so every call rebuilds the texture (not idempotent). An invalid package path is an error. A failed save (always while PIE runs) makes success false, with saved=false and save_error, the texture kept in memory.
+Create a UTexture2D asset filled with one solid color, with no source file: it allocates a BGRA8 editor source of width x height, fills every pixel with fill_color, sets sRGB with default compression, builds the resource and saves the asset to disk; no undo step. Use it for placeholder or mask textures; to bring in an image file use import_texture_file, to bake a render target create_static_texture_from_render_target, to change compression or sRGB afterwards set_texture_settings, and get_texture_info to read it back. It only creates: an asset already at package_path/name, of any class, is refused with success=false, its existing_class named, and nothing is deleted or created; to rebuild a texture, delete it first with delete_asset or pick a new name. An invalid package path is an error. A failed save (always while PIE runs) makes success false, with saved=false and save_error, the texture kept in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -168,7 +168,7 @@ Create a UTexture2D asset filled with one solid color, with no source file: it a
 | `height` | number | no | Height in pixels, a whole number clamped to 1..8192 (default 64). |
 | `fill_color` | array | no | [R, G, B, A] as 0-255 numbers, each rounded and clamped, e.g. [255, 0, 0, 255] for opaque red; missing trailing entries keep the default 255 (opaque white). |
 
-**Returns:** `{ texture_name: string, asset_path: string, created: bool, saved: bool, width: int, height: int, format: string, has_source: bool, fill_color: [int, int, int, int], save_error?: string }`
+**Returns:** `{ texture_name: string, asset_path: string, created: bool, saved: bool, width: int, height: int, format: string, has_source: bool, fill_color: [int, int, int, int], save_error?: string, existing_class?: string }`
 
 ## `delete_collection`
 

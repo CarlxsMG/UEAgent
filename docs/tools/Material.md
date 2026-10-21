@@ -522,14 +522,14 @@ Read a material's layer stack: the layer functions and blend functions it uses, 
 
 *Read-only.*
 
-Read the live per-world values of a Material Parameter Collection (its transient instance on one world) without changing any value: current_value per scalar and current_rgba per vector, each with readback_ok (false when the instance lacks that parameter, the value then being the asset default), plus parent_collection_path and is_valid. The world is the editor world by default, or the Play-in-Editor world world_label selects; the world fields and pie_instance (-1 outside PIE) say which one answered. Use it to check set_material_parameter_collection_instance_value or reset_material_parameter_collection_instance; for the saved defaults use get_collection_info. The engine lookup creates the instance at the defaults when the world has none, so instance_exists is true in practice, and scalar_override_count and vector_override_count are only the parameter counts, not overrides. A collection that does not load, or a world_label no live world matches, is an error.
+Read the live per-world values of a Material Parameter Collection (its transient instance on one world) without changing any value: current_value per scalar and current_rgba per vector, each with readback_ok (false when the instance lacks that parameter, the value then being the asset default) and overridden (the instance holds its own value for it, even one equal to the default), plus parent_collection_path and is_valid. The world is the editor world by default, or the Play-in-Editor world world_label selects; the world fields and pie_instance (-1 outside PIE) say which one answered. Use it to check set_material_parameter_collection_instance_value or reset_material_parameter_collection_instance; for the saved defaults use get_collection_info. The engine lookup creates the instance at the defaults when the world has none, so instance_exists is true in practice; scalar_override_count and vector_override_count count the parameters the instance overrides (0 right after reset_material_parameter_collection_instance). A collection that does not load, or a world_label no live world matches, is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `collection_path` | string | yes | Asset path of the collection, e.g. "/Game/MPC/MPC_Global", as get_collection_info takes it. |
 | `world_label` | string | no | Which world: empty or "editor" for the editor world (the default), even while Play-in-Editor runs; "pie" (alias "game") for the running PIE world, "server" or "client" for that PIE world, "pie:N" for PIE instance N. any other value names a live world by its object name (the editor world is checked first, so a map name selects it) or by its package name (UEDPIE_N_ and the map name for a PIE world), and a value no world has fails and lists the worlds present |
 
-**Returns:** `{ collection_path: string, world_name: string, world_package: string, world_type: string, net_mode: string, pie_instance: int, instance_exists: bool, is_valid: bool, parent_collection_path: string, scalar_override_count: int, vector_override_count: int, scalars: [object], vectors: [object] }`
+**Returns:** `{ collection_path: string, world_name: string, world_package: string, world_type: string, net_mode: string, pie_instance: int, instance_exists: bool, is_valid: bool, parent_collection_path: string, scalar_override_count: int, vector_override_count: int, scalars: [{ name, current_value, readback_ok, overridden }], vectors: [{ name, current_rgba, readback_ok, overridden }] }`
 
 ## `get_material_parameters`
 
@@ -898,15 +898,15 @@ Turn one usage flag (EMaterialUsage: SkeletalMesh, InstancedStaticMeshes, Niagar
 
 *Destructive.*
 
-Drives one input pin of the Substrate Slab BSDF node of a material with a constant: adds a NEW Constant expression holding value to the material graph and wires it into the named pin of the material's first Slab node, replacing whatever fed that pin, then saves the material. Each call adds another Constant node, even for the same pin and value; a constant that fed the pin before stays in the graph, unwired. Not recorded for undo, and the save result is not checked. Works whether Substrate is enabled or not (substrate_enabled reports it). The material needs a Slab node from create_substrate_slab_node; connect_substrate_slab_to_material wires the slab to the output. An unknown pin name is an error, but the Constant created before the failed wire stays in the graph. To change a constant already wired, use set_material_expression_property on its constant_node_id; delete stray nodes with delete_material_expression.
+Drives one input pin of the Substrate Slab BSDF node of a material with a constant: adds a NEW Constant expression holding value to the material graph and wires it into the named pin of the material's first Slab node, replacing whatever fed that pin, then saves the material. Each call adds another Constant node, even for the same pin and value; a constant that fed the pin before stays in the graph, unwired. One undo step removes the new constant and restores what fed the pin. A failed save (a read-only file, PIE running) makes success false with saved=false and save_error, the change kept in memory. Works whether Substrate is enabled or not (substrate_enabled reports it). The material needs a Slab node from create_substrate_slab_node; connect_substrate_slab_to_material wires the slab to the output. A pin name the Slab node does not have is an error that names its pins, and nothing is added. To change a constant already wired, use set_material_expression_property on its constant_node_id; delete stray nodes with delete_material_expression.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `material_path` | string | yes | Package or object path of the UMaterial holding the slab node (e.g. "/Game/Materials/M_Substrate"). |
-| `pin_name` | string | yes | Slab input pin to drive, by its input name: e.g. "Roughness", "Anisotropy", "F0" or "DiffuseAlbedo" (a color pin receives the scalar on all channels). |
+| `pin_name` | string | yes | Slab input pin to drive, by its input name as get_material_graph_info lists it (input_name), without case: e.g. "Roughness", "Anisotropy", "F0" or "Diffuse Albedo" (a color pin receives the scalar on all channels). |
 | `value` | number | yes | Scalar the Constant node holds (e.g. 0.35 for Roughness); not range-checked. |
 
-**Returns:** `{ material_path: string, slab_node_id: string, constant_node_id: string, pin_name: string, value: number, connected: bool, substrate_enabled: bool, r_substrate_cvar: int, note?: string }`
+**Returns:** `{ material_path: string, slab_node_id: string, constant_node_id: string, pin_name: string, value: number, connected: bool, saved: bool, save_error?: string, substrate_enabled: bool, r_substrate_cvar: int, note?: string } -- connected is read back from the slab pin`
 
 ## `swap_material_layer_parameters`
 

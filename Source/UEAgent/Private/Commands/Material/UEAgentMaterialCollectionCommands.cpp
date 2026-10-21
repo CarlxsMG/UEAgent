@@ -52,6 +52,24 @@ namespace UEAgentMaterialCollectionCommands
 
 namespace
 {
+    /**
+     * The overrides an MPCI holds: its protected ScalarParameterValues / VectorParameterValues maps, one entry per
+     * parameter set on the instance (SetScalarParameterValue adds it, ForceReturnToDefaultValues empties them). The
+     * engine exposes no accessor, so they are read through a pointer to member formed in this derived type, which C++
+     * allows for a protected member; the type is never instantiated.
+     */
+    struct FMpciOverrideMaps : public UMaterialParameterCollectionInstance
+    {
+        static const TMap<FName, float>& Scalars(const UMaterialParameterCollectionInstance& Instance)
+        {
+            return Instance.*(&FMpciOverrideMaps::ScalarParameterValues);
+        }
+        static const TMap<FName, FLinearColor>& Vectors(const UMaterialParameterCollectionInstance& Instance)
+        {
+            return Instance.*(&FMpciOverrideMaps::VectorParameterValues);
+        }
+    };
+
     // Load an MPC asset from a /Game path. Returns nullptr on failure.
     UMaterialParameterCollection* LoadCollectionAt(const FString& CollectionPath)
     {
@@ -1090,10 +1108,10 @@ TSharedPtr<FJsonObject> HandleSetMpciScalarParameterValue(const TSharedPtr<FJson
     return mcp_common::MakeOutcomeReply(Result, bReadback, ReadbackError);
 }
 
-// MCP:get_material_parameter_collection_instance_info - Read the live per-world values of a Material Parameter Collection (its transient instance on one world) without changing any value: current_value per scalar and current_rgba per vector, each with readback_ok (false when the instance lacks that parameter, the value then being the asset default), plus parent_collection_path and is_valid. The world is the editor world by default, or the Play-in-Editor world world_label selects; the world fields and pie_instance (-1 outside PIE) say which one answered. Use it to check set_material_parameter_collection_instance_value or reset_material_parameter_collection_instance; for the saved defaults use get_collection_info. The engine lookup creates the instance at the defaults when the world has none, so instance_exists is true in practice, and scalar_override_count and vector_override_count are only the parameter counts, not overrides. A collection that does not load, or a world_label no live world matches, is an error.
+// MCP:get_material_parameter_collection_instance_info - Read the live per-world values of a Material Parameter Collection (its transient instance on one world) without changing any value: current_value per scalar and current_rgba per vector, each with readback_ok (false when the instance lacks that parameter, the value then being the asset default) and overridden (the instance holds its own value for it, even one equal to the default), plus parent_collection_path and is_valid. The world is the editor world by default, or the Play-in-Editor world world_label selects; the world fields and pie_instance (-1 outside PIE) say which one answered. Use it to check set_material_parameter_collection_instance_value or reset_material_parameter_collection_instance; for the saved defaults use get_collection_info. The engine lookup creates the instance at the defaults when the world has none, so instance_exists is true in practice; scalar_override_count and vector_override_count count the parameters the instance overrides (0 right after reset_material_parameter_collection_instance). A collection that does not load, or a world_label no live world matches, is an error.
 //   @param collection_path - Asset path of the collection, e.g. "/Game/MPC/MPC_Global", as get_collection_info takes it.
 //   @param world_label - Which world: empty or "editor" for the editor world (the default), even while Play-in-Editor runs; "pie" (alias "game") for the running PIE world, "server" or "client" for that PIE world, "pie:N" for PIE instance N. any other value names a live world by its object name (the editor world is checked first, so a map name selects it) or by its package name (UEDPIE_N_ and the map name for a PIE world), and a value no world has fails and lists the worlds present
-//   @returns { collection_path: string, world_name: string, world_package: string, world_type: string, net_mode: string, pie_instance: int, instance_exists: bool, is_valid: bool, parent_collection_path: string, scalar_override_count: int, vector_override_count: int, scalars: [object], vectors: [object] }
+//   @returns { collection_path: string, world_name: string, world_package: string, world_type: string, net_mode: string, pie_instance: int, instance_exists: bool, is_valid: bool, parent_collection_path: string, scalar_override_count: int, vector_override_count: int, scalars: [{ name, current_value, readback_ok, overridden }], vectors: [{ name, current_rgba, readback_ok, overridden }] }
 TSharedPtr<FJsonObject> HandleGetMpciInfo(const TSharedPtr<FJsonObject>& Params)
 {
     FString CollectionPath;
@@ -1119,35 +1137,46 @@ TSharedPtr<FJsonObject> HandleGetMpciInfo(const TSharedPtr<FJsonObject>& Params)
     {
         const UMaterialParameterCollection* Parent = Instance->GetCollection();
         Result->SetStringField(TEXT("parent_collection_path"), Parent ? Parent->GetPathName() : TEXT(""));
-        Result->SetNumberField(TEXT("scalar_override_count"), Collection->ScalarParameters.Num());
-        Result->SetNumberField(TEXT("vector_override_count"), Collection->VectorParameters.Num());
 
-        // Live readback of every parameter's current effective value.
+        // Live readback of every parameter's current effective value, and whether the instance overrides it (its
+        // override maps hold the name), counted per kind.
+        const TMap<FName, float>& ScalarOverrides = FMpciOverrideMaps::Scalars(*Instance);
+        const TMap<FName, FLinearColor>& VectorOverrides = FMpciOverrideMaps::Vectors(*Instance);
+        int32 ScalarOverrideCount = 0;
         TArray<TSharedPtr<FJsonValue>> ScalarsArr;
         for (const FCollectionScalarParameter& P : Collection->ScalarParameters)
         {
             float V = P.DefaultValue;
             const bool bOK = Instance->GetScalarParameterValue(P.ParameterName, V);
+            const bool bOverridden = ScalarOverrides.Contains(P.ParameterName);
+            ScalarOverrideCount += bOverridden ? 1 : 0;
             TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
             O->SetStringField(TEXT("name"), P.ParameterName.ToString());
             O->SetNumberField(TEXT("current_value"), V);
             O->SetBoolField(TEXT("readback_ok"), bOK);
+            O->SetBoolField(TEXT("overridden"), bOverridden);
             ScalarsArr.Add(MakeShared<FJsonValueObject>(O));
         }
         Result->SetArrayField(TEXT("scalars"), ScalarsArr);
 
+        int32 VectorOverrideCount = 0;
         TArray<TSharedPtr<FJsonValue>> VectorsArr;
         for (const FCollectionVectorParameter& P : Collection->VectorParameters)
         {
             FLinearColor C = P.DefaultValue;
             const bool bOK = Instance->GetVectorParameterValue(P.ParameterName, C);
+            const bool bOverridden = VectorOverrides.Contains(P.ParameterName);
+            VectorOverrideCount += bOverridden ? 1 : 0;
             TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
             O->SetStringField(TEXT("name"), P.ParameterName.ToString());
             O->SetArrayField(TEXT("current_rgba"), mcp_common::ColorToJsonArray(C));
             O->SetBoolField(TEXT("readback_ok"), bOK);
+            O->SetBoolField(TEXT("overridden"), bOverridden);
             VectorsArr.Add(MakeShared<FJsonValueObject>(O));
         }
         Result->SetArrayField(TEXT("vectors"), VectorsArr);
+        Result->SetNumberField(TEXT("scalar_override_count"), ScalarOverrideCount);
+        Result->SetNumberField(TEXT("vector_override_count"), VectorOverrideCount);
     }
     return mcp_common::MakeOkReply(Result);
 }
