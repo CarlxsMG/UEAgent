@@ -4,6 +4,11 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 ## Unreleased
 
+### Added
+
+- A documentation page, [Choosing an MCP server](docs/choosing.md): how a server inside the editor differs from one
+  outside it, and the questions to ask any MCP server for Unreal, with UEAgent's answers and what it does not do.
+
 ### Changed
 
 - `Tools/package_release.py --fab` leaves `LICENSE` and `README.md` out of the Fab archive. On Fab, UEAgent is free
