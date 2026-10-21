@@ -16,7 +16,15 @@ class UStruct; class UWorld; struct FAssetData; struct FGameplayTagContainer; cl
 class UK2Node_CallFunction; class UK2Node_Event; class UK2Node_Self;
 class UK2Node_VariableGet; class UK2Node_VariableSet; class FTransaction;
 
-#include "Json.h"
+// The Json module's headers one by one: the monolithic Json.h warns in every file that includes it,
+// and Fab requires a plugin to build without it (IWYU).
+#include "Dom/JsonObject.h"
+#include "Dom/JsonValue.h"
+#include "Policies/CondensedJsonPrintPolicy.h"
+#include "Policies/PrettyJsonPrintPolicy.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 
 /**
  * Shared free-function helpers for the MCP command handlers.
