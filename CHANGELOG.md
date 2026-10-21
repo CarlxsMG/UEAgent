@@ -2,7 +2,10 @@
 
 Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](https://semver.org).
 
-## Unreleased
+## 2.4.0 - 2026-10-21
+
+UEAgent updates itself: the editor checks GitHub for a new release, downloads and verifies it, and installs it
+when the editor closes, keeping the previous version as a backup.
 
 ### Added
 
