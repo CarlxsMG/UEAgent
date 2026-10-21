@@ -4,6 +4,12 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 ## Unreleased
 
+### Added
+
+- Every file under `Source/` starts with a copyright notice, which Fab requires of a code plugin, and
+  `Tools/check_copyright.py` checks it in CI. `Tools/package_release.py --fab` builds the source archive
+  Fab takes for an engine version (see RELEASING.md).
+
 ### Fixed
 
 - The plugin's description in **Edit > Plugins** said about 2,100 tools, the count before 2.0; there are 1,742.
