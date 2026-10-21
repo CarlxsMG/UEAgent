@@ -2,6 +2,13 @@
 
 Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](https://semver.org).
 
+## Unreleased
+
+### Fixed
+
+- On the documentation site, a pipe inside code in a table showed with a backslash, as in
+  `mcp.clients.connect cursor\|vscode\|antigravity` in the console commands. It reads as on GitHub now.
+
 ## 2.4.1 - 2026-10-21
 
 The 146 tool definitions Glama scored lowest now say when to use the tool and what it does. Each one was rewritten
