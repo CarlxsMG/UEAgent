@@ -18,7 +18,7 @@ Unreal Editor accessible: UEAgent operates the editor, it does not change the ed
 | **Status bar item** (MCP · 55561) | The colour of its dot gives the server's state: green when a client is connected, yellow when the server has no client yet or no tool catalog, red when it did not start, gray when it is off. The tooltip and the top of the menu say the same in words. |
 | **Status bar menu** | The editor's standard menu, with a tooltip on every entry. Most entries also have a console command (below). |
 | **Activity panel** | The Result column names each outcome (OK, Warning, Failed, Refused) as well as colouring it, and the line above the list counts them. The colours are fixed, chosen for the editor's default dark theme; their contrast on a light theme has not been checked. |
-| **Notifications** | A notification closes by itself after 6 seconds (success) or 15 seconds (warning or failure). To read a result at your own pace, run the matching console command: it prints to the Output Log. |
+| **Notifications** | A notification closes by itself after 6 seconds (success) or 15 seconds (warning or failure). To read a result at your own pace, run the matching console command: it prints to the Output Log. The update notifications, which ask you to choose, stay until you click one of their buttons. |
 | **Text** | The UI is in English. It is drawn with Slate, so it follows the editor's **Application Scale** (Editor Preferences > General > Appearance). |
 
 The console opens with the key above <kbd>Tab</kbd> (<kbd>`</kbd> on a US keyboard). Its commands do what
@@ -33,6 +33,10 @@ the status bar menu does:
 | **Connect Claude Code to this project** | `mcp.claude.connect` |
 | **Connect another client** | `mcp.clients.connect <client>`, with `cursor`, `vscode` or `antigravity` |
 | **Skills** | `mcp.skills.status`, `mcp.skills.install`, `mcp.skills.remove` |
+| **Check for updates** | `mcp.update.check`, then `mcp.update.status` |
+| **Download and install** | `mcp.update.download` |
+| **Cancel the update** | `mcp.update.cancel` |
+| **Restart now to install** | No command: close the editor, and the update installs |
 | **Copy the "claude mcp add" / "codex mcp add" command** | The commands are written out in [Clients](docs/clients.md) |
 | **Settings...** | No command: **Edit > Editor Preferences > Plugins > UEAgent** |
 

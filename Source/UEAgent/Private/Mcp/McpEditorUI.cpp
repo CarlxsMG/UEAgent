@@ -9,6 +9,7 @@
 #include "Mcp/McpSkills.h"
 #include "Mcp/McpPreconditions.h"
 #include "Mcp/McpToolCatalog.h"
+#include "Mcp/McpUpdate.h"
 #include "UEAgentSettings.h"
 
 #include "Brushes/SlateRoundedBoxBrush.h"
@@ -343,6 +344,132 @@ namespace McpEditorUIPrivate
 		FModuleManager::LoadModuleChecked<ISettingsModule>("Settings").ShowViewer("Editor", "Plugins", "UEAgentSettings");
 	}
 
+	// --- Updates -----------------------------------------------------------------------------------
+
+	// The notification of the update in progress: one at a time, closed by its buttons or replaced.
+	static TWeakPtr<SNotificationItem> UpdateItem;
+	static FDelegateHandle UpdateChangedHandle;
+	static McpUpdate::EState LastUpdateState = McpUpdate::EState::Unchecked;
+
+	static void CloseUpdateItem(SNotificationItem::ECompletionState State)
+	{
+		if (const TSharedPtr<SNotificationItem> Item = UpdateItem.Pin())
+		{
+			Item->SetCompletionState(State);
+			Item->ExpireAndFadeout();
+		}
+		UpdateItem.Reset();
+	}
+
+	static void OpenReleasePage()
+	{
+		const FString& Url = McpUpdate::Status().Latest.PageUrl;
+		FPlatformProcess::LaunchURL(Url.IsEmpty() ? TEXT("https://github.com/CarlxsMG/UEAgent/releases") : *Url, nullptr, nullptr);
+	}
+
+	static FNotificationButtonInfo UpdateButton(const FText& Text, const FText& Tip, TFunction<void()> Action)
+	{
+		return FNotificationButtonInfo(Text, Tip, FSimpleDelegate::CreateLambda([Action]() { Action(); }), SNotificationItem::CS_Pending);
+	}
+
+	// A notification that stays until one of its buttons closes it, or the next one replaces it.
+	static void ShowUpdateItem(const FText& Title, const FString& Detail, TArray<FNotificationButtonInfo> Buttons)
+	{
+		CloseUpdateItem(SNotificationItem::CS_None);
+		FNotificationInfo Info(Title);
+		Info.SubText = FText::FromString(Detail);
+		Info.bFireAndForget = false;
+		Info.WidthOverride = 440.0f;
+		Info.ButtonDetails = MoveTemp(Buttons);
+		UpdateItem = FSlateNotificationManager::Get().AddNotification(Info);
+		if (const TSharedPtr<SNotificationItem> Item = UpdateItem.Pin())
+		{
+			Item->SetCompletionState(SNotificationItem::CS_Pending);
+		}
+	}
+
+	static void OnUpdateChanged()
+	{
+		using McpUpdate::EState;
+		const McpUpdate::FStatus& Status = McpUpdate::Status();
+		const EState Previous = LastUpdateState;
+		LastUpdateState = Status.State;
+		switch (Status.State)
+		{
+		case EState::Current:
+			// The startup check says nothing when there is nothing new.
+			if (Previous == EState::Checking && !Status.bAutomatic)
+			{
+				Notify(LOCTEXT("UpdateCurrent", "UEAgent is up to date"), Status.Message, ENotice::Success);
+			}
+			break;
+		case EState::Available:
+			if (Previous == EState::Checking)
+			{
+				TArray<FNotificationButtonInfo> Buttons;
+				if (Status.CanDownload())
+				{
+					Buttons.Add(UpdateButton(LOCTEXT("UpdateInstall", "Download and install"),
+						LOCTEXT("UpdateInstallTip", "Downloads the release for this engine, checks it, and installs it when the editor closes."),
+						[]() { CloseUpdateItem(SNotificationItem::CS_Success); McpUpdate::Download(); }));
+				}
+				Buttons.Add(UpdateButton(LOCTEXT("UpdateNotes", "What's new"), LOCTEXT("UpdateNotesTip", "Opens the release on GitHub."),
+					[]() { OpenReleasePage(); }));
+				Buttons.Add(UpdateButton(LOCTEXT("UpdateLater", "Not now"), LOCTEXT("UpdateLaterTip", "Still available from the \"MCP\" menu in the status bar."),
+					[]() { CloseUpdateItem(SNotificationItem::CS_None); }));
+				ShowUpdateItem(FText::Format(LOCTEXT("UpdateAvailable", "UEAgent {0} is available"), FText::FromString(Status.Latest.Version)),
+					Status.Message, MoveTemp(Buttons));
+			}
+			break;
+		case EState::Downloading:
+			if (Previous != EState::Downloading)
+			{
+				ShowUpdateItem(FText::Format(LOCTEXT("UpdateDownloading", "Downloading UEAgent {0}"), FText::FromString(Status.Latest.Version)),
+					TEXT("0%"), {});
+			}
+			else if (const TSharedPtr<SNotificationItem> Item = UpdateItem.Pin())
+			{
+				Item->SetSubText(FText::FromString(FString::Printf(TEXT("%d%%"), FMath::RoundToInt(Status.Progress * 100.0f))));
+			}
+			break;
+		case EState::Ready:
+			if (Previous == EState::Downloading)
+			{
+				TArray<FNotificationButtonInfo> Buttons;
+				Buttons.Add(UpdateButton(LOCTEXT("UpdateRestart", "Restart now"),
+					LOCTEXT("UpdateRestartTip", "Closes the editor (it offers to save first), installs the update and opens the editor again."),
+					[]() { CloseUpdateItem(SNotificationItem::CS_Success); McpUpdate::RestartToInstall(); }));
+				Buttons.Add(UpdateButton(LOCTEXT("UpdateLaterReady", "Later"),
+					LOCTEXT("UpdateLaterReadyTip", "The update is installed the next time the editor closes."),
+					[]() { CloseUpdateItem(SNotificationItem::CS_None); }));
+				ShowUpdateItem(FText::Format(LOCTEXT("UpdateReady", "UEAgent {0} is ready"), FText::FromString(Status.Latest.Version)),
+					TEXT("It is installed when the editor closes: restart now, or keep working and it installs the next time you close the editor."),
+					MoveTemp(Buttons));
+			}
+			break;
+		case EState::Failed:
+			// A failed startup check stays quiet: the user did not ask.
+			if (!(Previous == EState::Checking && Status.bAutomatic))
+			{
+				CloseUpdateItem(SNotificationItem::CS_Fail);
+				Notify(LOCTEXT("UpdateFailed", "UEAgent could not be updated"), Status.Message, ENotice::Failure);
+			}
+			break;
+		default:
+			break;
+		}
+	}
+
+	static void ShowJustInstalled()
+	{
+		const McpUpdate::FStatus& Status = McpUpdate::Status();
+		if (!Status.JustInstalled.IsEmpty())
+		{
+			Notify(FText::Format(LOCTEXT("UpdateInstalled", "UEAgent {0} is installed"), FText::FromString(Status.JustInstalled)),
+				Status.Message + TEXT(" Skills you installed in the project can be updated from the \"MCP\" menu."), ENotice::Success);
+		}
+	}
+
 	// --- Status bar --------------------------------------------------------------------------------
 
 	static FSlateColor DotColor()
@@ -377,8 +504,11 @@ namespace McpEditorUIPrivate
 	static FText TooltipText()
 	{
 		const TArray<FString> Others = ConnectedOtherClients();
-		return FText::FromString(FString::Printf(TEXT("MCP server: %s\nClaude Code: %s\nOther clients: %s\n\nClick to see the options."),
-			*ServerLine(), *ProjectStatus().Detail, Others.Num() > 0 ? *FString::Printf(TEXT("%s connected."), *FString::Join(Others, TEXT(", "))) : TEXT("none connected.")));
+		const McpUpdate::FStatus& Update = McpUpdate::Status();
+		const bool bUpdate = Update.State == McpUpdate::EState::Available || Update.State == McpUpdate::EState::Ready;
+		return FText::FromString(FString::Printf(TEXT("MCP server: %s\nClaude Code: %s\nOther clients: %s%s\n\nClick to see the options."),
+			*ServerLine(), *ProjectStatus().Detail, Others.Num() > 0 ? *FString::Printf(TEXT("%s connected."), *FString::Join(Others, TEXT(", "))) : TEXT("none connected."),
+			bUpdate ? *FString::Printf(TEXT("\nUpdate: %s"), *Update.Message) : TEXT("")));
 	}
 
 	static TSharedRef<SWidget> InfoBlock(const TArray<FString>& Lines)
@@ -543,11 +673,71 @@ namespace McpEditorUIPrivate
 		}
 		Menu.EndSection();
 
+		Menu.BeginSection("UEAgentUpdates", LOCTEXT("UpdatesSection", "Updates"));
+		{
+			using McpUpdate::EState;
+			const McpUpdate::FStatus& Update = McpUpdate::Status();
+			TArray<FString> Lines;
+			Lines.Add(FString::Printf(TEXT("Installed: UEAgent %s."), *Update.Installed));
+			if (Update.State == EState::Downloading)
+			{
+				Lines.Add(FString::Printf(TEXT("Downloading UEAgent %s: %d%%."), *Update.Latest.Version, FMath::RoundToInt(Update.Progress * 100.0f)));
+			}
+			else if (!Update.Message.IsEmpty())
+			{
+				Lines.Add(Update.Message);
+			}
+			else if (Update.Install != McpUpdate::EInstall::Release)
+			{
+				Lines.Add(McpUpdate::InstallAdvice(Update.Install));
+			}
+			Menu.AddWidget(InfoBlock(Lines), FText::GetEmpty(), /*bNoIndent*/ true);
+
+			const bool bBusy = Update.State == EState::Checking || Update.State == EState::Downloading;
+			Menu.AddMenuEntry(
+				LOCTEXT("CheckUpdates", "Check for updates"),
+				LOCTEXT("CheckUpdatesTip", "Asks GitHub for the latest release of UEAgent. UEAgent connects to GitHub only for this, and on startup if you turn that on in the settings."),
+				FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Refresh"),
+				FUIAction(
+					FExecuteAction::CreateLambda([]() { McpUpdate::Check(); }),
+					FCanExecuteAction::CreateLambda([bBusy]() { return !bBusy; })));
+			if (Update.State == EState::Available && Update.CanDownload())
+			{
+				Menu.AddMenuEntry(
+					FText::FromString(FString::Printf(TEXT("Download and install UEAgent %s"), *Update.Latest.Version)),
+					LOCTEXT("DownloadUpdateTip", "Downloads the release for this engine, checks it against the release's SHA-256, and installs it when the editor closes. The current version is kept in Saved/UEAgentUpdate/Backup."),
+					FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Download"),
+					FUIAction(FExecuteAction::CreateLambda([]() { McpUpdate::Download(); })));
+			}
+			if (Update.State == EState::Ready)
+			{
+				Menu.AddMenuEntry(
+					FText::FromString(FString::Printf(TEXT("Restart now to install UEAgent %s"), *Update.Latest.Version)),
+					LOCTEXT("RestartUpdateTip", "Closes the editor (it offers to save first), installs the update and opens the editor again."),
+					FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Refresh"),
+					FUIAction(FExecuteAction::CreateLambda([]() { McpUpdate::RestartToInstall(); })));
+				Menu.AddMenuEntry(
+					LOCTEXT("CancelUpdate", "Cancel the update"),
+					LOCTEXT("CancelUpdateTip", "Deletes the downloaded update: nothing is installed when the editor closes."),
+					FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.X"),
+					FUIAction(FExecuteAction::CreateLambda([]() { McpUpdate::Cancel(); })));
+			}
+			if (!Update.Latest.PageUrl.IsEmpty())
+			{
+				Menu.AddMenuEntry(
+					FText::FromString(FString::Printf(TEXT("What's new in UEAgent %s"), *Update.Latest.Version)),
+					LOCTEXT("ReleaseNotesTip", "Opens the release on GitHub."),
+					FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Help"),
+					FUIAction(FExecuteAction::CreateStatic(&OpenReleasePage)));
+			}
+		}
+		Menu.EndSection();
+
 		Menu.BeginSection("UEAgentSettings", FText::GetEmpty());
 		{
 			Menu.AddMenuEntry(
 				LOCTEXT("Settings", "Settings..."),
-				LOCTEXT("SettingsTip", "Editor Preferences > Plugins > UEAgent: port, token and hints."),
+				LOCTEXT("SettingsTip", "Editor Preferences > Plugins > UEAgent: port, token, hints and updates."),
 				FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Settings"),
 				FUIAction(FExecuteAction::CreateStatic(&OpenSettings)));
 		}
@@ -677,6 +867,7 @@ namespace McpEditorUIPrivate
 		{
 			HintTickerHandle.Reset();
 			ShowConnectHint();
+			ShowJustInstalled();
 			return false;
 		}), 4.0f);
 	}
@@ -687,12 +878,20 @@ void McpEditorUI::Startup()
 	using namespace McpEditorUIPrivate;
 	ToolMenusStartupHandle = UToolMenus::RegisterStartupCallback(FSimpleMulticastDelegate::FDelegate::CreateStatic(&RegisterStatusBar));
 	EditorInitializedHandle = FEditorDelegates::OnEditorInitialized.AddStatic(&OnEditorInitialized);
+	LastUpdateState = McpUpdate::Status().State;
+	UpdateChangedHandle = McpUpdate::OnChanged().AddStatic(&OnUpdateChanged);
 	McpActivityPanel::Register();
 }
 
 void McpEditorUI::Shutdown()
 {
 	using namespace McpEditorUIPrivate;
+	if (UpdateChangedHandle.IsValid())
+	{
+		McpUpdate::OnChanged().Remove(UpdateChangedHandle);
+		UpdateChangedHandle.Reset();
+	}
+	UpdateItem.Reset(); // Slate may already be gone: do not touch the notification itself
 	if (HintTickerHandle.IsValid())
 	{
 		FTSTicker::GetCoreTicker().RemoveTicker(HintTickerHandle);

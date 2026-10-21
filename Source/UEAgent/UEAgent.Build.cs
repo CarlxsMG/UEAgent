@@ -142,6 +142,8 @@ public class UEAgent : ModuleRules
 				{
 					"PropertyEditor",      // FPropertyEditorModule (details-panel property access)
 					"ToolMenus",           // the "MCP" status-bar indicator and its menu (Mcp/McpEditorUI.cpp)
+					"MainFrame",           // IMainFrameModule::RequestCloseEditor: "Restart now" to install an update (Mcp/McpUpdate.cpp)
+					"FileUtilities",       // FZipArchiveReader: unpacking a downloaded update (Mcp/McpUpdate.cpp)
 					"Settings",            // ISettingsModule::ShowViewer -- "Settings..." in the status-bar menu
 					"BlueprintEditorLibrary", // UBlueprintEditorLibrary
 					"LevelSequence",       // ULevelSequence and its runtime player
@@ -209,6 +211,13 @@ public class UEAgent : ModuleRules
 					// (GCachedScalabilityCVars comes from Engine, already a public dependency.)
 				}
 			);
+		}
+
+		if (Target.Platform == UnrealTargetPlatform.Win64)
+		{
+			// Windows CNG: the SHA-256 of a downloaded update (Mcp/McpUpdate.cpp). The engine's
+			// FPlatformMisc::GetSHA256Signature has no Windows implementation and asserts.
+			PublicSystemLibraries.Add("bcrypt.lib");
 		}
 	}
 }

@@ -160,6 +160,17 @@ Copia o clona este repositorio en `<TuProyecto>/Plugins/UEAgent`, abre el proyec
 lo compile, o compila el target del editor desde tu IDE. Al arrancar el editor, el log muestra
 `MCP HTTP server started on http://127.0.0.1:55561/mcp (... tools ...)`.
 
+## Actualizar
+
+**MCP · 55561 > Check for updates** pregunta a GitHub por la última versión. Si es más nueva,
+**Download and install** descarga el zip de tu versión del motor, lo comprueba con el
+`SHA256SUMS.txt` de la versión y lo instala al cerrar el editor, o en el momento con **Restart now**,
+que cierra el editor, la instala y lo vuelve a abrir. La versión anterior se guarda en
+`Saved/UEAgentUpdate/Backup`, y si la nueva no se puede colocar, la anterior vuelve a su sitio.
+
+Una copia clonada con git se actualiza con `git pull`, y una instalada desde Fab, desde el Epic Games
+Launcher. Después de actualizar, vuelve a conectar tu cliente para que liste de nuevo las herramientas.
+
 ## Configuración
 
 **Editor Preferences > Plugins > UEAgent** (por usuario):
@@ -170,6 +181,7 @@ lo compile, o compila el target del editor desde tu IDE. Al arrancar el editor, 
 | HTTP port | 55561 | `-McpHttpPort=N` en la línea de comandos lo sustituye |
 | Auth token | vacío | si se rellena, cada petición necesita `Authorization: Bearer <token>` |
 | Show connect hint | activado | al arrancar, ofrece conectar Claude Code si el proyecto no lo está |
+| Check for updates at startup | desactivado | preguntar a GitHub como mucho una vez al día si hay una versión nueva (ver [Actualizar](#actualizar)) |
 
 **Project Settings > Plugins > UEAgent** (compartido, se guarda en `Config/DefaultEditor.ini`):
 
@@ -191,6 +203,7 @@ lo compile, o compila el target del editor desde tu IDE. Al arrancar el editor, 
 | `mcp.ReadOnlyRootEnforcement 0\|1` | 0 = solo avisar de los guardados bajo una raíz de solo lectura, en vez de rechazarlos |
 | `mcp.UndoStepPerCall 0\|1` | 0 = dejar el historial de deshacer a cada herramienta, en vez de un paso por llamada |
 | `mcp.activity [N]` | escribir en el log las últimas N llamadas (20 por defecto), como las muestra el panel Activity |
+| `mcp.update.check` / `mcp.update.status` / `mcp.update.download` / `mcp.update.cancel` | buscar una versión nueva; el estado de la actualización; descargarla (se instala al cerrar el editor); descartar una ya descargada |
 
 ## Seguridad
 
@@ -207,10 +220,12 @@ Para informar de una vulnerabilidad, consulta [SECURITY.md](SECURITY.md).
 
 ## Privacidad
 
-UEAgent no abre ninguna conexión de red por su cuenta: sin telemetría, sin analíticas, sin
-comprobación de actualizaciones. El servidor solo escucha en 127.0.0.1, y la respuesta de cada
-herramienta va al cliente MCP que hayas conectado, en la misma máquina. Lo que ese cliente envíe
-después a su proveedor de modelos depende del cliente.
+UEAgent no envía nada sobre ti ni sobre tu proyecto: sin telemetría, sin analíticas. Su única
+conexión propia es a GitHub, para buscar una versión nueva: cuando pulsas **Check for updates**, o una
+vez al día al arrancar si activas **Check for updates at startup** (viene desactivado). Esa petición
+dice qué versión de UEAgent pregunta, y nada más. El servidor solo escucha en 127.0.0.1, y la
+respuesta de cada herramienta va al cliente MCP que hayas conectado, en la misma máquina. Lo que ese
+cliente envíe después a su proveedor de modelos depende del cliente.
 
 ## Accesibilidad
 
