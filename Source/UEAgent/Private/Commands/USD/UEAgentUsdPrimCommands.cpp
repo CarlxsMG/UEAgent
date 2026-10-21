@@ -11,6 +11,10 @@
 #include "UsdWrappers/VtValue.h"
 #include "UsdWrappers/UsdVariantSets.h"
 #include "UnrealUSDWrapper.h"
+// USDMemory.h warns wherever FScopedUsdAllocs is used in a module without IMPLEMENT_MODULE_USD. Here the scope only
+// wraps the 5.7 call into UnrealUSDWrapper (FUsdPrim::SetMetadata), a module that has the USD allocators, so the
+// warning does not apply; the define is the opt-out USDMemory.h offers.
+#define DISABLE_USDMEMORY_WARNING
 #include "USDMemory.h"  // FScopedUsdAllocs (the UE 5.7 SetMetadata scope)
 #include "Misc/EngineVersionComparison.h"
 #include "Commands/USD/UEAgentUsdRegistry.h"  // stage registry + helpers shared by the USD handlers
