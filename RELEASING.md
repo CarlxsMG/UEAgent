@@ -50,6 +50,10 @@ Fab takes the source, one archive per engine version, and Epic compiles it. Its 
 agreement requires each update to reach Fab no later than any other channel, GitHub included, so
 upload a release to Fab before or together with the GitHub release.
 
+On Fab, UEAgent is free under Fab's Standard License; on GitHub it stays MIT. The Fab archive
+leaves out `LICENSE` and `README.md` (whose badge and License section say MIT), because a license
+file in the archive does not change the license Fab grants.
+
 ```bash
 python Tools/package_release.py --engine "C:/Program Files/Epic Games/UE_5.8" --out D:/UEAgentFab58 --fab --fab-url com.epicgames.launcher://ue/Fab/product/<id>
 python Tools/package_release.py --engine "C:/Program Files/Epic Games/UE_5.7" --out D:/UEAgentFab57 --fab --fab-url com.epicgames.launcher://ue/Fab/product/<id>
