@@ -4,6 +4,11 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 ## Unreleased
 
+### Changed
+
+- `Tools/package_release.py --fab` leaves `LICENSE` and `README.md` out of the Fab archive. On Fab, UEAgent is free
+  under Fab's Standard License, and those files say MIT; on GitHub it stays MIT.
+
 ### Fixed
 
 - The image link previews show (GitHub, the documentation site) said 2,000+ tools, a count from before 2.0. It

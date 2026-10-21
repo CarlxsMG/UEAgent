@@ -19,7 +19,7 @@ Steps (RELEASING.md tells when to run it):
 With --fab it builds what Fab takes instead (python Tools/package_release.py --engine <UE root>
 --out <dir> --fab --fab-url <the listing's FabURL>): the source, for Epic to compile, one archive
 per engine version. From the same export it
-  1. keeps only the plugin's own files (FAB_KEEP), not Tools/, docs/ or .github/;
+  1. keeps only the plugin's own files (FAB_KEEP), not Tools/, docs/, .github/, LICENSE or README.md;
   2. adds to the descriptor EngineVersion (<major.minor>.0) and FabURL, which Fab requires;
   3. checks what Fab's technical requirements refuse and a file listing shows: a source file
      without the copyright notice, a module without a platform list, a path over 170 characters,
@@ -51,9 +51,11 @@ from check_copyright import missing_notice  # noqa: E402
 ROOT = Path(__file__).resolve().parent.parent
 VECTORS = ("refuse_vectors", "registry_vectors", "readback_vectors")
 
-# What a Fab archive carries: the plugin's own folders and the root files Config/FilterPlugin.ini
-# names, but not docs/, whose pages the listing links on the documentation site.
-FAB_KEEP = {"UEAgent.uplugin", "Config", "Resources", "Source", "LICENSE", "README.md", "CHANGELOG.md"}
+# What a Fab archive carries: the plugin's own folders and CHANGELOG.md. Not docs/, whose pages the
+# listing links on the documentation site, nor LICENSE and README.md: on Fab the plugin is licensed
+# under Fab's Standard License (Distribution Agreement 3(f)(v)), and the MIT file, with the README's
+# MIT badge and License section, would say otherwise.
+FAB_KEEP = {"UEAgent.uplugin", "Config", "Resources", "Source", "CHANGELOG.md"}
 FAB_URL_PREFIX = "com.epicgames.launcher://ue/Fab/product/"
 FAB_MAX_PATH = 170  # characters, counted from the plugin folder (UEAgent/...)
 FAB_REFUSED_DIRS = {"Binaries", "Intermediate", "Saved", "DerivedDataCache"}
