@@ -1750,7 +1750,7 @@
      "probes": {},
      "expect": {
       "refused": true,
-      "message": "execute_python: TextureExporterPNG CRASHES THE EDITOR if the texture is not 8 bits per channel (Assertion failed: SupportsTexture(Texture), EditorFactories.cpp, not an ensure). With a texture from an RTF_RGBA16F render target, or TC_HDR, or TC_EDITOR_ICON over float data, there is no return value: there is an assert. And the rule is not 'check the bit depth', it is DO NOT EXPORT AN IMAGE TO LOOK AT IT: to verify a capture, COUNT PIXELS with unreal.RenderingLibrary.read_render_target_raw / read_render_target_uv. IF YOU REALLY NEED A FILE: export_render_target is the supported path, or create the texture from an RTF_RGBA8 render target. NOTE: this guard only sees code sent through execute_python; the same call inside execute_python_file does NOT go through here."
+      "message": "execute_python: TextureExporterPNG CRASHES THE EDITOR if the texture is not 8 bits per channel (Assertion failed: SupportsTexture(Texture), EditorFactories.cpp, not an ensure). With a texture from an RTF_RGBA16F render target, or TC_HDR, or TC_EDITOR_ICON over float data, there is no return value: there is an assert. And the rule is not 'check the bit depth', it is DO NOT EXPORT AN IMAGE TO LOOK AT IT: to verify a capture, COUNT PIXELS with unreal.RenderingLibrary.read_render_target_raw / read_render_target_uv. IF YOU REALLY NEED A FILE: export_render_target is the supported path, or create the texture from an RTF_RGBA8 render target."
      },
      "expect_probe_calls": []
     }
