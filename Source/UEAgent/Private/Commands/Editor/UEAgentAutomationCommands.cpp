@@ -17,6 +17,10 @@
 // check so a disabled/unloaded plugin returns an honest error rather than crashing.
 #include "IPythonScriptPlugin.h"
 #include "PythonScriptTypes.h"
+#include "Mcp/McpPythonScan.h"
+#include "UObject/Stack.h"
+#include "UObject/UObjectGlobals.h"
+#include "Misc/FileHelper.h"
 // Functional Test authoring (PIE-based gameplay tests).
 #include "FunctionalTest.h"
 #include "Engine/Blueprint.h"
@@ -332,6 +336,216 @@ namespace
         // to widen itself instead of reading as "that was everything".
         Result->SetNumberField(TEXT("log_cursor_before"), static_cast<double>(CursorBefore));
     }
+
+    /**
+     * The PIE guard of the Python tools. While Play-in-Editor runs, the plugin refuses its own compile and save commands
+     * (McpPieSafety.gen.h), and a script reaches the same engine functions through unreal.*. Which call a script makes
+     * cannot be read from its text (an alias, getattr, a loop), so the guard acts on the call itself: every unreal.*
+     * function is a UFunction that Python runs through UObject::ProcessEvent, which calls the UFunction's native
+     * pointer. While a script runs during PIE, the guarded UFunctions point at ExecPieGuardRefusal instead, which does
+     * not run them and reports a script error; Python turns it into a RuntimeError in the script (PyUtil's
+     * InvokeFunctionCall). A Python-side hook cannot do this: the engine's functions are builtin_function_or_method_with_closure,
+     * which sys.setprofile never sees, and its types are immutable. A script that catches the RuntimeError goes on, but
+     * the call did not run and the reply still fails.
+     *
+     * Compiling a Blueprint during PIE ends in a dead editor (the compiler's UREINST_* trampoline retains a world and
+     * CheckForWorldGCLeaks is Fatal when PIE ends), and the editor does not write assets during PIE
+     * (Editor.AllowSavingAssetsDuringPIE=0): a save answers success without writing a byte.
+     */
+    struct FPieGuardedFunction
+    {
+        const TCHAR* Class;
+        const TCHAR* Function;
+        const TCHAR* PythonName;
+    };
+
+    const FPieGuardedFunction PieGuardedFunctions[] = {
+        { TEXT("BlueprintEditorLibrary"), TEXT("CompileBlueprint"), TEXT("BlueprintEditorLibrary.compile_blueprint") },
+        { TEXT("EditorAssetLibrary"), TEXT("SaveAsset"), TEXT("EditorAssetLibrary.save_asset") },
+        { TEXT("EditorAssetLibrary"), TEXT("SaveLoadedAsset"), TEXT("EditorAssetLibrary.save_loaded_asset") },
+        { TEXT("EditorAssetLibrary"), TEXT("SaveLoadedAssets"), TEXT("EditorAssetLibrary.save_loaded_assets") },
+        { TEXT("EditorAssetLibrary"), TEXT("SaveDirectory"), TEXT("EditorAssetLibrary.save_directory") },
+        { TEXT("EditorAssetSubsystem"), TEXT("SaveAsset"), TEXT("EditorAssetSubsystem.save_asset") },
+        { TEXT("EditorAssetSubsystem"), TEXT("SaveLoadedAsset"), TEXT("EditorAssetSubsystem.save_loaded_asset") },
+        { TEXT("EditorAssetSubsystem"), TEXT("SaveLoadedAssets"), TEXT("EditorAssetSubsystem.save_loaded_assets") },
+        { TEXT("EditorAssetSubsystem"), TEXT("SaveDirectory"), TEXT("EditorAssetSubsystem.save_directory") },
+        { TEXT("EditorLoadingAndSavingUtils"), TEXT("SavePackages"), TEXT("EditorLoadingAndSavingUtils.save_packages") },
+        { TEXT("EditorLoadingAndSavingUtils"), TEXT("SavePackagesWithDialog"), TEXT("EditorLoadingAndSavingUtils.save_packages_with_dialog") },
+        { TEXT("EditorLoadingAndSavingUtils"), TEXT("SaveDirtyPackages"), TEXT("EditorLoadingAndSavingUtils.save_dirty_packages") },
+        { TEXT("EditorLoadingAndSavingUtils"), TEXT("SaveDirtyPackagesWithDialog"), TEXT("EditorLoadingAndSavingUtils.save_dirty_packages_with_dialog") },
+        { TEXT("EditorLoadingAndSavingUtils"), TEXT("SaveMap"), TEXT("EditorLoadingAndSavingUtils.save_map") },
+        { TEXT("EditorLoadingAndSavingUtils"), TEXT("SaveCurrentLevel"), TEXT("EditorLoadingAndSavingUtils.save_current_level") },
+        { TEXT("EditorLevelLibrary"), TEXT("SaveCurrentLevel"), TEXT("EditorLevelLibrary.save_current_level") },
+        { TEXT("EditorLevelLibrary"), TEXT("SaveAllDirtyLevels"), TEXT("EditorLevelLibrary.save_all_dirty_levels") },
+        { TEXT("LevelEditorSubsystem"), TEXT("SaveCurrentLevel"), TEXT("LevelEditorSubsystem.save_current_level") },
+        { TEXT("LevelEditorSubsystem"), TEXT("SaveAllDirtyLevels"), TEXT("LevelEditorSubsystem.save_all_dirty_levels") },
+    };
+
+    /** While a guarded script runs: each swapped UFunction with its own native pointer and its Python name. */
+    struct FPieGuardSwap
+    {
+        UFunction* Function = nullptr;
+        FNativeFuncPtr Native = nullptr;
+        const TCHAR* PythonName = nullptr;
+    };
+    TArray<FPieGuardSwap> GPieGuardSwaps;
+    TArray<FString> GPieGuardRefused;
+
+    /** Stands in for a guarded UFunction while a script runs during PIE: does not run it, and reports a script error. */
+    void ExecPieGuardRefusal(UObject* Context, FFrame& Stack, RESULT_DECL)
+    {
+        FString Name = Stack.Node ? Stack.Node->GetName() : FString(TEXT("a guarded function"));
+        for (const FPieGuardSwap& Swap : GPieGuardSwaps)
+        {
+            if (Swap.Function == Stack.Node)
+            {
+                Name = Swap.PythonName;
+            }
+        }
+        GPieGuardRefused.AddUnique(Name);
+        P_FINISH;
+        FFrame::KismetExecutionMessage(*FString::Printf(
+            TEXT("UEAgent stopped %s: Play-in-Editor is running. Stop PIE and run the script again."), *Name), ELogVerbosity::Error);
+    }
+
+    /** Swaps the guarded UFunctions while alive, and puts them back however the script ends. */
+    struct FScopedPieGuard
+    {
+        FScopedPieGuard()
+        {
+            GPieGuardRefused.Reset();
+            GPieGuardSwaps.Reset();
+            for (const FPieGuardedFunction& Entry : PieGuardedFunctions)
+            {
+                UClass* Class = FindFirstObject<UClass>(Entry.Class, EFindFirstObjectOptions::NativeFirst);
+                UFunction* Function = Class ? Class->FindFunctionByName(FName(Entry.Function)) : nullptr;
+                if (Function && Function->HasAnyFunctionFlags(FUNC_Native) && Function->GetNativeFunc())
+                {
+                    GPieGuardSwaps.Add({ Function, Function->GetNativeFunc(), Entry.PythonName });
+                    Function->SetNativeFunc(&ExecPieGuardRefusal);
+                }
+            }
+        }
+        ~FScopedPieGuard()
+        {
+            for (const FPieGuardSwap& Swap : GPieGuardSwaps)
+            {
+                Swap.Function->SetNativeFunc(Swap.Native);
+            }
+            GPieGuardSwaps.Reset();
+        }
+    };
+
+    /** Runs Cmd, under the PIE guard while Play-in-Editor runs. OutRefused gets the calls the guard stopped. */
+    bool ExecPythonGuarded(IPythonScriptPlugin* Py, FPythonCommandEx& Cmd, TArray<FString>& OutRefused)
+    {
+        OutRefused.Reset();
+        if (!mcp_common::IsPieActive())
+        {
+            return Py->ExecPythonCommandEx(Cmd);
+        }
+        bool bSuccess = false;
+        {
+            FScopedPieGuard Guard;
+            bSuccess = Py->ExecPythonCommandEx(Cmd);
+        }
+        OutRefused = MoveTemp(GPieGuardRefused);
+        GPieGuardRefused.Reset();
+        return bSuccess;
+    }
+
+    /** The last line of a traceback: the exception and its message. */
+    FString LastTracebackLine(const FString& CommandResult)
+    {
+        TArray<FString> Lines;
+        CommandResult.ParseIntoArrayLines(Lines);
+        for (int32 Index = Lines.Num() - 1; Index >= 0; --Index)
+        {
+            const FString Line = Lines[Index].TrimStartAndEnd();
+            if (!Line.IsEmpty())
+            {
+                return Line;
+            }
+        }
+        return TEXT("an exception");
+    }
+
+    /**
+     * A script that enumerates actors and calls nothing that changes them is what get_actor_properties_by_class does
+     * in one call, with the world that answered. Not a refusal: the script may correlate what that tool cannot.
+     */
+    FString EnumerationHint(const FString& Code)
+    {
+        const TArray<FString> Calls = McpPythonScan::CalledNames(Code);
+        static const TCHAR* const Enumerators[] = {
+            TEXT("get_all_level_actors"), TEXT("get_all_actors_of_class"), TEXT("get_all_actors_with_tag"),
+            TEXT("get_all_actors_of_class_with_tag"), TEXT("get_all_actors_with_interface") };
+        bool bEnumerates = false;
+        for (const TCHAR* Name : Enumerators)
+        {
+            bEnumerates |= McpPythonScan::ContainsExact(Calls, Name);
+        }
+        if (!bEnumerates)
+        {
+            return FString();
+        }
+        static const TCHAR* const Changes[] = {
+            TEXT("set_"), TEXT("add_"), TEXT("spawn_"), TEXT("destroy"), TEXT("delete_"), TEXT("remove_"), TEXT("save_"),
+            TEXT("compile_"), TEXT("create_"), TEXT("attach_"), TEXT("detach_"), TEXT("apply_"), TEXT("import_"),
+            TEXT("rename_"), TEXT("duplicate_"), TEXT("modify"), TEXT("call_method"), TEXT("execute_"), TEXT("register_"),
+            TEXT("k2_set"), TEXT("k2_add"), TEXT("k2_destroy"), TEXT("k2_attach"), TEXT("k2_detach") };
+        for (const FString& Call : Calls)
+        {
+            for (const TCHAR* Prefix : Changes)
+            {
+                if (Call.StartsWith(Prefix, ESearchCase::CaseSensitive))
+                {
+                    return FString();
+                }
+            }
+        }
+        return TEXT("If this script only reads actors, get_actor_properties_by_class does it in one call: actors by class or editor ")
+            TEXT("label, with the properties you name, drilling into one component, and the world that answered (this tool ")
+            TEXT("cannot say which world answered). get_actors_by_class only lists them.");
+    }
+
+    /**
+     * The reply of execute_python and execute_python_file. The call fails when the PIE guard stopped the script or
+     * the script raised: python_success:false inside a success:true read as done to a model that checks success. The
+     * payload keeps python_success and the traceback (command_result) either way.
+     */
+    TSharedPtr<FJsonObject> MakePythonReply(const TCHAR* Tool, const TSharedPtr<FJsonObject>& Result, bool bPythonSuccess,
+        const TArray<FString>& Refused, const FString& Code)
+    {
+        if (Refused.Num() > 0)
+        {
+            TArray<TSharedPtr<FJsonValue>> Names;
+            for (const FString& Name : Refused)
+            {
+                Names.Add(MakeShared<FJsonValueString>(Name));
+            }
+            Result->SetArrayField(TEXT("pie_refused"), Names);
+            return mcp_common::MakeOutcomeReply(Result, false, FString::Printf(
+                TEXT("%s: did not run %s, because Play-in-Editor is running: compiling a Blueprint during PIE kills the ")
+                TEXT("editor when PIE ends, and the editor does not write assets during PIE. The script got a RuntimeError at ")
+                TEXT("that call; the rest of what it did still happened. Stop PIE (stop_play_in_editor, then confirm ")
+                TEXT("is_play_in_editor_active is false) and run it again."), Tool, *FString::Join(Refused, TEXT(", "))));
+        }
+        if (!bPythonSuccess)
+        {
+            FString Traceback;
+            Result->TryGetStringField(TEXT("command_result"), Traceback);
+            return mcp_common::MakeOutcomeReply(Result, false, FString::Printf(
+                TEXT("%s: the script raised %s. The traceback is in data.command_result; what ran before the exception ")
+                TEXT("still happened."), Tool, *LastTracebackLine(Traceback)));
+        }
+        const FString Hint = EnumerationHint(Code);
+        if (!Hint.IsEmpty())
+        {
+            Result->SetStringField(TEXT("hint"), Hint);
+        }
+        return mcp_common::MakeOkReply(Result);
+    }
 }
 
 namespace
@@ -519,14 +733,14 @@ namespace
     }
 }
 
-// MCP:execute_python - Execute Python code inside the running Unreal Editor. DO NOT GUESS A FIELD NAME: most of this tool's errors are "object has no attribute" -- and the field usually EXISTS, just not where you reached for it: `HitResult().impact_point` raises, `get_editor_property` cannot find it, and only `to_dict()` returns it (Transform.translation is the reverse). The engine's own stub and Epic's web docs list it either way, so neither settles it -- ask the object (dir(x), x.to_dict(), x.get_editor_property(...)). PIE TRAP -- this tool is the ONE HOLE in the plugin's PIE guard: the commands that compile a Blueprint or write to disk are REFUSED while Play-in-Editor is live (McpPieSafety.gen.h), but arbitrary Python cannot be classified statically, so a script that reaches compile/save through unreal.* (BlueprintEditorLibrary.compile_blueprint, EditorAssetLibrary.save_asset, save_loaded_asset, anything that dirties a Blueprint) RUNS ANYWAY. With PIE live that ends either in a DEAD EDITOR -- the compiler's UREINST_* trampoline retains a world and CheckForWorldGCLeaks is Fatal, taking every unsaved edit with it -- or in a save that reports success without writing a byte (Editor.AllowSavingAssetsDuringPIE=0). So: call is_play_in_editor_active FIRST whenever your script compiles, saves, or mutates a Blueprint, and stop PIE before running it. READING the live world during PIE is safe and is exactly what this tool is for -- do not avoid it for that. BEFORE writing a loop, check what already answers it in ONE call: scripts that re-implement something a tool already does fail far more often than scripts doing something genuinely new -- hand-rolled scaffolding is where the errors are, and a bug in the scaffold reads exactly like a finding about the game. enumerate actors of a class -> get_actors_by_class. enumerate them AND read their properties, filtered by class or editor label, drilling into one component, with the answering world STAMPED on the result (this tool cannot tell you which world answered) -> get_actor_properties_by_class. read properties off ONE known object -> get_properties. list an actor's components -> get_actor_components. one line trace -> raycast_scene. sample a property across a whole PIE session ARMED BEFORE BeginPlay -- a window a post-tick callback cannot reach at all -> watch_pie_property. But do NOT read this as "always prefer the specific tool": only a minority of scripts are replaceable end-to-end. Python remains the right answer when the script does what those cannot: several classes in one round trip, walking components AND calling a method, filtering by name substring, correlating two values in the same tick, or anything that mutates. Do not trade one call for twelve. WARNING: `log_output` IS NOT THE LOG OF THE CALL -- it is Python's own prints only (UE fills it from a delegate broadcast solely by unreal.log/log_warning/log_error), so every UE_LOG the ENGINE emits during your script is absent from it. Read `engine_log` instead: it is the GLog slice bracketed to this call, Warning+Error by default. Example: build_meta_human can run, return None, write zero assets and report a clean `log_output` while "LogMetaHumanCoreTechLib: Error: Texture Synthesis has not been initialized" sits in GLog. When a call reports success and NOTHING HAPPENED, `engine_log` is the first place to look; widen with engine_log_level=Log, or pass `log_cursor_before` to get_output_log_lines(since_sequence_id=...) for the unfiltered rest.
+// MCP:execute_python - Execute Python code inside the running Unreal Editor, for what no tool does: a client lists only the core tools, so search find_tools before writing a script -- most tools are not in that list. A script that raises fails the call, with the traceback in command_result. DO NOT GUESS A FIELD NAME: most of this tool's errors are "object has no attribute" -- and the field usually EXISTS, just not where you reached for it: `HitResult().impact_point` raises, `get_editor_property` cannot find it, and only `to_dict()` returns it (Transform.translation is the reverse). The engine's own stub and Epic's web docs list it either way, so neither settles it -- ask the object (dir(x), x.to_dict(), x.get_editor_property(...)). PIE: while Play-in-Editor runs, a call that compiles a Blueprint or saves (BlueprintEditorLibrary.compile_blueprint, EditorAssetLibrary.save_asset, save_loaded_asset, save_directory, EditorLoadingAndSavingUtils.save_packages, save_current_level...) does NOT run, however the script reaches it: the script gets a RuntimeError there, and the tool call fails with pie_refused even if the script catches it: compiling during PIE ends in a DEAD EDITOR when PIE stops (UREINST_* retains a world, CheckForWorldGCLeaks is Fatal), and a save during PIE writes nothing (Editor.AllowSavingAssetsDuringPIE=0). What the guard does NOT see is a script that changes a Blueprint without compiling it -- stop PIE before editing a Blueprint. READING the live world during PIE is safe and is exactly what this tool is for -- do not avoid it for that. BEFORE writing a loop, check what already answers it in ONE call (a script that only enumerates actors gets a `hint` naming the tool): scripts that re-implement something a tool already does fail far more often than scripts doing something genuinely new -- hand-rolled scaffolding is where the errors are, and a bug in the scaffold reads exactly like a finding about the game. enumerate actors of a class -> get_actors_by_class. enumerate them AND read their properties, filtered by class or editor label, drilling into one component, with the answering world STAMPED on the result (this tool cannot tell you which world answered) -> get_actor_properties_by_class. read properties off ONE known object -> get_properties. list an actor's components -> get_actor_components. one line trace -> raycast_scene. sample a property across a whole PIE session ARMED BEFORE BeginPlay -- a window a post-tick callback cannot reach at all -> watch_pie_property. But do NOT read this as "always prefer the specific tool": only a minority of scripts are replaceable end-to-end. Python remains the right answer when the script does what those cannot: several classes in one round trip, walking components AND calling a method, filtering by name substring, correlating two values in the same tick, or anything that mutates. Do not trade one call for twelve. WARNING: `log_output` IS NOT THE LOG OF THE CALL -- it is Python's own prints only (UE fills it from a delegate broadcast solely by unreal.log/log_warning/log_error), so every UE_LOG the ENGINE emits during your script is absent from it. Read `engine_log` instead: it is the GLog slice bracketed to this call, Warning+Error by default. Example: build_meta_human can run, return None, write zero assets and report a clean `log_output` while "LogMetaHumanCoreTechLib: Error: Texture Synthesis has not been initialized" sits in GLog. When a call reports success and NOTHING HAPPENED, `engine_log` is the first place to look; widen with engine_log_level=Log, or pass `log_cursor_before` to get_output_log_lines(since_sequence_id=...) for the unfiltered rest.
 //   @core
 //   @param command - Python code to run (single or multi-line).
 //   @param capture_output - Run as a file and collect captured log (default true)
 //   @param mode - Execution mode: ExecuteFile, ExecuteStatement, or EvaluateStatement (default ExecuteFile)
 //   @param engine_log_level - Minimum severity of ENGINE log to return in `engine_log`: Error, Warning (default), Display, Log/All.
 //   @param engine_log_max - Max lines in `engine_log` (default 50, 0 disables, hard cap 4096).
-//   @returns { command, python_success, execution_mode, command_result, output, log_output, log_line_count, engine_log, engine_log_count, engine_log_truncated, log_cursor_before }
+//   @returns { command, python_success, execution_mode, command_result, output, log_output, log_line_count, engine_log, engine_log_count, engine_log_truncated, log_cursor_before, pie_refused?, hint? }
 TSharedPtr<FJsonObject> HandleExecutePython(const TSharedPtr<FJsonObject>& Params)
 {
     FString Command;
@@ -566,7 +780,8 @@ TSharedPtr<FJsonObject> HandleExecutePython(const TSharedPtr<FJsonObject>& Param
     // Cursor BEFORE the call: everything GLog receives from here on belongs to this command.
     const int64 CursorBefore = GMCP_LogCapture.GetLastSequenceId();
 
-    const bool bSuccess = Py->ExecPythonCommandEx(Cmd);
+    TArray<FString> PieRefused;
+    const bool bSuccess = ExecPythonGuarded(Py, Cmd, PieRefused);
 
     TArray<TSharedPtr<FJsonValue>> LogEntries;
     FString CombinedLog;
@@ -584,14 +799,14 @@ TSharedPtr<FJsonObject> HandleExecutePython(const TSharedPtr<FJsonObject>& Param
     Result->SetNumberField(TEXT("log_line_count"), LogEntries.Num());
     AttachEngineLog(Result, Params, CursorBefore);
 
-    return mcp_common::MakeOkReply(Result);
+    return MakePythonReply(TEXT("execute_python"), Result, bSuccess, PieRefused, Command);
 }
 
-// MCP:execute_python_file - Execute a Python (.py) file inside the running Unreal Editor. PIE TRAP: same hole as execute_python -- arbitrary Python is NOT covered by the plugin's PIE guard, so a script that compiles a Blueprint or saves an asset runs even with Play-in-Editor live, where compiling can KILL the editor (UREINST_* retains a world, CheckForWorldGCLeaks is Fatal) and saving reports success without writing (Editor.AllowSavingAssetsDuringPIE=0). Check is_play_in_editor_active first when the file compiles, saves or mutates a Blueprint; reading the live world during PIE is safe. WARNING: `log_output` IS NOT THE LOG OF THE CALL -- it is Python's own prints only (UE fills it from a delegate broadcast solely by unreal.log/log_warning/log_error), so every UE_LOG the ENGINE emits during your script is absent from it. Read `engine_log` instead: it is the GLog slice bracketed to this call, Warning+Error by default. Example: build_meta_human can run, return None, write zero assets and report a clean `log_output` while "LogMetaHumanCoreTechLib: Error: Texture Synthesis has not been initialized" sits in GLog. When a call reports success and NOTHING HAPPENED, `engine_log` is the first place to look; widen with engine_log_level=Log, or pass `log_cursor_before` to get_output_log_lines(since_sequence_id=...) for the unfiltered rest.
+// MCP:execute_python_file - Execute a Python (.py) file inside the running Unreal Editor, for what no tool does. The file goes through the same checks as execute_python: the calls known to crash the editor are refused before it runs, and while Play-in-Editor runs a call that compiles a Blueprint or saves does NOT run (the script gets a RuntimeError and the tool call fails with pie_refused) -- a script that changes a Blueprint without compiling it is not seen, so stop PIE before editing a Blueprint. A script that raises fails the call, with the traceback in command_result. Reading the live world during PIE is safe. WARNING: `log_output` IS NOT THE LOG OF THE CALL -- it is Python's own prints only (UE fills it from a delegate broadcast solely by unreal.log/log_warning/log_error), so every UE_LOG the ENGINE emits during your script is absent from it. Read `engine_log` instead: it is the GLog slice bracketed to this call, Warning+Error by default. Example: build_meta_human can run, return None, write zero assets and report a clean `log_output` while "LogMetaHumanCoreTechLib: Error: Texture Synthesis has not been initialized" sits in GLog. When a call reports success and NOTHING HAPPENED, `engine_log` is the first place to look; widen with engine_log_level=Log, or pass `log_cursor_before` to get_output_log_lines(since_sequence_id=...) for the unfiltered rest.
 //   @param file_path - Absolute path to a .py file accessible from the editor host.
 //   @param engine_log_level - Minimum severity of ENGINE log to return in `engine_log`: Error, Warning (default), Display, Log/All.
 //   @param engine_log_max - Max lines in `engine_log` (default 50, 0 disables, hard cap 4096).
-//   @returns { file_path, python_success, command_result, output, log_output, log_line_count, engine_log, engine_log_count, engine_log_truncated, log_cursor_before }
+//   @returns { file_path, python_success, command_result, output, log_output, log_line_count, engine_log, engine_log_count, engine_log_truncated, log_cursor_before, pie_refused?, hint? }
 TSharedPtr<FJsonObject> HandleExecutePythonFile(const TSharedPtr<FJsonObject>& Params)
 {
     FString FilePath;
@@ -624,7 +839,8 @@ TSharedPtr<FJsonObject> HandleExecutePythonFile(const TSharedPtr<FJsonObject>& P
     // script itself printed, never the engine's own UE_LOG.
     const int64 CursorBefore = GMCP_LogCapture.GetLastSequenceId();
 
-    const bool bSuccess = Py->ExecPythonCommandEx(Cmd);
+    TArray<FString> PieRefused;
+    const bool bSuccess = ExecPythonGuarded(Py, Cmd, PieRefused);
 
     TArray<TSharedPtr<FJsonValue>> LogEntries;
     FString CombinedLog;
@@ -639,7 +855,9 @@ TSharedPtr<FJsonObject> HandleExecutePythonFile(const TSharedPtr<FJsonObject>& P
     Result->SetNumberField(TEXT("log_line_count"), LogEntries.Num());
     AttachEngineLog(Result, Params, CursorBefore);
 
-    return mcp_common::MakeOkReply(Result);
+    FString FileCode;
+    FFileHelper::LoadFileToString(FileCode, *FilePath);
+    return MakePythonReply(TEXT("execute_python_file"), Result, bSuccess, PieRefused, FileCode);
 }
 
 // MCP:get_python_status - Reports whether the editor Python plugin is loaded, available, configured and initialized, with the interpreter path and engine version; when Python is initialized it also evaluates sys.version for python_version (empty otherwise). Changes nothing; check it before execute_python or execute_python_file.

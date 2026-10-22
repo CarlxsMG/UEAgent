@@ -522,7 +522,8 @@ FString McpMetaTools::Instructions(const FMcpToolCatalog& Catalog)
 {
 	return FString::Printf(
 		TEXT("This connection lists three meta-tools instead of the %d Unreal Editor tools: find_tools searches them, describe_tool ")
-		TEXT("returns one tool's input schema and call_tool runs it. Search before guessing a tool name."), Catalog.NumTools());
+		TEXT("returns one tool's input schema and call_tool runs it. Search before guessing a tool name, and before writing ")
+		TEXT("Python: execute_python is for what no tool does."), Catalog.NumTools());
 }
 
 FString McpMetaTools::CoreInstructions(const FMcpToolCatalog& Catalog)
@@ -531,7 +532,8 @@ FString McpMetaTools::CoreInstructions(const FMcpToolCatalog& Catalog)
 		TEXT("This connection lists the %d core tools of the %d Unreal Editor tools: assets, actors and levels, any object's ")
 		TEXT("properties, Blueprint and other asset graphs, data tables, Play-in-Editor and Python. The rest are one call away: ")
 		TEXT("find_tools searches all of them, describe_tool returns one's input schema, call_tool runs any of them, and ")
-		TEXT("enable_toolset adds a whole domain's tools to this list. Search before guessing a tool name."),
+		TEXT("enable_toolset adds a whole domain's tools to this list. Search before guessing a tool name, and before writing ")
+		TEXT("Python: most tools are not in this list, and execute_python is for what no tool does."),
 		Catalog.NumCoreTools(), Catalog.NumTools());
 }
 

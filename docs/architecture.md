@@ -49,8 +49,9 @@ On the game thread, `UUEAgentBridge::DispatchSingleCommand` runs every call, and
    wire array `[pitch, yaw, roll]`.
 4. **Preconditions** (`Mcp/McpPreconditions`). A call known to crash or freeze the editor is refused,
    with what to do instead. A check reads the arguments, probes the editor state in the same pass, or
-   scans the Python that `execute_python` is about to run (`Mcp/McpPythonScan`). When a check exists to
-   prevent a crash and cannot verify, it refuses; any other check lets the call through. A content path
+   scans the Python that `execute_python` or `execute_python_file` is about to run
+   (`Mcp/McpPythonScan`). When a check exists to prevent a crash and cannot verify, it refuses; any
+   other check lets the call through. A content path
    with `//` in any argument, at any depth and in every `execute_batch` item, is refused (`CreatePackage` is
    Fatal on one), except the `value` that `set_usd_attribute_value` and `set_usd_prim_metadata` write:
    that is USD data, where a path expression such as `/World//Mesh` is legitimate. A number

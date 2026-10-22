@@ -2,6 +2,42 @@
 
 Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](https://semver.org).
 
+## 2.5.1 - 2026-10-22
+
+Python stops being the way around the plugin's checks. While Play-in-Editor runs, a script's calls that compile a
+Blueprint or save do not run. A script that raises fails the call. The agent instructions point a client to
+`find_tools` before it writes a script.
+
+### Changed
+
+- **The agent instructions and the Python tools' descriptions say Python is for what no tool does.** On the core list
+  a client sees 35 tools, so "no tool fits" came up far more often than it should. The instructions now send it to
+  `find_tools` first, since most tools are not in that list.
+- **A script that only enumerates actors gets a `hint`** naming `get_actor_properties_by_class`, which reads actors of
+  a class with their properties in one call and says which world answered. A script that calls anything that changes
+  them gets no hint, and nothing is refused.
+- The agent instructions name `get_object_info` for a whole component: `get_component_properties` retired in 2.5.0.
+
+### Fixed
+
+- **While Play-in-Editor ran, a script could compile a Blueprint or save.** The plugin refuses its own compile and
+  save tools during PIE, and Python reached the same engine functions. A compile during PIE kills the editor when PIE
+  ends, and a save during PIE answers success without writing anything.
+  - While PIE runs, `execute_python` and `execute_python_file` now swap the native code of these functions for a stub
+    that does not run them:
+    - `BlueprintEditorLibrary.compile_blueprint`;
+    - the save functions of `EditorAssetLibrary`, `EditorAssetSubsystem`, `EditorLoadingAndSavingUtils`,
+      `EditorLevelLibrary` and `LevelEditorSubsystem`.
+  - The script gets a `RuntimeError` at that call, however it reached the function.
+  - The tool call fails and lists what did not run in `pie_refused`, even when the script catches the error.
+  - Saving a game to a slot, and everything else a script does during PIE, runs as before.
+- **A script that raised answered `success: true`**, with `python_success: false` and the traceback inside. It now
+  fails the call, and the error names the exception. The payload still has `python_success` and the traceback in
+  `command_result`.
+- **`execute_python_file` skipped the checks for calls known to crash the editor**, such as `TextureExporterPNG`,
+  `SkeletalMergingLibrary.merge_meshes` and `request_auto_rigging`. It now reads the file and refuses those calls the
+  way `execute_python` does.
+
 ## 2.5.0 - 2026-10-22
 
 A client now lists 35 core tools instead of 1,622, and reaches the rest when it needs them. The six graph tools edit
