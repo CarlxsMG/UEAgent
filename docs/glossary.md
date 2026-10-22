@@ -15,7 +15,7 @@ The words these docs, the tools' descriptions and their answers use.
 | **Destructive** | A tool that can change or remove what is already in the project |
 | **Domain** | A group of tools about one part of the engine, such as Animation or Material: one page each in the [tool reference](tools/README.md) |
 | **`execute_batch`** | Several calls in one pass on the game thread, with one answer per call. Like any call, the whole batch is one undo step |
-| **`execute_python`** | Runs Python in the editor, with Unreal's Python API, when no tool fits. Its code is scanned before it runs |
+| **`execute_python`** | Runs Python in the editor, with Unreal's Python API, for what no tool does. Its code is scanned before it runs, and while Play-in-Editor runs its calls that compile a Blueprint or save do not run |
 | **`force`** | A parameter that runs a refused call anyway, at your own risk: the tools that PIE refuses have it, and so do some preconditions |
 | **Idempotent** | A repeat call with the same arguments changes nothing more |
 | **Open world** | A tool whose code talks to the network or runs arbitrary code |

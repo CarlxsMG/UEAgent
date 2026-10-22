@@ -60,7 +60,9 @@ itself: the lists only show what each task touches. Every tool is described in t
 
 ## When no tool fits
 
-- `execute_python` runs Python in the editor, with Unreal's Python API.
+- A tool that is not in the client's list is usually there: `find_tools` searches all of them.
+- `execute_python` runs Python in the editor, with Unreal's Python API, for what no tool does. While
+  Play-in-Editor runs, a script's calls that compile a Blueprint or save do not run.
 - `execute_batch` runs several calls in one pass on the game thread, without a round trip each.
 
 ## Tips

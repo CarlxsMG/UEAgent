@@ -116,9 +116,9 @@ namespace McpPreconditionsPrivate
 		TEXT("the usual purpose either: it does NOT render UMG -- the UI is not in the image. To inspect the UI, use list_pie_widgets; for an image of ")
 		TEXT("the viewport, capture_viewport; to judge real gameplay, ask the user to play-test it in PIE.");
 
-	// MsgDeleteThenRename  (args: -)
+	// MsgDeleteThenRename  (args: tool)
 	static const TCHAR* const MsgDeleteThenRename =
-		TEXT("execute_python: this script calls both delete_subobject AND rename_subobject. That sequence CRASHES THE EDITOR (fatal in Obj.cpp: ")
+		TEXT("%s: this script calls both delete_subobject AND rename_subobject. That sequence CRASHES THE EDITOR (fatal in Obj.cpp: ")
 		TEXT("'Renaming on top of an existing object is not allowed') and cannot return an error. The trap is not renaming onto a taken name: the name ")
 		TEXT("is FREE in the Blueprint but still TAKEN in the instance ALREADY PLACED in the level, because delete_subobject removes the component from ")
 		TEXT("the SCS but does not reach what that instance serialized. RULE: do not rename an SCS component -- if the name matters, create it with the ")
@@ -127,9 +127,9 @@ namespace McpPreconditionsPrivate
 		TEXT("in the same script. WARNING: if the name ends in a digit you did not ask for (MyComponent1), Unreal made it unique because a namesake ")
 		TEXT("ALREADY exists: find out what it is instead of renaming over it.");
 
-	// MsgAttributeSetTypes  (args: sites)
+	// MsgAttributeSetTypes  (args: tool, sites)
 	static const TCHAR* const MsgAttributeSetTypes =
-		TEXT("execute_python: this script WRITES attribute_set_types (%s), and that CRASHES THE EDITOR inside the call: assertion in Array.h, 'Array ")
+		TEXT("%s: this script WRITES attribute_set_types (%s), and that CRASHES THE EDITOR inside the call: assertion in Array.h, 'Array ")
 		TEXT("index out of bounds: 1 into an array of size 1'. UMaterialExpressionSetMaterialAttributes keeps TWO parallel arrays (Inputs and ")
 		TEXT("AttributeSetTypes); writing AttributeSetTypes through reflection does NOT grow Inputs, and PostEditChangeProperty indexes Inputs[1]. ")
 		TEXT("There is no return, so there is no success:false to rely on: the process goes down with every unsaved material edit. The two arrays are ")
@@ -137,9 +137,9 @@ namespace McpPreconditionsPrivate
 		TEXT("MakeMaterialAttributes, reachable by name -- there is no need to touch this node. READING the property IS allowed (get_editor_property ")
 		TEXT("returns [] without error); only writing it crashes.");
 
-	// MsgMergeMeshes  (args: -)
+	// MsgMergeMeshes  (args: tool)
 	static const TCHAR* const MsgMergeMeshes =
-		TEXT("execute_python: SkeletalMergingLibrary.merge_meshes CRASHES THE EDITOR with an assert, not an exception (Assertion failed: (Index >= 0) ")
+		TEXT("%s: SkeletalMergingLibrary.merge_meshes CRASHES THE EDITOR with an assert, not an exception (Assertion failed: (Index >= 0) ")
 		TEXT("& (Index < ArrayNum), 'Array index out of bounds: 1 into an array of size 1', not an ensure). It indexes the parallel arrays ")
 		TEXT("mesh_section_mappings and uv_transforms_per_mesh by NUMBER OF MESHES without validating them, so with 2 meshes and those arrays empty it ")
 		TEXT("crashes and takes everything unsaved with it. With a SINGLE mesh it is harmless: the crash starts at TWO, which is exactly the useful ")
@@ -148,18 +148,18 @@ namespace McpPreconditionsPrivate
 		TEXT("exposes assign_physics_asset, and IKRetargetBatchOperation is for ANIMATIONS. The step that produces the mesh is done in the editor ")
 		TEXT("(right-click the SkeletalMesh -> Skeleton -> Assign Skeleton).");
 
-	// MsgPngExporter  (args: -)
+	// MsgPngExporter  (args: tool)
 	static const TCHAR* const MsgPngExporter =
-		TEXT("execute_python: TextureExporterPNG CRASHES THE EDITOR if the texture is not 8 bits per channel (Assertion failed: ")
+		TEXT("%s: TextureExporterPNG CRASHES THE EDITOR if the texture is not 8 bits per channel (Assertion failed: ")
 		TEXT("SupportsTexture(Texture), EditorFactories.cpp, not an ensure). With a texture from an RTF_RGBA16F render target, or TC_HDR, or ")
 		TEXT("TC_EDITOR_ICON over float data, there is no return value: there is an assert. And the rule is not 'check the bit depth', it is DO NOT ")
 		TEXT("EXPORT AN IMAGE TO LOOK AT IT: to verify a capture, COUNT PIXELS with unreal.RenderingLibrary.read_render_target_raw / ")
 		TEXT("read_render_target_uv. IF YOU REALLY NEED A FILE: export_render_target is the supported path, or create the texture from an RTF_RGBA8 ")
-		TEXT("render target. NOTE: this guard only sees code sent through execute_python; the same call inside execute_python_file does NOT go through here.");
+		TEXT("render target.");
 
-	// MsgAutorig  (args: -)
+	// MsgAutorig  (args: tool)
 	static const TCHAR* const MsgAutorig =
-		TEXT("execute_python: request_auto_rigging CRASHES THE EDITOR IMMEDIATELY (Assertion failed: IsValid(), SharedPointer.h, not an ensure; script ")
+		TEXT("%s: request_auto_rigging CRASHES THE EDITOR IMMEDIATELY (Assertion failed: IsValid(), SharedPointer.h, not an ensure; script ")
 		TEXT("stack MetaHumanCharacterEditorSubsystem.RequestAutoRigging), and it is not a local failure: METAHUMAN AUTO-RIGGING IS A CLOUD SERVICE. ")
 		TEXT("The observed chain: no Epic session -> EOS_InvalidAuth -> no autorig -> 'Character is not rigged' in the UI -> can_build_meta_human:false ")
 		TEXT("-> Assemble disabled. rig_type=JOINTS_ONLY makes no difference. It is not blocked because it is impossible, but because what decides it ")
@@ -730,16 +730,26 @@ namespace McpPreconditionsPrivate
 		return Refuse(Fill(MsgSparseDelegate, { Delegate, ClassName.IsEmpty() ? Object : ClassName }), TEXT("sparse_delegate"));
 	}
 
-	/** The code sent to `execute_python`: the positional Rotator check, then the five crash checks
-	 *  in order. */
+	/** The code `execute_python` runs (its `command`) or `execute_python_file` runs (the file at `file_path`): the
+	 *  positional Rotator check, then the five crash checks in order. A file that cannot be read is left to the tool,
+	 *  which reports it. */
 	static TOptional<FRefusal> RefusePythonCode(const FString& CommandType, const TSharedPtr<FJsonObject>& Params)
 	{
-		const TSharedPtr<FJsonValue> CodeValue = Params.IsValid() ? Params->TryGetField(TEXT("command")) : nullptr;
+		const TCHAR* const Field = CommandType == TEXT("execute_python_file") ? TEXT("file_path") : TEXT("command");
+		const TSharedPtr<FJsonValue> CodeValue = Params.IsValid() ? Params->TryGetField(Field) : nullptr;
 		if (!CodeValue.IsValid() || CodeValue->Type != EJson::String)
 		{
 			return {};
 		}
-		const FString Code = CodeValue->AsString();
+		FString Code = CodeValue->AsString();
+		if (CommandType == TEXT("execute_python_file"))
+		{
+			const FString Path = Code;
+			if (!FFileHelper::LoadFileToString(Code, *Path))
+			{
+				return {};
+			}
+		}
 
 		// Rotator(roll, pitch, yaw) versus the (pitch, yaw, roll) it prints in.
 		const TArray<FString> Offenders = McpPythonScan::PositionalRotatorCalls(Code);
@@ -764,26 +774,26 @@ namespace McpPreconditionsPrivate
 		// Blueprint, and refusing it outright would block normal work.
 		if (McpPythonScan::ContainsExact(Calls, TEXT("delete_subobject")) && McpPythonScan::ContainsExact(Calls, TEXT("rename_subobject")))
 		{
-			return Refuse(MsgDeleteThenRename, TEXT("delete_then_rename"));
+			return Refuse(Fill(MsgDeleteThenRename, { CommandType }), TEXT("delete_then_rename"));
 		}
 		const TArray<FString> Sites = McpPythonScan::PropertyWrites(Code, TEXT("attribute_set_types"));
 		if (Sites.Num() > 0)
 		{
-			return Refuse(Fill(MsgAttributeSetTypes, { FString::Join(UniqueSorted(Sites), TEXT(", ")) }), TEXT("attribute_set_types"));
+			return Refuse(Fill(MsgAttributeSetTypes, { CommandType, FString::Join(UniqueSorted(Sites), TEXT(", ")) }), TEXT("attribute_set_types"));
 		}
 		// SkeletalMergingLibrary.merge_meshes crashes the editor with an assert, not an exception.
 		if (McpPythonScan::ContainsExact(Calls, TEXT("merge_meshes")))
 		{
-			return Refuse(MsgMergeMeshes, TEXT("merge_meshes"));
+			return Refuse(Fill(MsgMergeMeshes, { CommandType }), TEXT("merge_meshes"));
 		}
 		if (McpPythonScan::ContainsExact(Calls, TEXT("TextureExporterPNG")))
 		{
-			return Refuse(MsgPngExporter, TEXT("png_exporter"));
+			return Refuse(Fill(MsgPngExporter, { CommandType }), TEXT("png_exporter"));
 		}
 		// request_auto_rigging crashes the editor at once: auto-rigging is a cloud service.
 		if (McpPythonScan::ContainsExact(Calls, TEXT("request_auto_rigging")))
 		{
-			return Refuse(MsgAutorig, TEXT("autorig"));
+			return Refuse(Fill(MsgAutorig, { CommandType }), TEXT("autorig"));
 		}
 		return {};
 	}
@@ -894,7 +904,7 @@ TOptional<McpPreconditions::FRefusal> McpPreconditions::Check(const FString& Com
 	if (CommandType == TEXT("subscribe_to_delegate")) { return RefuseSparseDelegate(Params, Probe); }
 	if (CommandType == TEXT("start_play_in_editor")) { return RefusePieAlreadyRunning(Probe); }
 	// (c) by the code to run
-	if (CommandType == TEXT("execute_python")) { return RefusePythonCode(CommandType, Params); }
+	if (CommandType == TEXT("execute_python") || CommandType == TEXT("execute_python_file")) { return RefusePythonCode(CommandType, Params); }
 	return {};
 }
 

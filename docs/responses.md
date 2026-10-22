@@ -80,6 +80,12 @@ refuse a call:
   call anyway, at your own risk. Starting or stopping a PIE session that someone else started needs
   `force: true` too.
 
+A Python script cannot be classified before it runs, so the Python tools check it as it runs. While
+Play-in-Editor runs, a call the script makes that compiles a Blueprint or saves does not run: the script
+gets a `RuntimeError` there, and the tool call fails with `pie_refused`, the calls that did not run, even
+when the script catches the error. A script that raises fails the call too, with the traceback in
+`command_result`.
+
 A precondition refusal, as the agent reads it:
 
 ```json

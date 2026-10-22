@@ -57,14 +57,15 @@ namespace McpHttpServerPrivate
 		TEXT("asset or actor, clear_ empties a list; diff_ compares two things; execute_ runs the Python, console command or batch ")
 		TEXT("you pass, run_ starts a test, query, tree or utility that already exists.\n")
 		TEXT("- Similar tools: get_properties reads named properties of one object you can path to, get_object_info one you know ")
-		TEXT("nothing about, get_actor_properties_by_class placed actors by class or label, get_component_properties a whole ")
-		TEXT("component. set_properties writes any setting of an asset, an actor or a component (\"Actor.Component\", by name or ")
+		TEXT("nothing about or a whole component (\"Actor.Component\"), get_actor_properties_by_class placed actors by class or ")
+		TEXT("label. set_properties writes any setting of an asset, an actor or a component (\"Actor.Component\", by name or ")
 		TEXT("class) -- a light, fog, sky, decal, camera, post-process volume, sound, Niagara system... -- and saves an asset with ")
 		TEXT("save=true; set_component_property writes a component in a live PIE world. spawn_actor places an actor of any class ")
 		TEXT("with its properties, spawn_box_volume a volume. A typed tool says in its description what it does that these do not.\n")
 		TEXT("- For many small edits, use `execute_batch`: one call, one pass on the game thread.\n")
 		TEXT("- After editing a Blueprint graph, compile it and read the compiler's messages.\n")
-		TEXT("- When no tool fits, `execute_python` runs Unreal's Python API in the editor.");
+		TEXT("- `execute_python` runs Unreal's Python API in the editor, for what no tool does: look for a tool first. While ")
+		TEXT("Play-in-Editor runs, a script's calls that compile a Blueprint or save do not run.");
 
 	constexpr int32 MaxHeaderBytes = 64 * 1024;
 	constexpr int64 MaxBodyBytes = 256ll * 1024 * 1024;   // a larger request body is refused
