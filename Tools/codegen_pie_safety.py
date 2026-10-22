@@ -49,7 +49,7 @@ they are the CURATED block below, each with its one line of evidence.
 Controls (run with --controls; they gate --write)
 ------------------------------------------------
 POSITIVE: compile_blueprint, add_graph_node, connect_pins, reparent_blueprint,
-build_blueprint_graph, delete_node must be classified unsafe.
+build_blueprint_graph, remove_graph_node must be classified unsafe.
 NEGATIVE: get_graph_nodes, get_blueprint_info, get_blueprint_functions, get_editor_status must NOT.
 A scan that cannot reproduce those is refuted, and refuses to write.
 
@@ -130,7 +130,7 @@ NEVER_GATE = {
 
 POSITIVE_CONTROLS = [
     "compile_blueprint", "add_graph_node", "connect_pins",
-    "reparent_blueprint", "build_blueprint_graph", "delete_node",
+    "reparent_blueprint", "build_blueprint_graph", "remove_graph_node",
 ]
 NEGATIVE_CONTROLS = [
     "get_graph_nodes", "get_blueprint_info", "get_blueprint_functions", "get_editor_status",

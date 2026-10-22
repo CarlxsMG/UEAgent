@@ -15,16 +15,26 @@ The old name runs the new tool: same parameters, same reply.
 | `add_transition_condition` | `add_state_transition_condition` |
 | `append_mesh_primitive` | `add_mesh_primitive` |
 | `append_mesh_to_dynamic_mesh` | `add_mesh_to_dynamic_mesh` |
+| `compare_asset_versions` | `diff_asset_versions` |
+| `compare_objects` | `diff_objects` |
 | `configure_ai_sight_radius` | `set_ai_sight_radius` |
 | `configure_asset_streaming` | `set_asset_streaming_config` |
-| `configure_audio_3d` | `set_audio_3d_settings` |
+| `configure_audio_3d` | `set_audio_3d_settings` (retired: `set_properties` does the same) |
 | `configure_light_shadows` | `set_light_shadow_quality` (retired: `set_properties` does the same) |
 | `configure_post_processing` | `set_post_process_quality` (retired: `set_cvar` does the same) |
 | `configure_render_output` | `set_render_job_output` |
 | `configure_replication` | `set_actor_replication` (retired: `set_properties` does the same) |
 | `configure_water_zone` | `set_water_zone_settings` |
+| `delete_blueprint_variable` | `remove_blueprint_variable` |
+| `delete_curve_table_row` | `remove_curve_table_row` |
+| `delete_data_table_row` | `remove_data_table_row` |
+| `delete_material_function_input` | `remove_material_function_input` |
+| `delete_material_function_output` | `remove_material_function_output` |
+| `delete_mesh_triangles` | `remove_mesh_triangles` |
+| `delete_node` | `remove_graph_node` |
 | `destroy_mass_entity` | `delete_mass_entity` |
 | `detect_substrate_enabled` | `is_substrate_enabled` |
+| `does_foliage_type_exist` | `is_foliage_type_loadable` |
 | `edit_anim_notify` | `set_anim_notify` |
 | `edit_blend_space_sample` | `set_blend_space_sample` |
 | `inspect_chooser_table` | `get_chooser_table_info` |
@@ -58,31 +68,87 @@ The tool still runs under its own name; the listed tool does the same.
 
 | Retired | Use | How |
 |---|---|---|
+| `add_anim_graph_node` | `add_graph_node` | asset_path=&lt;anim blueprint>, graph_name="AnimGraph" (or "&lt;StateMachine> > &lt;State>"), node_type=&lt;AnimGraphNode class, e.g. AnimGraphNode_Slot>, position_x=&lt;x>, position_y=&lt;y>; the Animation Blueprint is not saved (save_asset) |
+| `add_metasound_node` | `add_graph_node` | asset_path=&lt;MetaSound Source>, node_type=&lt;class_path from list_metasound_node_types, e.g. UE.Sine.Audio>, major_version=&lt;n>; the reply's node_id is the node GUID |
+| `add_pcg_node` | `add_graph_node` | asset_path=&lt;PCG graph>, node_type=&lt;settings class from list_pcg_node_types>; the reply's node_id is the node name |
+| `add_pcg_subgraph_node` | `add_graph_node` | asset_path=&lt;PCG graph>, node_type="PCGSubgraphSettings", subgraph_path=&lt;the PCG graph to embed> |
+| `add_rigvm_link` | `connect_pins` | asset_path=&lt;Control Rig>, source_node_id=&lt;NodeA>, source_pin=&lt;pin path below NodeA>, target_node_id=&lt;NodeB>, target_pin=&lt;pin path below NodeB> (a NodeA.Pin path split at its first dot) |
+| `add_rigvm_node` | `add_graph_node` | asset_path=&lt;Control Rig>, node_type=&lt;BeginExecution, PrepareForExecution, GetTransform, SetTransform, AimBone or TwoBoneIKSimple>, node_name=&lt;name>, node_position=[x, y] |
+| `add_sound_cue_node` | `add_graph_node` | asset_path=&lt;sound cue>, node_type=&lt;WavePlayer, Mixer, Random, Looping, Modulator...>, sound_wave_path=&lt;sound wave, WavePlayer only>; the reply's node_id is the node index |
 | `analyze_assets_performance_batch` | `execute_batch` | one analyze_asset_performance per asset |
 | `apply_multiple_gameplay_effects` | `execute_batch` | one apply_gameplay_effect per effect |
+| `connect_anim_graph_pins` | `connect_pins` | asset_path=&lt;anim blueprint>, graph_name="AnimGraph", source_node_id=&lt;NodeGuid>, source_pin=&lt;output pin>, target_node_id=&lt;NodeGuid>, target_pin=&lt;input pin> (the graph's own schema checks pose links); not saved |
+| `connect_material_expressions` | `connect_pins` | asset_path=&lt;material>, source_node_id=&lt;from expression name>, source_pin=&lt;output name, "" for the first>, target_node_id=&lt;to expression name>, target_pin=&lt;input name without spaces> |
+| `connect_material_function_pins` | `connect_pins` | asset_path=&lt;material function>, source_node_id=&lt;from_node_id>, source_pin=&lt;from_pin, "" for the first output>, target_node_id=&lt;to_node_id>, target_pin=&lt;to_input> |
+| `connect_metasound_graph_input_to_node` | `connect_pins` | asset_path=&lt;MetaSound Source>, source_node_id="@input", source_pin=&lt;graph_input_name>, target_node_id=&lt;to_node_id>, target_pin=&lt;to_input_name> |
+| `connect_metasound_graph_input_to_output` | `connect_pins` | asset_path=&lt;MetaSound Source>, source_node_id="@input", source_pin=&lt;graph input name>, target_node_id="@output", target_pin=&lt;graph output name> |
+| `connect_metasound_node_to_graph_output` | `connect_pins` | asset_path=&lt;MetaSound Source>, source_node_id=&lt;node_id>, source_pin=&lt;node_output_name>, target_node_id="@output", target_pin=&lt;graph_output_name> |
+| `connect_metasound_nodes` | `connect_pins` | asset_path=&lt;MetaSound Source>, source_node_id=&lt;from_node_id>, source_pin=&lt;from_output_name>, target_node_id=&lt;to_node_id>, target_pin=&lt;to_input_name> |
+| `connect_pcg_nodes` | `connect_pins` | asset_path=&lt;PCG graph>, source_node_id=&lt;from_node, or "@input">, source_pin=&lt;from_pin>, target_node_id=&lt;to_node, or "@output">, target_pin=&lt;to_pin> |
+| `connect_sound_cue_nodes` | `connect_pins` | asset_path=&lt;sound cue>, source_node_id=&lt;child index>, source_pin="", target_node_id=&lt;parent index>, target_pin=&lt;input slot index, "" for the first free one> |
+| `connect_substrate_slab_to_material` | `connect_pins` | asset_path=&lt;material>, source_node_id=&lt;slab expression name, from get_graph_nodes>, source_pin="", target_node_id="@output", target_pin="FrontMaterial" (refused while Substrate is disabled); then compile_material and save_asset |
+| `connect_to_material_output` | `connect_pins` | asset_path=&lt;material>, source_node_id=&lt;expression name>, source_pin=&lt;output name, "" for the first>, target_node_id="@output", target_pin=&lt;BaseColor, Metallic, Specular, Roughness, Normal, EmissiveColor, Opacity, OpacityMask, ..., FrontMaterial, MaterialAttributes> |
 | `create_camera` | `spawn_actor` | type="CameraActor", name, location, rotation |
 | `create_camera_rig_crane` | `spawn_actor` | type="CameraRig_Crane", name, location, properties={"CranePitch":..,"CraneYaw":..,"CraneArmLength":..} |
 | `create_camera_rig_rail` | `spawn_actor` | type="CameraRig_Rail", name, location; reshape the rail with set_spline_points |
 | `create_lake_water_body` | `create_water_body` | body_type="lake" |
 | `create_mass_spawner_actor` | `spawn_actor` | type="MassSpawner", name, location |
+| `create_material_expression` | `add_graph_node` | asset_path=&lt;material or material function>, node_type=&lt;expression class path, e.g. /Script/Engine.MaterialExpressionConstant>, position_x=&lt;x>, position_y=&lt;y>; the reply's node_id is the expression name |
 | `create_ocean_water_body` | `create_water_body` | body_type="ocean" |
 | `create_river_water_body` | `create_water_body` | body_type="river" |
+| `create_substrate_slab_node` | `add_graph_node` | asset_path=&lt;material>, node_type="/Script/Engine.MaterialExpressionSubstrateSlabBSDF", position_x=&lt;x>, position_y=&lt;y>; then save_asset. It always adds a node: get_graph_nodes shows an existing slab first |
 | `create_trigger` | `spawn_actor` | type="TriggerBox" or "TriggerSphere", name, location |
 | `create_water_zone` | `spawn_actor` | type="WaterZone", name, location |
+| `delete_material_expression` | `remove_graph_node` | asset_path=&lt;material or material function>, node_id=&lt;expression name> |
+| `disconnect_anim_graph_pins` | `disconnect_pin` | asset_path=&lt;anim blueprint>, graph_name="AnimGraph", node_id=&lt;source_node_id>, pin_name=&lt;source_pin>; add linked_node_id=&lt;target_node_id>, linked_pin=&lt;target_pin> to break only that link; not saved |
+| `disconnect_material_expressions` | `disconnect_pin` | asset_path=&lt;material or material function>, node_id=&lt;to expression name>, pin_name=&lt;input name> |
+| `disconnect_metasound_graph_input_from_output` | `disconnect_pin` | asset_path=&lt;MetaSound Source>, node_id="@output", pin_name=&lt;graph output name>, linked_node_id="@input", linked_pin=&lt;graph input name> |
+| `disconnect_metasound_node_from_graph_output` | `disconnect_pin` | asset_path=&lt;MetaSound Source>, node_id="@output", pin_name=&lt;graph_output_name> |
+| `disconnect_metasound_nodes` | `disconnect_pin` | asset_path=&lt;MetaSound Source>, node_id=&lt;to_node_id>, pin_name=&lt;to_input_name> |
+| `disconnect_pcg_nodes` | `disconnect_pin` | asset_path=&lt;PCG graph>, node_id=&lt;to_node, or "@output">, pin_name=&lt;to_pin>, linked_node_id=&lt;from_node, or "@input">, linked_pin=&lt;from_pin> |
+| `disconnect_sound_cue_nodes` | `disconnect_pin` | asset_path=&lt;sound cue>, node_id=&lt;parent index>, pin_name=&lt;input slot index>; or pin_name="" with linked_node_id=&lt;child index> |
+| `disconnect_to_material_output` | `disconnect_pin` | asset_path=&lt;material>, node_id="@output", pin_name=&lt;BaseColor, ..., FrontMaterial, MaterialAttributes> |
 | `dump_collision_channels` | `list_collision_channels` | each custom channel carries is_trace_type, query_type, query_index and query_number |
+| `get_anim_graph_node_properties` | `get_properties` | object_path=&lt;the node's object_path from get_graph_nodes with graph_name="AnimGraph">, property_names=["Node"] |
+| `get_behavior_tree_node_properties` | `get_object_info` | object_path=&lt;the node's object_path from get_behavior_tree_info> |
+| `get_cine_camera_settings` | `get_properties` | object_path="&lt;camera actor>.CineCameraComponent", property_names=["Filmback","LensSettings","FocusSettings","CurrentFocalLength","CurrentAperture","CurrentFocusDistance"]; call_function GetHorizontalFieldOfView on the same path for the field of view |
+| `get_component_properties` | `get_object_info` | object_path="&lt;actor>.&lt;component>" (world=pie for a live instance), or a Blueprint component template's path from get_blueprint_component_object_path |
 | `get_directional_light_cascade_settings` | `get_properties` | object_path="&lt;light>.DirectionalLightComponent", property_names=["DynamicShadowDistanceMovableLight","DynamicShadowDistanceStationaryLight","DynamicShadowCascades","CascadeDistributionExponent","CascadeTransitionFraction","ShadowDistanceFadeoutFraction","bUseInsetShadowsForMovableObjects"] |
 | `get_exponential_height_fog_properties` | `get_properties` | object_path="&lt;actor>.ExponentialHeightFogComponent", property_names=["FogDensity","FogHeightFalloff",...], or get_component_properties for all of them |
 | `get_foliage_type_properties` | `get_properties` | object_path=&lt;foliage type>, property_names=["Density","Radius","ScaleX","CullDistance",...], or get_object_info for all of them |
+| `get_input_settings` | `get_properties` | object_path="/Script/Engine.Default__InputSettings", property_names=["ActionMappings","AxisMappings"] |
 | `get_interchange_pipeline_properties` | `get_object_info` | object_path=&lt;pipeline asset>: every property with its type and value |
+| `get_interchange_project_settings` | `get_properties` | object_path="/Script/InterchangeEngine.Default__InterchangeProjectSettings", property_names=["ContentImportSettings","SceneImportSettings","FilePickerClass","GenericPipelineClass","ConverterDefaultPipeline"] |
+| `get_landscape_grass_type_properties` | `get_properties` | object_path=&lt;grass type>, property_names=["GrassVarieties"] |
+| `get_light_properties` | `get_properties` | object_path="&lt;light actor>.&lt;its light component class, e.g. PointLightComponent>", property_names=["Intensity","LightColor","IntensityUnits","AttenuationRadius","SourceRadius","InnerConeAngle","OuterConeAngle","Temperature","bUseTemperature","CastShadows","Mobility"] |
+| `get_mass_trait_property` | `get_properties` | object_path=&lt;the trait's object_path from list_mass_traits>, property_names=["&lt;property>"] |
+| `get_material_graph_info` | `get_graph_nodes` | asset_path=&lt;material or material function>; the reply is the same, and each node also has node_id (its name), object_path and outputs |
+| `get_metasound_node_info` | `get_graph_nodes` | asset_path=&lt;MetaSound Source>, node_id=&lt;node GUID>; the same node detail, plus the connections that touch it |
 | `get_niagara_system_properties` | `get_properties` | object_path=&lt;system>, property_names=[engine names with their "bOverride..." flags] |
+| `get_pcg_graph_info` | `get_graph_nodes` | asset_path=&lt;PCG graph>; the reply is the same, and each node also has node_id (its name), object_path and settings_path |
+| `get_pcg_node_properties` | `get_object_info` | object_path=&lt;the node's settings_path from get_graph_nodes> |
+| `get_post_process_settings` | `get_properties` | object_path=&lt;post-process volume>, property_names=["bEnabled","bUnbound","Priority","Settings"] |
+| `get_property_access_path` | `get_properties` | object_path=&lt;the node's object_path from get_graph_nodes>, property_names=["Path","TextPath","ResolvedPinType"] |
+| `get_recast_navmesh_settings` | `get_properties` | object_path=&lt;the RecastNavMesh actor, e.g. RecastNavMesh-Default>, property_names=["AgentRadius","AgentHeight","AgentMaxSlope","TileSizeUU","MergeRegionSize","MinRegionArea","MaxSimplificationError","NavMeshResolutionParams"] |
+| `get_reflection_capture_properties` | `get_properties` | object_path="&lt;capture actor>.&lt;its capture component class, e.g. SphereReflectionCaptureComponent>", property_names=["InfluenceRadius","BoxTransitionDistance","Brightness","Cubemap","ReflectionSourceType","RelativeScale3D"] |
+| `get_rigvm_graph` | `get_graph_nodes` | asset_path=&lt;Control Rig>; the same nodes, each with node_id (its name), and each pin with default_value and linked_to |
 | `get_scene_capture_2d_properties` | `get_properties` | object_path="&lt;actor>.SceneCaptureComponent2D", property_names=["CaptureSource","TextureTarget","FOVAngle","ProjectionType","OrthoWidth","bCaptureEveryFrame","bCaptureOnMovement"] |
 | `get_sky_atmosphere_properties` | `get_properties` | object_path="&lt;actor>.SkyAtmosphereComponent", property_names=[engine names], or get_component_properties for all of them |
 | `get_sky_light_properties` | `get_properties` | object_path="&lt;actor>.SkyLightComponent", property_names=["Intensity","LightColor","Contrast",...], or get_component_properties for all of them |
 | `get_sound_attenuation_properties` | `get_properties` | object_path=&lt;attenuation asset>, property_names=["Attenuation"] |
+| `get_sound_class_properties` | `get_properties` | object_path=&lt;sound class>, property_names=["Properties","ParentClass","ChildClasses"] |
 | `get_sound_concurrency_properties` | `get_properties` | object_path=&lt;concurrency asset>, property_names=["Concurrency"] |
+| `get_sound_cue_graph` | `get_graph_nodes` | asset_path=&lt;sound cue>; the reply is the same, and each node also has node_id (its index) and object_path |
 | `get_sound_wave_properties` | `get_object_info` | object_path=&lt;sound wave>: every property; get_properties for named ones |
 | `get_volumetric_cloud_properties` | `get_properties` | object_path="&lt;actor>.VolumetricCloudComponent", property_names=[engine names], or get_component_properties for all of them |
+| `list_metasound_connections` | `get_graph_nodes` | asset_path=&lt;MetaSound Source>; its connections field holds the same edges |
+| `list_metasound_nodes` | `get_graph_nodes` | asset_path=&lt;MetaSound Source>; the same nodes, each with node_id (its GUID), plus the graph's connections |
 | `place_actors_on_terrain` | `execute_batch` | one snap_actor_to_landscape per actor, with transaction=true for one undo step |
+| `remove_metasound_node` | `remove_graph_node` | asset_path=&lt;MetaSound Source>, node_id=&lt;node GUID> |
+| `remove_pcg_node` | `remove_graph_node` | asset_path=&lt;PCG graph>, node_id=&lt;node_name> |
+| `remove_rigvm_link` | `disconnect_pin` | asset_path=&lt;Control Rig>, node_id=&lt;NodeB>, pin_name=&lt;pin path below NodeB>; only the link from NodeA.Pin: add linked_node_id=&lt;NodeA>, linked_pin=&lt;Pin> |
+| `remove_rigvm_node` | `remove_graph_node` | asset_path=&lt;Control Rig>, node_id=&lt;node_name> |
+| `remove_sound_cue_node` | `remove_graph_node` | asset_path=&lt;sound cue>, node_id=&lt;node index>; the later ids shift down (read id_remap) |
 | `set_actor_net_cull_distance` | `set_properties` | object_path=&lt;actor>, properties={"NetCullDistanceSquared": distance*distance} |
 | `set_actor_net_dormancy` | `set_properties` | object_path=&lt;actor>, properties={"NetDormancy":"DORM_DormantAll"} |
 | `set_actor_net_priority` | `set_properties` | object_path=&lt;actor>, properties={"NetPriority":..} |
@@ -90,9 +156,13 @@ The tool still runs under its own name; the listed tool does the same.
 | `set_actor_replication` | `set_properties` | object_path=&lt;actor>, properties={"bReplicates":true,"bReplicateMovement":true} |
 | `set_actor_transforms` | `execute_batch` | one set_actor_transform per actor, with transaction=true for one undo step |
 | `set_allow_cinematic_control` | `set_viewport_settings` | allow_cinematic_control |
+| `set_anim_additive_settings` | `set_properties` | object_path=&lt;anim sequence>, properties={"AdditiveAnimType":"AAT_LocalSpaceBase","RefPoseType":"ABPT_RefPose","RefFrameIndex":0,"RefPoseSeq":"/Game/..."}, save=true (PostEditChange recompresses the sequence) |
+| `set_anim_graph_node_property` | `set_properties` | object_path=&lt;the node's object_path from get_graph_nodes with graph_name="AnimGraph">, properties={"Node":{"&lt;field>":&lt;value>}}; the node is reconstructed and its Blueprint marked modified (compile_blueprint) |
+| `set_audio_3d_settings` | `set_properties` | object_path="&lt;actor>.&lt;audio component>", properties={"bAllowSpatialization":true,"bOverrideAttenuation":true,"AttenuationOverrides":{"bAttenuate":true,"bSpatialize":true,"AttenuationShape":"Sphere","AttenuationShapeExtents":{"X":500},"FalloffDistance":1000}} (the old presets: High 1000/2000, Medium 500/1000, Low 250/500 radius/falloff) |
 | `set_blend_space_properties` | `set_properties` | object_path=&lt;blend space>, properties={"BlendParameters":[{"DisplayName":"Speed","Min":0,"Max":600,"GridNum":4},{}]}, clamp=true, save=true (the blend space is resampled) |
 | `set_box_slot_properties` | `set_slot_properties` | slot_properties={"HorizontalAlignment":"HAlign_Center","VerticalAlignment":"VAlign_Fill","Padding":{"Left":8,"Top":4,"Right":8,"Bottom":4},"Size":{"SizeRule":"Fill","Value":1}} |
 | `set_camera_fov` | `set_properties` | object_path="&lt;camera>.CameraComponent", properties={"FieldOfView":..} |
+| `set_camera_node_parameters` | `set_properties` | object_path=&lt;root_node_path, or a child's object_path, from get_camera_rig_nodes>, properties={"FieldOfView":{"Value":90}}, save=true |
 | `set_camera_post_process` | `set_properties` | object_path="&lt;camera>.CameraComponent", properties={"PostProcessSettings":{"bOverride_&lt;Name>":true,"&lt;Name>":..},"PostProcessBlendWeight":1} |
 | `set_camera_rig_rail_position` | `set_properties` | object_path=&lt;rail actor>, properties={"CurrentPositionOnRail":0.5} (0 = start, 1 = end) |
 | `set_camera_speed` | `set_viewport_settings` | camera_speed |
@@ -127,7 +197,9 @@ The tool still runs under its own name; the listed tool does the same.
 | `set_gameplay_effect_modifier_custom` | `set_gameplay_effect_modifier` | magnitude_type="custom", calculation_class, coefficient, pre_multiply_add, post_multiply_add |
 | `set_gameplay_effect_modifier_custom_curve` | `set_gameplay_effect_modifier` | curve_table_path, row_name, magnitude_curve_for="custom" |
 | `set_gameplay_effect_modifier_set_by_caller` | `set_gameplay_effect_modifier` | magnitude_type="set_by_caller", data_tag or data_name |
+| `set_geometry_collection_connection_settings` | `set_properties` | object_path=&lt;geometry collection>, properties={"ClusterConnectionType":"Chaos_PointImplicit","EnableClustering":true,"ClusterGroupIndex":0,"MaxClusterLevel":100,"ConnectionGraphBoundsFilteringMargin":0}, save=true |
 | `set_grid_slot_properties` | `set_slot_properties` | slot_properties={"Row":..,"Column":..,"RowSpan":..,"ColumnSpan":..,"Layer":..,"Nudge":{"X":..,"Y":..}} |
+| `set_hlod_layer_settings` | `set_properties` | object_path=&lt;HLOD layer>, properties={"bIsSpatiallyLoaded":true,"CellSize":25600,"LoadingRange":51200,"LayerType":"Instancing"}, save=true |
 | `set_interchange_pipeline_properties` | `set_properties` | object_path=&lt;pipeline asset>, properties with the engine names |
 | `set_light_color` | `set_properties` | object_path="&lt;light>.LightComponent", properties={"LightColor":{"R":255,"G":200,"B":150,"A":255}} (8-bit sRGB) |
 | `set_light_intensity` | `set_properties` | object_path="&lt;light>.LightComponent", properties={"Intensity":..} |
@@ -135,10 +207,15 @@ The tool still runs under its own name; the listed tool does the same.
 | `set_light_shadow_quality` | `set_properties` | object_path="&lt;light>.LightComponent", properties={"CastShadows":true,"ShadowBias":..,"ShadowSlopeBias":..,"ShadowSharpen":..} (the presets were High 0.1/0.1/1.0, Medium 0.2/0.2/0.5, Low 0.5/0.5/0.0) |
 | `set_lumen_gi_quality` | `set_cvar` | set_cvar(name="r.DynamicGlobalIlluminationMethod", value=1 Lumen / 2 ScreenSpace / 0 None) for the method; set_scalability_quality(category="GlobalIllumination", level=0..4) for the quality |
 | `set_marked_frames_locked` | `set_sequence_settings` | marked_frames_locked |
+| `set_mass_trait_property` | `set_properties` | object_path=&lt;the trait's object_path from list_mass_traits>, properties={"&lt;property>":&lt;value>} (a struct as {"Field":value}), save=true |
+| `set_material_expression_property` | `set_properties` | object_path=&lt;the expression's object_path from get_graph_nodes, or "&lt;material>:&lt;node_id>">, properties={"R":0.5} or {"DefaultValue":{"R":1,"G":0.5,"B":0,"A":1}} or {"ParameterName":"Tint"} |
 | `set_material_instance_base_overrides` | `set_properties` | object_path=&lt;material instance>, properties={"BasePropertyOverrides":{"bOverride_TwoSided":true,"TwoSided":true,...}}, save=true |
 | `set_material_instance_static_component_mask` | `set_material_instance_parameter` | param_type="static_component_mask", value=[r, g, b, a] of bools, association, layer_index |
 | `set_material_instance_static_switch` | `set_material_instance_parameter` | param_type="static_switch", value=true\|false, association, layer_index (the static permutation is rebuilt and the instance saved) |
 | `set_material_layer_parameter` | `set_material_instance_parameter` | param_type="scalar"\|"vector"\|"texture", layer_index, value |
+| `set_metasound_node_input_default` | `set_pin_default_value` | asset_path=&lt;MetaSound Source>, node_id=&lt;node GUID>, pin_name=&lt;input_name>, value=&lt;the value as text, read as the pin's type> |
+| `set_modulation_generator_settings` | `set_properties` | object_path=&lt;generator>, properties={"Params":{"Frequency":1,"Amplitude":1,"Offset":0,"Phase":0}} (an LFO; ADEnvelope takes AttackTime and DecayTime, EnvelopeFollower AttackTime, ReleaseTime, Gain and AudioBus), clamp=true, save=true |
+| `set_modulation_parameter_settings` | `set_properties` | object_path=&lt;modulation parameter>, properties={"Settings":{"ValueNormalized":0.5}}, save=true |
 | `set_montage_properties` | `set_properties` | object_path=&lt;montage>, properties={"BlendIn":{"BlendTime":..},"BlendOut":{"BlendTime":..},...}, clamp=true, save=true |
 | `set_motion_warping_component_search_in_anims` | `set_properties` | object_path="&lt;actor>.MotionWarpingComponent", properties={"bSearchForWindowsInAnimsWithinMontages":..} |
 | `set_motion_warping_target_bone_name` | `set_motion_warping_target` | bone_name |
@@ -164,12 +241,14 @@ The tool still runs under its own name; the listed tool does the same.
 | `set_niagara_emitter_requires_persistent_ids` | `set_niagara_emitter_properties` | requires_persistent_ids |
 | `set_niagara_emitter_sim_target` | `set_niagara_emitter_properties` | sim_target, local_space, deterministic |
 | `set_niagara_emitter_template_description` | `set_properties` | object_path=&lt;emitter asset>, properties={"TemplateAssetDescription":"..."}, save=true |
+| `set_niagara_renderer_properties` | `set_properties` | object_path=&lt;the renderer's object_path from get_niagara_emitter_renderers>, properties={...}, save=true; the system recompiles |
 | `set_niagara_system_deterministic` | `set_properties` | object_path=&lt;system>, properties={"bDeterminism":true,"RandomSeed":..}, save=true |
 | `set_niagara_system_properties` | `set_properties` | object_path=&lt;system>, properties with the engine names and their "bOverride..." flags, save=true |
 | `set_niagara_system_warmup_tick_count` | `set_properties` | object_path=&lt;system>, properties={"WarmupTime":..} or {"WarmupTickDelta":..}, save=true: the engine recomputes WarmupTickCount from them |
 | `set_niagara_system_warmup_tick_delta` | `set_properties` | object_path=&lt;system>, properties={"WarmupTickDelta":..}, save=true (the engine recomputes WarmupTickCount) |
 | `set_niagara_system_warmup_time` | `set_properties` | object_path=&lt;system>, properties={"WarmupTime":..}, save=true (the engine recomputes WarmupTickCount) |
 | `set_pcg_component_properties` | `set_properties` | object_path="&lt;actor>.PCGComponent", properties with the engine names |
+| `set_pcg_node_properties` | `set_properties` | object_path=&lt;the node's settings_path from get_graph_nodes>, properties={"PointsPerSquaredMeter":0.5}, clamp=true, save=true |
 | `set_physical_material_properties` | `set_properties` | object_path=&lt;physical material>, properties={"Friction":..,"Restitution":..,"Density":..,"bOverrideFrictionCombineMode":true,"FrictionCombineMode":"Max"}, clamp=true, save=true |
 | `set_physics_properties` | `set_blueprint_component_properties` | blueprint_name, component_name, property_name="BodyInstance", property_value={"bSimulatePhysics":true,"bOverrideMass":true,"MassInKgOverride":50,"LinearDamping":..,"AngularDamping":..} |
 | `set_playback_range_locked` | `set_sequence_settings` | playback_range_locked |
@@ -178,7 +257,9 @@ The tool still runs under its own name; the listed tool does the same.
 | `set_post_process_quality` | `set_cvar` | one set_cvar per variable, in one execute_batch: r.BloomQuality, r.MotionBlurQuality, r.DepthOfFieldQuality, r.AmbientOcclusionLevels, r.LensFlareQuality, r.SSR.Quality (High 2, Medium 1/0, Low 0) |
 | `set_post_process_setting` | `set_properties` | object_path=&lt;post-process volume>, properties={"Settings":{"bOverride_&lt;Name>":true,"&lt;Name>":value}} |
 | `set_post_process_volume_settings` | `set_properties` | object_path=&lt;post-process volume>, properties={"bEnabled":..,"Priority":..,"Settings":{"bOverride_&lt;Name>":true,"&lt;Name>":value}} |
+| `set_recast_navmesh_settings` | `set_properties` | object_path=&lt;the RecastNavMesh actor>, properties={"AgentRadius":34,"AgentHeight":144,"AgentMaxSlope":44,"TileSizeUU":1000}, clamp=true (a generation setting rebuilds the navmesh); then save_level |
 | `set_reflection_capture_properties` | `set_properties` | object_path="&lt;capture>.ReflectionCaptureComponent", properties={"InfluenceRadius" or "BoxTransitionDistance":..,"Brightness":..,"Cubemap":"/Game/...","ReflectionSourceType":..}; the box extent is the actor's scale (set_actor_transform), then rebuild_reflection_captures |
+| `set_rigvm_pin_default` | `set_pin_default_value` | asset_path=&lt;Control Rig>, node_id=&lt;NodeName>, pin_name=&lt;pin path below the node>, value=&lt;export text> |
 | `set_scene_capture_2d_properties` | `set_properties` | object_path="&lt;actor>.SceneCaptureComponent2D", properties={"CaptureSource":"SCS_FinalColorLDR","FOVAngle":..,"TextureTarget":"/Game/RT_..."} |
 | `set_section_active` | `set_section_properties` | active |
 | `set_section_blend_type` | `set_section_properties` | blend_type |
@@ -198,8 +279,12 @@ The tool still runs under its own name; the listed tool does the same.
 | `set_sound_attenuation_properties` | `set_properties` | object_path=&lt;attenuation>, properties={"Attenuation":{"FalloffDistance":..,...}}, clamp=true, save=true |
 | `set_sound_class_properties` | `set_properties` | object_path=&lt;sound class>, properties={"Properties":{"Volume":..,"Pitch":..,"bIsUISound":..}}, save=true |
 | `set_sound_concurrency_properties` | `set_properties` | object_path=&lt;concurrency>, properties={"Concurrency":{"MaxCount":..,...}}, clamp=true, save=true |
+| `set_sound_cue_first_node` | `connect_pins` | asset_path=&lt;sound cue>, source_node_id=&lt;node index>, source_pin="", target_node_id="@output", target_pin="" |
+| `set_sound_cue_node_properties` | `set_properties` | object_path=&lt;the node's object_path from get_graph_nodes>, properties={"PitchMin":0.9,"PitchMax":1.1} (the UPROPERTY names), save=true; the cue recaches its values |
 | `set_sound_wave_properties` | `set_properties` | object_path=&lt;sound wave>, properties={"Volume":..,"bLooping":..,...}, clamp=true, save=true |
 | `set_static_mesh_properties` | `set_blueprint_component_properties` | blueprint_name, component_name, property_name="StaticMesh", property_value="/Game/SM_..."; the material with apply_material_to_blueprint |
+| `set_submix_effect_settings` | `set_properties` | object_path=&lt;effect preset path, as get_submix_effect_chain lists it>, properties={"Settings":{"ThresholdDb":-12,"Ratio":4}}, clamp=true, save=true |
+| `set_texture_settings` | `set_properties` | object_path=&lt;texture>, properties={"SRGB":false,"CompressionSettings":"TC_Normalmap","LODGroup":"TEXTUREGROUP_World","AddressX":"TA_Clamp","AddressY":"TA_Clamp","Filter":"TF_Default","MipGenSettings":"TMGS_NoMipmaps","LODBias":0,"MaxTextureSize":0}, clamp=true, save=true; an unknown enum name is refused |
 | `set_view_type` | `set_viewport_settings` | view_type |
 | `set_viewport_camera` | `set_viewport_settings` | location, rotation |
 | `set_viewport_exposure` | `set_viewport_settings` | exposure_fixed, exposure_ev100 |

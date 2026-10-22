@@ -312,6 +312,8 @@ namespace
             TSharedPtr<FJsonObject> BodyObj = MakeShared<FJsonObject>();
             BodyObj->SetNumberField(TEXT("index"), i);
             BodyObj->SetStringField(TEXT("bone_name"), BS ? BS->BoneName.ToString() : FString());
+            // The path set_properties and get_properties take for the body's settings.
+            BodyObj->SetStringField(TEXT("object_path"), BS ? BS->GetPathName() : FString());
             if (BS)
             {
                 BodyObj->SetNumberField(TEXT("primitive_count"), BS->AggGeom.GetElementCount());
@@ -511,7 +513,7 @@ namespace
 //   @param name - Asset name (e.g. 'PA_Cube').
 //   @param package_path - Content folder for the new asset (default /Game/Physics; an empty string also uses it)
 //   @param skeletal_mesh_path - Skeletal mesh to generate the bodies from (default /Engine/EngineMeshes/SkeletalCube); read only for a new asset, which fails when it does not load
-//   @returns { asset_path: string, asset_name: string, package_path: string, body_count: number, constraint_count: number, skeletal_mesh_path: string, bodies: [{ index: number, bone_name: string, primitive_count?: number }], skeleton_bones: [string], constraints: [object], already_existed: bool, created: bool, saved: bool, bodies_generated?: bool, generation_message?: string, save_error?: string, note?: string }
+//   @returns { asset_path: string, asset_name: string, package_path: string, body_count: number, constraint_count: number, skeletal_mesh_path: string, bodies: [{ index: number, bone_name: string, object_path: string, primitive_count?: number }], skeleton_bones: [string], constraints: [object], already_existed: bool, created: bool, saved: bool, bodies_generated?: bool, generation_message?: string, save_error?: string, note?: string }
 TSharedPtr<FJsonObject> HandleCreatePhysicsAsset(const TSharedPtr<FJsonObject>& Params)
 {
     FString PackagePath;
@@ -607,7 +609,7 @@ TSharedPtr<FJsonObject> HandleCreatePhysicsAsset(const TSharedPtr<FJsonObject>& 
 
 // MCP:get_physics_asset_info - Read a UPhysicsAsset without changing it: body_count and constraint_count; each body's index, bone_name and primitive_count; every constraint with its name, child and parent bones, swing, twist and linear motions and limits, and its drive, breakable and projection settings; skeletal_mesh_path, the asset's preview mesh (empty when none, and not necessarily a mesh that uses the asset); and skeleton_bones, that mesh's bone names, the names body and constraint tools accept. A path that does not load as a physics asset is an error. Edit bodies with set_physics_body_properties, joints with add_physics_asset_constraint, set_physics_asset_constraint_limits or set_physics_asset_constraint_drives; a world constraint actor is get_physics_constraint_info. Add or remove a bone's body: add_physics_asset_body / remove_physics_asset_body.
 //   @param physics_asset_path - Path of the UPhysicsAsset, e.g. "/Game/Physics/PA_Hero" or "/Game/Physics/PA_Hero.PA_Hero".
-//   @returns { asset_path: string, asset_name: string, body_count: number, constraint_count: number, skeletal_mesh_path: string, bodies: [{ index: number, bone_name: string, primitive_count?: number }], skeleton_bones: [string], constraints: [object] }
+//   @returns { asset_path: string, asset_name: string, body_count: number, constraint_count: number, skeletal_mesh_path: string, bodies: [{ index: number, bone_name: string, object_path: string, primitive_count?: number }], skeleton_bones: [string], constraints: [object] }
 TSharedPtr<FJsonObject> HandleGetPhysicsAssetInfo(const TSharedPtr<FJsonObject>& Params)
 {
     UPhysicsAsset* PhysAsset = nullptr;

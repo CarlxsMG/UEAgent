@@ -524,8 +524,12 @@ namespace mcp_common
         }
         TGuardValue<int32> InnerCall(Bridge->SubCommandDepth, Bridge->SubCommandDepth + 1);
         const TSharedPtr<FJsonObject> Envelope = Bridge->DispatchSingleCommand(Command, Params.IsValid() ? Params : MakeShared<FJsonObject>());
+        FString Status;
+        const bool bSucceeded = Envelope.IsValid() && Envelope->TryGetStringField(TEXT("status"), Status) && Status == TEXT("success");
         const TSharedPtr<FJsonObject>* Result = nullptr;
-        if (Envelope.IsValid() && Envelope->TryGetObjectField(TEXT("result"), Result) && Result && Result->IsValid())
+        const bool bHasResult = Envelope.IsValid() && Envelope->TryGetObjectField(TEXT("result"), Result) && Result && Result->IsValid();
+        // A handler's own failure states it (`success: false`) and goes back as it is.
+        if (bHasResult && (bSucceeded || (*Result)->HasField(TEXT("success"))))
         {
             return *Result;
         }
@@ -534,7 +538,31 @@ namespace mcp_common
         {
             Envelope->TryGetStringField(TEXT("error"), Error);
         }
-        return MakeErrorReply(Error);
+        // A refusal (PIE guard, precondition) carries its detail in `result` and no `success` field: it is still a
+        // failure, never the caller's success.
+        return bHasResult ? MakeOutcomeReply(*Result, false, Error) : MakeErrorReply(Error);
+    }
+
+    TSharedPtr<FJsonObject> ForwardCall(const TCHAR* Tool, const FString& Command, const TSharedPtr<FJsonObject>& Params)
+    {
+        UUEAgentBridge* Bridge = GEditor ? GEditor->GetEditorSubsystem<UUEAgentBridge>() : nullptr;
+        if (Bridge && Bridge->SubCommandDepth == 0)
+        {
+            if (Bridge->ForwardedBy != Tool)
+            {
+                Bridge->ForwardCount = 0;
+            }
+            Bridge->ForwardedBy = Tool;
+            Bridge->ForwardedCommand = Command;
+            Bridge->ForwardedParams = MakeShared<FJsonObject>();
+            if (Params.IsValid())
+            {
+                // A copy: the dispatch rewrites aliases in place, and the contract reads the call as it was made.
+                FJsonObject::Duplicate(Params, Bridge->ForwardedParams);
+            }
+            ++Bridge->ForwardCount;
+        }
+        return RunSubCommand(Command, Params);
     }
 
     TSharedPtr<FJsonObject> RunSubCommands(const TCHAR* Tool, const TArray<FSubCommand>& Steps, const TSharedPtr<FJsonObject>& Reply)
@@ -2409,6 +2437,14 @@ namespace mcp_common
             {
                 ResolvedPath = FString::Printf(TEXT("%s.%s"), *ObjectPath, *LeafName);
             }
+        }
+        // The same for a sub-object named under a bare package path: "/Game/M_Rock:MaterialExpressionConstant_0" is
+        // "/Game/M_Rock.M_Rock:MaterialExpressionConstant_0".
+        FString PackagePart, SubObjectPart;
+        if (ObjectPath.Split(TEXT(":"), &PackagePart, &SubObjectPart) && !PackagePart.Contains(TEXT("."))
+            && FPackageName::IsValidLongPackageName(PackagePart) && !SubObjectPart.IsEmpty())
+        {
+            ResolvedPath = FString::Printf(TEXT("%s.%s:%s"), *PackagePart, *FPackageName::GetLongPackageAssetName(PackagePart), *SubObjectPart);
         }
 
         // 1) In-memory first -- zero side effects. Resolves already-loaded assets

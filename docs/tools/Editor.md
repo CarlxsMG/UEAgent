@@ -131,7 +131,9 @@ Capture a high-resolution (supersampled) screenshot and write it to a PNG SYNCHR
 
 *Destructive.*
 
-Screenshot the active editor viewport to a PNG (forcing a fresh draw first), optionally resized and optionally returned inline as base64. Use it to SHOW a result -- proof that something looks right, an image to hand to a human. Do NOT use it to diagnose: an image costs far more context than a command and is read far less reliably than one, so for "is the actor there / did the value change / did it move" prefer get_actor_bounds, get_component_properties, raycast_scene or a property read, which answer exactly and cheaply. Captures the EDITOR viewport, not a PIE window; capture_high_res_screenshot is the higher-resolution sibling.
+**Core tool:** every client lists it by default.
+
+Screenshot the active editor viewport to a PNG (forcing a fresh draw first), optionally resized and optionally returned inline as base64. Use it to SHOW a result -- proof that something looks right, an image to hand to a human. Do NOT use it to diagnose: an image costs far more context than a command and is read far less reliably than one, so for "is the actor there / did the value change / did it move" prefer get_actor_bounds, get_properties, raycast_scene or a property read, which answer exactly and cheaply. Captures the EDITOR viewport, not a PIE window; capture_high_res_screenshot is the higher-resolution sibling.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -294,6 +296,8 @@ Create a Blueprint Struct (UUserDefinedStruct). Idempotent by reset+rebuild: a s
 
 *Destructive.*
 
+**Core tool:** every client lists it by default.
+
 Remove one actor from the EDITOR level through the editor's own delete path (select + edactDeleteSelected), so it is transacted and undoable, and echo back the deleted actor's JSON. WARNING: two edges that bite: it matches the INTERNAL name only -- unlike set_actor_transform, an editor LABEL will not resolve -- and it clears the current selection as a side effect. It cannot touch PIE actors (editor world only), and the deletion lives in memory until save_level writes the .umap. Use delete_actors for several at once.
 
 | Parameter | Type | Required | Description |
@@ -383,6 +387,8 @@ No parameters.
 
 *Destructive.*
 
+**Core tool:** every client lists it by default.
+
 Run a console command through the EDITOR (GEditor->Exec against the editor world): cvars, `stat` overlays, `r.*` toggles, engine commands. WARNING: it does NOT reach a running PIE session's PlayerController, so player cheats like `BugItGo` come back handled:false -- to move or cheat a PIE pawn use execute_python against the anchored PIE world. `handled` is the engine's own "some Exec claimed this string", not proof of an effect: verify with the state (get_cvar, a property read), never with this bool.
 
 | Parameter | Type | Required | Description |
@@ -394,6 +400,8 @@ Run a console command through the EDITOR (GEditor->Exec against the editor world
 ## `execute_python`
 
 *Destructive, open world.*
+
+**Core tool:** every client lists it by default.
 
 Execute Python code inside the running Unreal Editor. DO NOT GUESS A FIELD NAME: most of this tool's errors are "object has no attribute" -- and the field usually EXISTS, just not where you reached for it: `HitResult().impact_point` raises, `get_editor_property` cannot find it, and only `to_dict()` returns it (Transform.translation is the reverse). The engine's own stub and Epic's web docs list it either way, so neither settles it -- ask the object (dir(x), x.to_dict(), x.get_editor_property(...)). PIE TRAP -- this tool is the ONE HOLE in the plugin's PIE guard: the commands that compile a Blueprint or write to disk are REFUSED while Play-in-Editor is live (McpPieSafety.gen.h), but arbitrary Python cannot be classified statically, so a script that reaches compile/save through unreal.* (BlueprintEditorLibrary.compile_blueprint, EditorAssetLibrary.save_asset, save_loaded_asset, anything that dirties a Blueprint) RUNS ANYWAY. With PIE live that ends either in a DEAD EDITOR -- the compiler's UREINST_* trampoline retains a world and CheckForWorldGCLeaks is Fatal, taking every unsaved edit with it -- or in a save that reports success without writing a byte (Editor.AllowSavingAssetsDuringPIE=0). So: call is_play_in_editor_active FIRST whenever your script compiles, saves, or mutates a Blueprint, and stop PIE before running it. READING the live world during PIE is safe and is exactly what this tool is for -- do not avoid it for that. BEFORE writing a loop, check what already answers it in ONE call: scripts that re-implement something a tool already does fail far more often than scripts doing something genuinely new -- hand-rolled scaffolding is where the errors are, and a bug in the scaffold reads exactly like a finding about the game. enumerate actors of a class -> get_actors_by_class. enumerate them AND read their properties, filtered by class or editor label, drilling into one component, with the answering world STAMPED on the result (this tool cannot tell you which world answered) -> get_actor_properties_by_class. read properties off ONE known object -> get_properties. list an actor's components -> get_actor_components. one line trace -> raycast_scene. sample a property across a whole PIE session ARMED BEFORE BeginPlay -- a window a post-tick callback cannot reach at all -> watch_pie_property. But do NOT read this as "always prefer the specific tool": only a minority of scripts are replaceable end-to-end. Python remains the right answer when the script does what those cannot: several classes in one round trip, walking components AND calling a method, filtering by name substring, correlating two values in the same tick, or anything that mutates. Do not trade one call for twelve. WARNING: `log_output` IS NOT THE LOG OF THE CALL -- it is Python's own prints only (UE fills it from a delegate broadcast solely by unreal.log/log_warning/log_error), so every UE_LOG the ENGINE emits during your script is absent from it. Read `engine_log` instead: it is the GLog slice bracketed to this call, Warning+Error by default. Example: build_meta_human can run, return None, write zero assets and report a clean `log_output` while "LogMetaHumanCoreTechLib: Error: Texture Synthesis has not been initialized" sits in GLog. When a call reports success and NOTHING HAPPENED, `engine_log` is the first place to look; widen with engine_log_level=Log, or pass `log_cursor_before` to get_output_log_lines(since_sequence_id=...) for the unfiltered rest.
 
@@ -437,6 +445,8 @@ Export assets to files via IAssetTools::ExportAssets (preferred format, FBX/PNG/
 ## `find_actors_by_name`
 
 *Read-only.*
+
+**Core tool:** every client lists it by default.
 
 Locate actors by a SUBSTRING of their internal name and/or their editor label, returning name, label, class and transform for each hit. This is the one to use when you know what a thing is CALLED but not its class -- get_actors_by_class needs an exact class name, and this one alone can search labels (match='label'), which is where hand-assigned names live. Plain case-INSENSITIVE substring, no wildcards and no regex: 'turret' matches BP_Turret_C_2, and '*' matches literally nothing. Its world selector is the canonical one: 'editor' (default), 'pie'/'game', 'server', 'client' and 'pie:N' all resolve for real, an unrecognised value FAILS instead of falling through to the editor world, and the reply stamps world_package/world_type/net_mode/pie_instance so you can tell which world answered.
 
@@ -523,6 +533,8 @@ No parameters.
 ## `get_current_level`
 
 *Read-only.*
+
+**Core tool:** every client lists it by default.
 
 Which map a world is sitting on: level_name, its package_name (/Game/... or /Engine/...), the resolved disk filename, whether the package is dirty, and a live actor count. package_name is the discriminator that catches the classic mistake -- if it starts with /Engine/ you are on an engine template (what load_level with default_template=true leaves behind) and a save_level without `filename` would overwrite the ENGINE's own map. Defaults to the EDITOR world; it also takes the standard `world` selector, so during PIE you can ask the play world ('pie'/'server'/'client'/'pie:N') instead of being told about the authoring map and having no way to know it.
 
@@ -746,6 +758,8 @@ List the console variables registered in the running editor whose name contains 
 
 *Read-only.*
 
+**Core tool:** every client lists it by default.
+
 What is UNSAVED in the editor right now: every dirty package with its disk path, split into map / OFPA-external / asset, and -- the reason to run it -- readonly_dirty_count, the single go/no-go number telling you a vendored root like /Game/VendorPack would be REWRITTEN by the next bulk save. Run it before closing the editor, before compiling, and before any save; it also resolves OFPA hashes to actor labels so /__ExternalActors__/AB/CD/EF12 becomes a name. Strictly read-only: never marks dirty, never saves. WARNING: it reports IN-MEMORY state only -- a package clean here can still differ from HEAD on disk, so `git status` stays the disk authority. And do NOT use its pie_active field as the PIE gate: it can answer false with PIE running; the oracle is is_play_in_editor_active.
 
 | Parameter | Type | Required | Description |
@@ -772,6 +786,8 @@ List the section names of one INI (Engine, Game, Input, Editor, Scalability...) 
 ## `load_level`
 
 *Destructive.*
+
+**Core tool:** every client lists it by default.
 
 Open a map in the editor (by /Game or /Engine package path, or disk .umap), replacing the current world; default_template=true opens the engine's default template level instead (/Engine/Maps/Templates/Template_Default, ~45 actors: floor, PlayerStart, sky and lights), after which a save_level without `filename` would write over the ENGINE's own map (is_engine_template and warning say so). Also the repair for actors that VANISHED from a world in memory after compile_blueprint: reloading the same map brings the placed OFPA instances back with their per-instance config -- never re-place them. REFUSES up front when any other UWorld is still resident in memory, because the engine's world-leak check turns that into a Fatal error that kills the editor process and every unsaved edit with it; the refusal lists the resident worlds and the remedy. Run list_dirty_packages first: a reload discards unsaved work.
 
@@ -1019,6 +1035,8 @@ No parameters.
 
 *Destructive.*
 
+**Core tool:** every client lists it by default.
+
 Write ONE .uasset to disk by package path (a Blueprint, DataTable, material...) and VERIFY the effect: still_dirty_after_save:false plus file_on_disk:true is the oracle, not `saved`. Use save_level for the .umap and reload_asset_package to undo an in-memory edit instead. PIE: this is REFUSED while Play-in-Editor runs (it never stops or touches your session) -- the engine guard Editor.AllowSavingAssetsDuringPIE=0 rejects the write before attempting anything, so a save during play would report success without writing a byte. Stop PIE and retry, or pass force=true. WARNING: when it answers success:false with PIE down, a common cause is the file being READ-ONLY on disk (e.g. a Git LFS `lockable` file that has not been `git lfs lock`ed). You do not have to check that by hand: `file_read_only` is measured on every call and the error message states whether a read-only file IS or is NOT the explanation. WARNING: it writes exactly one package, so it cannot stop a compile cascade from dirtying a vendored asset that a LATER bulk save then rewrites -- list_dirty_packages before, `git status` after.
 
 | Parameter | Type | Required | Description |
@@ -1259,6 +1277,8 @@ Ground an actor on the landscape by sampling the heightmap at its XY (no line tr
 
 *Destructive.*
 
+**Core tool:** every client lists it by default.
+
 Place an actor of ANY placeable class -- a built-in short name (StaticMeshActor, PointLight, SpotLight, DirectionalLight, RectLight, SkyLight, CameraActor, Character), another engine or plugin class by name or path (SkyAtmosphere, ExponentialHeightFog, VolumetricCloud, SceneCapture2D, TextRenderActor, NiagaraActor, /Script/Engine.DecalActor...) or a Blueprint asset path -- into the editor level or a live PIE world, at an optional location/rotation/scale, and set its properties in the same call: properties={"Prop": v} on the actor, {"Component.Prop": v} on a component named so or of a class only one component has (e.g. {"ExponentialHeightFogComponent.FogDensity": 0.05}), written as set_properties writes them. A volume needs a brush: spawn_box_volume places one; an abstract or non-placeable class is refused. Refuses a name an actor already has (omit name to let the engine pick a unique one); the spawn is undoable. A property that cannot be written makes the call fail with properties_failed while the actor stays, so fix it with set_properties or remove it with delete_actor. It creates the actor in MEMORY only -- save_level (with the .umap writable) puts it on disk. WARNING: with 2+ PIE clients world='pie' can land in the CLIENT world, producing an actor the authority never sees -- ask for world='server' instead, and check has_authority and world_package in the reply.
 
 | Parameter | Type | Required | Description |
@@ -1279,6 +1299,8 @@ Place an actor of ANY placeable class -- a built-in short name (StaticMeshActor,
 ## `undo`
 
 *Destructive.*
+
+**Core tool:** every client lists it by default.
 
 Step the editor's undo stack back by one transaction, or by `count` of them, and report what is left, including next_undo (the label of the entry now on top). WARNING: `success` is ALWAYS true, including when there was nothing to undo -- the real oracle is `applied`, and with a count compare actually_undone against requested (the stack ran out, or an undo barrier stopped it); the honest verification is re-reading whatever you changed. Read get_undo_state first to look before you leap.
 

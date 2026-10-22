@@ -2,7 +2,7 @@
 
 # Interchange
 
-17 tools for Interchange imports and reimports, pipelines and their stack, translators and factories.
+16 tools for Interchange imports and reimports, pipelines and their stack, translators and factories.
 
 Back to the [index](README.md).
 
@@ -69,16 +69,6 @@ Read the Interchange import data (UInterchangeAssetImportData) of an asset loade
 | `include_node_container` | boolean | no | Optional bool, default false: add root_uids, factory_node_count and factory_nodes from the import data's node container (empty when there is none) |
 
 **Returns:** `{ asset_path: string, present: bool, pipelines_count: number, pipelines: [{ class: string, name: string, path: string }], has_node_container: bool, source_filenames: [string], display_labels: [string], root_uids?: [string], factory_node_count?: number, factory_nodes?: [{ uid: string, class: string, display_label: string }] }`
-
-## `get_interchange_project_settings`
-
-*Read-only.*
-
-Read the project's Interchange settings, the live class defaults of UInterchangeProjectSettings as Project Settings shows them. For content import: the default pipeline stack, every pipeline stack with its pipeline paths, the per-asset-type default-stack overrides, the import dialog class and the import and reimport dialog flags. For scene import: the default stack, the two dialog flags and only a count of its per-translator dialog overrides. Plus the file picker, generic pipeline and converter default pipeline classes, the static mesh smoothing fallback flag and the Interchange groups. Read-only, with no parameters. Change the default stack with set_interchange_pipeline_stack_default; read one pipeline asset with get_object_info; the formats translators accept: get_interchange_supported_formats.
-
-No parameters.
-
-**Returns:** `{ content_import_settings: { default_pipeline_stack: string, import_dialog_class: string, b_show_import_dialog: bool, b_show_reimport_dialog: bool, pipeline_stacks: [{ name: string, pipelines: [string] }], pipeline_stacks_count: int, default_pipeline_stack_override: [{ translator_type: string, stack_name: string }] }, scene_import_settings: { default_pipeline_stack: string, b_show_import_dialog: bool, b_show_reimport_dialog: bool, per_translator_dialog_override_count: int }, file_picker_class: string, generic_pipeline_class: string, converter_default_pipeline: string, b_static_mesh_use_smooth_edges_if_smoothing_information_is_missing: bool, interchange_groups: [{ display_name: string, unique_id: string, default_pipeline_stack: string, b_show_import_dialog: bool, b_show_reimport_dialog: bool }], interchange_groups_count: int }`
 
 ## `get_interchange_supported_formats`
 
@@ -194,7 +184,7 @@ Write the package of an Interchange pipeline asset (a UInterchangePipelineBase l
 
 *Destructive, idempotent.*
 
-Choose the named pipeline stack Interchange uses by default for content imports (assets) or scene imports (levels) -- the DefaultPipelineStack that Project Settings > Interchange shows -- and write it to the project's DefaultEngine.ini, so it outlives the editor session. The stack must already exist in that import path's pipeline stacks: an unknown name is refused with the list of the ones there, and so is a read-only DefaultEngine.ini, both before anything changes. The previous default is overwritten and returned in previous_stack_name; choosing the stack that is already the default changes nothing (changed=false), so a repeat call is harmless (idempotent). No undo step is recorded. The content stacks and both current defaults are listed by get_interchange_project_settings; to choose the pipelines of one imported asset instead, use set_interchange_pipelines.
+Choose the named pipeline stack Interchange uses by default for content imports (assets) or scene imports (levels) -- the DefaultPipelineStack that Project Settings > Interchange shows -- and write it to the project's DefaultEngine.ini, so it outlives the editor session. The stack must already exist in that import path's pipeline stacks: an unknown name is refused with the list of the ones there, and so is a read-only DefaultEngine.ini, both before anything changes. The previous default is overwritten and returned in previous_stack_name; choosing the stack that is already the default changes nothing (changed=false), so a repeat call is harmless (idempotent). No undo step is recorded. The content stacks and both current defaults are read with get_properties on /Script/InterchangeEngine.Default__InterchangeProjectSettings; to choose the pipelines of one imported asset instead, use set_interchange_pipelines.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

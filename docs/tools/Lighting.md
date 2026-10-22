@@ -2,55 +2,19 @@
 
 # Lighting
 
-7 tools for lights and shadows, sky atmosphere, sky light, fog and volumetric clouds, post process, reflection and scene captures, and Lumen.
+4 tools for lights and shadows, sky atmosphere, sky light, fog and volumetric clouds, post process, reflection and scene captures, and Lumen.
 
 Back to the [index](README.md).
-
-## `get_light_properties`
-
-*Read-only.*
-
-Read a light actor of the editor level, found by object name (not label), in one call: owner transform, intensity, color, mobility and every field set_properties writes, plus the type-specific ones (point/spot falloff and cones, RectLight source and barn doors, directional sun-light flags). A convenience view of the actor and its first light component; get_properties reads any other UPROPERTY. Every value is read off the component: light_intensity_units is the unit name (Unitless, Candelas, Lumens, EV or Nits) on point, spot and rect lights and is left out for a directional light, whose intensity is lux; the falloff keys appear only on point and spot lights; light_lighting_channel_mask packs LightingChannels (1 = channel 0, 2 = channel 1, 4 = channel 2). light_type is always 'Light Component'; the kind is light_subtype. An unknown name is an error. Read-only.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `light_name` | string | yes | Name of the light actor to query |
-
-**Returns:** `{ light_name, light_found, light_message, light_class (owner actor class), light_type ("Light Component" for every light; the kind is light_subtype), light_position: { x, y, z }, light_rotation: { pitch, yaw, roll }, light_scale: { x, y, z } (owner actor transform), light_intensity, light_intensity_units? (point/spot/rect only: Unitless, Candelas, Lumens, EV or Nits), light_color: { r, g, b, a }, light_enabled, light_cast_shadows, light_affect_world, light_mobility, light_use_inverse_squared_falloff? (point/spot only), light_falloff_exponent? (point/spot only), light_lighting_channel_mask (1 = channel 0, 2 = channel 1, 4 = channel 2), light_temperature, light_use_temperature, light_indirect_lighting_intensity, light_volumetric_scattering_intensity, light_affect_translucent_lighting, light_use_ies_brightness, light_ies_brightness_scale, light_ies_texture, light_function_scale: { x, y, z }, light_function_fade_distance, light_function_disabled_brightness, light_function_material, light_shadow_bias, light_cast_volumetric_shadow, light_contact_shadow_length, light_contact_shadow_length_in_ws, light_subtype (DirectionalLight, PointLight, SpotLight, RectLight or Unknown), light_atmosphere_sun_light? (directional: 1 or 0), light_atmosphere_sun_light_index? (directional), light_atmosphere_sun_disk_color_scale?: { r, g, b, a } (directional), light_attenuation_radius? (point/spot/rect), light_source_radius? (point/spot), light_soft_source_radius? (point/spot), light_source_length? (point/spot), light_inner_cone_angle? (spot), light_outer_cone_angle? (spot), light_source_width? (rect), light_source_height? (rect), light_barn_door_angle? (rect), light_barn_door_length? (rect), light_source_texture? (rect), light_tags: [string], light_level, light_world }`
 
 ## `get_lighting_quality`
 
 *Read-only.*
 
-Read-only census of every light component in the editor world (the editor level, even while Play-in-Editor runs), sky lights included, an actor with several counting each: counts by type (sky_light_count among them) and mobility, shadow-casting and world-affecting counts, intensity total/average/min/max over all of them (a sky light's intensity is its scale), one light_details entry per component, plus r.LightingQuality and r.DynamicLighting. lighting_quality_score (0 to 1) and its rating are a heuristic of light count, shadow casters and type variety, not a measure of built lighting; nothing is built. For one light use get_light_properties, for lights near a point get_lighting_in_area.
+Read-only census of every light component in the editor world (the editor level, even while Play-in-Editor runs), sky lights included, an actor with several counting each: counts by type (sky_light_count among them) and mobility, shadow-casting and world-affecting counts, intensity total/average/min/max over all of them (a sky light's intensity is its scale), one light_details entry per component, plus r.LightingQuality and r.DynamicLighting. lighting_quality_score (0 to 1) and its rating are a heuristic of light count, shadow casters and type variety, not a measure of built lighting; nothing is built. For one light use get_properties on its light component, for lights near a point get_lighting_in_area.
 
 No parameters.
 
 **Returns:** `{ level_name, lighting_quality_found, lighting_quality_message, lighting_quality, lighting_type, lighting_enabled, light_name, light_class, light_component, light_component_class, light_intensity, light_enabled, light_cast_shadows, light_affect_world, light_mobility, x, y, z, r, g, b, a, light_count, directional_light_count, point_light_count, spot_light_count, rect_light_count, sky_light_count, static_light_count, stationary_light_count, movable_light_count, shadow_casting_light_count, world_affecting_light_count, total_intensity, average_intensity, max_intensity, min_intensity, light_details, lighting_quality_score, lighting_quality_rating } -- light_name and light_class are the owning actor's, light_component and light_component_class the component's`
-
-## `get_post_process_settings`
-
-*Read-only.*
-
-Read a PostProcessVolume without changing it: the actor-level enabled / unbounded / priority, its color grading and the scalar settings set_properties manages, each with its override flag, plus film grain, motion blur, the auto-exposure method and the color grading LUT.  Every graded or scalar value comes with `overridden` (its bOverride_* flag) so you can see what is actually active.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actor_name` | string | yes | Label/name of the target PostProcessVolume actor. |
-
-**Returns:** `{ actor_name: string, enabled: bool, unbounded: bool, priority: number, color_grading: { saturation, contrast, gamma, gain, offset, saturation_shadows, saturation_midtones, saturation_highlights, contrast_shadows, contrast_midtones, contrast_highlights (each {value:[float], overridden}) }, white_balance: { white_temp, white_tint, shadows_max, highlights_min (each {value, overridden}) }, scalars: { bloom_intensity, vignette_intensity, ambient_occlusion_intensity, auto_exposure_bias, auto_exposure_min_brightness, auto_exposure_max_brightness (each {value, overridden}) }, film_grain_intensity: number, motion_blur_amount: number, color_grading_lut_path: string, exposure_method: int, auto_exposure_method: string, dynamic_global_illumination_method: int }`
-
-## `get_reflection_capture_properties`
-
-*Read-only.*
-
-Read a Sphere or Box reflection-capture actor of the editor level, found by label or internal name: capture_type, InfluenceRadius (Sphere), BoxTransitionDistance (Box), Brightness, the actor scale reported as box_extent, the Cubemap path and ReflectionSourceType. A curated round-trip view for set_properties, not every property; get_properties (internal names only) reads any other UPROPERTY. Pure reader, no recapture.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actor_name` | string | yes | Label or internal name of the reflection-capture actor |
-
-**Returns:** `{ actor_name: string, actor_internal_name: string, capture_type: string, influence_radius: number, box_transition_distance: number, brightness: number, box_extent: [number], cubemap: string, reflection_source_type: string }`
 
 ## `get_rendering_settings`
 
@@ -76,7 +40,7 @@ No parameters.
 
 *Destructive.*
 
-Recapture every Sphere and Box reflection capture of the editor world now, as the editor does after a capture moves, so reflections show changes made to the scene (new meshes, lights, materials). Use it after placing a capture with spawn_actor (type SphereReflectionCapture or BoxReflectionCapture) or changing one with set_properties (its ReflectionCaptureComponent), or after editing the scene around a capture; read one back with get_reflection_capture_properties; a full static lighting build is build_lighting, which also rebuilds captures. Every capture of the world is redone, which takes longer the more captures there are; there is no per-capture option. It saves nothing and is no undo step: save_level keeps the result. Under -NullRHI (headless) nothing is rendered, so the captures do not change. updated is always true; capture_count is how many captures it found (0 when the world has none, which is not an error).
+Recapture every Sphere and Box reflection capture of the editor world now, as the editor does after a capture moves, so reflections show changes made to the scene (new meshes, lights, materials). Use it after placing a capture with spawn_actor (type SphereReflectionCapture or BoxReflectionCapture) or changing one with set_properties (its ReflectionCaptureComponent), or after editing the scene around a capture; read one back with get_properties on its capture component; a full static lighting build is build_lighting, which also rebuilds captures. Every capture of the world is redone, which takes longer the more captures there are; there is no per-capture option. It saves nothing and is no undo step: save_level keeps the result. Under -NullRHI (headless) nothing is rendered, so the captures do not change. updated is always true; capture_count is how many captures it found (0 when the world has none, which is not an error).
 
 No parameters.
 

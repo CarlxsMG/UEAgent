@@ -6,14 +6,14 @@
 
 <p align="center">
   <b>El servidor MCP para Unreal Engine 5, integrado en el editor.</b><br>
-  Más de 1.600 herramientas para que Claude Code, Cursor o cualquier cliente MCP construya en Unreal,<br>
+  Más de 1.500 herramientas para que Claude Code, Cursor o cualquier cliente MCP construya en Unreal,<br>
   con cada cambio comprobado antes de ejecutarse y releído después.
 </p>
 
 <p align="center">
   <img alt="Unreal Engine 5.7 | 5.8" src="https://img.shields.io/badge/Unreal%20Engine-5.7%20%7C%205.8-0E1128?logo=unrealengine&logoColor=white">
   <img alt="MCP: Streamable HTTP" src="https://img.shields.io/badge/MCP-Streamable%20HTTP-6E56CF">
-  <img alt="Más de 1.600 herramientas" src="https://img.shields.io/badge/tools-1%2C600%2B-2EA44F">
+  <img alt="Más de 1.500 herramientas" src="https://img.shields.io/badge/tools-1%2C500%2B-2EA44F">
   <a href="LICENSE"><img alt="Licencia: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
   <a href="https://github.com/CarlxsMG/UEAgent/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/CarlxsMG/UEAgent/actions/workflows/ci.yml/badge.svg"></a>
   <a href="https://carlxsmg.github.io/UEAgent/"><img alt="Documentación" src="https://img.shields.io/badge/docs-carlxsmg.github.io%2FUEAgent-6E56CF"></a>
@@ -55,7 +55,7 @@ sirve Streamable HTTP desde dentro del editor, sin ningún proceso de Python o N
 flowchart LR
     A["Agente de IA<br/>Claude Code, Cursor, ..."] -- "MCP sobre HTTP" --> P
     subgraph E["Unreal Editor + UEAgent"]
-        P["Precondiciones<br/>rechazan los cuelgues conocidos"] --> H["Herramienta<br/>más de 1.600"] --> R["Readback<br/>relee el estado"]
+        P["Precondiciones<br/>rechazan los cuelgues conocidos"] --> H["Herramienta<br/>más de 1.500"] --> R["Readback<br/>relee el estado"]
     end
     R -- "resultado verificado" --> A
 ```
@@ -110,12 +110,12 @@ Más en [Examples](docs/examples.md).
 
 | Cliente | Notas |
 |---|---|
-| Claude Code | Conexión con un clic desde la barra de estado del editor. Carga las herramientas bajo demanda, así que el catálogo completo no es problema. |
-| Cursor, VS Code, Windsurf, Claude Desktop, Gemini CLI, Codex | Cualquier cliente con Streamable HTTP: consulta [la configuración de cada uno](docs/clients.md). Un cliente que carga todas las herramientas de golpe necesita la [lista compacta](docs/clients.md#compact-tool-list). |
+| Claude Code | Conexión con un clic desde la barra de estado del editor. Carga las herramientas bajo demanda, así que con `?tools=all` al final de la URL recibe todas. |
+| Cursor, VS Code, Windsurf, Claude Desktop, Gemini CLI, Codex | Cualquier cliente con Streamable HTTP: consulta [la configuración de cada uno](docs/clients.md). |
 
-Con `?tools=compact` al final de la URL, el servidor lista tres herramientas que buscan, describen y
-ejecutan el resto, para los clientes que limitan cuántas herramientas puede listar un servidor:
-consulta la [lista compacta](docs/clients.md#compact-tool-list).
+Por defecto el servidor lista sus herramientas básicas y cuatro herramientas que buscan, describen y
+ejecutan el resto, o añaden un dominio entero a la lista. Con `?tools=all` al final de la URL lista
+todas, y con `?tools=compact` solo tres: consulta las [listas de herramientas](docs/clients.md#tool-lists).
 
 UEAgent está en [Glama](https://glama.ai/mcp/servers/CarlxsMG/UEAgent), el directorio de servidores MCP:
 

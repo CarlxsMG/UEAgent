@@ -4,8 +4,9 @@ While the editor is open, UEAgent serves MCP over Streamable HTTP at `http://127
 (the port is set in **Editor Preferences > Plugins > UEAgent**). Any MCP client that speaks
 Streamable HTTP can connect.
 
-Every client here except Claude Code loads all the tools up front, so the examples ask for the
-[compact tool list](#compact-tool-list) with `?tools=compact`. Remove it to give a client every tool.
+By default a client gets the [core tool list](#tool-lists): the core tools, and four tools that search,
+describe and run the rest, or add a whole domain to the list. `?tools=all` at the end of the URL lists
+every tool, for a client that loads tools on demand.
 
 The editor writes the connection for the clients that read it from a file in the project: in the
 status bar, **MCP · 55561 > Connect Claude Code to this project**, or **Connect another client** for
@@ -26,7 +27,7 @@ From the editor's status bar, **MCP · 55561 > Connect Claude Code to this proje
 claude mcp add --transport http unreal http://127.0.0.1:55561/mcp
 ```
 
-Claude Code loads tools on demand, so it takes the full list.
+Claude Code loads tools on demand, so it can take every tool: add `?tools=all` to the URL.
 
 ### Cursor
 
@@ -37,7 +38,7 @@ By hand, there or in `~/.cursor/mcp.json` for every project:
 {
   "mcpServers": {
     "unreal": {
-      "url": "http://127.0.0.1:55561/mcp?tools=compact"
+      "url": "http://127.0.0.1:55561/mcp"
     }
   }
 }
@@ -53,7 +54,7 @@ GitHub Copilot, in agent mode. **MCP · 55561 > Connect another client > Connect
   "servers": {
     "unreal": {
       "type": "http",
-      "url": "http://127.0.0.1:55561/mcp?tools=compact"
+      "url": "http://127.0.0.1:55561/mcp"
     }
   }
 }
@@ -67,7 +68,7 @@ GitHub Copilot, in agent mode. **MCP · 55561 > Connect another client > Connect
 {
   "mcpServers": {
     "unreal": {
-      "serverUrl": "http://127.0.0.1:55561/mcp?tools=compact"
+      "serverUrl": "http://127.0.0.1:55561/mcp"
     }
   }
 }
@@ -84,7 +85,7 @@ Edit Config**):
   "mcpServers": {
     "unreal": {
       "command": "npx",
-      "args": ["-y", "mcp-remote", "http://127.0.0.1:55561/mcp?tools=compact", "--allow-http"]
+      "args": ["-y", "mcp-remote", "http://127.0.0.1:55561/mcp", "--allow-http"]
     }
   }
 }
@@ -101,7 +102,7 @@ the project (the key is `serverUrl`); by hand, there or in `~/.gemini/config/mcp
 {
   "mcpServers": {
     "unreal": {
-      "serverUrl": "http://127.0.0.1:55561/mcp?tools=compact"
+      "serverUrl": "http://127.0.0.1:55561/mcp"
     }
   }
 }
@@ -112,7 +113,7 @@ the project (the key is `serverUrl`); by hand, there or in `~/.gemini/config/mcp
 Google replaced Gemini CLI with Antigravity CLI in June 2026; for an install that still runs it:
 
 ```bash
-gemini mcp add -t http unreal "http://127.0.0.1:55561/mcp?tools=compact"
+gemini mcp add -t http unreal "http://127.0.0.1:55561/mcp"
 ```
 
 Or in `.gemini/settings.json`, with `httpUrl` (in Gemini CLI, `url` means the older SSE transport):
@@ -121,7 +122,7 @@ Or in `.gemini/settings.json`, with `httpUrl` (in Gemini CLI, `url` means the ol
 {
   "mcpServers": {
     "unreal": {
-      "httpUrl": "http://127.0.0.1:55561/mcp?tools=compact"
+      "httpUrl": "http://127.0.0.1:55561/mcp"
     }
   }
 }
@@ -133,30 +134,49 @@ Or in `.gemini/settings.json`, with `httpUrl` (in Gemini CLI, `url` means the ol
 terminal: Codex keeps its servers in `~/.codex/config.toml`, for every project.
 
 ```bash
-codex mcp add unreal --url "http://127.0.0.1:55561/mcp?tools=compact"
+codex mcp add unreal --url "http://127.0.0.1:55561/mcp"
 ```
 
 Or in `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.unreal]
-url = "http://127.0.0.1:55561/mcp?tools=compact"
+url = "http://127.0.0.1:55561/mcp"
 ```
 <!-- /tabs -->
 
-## Compact tool list
+## Tool lists
 
-For a client that cannot take the whole catalog, the server lists three meta-tools instead:
+The URL picks which tools a client lists. Whatever the list, every tool runs: `call_tool` reaches the
+ones that are not listed.
+
+| URL | Lists | For |
+|---|---|---|
+| `http://127.0.0.1:55561/mcp` | The core tools, `find_tools`, `describe_tool`, `call_tool` and `enable_toolset` | Every client: the default |
+| `http://127.0.0.1:55561/mcp?tools=all` | Every tool | A client that loads tools on demand, such as Claude Code |
+| `http://127.0.0.1:55561/mcp?tools=compact` | `find_tools`, `describe_tool` and `call_tool` | A client with a tight cap on how many tools it lists |
+
+### The core list
+
+The core tools are the ones most work starts with: assets, actors and levels, any object's
+properties, Blueprint and other asset graphs, data tables, Play-in-Editor and Python. The
+[tool reference](tools/README.md) marks them. Four tools reach the rest:
 
 | Tool | |
 |---|---|
-| `find_tools` | Searches the tools by words and/or domain; with no arguments, lists the domains |
+| `find_tools` | Searches every tool by words and/or domain; with no arguments, lists the domains |
 | `describe_tool` | One tool's description and input schema |
-| `call_tool` | Runs a tool by name, with the same checks and readback as a direct call |
+| `call_tool` | Runs any tool by name, with the same checks and readback as a direct call |
+| `enable_toolset` | Adds every tool of one or more domains to this client's list |
 
-Ask for it per client with the URL `http://127.0.0.1:55561/mcp?tools=compact`, or for every client
-by starting the editor with the environment variable `UEAGENT_TOOLS=compact` (then `?tools=full`
-gives one client the whole list back).
+`enable_toolset` lasts as long as the client's session: the server tells the client that its list
+changed, and a client that supports `tools/list_changed` reads it again. To list a domain from the
+start, name it in the URL: `?domains=Material,Animation`.
+
+### Every client at once
+
+`UEAGENT_TOOLS=all` or `UEAGENT_TOOLS=compact` in the environment the editor starts in changes the
+default for every client; `?tools=core` gives one client the core list back.
 
 ## With an auth token
 

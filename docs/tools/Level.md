@@ -2,7 +2,7 @@
 
 # Level
 
-112 tools for placing and transforming actors, landscapes, foliage and splines, World Partition and data layers, level instances and streaming, and Play-in-Editor.
+111 tools for placing and transforming actors, landscapes, foliage and splines, World Partition and data layers, level instances and streaming, and Play-in-Editor.
 
 Back to the [index](README.md).
 
@@ -23,7 +23,7 @@ Place foliage instances of a UFoliageType at explicit transforms in the level's 
 
 *Additive.*
 
-Drop the nodes of an altitude mask into a material graph: a SmoothStep preset with ConstMin=min_height / ConstMax=max_height in world units, for blending a layer in by height (snow above a line, sand below one). It does NOT build a wired chain despite the name: the SmoothStep Value input is left UNCONNECTED and no world-position node is wired, so you must connect WorldPosition Z into it yourself (connect_material_expressions) or the mask stays constant. Use the reply's expression_id and note to find the pin, then re-read the graph as the oracle.
+Drop the nodes of an altitude mask into a material graph: a SmoothStep preset with ConstMin=min_height / ConstMax=max_height in world units, for blending a layer in by height (snow above a line, sand below one). It does NOT build a wired chain despite the name: the SmoothStep Value input is left UNCONNECTED and no world-position node is wired, so you must connect WorldPosition Z into it yourself (connect_pins) or the mask stays constant. Use the reply's expression_id and note to find the pin, then re-read the graph as the oracle.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -52,7 +52,7 @@ Register a LandscapeLayerInfo asset as a target weight (paint) layer on a landsc
 
 *Additive.*
 
-Add the LandscapeLayerBlend node that makes a terrain material multi-layered, pre-populated with one input per name in layer_names (weight / alpha / height blend). This is what lets grass, rock, sand and snow coexist on one landscape material, and the layer names must match the ones registered on the terrain with add_landscape_layer or those inputs read zero weight forever. The node is created with its layer inputs but nothing feeding them -- wire each layer's texture chain with connect_material_expressions, then compile_material and check get_material_stats.
+Add the LandscapeLayerBlend node that makes a terrain material multi-layered, pre-populated with one input per name in layer_names (weight / alpha / height blend). This is what lets grass, rock, sand and snow coexist on one landscape material, and the layer names must match the ones registered on the terrain with add_landscape_layer or those inputs read zero weight forever. The node is created with its layer inputs but nothing feeding them -- wire each layer's texture chain with connect_pins, then compile_material and check get_material_stats.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -96,7 +96,7 @@ Join two existing landscape spline control points with a segment -- the second h
 
 *Additive.*
 
-Drop the two nodes of a slope mask into a material graph: a SmoothStep preset with ConstMin=min_slope / ConstMax=max_slope, plus a downstream node whose output is the mask (intended 1 on flat ground, 0 on vertical walls). It does NOT build a wired chain despite the name: no VertexNormalWS node is created and both inputs are left UNCONNECTED, so until you wire VertexNormalWS.B into the SmoothStep Value pin yourself (connect_material_expressions) the mask evaluates to a constant. The reply's expression_id and note tell you which node to wire. Verify by re-reading the graph, not by success.
+Drop the two nodes of a slope mask into a material graph: a SmoothStep preset with ConstMin=min_slope / ConstMax=max_slope, plus a downstream node whose output is the mask (intended 1 on flat ground, 0 on vertical walls). It does NOT build a wired chain despite the name: no VertexNormalWS node is created and both inputs are left UNCONNECTED, so until you wire VertexNormalWS.B into the SmoothStep Value pin yourself (connect_pins) the mask evaluates to a constant. The reply's expression_id and note tell you which node to wire. Verify by re-reading the graph, not by success.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -370,18 +370,6 @@ Detach an editor-world actor from the actor it is attached to, keeping its world
 
 **Returns:** `{ actor: string, was_attached: bool, detached: bool, former_parent: string }`
 
-## `does_foliage_type_exist`
-
-*Read-only.*
-
-Yes/no guard: does this FoliageType asset path exist and load? Cheap precondition check before a create/scatter/tune call so a typo in the path fails here instead of deep inside another tool. Asks about the ASSET only -- get_foliage_instance_count (has_instances) answers whether anything of it is placed in the level.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `foliage_type_path` | string | yes | Asset path (e.g. /Game/Foliage/BP_Tree) |
-
-**Returns:** `{ exists: bool, asset_path: string }`
-
 ## `edit_level_instance`
 
 *Destructive, idempotent.*
@@ -467,7 +455,7 @@ Tell whether a placed actor comes from a Blueprint and, if so, name its generate
 
 *Read-only.*
 
-List every component on one actor in the editor OR the live PIE world: name, class, is_active, plus mesh/light details. Accepts world='editor'|'pie'|'server'|'client'|'pie:N' ('server' = the PIE world with authority, 'client' = the other one) and stamps world_name/world_package/net_mode/pie_instance so a co-op reading says WHICH world it came from. Use this to discover component names; then get_component_properties (also world-aware) for their values -- reading with the default world='editor' returns the pre-BeginPlay archetype, not the running actor.
+List every component on one actor in the editor OR the live PIE world: name, class, is_active, plus mesh/light details. Accepts world='editor'|'pie'|'server'|'client'|'pie:N' ('server' = the PIE world with authority, 'client' = the other one) and stamps world_name/world_package/net_mode/pie_instance so a co-op reading says WHICH world it came from. Use this to discover component names; then get_object_info (also world-aware) for their values -- reading with the default world='editor' returns the pre-BeginPlay archetype, not the running actor.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -515,6 +503,8 @@ Read whether an EDITOR-world actor is location-locked in the viewport (AActor::I
 ## `get_actors_by_class`
 
 *Read-only.*
+
+**Core tool:** every client lists it by default.
 
 Census of one class in a chosen world: names + locations of every actor whose class name matches EXACTLY (no subclasses; a Blueprint needs its runtime name with the _C suffix, e.g. BP_Foo_C), capped at 1000. The co-op workhorse -- world='editor'|'pie'|'server'|'client'|'pie:N' ('server' = the PIE world with authority, 'client' = the other), and the reply stamps world_name/world_package/net_mode/pie_instance so actors_count:0 is readable as "not in THIS world" instead of "does not exist". Use find_actors_by_name for substring/label search, get_actors_in_radius for proximity. Two false zeros: with 2+ PIE clients a bare world='pie' resolves to only ONE of the two worlds; and after compile_blueprint the placed OFPA instances vanish from BOTH editor and PIE worlds in memory (git shows them intact on disk -- the fix is load_level of the same map, never re-placing them).
 
@@ -600,19 +590,6 @@ List every FoliageType actually present in the level's InstancedFoliageActors, w
 No parameters.
 
 **Returns:** `{ foliage_types: [object], foliage_type_count: int, foliage_actor_count: int }`
-
-## `get_landscape_grass_type_properties`
-
-*Read-only.*
-
-Read one grass variety (variety_index, default 0) of a LandscapeGrassType asset: mesh, density, placement jitter, start/end cull distance, min LOD, scaling mode and scale ranges, rotation/alignment and shadow flags, under the names set_landscape_grass_type_properties takes. Use it instead of get_properties, which can only return the whole GrassVarieties array, not one element; per-platform values report their Default only. Two units that mislead: grass_density is instances per TEN square metres (25 means 2.5/m2), and start_cull_distance only fades if the mesh's material uses a PerInstanceFadeAmount node -- otherwise clusters pop at end_cull_distance and the start value does nothing.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `grass_path` | string | yes | Asset path of the ULandscapeGrassType |
-| `variety_index` | integer | no | Optional index of the FGrassVariety to read, default 0 when omitted; an index outside the grass type's varieties is an error |
-
-**Returns:** `{ asset_path, grass_class, variety_index, variety_count, grass_mesh, grass_density, placement_jitter, start_cull_distance, end_cull_distance, min_lod, scaling, scale_x:{min,max}, scale_y, scale_z, random_rotation, align_to_surface, use_grid, cast_dynamic_shadow, receives_decals, keep_instance_buffer_cpu_copy }`
 
 ## `get_landscape_height_at`
 
@@ -838,9 +815,23 @@ Fire a simulated mouse click at a running PIE session's PlayerController: fire/a
 
 **Returns:** `{ injected: bool (the event was delivered to the controller, NOT that the game reacted -- verify with state), button: string, event: string, pie_client_index: int }`
 
+## `is_foliage_type_loadable`
+
+*Read-only.*
+
+Yes/no guard: does this FoliageType asset path exist and load? Cheap precondition check before a create/scatter/tune call so a typo in the path fails here instead of deep inside another tool. Asks about the ASSET only -- get_foliage_instance_count (has_instances) answers whether anything of it is placed in the level.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `foliage_type_path` | string | yes | Asset path (e.g. /Game/Foliage/BP_Tree) |
+
+**Returns:** `{ exists: bool, asset_path: string }`
+
 ## `is_play_in_editor_active`
 
 *Read-only.*
+
+**Core tool:** every client lists it by default.
 
 THE oracle for "is the game running right now": asks ULevelEditorSubsystem::IsInPlayInEditor and returns is_pie_active plus status 'Playing'/'Stopped' and the current level name. Cheap, read-only, no params. Use it to confirm start_play_in_editor / stop_play_in_editor (both answer from before the async transition finishes) and as the gate before any save -- saving with PIE up is refused by the engine. WARNING: Do NOT use the pie_active field of list_dirty_packages for this: it can report false with PIE running and answering.
 
@@ -1288,7 +1279,7 @@ Set the KillZ death plane on the EDITOR world's WorldSettings: any actor falling
 
 *Destructive, idempotent.*
 
-Set fields of one grass variety (variety_index) of a LandscapeGrassType asset, only those you pass, and save it. set_properties cannot address one FGrassVariety element of the asset's array; this also writes only the per-platform Default of density and cull distances, refreshes the state hash, and appends a variety for index 0 when the list is empty. No undo step. A grass_mesh that does not load, an invalid scaling or a scale range that is not a {"min","max"} object fails the call with nothing changed, not even the appended variety. Read: get_landscape_grass_type_properties.
+Set fields of one grass variety (variety_index) of a LandscapeGrassType asset, only those you pass, and save it. set_properties cannot address one FGrassVariety element of the asset's array; this also writes only the per-platform Default of density and cull distances, refreshes the state hash, and appends a variety for index 0 when the list is empty. No undo step. A grass_mesh that does not load, an invalid scaling or a scale range that is not a {"min","max"} object fails the call with nothing changed, not even the appended variety. Read: get_properties (GrassVarieties).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1493,6 +1484,8 @@ Spawn an ALevelStreamingVolume in the editor world with a real box brush (half-e
 
 *Destructive.*
 
+**Core tool:** every client lists it by default.
+
 Press Play: starts a real PlayInEditor session (a true play world with a spawned PlayerController, not SimulateInEditor), optionally multi-client and networked for co-op testing via number_of_clients + net_mode=ListenServer. WARNING: RequestPlaySession is ASYNC and this tool probes right after asking, so `pie_started` comes back FALSE on a start that is perfectly fine -- the oracle is a follow-up is_play_in_editor_active, never this field. With 2+ clients the worlds are UEDPIE_0 (server) and UEDPIE_1 (client), and later reads must be anchored with world='server'/'client' because PIE actor NAMES are swapped between them. Refuses if another MCP session (or a human) already owns PIE unless force=true.
 
 | Parameter | Type | Required | Description |
@@ -1507,6 +1500,8 @@ Press Play: starts a real PlayInEditor session (a true play world with a spawned
 ## `stop_play_in_editor`
 
 *Destructive.*
+
+**Core tool:** every client lists it by default.
 
 Press Stop: requests the end of the Play-in-Editor session (EditorRequestEndPlay). WARNING: `pie_stopped` is HARDCODED true whenever PIE was running and teardown is async, so the only oracle is a follow-up is_play_in_editor_active. WARNING: Treat every call as an operation that CAN KILL THE EDITOR: any UWorld/UPackage handle left in an execute_python global keeps the PIE world rooted and the engine aborts with "Object ... from PIE level still referenced" -- purge the __main__ namespace and gc.collect() BEFORE calling. Refuses when another MCP session (or a human) started the PIE, and then needs force=true.
 

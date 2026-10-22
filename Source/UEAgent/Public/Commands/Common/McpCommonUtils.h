@@ -314,8 +314,16 @@ namespace mcp_common
     UEAGENT_API TSharedPtr<FJsonObject> RunSubCommands(const TCHAR* Tool, const TArray<FSubCommand>& Steps, const TSharedPtr<FJsonObject>& Reply);
 
     /** Runs Command with Params through the bridge's own dispatch, as RunSubCommands does one step, and returns that
-     *  command's reply as it is: for a tool that only picks which tool runs. */
+     *  command's reply as it is: for a tool that only picks which tool runs. A refused call (PIE guard, precondition)
+     *  comes back as a failure, with its detail under `data`. */
     UEAGENT_API TSharedPtr<FJsonObject> RunSubCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params);
+
+    /**
+     * RunSubCommand for a tool that hands its whole call to another tool (the graph tools on a material, a MetaSound...):
+     * it also records the forward on the bridge, so the READBACK contract checks Command's call instead of Tool's. A
+     * tool that forwards more than one call gets neither tool's contract. Only a top-level call records it.
+     */
+    UEAGENT_API TSharedPtr<FJsonObject> ForwardCall(const TCHAR* Tool, const FString& Command, const TSharedPtr<FJsonObject>& Params);
 
     /**
      * Wraps Data like MakeOkReply (under "data") with a top-level "success" that is
@@ -703,7 +711,7 @@ namespace mcp_common
      * walk them field-by-field into a clunky {"TagName":...}/{"GameplayTags":[...]}).
      * The canonical value-reader wherever the caller wants real typed JSON, not a single
      * opaque UE export-text string; GetPropertyValueAsString (UEAgentReflectionCommands)
-     * serves internal string-equality comparisons (compare_objects) where format doesn't matter.
+     * serves internal string-equality comparisons (diff_objects) where format doesn't matter.
      */
     UEAGENT_API TSharedPtr<FJsonValue> PropertyValueToJson(FProperty* Property, const void* ValuePtr);
 
@@ -968,7 +976,7 @@ namespace mcp_common
      * and classify any residual export-text difference.
      *
      * `PropertyA`/`PropertyB` may be two DIFFERENT FProperty objects (the
-     * compare_objects case: same property name on two unrelated classes); they
+     * diff_objects case: same property name on two unrelated classes); they
      * are checked with FProperty::SameType first and a mismatch is reported as
      * EPropertyDiffKind::TypeMismatch rather than compared. `ContainerA` /
      * `ContainerB` are the OBJECT/STRUCT base pointers (NOT value pointers) --

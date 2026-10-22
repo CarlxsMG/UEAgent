@@ -2,7 +2,7 @@
 
 # Camera
 
-18 tools for camera actors and components, spring arms, cine camera lens and focus, camera rigs, shakes and Gameplay Cameras assets.
+16 tools for camera actors and components, spring arms, cine camera lens and focus, camera rigs, shakes and Gameplay Cameras assets.
 
 Back to the [index](README.md).
 
@@ -35,7 +35,7 @@ Add a UCameraComponent to an actor placed in the editor world, found by name or 
 
 *Destructive, idempotent.*
 
-Populates the Children of a composite rig node (the rig RootNode must be a UArrayCameraNode ("Sequence"); set it via set_camera_rig_root_node node_type=ArrayCameraNode). Creates a new UCameraNode of child_node_type outered to the rig and appends it, in one undo step, then saves the rig. Idempotent via optional index: index&lt;Children.Num() REPLACES that slot instead of appending. added is the read-back of the new child in its slot; a failed save fails the call, with saved false and save_error, and leaves the change in memory. Gameplay Camera System is EXPERIMENTAL (plugin GameplayCameras). Set its parameters with set_camera_node_parameters child_index; inverse: remove_camera_node_child.
+Populates the Children of a composite rig node (the rig RootNode must be a UArrayCameraNode ("Sequence"); set it via set_camera_rig_root_node node_type=ArrayCameraNode). Creates a new UCameraNode of child_node_type outered to the rig and appends it, in one undo step, then saves the rig. Idempotent via optional index: index&lt;Children.Num() REPLACES that slot instead of appending. added is the read-back of the new child in its slot; a failed save fails the call, with saved false and save_error, and leaves the change in memory. Gameplay Camera System is EXPERIMENTAL (plugin GameplayCameras). Set its parameters with set_properties on its object_path from get_camera_rig_nodes; inverse: remove_camera_node_child.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -89,7 +89,7 @@ Add a USpringArmComponent (camera boom) to an actor placed in the editor world, 
 
 *Destructive.*
 
-Build a Gameplay Cameras UCameraRigAsset, found by content path, in memory as the rig editor's Build does: its node hierarchy, interface and parameters are rebuilt from the current nodes, replacing the previous build data. built is true when build_status comes back Clean or CleanWithWarnings; WithErrors fails the call with the build errors in its message, and messages lists every build message with its severity (the editor log gets them too). Nothing is saved (saving the rig builds it again anyway); what the build changes is recorded in the call's undo step. A rig that does not resolve is an error. Edit the rig first with set_camera_rig_root_node, set_camera_node_parameters or add_camera_node_child; read its nodes with get_camera_rig_nodes; create one with create_camera_rig_asset.
+Build a Gameplay Cameras UCameraRigAsset, found by content path, in memory as the rig editor's Build does: its node hierarchy, interface and parameters are rebuilt from the current nodes, replacing the previous build data. built is true when build_status comes back Clean or CleanWithWarnings; WithErrors fails the call with the build errors in its message, and messages lists every build message with its severity (the editor log gets them too). Nothing is saved (saving the rig builds it again anyway); what the build changes is recorded in the call's undo step. A rig that does not resolve is an error. Edit the rig first with set_camera_rig_root_node, add_camera_node_child or set_properties on a node path; read its nodes with get_camera_rig_nodes; create one with create_camera_rig_asset.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -114,7 +114,7 @@ Create a UCameraAsset (Gameplay Camera System, Experimental plugin) at package_p
 
 *Additive, idempotent.*
 
-Create an empty camera rig asset (UCameraRigAsset, from the Experimental Gameplay Cameras plugin) at package_path/name and save it; it has no root node yet. Idempotent: a camera rig already at that path is returned unchanged with created=false, already_existed=true and saved=false, since nothing is written; an asset of another class there is an error. Not an undo step. Then give it a root node with set_camera_rig_root_node, tune it with set_camera_node_parameters or add_camera_node_child, build it with build_camera_rig, and run it from a camera asset (create_camera_asset) through set_camera_asset_director; get_camera_rig_nodes reads it back. A failed save of a new rig makes success false, with saved=false and save_error, and the rig left in memory.
+Create an empty camera rig asset (UCameraRigAsset, from the Experimental Gameplay Cameras plugin) at package_path/name and save it; it has no root node yet. Idempotent: a camera rig already at that path is returned unchanged with created=false, already_existed=true and saved=false, since nothing is written; an asset of another class there is an error. Not an undo step. Then give it a root node with set_camera_rig_root_node, tune it with add_camera_node_child or set_properties on a node path from get_camera_rig_nodes, build it with build_camera_rig, and run it from a camera asset (create_camera_asset) through set_camera_asset_director; get_camera_rig_nodes reads it back. A failed save of a new rig makes success false, with saved=false and save_error, and the rig left in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -164,13 +164,13 @@ Read the overridden PostProcessSettings off a camera actor's camera component: o
 
 *Read-only.*
 
-Reports a camera rig's RootNode class and its camera-parameter fields (name + value), plus, for a composite ArrayCameraNode root, its Children (index, class and their own camera-parameter fields). Read-only. It reads what set_camera_node_parameters writes (child_index for a child), add_camera_node_child adds and remove_camera_node_child removes.
+Reports a camera rig's RootNode class and its camera-parameter fields (name + value), plus, for a composite ArrayCameraNode root, its Children (index, class and their own camera-parameter fields). Read-only. It gives the node paths set_properties writes, and reads what add_camera_node_child adds and remove_camera_node_child removes.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `camera_rig_path` | string | yes | /Game/... path to the UCameraRigAsset (required) |
 
-**Returns:** `{ camera_rig_path, has_root_node, root_node_class, parameters:[{name, value}], children:[{index, class, parameters:[{name, value}]}] }`
+**Returns:** `{ camera_rig_path, has_root_node, root_node_class, root_node_path, parameters:[{name, value}], children:[{index, class, object_path, parameters:[{name, value}]}] }`
 
 ## `get_cameras`
 
@@ -184,18 +184,6 @@ List the camera actors (ACameraActor or CineCameraActor) in the editor world wit
 | `camera_name` | string | no | Optional camera to report alone, matched by actor name or label; a camera without a camera component reports fov 90 |
 
 **Returns:** `{ cameras: [{ name: string, label: string, is_valid: bool, location: [number, number, number], rotation: [number, number, number], fov: number? }], total_count: number, max_results: number, truncated: bool, camera_name?: string }`
-
-## `get_cine_camera_settings`
-
-*Read-only.*
-
-Read the full cine-camera configuration off a CineCameraActor's CineCameraComponent: filmback (sensor size/offsets/aspect + preset), lens (focal/f-stop range, squeeze, blades, preset), focus (method/manual distance/offset/smoothing) and the current focal length / aperture / focus distance. Pure reader; mutates nothing.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actor_name` | string | yes | Name or label of the CineCameraActor to query. |
-
-**Returns:** `{ actor_name: string, filmback: { sensor_width, sensor_height, sensor_horizontal_offset, sensor_vertical_offset, sensor_aspect_ratio, preset_name }, lens: { min_focal_length, max_focal_length, min_fstop, max_fstop, minimum_focus_distance, squeeze_factor, diaphragm_blade_count, preset_name }, focus: { method, manual_focus_distance, focus_offset, smooth_focus_changes, focus_smoothing_interp_speed }, current_focal_length, current_aperture, current_focus_distance, horizontal_fov, vertical_fov, note }`
 
 ## `list_camera_node_types`
 
@@ -233,25 +221,11 @@ Wires a new USingleCameraDirector on a UCameraAsset, pointing it at a UCameraRig
 
 **Returns:** `{ camera_asset_path, camera_rig_path, director_class, director_set, saved, save_error }`
 
-## `set_camera_node_parameters`
-
-*Destructive, idempotent.*
-
-Sets parameters on a camera rig's RootNode by reflection, all or nothing: every property is parsed first, and an unknown property or a value that does not fit fails the call, naming each one in failed, with nothing written or saved. FXxxCameraParameter props take the raw value, a bool or a number (a whole one for an integer), written to the nested .Value; other props set directly. Otherwise all of them are written in one undo step and the rig is saved; applied reads the stored values back. Values the node already holds are a success with changed false, saved false and a note, and nothing is written or saved. A failed save fails the call, with saved false and save_error, and leaves the change in memory. With child_index the node edited is that child of a composite ArrayCameraNode root (add_camera_node_child); an index out of range, or a root that is not an ArrayCameraNode, is an error. Read the values back with get_camera_rig_nodes.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `camera_rig_path` | string | yes | /Game/... path to the UCameraRigAsset whose RootNode is edited (required) |
-| `properties` | object | yes | JSON object { PropertyName: value, ... } (e.g. {"FieldOfView": 90}) |
-| `child_index` | number | no | Optional index of a child of the composite ArrayCameraNode root to edit instead of the root node itself |
-
-**Returns:** `{ camera_rig_path, node_class, child_index?, changed, set:[name], failed:[{name, error}], applied:{name: stored_value_text}, saved, save_error, note }`
-
 ## `set_camera_rig_root_node`
 
 *Destructive, idempotent.*
 
-Replace the RootNode of a Gameplay Cameras UCameraRigAsset with a new, default-valued node of node_type; the previous root and everything under it (children, parameter values) is dropped. Runs in an undo transaction and saves the rig; a failed save fails the call, with saved false and save_error, and leaves the change in memory. Does not build the rig (build_camera_rig does). Valid node_type names come from list_camera_node_types; configure the new root with set_camera_node_parameters, give an ArrayCameraNode root children with add_camera_node_child, and read it back with get_camera_rig_nodes.
+Replace the RootNode of a Gameplay Cameras UCameraRigAsset with a new, default-valued node of node_type; the previous root and everything under it (children, parameter values) is dropped. Runs in an undo transaction and saves the rig; a failed save fails the call, with saved false and save_error, and leaves the change in memory. Does not build the rig (build_camera_rig does). Valid node_type names come from list_camera_node_types; configure the new root with set_properties on its root_node_path from get_camera_rig_nodes, give an ArrayCameraNode root children with add_camera_node_child, and read it back with get_camera_rig_nodes.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

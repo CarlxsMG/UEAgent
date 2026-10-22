@@ -553,9 +553,12 @@ namespace McpEditorUIPrivate
 			}
 			if (const TSharedPtr<const FMcpToolCatalog> Catalog = FMcpToolCatalog::GetCurrent())
 			{
-				Lines.Add(B && B->IsHttpCompactTools()
+				const EMcpToolsMode Mode = B ? B->GetHttpToolsMode() : EMcpToolsMode::Core;
+				Lines.Add(Mode == EMcpToolsMode::Compact
 					? FString::Printf(TEXT("%d tools in the catalog, listed as 3 meta-tools (UEAGENT_TOOLS=compact)"), Catalog->NumTools())
-					: FString::Printf(TEXT("%d tools in the catalog"), Catalog->NumTools()));
+					: Mode == EMcpToolsMode::All
+					? FString::Printf(TEXT("%d tools in the catalog, all listed (UEAGENT_TOOLS=all)"), Catalog->NumTools())
+					: FString::Printf(TEXT("%d tools in the catalog: %d core tools listed, the rest one call away"), Catalog->NumTools(), Catalog->NumCoreTools()));
 			}
 			Menu.AddWidget(InfoBlock(Lines), FText::GetEmpty(), /*bNoIndent*/ true);
 			Menu.AddMenuEntry(

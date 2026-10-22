@@ -558,7 +558,7 @@ namespace
 // saves it. Uses CreatePackage + NewObject<UPCGGraph> (the PCGGraphFactory lives
 // in the PCGEditor module and is not needed here; UPCGGraph has no modal setup).
 // ---------------------------------------------------------------------------
-// MCP:create_pcg_graph - Create an empty UPCGGraph asset at package_path/name and save it, or return the UPCGGraph already there unchanged (created=false, already_exists=true, nothing saved), so repeat calls are idempotent. A fresh graph holds only its implicit Input and Output nodes, which node_count leaves out (0). Another asset class at that path, or an invalid path, is an error; a failed save, as during PIE, makes success false with save_error. No undo step is recorded. Requires the PCG plugin. Next: add nodes with add_pcg_node (types from list_pcg_node_types), wire them with connect_pcg_nodes, expose tunables with add_pcg_graph_parameter, read back with get_pcg_graph_info, and use it in the level through spawn_box_volume or add_pcg_component.
+// MCP:create_pcg_graph - Create an empty UPCGGraph asset at package_path/name and save it, or return the UPCGGraph already there unchanged (created=false, already_exists=true, nothing saved), so repeat calls are idempotent. A fresh graph holds only its implicit Input and Output nodes, which node_count leaves out (0). Another asset class at that path, or an invalid path, is an error; a failed save, as during PIE, makes success false with save_error. No undo step is recorded. Requires the PCG plugin. Next: add nodes with add_graph_node (types from list_pcg_node_types), wire them with connect_pins, expose tunables with add_pcg_graph_parameter, read back with get_graph_nodes, and use it in the level through spawn_box_volume or add_pcg_component.
 //   @param name - Name of the PCG Graph asset to create; the object path becomes package_path/name.name.
 //   @param package_path - Destination /Game folder (default /Game/PCG); a trailing slash is ignored.
 //   @returns { graph_name: string, asset_path: string, created: bool, already_exists?: bool, node_count: int, saved?: bool, save_error?: string }
@@ -619,6 +619,7 @@ TSharedPtr<FJsonObject> HandleCreatePCGGraph(const TSharedPtr<FJsonObject>& Para
 // Saves the graph after mutating. Returns the node title + new node count.
 // ---------------------------------------------------------------------------
 // MCP:add_pcg_node - Add one unconnected node of a PCG settings class (the node type: surface sampler, static mesh spawner, filter...) with its default settings to a PCG graph asset, in one undo step, then save the graph. Each call adds another node, so a repeat call makes a duplicate. Get valid node_type names from list_pcg_node_types; wire the new node with connect_pcg_nodes using the node_name it returns, set its fields with set_pcg_node_properties, and check the graph with get_pcg_graph_info. To embed a whole graph use add_pcg_subgraph_node instead; inverse: remove_pcg_node; make the graph first with create_pcg_graph. A graph that does not load, or a node_type that is not a concrete PCG settings class, is an error and nothing changes. A failed save makes success false, with saved false, save_error and the node only in memory.
+//   @retired add_graph_node - asset_path=<PCG graph>, node_type=<settings class from list_pcg_node_types>; the reply's node_id is the node name
 //   @param pcg_graph_path - Asset path of the PCG Graph (e.g. "/Game/PCG/PCG_Example" or fully-qualified "/Game/PCG/PCG_Example.PCG_Example"), as create_pcg_graph returns it.
 //   @param node_type - A concrete UPCGSettings subclass, as list_pcg_node_types returns it (types[].name or types[].path): e.g. "PCGSurfaceSamplerSettings", "PCGStaticMeshSpawnerSettings", or "/Script/PCG.PCGSurfaceSamplerSettings"; the U prefix is optional.
 //   @returns { graph_name: string, asset_path: string, node_title: string, node_name: string, settings_class: string, node_count: int, saved: bool, save_error?: string }
@@ -678,8 +679,9 @@ TSharedPtr<FJsonObject> HandleAddPCGNode(const TSharedPtr<FJsonObject>& Params)
 // Loads a UPCGGraph and reports its node count and the title of every node.
 // ---------------------------------------------------------------------------
 // MCP:get_pcg_graph_info - Reads the structure of a UPCGGraph: node count, per-node titles and pin labels, and every directed edge.  Pin labels and the input_node_name/output_node_name feed connect_pcg_nodes / disconnect_pcg_nodes; the implicit graph endpoints are also addressable by the tokens "Input"/"Output".
+//   @retired get_graph_nodes - asset_path=<PCG graph>; the reply is the same, and each node also has node_id (its name), object_path and settings_path
 //   @param pcg_graph_path - Asset path of the PCG Graph (e.g. "/Game/PCG/PCG_Example" or fully-qualified "/Game/PCG/PCG_Example.PCG_Example").
-//   @returns { graph_name: string, asset_path: string, node_count: int, nodes: [{node_name, title, settings_class, input_pins: [string], output_pins: [string]}], has_input_node: bool, has_output_node: bool, input_node_name: string, output_node_name: string, edges: [{from_node, from_pin, to_node, to_pin}], edge_count: int }
+//   @returns { graph_name: string, asset_path: string, node_count: int, nodes: [{node_name, object_path, title, settings_class, settings_path, input_pins: [string], output_pins: [string]}], has_input_node: bool, has_output_node: bool, input_node_name: string, output_node_name: string, edges: [{from_node, from_pin, to_node, to_pin}], edge_count: int }
 
 TSharedPtr<FJsonObject> HandleGetPCGGraphInfo(const TSharedPtr<FJsonObject>& Params)
 {
@@ -704,10 +706,13 @@ TSharedPtr<FJsonObject> HandleGetPCGGraphInfo(const TSharedPtr<FJsonObject>& Par
         }
         TSharedPtr<FJsonObject> N = MakeShared<FJsonObject>();
         N->SetStringField(TEXT("node_name"), Node->GetName());
+        N->SetStringField(TEXT("object_path"), Node->GetPathName());
         N->SetStringField(TEXT("title"), Node->GetNodeTitle(EPCGNodeTitleType::ListView).ToString());
         if (const UPCGSettings* Settings = Node->GetSettings())
         {
             N->SetStringField(TEXT("settings_class"), Settings->GetClass()->GetName());
+            // The node's settings object: the path set_properties and get_properties take for its values.
+            N->SetStringField(TEXT("settings_path"), Settings->GetPathName());
         }
         // Pin labels so callers know what connect_pcg_nodes can target.
         TArray<TSharedPtr<FJsonValue>> InPins;
@@ -1263,7 +1268,7 @@ namespace
 
 // Graph parameters, node-type discovery, generated-data inspection.
 
-// MCP:list_pcg_node_types - Enumerate every PCG node type available in this build (all concrete PCGSettings subclasses, including plugin- and project-added ones), with class names and paths. Run it before add_pcg_node so you pass a class that exists instead of guessing a name from documentation that may not match this engine version. Read-only reflection.
+// MCP:list_pcg_node_types - Enumerate every PCG node type available in this build (all concrete PCGSettings subclasses, including plugin- and project-added ones), with class names and paths. Run it before add_graph_node so you pass a class that exists instead of guessing a name from documentation that may not match this engine version. Read-only reflection.
 //   @returns { base_class, count, types:[{name, path}] }
 TSharedPtr<FJsonObject> HandleListPCGNodeTypes(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1486,7 +1491,7 @@ TSharedPtr<FJsonObject> HandleRemovePCGGraphParameter(const TSharedPtr<FJsonObje
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_pcg_generated_data - Report what the PCG component of an editor-world actor produced in its last generation, without changing anything: per output item its pin, tags and data class (e.g. PCGPointData). Generation is asynchronous, so the list is empty, with a note, until a generate_pcg_component run has completed: poll this or get_pcg_component_info after triggering it. An actor without a PCG component answers has_component false and an empty list rather than an error; an actor that is not found is an error. For the component's graph, seed and generating state use get_pcg_component_info; for the graph's nodes get_pcg_graph_info; to clear the output cleanup_pcg_component.
+// MCP:get_pcg_generated_data - Report what the PCG component of an editor-world actor produced in its last generation, without changing anything: per output item its pin, tags and data class (e.g. PCGPointData). Generation is asynchronous, so the list is empty, with a note, until a generate_pcg_component run has completed: poll this or get_pcg_component_info after triggering it. An actor without a PCG component answers has_component false and an empty list rather than an error; an actor that is not found is an error. For the component's graph, seed and generating state use get_pcg_component_info; for the graph's nodes get_graph_nodes; to clear the output cleanup_pcg_component.
 //   @param actor_name - Actor holding the PCG component (an APCGVolume or an actor given one by add_pcg_component), by object name or editor label, e.g. "PCGVolume_0" (required)
 //   @returns { actor_name, has_component, output_data_count, data:[{index, pin, data_class, tags:[...]}], note? }
 TSharedPtr<FJsonObject> HandleGetPCGGeneratedData(const TSharedPtr<FJsonObject>& Params)
@@ -1528,6 +1533,7 @@ TSharedPtr<FJsonObject> HandleGetPCGGeneratedData(const TSharedPtr<FJsonObject>&
 }
 
 // MCP:add_pcg_subgraph_node - Embed one PCG graph inside another as a Subgraph node -- how you reuse a scatter or filter recipe across biomes instead of duplicating nodes, and how you consume a library graph without editing it. Check first with get_pcg_graph_info that the target graph actually USES its input node (a graph with no edges from its default input cannot be fed filtered data and will ignore whatever you wire in), and with get_pcg_graph_parameters whether it exposes anything tunable.
+//   @retired add_graph_node - asset_path=<PCG graph>, node_type="PCGSubgraphSettings", subgraph_path=<the PCG graph to embed>
 //   @param pcg_graph_path - /Game/... path to the host UPCGGraph (required)
 //   @param subgraph_path - /Game/... path to the UPCGGraph to embed as a subgraph (required)
 //   @returns { graph_name, asset_path, node_name, node_title, subgraph_path, subgraph_set, node_count, saved }
@@ -1590,6 +1596,7 @@ TSharedPtr<FJsonObject> HandleAddPCGSubgraphNode(const TSharedPtr<FJsonObject>& 
 // "Out"/"In" pin (else its first pin) and the resolved labels are echoed back.
 // ---------------------------------------------------------------------------
 // MCP:connect_pcg_nodes - Connects two PCG nodes by adding a directed edge from an output pin to an input pin.  Node names come from get_pcg_graph_info; the implicit graph endpoints are addressable as "Input"/"Output". from_pin/to_pin default to the node's "Out"/"In" pin (else its first pin); the resolved labels are echoed in the response. Idempotent: an existing edge reports already_connected without error. The graph is re-saved after a new edge is added.
+//   @retired connect_pins - asset_path=<PCG graph>, source_node_id=<from_node, or "@input">, source_pin=<from_pin>, target_node_id=<to_node, or "@output">, target_pin=<to_pin>
 //   @param pcg_graph_path - Asset path of the PCG Graph (e.g. "/Game/PCG/PCG_Example" or fully-qualified "/Game/PCG/PCG_Example.PCG_Example").
 //   @param from_node - Upstream node: a node_name from get_pcg_graph_info, or the token "Input" for the graph's implicit input node.
 //   @param to_node - Downstream node: a node_name, or the token "Output" for the graph's implicit output node.
@@ -1642,12 +1649,13 @@ TSharedPtr<FJsonObject> HandleConnectPCGNodes(const TSharedPtr<FJsonObject>& Par
 #else
     Data->SetNumberField(TEXT("edge_count"), Graph->GetAllEdges().Num());
 #endif
-    Data->SetBoolField(TEXT("saved"), bSaved);
-    if (!bAlready && !bSaved && !SaveError.IsEmpty())
+    if (bAlready)
     {
-        Data->SetStringField(TEXT("save_error"), SaveError);
+        Data->SetBoolField(TEXT("saved"), false);
+        return mcp_common::MakeOkReply(Data);
     }
-    return mcp_common::MakeOkReply(Data);
+    // A failed save leaves the edge in memory only: not a success.
+    return mcp_common::MakeSavedReply(Data, bSaved, TEXT("connect_pcg_nodes"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -1657,6 +1665,7 @@ TSharedPtr<FJsonObject> HandleConnectPCGNodes(const TSharedPtr<FJsonObject>& Par
 // change. Pin resolution mirrors connect_pcg_nodes.
 // ---------------------------------------------------------------------------
 // MCP:disconnect_pcg_nodes - Remove the one directed edge from an output pin of one node to an input pin of another in a PCG graph asset, in one undo step, then save the graph; both nodes and every other edge stay. Pin labels default to the node's "Out" or "In" pin (else its first pin), and the labels used are echoed back. Inverse of connect_pcg_nodes; to drop a node with all its edges use remove_pcg_node; to see nodes, pins and edges first use get_pcg_graph_info. Components already generated from the graph keep their old output until cleanup_pcg_component and generate_pcg_component run. Idempotent: when no such edge exists nothing is changed or saved and already_disconnected is true; disconnected is read back after the call. A graph, node or pin that cannot be resolved is an error before anything changes. A failed save (for example while PIE runs) makes success false, with saved false and save_error, the edge gone only in memory.
+//   @retired disconnect_pin - asset_path=<PCG graph>, node_id=<to_node, or "@output">, pin_name=<to_pin>, linked_node_id=<from_node, or "@input">, linked_pin=<from_pin>
 //   @param pcg_graph_path - Asset path of the PCG Graph, e.g. "/Game/PCG/PCG_Example", as create_pcg_graph returns it.
 //   @param from_node - Upstream node name as get_pcg_graph_info lists it (node_name, case-insensitive), or the token "Input" for the graph's input node.
 //   @param to_node - Downstream node name as get_pcg_graph_info lists it (node_name, case-insensitive), or the token "Output" for the graph's output node.
@@ -1731,6 +1740,7 @@ TSharedPtr<FJsonObject> HandleDisconnectPCGNodes(const TSharedPtr<FJsonObject>& 
 // dangling (silent corruption, not an exception). We reject that up front.
 // ---------------------------------------------------------------------------
 // MCP:remove_pcg_node - Removes a user-added node from a PCG graph by name.  Uses UPCGGraph::RemoveNode, which auto-breaks the node's edges and notifies its neighbours; the graph is re-saved after the mutation. The implicit Input/Output endpoint nodes cannot be removed (doing so would silently corrupt the graph) and are rejected with an honest error. Idempotent: a node that is not present reports already_removed without error.
+//   @retired remove_graph_node - asset_path=<PCG graph>, node_id=<node_name>
 //   @param pcg_graph_path - Asset path of the PCG Graph (e.g. "/Game/PCG/PCG_Example" or fully-qualified "/Game/PCG/PCG_Example.PCG_Example").
 //   @param node_name - The node_name from get_pcg_graph_info of the node to remove. The tokens "Input"/"Output" (and the endpoints' real names) are rejected: the implicit graph endpoints cannot be removed.
 //   @returns { graph_name: string, asset_path: string, node_name: string, removed: bool, already_removed: bool, node_count: int, saved: bool, save_error: string }
@@ -1801,6 +1811,7 @@ TSharedPtr<FJsonObject> HandleRemovePCGNode(const TSharedPtr<FJsonObject>& Param
 // (mcp_common::StructToJson over Settings->GetClass()). Read-only.
 // ---------------------------------------------------------------------------
 // MCP:get_pcg_node_properties - Read the reflected properties of one PCG node's settings object (UPCGSettings), serialized to JSON, the node found by its node_name from get_pcg_graph_info or the "Input"/"Output" tokens. Use it instead of get_properties, which would need the settings subobject's path. Read-only; write with set_pcg_node_properties.
+//   @retired get_object_info - object_path=<the node's settings_path from get_graph_nodes>
 //   @param pcg_graph_path - Asset path of the PCG Graph (e.g. "/Game/PCG/PCG_Example" or fully-qualified "/Game/PCG/PCG_Example.PCG_Example").
 //   @param node_name - The node_name from get_pcg_graph_info of the node to read (the tokens "Input"/"Output" address the implicit endpoints).
 //   @returns { graph_name: string, asset_path: string, node_name: string, settings_class: string, properties: object }
@@ -1849,6 +1860,7 @@ TSharedPtr<FJsonObject> HandleGetPCGNodeProperties(const TSharedPtr<FJsonObject>
 // Saves the graph after the mutation and reads the persisted state back.
 // ---------------------------------------------------------------------------
 // MCP:set_pcg_node_properties - Write fields of one PCG node's settings object, picked by node_name in a PCG Graph asset, then save the graph and read the settings back. Use it instead of set_properties, which needs the settings object's path: this also clamps numbers to ClampMin/ClampMax and runs PostEditChange, invalidating the node's cached CRC and rebuilding its pins. Only keys in properties are written, in one undo step; keys match property names case-insensitively. An empty object, a key that names no property (the error lists them), a deprecated or instanced one, a null value, or a value of the wrong kind or that does not convert is an error and nothing changes. A call that changes no value still runs PostEditChange and re-saves. "Input"/"Output" address the endpoints. Read: get_pcg_node_properties.
+//   @retired set_properties - object_path=<the node's settings_path from get_graph_nodes>, properties={"PointsPerSquaredMeter":0.5}, clamp=true, save=true
 //   @param pcg_graph_path - Asset path of the PCG Graph (e.g. "/Game/PCG/PCG_Example" or fully-qualified "/Game/PCG/PCG_Example.PCG_Example").
 //   @param node_name - The node_name from get_pcg_graph_info of the node to author (the tokens "Input"/"Output" address the implicit endpoints).
 //   @param properties [object!] - Object of UPCGSettings fields to merge, keyed by property name (matched case-insensitively) (e.g. for a SurfaceSampler: bApplyDensityToPoints(bool), PointsPerSquaredMeter(float>=0), Looseness(float)); absent keys untouched. An empty object, a key that names no property of the settings class (or a deprecated one, or one holding instanced subobjects), a null value or a value that does not convert is an error and nothing is changed.

@@ -9,7 +9,8 @@ The words these docs, the tools' descriptions and their answers use.
 | **Aliased parameter** | An argument spelled the way a sibling tool spells it. The server renames it before the call and lists it in `data.aliased_params` |
 | **Annotations** | The hints every tool publishes over MCP: read-only, destructive or additive, idempotent, open world. `Tools/tool_hints.py` derives them from the code the tool runs and from its verb |
 | **Catalog** | `Resources/command_catalog.json`, the list of tools the server serves, generated from the C++. The [tool reference](tools/README.md) and the [tool explorer](explorer.md) are the same catalog |
-| **Compact tool list** | Three tools, `find_tools`, `describe_tool` and `call_tool`, that search, describe and run the rest, for a client that cannot list every tool. See [Clients](clients.md#compact-tool-list) |
+| **Compact tool list** | Three tools, `find_tools`, `describe_tool` and `call_tool`, that search, describe and run every tool, for a client with a tight cap on how many tools it lists (`?tools=compact`). See [Clients](clients.md#tool-lists) |
+| **Core tool list** | What a client lists by default: the core tools, plus `find_tools`, `describe_tool`, `call_tool` and `enable_toolset`, which search, describe and run the rest or add a whole domain to the list. See [Clients](clients.md#tool-lists) |
 | **Contract tests** | The recorded refusals, readbacks and registry probes in `Resources/ContractTests`, which the C++ has to reproduce exactly. See [Architecture](architecture.md#the-contract-tests) |
 | **Destructive** | A tool that can change or remove what is already in the project |
 | **Domain** | A group of tools about one part of the engine, such as Animation or Material: one page each in the [tool reference](tools/README.md) |

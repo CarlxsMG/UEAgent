@@ -3369,7 +3369,7 @@ TSharedPtr<FJsonObject> HandleCreateLandscapeGrassType(const TSharedPtr<FJsonObj
     return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("create_landscape_grass_type"), SaveError);
 }
 
-// MCP:set_landscape_grass_type_properties - Set fields of one grass variety (variety_index) of a LandscapeGrassType asset, only those you pass, and save it. set_properties cannot address one FGrassVariety element of the asset's array; this also writes only the per-platform Default of density and cull distances, refreshes the state hash, and appends a variety for index 0 when the list is empty. No undo step. A grass_mesh that does not load, an invalid scaling or a scale range that is not a {"min","max"} object fails the call with nothing changed, not even the appended variety. Read: get_landscape_grass_type_properties.
+// MCP:set_landscape_grass_type_properties - Set fields of one grass variety (variety_index) of a LandscapeGrassType asset, only those you pass, and save it. set_properties cannot address one FGrassVariety element of the asset's array; this also writes only the per-platform Default of density and cull distances, refreshes the state hash, and appends a variety for index 0 when the list is empty. No undo step. A grass_mesh that does not load, an invalid scaling or a scale range that is not a {"min","max"} object fails the call with nothing changed, not even the appended variety. Read: get_properties (GrassVarieties).
 //   @param grass_path - Asset path of the LandscapeGrassType, e.g. "/Game/Foliage/GT_Field".
 //   @param variety_index [integer] - Index of the FGrassVariety to edit, default 0 (appends if the array is empty)
 //   @param grass_mesh - Path of the StaticMesh for this variety, e.g. "/Game/Foliage/SM_Grass"; a path that does not load as a StaticMesh fails the call and nothing is changed.
@@ -3451,6 +3451,7 @@ TSharedPtr<FJsonObject> HandleSetLandscapeGrassTypeProperties(const TSharedPtr<F
 }
 
 // MCP:get_landscape_grass_type_properties - Read one grass variety (variety_index, default 0) of a LandscapeGrassType asset: mesh, density, placement jitter, start/end cull distance, min LOD, scaling mode and scale ranges, rotation/alignment and shadow flags, under the names set_landscape_grass_type_properties takes. Use it instead of get_properties, which can only return the whole GrassVarieties array, not one element; per-platform values report their Default only. Two units that mislead: grass_density is instances per TEN square metres (25 means 2.5/m2), and start_cull_distance only fades if the mesh's material uses a PerInstanceFadeAmount node -- otherwise clusters pop at end_cull_distance and the start value does nothing.
+//   @retired get_properties - object_path=<grass type>, property_names=["GrassVarieties"]
 //   @param grass_path - Asset path of the ULandscapeGrassType
 //   @param variety_index [integer] - Optional index of the FGrassVariety to read, default 0 when omitted; an index outside the grass type's varieties is an error
 //   @returns { asset_path, grass_class, variety_index, variety_count, grass_mesh, grass_density, placement_jitter, start_cull_distance, end_cull_distance, min_lod, scaling, scale_x:{min,max}, scale_y, scale_z, random_rotation, align_to_surface, use_grid, cast_dynamic_shadow, receives_decals, keep_instance_buffer_cpu_copy }
@@ -3701,10 +3702,11 @@ TSharedPtr<FJsonObject> HandleGetFoliageInRadius(const TSharedPtr<FJsonObject>& 
 }
 
 // ---------------------------------------------------------------------------
-// does_foliage_type_exist
+// is_foliage_type_loadable
 // ---------------------------------------------------------------------------
 
-// MCP:does_foliage_type_exist - Yes/no guard: does this FoliageType asset path exist and load? Cheap precondition check before a create/scatter/tune call so a typo in the path fails here instead of deep inside another tool. Asks about the ASSET only -- get_foliage_instance_count (has_instances) answers whether anything of it is placed in the level.
+// MCP:is_foliage_type_loadable - Yes/no guard: does this FoliageType asset path exist and load? Cheap precondition check before a create/scatter/tune call so a typo in the path fails here instead of deep inside another tool. Asks about the ASSET only -- get_foliage_instance_count (has_instances) answers whether anything of it is placed in the level.
+//   @renamed-from does_foliage_type_exist
 //   @param foliage_type_path - Asset path (e.g. /Game/Foliage/BP_Tree)
 //   @returns { exists: bool, asset_path: string }
 //   @hints read-only
@@ -3784,7 +3786,7 @@ namespace
 // add_landscape_layer_blend_node
 // ---------------------------------------------------------------------------
 
-// MCP:add_landscape_layer_blend_node - Add the LandscapeLayerBlend node that makes a terrain material multi-layered, pre-populated with one input per name in layer_names (weight / alpha / height blend). This is what lets grass, rock, sand and snow coexist on one landscape material, and the layer names must match the ones registered on the terrain with add_landscape_layer or those inputs read zero weight forever. The node is created with its layer inputs but nothing feeding them -- wire each layer's texture chain with connect_material_expressions, then compile_material and check get_material_stats.
+// MCP:add_landscape_layer_blend_node - Add the LandscapeLayerBlend node that makes a terrain material multi-layered, pre-populated with one input per name in layer_names (weight / alpha / height blend). This is what lets grass, rock, sand and snow coexist on one landscape material, and the layer names must match the ones registered on the terrain with add_landscape_layer or those inputs read zero weight forever. The node is created with its layer inputs but nothing feeding them -- wire each layer's texture chain with connect_pins, then compile_material and check get_material_stats.
 //   @param material_path - Asset path of the target UMaterial (e.g. /Game/Materials/M_Landscape)
 //   @param layer_names - List of FName layer names to add (in order). Each becomes a FLayerBlendInput with LB_WeightBlend.
 //   @param blend_type - Optional "weight" (default) | "alpha" | "height" for the layer blend enum
@@ -3860,7 +3862,7 @@ TSharedPtr<FJsonObject> HandleAddLandscapeLayerBlendNode(const TSharedPtr<FJsonO
 // add_height_mask_node
 // ---------------------------------------------------------------------------
 
-// MCP:add_height_mask_node - Drop the nodes of an altitude mask into a material graph: a SmoothStep preset with ConstMin=min_height / ConstMax=max_height in world units, for blending a layer in by height (snow above a line, sand below one). It does NOT build a wired chain despite the name: the SmoothStep Value input is left UNCONNECTED and no world-position node is wired, so you must connect WorldPosition Z into it yourself (connect_material_expressions) or the mask stays constant. Use the reply's expression_id and note to find the pin, then re-read the graph as the oracle.
+// MCP:add_height_mask_node - Drop the nodes of an altitude mask into a material graph: a SmoothStep preset with ConstMin=min_height / ConstMax=max_height in world units, for blending a layer in by height (snow above a line, sand below one). It does NOT build a wired chain despite the name: the SmoothStep Value input is left UNCONNECTED and no world-position node is wired, so you must connect WorldPosition Z into it yourself (connect_pins) or the mask stays constant. Use the reply's expression_id and note to find the pin, then re-read the graph as the oracle.
 //   @param material_path - Asset path of the target UMaterial
 //   @param min_height - Lower bound (world units) for SmoothStep. Below this the mask is 0.
 //   @param max_height - Upper bound (world units) for SmoothStep. Above this the mask is 1.
@@ -3920,7 +3922,7 @@ TSharedPtr<FJsonObject> HandleAddHeightMaskNode(const TSharedPtr<FJsonObject>& P
 // add_slope_mask_node
 // ---------------------------------------------------------------------------
 
-// MCP:add_slope_mask_node - Drop the two nodes of a slope mask into a material graph: a SmoothStep preset with ConstMin=min_slope / ConstMax=max_slope, plus a downstream node whose output is the mask (intended 1 on flat ground, 0 on vertical walls). It does NOT build a wired chain despite the name: no VertexNormalWS node is created and both inputs are left UNCONNECTED, so until you wire VertexNormalWS.B into the SmoothStep Value pin yourself (connect_material_expressions) the mask evaluates to a constant. The reply's expression_id and note tell you which node to wire. Verify by re-reading the graph, not by success.
+// MCP:add_slope_mask_node - Drop the two nodes of a slope mask into a material graph: a SmoothStep preset with ConstMin=min_slope / ConstMax=max_slope, plus a downstream node whose output is the mask (intended 1 on flat ground, 0 on vertical walls). It does NOT build a wired chain despite the name: no VertexNormalWS node is created and both inputs are left UNCONNECTED, so until you wire VertexNormalWS.B into the SmoothStep Value pin yourself (connect_pins) the mask evaluates to a constant. The reply's expression_id and note tell you which node to wire. Verify by re-reading the graph, not by success.
 //   @param material_path - Asset path of the target UMaterial
 //   @param min_slope - Lower bound (radians or slope units, depending on convention) for SmoothStep (default 0.0)
 //   @param max_slope - Upper bound for SmoothStep (default 0.5)
@@ -3987,7 +3989,7 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("create_landscape_layer_info"), &HandleCreateLandscapeLayerInfo },
     { TEXT("export_landscape_heightmap"), &HandleExportLandscapeHeightmap },
     { TEXT("flatten_landscape_in_box"), &HandleFlattenLandscapeInBox },
-    { TEXT("does_foliage_type_exist"), &HandleFoliageTypeExists },
+    { TEXT("is_foliage_type_loadable"), &HandleFoliageTypeExists },
     { TEXT("get_foliage_in_radius"), &HandleGetFoliageInRadius },
     { TEXT("get_foliage_instance_count"), &HandleGetFoliageInstanceCount },
     { TEXT("get_foliage_type_properties"), &HandleGetFoliageTypeProperties },

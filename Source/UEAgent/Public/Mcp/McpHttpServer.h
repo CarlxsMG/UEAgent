@@ -13,6 +13,18 @@ class FMcpHttpAcceptor;
 class FMcpHttpConnection;
 
 /**
+ * Which tools tools/list carries for a client: the core tools plus the meta-tools (the default; enable_toolset adds
+ * domains per session), every tool, or the compact meta-tools alone. UEAGENT_TOOLS=core|all|compact sets the server's
+ * default and a client's URL can ask for another (?tools=core|all|compact; `full` is another spelling of `all`).
+ */
+enum class EMcpToolsMode : uint8
+{
+	Core,
+	All,
+	Compact,
+};
+
+/**
  * Native MCP server: Streamable HTTP served from the editor itself, with no external process in
  * front of it. It speaks the protocol era that uses `initialize` (2024-11-05 ... 2025-11-25),
  * which Claude Code falls back to for compatibility since the 2026-07-28 spec revision.
@@ -37,8 +49,8 @@ public:
 	/**
 	 * Opens 127.0.0.1:InPort. Returns false with OutError if it cannot (e.g. the port is in use).
 	 * Empty InAuthToken = no authentication; otherwise every request must carry `Authorization: Bearer`.
-	 * UEAGENT_TOOLS=compact in the environment lists the meta-tools of Mcp/McpMetaTools.h instead
-	 * of the whole catalog. Game thread (reads the plugin version).
+	 * UEAGENT_TOOLS=all|compact in the environment changes the default list (EMcpToolsMode). Game thread (reads the
+	 * plugin version).
 	 */
 	bool Start(uint16 InPort, const FString& InAuthToken, FString& OutError);
 	/** Closes everything and waits for the threads. Call from the game thread. */
@@ -48,8 +60,8 @@ public:
 	uint16 GetPort() const { return Port; }
 	const FString& GetAuthToken() const { return AuthToken; }
 	const FString& GetServerVersion() const { return ServerVersion; }
-	/** Does tools/list carry the compact list by default? A client's URL can still ask for either (?tools=compact|full). */
-	bool IsCompactTools() const { return bCompactTools; }
+	/** The list tools/list carries when a client's URL asks for none (?tools=core|all|compact). */
+	EMcpToolsMode GetDefaultToolsMode() const { return DefaultToolsMode; }
 	int32 GetNumConnections();
 	int64 GetNumRequests() const { return NumRequests.GetValue(); }
 	int64 GetNumToolCalls() const { return NumToolCalls.GetValue(); }
@@ -63,8 +75,30 @@ public:
 	void CountRequest() { NumRequests.Increment(); }
 	void CountToolCall() { NumToolCalls.Increment(); }
 
+	/**
+	 * Sessions: `initialize` on the core list opens one and answers its id in Mcp-Session-Id, which the client sends
+	 * back on every request; the session remembers the domains enable_toolset added to that client's list. The server
+	 * requires no session: a request without one, or with one it does not know (the editor restarted), gets the list
+	 * its URL asks for. At most MaxSessions are kept, the least recently used dropped first. Any thread.
+	 */
+	FString OpenSession();
+	/** The domains Session enabled; false when the server does not know Session. */
+	bool GetSessionDomains(const FString& Session, TSet<FString>& OutDomains);
+	/** Adds Domains to Session's list, opening it under that id if the server does not know it. */
+	void AddSessionDomains(const FString& Session, const TArray<FString>& Domains);
+
+	static constexpr int32 MaxSessions = 256;
+
 private:
 	void ReapFinishedConnections();
+
+	struct FSession
+	{
+		TSet<FString> Domains;
+		double LastUsed = 0.0;
+	};
+	/** Drops the least recently used sessions above MaxSessions. SessionsLock held. */
+	void TrimSessions();
 
 	struct FConnectionHandle
 	{
@@ -83,7 +117,9 @@ private:
 	// Set in Start() and read-only while the server runs: the threads read them without a lock.
 	FString AuthToken;
 	FString ServerVersion;
-	bool bCompactTools = false;
+	EMcpToolsMode DefaultToolsMode = EMcpToolsMode::Core;
+	TMap<FString, FSession> Sessions;
+	FCriticalSection SessionsLock;
 	uint32 NextConnectionId = 0;
 	FThreadSafeCounter64 NumRequests;
 	FThreadSafeCounter64 NumToolCalls;

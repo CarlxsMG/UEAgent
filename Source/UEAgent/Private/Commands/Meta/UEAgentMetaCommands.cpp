@@ -15,6 +15,7 @@ namespace UEAgentMetaCommands
 // MCP-DOMAIN: Meta
 
 // MCP:execute_batch - Run SEVERAL commands back-to-back inside the SAME game-thread pass, with no intermediate MCP round-trips -- the way to cut N calls to 1 when you are authoring in bulk. Any command the bridge dispatches can go in the list. By default every item runs even if an earlier one failed, and each result is reported individually; set stop_on_error to abort at the first failure, and transaction to make the whole run a single undo step.
+//   @core
 //   @param commands [array!] - [{command_type: string, params?: object}, ...] (required, non-empty)
 //   @param stop_on_error [bool] - Stop after the first failing sub-command (default false)
 //   @param transaction [bool] - Wrap the whole run in one undo transaction, so a single undo reverts all of it (begin_transaction / end_transaction). When stop_on_error trips on an error, cancel_transaction closes it instead and rolls back what the run had recorded, items reported ok included: transaction_rolled_back says whether it did. Default false.

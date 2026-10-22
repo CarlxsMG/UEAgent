@@ -213,6 +213,7 @@ namespace
 
         NodeObj->SetStringField(TEXT("name"), Node->GetNodeName());
         NodeObj->SetStringField(TEXT("class"), Node->GetClass()->GetName());
+        NodeObj->SetStringField(TEXT("object_path"), Node->GetPathName());
 
         if (Depth >= 64)
         {
@@ -230,6 +231,7 @@ namespace
                     TSharedPtr<FJsonObject> SvcObj = MakeShared<FJsonObject>();
                     SvcObj->SetStringField(TEXT("name"), Service->GetNodeName());
                     SvcObj->SetStringField(TEXT("class"), Service->GetClass()->GetName());
+                    SvcObj->SetStringField(TEXT("object_path"), Service->GetPathName());
                     ServicesArr.Add(MakeShared<FJsonValueObject>(SvcObj));
                 }
             }
@@ -253,6 +255,7 @@ namespace
                             TSharedPtr<FJsonObject> DecObj = MakeShared<FJsonObject>();
                             DecObj->SetStringField(TEXT("name"), Decorator->GetNodeName());
                             DecObj->SetStringField(TEXT("class"), Decorator->GetClass()->GetName());
+                            DecObj->SetStringField(TEXT("object_path"), Decorator->GetPathName());
                             DecoratorsArr.Add(MakeShared<FJsonValueObject>(DecObj));
                         }
                     }
@@ -596,7 +599,7 @@ UBlackboardComponent* ReadBlackboardKey(const TSharedPtr<FJsonObject>& Params, F
 // Asset-based reads
 //----------------------------------------------------------------------//
 
-// MCP:get_behavior_tree_info - Read a UBehaviorTree asset found by content path: its name, its blackboard asset with every key it holds in key-ID order, parent blackboard keys first (name, type, instance_synced, the base class or enum subsettings, inherited, and defined_in naming the blackboard that declares the key), and the node tree from RootNode -- each node's name and class, a composite's services and children, and the decorators on each child edge, nested up to 64 levels. Nothing is written. A missing path, or one that does not load as a behavior tree, is an error; a tree with no root gives root_node null. The runtime state of a tree running on an AI actor is get_behavior_tree_status; blackboard asset details: get_blackboard_data; build the tree with set_behavior_tree_root, add_behavior_tree_child, add_behavior_tree_decorator and add_behavior_tree_service. A node's settings: get_behavior_tree_node_properties.
+// MCP:get_behavior_tree_info - Read a UBehaviorTree asset found by content path: its name, its blackboard asset with every key it holds in key-ID order, parent blackboard keys first (name, type, instance_synced, the base class or enum subsettings, inherited, and defined_in naming the blackboard that declares the key), and the node tree from RootNode -- each node's name, class and object_path (the path get_properties and set_properties take for its settings), a composite's services and children, and the decorators on each child edge, nested up to 64 levels. Nothing is written. A missing path, or one that does not load as a behavior tree, is an error; a tree with no root gives root_node null. The runtime state of a tree running on an AI actor is get_behavior_tree_status; blackboard asset details: get_blackboard_data; build the tree with set_behavior_tree_root, add_behavior_tree_child, add_behavior_tree_decorator and add_behavior_tree_service. A node's settings: get_object_info on its object_path.
 //   @param behavior_tree_path - Content path of the UBehaviorTree asset, e.g. "/Game/AI/BT_Enemy"; a bare asset name is not resolved
 //   @returns { behavior_tree_path: string, name: string, blackboard_asset: string|null, blackboard_keys: [{ name: string, type: string, instance_synced: bool, inherited: bool, defined_in: string }], root_node: object|null }
 
@@ -1798,7 +1801,7 @@ namespace
     }
 }
 
-// MCP:add_behavior_tree_child - Add a child under a BehaviorTree composite: a composite (Selector/Sequence/SimpleParallel) when composite is given, or a leaf task (Wait/MoveTo/PlaySound/RunBehavior/...) when task_class is given; exactly one of the two. The child is appended to the parent's Children (array order = execution order). Authoring is data-only: ParentNode/ExecutionIndex are assigned by the BT runtime at load (run_behavior_tree). Idempotent by child_name within the parent, whatever its kind. The returned child_name is how you address a composite as a parent for further children. Configure the node (a MoveTo's key, a Wait's time) with set_behavior_tree_node_property; read its settings with get_behavior_tree_node_properties.
+// MCP:add_behavior_tree_child - Add a child under a BehaviorTree composite: a composite (Selector/Sequence/SimpleParallel) when composite is given, or a leaf task (Wait/MoveTo/PlaySound/RunBehavior/...) when task_class is given; exactly one of the two. The child is appended to the parent's Children (array order = execution order). Authoring is data-only: ParentNode/ExecutionIndex are assigned by the BT runtime at load (run_behavior_tree). Idempotent by child_name within the parent, whatever its kind. The returned child_name is how you address a composite as a parent for further children. Configure the node (a MoveTo's key, a Wait's time) with set_behavior_tree_node_property; read its settings with get_object_info on its object_path from get_behavior_tree_info.
 //   @param behavior_tree_path - Path to the UBehaviorTree asset (its RootNode must already be set via set_behavior_tree_root).
 //   @param composite [string] - Concrete composite class: "Selector" | "Sequence" | "SimpleParallel" (or a BTComposite_* class name). Give this or task_class, not both.
 //   @param task_class [string] - Concrete task class: "Wait" | "MoveTo" | "PlaySound" | "RunBehavior" | "FinishWithResult" (or a BTTask_* class name). Give this or composite, not both.
@@ -1971,7 +1974,7 @@ TSharedPtr<FJsonObject> HandleRemoveBehaviorTreeChild(const TSharedPtr<FJsonObje
 // while ONE composite is active (UBTCompositeNode::Services). Idempotent by NodeName.
 // ===========================================================================
 
-// MCP:add_behavior_tree_decorator - Attach a decorator (execution condition) to a specific child-edge of a BehaviorTree composite.  The decorator is appended to that child's Decorators array and gates whether the child may run. Authoring is data-only: ParentNode/ExecutionIndex are assigned by the BT runtime at load (run_behavior_tree). Idempotent by decorator_name within the child-edge. Configure it (key, condition) with set_behavior_tree_node_property; read: get_behavior_tree_node_properties.
+// MCP:add_behavior_tree_decorator - Attach a decorator (execution condition) to a specific child-edge of a BehaviorTree composite.  The decorator is appended to that child's Decorators array and gates whether the child may run. Authoring is data-only: ParentNode/ExecutionIndex are assigned by the BT runtime at load (run_behavior_tree). Idempotent by decorator_name within the child-edge. Configure it (key, condition) with set_behavior_tree_node_property; read: get_object_info on its object_path.
 //   @param behavior_tree_path - Path to the UBehaviorTree asset (its RootNode must already be set, with the target child added).
 //   @param child_name [string!] - Name of the existing child (a child_name from a prior add_behavior_tree_child) whose edge the decorator gates.
 //   @param decorator_class [string!] - Concrete decorator class: "Cooldown" | "Loop" | "TimeLimit" | "Blackboard" | ... (or a BTDecorator_* class name).
@@ -2154,7 +2157,7 @@ TSharedPtr<FJsonObject> HandleRemoveBTDecorator(const TSharedPtr<FJsonObject>& P
     return mcp_common::MakeSavedReply(R, bSaved, TEXT("remove_behavior_tree_decorator"), SaveError);
 }
 
-// MCP:add_behavior_tree_service - Attach a service (background tick) to a BehaviorTree composite.  The service is appended to the composite's Services array and ticks while that composite branch is active. Authoring is data-only: ParentNode/ExecutionIndex are assigned by the BT runtime at load (run_behavior_tree). Idempotent by service_name within the composite. Configure it with set_behavior_tree_node_property; read: get_behavior_tree_node_properties.
+// MCP:add_behavior_tree_service - Attach a service (background tick) to a BehaviorTree composite.  The service is appended to the composite's Services array and ticks while that composite branch is active. Authoring is data-only: ParentNode/ExecutionIndex are assigned by the BT runtime at load (run_behavior_tree). Idempotent by service_name within the composite. Configure it with set_behavior_tree_node_property; read: get_object_info on its object_path.
 //   @param behavior_tree_path - Path to the UBehaviorTree asset (its RootNode must already be set via set_behavior_tree_root).
 //   @param service_class [string!] - Concrete service class: "DefaultFocus" | "RunEQS" | ... (or a BTService_* class name).
 //   @param parent_name - Optional composite name to attach the service to; "Root" or omitted targets the RootNode.
@@ -2569,6 +2572,7 @@ namespace
 }
 
 // MCP:get_behavior_tree_node_properties - Read the settings of one node of a BehaviorTree asset -- a composite, a task, a decorator or a service, found by its node name anywhere in the tree -- as typed JSON: every editable property of its class (name, type, category, value), a blackboard key selector read as its key name with the key types it accepts (allowed_key_types), a value-or-key pair (a Wait's WaitTime) as {Key, DefaultValue}. property_name narrows it to one. Read-only. It reads what set_behavior_tree_node_property writes; the tree's shape and node names come from get_behavior_tree_info. A missing tree or node is an error listing the nodes; a name several nodes share is an error naming each, to narrow with parent_name.
+//   @retired get_object_info - object_path=<the node's object_path from get_behavior_tree_info>
 //   @param behavior_tree_path - Path to the UBehaviorTree asset.
 //   @param node_name - Name of the node: the child_name, decorator_name or service_name given when it was added; "Root" for the root composite.
 //   @param parent_name - Optional name of the composite (or, for a task's service, the task) holding the node, to pick one of several nodes with the same name; "Root" for the root.
@@ -2633,7 +2637,7 @@ TSharedPtr<FJsonObject> HandleGetBehaviorTreeNodeProperties(const TSharedPtr<FJs
     return mcp_common::MakeOkReply(Reply);
 }
 
-// MCP:set_behavior_tree_node_property - Write one setting of one node of a BehaviorTree asset -- a composite, task, decorator or service found by its node name -- then save the tree; no undo step. This is how a placed node is told what to do: a MoveTo's BlackboardKey, a Wait's WaitTime, a Blackboard decorator's key and condition. property_name is an editable property of the node's class or a dotted path into it. A blackboard key selector takes the key's NAME as a string: the key must exist in the tree's blackboard (or a parent) and be a type the selector accepts, else an error naming the keys; a value-or-key pair (WaitTime) takes a plain value for its DefaultValue or {"key": "<blackboard key>"}, a key of a type the pair accepts (a float pair takes a Float key); anything else takes typed JSON (numbers, bools, enum names, structs as objects). A property the class does not have, one that is not editable, or a value that does not fit is an error and nothing is written. The reply re-reads the property (value_after). Read: get_behavior_tree_node_properties; place nodes: add_behavior_tree_child / add_behavior_tree_decorator / add_behavior_tree_service.
+// MCP:set_behavior_tree_node_property - Write one setting of one node of a BehaviorTree asset -- a composite, task, decorator or service found by its node name -- then save the tree; no undo step. This is how a placed node is told what to do: a MoveTo's BlackboardKey, a Wait's WaitTime, a Blackboard decorator's key and condition. property_name is an editable property of the node's class or a dotted path into it. A blackboard key selector takes the key's NAME as a string: the key must exist in the tree's blackboard (or a parent) and be a type the selector accepts, else an error naming the keys; a value-or-key pair (WaitTime) takes a plain value for its DefaultValue or {"key": "<blackboard key>"}, a key of a type the pair accepts (a float pair takes a Float key); anything else takes typed JSON (numbers, bools, enum names, structs as objects). A property the class does not have, one that is not editable, or a value that does not fit is an error and nothing is written. The reply re-reads the property (value_after). Read: get_object_info on the node's object_path; place nodes: add_behavior_tree_child / add_behavior_tree_decorator / add_behavior_tree_service.
 //   @param behavior_tree_path - Path to the UBehaviorTree asset.
 //   @param node_name - Name of the node (its child_name, decorator_name or service_name); "Root" for the root composite.
 //   @param property_name - Editable property of the node's class (e.g. "BlackboardKey", "WaitTime", "AcceptableRadius") or a dotted path into one ("WaitTime.DefaultValue").

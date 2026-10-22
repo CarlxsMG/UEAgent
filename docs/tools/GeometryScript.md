@@ -164,7 +164,7 @@ Empty a DynamicMeshActor's live UDynamicMesh in place (keep the actor, drop the 
 
 *Destructive, idempotent.*
 
-Compact a DynamicMeshActor's live dynamic mesh in the editor world (actor found by label or object name): renumber its vertex, triangle and edge IDs into dense ranges, dropping the free ID slots that deletions leave. Geometry and the vertex and triangle counts stay the same, but IDs move, so vertex or triangle IDs read before (select_mesh_triangles, get_mesh_components_detail) are stale afterwards. Idempotent: compacted is true when any ID moved, and one undo step restores the old IDs; an already compact mesh is a success with compacted=false and adds no undo step. Nothing is saved; an unknown actor is an error. Run it after delete_mesh_triangles or remove_unused_vertices, and before the xatlas method of unwrap_mesh_uvs.
+Compact a DynamicMeshActor's live dynamic mesh in the editor world (actor found by label or object name): renumber its vertex, triangle and edge IDs into dense ranges, dropping the free ID slots that deletions leave. Geometry and the vertex and triangle counts stay the same, but IDs move, so vertex or triangle IDs read before (select_mesh_triangles, get_mesh_components_detail) are stale afterwards. Idempotent: compacted is true when any ID moved, and one undo step restores the old IDs; an already compact mesh is a success with compacted=false and adds no undo step. Nothing is saved; an unknown actor is an error. Run it after remove_mesh_triangles or remove_unused_vertices, and before the xatlas method of unwrap_mesh_uvs.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -215,20 +215,6 @@ Copy the geometry of a UStaticMesh asset INTO the live dynamic mesh of a Dynamic
 | `lod_index` | number | no | Optional source LOD to read (default 0), from 0 to the mesh's last LOD, echoed as requested_lod_index; a negative one or one the mesh does not have is an error. |
 
 **Returns:** `{ source_static_mesh_path, actor_name, lod_index, requested_lod_index, read_hi_res_source, read_render_data, outcome_success: bool, triangle_count, vertex_count, copied: bool }`
-
-## `delete_mesh_triangles`
-
-*Destructive.*
-
-Delete the listed triangle IDs (triangle_ids, or a single triangle_id) from a DynamicMeshActor's live dynamic mesh in the editor world; IDs that do not exist are skipped, so compare num_deleted with requested_count (a missing ID is not an error: deleted just comes back false). One undo step restores the triangles, and a call that deletes none adds no undo step; reply actor_name is the component name, not the actor label.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actor_name` | string | yes | Label or object name (case-insensitive) of the target DynamicMeshActor in the editor world. |
-| `triangle_ids` | array | no | Non-empty array of non-negative integer triangle IDs, e.g. [0, 5, 12]; any negative or non-numeric entry fails the call. Required unless triangle_id is given. |
-| `triangle_id` | number | no | Optional single non-negative triangle ID, read as triangle_ids [triangle_id] when triangle_ids is absent. |
-
-**Returns:** `{ actor_name, num_deleted, requested_count, deleted: bool, triangle_id?: int, triangle_count, previous_triangle_count } -- deleted is num_deleted > 0; triangle_id echoes the single ID when it was given.`
 
 ## `find_nearest_point_on_mesh`
 
@@ -388,11 +374,25 @@ Destroy a DynamicMeshActor in the editor world, found by label or object name, i
 
 **Returns:** `{ actor_name: string, actor_internal_name: string, destroyed: bool, triangle_count_before: int, note?: string }`
 
+## `remove_mesh_triangles`
+
+*Destructive.*
+
+Delete the listed triangle IDs (triangle_ids, or a single triangle_id) from a DynamicMeshActor's live dynamic mesh in the editor world; IDs that do not exist are skipped, so compare num_deleted with requested_count (a missing ID is not an error: deleted just comes back false). One undo step restores the triangles, and a call that deletes none adds no undo step; reply actor_name is the component name, not the actor label.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `actor_name` | string | yes | Label or object name (case-insensitive) of the target DynamicMeshActor in the editor world. |
+| `triangle_ids` | array | no | Non-empty array of non-negative integer triangle IDs, e.g. [0, 5, 12]; any negative or non-numeric entry fails the call. Required unless triangle_id is given. |
+| `triangle_id` | number | no | Optional single non-negative triangle ID, read as triangle_ids [triangle_id] when triangle_ids is absent. |
+
+**Returns:** `{ actor_name, num_deleted, requested_count, deleted: bool, triangle_id?: int, triangle_count, previous_triangle_count } -- deleted is num_deleted > 0; triangle_id echoes the single ID when it was given.`
+
 ## `remove_unused_vertices`
 
 *Destructive.*
 
-Deletes the orphan vertices (those no triangle uses) of a DynamicMeshActor's live dynamic mesh in the editor world and refreshes its render data; triangles and their shape are untouched. Remaining vertex IDs are not renumbered: run compact_mesh afterwards for dense IDs. A mesh without orphan vertices is a success with removed false and adds no undo step; otherwise one undo step restores the mesh. The level is marked dirty, nothing is saved to an asset; an unknown actor or one without a dynamic mesh is an error. Typical after delete_mesh_triangles or apply_mesh_boolean; open seams are closed by weld_mesh_edges, overlaps by repair_mesh_self_intersections, and get_dynamic_mesh_info reads the counts.
+Deletes the orphan vertices (those no triangle uses) of a DynamicMeshActor's live dynamic mesh in the editor world and refreshes its render data; triangles and their shape are untouched. Remaining vertex IDs are not renumbered: run compact_mesh afterwards for dense IDs. A mesh without orphan vertices is a success with removed false and adds no undo step; otherwise one undo step restores the mesh. The level is marked dirty, nothing is saved to an asset; an unknown actor or one without a dynamic mesh is an error. Typical after remove_mesh_triangles or apply_mesh_boolean; open seams are closed by weld_mesh_edges, overlaps by repair_mesh_self_intersections, and get_dynamic_mesh_info reads the counts.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

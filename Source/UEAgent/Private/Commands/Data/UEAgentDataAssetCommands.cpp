@@ -1566,7 +1566,8 @@ TSharedPtr<FJsonObject> HandleSetDataTableRow(const TSharedPtr<FJsonObject>& Par
     return WriteDataTableRow(Params, /*bRequireExisting*/ !bCreateIfMissing);
 }
 
-// MCP:delete_data_table_row - Remove one row from a DataTable by key, saving the asset and VERIFYING the removal by re-reading (it reports existed, removed, still_exists and the new row_count, so the reply is its own oracle rather than a bare success). Check existed to tell "deleted it" from "there was never such a key" (then saved=false, nothing saved). Anything still referencing that row name by handle now resolves to nothing, silently -- audit with find_blueprint_node_references before deleting a live row.
+// MCP:remove_data_table_row - Remove one row from a DataTable by key, saving the asset and VERIFYING the removal by re-reading (it reports existed, removed, still_exists and the new row_count, so the reply is its own oracle rather than a bare success). Check existed to tell "deleted it" from "there was never such a key" (then saved=false, nothing saved). Anything still referencing that row name by handle now resolves to nothing, silently -- audit with find_blueprint_node_references before deleting a live row.
+//   @renamed-from delete_data_table_row
 //   @param table_path - Full asset path of the DataTable
 //   @param row_name - Name (key) of the row to remove
 //   @returns { table_path, row_name, existed, removed, still_exists, row_count, saved, note? }
@@ -1619,7 +1620,7 @@ TSharedPtr<FJsonObject> HandleDeleteDataTableRow(const TSharedPtr<FJsonObject>& 
         return mcp_common::MakeOkReply(Reply);
     }
 
-    return mcp_common::MakeSavedReply(Reply, bSaved, TEXT("delete_data_table_row"));
+    return mcp_common::MakeSavedReply(Reply, bSaved, TEXT("remove_data_table_row"));
 }
 
 // MCP:import_data_table_csv - Bulk-load a DataTable from a CSV string -- the fast path for authoring or restoring many rows at once. DESTRUCTIVE: it REPLACES the table's rows, so any row not in the CSV is gone; export first (export_data_table_as_csv) if you meant to merge. Always read the problems array and problem_count: the native importer reports per-cell failures there while still succeeding overall, and enum values whose display name contains spaces are cut at the first space and silently land on the index-0 enumerator. For a handful of rows prefer set_data_table_rows_from_json, which reports per-row results.
@@ -1998,6 +1999,7 @@ namespace UEAgentDataAssetCommandsImpl
 }
 
 // MCP:set_data_table_row_fields - Write only the named cells of one DataTable row via the native JSON importer, deep-merged onto the current row so untouched columns and struct sub-fields survive, then save. Returns changed_columns, unchanged_despite_request, unknown_columns (skipped) and the row as ExportText. For many rows use set_data_table_rows_from_json.
+//   @core
 //   @param data_table - Full asset path of the DataTable (table_path also accepted)
 //   @param row_name - Name (key) of the row to write
 //   @param fields - Object of {column_name: value} to overlay onto the current row (only these cells are written); a TMap<Enum,SoftClass> value must be an object of {EnumName: bare-class-path} (e.g. {"MyEnumValue":"/Game/...ABP_x_C"}) -- passed through verbatim, never wrapped
@@ -2169,6 +2171,7 @@ TSharedPtr<FJsonObject> HandleSetDataTableRowFields(const TSharedPtr<FJsonObject
 }
 
 // MCP:get_data_table_row - Read ONE row of a DataTable by key and get every column as JSON. Reads the row memory untyped (FindRowUnchecked), so it works on Blueprint / user-defined row structs that are not FTableRowBase children, where the typed lookup reports "Row not found" for rows that exist; a miss here really is a missing key. Serializes TMap, nested struct and GameplayTag columns in row_data. Two optional renderings of the same row: include_native_json adds row_json, the verbatim string of UE's own DataTable JSON writer -- the exact format set_data_table_row_from_json consumes, so it is the read half of a copy/round-trip (it emits GameplayTagContainers in the ExportText form the importer accepts; the round trip is not lossless for multi-word user-defined enums, so re-read what you wrote); include_export_text adds fields, every cell as its byte-exact ExportText string, so TMap<Enum,SoftClass>, nested struct arrays and soft references appear in full (row_data shows such TMaps as {}) -- the form to copy a vendor row or to tell an empty enum from an unwritten one. Use get_data_table_rows when you want the enum DISPLAY names.
+//   @core
 //   @param table_path - The full asset path to the DataTable.
 //   @param row_name - The name of the row to retrieve.
 //   @param include_native_json - Optional bool, default false: add row_json, the row as UE's native DataTable JSON string.
@@ -2189,7 +2192,7 @@ TSharedPtr<FJsonObject> HandleGetDataTableRow(const TSharedPtr<FJsonObject>& Par
     bool bIncludeExportText = false;
     Params->TryGetBoolField(TEXT("include_export_text"), bIncludeExportText);
 
-    // The row memory is looked up untyped (FindRowUnchecked, as set/delete_data_table_row do).
+    // The row memory is looked up untyped (FindRowUnchecked, as set/remove_data_table_row do).
     // The typed FindRow<FTableRowBase> goes through FindRowInternal, which returns nullptr for ANY row struct
     // that is not a child of FTableRowBase BEFORE it even looks at the row map -- so every row of a table
     // keyed by a Blueprint / user-defined struct would read as missing although get_data_table_info and
@@ -3786,7 +3789,7 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("create_curve_asset"), &HandleCreateCurveAsset },
     { TEXT("create_data_asset"), &HandleCreateDataAsset },
     { TEXT("create_data_table"), &HandleCreateDataTable },
-    { TEXT("delete_data_table_row"), &HandleDeleteDataTableRow },
+    { TEXT("remove_data_table_row"), &HandleDeleteDataTableRow },
     { TEXT("diff_data_tables"), &HandleDiffDataTables },
     { TEXT("export_data_table_as_csv"), &HandleExportDataTableAsCsv },
     { TEXT("export_data_table_as_json"), &HandleExportDataTableAsJson },

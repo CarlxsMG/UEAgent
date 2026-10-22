@@ -2,7 +2,7 @@
 
 # Physics
 
-48 tools for physics assets and constraints, collision, physical materials, Chaos geometry collections and fields, instanced static meshes, raycasts and overlap queries.
+47 tools for physics assets and constraints, collision, physical materials, Chaos geometry collections and fields, instanced static meshes, raycasts and overlap queries.
 
 Back to the [index](README.md).
 
@@ -224,7 +224,7 @@ Create a UPhysicsAsset at package_path/name by generating bodies and constraints
 | `package_path` | string | no | Content folder for the new asset (default /Game/Physics; an empty string also uses it) |
 | `skeletal_mesh_path` | string | no | Skeletal mesh to generate the bodies from (default /Engine/EngineMeshes/SkeletalCube); read only for a new asset, which fails when it does not load |
 
-**Returns:** `{ asset_path: string, asset_name: string, package_path: string, body_count: number, constraint_count: number, skeletal_mesh_path: string, bodies: [{ index: number, bone_name: string, primitive_count?: number }], skeleton_bones: [string], constraints: [object], already_existed: bool, created: bool, saved: bool, bodies_generated?: bool, generation_message?: string, save_error?: string, note?: string }`
+**Returns:** `{ asset_path: string, asset_name: string, package_path: string, body_count: number, constraint_count: number, skeletal_mesh_path: string, bodies: [{ index: number, bone_name: string, object_path: string, primitive_count?: number }], skeleton_bones: [string], constraints: [object], already_existed: bool, created: bool, saved: bool, bodies_generated?: bool, generation_message?: string, save_error?: string, note?: string }`
 
 ## `cut_geometry_collection_with_planes`
 
@@ -365,7 +365,7 @@ Read a UPhysicsAsset without changing it: body_count and constraint_count; each 
 |---|---|---|---|
 | `physics_asset_path` | string | yes | Path of the UPhysicsAsset, e.g. "/Game/Physics/PA_Hero" or "/Game/Physics/PA_Hero.PA_Hero". |
 
-**Returns:** `{ asset_path: string, asset_name: string, body_count: number, constraint_count: number, skeletal_mesh_path: string, bodies: [{ index: number, bone_name: string, primitive_count?: number }], skeleton_bones: [string], constraints: [object] }`
+**Returns:** `{ asset_path: string, asset_name: string, body_count: number, constraint_count: number, skeletal_mesh_path: string, bodies: [{ index: number, bone_name: string, object_path: string, primitive_count?: number }], skeleton_bones: [string], constraints: [object] }`
 
 ## `get_physics_constraint_info`
 
@@ -515,28 +515,11 @@ Override the physical material (friction, restitution, surface type) of one plac
 
 **Returns:** `{ actor_name: string, component_name: string, physical_material_path: string, physical_material_name: string, applied_material_name?: string, verified: bool, applied: bool }`
 
-## `set_geometry_collection_connection_settings`
-
-*Destructive, idempotent.*
-
-Write the five clustering and connection-graph properties of a UGeometryCollection asset (cluster connection type, EnableClustering, ClusterGroupIndex, MaxClusterLevel, bounds filtering margin) in an undo transaction, invalidate it and save it; a failed save makes success false. Every field is written on each call, so an omitted one goes back to its listed default, and an unrecognized connection type becomes PointImplicit. The bone hierarchy is not rebuilt: cluster_geometry_collection builds clusters and compute_geometry_collection_proximity the proximity graph. The reply reads back the type, enable_clustering and max_cluster_level.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `geometry_collection_path` | string | yes | Asset path of the UGeometryCollection |
-| `cluster_connection_type` | string | no | PointImplicit, DelaunayTriangulation, MinimalSpanningSubsetDelaunayTriangulation, BoundsOverlapFilteredDelaunayTriangulation, PointImplicitAugmentedWithMinimalDelaunay, or None, default PointImplicit |
-| `enable_clustering` | boolean | no | If true, enable cluster graph generation, default true |
-| `cluster_group_index` | number | no | Cluster group index, default 0 |
-| `max_cluster_level` | number | no | Maximum hierarchy level to cluster, default 100 |
-| `bounds_filtering_margin` | number | no | Connection graph bounds filtering margin, default 0 |
-
-**Returns:** `{ geometry_collection_path: string, cluster_connection_type: string, enable_clustering: bool, max_cluster_level: int, success: bool, saved: bool }`
-
 ## `set_geometry_collection_damage`
 
 *Destructive, idempotent.*
 
-Set the damage model and/or the per-level damage thresholds of a UGeometryCollection asset in an undo transaction, then save it. Only the fields given change; damage_thresholds overwrites the whole threshold list, skipping entries that are not numbers. Succeeds only when the package reaches disk; a failed save leaves the change in memory only (saved false, save_error). The reply reads back damage_model ("Threshold", "MaterialStrength" or "Unknown") and num_thresholds; get_geometry_collection_info shows them later. Mass: set_geometry_collection_mass; clustering: set_geometry_collection_connection_settings.
+Set the damage model and/or the per-level damage thresholds of a UGeometryCollection asset in an undo transaction, then save it. Only the fields given change; damage_thresholds overwrites the whole threshold list, skipping entries that are not numbers. Succeeds only when the package reaches disk; a failed save leaves the change in memory only (saved false, save_error). The reply reads back damage_model ("Threshold", "MaterialStrength" or "Unknown") and num_thresholds; get_geometry_collection_info shows them later. Mass: set_geometry_collection_mass; clustering: set_properties (ClusterConnectionType, EnableClustering...).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

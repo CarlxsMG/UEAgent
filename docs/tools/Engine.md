@@ -2,7 +2,7 @@
 
 # Engine
 
-51 tools for Niagara systems and emitters with their modules, renderers, data interfaces, simulation stages and event handlers, and the engine's status.
+50 tools for Niagara systems and emitters with their modules, renderers, data interfaces, simulation stages and event handlers, and the engine's status.
 
 Back to the [index](README.md).
 
@@ -74,7 +74,7 @@ Insert an engine module script into a Niagara emitter's particle stack.  Loads t
 
 *Additive.*
 
-Add a new renderer (Sprite / Ribbon / Mesh / Light / Decal) to a Niagara emitter, optionally with its properties seeded in the same call.  Creates a UNiagaraRendererProperties instance of the requested concrete class inside the emitter, as the Niagara editor does, optionally sets the Material UPROPERTY and the supplied properties (the keys set_niagara_renderer_properties takes, converted and clamped by reflection; enum keys fire PostEditChangeProperty), and appends it to the emitter's RendererProperties array, in one undo step. A Light is seeded with affects_translucency and alpha_scales_brightness true (the engine defaults are false), as the dedicated light-renderer tool seeded it; properties overrides either. Then requests a system compile and saves the asset. verified is true when the renderer is in the emitter's list and resolves that emitter; properties reads the stored values back. Each call adds one more renderer. An unknown renderer_type, a material_path that does not load as a material, an unknown key in properties, a numeric property given something other than a JSON number, or a value that does not convert is an error and nothing is created. A failed save makes success false, with saved=false and save_error, the renderer kept in memory.
+Add a new renderer (Sprite / Ribbon / Mesh / Light / Decal) to a Niagara emitter, optionally with its properties seeded in the same call.  Creates a UNiagaraRendererProperties instance of the requested concrete class inside the emitter, as the Niagara editor does, optionally sets the Material UPROPERTY and the supplied properties (converted and clamped by reflection; enum keys fire PostEditChangeProperty), and appends it to the emitter's RendererProperties array, in one undo step. A Light is seeded with affects_translucency and alpha_scales_brightness true (the engine defaults are false), as the dedicated light-renderer tool seeded it; properties overrides either. Then requests a system compile and saves the asset. verified is true when the renderer is in the emitter's list and resolves that emitter; properties reads the stored values back. Each call adds one more renderer. An unknown renderer_type, a material_path that does not load as a material, an unknown key in properties, a numeric property given something other than a JSON number, or a value that does not convert is an error and nothing is created. A failed save makes success false, with saved=false and save_error, the renderer kept in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -82,7 +82,7 @@ Add a new renderer (Sprite / Ribbon / Mesh / Light / Decal) to a Niagara emitter
 | `emitter_name` | string | yes | Name of the emitter handle (the human-readable name in the system's emitter list). |
 | `renderer_type` | string | yes | One of "Sprite" / "Ribbon" / "Mesh" / "Light" / "Decal" (case-insensitive). |
 | `material_path` | string | no | Optional asset path; sets the renderer's Material property (a class without one, such as Light, ignores it). If omitted, the renderer is added with a null material (still a valid empty renderer). |
-| `properties` | object | no | Optional object of renderer properties to seed, with the keys and value forms of set_niagara_renderer_properties, e.g. {"radius_scale": 2, "use_inverse_squared_falloff": false, "color_add": {"X": 1, "Y": 0, "Z": 0}} for a Light (scales clamped at 0; affects_translucency and alpha_scales_brightness default to true) or {"decal_source_mode": "Emitter", "renderer_visibility": 1, "decal_screen_size_fade": 0.1} for a Decal. Keys the renderer class lacks are listed in not_applicable. |
+| `properties` | object | no | Optional object of renderer properties to seed, e.g. {"radius_scale": 2, "use_inverse_squared_falloff": false, "color_add": {"X": 1, "Y": 0, "Z": 0}} for a Light (scales clamped at 0; affects_translucency and alpha_scales_brightness default to true) or {"decal_source_mode": "Emitter", "renderer_visibility": 1, "decal_screen_size_fade": 0.1} for a Decal. Keys the renderer class lacks are listed in not_applicable. |
 
 **Returns:** `{ system_path: string, emitter_name: string, renderer_type: string, renderer_class: string, renderer_index: int, material_path: string, applied: [string], not_applicable: [string], post_edit_fired: bool, properties: object, renderer_count: int, verified: bool, saved: bool, save_error?: string }`
 
@@ -233,14 +233,14 @@ List every emitter handle of a Niagara System asset, or just one chosen by displ
 
 *Read-only.*
 
-List every renderer of one emitter in a Niagara System asset, in stack order, without changing anything: per renderer its 0-based index, class (Sprite, Mesh, Ribbon, Light, Decal...), object name and material path, the authored fields set_niagara_renderer_properties writes (bIsEnabled, SortOrderHint, MotionVectorSetting, bAllowInCullProxies plus the Sprite, Mesh, Light or Decal fields the class has) and, for a Mesh renderer, its static-mesh slots. Use it to find the renderer_index the renderer tools take; for every property of one renderer use get_niagara_renderer_info. Change a renderer with set_niagara_renderer_properties, set_niagara_renderer_material or set_niagara_mesh_renderer_mesh, add one with add_niagara_renderer, take one out with remove_niagara_renderer. An unknown system or emitter name is an error; an emitter with no renderers is a success with renderer_count 0.
+List every renderer of one emitter in a Niagara System asset, in stack order, without changing anything: per renderer its 0-based index, class (Sprite, Mesh, Ribbon, Light, Decal...), object name and material path, its object_path (which set_properties writes), the authored fields (bIsEnabled, SortOrderHint, MotionVectorSetting, bAllowInCullProxies plus the Sprite, Mesh, Light or Decal fields the class has) and, for a Mesh renderer, its static-mesh slots. Use it to find the renderer_index the renderer tools take; for every property of one renderer use get_niagara_renderer_info. Change a renderer with set_properties on its object_path, set_niagara_renderer_material or set_niagara_mesh_renderer_mesh, add one with add_niagara_renderer, take one out with remove_niagara_renderer. An unknown system or emitter name is an error; an emitter with no renderers is a success with renderer_count 0.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `system_path` | string | yes | Niagara System asset, package or object path, e.g. '/Game/FX/NS_Sparks'. |
 | `emitter_name` | string | yes | Display name of the emitter handle in that system, case ignored, e.g. 'Sparks', as get_niagara_emitter_handles lists it. |
 
-**Returns:** `{ system_path: string, emitter_name: string, renderer_count: int, renderers: [{ index, class, display_name, material_path, properties:{...}, meshes?:[{ slot, mesh_path }] }] }`
+**Returns:** `{ system_path: string, emitter_name: string, renderer_count: int, renderers: [{ index, class, display_name, object_path, material_path, properties:{...}, meshes?:[{ slot, mesh_path }] }] }`
 
 ## `get_niagara_emitter_runtime_summary`
 
@@ -311,7 +311,7 @@ Read the simulation stages of a Niagara emitter (read-only): every stage of FVer
 | `stage_index` | number | no | Optional 0-based index of a single stage to return. |
 | `stage_name` | string | no | Optional SimulationStageName to match if stage_index is not supplied. |
 
-**Returns:** `{ system_path: string, emitter_name: string, simulation_stage_count: int, total_simulation_stages: int, simulation_stages: [{ index, stage_name, class, enabled, iteration_source? }] }`
+**Returns:** `{ system_path: string, emitter_name: string, simulation_stage_count: int, total_simulation_stages: int, simulation_stages: [{ index, stage_name, class, enabled, object_path, iteration_source? }] }`
 
 ## `get_niagara_system_info`
 
@@ -450,7 +450,7 @@ Remove one module from a Niagara emitter's particle spawn or update stack, in on
 
 *Destructive.*
 
-Take the renderer at renderer_index (0-based, in get_niagara_emitter_renderers order) out of one emitter of a Niagara System asset, in one undo step, then request a system compile and save. renderer_index is required and must be a JSON number of 0 or more; an index out of range, an empty renderer slot, or an unknown system or emitter is an error and nothing changes. The renderers after it move down one index. A failed save makes success false, with saved=false and save_error, the removal kept in memory. Returns the class of the renderer taken out and the count left. Add one with add_niagara_renderer; change one with set_niagara_renderer_properties.
+Take the renderer at renderer_index (0-based, in get_niagara_emitter_renderers order) out of one emitter of a Niagara System asset, in one undo step, then request a system compile and save. renderer_index is required and must be a JSON number of 0 or more; an index out of range, an empty renderer slot, or an unknown system or emitter is an error and nothing changes. The renderers after it move down one index. A failed save makes success false, with saved=false and save_error, the removal kept in memory. Returns the class of the renderer taken out and the count left. Add one with add_niagara_renderer; change one with set_properties on its object_path from get_niagara_emitter_renderers.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -694,49 +694,6 @@ Set the Material UPROPERTY on a Niagara renderer (Sprite, Ribbon, Mesh or Decal:
 | `material_path` | string | yes | Asset path of the UMaterialInterface to assign. |
 
 **Returns:** `{ system_path: string, emitter_name: string, renderer_index: int, renderer_class: string, previous_material_path: string, material_path: string, verified: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
-
-## `set_niagara_renderer_properties`
-
-*Destructive, idempotent.*
-
-Set properties of one renderer (Sprite, Mesh, Ribbon, Light or Decal) of a Niagara emitter, found by emitter_name and renderer_index, in one undo step, then request a system compile and save. Use it over set_properties, which neither finds the renderer nor applies ClampMin/ClampMax, compiles or saves. Only supplied fields are written; enum fields (alignment, facing_mode, sort_mode, motion_vector_setting, decal_source_mode) also fire PostEditChangeProperty. Every field is converted before the first write, so a value that does not convert (an unknown enum name, an array for a struct field) or a non-number renderer_index is an error and nothing changes. Values already held: changed=false, saved=false. Keys the renderer class lacks are listed in not_applicable. A failed save makes success false with save_error. Materials: set_niagara_renderer_material; mesh: set_niagara_mesh_renderer_mesh; read back: get_niagara_renderer_info.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `system_path` | string | yes | Asset path of the Niagara System. |
-| `emitter_name` | string | yes | Name of the emitter handle. |
-| `renderer_index` | number | yes | 0-based index of the renderer (use get_niagara_emitter_renderers). |
-| `enabled` | string | no | Optional bool: base bIsEnabled (also accepted as renderer_enabled). |
-| `sort_order_hint` | string | no | Optional int: base SortOrderHint. |
-| `motion_vector_setting` | string | no | Optional enum name: base MotionVectorSetting (e.g. "AutoDetect"/"Precise"/"Disable"). |
-| `allow_in_cull_proxies` | string | no | Optional bool: base bAllowInCullProxies. |
-| `alignment` | string | no | Optional enum name (Sprite): Alignment (e.g. "Unaligned"/"VelocityAligned"/"CustomAlignment"/"Automatic"). |
-| `facing_mode` | string | no | Optional enum name (Sprite ENiagaraSpriteFacingMode or Mesh ENiagaraMeshFacingMode, resolved by class): FacingMode. |
-| `sort_mode` | string | no | Optional enum name (Sprite/Mesh): SortMode (e.g. "None"/"ViewDepth"/"ViewDistance"/"CustomAscending"/"CustomDescending"). |
-| `sub_image_size` | string | no | Optional {X,Y} object (Sprite/Mesh): SubImageSize; an [x,y] array is an error. |
-| `macro_uv_radius` | string | no | Optional float (Sprite): MacroUVRadius. |
-| `pivot_in_uv_space` | string | no | Optional {X,Y} object (Sprite): PivotInUVSpace; an [x,y] array is an error. |
-| `cast_shadows` | string | no | Optional bool (Sprite): bCastShadows. |
-| `renderer_visibility` | string | no | Optional int (Sprite): RendererVisibility tag value. |
-| `override_materials` | string | no | Optional bool (Mesh): bOverrideMaterials. |
-| `mesh_bounds_scale` | string | no | Optional {X,Y,Z} object (Mesh): MeshBoundsScale; an [x,y,z] array is an error. |
-| `locked_axis` | string | no | Optional {X,Y,Z} object (Mesh): LockedAxis; an [x,y,z] array is an error. |
-| `use_inverse_squared_falloff` | string | no | Optional bool (Light): bUseInverseSquaredFalloff. |
-| `affects_translucency` | string | no | Optional bool (Light): bAffectsTranslucency. |
-| `allow_mega_lights` | string | no | Optional bool (Light): bAllowMegaLights. |
-| `mega_lights_cast_shadows` | string | no | Optional bool (Light): bMegaLightsCastShadows. |
-| `alpha_scales_brightness` | string | no | Optional bool (Light): bAlphaScalesBrightness. |
-| `override_inverse_exposure_blend` | string | no | Optional bool (Light): bOverrideInverseExposureBlend. |
-| `radius_scale` | string | no | Optional float (Light, ClampMin=0): RadiusScale. |
-| `default_exponent` | string | no | Optional float (Light, ClampMin=0): DefaultExponent (used when use_inverse_squared_falloff=false). |
-| `specular_scale` | string | no | Optional float (Light, ClampMin=0): SpecularScale. |
-| `diffuse_scale` | string | no | Optional float (Light, ClampMin=0): DiffuseScale. |
-| `color_add` | string | no | Optional {X,Y,Z} object (Light): ColorAdd (FVector3f RGB shift); an [x,y,z] array is an error. |
-| `inverse_exposure_blend` | string | no | Optional float (Light): InverseExposureBlend. |
-| `decal_screen_size_fade` | string | no | Optional float (Decal): DecalScreenSizeFade. |
-| `decal_source_mode` | string | no | Optional enum name/int (Decal): SourceMode ("Particles"/"Emitter"); fires PostEditChangeProperty so UpdateSourceModeDerivates runs. |
-
-**Returns:** `{ system_path, emitter_name, renderer_index, renderer_class, applied:[prop names written], not_applicable:[input keys], post_edit_fired: bool, properties:{round-trip dump}, changed: bool, saved: bool, save_error?, note? }`
 
 ## `set_niagara_simulation_stage_properties`
 

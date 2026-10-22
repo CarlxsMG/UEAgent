@@ -633,7 +633,7 @@ namespace McpReadbackInResponseB
 			return nullptr;
 		}
 		TArray<FString> Warnings;
-		const FV Bp = Or(Get(Params, TEXT("blueprint_name")), Get(Params, TEXT("blueprint_path")));
+		const FV Bp = Or(Get(Params, TEXT("asset_path")), Get(Params, TEXT("blueprint_name")), Get(Params, TEXT("blueprint_path")));
 		// The project's vendored-library roots (Project Settings > Plugins > UEAgent); the
 		// match is case-insensitive.
 		if (mcp_common::IsUnderReadOnlyRoot(LowerStrip(Bp)))

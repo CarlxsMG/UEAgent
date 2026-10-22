@@ -529,9 +529,9 @@ bool UUEAgentBridge::IsHttpRunning() const
     return HttpServer && HttpServer->IsRunning();
 }
 
-bool UUEAgentBridge::IsHttpCompactTools() const
+EMcpToolsMode UUEAgentBridge::GetHttpToolsMode() const
 {
-    return IsHttpRunning() && HttpServer->IsCompactTools();
+    return IsHttpRunning() ? HttpServer->GetDefaultToolsMode() : EMcpToolsMode::Core;
 }
 
 bool UUEAgentBridge::StartHttpServer()
@@ -582,7 +582,8 @@ bool UUEAgentBridge::StartHttpServer()
         Catalog.IsValid() ? Catalog->NumTools() : 0,
         Catalog.IsValid() ? Catalog->NumParams() : 0,
         Settings->AuthToken.IsEmpty() ? TEXT("") : TEXT(", with token"),
-        HttpServer->IsCompactTools() ? TEXT(", compact tool list (UEAGENT_TOOLS)") : TEXT(""));
+        HttpServer->GetDefaultToolsMode() == EMcpToolsMode::All ? TEXT(", every tool listed (UEAGENT_TOOLS=all)")
+        : HttpServer->GetDefaultToolsMode() == EMcpToolsMode::Compact ? TEXT(", compact tool list (UEAGENT_TOOLS=compact)") : TEXT(", core tool list"));
     return true;
 }
 
@@ -609,7 +610,8 @@ FString UUEAgentBridge::DescribeHttpStatus() const
     }
     return FString::Printf(TEXT("MCP HTTP: http://127.0.0.1:%d/mcp | %d connections | %lld requests | %lld tools/call | %s%s"),
         HttpServer->GetPort(), HttpServer->GetNumConnections(), HttpServer->GetNumRequests(), HttpServer->GetNumToolCalls(), *CatalogText,
-        HttpServer->IsCompactTools() ? TEXT(" | compact tool list") : TEXT(""));
+        HttpServer->GetDefaultToolsMode() == EMcpToolsMode::All ? TEXT(" | every tool listed")
+        : HttpServer->GetDefaultToolsMode() == EMcpToolsMode::Compact ? TEXT(" | compact tool list") : TEXT(" | core tool list"));
 }
 
 uint16 UUEAgentBridge::GetHttpPort() const
@@ -1462,11 +1464,22 @@ TFuture<FString> UUEAgentBridge::EnqueueToolCall(const FString& RequestedCommand
             Before = McpReadback::TakeBefore(CommandType, ContractParams, Send);
         }
 
+        ForwardedBy.Reset();
+        ForwardedCommand.Reset();
+        ForwardedParams.Reset();
+        ForwardCount = 0;
         TSharedPtr<FJsonObject> Envelope = CheckPIEOwnershipGuard(CommandType, Params, SessionId);
         if (!Envelope.IsValid())
         {
             Envelope = DispatchSingleCommand(RequestedCommandType, Params); // rewrites aliases and rotations IN PLACE
         }
+        // A tool that handed its call to another one (mcp_common::ForwardCall) is checked as that call: the forwarder's
+        // own checks are written for its native path. One that forwarded several calls gets neither contract.
+        const bool bForwarded = ForwardCount > 0 && ForwardedBy == CommandType;
+        const FString ContractCommand = bForwarded ? ForwardedCommand : CommandType;
+        const TSharedPtr<FJsonObject> ContractCallParams = bForwarded
+            ? McpBridgeParams::ContractView(ForwardedCommand, ForwardedParams.IsValid() ? ForwardedParams : MakeShared<FJsonObject>())
+            : ContractParams;
 
         bool bRefused = false;
         TSharedPtr<FJsonObject> Result = McpReadback::Unwrap(Envelope, bRefused);
@@ -1475,9 +1488,10 @@ TFuture<FString> UUEAgentBridge::EnqueueToolCall(const FString& RequestedCommand
         // stated reason is not the real one.
         const TSharedPtr<FJsonObject> RefusalInfo = McpPy::AsDict(McpPy::Get(Result, TEXT("result")));
         const bool bPrecondition = bRefused && McpPy::TextOf(McpPy::Get(RefusalInfo, TEXT("refused_by"))) == TEXT("precondition");
-        if (!bPrecondition && McpReadback::HasContract(CommandType))
+        if (!bPrecondition && !(bForwarded && ForwardCount > 1) && McpReadback::HasContract(ContractCommand))
         {
-            Result = McpReadback::Verify(CommandType, ContractParams, Result, Send, Before);
+            // The before snapshot was taken for the tool as called, so a forwarded call has none.
+            Result = McpReadback::Verify(ContractCommand, ContractCallParams, Result, Send, bForwarded ? TSharedPtr<FJsonValue>() : Before);
         }
         Result = McpReadback::AnnotateOffload(CommandType, Result);
         McpActivity::Record(CommandType, Started, (FPlatformTime::Seconds() - StartSeconds) * 1000.0, Result, bRefused);

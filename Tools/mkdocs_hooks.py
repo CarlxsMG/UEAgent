@@ -349,9 +349,9 @@ def llms_txt(config) -> str:
     base = config["site_url"]
     lines = [f"# {config['site_name']}", "", f"> {config['site_description']}", "",
              "UEAgent is an editor plugin for Unreal Engine 5.7 and 5.8. While the editor is open it serves MCP over Streamable "
-             "HTTP at http://127.0.0.1:55561/mcp, and every tool call runs on the editor's game thread. A client that "
-             "cannot list every tool connects to http://127.0.0.1:55561/mcp?tools=compact instead, which lists "
-             "find_tools, describe_tool and call_tool.", ""]
+             "HTTP at http://127.0.0.1:55561/mcp, and every tool call runs on the editor's game thread. By default it "
+             "lists its core tools plus find_tools, describe_tool, call_tool and enable_toolset, which reach the rest; "
+             "?tools=all lists every tool and ?tools=compact only the first three.", ""]
 
     def entry(page) -> str:
         description = page.meta.get("description", "")

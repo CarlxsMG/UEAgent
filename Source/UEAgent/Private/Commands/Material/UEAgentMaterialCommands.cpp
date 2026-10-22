@@ -571,7 +571,7 @@ namespace UEAgentMaterialCommandsImpl
 #endif
 }
 
-// MCP:create_material - Create a new base material asset (UMaterial) -- the graph-owning master whose parameters and static switches every instance of it inherits. Prefer create_material_instance when you only need a re-skin of something that exists: an instance costs no new shader permutations and leaves the original updatable. After creating, build the graph with create_material_expression + connect_material_expressions, then verify with get_material_stats (compile_errors empty and stats_valid true) -- compile_material only acknowledges, it does not report errors, and a landscape material that fails to compile silently falls back to the default material.
+// MCP:create_material - Create a new base material asset (UMaterial) -- the graph-owning master whose parameters and static switches every instance of it inherits. Prefer create_material_instance when you only need a re-skin of something that exists: an instance costs no new shader permutations and leaves the original updatable. After creating, build the graph with add_graph_node + connect_pins, then verify with get_material_stats (compile_errors empty and stats_valid true) -- compile_material only acknowledges, it does not report errors, and a landscape material that fails to compile silently falls back to the default material.
 //   @param material_path - Content FOLDER the material is created in (e.g., '/Game/Materials')
 //   @param material_name - Name of the material asset to create
 //   @returns { material_path: string (object path of the new material, '/Game/Materials/M_X.M_X'), material_name: string, package_path: string, success: bool } -- an existing asset of that name is an error, never overwritten
@@ -781,6 +781,7 @@ TSharedPtr<FJsonObject> HandleCreateMaterialInstance(const TSharedPtr<FJsonObjec
 }
 
 // MCP:create_material_expression - Add ONE node to a material graph -- or to a material function's internal graph -- by expression class path (e.g. /Script/Engine.MaterialExpressionConstant, ...TextureSample, ...ScalarParameter), at a graph position. The building block of headless material authoring: create the nodes, then wire them with connect_material_expressions and connect_to_material_output (inside a function: connect_material_function_pins, then recompile_material_function). The node arrives UNCONNECTED, so nothing renders differently until it is wired -- verify with get_material_graph_info and get_material_stats, not with the success flag. Inverse: delete_material_expression (with material_function_path inside a function).
+//   @retired add_graph_node - asset_path=<material or material function>, node_type=<expression class path, e.g. /Script/Engine.MaterialExpressionConstant>, position_x=<x>, position_y=<y>; the reply's node_id is the expression name
 //   @param material_path - Full path to the material (e.g., '/Game/Materials/MyMaterial.MyMaterial'); a UMaterialFunction path is accepted too and creates the node inside that function
 //   @param material_function_path - Alias of material_path that addresses a UMaterialFunction (or material layer): the node is created inside the function's graph
 //   @param expression_class_name - Material expression class name (e.g., '/Script/Engine.MaterialExpressionConstant')
@@ -881,6 +882,7 @@ TSharedPtr<FJsonObject> HandleCreateMaterialExpression(const TSharedPtr<FJsonObj
 }
 
 // MCP:delete_material_expression - Delete ONE node from a material graph -- or from a material function's internal graph -- by name. Deliberately one at a time, and that is the safe way to empty a graph: the engine's bulk delete_all_material_expressions can leave half the nodes behind with no error, and a rebuild on top then produces duplicate parameter names that no parameter listing reveals (duplicates collapse by name). Loop this instead, re-reading get_material_graph_info until its expression_count reaches 0. The underlying engine call also returns false while having done the work, so count the nodes rather than trusting the flag. Inside a function (material_function_path, or a function path in material_path) the links into the node are broken, the node leaves the function's expressions and the reply re-reads them (deleted, expression_count); the change stays in memory until recompile_material_function saves it. Inverse of create_material_expression; a node that is not there is an error and nothing changes.
+//   @retired remove_graph_node - asset_path=<material or material function>, node_id=<expression name>
 //   @param material_path - Full path to the material (e.g., '/Game/Materials/MyMaterial.MyMaterial'); a UMaterialFunction path is accepted too and deletes the node inside that function
 //   @param material_function_path - Alias of material_path that addresses a UMaterialFunction (or material layer): the node is deleted from the function's graph
 //   @param expression_name - Name of the material expression to delete
@@ -952,6 +954,7 @@ TSharedPtr<FJsonObject> HandleDeleteMaterialExpression(const TSharedPtr<FJsonObj
 }
 
 // MCP:connect_material_expressions - Wire one material node's output pin into another node's input pin -- the call that turns loose expressions into a working graph, and the only headless route to some pins. Input names go WITHOUT spaces (BaseColor and AmbientOcclusion work, "Base Color" does not), and MakeMaterialAttributes accepts named pins the graph walker reports as unnamed, including Displacement. A true return only means the pin NAME resolved: confirm the connection landed by re-reading get_material_graph_info, then compile and check get_material_stats.
+//   @retired connect_pins - asset_path=<material>, source_node_id=<from expression name>, source_pin=<output name, "" for the first>, target_node_id=<to expression name>, target_pin=<input name without spaces>
 //   @param material_path - Full path to the material (e.g., '/Game/Materials/MyMaterial.MyMaterial')
 //   @param from_expression_name - Name of the source material expression
 //   @param from_output_name - Name of the output pin on the source expression
@@ -1019,6 +1022,7 @@ TSharedPtr<FJsonObject> HandleConnectMaterialExpressions(const TSharedPtr<FJsonO
 }
 
 // MCP:disconnect_material_expressions - Disconnect an input of a material expression (inverse of connect_material_expressions) -- in a material, or inside a material function's graph (inverse of connect_material_function_pins) when material_function_path, or a function path in material_path, is given.  Idempotent: an input that is already disconnected returns already_disconnected=true (still success — the expression exists, there simply was no connection to break). Inside a function the change stays in memory until recompile_material_function saves it.
+//   @retired disconnect_pin - asset_path=<material or material function>, node_id=<to expression name>, pin_name=<input name>
 //   @param material_path - Full path to the material (e.g., '/Game/Materials/MyMaterial.MyMaterial'); a UMaterialFunction path is accepted too and disconnects inside that function
 //   @param material_function_path - Alias of material_path that addresses a UMaterialFunction (or material layer): the input is disconnected inside the function's graph
 //   @param to_expression_name - Name of the destination material expression whose input is disconnected

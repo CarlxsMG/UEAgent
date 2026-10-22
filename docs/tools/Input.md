@@ -2,7 +2,7 @@
 
 # Input
 
-23 tools for Enhanced Input actions, mapping contexts, modifiers and triggers, key mappings and force feedback.
+22 tools for Enhanced Input actions, mapping contexts, modifiers and triggers, key mappings and force feedback.
 
 Back to the [index](README.md).
 
@@ -158,16 +158,6 @@ Read ONE Enhanced Input mapping context asset (IMC): every action-to-key mapping
 | `mapping_index` | number | no | Optional 0-based index into the context's Mappings[] (the index add_mapping_to_context returns): only that binding is returned, even one without an action. Out of range is an error. |
 
 **Returns:** `{ context_path, context_name, mappings: [{ index, action_name, key (display name), key_name (the FKey name add_mapping_to_context takes), triggers: [{ index, class_name, display_name }], trigger_count }], mapping_count, total_mapping_count }`
-
-## `get_input_settings`
-
-*Read-only.*
-
-Read the project's LEGACY input mappings from UInputSettings: named action mappings (key + shift/ctrl/alt/cmd modifiers) and axis mappings (key + scale), each with its row count, in one call. Legacy only -- it does NOT see Enhanced Input mapping contexts, so on an Enhanced Input project it can return almost nothing while the game is fully bound. For the complete picture across both systems use list_all_input_mappings; for one Enhanced Input context use get_input_mapping_context.
-
-No parameters.
-
-**Returns:** `{ action_mappings: [{ action_name, key, shift, ctrl, alt, cmd }], action_mapping_count, axis_mappings: [{ axis_name, key, scale }], axis_mapping_count }`
 
 ## `get_player_input`
 

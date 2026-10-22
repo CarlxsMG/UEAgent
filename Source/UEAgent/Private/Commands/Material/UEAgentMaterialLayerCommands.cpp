@@ -50,7 +50,7 @@ namespace UEAgentMaterialLayerImpl
 // ---------------------------------------------------------------------------
 // add_material_attribute_layers_node
 // ---------------------------------------------------------------------------
-// MCP:add_material_attribute_layers_node - Adds a new MaterialAttributeLayers expression to a UMaterial asset, turns on bUseMaterialAttributes (the separate pins such as Base Color stop driving the material), wires the node into MaterialAttributes, recompiles and saves. Not idempotent: each call adds another node. Fails when the save fails; returns connected_material_attributes and num_expressions. Unwire: disconnect_to_material_output output_property=MaterialAttributes.
+// MCP:add_material_attribute_layers_node - Adds a new MaterialAttributeLayers expression to a UMaterial asset, turns on bUseMaterialAttributes (the separate pins such as Base Color stop driving the material), wires the node into MaterialAttributes, recompiles and saves. Not idempotent: each call adds another node. Fails when the save fails; returns connected_material_attributes and num_expressions. Unwire: disconnect_pin node_id=@output, pin_name=MaterialAttributes.
 //   @param material_path - Object path to the UMaterial, e.g. /Game/MyGame/M_Example
 //   @param node_name - Label echoed back in the reply only; it does not name or find any node in the graph
 //   @returns { material_path: string, expression_added: bool, expression_class: string, connected_material_attributes: bool, use_material_attributes: bool, num_expressions: int, recompiled: bool, saved: bool, node_name: string, save_error: string }

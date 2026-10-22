@@ -2,7 +2,7 @@
 
 # Animation
 
-214 tools for Animation Blueprints and state machines, montages, notifies and curves, blend spaces, skeletons and skeletal meshes, IK Rig and retargeting, Control Rig, Pose Search and motion warping.
+202 tools for Animation Blueprints and state machines, montages, notifies and curves, blend spaces, skeletons and skeletal meshes, IK Rig and retargeting, Control Rig, Pose Search and motion warping.
 
 Back to the [index](README.md).
 
@@ -63,22 +63,6 @@ Add a float curve (Editable flag) to a UAnimSequence, or rekey the one already t
 | `curve_type` | string | no | Optional curve type the keys are meant for: float (the default, the only one written). transform is refused with an error pointing at add_anim_transform_curve; any other value is an error. |
 
 **Returns:** `{ anim_sequence_path, curve_name, num_float_curves, num_keys, curve_found, changed, applied, success, saved, save_error, message }`
-
-## `add_anim_graph_node`
-
-*Additive.*
-
-Place a UAnimGraphNode_* (by class name) into an AnimGraph or a state's inner graph. Saves the ABP but does NOT recompile it -- run compile_anim_blueprint after your edits for runtime effect.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `anim_blueprint_path` | string | yes | Path or name of the UAnimBlueprint. |
-| `node_class` | string | yes | AnimGraphNode class: short name (e.g. "AnimGraphNode_Slot", "AnimGraphNode_PoseSearchHistoryCollector") or full path. |
-| `graph_name` | string | no | Target graph; omit/"AnimGraph" for the top-level AnimGraph, or a nested name like "MainSM > Idle". |
-| `x` | number | no | Node X position (optional, default 0). |
-| `y` | number | no | Node Y position (optional, default 0). |
-
-**Returns:** `{ node_id, node_class, graph_name, pins[], saved } (NodeToJson of the created node)`
 
 ## `add_anim_notify`
 
@@ -141,7 +125,7 @@ Add an animation slot group (a named group that montage slots belong to; one slo
 
 *Additive, idempotent.*
 
-Add a state node named state_name to an existing state machine of an Animation Blueprint, then mark the blueprint structurally modified and save it without compiling (compile_anim_blueprint gives runtime effect). Not an undo step. Idempotent by name: a state of that name (case-insensitive) is returned unchanged with already_existed true, and nothing is saved. The machine must sit on the top-level AnimGraph (add_anim_state_machine creates it); a missing blueprint or machine is an error. The new state is unconnected and its animation graph empty: link it with add_anim_transition, fill it with add_anim_graph_node, check the machine with get_anim_state_machine_info; remove_anim_state is the inverse. Refused while PIE runs unless force=true; a failed save is an error, the change kept in memory.
+Add a state node named state_name to an existing state machine of an Animation Blueprint, then mark the blueprint structurally modified and save it without compiling (compile_anim_blueprint gives runtime effect). Not an undo step. Idempotent by name: a state of that name (case-insensitive) is returned unchanged with already_existed true, and nothing is saved. The machine must sit on the top-level AnimGraph (add_anim_state_machine creates it); a missing blueprint or machine is an error. The new state is unconnected and its animation graph empty: link it with add_anim_transition, fill it with add_graph_node (graph_name="&lt;Machine> > &lt;State>"), check the machine with get_anim_state_machine_info; remove_anim_state is the inverse. Refused while PIE runs unless force=true; a failed save is an error, the change kept in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -155,7 +139,7 @@ Add a state node named state_name to an existing state machine of an Animation B
 
 *Additive, idempotent.*
 
-Add a state machine node named machine_name to the top-level AnimGraph of an Animation Blueprint, then mark the blueprint structurally modified and save it without compiling (compile_anim_blueprint gives runtime effect). Idempotent by name: an existing machine is returned unchanged (already_existed true). The node starts with only its entry and is not connected to the Output Pose: wire it with connect_anim_graph_pins, fill it with add_anim_state, add_anim_conduit and add_anim_transition, or build it in one call with build_anim_state_machine. Refused while PIE runs unless force=true; a failed save is an error, the change kept in memory.
+Add a state machine node named machine_name to the top-level AnimGraph of an Animation Blueprint, then mark the blueprint structurally modified and save it without compiling (compile_anim_blueprint gives runtime effect). Idempotent by name: an existing machine is returned unchanged (already_existed true). The node starts with only its entry and is not connected to the Output Pose: wire it with connect_pins (graph_name="AnimGraph"), fill it with add_anim_state, add_anim_conduit and add_anim_transition, or build it in one call with build_anim_state_machine. Refused while PIE runs unless force=true; a failed save is an error, the change kept in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -257,7 +241,7 @@ Add a bone named bone_name to the reference skeleton of a USkeleton asset under 
 
 *Additive, idempotent.*
 
-Add a Leg IK node (UAnimGraphNode_LegIK) to the top-level AnimGraph of an Animation Blueprint, or reuse the first one already there, bind the feet into its LegsDefinition, then mark the blueprint structurally modified and save it without compiling. Leg 0 gets left_foot_bone and leg 1 right_foot_bone as the FK foot bone; a leg's IK target bone is set to the same bone when it is unset or the leg's foot changes, so the node compiles but has no effect until each IK target names an IK bone (set_anim_graph_node_property on LegsDefinition with the returned node_id); legs beyond the first two and the other leg settings are kept. Bones the target skeleton lacks are an error and nothing is written. The node is left unwired: connect it with connect_anim_graph_pins. Idempotent; refused while PIE runs unless force=true.
+Add a Leg IK node (UAnimGraphNode_LegIK) to the top-level AnimGraph of an Animation Blueprint, or reuse the first one already there, bind the feet into its LegsDefinition, then mark the blueprint structurally modified and save it without compiling. Leg 0 gets left_foot_bone and leg 1 right_foot_bone as the FK foot bone; a leg's IK target bone is set to the same bone when it is unset or the leg's foot changes, so the node compiles but has no effect until each IK target names an IK bone (set_properties on the node's object_path, LegsDefinition in its Node struct); legs beyond the first two and the other leg settings are kept. Bones the target skeleton lacks are an error and nothing is written. The node is left unwired: connect it with connect_pins. Idempotent; refused while PIE runs unless force=true.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -474,35 +458,6 @@ Add a bone, a null (a space: a transform-only element) or an animation control t
 
 **Returns:** `{ asset_path: string, element_key: string, element_type: string, parent: string, control_type?: string, control_type_recognized?: bool, bone_count: int, null_count: int, control_count: int, curve_count: int, other_count: int, total: int, saved: bool, save_error: string }`
 
-## `add_rigvm_link`
-
-*Destructive.*
-
-Link an output pin to an input pin in the main RigVM graph of a Control Rig Blueprint (URigVMController::AddLink with its undo, as the editor links, so a new link is one undo step); a link already into that input pin, into a pin inside it or into the pin it is part of, or out of an execute output pin, is replaced. Pins are NodeName.PinName paths as get_rigvm_graph lists them. A new link is then compiled and saved; a failed link (pins missing, incompatible or already linked) is an error with linked and saved false, the graph is left as it was (links the attempt broke are restored), nothing is compiled or saved, and the package keeps the dirty flag it had; should the graph still differ from before, the error says so and the package stays dirty. Refused during PIE unless force. Add nodes with add_rigvm_node and set unlinked inputs with set_rigvm_pin_default; Blueprint graphs use connect_pins. Inverse: remove_rigvm_link.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `control_rig_path` | string | yes | Path to the UControlRigBlueprint asset |
-| `source_pin` | string | yes | Output pin path NodeA.PinName |
-| `target_pin` | string | yes | Input pin path NodeB.PinName |
-
-**Returns:** `{ asset_path: string, source_pin: string, target_pin: string, linked: bool, link_count: int, saved: bool, save_error: string }`
-
-## `add_rigvm_node`
-
-*Additive.*
-
-Add a rig-unit node of node_type to the main RigVM graph of a Control Rig Blueprint loaded by asset path, at position (default 0, 0), then compile and save the rig. Types match case-insensitively (ForwardsSolve means BeginExecution, Setup means PrepareForExecution); any other is an error. node_name is only a request: a taken name gets a unique suffix (the reply has the real one), and every call adds one more node. An event node the graph already has (BeginExecution, PrepareForExecution) is not added twice: when node_name is its name the call succeeds with already_exists=true and saved=false, nothing compiled or saved, otherwise it is an error. A failed save makes success false with save_error, the node kept in memory. Refused during PIE unless force=true. Next: add_rigvm_link to wire it, set_rigvm_pin_default for inputs, get_rigvm_graph for pin paths; the inverse is remove_rigvm_node.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `control_rig_path` | string | yes | Asset path of the UControlRigBlueprint, e.g. "/Game/Rigs/CR_Mannequin". |
-| `node_type` | string | yes | BeginExecution, PrepareForExecution, GetTransform, SetTransform, AimBone, or TwoBoneIKSimple |
-| `node_name` | string | no | Optional node name to ask for; defaults to the rig-unit struct name, and a name already in the graph gets a unique suffix. |
-| `position` | array | no | Optional [x, y] editor graph position |
-
-**Returns:** `{ asset_path: string, node_name: string, node_title: string, node_type: string, pin_count: int, node_count: int, saved: bool, already_exists: bool, save_error: string }`
-
 ## `add_skeletal_mesh_lod`
 
 *Additive.*
@@ -688,23 +643,6 @@ Compile an Animation Blueprint synchronously and save its package, even when the
 
 **Returns:** `{ anim_blueprint_path: string, compiled: bool, status: string, is_up_to_date: bool, has_error: bool, error_count: int, warning_count: int, errors: [string], warnings: [string], saved: bool, save_error?: string }`
 
-## `connect_anim_graph_pins`
-
-*Destructive.*
-
-Wire two AnimGraph pins (pose links AND data pins) using the graph's OWN schema. USE THIS INSTEAD OF connect_pins inside an AnimGraph: the generic connect_pins uses the K2 schema, which does not understand FPoseLink/FComponentSpacePoseLink pose pins, whereas this goes through UAnimationGraphSchema::TryCreateConnection so pose links connect correctly. Saves the ABP but does NOT recompile it -- run compile_anim_blueprint after your edits for runtime effect.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `anim_blueprint_path` | string | yes | Path/name of the UAnimBlueprint. |
-| `source_node_id` | string | yes | NodeGuid of the source node. |
-| `source_pin` | string | yes | Output pin name on the source node. |
-| `target_node_id` | string | yes | NodeGuid of the target node. |
-| `target_pin` | string | yes | Input pin name on the target node. |
-| `graph_name` | string | no | Target graph (optional, default the top-level AnimGraph). |
-
-**Returns:** `{ connected, source_node_id, target_node_id, saved }`
-
 ## `connect_ik_goal_to_solver`
 
 *Destructive, idempotent.*
@@ -884,7 +822,7 @@ Create and save a UIKRigDefinition asset and set its source skeletal mesh.  Idem
 
 *Additive, idempotent.*
 
-Create in one call an Animation Blueprint for a skeleton with a locomotion state machine: the machine, its states (Idle, Walk, Run by default), the entry wired to the first state and a transition each way between consecutive states, then compile and save it. Use it as the quick start for a character; for any other layout build the machine from a JSON spec with build_anim_state_machine, or step by step with create_anim_blueprint, add_anim_state_machine, add_anim_state and add_anim_transition. What it leaves to do: the states are empty (put an animation in each with add_anim_graph_node) and the transitions have no rule, so they are never taken (set_anim_transition_rule_from_comparison, _from_bool or _automatic). Idempotent: an existing Animation Blueprint, machine, state or transition is reused, not duplicated, and an entry already wired is left alone; an existing blueprint is kept even if its skeleton is not skeleton_path. Compile errors are not reported here (check with compile_anim_blueprint); a failed save is an error. Refused while PIE runs unless force=true.
+Create in one call an Animation Blueprint for a skeleton with a locomotion state machine: the machine, its states (Idle, Walk, Run by default), the entry wired to the first state and a transition each way between consecutive states, then compile and save it. Use it as the quick start for a character; for any other layout build the machine from a JSON spec with build_anim_state_machine, or step by step with create_anim_blueprint, add_anim_state_machine, add_anim_state and add_anim_transition. What it leaves to do: the states are empty (put an animation in each with add_graph_node) and the transitions have no rule, so they are never taken (set_anim_transition_rule_from_comparison, _from_bool or _automatic). Idempotent: an existing Animation Blueprint, machine, state or transition is reused, not duplicated, and an entry already wired is left alone; an existing blueprint is kept even if its skeleton is not skeleton_path. Compile errors are not reported here (check with compile_anim_blueprint); a failed save is an error. Refused while PIE runs unless force=true.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -981,23 +919,6 @@ Register a new morph target on a skeletal mesh asset in memory only, for the res
 
 **Returns:** `{ morph_target_name: string, skeletal_mesh_path: string, created: bool, persisted_to_disk: bool, total_morph_targets: int, note: string }`
 
-## `disconnect_anim_graph_pins`
-
-*Destructive.*
-
-Break AnimGraph pin links: a specific source->target link, or ALL links on the source pin. Use the specific form to insert a node into an existing chain (break A->B, then wire A->N and N->B). Saves the ABP but does NOT recompile it -- run compile_anim_blueprint after your edits for runtime effect.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `anim_blueprint_path` | string | yes | Path/name of the UAnimBlueprint. |
-| `source_node_id` | string | yes | NodeGuid of the source node. |
-| `source_pin` | string | yes | Pin name on the source node. |
-| `target_node_id` | string | no | NodeGuid of the target node (optional; if omitted, breaks ALL links on source_pin). |
-| `target_pin` | string | no | Pin name on the target node (optional; required if target_node_id is given). |
-| `graph_name` | string | no | Target graph (optional, default the top-level AnimGraph). |
-
-**Returns:** `{ disconnected, broke_all, source_node_id, source_pin, saved }`
-
 ## `disconnect_ik_goal_from_solver`
 
 *Destructive, idempotent.*
@@ -1079,20 +1000,6 @@ Read one curve of a UAnimSequence's data model without changing it: for a float 
 | `curve_type` | string | no | "float" (default) or "transform", case ignored; any other value reads a float curve. |
 
 **Returns:** `{ anim_sequence_path, curve_name, curve_type, found, num_keys, flags, keys: [{ time, value }] }`
-
-## `get_anim_graph_node_properties`
-
-*Read-only.*
-
-Read the internal FAnimNode struct of one AnimGraphNode, found by NodeGuid (node_id) in the AnimGraph or a nested graph_name, as typed JSON: the runtime settings (Pose History PoseCount/CollectorName, Slot SlotName, blend params), not the pin surface get_graph_nodes reports. Use it instead of get_properties, which cannot address a graph node by GUID; a non-anim node returns its EditAnywhere properties. Read-only; write with set_anim_graph_node_property.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `anim_blueprint_path` | string | yes | Path/name of the UAnimBlueprint. |
-| `node_id` | string | yes | NodeGuid of the target AnimGraphNode. |
-| `graph_name` | string | no | Target graph (optional, default the top-level AnimGraph). |
-
-**Returns:** `{ node_id, node_class, node_struct, node_properties:{...} }`
 
 ## `get_anim_notifies`
 
@@ -1254,7 +1161,7 @@ Read back the vertex deltas of a morph target on a specific LOD (inverse of set_
 
 *Read-only.*
 
-Read the UMotionWarpingComponent of an actor without changing anything: whether warp windows are also searched in animations inside montages, every warp target (name, location, rotation, the component it follows or null, bone name, follow flag, location and rotation offsets, and location_offset_direction as the enum's integer), the modifier count, the owner adapter class (None when unset) and the number of switch-off conditions (a protected array read by reflection; -1 if the engine renames it). Warp targets are transient, so on an editor actor they are the ones added this session with add_motion_warping_target. Change a target with set_motion_warping_target, take one out with remove_motion_warping_target, and flip the montage search with set_properties on "&lt;actor>.&lt;component name>" (property bSearchForWindowsInAnimsWithinMontages). An actor that is not found, or one without a UMotionWarpingComponent (add_motion_warping_component adds it), is an error. For a generic component property dump use get_component_properties.
+Read the UMotionWarpingComponent of an actor without changing anything: whether warp windows are also searched in animations inside montages, every warp target (name, location, rotation, the component it follows or null, bone name, follow flag, location and rotation offsets, and location_offset_direction as the enum's integer), the modifier count, the owner adapter class (None when unset) and the number of switch-off conditions (a protected array read by reflection; -1 if the engine renames it). Warp targets are transient, so on an editor actor they are the ones added this session with add_motion_warping_target. Change a target with set_motion_warping_target, take one out with remove_motion_warping_target, and flip the montage search with set_properties on "&lt;actor>.&lt;component name>" (property bSearchForWindowsInAnimsWithinMontages). An actor that is not found, or one without a UMotionWarpingComponent (add_motion_warping_component adds it), is an error. For a generic component property dump use get_object_info on "&lt;actor>.&lt;component>".
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1351,18 +1258,6 @@ Read every element of a Control Rig Blueprint hierarchy in traversal order as el
 | `control_rig_path` | string | yes | Control Rig Blueprint asset path, e.g. "/Game/Rigs/CR_Hero" |
 
 **Returns:** `{ asset_path: string, bone_count: int, null_count: int, control_count: int, curve_count: int, other_count: int, total: int, elements: [{name, type}] }`
-
-## `get_rigvm_graph`
-
-*Read-only.*
-
-Read the main RigVM graph of a Control Rig Blueprint, loaded by asset path: every node with its name, title, type (the rig-unit struct, or the node class otherwise) and top-level pins, each pin with its name, NodeName.PinName path, direction and is_execute, plus node_count and link_count. Links are only counted, not listed, and the sub-pins of struct pins are not expanded. Read-only: nothing is compiled or saved, and no PIE is needed. A path that is not a Control Rig Blueprint, or one with no default RigVM model, is an error. Use the pin paths with add_rigvm_link and set_rigvm_pin_default; add nodes with add_rigvm_node, take one out with remove_rigvm_node; the bones and controls of the rig: get_rig_hierarchy.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `control_rig_path` | string | yes | Asset path of the UControlRigBlueprint, e.g. "/Game/Rigs/CR_Mannequin". |
-
-**Returns:** `{ asset_path: string, nodes: [{ name: string, title: string, type: string, pin_count: int, pins: [{ name: string, path: string, direction: string, is_execute: bool }] }], node_count: int, link_count: int }`
 
 ## `get_skeletal_mesh_info`
 
@@ -1938,33 +1833,6 @@ Remove one element (by name and type) from a Control Rig Blueprint hierarchy wit
 
 **Returns:** `{ asset_path: string, element_key: string, element_type: string, removed: bool, bone_count: int, null_count: int, control_count: int, curve_count: int, other_count: int, total: int, saved: bool, save_error: string }`
 
-## `remove_rigvm_link`
-
-*Destructive.*
-
-Break links into an input pin in the main RigVM graph of a Control Rig Blueprint (URigVMController::BreakLink / BreakAllLinks with their undo, one undo step), then compile and save the rig. Inverse of add_rigvm_link: with source_pin only the link from that output pin goes; without it every link into target_pin goes. Pins are NodeName.PinName paths as get_rigvm_graph lists them. A pin that does not exist is an error; a pin with no such link is an honest no-op (removed=false, nothing compiled or saved). The reply re-reads the pin (links_left) and the graph's link_count. Refused during PIE unless force. The whole node: remove_rigvm_node.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `control_rig_path` | string | yes | Path to the UControlRigBlueprint asset |
-| `target_pin` | string | yes | Input pin path NodeB.PinName whose incoming link(s) to break |
-| `source_pin` | string | no | Optional output pin path NodeA.PinName: only the link from it is broken |
-
-**Returns:** `{ asset_path: string, target_pin: string, source_pin?: string, removed: bool, links_removed: int, links_left: int, link_count: int, saved: bool, save_error: string }`
-
-## `remove_rigvm_node`
-
-*Destructive.*
-
-Remove a node from a Control Rig's RigVM solver graph, then compile and save the rig. A node that is not found, or that the controller fails to remove, is an error and nothing is compiled or saved.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `control_rig_path` | string | yes | Path to the UControlRigBlueprint asset |
-| `node_name` | string | yes | Graph node name to remove, as reported by add_rigvm_node |
-
-**Returns:** `{ asset_path: string, node_name: string, removed: bool, node_count: int, saved: bool, save_error: string }`
-
 ## `remove_skeletal_mesh_lod`
 
 *Destructive.*
@@ -2161,22 +2029,6 @@ Retime a FLOAT curve on a UAnimSequence through its data controller (one undo st
 
 **Returns:** `{ anim_sequence_path, curve_name, origin, factor, num_keys, applied, saved, save_error, message }`
 
-## `set_anim_additive_settings`
-
-*Destructive, idempotent.*
-
-Set the additive-animation type and base pose on a UAnimSequence in an undo transaction and save it. Settings the sequence already has are a success with changed=false and saved=false, and the sequence is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `anim_sequence_path` | string | yes | Object path of the UAnimSequence. |
-| `additive_anim_type` | string | no | Additive type: LocalSpaceBase\|RotationOffsetMeshSpace\|None (default LocalSpaceBase) |
-| `ref_pose_type` | string | no | Base pose type: RefPose\|AnimScaled\|AnimFrame\|LocalAnimFrame\|None (default RefPose) |
-| `ref_frame_index` | number | no | Frame index used for the base pose (default 0) |
-| `ref_pose_anim_path` | string | no | Object path of the reference UAnimSequence for the base pose (optional) |
-
-**Returns:** `{ anim_sequence_path, additive_anim_type, ref_pose_type, ref_frame_index, ref_pose_anim_set, changed, success, saved, save_error, message? }`
-
 ## `set_anim_bone_track_keys`
 
 *Destructive, idempotent.*
@@ -2252,7 +2104,7 @@ Set the frame rate of the data model of a UAnimSequence (IAnimationDataControlle
 
 *Destructive, idempotent.*
 
-Bind an AnimGraph node input pin to a variable or property path in the node property-binding map (the Details-panel bind chip), e.g. "TransformTrajectory" to "Trajectory"; set_anim_graph_node_property edits the FAnimNode struct instead. Returns applied and the stored binding; saves the AnimBP without recompiling (run compile_anim_blueprint).
+Bind an AnimGraph node input pin to a variable or property path in the node property-binding map (the Details-panel bind chip), e.g. "TransformTrajectory" to "Trajectory"; set_properties on the node's object_path edits the FAnimNode struct (Node) instead. Returns applied and the stored binding; saves the AnimBP without recompiling (run compile_anim_blueprint).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2265,23 +2117,6 @@ Bind an AnimGraph node input pin to a variable or property path in the node prop
 | `blueprint_name` | string | no | Alias of anim_blueprint_path, used only when anim_blueprint_path and anim_blueprint are both absent or empty. |
 
 **Returns:** `{ node_id, pin_name, binding_path, applied, binding:{property_name, property_path[], path_as_text, is_bound, is_promotion, binding_type, pin_category}, saved }`
-
-## `set_anim_graph_node_property`
-
-*Destructive, idempotent.*
-
-Write one field of an AnimGraphNode's internal FAnimNode struct (runtime settings, not pins): node by NodeGuid, field by name or dotted path. set_properties cannot address a graph node by GUID; this also takes a dotted path, rebuilds the node's pins, is undoable and saves the ABP, but does NOT recompile -- run compile_anim_blueprint. Read: get_anim_graph_node_properties.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `anim_blueprint_path` | string | yes | Path/name of the UAnimBlueprint. |
-| `node_id` | string | yes | NodeGuid of the target AnimGraphNode. |
-| `property` | string | yes | Property path inside the FAnimNode (e.g. "PoseCount", "SlotName"). A leading "Node." is tolerated. Nested structs use dots ("A.B"). |
-| `value` | string | no | Text value (UE ImportText form: number, "EnumName", "(X=1,Y=2)"...). Use for scalars/enums/simple structs. |
-| `value_json` | any | no | JSON value applied via JsonValueToUProperty. Use for complex/nested types. Takes precedence over value. |
-| `graph_name` | string | no | Target graph (optional, default the top-level AnimGraph). |
-
-**Returns:** `{ node_id, property, applied, new_value, saved }`
 
 ## `set_anim_montage_preview_mesh`
 
@@ -2877,20 +2712,6 @@ Set a Control Rig control's pose value (Initial + Current), type-correct per the
 | `value` | any | yes | The value: bool (Bool), number (Float/ScaleFloat/Integer), or [x,y(,z)] (Vector2D/Position/Scale/Rotator). |
 
 **Returns:** `{ asset_path: string, control_name: string, control_type: string, value: any, saved: bool, save_error?: string }`
-
-## `set_rigvm_pin_default`
-
-*Destructive, idempotent.*
-
-Set the default value of a pin in the main RigVM graph of a Control Rig Blueprint (URigVMController::SetPinDefaultValue, no undo entry), then compile and save it. success reflects the save even when the write failed: check set, pin_found and current_value, which is read back.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `control_rig_path` | string | yes | Asset path of the UControlRigBlueprint, e.g. "/Game/Rigs/CR_Mannequin". |
-| `pin_path` | string | yes | Pin path NodeName.PinName, e.g. SetTransform.bInitial |
-| `value` | string | yes | Value in UE export-text form, e.g. "true", "1.0" or "(X=0.0,Y=0.0,Z=1.0)"; array pins are resized to the given element count. |
-
-**Returns:** `{ asset_path: string, pin_path: string, value: string, set: bool, pin_found: bool, current_value: string, saved: bool, save_error: string }`
 
 ## `set_skeletal_mesh_anim_class`
 

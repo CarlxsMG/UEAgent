@@ -189,6 +189,8 @@ namespace
             return Obj;
         }
         Obj->SetStringField(TEXT("name"), Node->GetName());
+        // The path set_properties and get_properties take for the node's own settings.
+        Obj->SetStringField(TEXT("object_path"), Node->GetPathName());
         Obj->SetStringField(TEXT("title"), Node->GetNodeTitle());
 
         FString TypeName;
@@ -220,6 +222,25 @@ namespace
             PinObj->SetStringField(TEXT("path"), Pin->GetPinPath(/*bUseNodePath*/ true));
             PinObj->SetStringField(TEXT("direction"), PinDirectionToString(Pin->GetDirection()));
             PinObj->SetBoolField(TEXT("is_execute"), Pin->IsExecuteContext());
+            if (!Pin->IsExecuteContext())
+            {
+                PinObj->SetStringField(TEXT("default_value"), Pin->GetDefaultValue());
+            }
+            // The pins at the other end of this pin's links, as node name and pin path below the node.
+            TArray<TSharedPtr<FJsonValue>> Linked;
+            TArray<URigVMPin*> Others = Pin->GetLinkedSourcePins();
+            Others.Append(Pin->GetLinkedTargetPins());
+            for (const URigVMPin* Other : Others)
+            {
+                if (Other && Other->GetNode())
+                {
+                    TSharedPtr<FJsonObject> End = MakeShared<FJsonObject>();
+                    End->SetStringField(TEXT("node_id"), Other->GetNode()->GetName());
+                    End->SetStringField(TEXT("pin_name"), Other->GetSegmentPath(/*bIncludeRootPin*/ true));
+                    Linked.Add(MakeShared<FJsonValueObject>(End));
+                }
+            }
+            PinObj->SetArrayField(TEXT("linked_to"), Linked);
             PinArr.Add(MakeShared<FJsonValueObject>(PinObj));
         }
         Obj->SetArrayField(TEXT("pins"), PinArr);
@@ -231,6 +252,7 @@ namespace
 // add_rigvm_node
 // ---------------------------------------------------------------------------
 // MCP:add_rigvm_node - Add a rig-unit node of node_type to the main RigVM graph of a Control Rig Blueprint loaded by asset path, at position (default 0, 0), then compile and save the rig. Types match case-insensitively (ForwardsSolve means BeginExecution, Setup means PrepareForExecution); any other is an error. node_name is only a request: a taken name gets a unique suffix (the reply has the real one), and every call adds one more node. An event node the graph already has (BeginExecution, PrepareForExecution) is not added twice: when node_name is its name the call succeeds with already_exists=true and saved=false, nothing compiled or saved, otherwise it is an error. A failed save makes success false with save_error, the node kept in memory. Refused during PIE unless force=true. Next: add_rigvm_link to wire it, set_rigvm_pin_default for inputs, get_rigvm_graph for pin paths; the inverse is remove_rigvm_node.
+//   @retired add_graph_node - asset_path=<Control Rig>, node_type=<BeginExecution, PrepareForExecution, GetTransform, SetTransform, AimBone or TwoBoneIKSimple>, node_name=<name>, node_position=[x, y]
 //   @param control_rig_path - Asset path of the UControlRigBlueprint, e.g. "/Game/Rigs/CR_Mannequin".
 //   @param node_type - BeginExecution, PrepareForExecution, GetTransform, SetTransform, AimBone, or TwoBoneIKSimple
 //   @param node_name - Optional node name to ask for; defaults to the rig-unit struct name, and a name already in the graph gets a unique suffix.
@@ -318,7 +340,8 @@ TSharedPtr<FJsonObject> HandleAddRigVMNode(const TSharedPtr<FJsonObject>& Params
 // ---------------------------------------------------------------------------
 // set_rigvm_pin_default
 // ---------------------------------------------------------------------------
-// MCP:set_rigvm_pin_default - Set the default value of a pin in the main RigVM graph of a Control Rig Blueprint (URigVMController::SetPinDefaultValue, no undo entry), then compile and save it. success reflects the save even when the write failed: check set, pin_found and current_value, which is read back.
+// MCP:set_rigvm_pin_default - Set the default value of a pin in the main RigVM graph of a Control Rig Blueprint (URigVMController::SetPinDefaultValue, no undo entry), then compile and save it. A value that does not land (set false, current_value read back) is an error, and then nothing is compiled or saved.
+//   @retired set_pin_default_value - asset_path=<Control Rig>, node_id=<NodeName>, pin_name=<pin path below the node>, value=<export text>
 //   @param control_rig_path - Asset path of the UControlRigBlueprint, e.g. "/Game/Rigs/CR_Mannequin".
 //   @param pin_path - Pin path NodeName.PinName, e.g. SetTransform.bInitial
 //   @param value - Value in UE export-text form, e.g. "true", "1.0" or "(X=0.0,Y=0.0,Z=1.0)"; array pins are resized to the given element count.
@@ -337,11 +360,8 @@ TSharedPtr<FJsonObject> HandleSetRigVMPinDefault(const TSharedPtr<FJsonObject>& 
         return Error;
     }
 
-    const bool bSet = Controller->SetPinDefaultValue(
+    const bool bWritten = Controller->SetPinDefaultValue(
         PinPath, Value, /*bResizeArrays*/ true, /*bSetupUndoRedo*/ false);
-
-    FString SaveErr;
-    const bool bSaved = RigVM_CompileAndSave(CRBP, SaveErr);
 
     // Read back the actual default value to verify (some 5.7 setters return false on success).
     URigVMGraph* Model = CRBP->GetDefaultModel();
@@ -355,13 +375,25 @@ TSharedPtr<FJsonObject> HandleSetRigVMPinDefault(const TSharedPtr<FJsonObject>& 
             ReadBack = Pin->GetDefaultValue();
         }
     }
+    const bool bSet = bWritten || (bPinFound && ReadBack == Value);
 
     TSharedPtr<FJsonObject> Resp = RigVM_StartReply(CRBP);
     Resp->SetStringField(TEXT("pin_path"), PinPath);
     Resp->SetStringField(TEXT("value"), Value);
-    Resp->SetBoolField(TEXT("set"), bSet || (bPinFound && ReadBack == Value));
+    Resp->SetBoolField(TEXT("set"), bSet);
     Resp->SetBoolField(TEXT("pin_found"), bPinFound);
     Resp->SetStringField(TEXT("current_value"), ReadBack);
+    // A write that did not land is a failure, and nothing is compiled or saved for it.
+    if (!bSet)
+    {
+        Resp->SetBoolField(TEXT("saved"), false);
+        return mcp_common::MakeOutcomeReply(Resp, false, bPinFound
+            ? FString::Printf(TEXT("set_rigvm_pin_default: the value did not land; the pin still holds '%s'. Nothing was compiled or saved."), *ReadBack)
+            : FString::Printf(TEXT("set_rigvm_pin_default: no pin '%s' in the rig's main graph. Nothing was compiled or saved."), *PinPath));
+    }
+
+    FString SaveErr;
+    const bool bSaved = RigVM_CompileAndSave(CRBP, SaveErr);
     return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("set_rigvm_pin_default"), SaveErr);
 }
 
@@ -369,6 +401,7 @@ TSharedPtr<FJsonObject> HandleSetRigVMPinDefault(const TSharedPtr<FJsonObject>& 
 // add_rigvm_link
 // ---------------------------------------------------------------------------
 // MCP:add_rigvm_link - Link an output pin to an input pin in the main RigVM graph of a Control Rig Blueprint (URigVMController::AddLink with its undo, as the editor links, so a new link is one undo step); a link already into that input pin, into a pin inside it or into the pin it is part of, or out of an execute output pin, is replaced. Pins are NodeName.PinName paths as get_rigvm_graph lists them. A new link is then compiled and saved; a failed link (pins missing, incompatible or already linked) is an error with linked and saved false, the graph is left as it was (links the attempt broke are restored), nothing is compiled or saved, and the package keeps the dirty flag it had; should the graph still differ from before, the error says so and the package stays dirty. Refused during PIE unless force. Add nodes with add_rigvm_node and set unlinked inputs with set_rigvm_pin_default; Blueprint graphs use connect_pins. Inverse: remove_rigvm_link.
+//   @retired connect_pins - asset_path=<Control Rig>, source_node_id=<NodeA>, source_pin=<pin path below NodeA>, target_node_id=<NodeB>, target_pin=<pin path below NodeB> (a NodeA.Pin path split at its first dot)
 //   @param control_rig_path - Path to the UControlRigBlueprint asset
 //   @param source_pin - Output pin path NodeA.PinName
 //   @param target_pin - Input pin path NodeB.PinName
@@ -434,6 +467,7 @@ TSharedPtr<FJsonObject> HandleAddRigVMLink(const TSharedPtr<FJsonObject>& Params
 }
 
 // MCP:remove_rigvm_link - Break links into an input pin in the main RigVM graph of a Control Rig Blueprint (URigVMController::BreakLink / BreakAllLinks with their undo, one undo step), then compile and save the rig. Inverse of add_rigvm_link: with source_pin only the link from that output pin goes; without it every link into target_pin goes. Pins are NodeName.PinName paths as get_rigvm_graph lists them. A pin that does not exist is an error; a pin with no such link is an honest no-op (removed=false, nothing compiled or saved). The reply re-reads the pin (links_left) and the graph's link_count. Refused during PIE unless force. The whole node: remove_rigvm_node.
+//   @retired disconnect_pin - asset_path=<Control Rig>, node_id=<NodeB>, pin_name=<pin path below NodeB>; only the link from NodeA.Pin: add linked_node_id=<NodeA>, linked_pin=<Pin>
 //   @param control_rig_path - Path to the UControlRigBlueprint asset
 //   @param target_pin - Input pin path NodeB.PinName whose incoming link(s) to break
 //   @param source_pin - Optional output pin path NodeA.PinName: only the link from it is broken
@@ -524,9 +558,10 @@ TSharedPtr<FJsonObject> HandleRemoveRigVMLink(const TSharedPtr<FJsonObject>& Par
 // ---------------------------------------------------------------------------
 // get_rigvm_graph
 // ---------------------------------------------------------------------------
-// MCP:get_rigvm_graph - Read the main RigVM graph of a Control Rig Blueprint, loaded by asset path: every node with its name, title, type (the rig-unit struct, or the node class otherwise) and top-level pins, each pin with its name, NodeName.PinName path, direction and is_execute, plus node_count and link_count. Links are only counted, not listed, and the sub-pins of struct pins are not expanded. Read-only: nothing is compiled or saved, and no PIE is needed. A path that is not a Control Rig Blueprint, or one with no default RigVM model, is an error. Use the pin paths with add_rigvm_link and set_rigvm_pin_default; add nodes with add_rigvm_node, take one out with remove_rigvm_node; the bones and controls of the rig: get_rig_hierarchy.
+// MCP:get_rigvm_graph - Read the main RigVM graph of a Control Rig Blueprint, loaded by asset path: every node with its name, title, type (the rig-unit struct, or the node class otherwise) and top-level pins, each pin with its name, NodeName.PinName path, direction and is_execute, plus node_count and link_count; each pin also has its default_value (not on execute pins) and linked_to, the node and pin path at the other end of each of its links, and each node its object_path. The sub-pins of struct pins are not expanded. Read-only: nothing is compiled or saved, and no PIE is needed. A path that is not a Control Rig Blueprint, or one with no default RigVM model, is an error. Use the pin paths with add_rigvm_link and set_rigvm_pin_default; add nodes with add_rigvm_node, take one out with remove_rigvm_node; the bones and controls of the rig: get_rig_hierarchy.
+//   @retired get_graph_nodes - asset_path=<Control Rig>; the same nodes, each with node_id (its name), and each pin with default_value and linked_to
 //   @param control_rig_path - Asset path of the UControlRigBlueprint, e.g. "/Game/Rigs/CR_Mannequin".
-//   @returns { asset_path: string, nodes: [{ name: string, title: string, type: string, pin_count: int, pins: [{ name: string, path: string, direction: string, is_execute: bool }] }], node_count: int, link_count: int }
+//   @returns { asset_path: string, nodes: [{ name: string, object_path: string, title: string, type: string, pin_count: int, pins: [{ name: string, path: string, direction: string, is_execute: bool, default_value?: string, linked_to: [{ node_id: string, pin_name: string }] }] }], node_count: int, link_count: int }
 TSharedPtr<FJsonObject> HandleGetRigVMGraph(const TSharedPtr<FJsonObject>& Params)
 {
     FString RigPath;
@@ -562,6 +597,7 @@ TSharedPtr<FJsonObject> HandleGetRigVMGraph(const TSharedPtr<FJsonObject>& Param
 // remove_rigvm_node
 // ---------------------------------------------------------------------------
 // MCP:remove_rigvm_node - Remove a node from a Control Rig's RigVM solver graph, then compile and save the rig. A node that is not found, or that the controller fails to remove, is an error and nothing is compiled or saved.
+//   @retired remove_graph_node - asset_path=<Control Rig>, node_id=<node_name>
 //   @param control_rig_path - Path to the UControlRigBlueprint asset
 //   @param node_name - Graph node name to remove, as reported by add_rigvm_node
 //   @returns { asset_path: string, node_name: string, removed: bool, node_count: int, saved: bool, save_error: string }

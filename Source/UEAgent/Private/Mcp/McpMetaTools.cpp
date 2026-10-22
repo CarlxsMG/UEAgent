@@ -14,6 +14,7 @@
 const TCHAR* const McpMetaTools::FindTools = TEXT("find_tools");
 const TCHAR* const McpMetaTools::DescribeTool = TEXT("describe_tool");
 const TCHAR* const McpMetaTools::CallTool = TEXT("call_tool");
+const TCHAR* const McpMetaTools::EnableToolset = TEXT("enable_toolset");
 
 // Namespace name unique per file: the module builds as unity (see Build.cs).
 namespace McpMetaToolsPrivate
@@ -437,7 +438,7 @@ namespace McpMetaToolsPrivate
 	}
 }
 
-TArray<uint8> McpMetaTools::BuildToolsListUtf8(const FMcpToolCatalog& Catalog)
+TArray<TSharedPtr<FJsonValue>> McpMetaTools::BuildMetaTools(const FMcpToolCatalog& Catalog, EList List)
 {
 	using namespace McpMetaToolsPrivate;
 
@@ -447,6 +448,7 @@ TArray<uint8> McpMetaTools::BuildToolsListUtf8(const FMcpToolCatalog& Catalog)
 	{
 		DomainNames.Add(D.Name);
 	}
+	const bool bCore = List == EList::Core;
 
 	TSharedRef<FJsonObject> FindProperties = MakeShared<FJsonObject>();
 	FindProperties->SetObjectField(TEXT("query"), Property(TEXT("string"),
@@ -470,7 +472,8 @@ TArray<uint8> McpMetaTools::BuildToolsListUtf8(const FMcpToolCatalog& Catalog)
 	Tools.Add(MakeTool(FindTools, FString::Printf(
 		TEXT("Searches this server's %d Unreal Editor tools (%d domains) and returns the best matches: name, domain, parameters ")
 		TEXT("(* = required) and a one-line summary. With no arguments it lists the domains. Then describe_tool gives a tool's ")
-		TEXT("full schema and call_tool runs it."), Catalog.NumTools(), Domains.Num()),
+		TEXT("full schema and call_tool runs it%s."), Catalog.NumTools(), Domains.Num(),
+		bCore ? TEXT(", or enable_toolset adds its whole domain to your tool list") : TEXT("")),
 		FindProperties, {}, /*bReadOnly*/ true));
 	Tools.Add(MakeTool(DescribeTool,
 		TEXT("One tool's full description and input JSON schema: every parameter's type and meaning, the required ones, closed ")
@@ -480,9 +483,31 @@ TArray<uint8> McpMetaTools::BuildToolsListUtf8(const FMcpToolCatalog& Catalog)
 		TEXT("Runs one of this server's tools by name, with `arguments` holding that tool's own parameters. The call goes through ")
 		TEXT("the same validation, guards and readback as a tool listed directly."),
 		CallProperties, { TEXT("name") }, /*bReadOnly*/ false));
+	if (bCore)
+	{
+		TSharedRef<FJsonObject> EnableProperties = MakeShared<FJsonObject>();
+		TSharedRef<FJsonObject> DomainsProperty = Property(TEXT("array"),
+			TEXT("The domains whose tools to add, as find_tools lists them, e.g. [\"Material\"] or [\"Animation\", \"Audio\"]."));
+		TSharedRef<FJsonObject> Items = MakeShared<FJsonObject>();
+		Items->SetStringField(TEXT("type"), TEXT("string"));
+		Items->SetArrayField(TEXT("enum"), ToJsonStrings(DomainNames));
+		DomainsProperty->SetObjectField(TEXT("items"), Items);
+		EnableProperties->SetObjectField(TEXT("domains"), DomainsProperty);
+		Tools.Add(MakeTool(EnableToolset, FString::Printf(
+			TEXT("Adds every tool of one or more domains to this connection's tool list, so you call them directly instead of ")
+			TEXT("through call_tool: use it when a task needs several tools of a domain, for example Material or Animation. ")
+			TEXT("The %d core tools are always listed; find_tools with no arguments lists the %d domains and their sizes. Your ")
+			TEXT("client re-reads the list when the server announces the change; if it does not, call_tool reaches the same tools. ")
+			TEXT("Lasts until the connection's session ends."), Catalog.NumCoreTools(), Domains.Num()),
+			EnableProperties, { TEXT("domains") }, /*bReadOnly*/ true));
+	}
+	return Tools;
+}
 
+TArray<uint8> McpMetaTools::BuildToolsListUtf8(const FMcpToolCatalog& Catalog)
+{
 	TSharedRef<FJsonObject> ListResult = MakeShared<FJsonObject>();
-	ListResult->SetArrayField(TEXT("tools"), Tools);
+	ListResult->SetArrayField(TEXT("tools"), BuildMetaTools(Catalog, EList::Compact));
 	FString Serialized;
 	TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
 		TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Serialized);
@@ -498,6 +523,109 @@ FString McpMetaTools::Instructions(const FMcpToolCatalog& Catalog)
 	return FString::Printf(
 		TEXT("This connection lists three meta-tools instead of the %d Unreal Editor tools: find_tools searches them, describe_tool ")
 		TEXT("returns one tool's input schema and call_tool runs it. Search before guessing a tool name."), Catalog.NumTools());
+}
+
+FString McpMetaTools::CoreInstructions(const FMcpToolCatalog& Catalog)
+{
+	return FString::Printf(
+		TEXT("This connection lists the %d core tools of the %d Unreal Editor tools: assets, actors and levels, any object's ")
+		TEXT("properties, Blueprint and other asset graphs, data tables, Play-in-Editor and Python. The rest are one call away: ")
+		TEXT("find_tools searches all of them, describe_tool returns one's input schema, call_tool runs any of them, and ")
+		TEXT("enable_toolset adds a whole domain's tools to this list. Search before guessing a tool name."),
+		Catalog.NumCoreTools(), Catalog.NumTools());
+}
+
+bool McpMetaTools::ReadToolsetDomains(const FMcpToolCatalog& Catalog, const TSharedPtr<FJsonObject>& Args, TArray<FString>& OutDomains, FString& OutError)
+{
+	OutDomains.Reset();
+	TArray<FString> Requested;
+	if (Args.IsValid())
+	{
+		const TArray<TSharedPtr<FJsonValue>>* Values = nullptr;
+		if (Args->TryGetArrayField(TEXT("domains"), Values) && Values)
+		{
+			for (const TSharedPtr<FJsonValue>& Value : *Values)
+			{
+				FString Name;
+				if (Value.IsValid() && Value->TryGetString(Name))
+				{
+					Requested.Add(Name);
+				}
+			}
+		}
+		FString Single;
+		if (Args->TryGetStringField(TEXT("domains"), Single) || Args->TryGetStringField(TEXT("domain"), Single))
+		{
+			// One domain as a string, or several separated by commas: a model sends either.
+			TArray<FString> Parts;
+			Single.ParseIntoArray(Parts, TEXT(","));
+			Requested.Append(Parts);
+		}
+	}
+	TArray<FString> Unknown;
+	for (const FString& Name : Requested)
+	{
+		const FString Domain = Catalog.FindDomain(Name);
+		if (Domain.IsEmpty())
+		{
+			Unknown.Add(Name.TrimStartAndEnd());
+		}
+		else
+		{
+			OutDomains.AddUnique(Domain);
+		}
+	}
+	if (Unknown.Num() > 0 || OutDomains.Num() == 0)
+	{
+		OutError = FString::Printf(TEXT("enable_toolset: %s. The domains are: %s"),
+			Unknown.Num() > 0 ? *FString::Printf(TEXT("unknown domain %s"), *FString::Join(Unknown, TEXT(", "))) : TEXT("`domains` names no domain"),
+			*FString::Join(Catalog.GetDomains(), TEXT(", ")));
+		OutDomains.Reset();
+		return false;
+	}
+	return true;
+}
+
+TSharedRef<FJsonObject> McpMetaTools::ToolsetReply(const FMcpToolCatalog& Catalog, const TArray<FString>& Domains, const TSet<FString>& EnabledBefore, bool bHasSession)
+{
+	using namespace McpMetaToolsPrivate;
+
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetBoolField(TEXT("success"), true);
+	TArray<TSharedPtr<FJsonValue>> DomainsJson;
+	int32 Added = 0;
+	for (const FString& Domain : Domains)
+	{
+		TArray<FString> Names;
+		for (const FMcpToolCatalog::FTool& Tool : Catalog.GetTools())
+		{
+			if (Tool.Domain == Domain && !Tool.bCore)
+			{
+				Names.Add(Tool.Name);
+			}
+		}
+		const bool bAlready = EnabledBefore.Contains(Domain);
+		Added += bAlready ? 0 : Names.Num();
+		TSharedRef<FJsonObject> Entry = MakeShared<FJsonObject>();
+		Entry->SetStringField(TEXT("domain"), Domain);
+		Entry->SetBoolField(TEXT("already_listed"), bAlready);
+		Entry->SetArrayField(TEXT("tools"), ToJsonStrings(Names));
+		DomainsJson.Add(MakeShared<FJsonValueObject>(Entry));
+	}
+	Result->SetArrayField(TEXT("domains"), DomainsJson);
+	Result->SetNumberField(TEXT("tools_added"), bHasSession ? Added : 0);
+	Result->SetBoolField(TEXT("list_changed"), bHasSession && Added > 0);
+	if (!bHasSession)
+	{
+		Result->SetStringField(TEXT("note"), TEXT("This connection sent no Mcp-Session-Id, so its tool list cannot change: call these tools ")
+			TEXT("with call_tool, or add ?domains=<Domain> to the server URL to list them from the start."));
+	}
+	else if (Added > 0)
+	{
+		Result->SetStringField(TEXT("note"), TEXT("The tools are in this connection's list from now on; if your client does not show them, ")
+			TEXT("it did not re-read the list: call them with call_tool."));
+	}
+	return Result;
 }
 
 TSharedPtr<FJsonObject> McpMetaTools::Answer(const FMcpToolCatalog& Catalog, const FString& ToolName, const TSharedPtr<FJsonObject>& Args, bool& bOutIsError)

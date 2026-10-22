@@ -58,7 +58,7 @@ bool FMcpAgentClientsTest::RunTest(const FString& Parameters)
 		return Status;
 	};
 
-	// 1. Cursor, no file and no folder: both are created, in two spaces and LF, with the compact list;
+	// 1. Cursor, no file and no folder: both are created, in two spaces and LF, with the server's URL (the core list);
 	//    a second Connect does not write again.
 	{
 		const FString Path = CaseDir(TEXT("CursorNew")) / TEXT(".cursor/mcp.json");
@@ -66,7 +66,7 @@ bool FMcpAgentClientsTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("1 connects"), McpAgentClients::Connect(EClient::Cursor, Path, Port, false, Message));
 		AddInfo(Message);
 		TestEqual(TEXT("1 content"), ReadText(Path), FString(TEXT(
-			"{\n  \"mcpServers\": {\n    \"unreal\": {\n      \"url\": \"http://127.0.0.1:55561/mcp?tools=compact\"\n    }\n  }\n}\n")));
+			"{\n  \"mcpServers\": {\n    \"unreal\": {\n      \"url\": \"http://127.0.0.1:55561/mcp\"\n    }\n  }\n}\n")));
 		StateIs(EClient::Cursor, Path, false, EState::Connected, TEXT("1 after"));
 		const FDateTime Stamp = IFileManager::Get().GetTimeStamp(*Path);
 		TestTrue(TEXT("1 idempotent"), McpAgentClients::Connect(EClient::Cursor, Path, Port, false, Message));
@@ -84,7 +84,7 @@ bool FMcpAgentClientsTest::RunTest(const FString& Parameters)
 		AddInfo(Message);
 		TestEqual(TEXT("2 content"), ReadText(Path),
 			FString(TEXT("{\r\n\t\"servers\": {\r\n")) + Other
-			+ TEXT(",\r\n\t\t\"unreal\": {\r\n\t\t\t\"type\": \"http\",\r\n\t\t\t\"url\": \"http://127.0.0.1:55561/mcp?tools=compact\"\r\n\t\t}\r\n\t},\r\n\t\"note\": 1.50\r\n}\r\n"));
+			+ TEXT(",\r\n\t\t\"unreal\": {\r\n\t\t\t\"type\": \"http\",\r\n\t\t\t\"url\": \"http://127.0.0.1:55561/mcp\"\r\n\t\t}\r\n\t},\r\n\t\"note\": 1.50\r\n}\r\n"));
 	}
 
 	// 3. VS Code with a token: the header names an input, and the input is declared once.
@@ -109,7 +109,7 @@ bool FMcpAgentClientsTest::RunTest(const FString& Parameters)
 		const FString Path = CaseDir(TEXT("Antigravity")) / TEXT("mcp_config.json");
 		TestTrue(TEXT("5 connects"), McpAgentClients::Connect(EClient::Antigravity, Path, Port, false, Message));
 		TestEqual(TEXT("5 content"), ReadText(Path), FString(TEXT(
-			"{\n  \"mcpServers\": {\n    \"unreal\": {\n      \"serverUrl\": \"http://127.0.0.1:55561/mcp?tools=compact\"\n    }\n  }\n}\n")));
+			"{\n  \"mcpServers\": {\n    \"unreal\": {\n      \"serverUrl\": \"http://127.0.0.1:55561/mcp\"\n    }\n  }\n}\n")));
 		const FString Before = ReadText(Path);
 		StateIs(EClient::Antigravity, Path, true, EState::AuthUnsupported, TEXT("5 token"));
 		TestFalse(TEXT("5 refuses with a token"), McpAgentClients::Connect(EClient::Antigravity, Path, Port, true, Message));
@@ -125,7 +125,7 @@ bool FMcpAgentClientsTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("6 connects"), McpAgentClients::Connect(EClient::Cursor, Path, Port, false, Message));
 		AddInfo(Message);
 		TestEqual(TEXT("6 content"), ReadText(Path), FString(TEXT(
-			"{\n  \"mcpServers\": {\n    \"unreal\": {\n      \"url\": \"http://127.0.0.1:55561/mcp?tools=compact\",\n      \"disabled\": false\n    }\n  }\n}\n")));
+			"{\n  \"mcpServers\": {\n    \"unreal\": {\n      \"url\": \"http://127.0.0.1:55561/mcp\",\n      \"disabled\": false\n    }\n  }\n}\n")));
 	}
 
 	// 7. Invalid JSON: unreadable, and left untouched.
@@ -150,7 +150,7 @@ bool FMcpAgentClientsTest::RunTest(const FString& Parameters)
 	}
 
 	// 9. The Codex command, with and without a token.
-	TestEqual(TEXT("9 codex"), McpAgentClients::CodexAddCommand(Port, false), FString(TEXT("codex mcp add unreal --url \"http://127.0.0.1:55561/mcp?tools=compact\"")));
+	TestEqual(TEXT("9 codex"), McpAgentClients::CodexAddCommand(Port, false), FString(TEXT("codex mcp add unreal --url \"http://127.0.0.1:55561/mcp\"")));
 	TestTrue(TEXT("9 codex token"), McpAgentClients::CodexAddCommand(Port, true).EndsWith(TEXT(" --bearer-token-env-var UEAGENT_TOKEN")));
 	return true;
 }

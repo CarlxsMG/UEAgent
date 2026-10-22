@@ -4048,6 +4048,7 @@ TSharedPtr<FJsonObject> HandleAddAnimTransformCurve(const TSharedPtr<FJsonObject
 // set_anim_additive_settings — set the additive animation type + base pose on a UAnimSequence.
 // ---------------------------------------------------------------------------
 // MCP:set_anim_additive_settings - Set the additive-animation type and base pose on a UAnimSequence in an undo transaction and save it. Settings the sequence already has are a success with changed=false and saved=false, and the sequence is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
+//   @retired set_properties - object_path=<anim sequence>, properties={"AdditiveAnimType":"AAT_LocalSpaceBase","RefPoseType":"ABPT_RefPose","RefFrameIndex":0,"RefPoseSeq":"/Game/..."}, save=true (PostEditChange recompresses the sequence)
 //   @param anim_sequence_path - Object path of the UAnimSequence.
 //   @param additive_anim_type - Additive type: LocalSpaceBase|RotationOffsetMeshSpace|None (default LocalSpaceBase)
 //   @param ref_pose_type - Base pose type: RefPose|AnimScaled|AnimFrame|LocalAnimFrame|None (default RefPose)

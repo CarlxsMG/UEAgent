@@ -1552,9 +1552,10 @@ TSharedPtr<FJsonObject> HandleScanUAssetRefs(const TSharedPtr<FJsonObject>& Para
 }
 
 // -------------------------------------------------------------------------- //
-// compare_asset_versions
+// diff_asset_versions
 // -------------------------------------------------------------------------- //
-// MCP:compare_asset_versions - Apply the binary ref-scan of scan_uasset_references to the SAME asset (rel_path) across N external Content roots, reporting ref-count / size / mtime (and optional pattern-match count) per root so you can tell an incomplete (stub) copy from the complete one at a glance.
+// MCP:diff_asset_versions - Apply the binary ref-scan of scan_uasset_references to the SAME asset (rel_path) across N external Content roots, reporting ref-count / size / mtime (and optional pattern-match count) per root so you can tell an incomplete (stub) copy from the complete one at a glance.
+//   @renamed-from compare_asset_versions
 //   @param rel_path - Asset path relative to each root's Content dir, e.g. 'Characters/Mannequin/ABP_Manny.uasset' (a missing extension defaults to .uasset).
 //   @param roots - List of external Content-root directories to compare across.
 //   @param pattern - Optional regex (ECMAScript) forwarded to the scan; when set, roots rank by pattern-match count instead of ref-path count.
@@ -1986,7 +1987,7 @@ TSharedPtr<FJsonObject> HandleGetReferencePath(const TSharedPtr<FJsonObject>& Pa
 const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("rename_assets"), &HandleBulkRenameAssets },
-    { TEXT("compare_asset_versions"), &HandleCompareAssetVersions },
+    { TEXT("diff_asset_versions"), &HandleCompareAssetVersions },
     { TEXT("diff_content_trees"), &HandleDiffContentTrees },
     { TEXT("evaluate_curve_at_time"), &HandleEvaluateCurveAtTime },
     { TEXT("generate_asset_thumbnail"), &HandleGenerateAssetThumbnail },

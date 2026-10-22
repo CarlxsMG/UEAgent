@@ -289,6 +289,63 @@ namespace
         return nullptr;
     }
 
+    // A `value` given as text, with no typed field and no parameter_type, read as the input's own data type: the call
+    // the generic set_pin_default_value makes, which does not know the type. OutParams is a copy of the call with the typed
+    // field set (a Float or Time stays in `value`, as a number); false with OutError when the text does not parse as that
+    // type or the type takes no text. Not applicable (true, OutParams null) when the call already says the type.
+    bool MetaSound_ReadTextAsType(const TSharedPtr<FJsonObject>& Args, const FName& DataType, TSharedPtr<FJsonObject>& OutParams, FString& OutError)
+    {
+        OutParams.Reset();
+        const TSharedPtr<FJsonValue> Value = Args->TryGetField(TEXT("value"));
+        if (!Value.IsValid() || Value->Type != EJson::String || Args->HasField(TEXT("int_value")) || Args->HasField(TEXT("bool_value"))
+            || Args->HasField(TEXT("string_value")) || Args->HasField(TEXT("parameter_type")))
+        {
+            return true;
+        }
+        const FString Text = Value->AsString().TrimStartAndEnd();
+        TSharedPtr<FJsonObject> Typed = MakeShared<FJsonObject>();
+        FJsonObject::Duplicate(Args, Typed);
+        Typed->RemoveField(TEXT("value"));
+        const FString Type = DataType.ToString();
+        if (Type == TEXT("Bool"))
+        {
+            if (Text.Equals(TEXT("true"), ESearchCase::IgnoreCase) || Text == TEXT("1")) { Typed->SetBoolField(TEXT("bool_value"), true); }
+            else if (Text.Equals(TEXT("false"), ESearchCase::IgnoreCase) || Text == TEXT("0")) { Typed->SetBoolField(TEXT("bool_value"), false); }
+            else { OutError = FString::Printf(TEXT("'%s' is not a Bool: give true or false. Nothing was written."), *Text); return false; }
+        }
+        else if (Type == TEXT("Int32"))
+        {
+            int64 Whole = 0;
+            if (!LexTryParseString(Whole, *Text) || Text.Contains(TEXT(".")))
+            {
+                OutError = FString::Printf(TEXT("'%s' is not a whole number, which an Int32 input takes. Nothing was written."), *Text);
+                return false;
+            }
+            Typed->SetNumberField(TEXT("int_value"), static_cast<double>(Whole));
+        }
+        else if (Type == TEXT("Float") || Type == TEXT("Time"))
+        {
+            double Number = 0.0;
+            if (!LexTryParseString(Number, *Text))
+            {
+                OutError = FString::Printf(TEXT("'%s' is not a number, which a %s input takes. Nothing was written."), *Text, *Type);
+                return false;
+            }
+            Typed->SetNumberField(TEXT("value"), Number);
+        }
+        else if (Type == TEXT("String"))
+        {
+            Typed->SetStringField(TEXT("string_value"), Value->AsString());
+        }
+        else
+        {
+            OutError = FString::Printf(TEXT("The input is of type %s, which takes no literal default (only Bool, Int32, Float, Time and String do). Nothing was written."), *Type);
+            return false;
+        }
+        OutParams = Typed;
+        return true;
+    }
+
     // Build an FMetasoundFrontendLiteral from `value` read as the JSON type ParameterType names: "float" (a number),
     // "int" (a whole number), "bool" (true or false) or "string" (a string). Null on success; otherwise the error
     // reply, with nothing to write: an unknown type, no value, or a value whose JSON type is not the one named.
@@ -540,7 +597,7 @@ namespace
 // UMetaSoundSource asset under /Game (via IAssetTools::CreateAsset; headless-safe,
 // no modal). Idempotent: if the asset already exists, loads + returns its info.
 // ---------------------------------------------------------------------------
-// MCP:create_metasound_source - Create a UMetaSoundSource asset at package_path/name (default folder /Game/MetaSounds): a one-shot source graph pre-wired with the source interface (OnPlay input, OnFinished output, one audio output per channel), built by the MetaSound builder subsystem and written with BuildToAsset, then saved; no dialog, no undo step. Idempotent: a MetaSound Source already there is returned unchanged with already_exists=true, created=false and saved=false, nothing saved. output_format is mono, stereo, quad, 5.1 or 7.1; anything else is an error and nothing is created. The reply's output_format is read from the source, also for an existing one, whose own format is reported and left as it is. An invalid package name or a failed build is an error; a failed save gives success false with save_error. Next: add_metasound_node, add_metasound_interface; inspect: get_metasound_info; inverse: delete_asset.
+// MCP:create_metasound_source - Create a UMetaSoundSource asset at package_path/name (default folder /Game/MetaSounds): a one-shot source graph pre-wired with the source interface (OnPlay input, OnFinished output, one audio output per channel), built by the MetaSound builder subsystem and written with BuildToAsset, then saved; no dialog, no undo step. Idempotent: a MetaSound Source already there is returned unchanged with already_exists=true, created=false and saved=false, nothing saved. output_format is mono, stereo, quad, 5.1 or 7.1; anything else is an error and nothing is created. The reply's output_format is read from the source, also for an existing one, whose own format is reported and left as it is. An invalid package name or a failed build is an error; a failed save gives success false with save_error. Next: add_graph_node, add_metasound_interface; inspect: get_metasound_info; inverse: delete_asset.
 //   @param name - Name of the MetaSound Source asset to create.
 //   @param package_path - Target /Game package path (optional, default "/Game/MetaSounds")
 //   @param output_format - Output audio format: "mono", "stereo", "quad", "5.1", or "7.1" (optional, default "mono")
@@ -735,13 +792,13 @@ TSharedPtr<FJsonObject> HandleMetaSoundAddInterface(const TSharedPtr<FJsonObject
 // named graph input's default literal via SetGraphInputDefault, then reads it
 // back to verify and saves. Supports float / int / bool / string values.
 // ---------------------------------------------------------------------------
-// MCP:set_metasound_graph_input_default - Set the default value of one graph input of a MetaSound Source asset (a preset included) through the MetaSound editor builder, in one undo step, then save the asset. Give one typed field: bool_value (true or false), int_value (a whole number), string_value (a string) or value (a number, read as a float); with several, the first in that order wins. Or give parameter_type (float, int, bool or string) and value in that JSON type, the typed fields then being ignored. A missing or mistyped value, an unknown parameter_type, an unknown source, or an input that is missing or does not take that type is an error, with nothing written. value_set means the default reads back as the value; an input already holding it gives changed=false and saved=false, nothing written. A failed save makes success false with save_error. Inputs and their defaults: get_metasound_info (include_defaults); a node pin: set_metasound_node_input_default.
+// MCP:set_metasound_graph_input_default - Set the default value of one graph input of a MetaSound Source asset (a preset included) through the MetaSound editor builder, in one undo step, then save the asset. Give one typed field: bool_value (true or false), int_value (a whole number), string_value (a string) or value (a number, read as a float); with several, the first in that order wins. Or give parameter_type (float, int, bool or string) and value in that JSON type, the typed fields then being ignored. value may also be text, read as the input's own type ("0.5", "true", "Hello"). A missing or mistyped value, an unknown parameter_type, an unknown source, or an input that is missing or does not take that type is an error, with nothing written. value_set means the default reads back as the value; an input already holding it gives changed=false and saved=false, nothing written. A failed save makes success false with save_error. Inputs and their defaults: get_metasound_info (include_defaults); a node pin: set_pin_default_value.
 //   @param metasound_path - Asset path of the MetaSound Source.
 //   @param preset_path - Alias of metasound_path.
 //   @param input_name - Name of the graph input whose default to set.
 //   @param parameter_name - Alias of input_name.
 //   @param parameter_type - Optional literal type of value: "float", "int", "bool" or "string". When given, value must be of that JSON type (a whole number for int) and int_value/bool_value/string_value are ignored; another type name is an error.
-//   @param value - Float default value, a JSON number (optional, used if no other *_value is provided); with parameter_type, the value in the JSON type it names. Another JSON type is an error
+//   @param value - Float default value, a JSON number (optional, used if no other *_value is provided), or the value as text read as the input's type; with parameter_type, the value in the JSON type it names. Another JSON type is an error
 //   @param int_value - Int32 default value, a whole JSON number (optional, mutually exclusive with value/bool_value/string_value)
 //   @param bool_value - Bool default value, JSON true or false (optional, mutually exclusive with value/int_value/string_value)
 //   @param string_value - String default value, a JSON string (optional, mutually exclusive with value/int_value/bool_value)
@@ -775,6 +832,27 @@ TSharedPtr<FJsonObject> HandleMetaSoundSetInputDefault(const TSharedPtr<FJsonObj
     FString ParameterType;
     const bool bTypedValue = Params->TryGetStringField(TEXT("parameter_type"), ParameterType)
         && !ParameterType.TrimStartAndEnd().IsEmpty();
+
+    // A text value is read as the graph input's own type.
+    if (!bTypedValue)
+    {
+        if (const UMetaSoundSource* Typed = mcp_common::ResolveAsset<UMetaSoundSource>(MetaSoundPath))
+        {
+            const FName WantedName(*InputName);
+            const FMetasoundFrontendClassInput* Member = Typed->GetConstDocument().RootGraph.GetDefaultInterface().Inputs.FindByPredicate(
+                [&WantedName](const FMetasoundFrontendClassInput& In) { return In.Name == WantedName; });
+            TSharedPtr<FJsonObject> Converted;
+            FString TextError;
+            if (Member && !MetaSound_ReadTextAsType(Params, Member->TypeName, Converted, TextError))
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(TEXT("Graph input '%s': %s"), *InputName, *TextError));
+            }
+            if (Converted.IsValid())
+            {
+                Params->Values = Converted->Values; // the call as if it had given the typed field
+            }
+        }
+    }
 
     // The value is read and checked before anything is opened or written: a missing value, or one of the wrong JSON
     // type, would otherwise be written as 0, false or an empty string.
@@ -886,7 +964,7 @@ TSharedPtr<FJsonObject> HandleMetaSoundSetInputDefault(const TSharedPtr<FJsonObj
 // the node/edge/variable counts of the root graph's default page; optionally the
 // default of each input, read through the editor builder.
 // ---------------------------------------------------------------------------
-// MCP:get_metasound_info - Read the top-level metadata of a MetaSound Source asset (a preset included), loading it if needed: its class, the root graph class name, the graph inputs and outputs (name and type) with their counts, interface_count (the number of interfaces the document declares) and the node, connection (edge) and variable counts of the root graph's default page; with include_defaults, each input's default value too. Read-only; a path that does not resolve to a UMetaSoundSource, a MetaSound Patch included, is an error. list_metasound_nodes lists the nodes; get_assets_by_type with asset_type MetaSoundSource finds sources. The edges themselves: list_metasound_connections.
+// MCP:get_metasound_info - Read the top-level metadata of a MetaSound Source asset (a preset included), loading it if needed: its class, the root graph class name, the graph inputs and outputs (name and type) with their counts, interface_count (the number of interfaces the document declares) and the node, connection (edge) and variable counts of the root graph's default page; with include_defaults, each input's default value too. Read-only; a path that does not resolve to a UMetaSoundSource, a MetaSound Patch included, is an error. get_graph_nodes lists the nodes and their connections; get_assets_by_type with asset_type MetaSoundSource finds sources.
 //   @param metasound_path - Asset path of the MetaSound Source, as a package path like "/Game/MetaSounds/MS_Example" or an object path like "/Game/MetaSounds/MS_Example.MS_Example"
 //   @param include_defaults - Optional bool (default false). When true, each inputs[] entry gains value: its default as the MetaSound editor builder reads it (a literal string), or "(inherited)" when the builder has none (a preset input taken from its referenced asset). Opens the editor builder for the asset; the asset is not changed.
 //   @returns { source_name: string, asset_path: string, class_name: string, graph_class_name: string, input_count: number, output_count: number, interface_count: number, node_count: number, connection_count: number, variable_count: number, inputs: [{ name: string, type: string, value?: string }], outputs: [{ name: string, type: string }] }
@@ -1182,6 +1260,7 @@ TSharedPtr<FJsonObject> HandleAddMetaSoundGraphOutput(const TSharedPtr<FJsonObje
 // Verified via NodesAreConnected. Saves the asset.
 // ---------------------------------------------------------------------------
 // MCP:connect_metasound_graph_input_to_output - Connects a graph input node's output to a graph output node's input.  Resolves the source handle from a graph INPUT node by name (FindGraphInputNode -> the input node's output handle) and the destination handle from a graph OUTPUT node by name (FindGraphOutputNode -> the output node's input handle), then calls UMetaSoundBuilderBase::ConnectNodes and verifies via NodesAreConnected. The connection is real where the two data types match (e.g. a Float graph input connected to a Float graph output). Saves the asset. Graph input to a node: connect_metasound_graph_input_to_node; edges: list_metasound_connections.
+//   @retired connect_pins - asset_path=<MetaSound Source>, source_node_id="@input", source_pin=<graph input name>, target_node_id="@output", target_pin=<graph output name>
 //   @param metasound_path - Asset path of the MetaSound Source.
 //   @param from_node_output_name - Name of the graph INPUT to use as the connection source.
 //   @param to_node_input_name - Name of the graph OUTPUT to use as the connection target.
@@ -1233,6 +1312,7 @@ TSharedPtr<FJsonObject> HandleConnectMetaSoundNodes(const TSharedPtr<FJsonObject
 // (discovered at runtime) so a follow-up call can set defaults / wire it.
 // ---------------------------------------------------------------------------
 // MCP:add_metasound_node - Add a real process node to a MetaSound Source graph by its registered class name (e.g. UE/Sine/Audio).  Unlike add_metasound_graph_input (which adds a graph input node), this instantiates a DSP node so you can author a real signal patch headless. Returns the node's GUID (node_id) and its enumerated input/output pins (name + data_type) for follow-up set/connect calls. The asset is saved. NOT idempotent: each call adds a new node instance (delete + recreate the source for a clean run). Wire it with connect_metasound_nodes, connect_metasound_graph_input_to_node or connect_metasound_node_to_graph_output; edges: list_metasound_connections.
+//   @retired add_graph_node - asset_path=<MetaSound Source>, node_type=<class_path from list_metasound_node_types, e.g. UE.Sine.Audio>, major_version=<n>; the reply's node_id is the node GUID
 //   @param metasound_path - Asset path of the MetaSound Source.
 //   @param class_namespace - Registered node class namespace, e.g. "UE".
 //   @param class_name - Registered node class name, e.g. "Sine".
@@ -1293,11 +1373,12 @@ TSharedPtr<FJsonObject> HandleMetaSoundAddNodeByClassName(const TSharedPtr<FJson
 // then reads it back to verify. Mirrors set_metasound_graph_input_default but for process
 // nodes, not graph inputs.
 // ---------------------------------------------------------------------------
-// MCP:set_metasound_node_input_default - Set the default literal of a named input pin on a concrete node of a MetaSound Source (node by node_id from add_metasound_node) through the MetaSound editor builder, then read it back and save the asset. Give one typed field: bool_value (true or false), int_value (a whole number), string_value (a string) or value (a number, read as a float); with several, the first in that order wins. A missing or mistyped value, an unknown source, node_id or pin, or a literal the pin refuses is an error. A failed save makes success false. For a graph input use set_metasound_graph_input_default.
+// MCP:set_metasound_node_input_default - Set the default literal of a named input pin on a concrete node of a MetaSound Source (node by node_id from add_metasound_node) through the MetaSound editor builder, then read it back and save the asset. Give one typed field: bool_value (true or false), int_value (a whole number), string_value (a string) or value (a number, read as a float); with several, the first in that order wins. value may also be text, read as the pin's own type ("440", "true", "Hello"). A missing or mistyped value, an unknown source, node_id or pin, or a literal the pin refuses is an error, and so is a value that does not read back (value_set false, nothing saved). A failed save makes success false. For a graph input use set_metasound_graph_input_default.
+//   @retired set_pin_default_value - asset_path=<MetaSound Source>, node_id=<node GUID>, pin_name=<input_name>, value=<the value as text, read as the pin's type>
 //   @param metasound_path - Asset path of the MetaSound Source.
 //   @param node_id - GUID of the node (from add_metasound_node).
 //   @param input_name - Name of the node input pin (discover via the node's enumerated inputs).
-//   @param value - Float default, a JSON number (optional, used if no other *_value is provided).
+//   @param value [any] - Float default, a JSON number, or the value as text read as the pin's type (optional, used if no other *_value is provided).
 //   @param int_value - Int32 default, a whole JSON number (optional, mutually exclusive).
 //   @param bool_value - Bool default, JSON true or false (optional, mutually exclusive).
 //   @param string_value - String default, a JSON string (optional, mutually exclusive).
@@ -1330,6 +1411,23 @@ TSharedPtr<FJsonObject> HandleMetaSoundSetNodeInputDefault(const TSharedPtr<FJso
         return mcp_common::MakeErrorReply(
             FString::Printf(TEXT("Node input '%s' not found on node %s"), *InputName, *NodeId));
 
+    // A text value is read as the pin's own type.
+    {
+        FName PinName, PinType;
+        EMetaSoundBuilderResult DataResult = EMetaSoundBuilderResult::Failed;
+        Builder->GetNodeInputData(InputHandle, PinName, PinType, DataResult);
+        TSharedPtr<FJsonObject> Typed;
+        FString TextError;
+        if (DataResult == EMetaSoundBuilderResult::Succeeded && !MetaSound_ReadTextAsType(Params, PinType, Typed, TextError))
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(TEXT("Input '%s' of node %s: %s"), *InputName, *NodeId, *TextError));
+        }
+        if (Typed.IsValid())
+        {
+            Params->Values = Typed->Values; // the call as if it had given the typed field
+        }
+    }
+
     FMetasoundFrontendLiteral Literal;
     FString ValueType;
     if (TSharedPtr<FJsonObject> ValueError = BuildLiteralFromParams(Params, Literal, ValueType)) { return ValueError; }
@@ -1345,18 +1443,25 @@ TSharedPtr<FJsonObject> HandleMetaSoundSetNodeInputDefault(const TSharedPtr<FJso
 
     EMetaSoundBuilderResult GetResult = EMetaSoundBuilderResult::Failed;
     const FMetasoundFrontendLiteral ReadBack = Builder->GetNodeInputDefault(InputHandle, GetResult);
-
-    FString SaveErr;
-    const bool bSaved = MetaSound_MarkDirtyAndSave(Source, SaveErr);
+    const bool bVerified = GetResult == EMetaSoundBuilderResult::Succeeded;
+    // The write landed when the default read back is the literal sent; only then is it saved.
+    const bool bWritten = bVerified && ReadBack.IsEqual(Literal);
 
     TSharedPtr<FJsonObject> Data = MetaSound_NewPayload(Source);
     Data->SetStringField(TEXT("node_id"), NodeId);
     Data->SetStringField(TEXT("input_name"), InputName);
     Data->SetStringField(TEXT("value_type"), ValueType);
-    Data->SetBoolField(TEXT("value_set"), true);
-    Data->SetBoolField(TEXT("verified"), GetResult == EMetaSoundBuilderResult::Succeeded);
+    Data->SetBoolField(TEXT("value_set"), bWritten);
+    Data->SetBoolField(TEXT("verified"), bVerified);
     Data->SetStringField(TEXT("value_read_back"), ReadBack.ToString());
-    return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_metasound_node_input_default"));
+    if (!bWritten)
+    {
+        mcp_common::AddSaveOutcome(Data, false, TEXT("not saved: the default read back is not the value sent"));
+        return mcp_common::MakeOutcomeReply(Data, false, mcp_common::MeasuredOutcomeError(TEXT("set_metasound_node_input_default"), TEXT("value_set")));
+    }
+    FString SaveErr;
+    const bool bSaved = MetaSound_MarkDirtyAndSave(Source, SaveErr);
+    return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_metasound_node_input_default"), SaveErr);
 }
 
 // ---------------------------------------------------------------------------
@@ -1366,6 +1471,7 @@ TSharedPtr<FJsonObject> HandleMetaSoundSetNodeInputDefault(const TSharedPtr<FJso
 // edge before adding). Single canonical path (no runtime fallback).
 // ---------------------------------------------------------------------------
 // MCP:connect_metasound_node_to_graph_output - Connect a concrete node's output pin to a named graph output, completing a signal patch (e.g. Sine.Audio -> the source's audio output).  Uses ConnectNodeOutputToGraphOutput (idempotent: replaces any existing edge). Reports the honest EMetaSoundBuilderResult. Node to node: connect_metasound_nodes; edges: list_metasound_connections.
+//   @retired connect_pins - asset_path=<MetaSound Source>, source_node_id=<node_id>, source_pin=<node_output_name>, target_node_id="@output", target_pin=<graph_output_name>
 //   @param metasound_path - Asset path of the MetaSound Source.
 //   @param node_id - GUID of the source node (from add_metasound_node).
 //   @param node_output_name - Name of the node's output pin (e.g. "Audio").
@@ -1431,6 +1537,7 @@ TSharedPtr<FJsonObject> HandleMetaSoundConnectNodeToGraphOutput(const TSharedPtr
 // to clear whatever node output drives that graph output. Saves the asset.
 // ---------------------------------------------------------------------------
 // MCP:disconnect_metasound_node_from_graph_output - Disconnects whatever node output currently drives a named graph output, clearing the edge (inverse of connect_metasound_node_to_graph_output).  Resolves the graph output node's input handle by name (FindGraphOutputNode) and queries NodeInputIsConnected first: if the input is already unconnected it returns already_disconnected without error (idempotent), otherwise it calls UMetaSoundBuilderBase::DisconnectNodeInput and reports the result. Saves the asset.
+//   @retired disconnect_pin - asset_path=<MetaSound Source>, node_id="@output", pin_name=<graph_output_name>
 //   @param metasound_path - Asset path of the MetaSound Source.
 //   @param graph_output_name - Name of the target graph output to disconnect (discover via get_metasound_info).
 //   @returns { asset_path: string, graph_output_name: string, data_type: string, disconnected: bool, already_disconnected: bool, result: string, saved: bool, save_error: string? }
@@ -1502,6 +1609,7 @@ TSharedPtr<FJsonObject> HandleMetaSoundDisconnectNodeFromGraphOutput(const TShar
 // UMetaSoundBuilderBase::DisconnectNodes. Saves the asset.
 // ---------------------------------------------------------------------------
 // MCP:disconnect_metasound_graph_input_from_output - Disconnects a graph input node's output from a graph output node's input (inverse of connect_metasound_graph_input_to_output).  Resolves the source handle from a graph INPUT node by name (FindGraphInputNode -> the input node's output handle) and the destination handle from a graph OUTPUT node by name (FindGraphOutputNode -> the output node's input handle), then queries NodesAreConnected first: if the edge is already absent it returns already_disconnected without error (idempotent), otherwise it calls UMetaSoundBuilderBase::DisconnectNodes and reports the result. Saves the asset.
+//   @retired disconnect_pin - asset_path=<MetaSound Source>, node_id="@output", pin_name=<graph output name>, linked_node_id="@input", linked_pin=<graph input name>
 //   @param metasound_path - Asset path of the MetaSound Source.
 //   @param from_node_output_name - Name of the graph INPUT whose output is the connection source.
 //   @param to_node_input_name - Name of the graph OUTPUT whose input is the connection target.
@@ -1559,7 +1667,8 @@ TSharedPtr<FJsonObject> HandleDisconnectMetaSoundNodes(const TSharedPtr<FJsonObj
 // via UMetaSoundBuilderBase::RemoveNode(bRemoveUnusedDependencies=true). Queries
 // ContainsNode first for honest idempotency (already_absent without error). Saves.
 // ---------------------------------------------------------------------------
-// MCP:remove_metasound_node - Removes a node from a MetaSound Source graph by its node_id GUID (inverse of add_metasound_node).  Parses the node_id into a node handle and queries ContainsNode first: if the node is already absent it returns already_absent without error (idempotent), otherwise it calls UMetaSoundBuilderBase::RemoveNode (pruning unused dependencies) and reports the result. Saves the asset.
+// MCP:remove_metasound_node - Removes a node from a MetaSound Source graph by its node_id GUID (inverse of add_metasound_node).  Parses the node_id into a node handle and queries ContainsNode first: if the node is already absent it returns already_absent without error (idempotent), otherwise it calls UMetaSoundBuilderBase::RemoveNode (pruning unused dependencies) and reports the result. Saves the asset. A graph input or output node is refused: remove that input or output with remove_metasound_graph_input or remove_metasound_graph_output.
+//   @retired remove_graph_node - asset_path=<MetaSound Source>, node_id=<node GUID>
 //   @param metasound_path - Asset path of the MetaSound Source.
 //   @param node_id - GUID of the node to remove (from add_metasound_node).
 //   @returns { asset_path: string, node_id: string, removed: bool, already_absent: bool, saved: bool, save_error: string?, note: string? }
@@ -1602,6 +1711,24 @@ TSharedPtr<FJsonObject> HandleRemoveMetaSoundNode(const TSharedPtr<FJsonObject>&
         Data->SetStringField(TEXT("note"),
             FString::Printf(TEXT("node %s not present in graph; nothing to remove"), *NodeId));
         return mcp_common::MakeOkReply(Data);
+    }
+
+    // A graph input or output node stands for the input or output itself: removing the node alone would leave the
+    // member declared with no node.
+    {
+        const FMetasoundFrontendDocument& Document = Source->GetConstDocument();
+        const FMetasoundFrontendNode* Found = Document.RootGraph.GetConstDefaultGraph().Nodes.FindByPredicate(
+            [&NodeHandle](const FMetasoundFrontendNode& Node) { return Node.GetID() == NodeHandle.NodeID; });
+        const FMetasoundFrontendClass* Class = Found ? Document.Dependencies.FindByPredicate(
+            [Found](const FMetasoundFrontendClass& Dependency) { return Dependency.ID == Found->ClassID; }) : nullptr;
+        if (Class && (Class->Metadata.GetType() == EMetasoundFrontendClassType::Input || Class->Metadata.GetType() == EMetasoundFrontendClassType::Output))
+        {
+            const bool bInput = Class->Metadata.GetType() == EMetasoundFrontendClassType::Input;
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("Node %s is the graph %s '%s': remove the %s itself with %s. Nothing was removed."), *NodeId,
+                bInput ? TEXT("input") : TEXT("output"), *Found->Name.ToString(), bInput ? TEXT("input") : TEXT("output"),
+                bInput ? TEXT("remove_metasound_graph_input") : TEXT("remove_metasound_graph_output")));
+        }
     }
 
     FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "MetaSoundRemoveNode", "MetaSound Remove Node"));
@@ -1819,7 +1946,7 @@ static void MetaSound_AddNativeFields(const TSharedPtr<FJsonObject>& Entry, EMet
 // ---------------------------------------------------------------------------
 // list_metasound_node_types — ISearchEngine reflection of registered node classes
 // ---------------------------------------------------------------------------
-// MCP:list_metasound_node_types - List the MetaSound node classes the editor's MetaSound search engine knows, without changing anything: per class its class_name, class_path (Namespace.Name.Variant, e.g. UE.Sine.Audio: the three parts add_metasound_node takes as class_namespace, class_name and class_variant), type (e.g. External, the type of node classes and MetaSound assets), highest version (major.minor; the major is add_metasound_node's major_version), access_flags, is_native (false for a class a MetaSound asset defines, as the MetaSound asset manager knows it, true for one registered by engine or plugin code; null if the asset manager is unavailable) and asset_path (the defining asset, empty for a native class). Deprecated classes are left out and only the highest version of each is listed; with include_unloaded (default) MetaSound assets not loaded yet are included too. The full list is long (hundreds of classes, too long to come back inline), so narrow it with name_filter and max_results; count is what came back, matched_count what matched the filter and total_count every class. Use it to find a class before add_metasound_node; the nodes already in one MetaSound's graph are list_metasound_nodes, and one node's pins get_metasound_node_info. Editor only.
+// MCP:list_metasound_node_types - List the MetaSound node classes the editor's MetaSound search engine knows, without changing anything: per class its class_name, class_path (Namespace.Name.Variant, e.g. UE.Sine.Audio: the node_type add_graph_node takes), type (e.g. External, the type of node classes and MetaSound assets), highest version (major.minor; the major is add_graph_node's major_version), access_flags, is_native (false for a class a MetaSound asset defines, as the MetaSound asset manager knows it, true for one registered by engine or plugin code; null if the asset manager is unavailable) and asset_path (the defining asset, empty for a native class). Deprecated classes are left out and only the highest version of each is listed; with include_unloaded (default) MetaSound assets not loaded yet are included too. The full list is long (hundreds of classes, too long to come back inline), so narrow it with name_filter and max_results; count is what came back, matched_count what matched the filter and total_count every class. Use it to find a class before add_graph_node; the nodes already in one MetaSound's graph, and one node's pins, are get_graph_nodes. Editor only.
 //   @param include_unloaded - true (default) also lists the classes of MetaSound assets not loaded into memory yet, from the MetaSound asset manager's tag data; false lists only the classes registered now.
 //   @param name_filter - Optional text matched, case-insensitively, inside each class_path or asset_path, e.g. "Sine" or "/Game/Audio/MS_"; empty lists every class.
 //   @param max_results - Optional cap on the classes returned after the filter (default 0, no cap); truncated says whether it cut the list.
@@ -1960,6 +2087,7 @@ try
 // list_metasound_nodes — enumerate nodes in a MetaSound graph
 // ---------------------------------------------------------------------------
 // MCP:list_metasound_nodes - List every node in the default graph of a MetaSound Source asset with its GUID id, name, class name and input/output counts, plus count. Read-only; pass the id to get_metasound_node_info and the other node tools.
+//   @retired get_graph_nodes - asset_path=<MetaSound Source>; the same nodes, each with node_id (its GUID), plus the graph's connections
 //   @param metasound_path - MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain"; MetaSound Patches are not accepted.
 //   @returns { metasound_path, count, nodes: [{ id, name, class_name, input_count, output_count }] }
 TSharedPtr<FJsonObject> HandleListMetaSoundNodes(
@@ -2011,8 +2139,9 @@ TSharedPtr<FJsonObject> HandleListMetaSoundNodes(
 // get_metasound_node_info — full node detail (inputs/outputs/literals)
 // ---------------------------------------------------------------------------
 // MCP:get_metasound_node_info - Read one node of the default graph of a MetaSound Source by GUID: its name, class name, input/output/environment vertices (name, type_name, vertex_id), each input's stored default literal (has_value, literal_type, value; has_value false means no literal is set), the input literal defaults by vertex, and the Configuration struct class; input_name narrows inputs and input_defaults to one input, and an unknown input name fails listing the valid ones. Read-only; get node ids from list_metasound_nodes, write an input default with set_metasound_node_input_default.
+//   @retired get_graph_nodes - asset_path=<MetaSound Source>, node_id=<node GUID>; the same node detail, plus the connections that touch it
 //   @param metasound_path - MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain"; MetaSound Patches are not accepted.
-//   @param node_id - Node GUID, as list_metasound_nodes returns it in id; a value that is not a GUID is refused.
+//   @param node_id - Node GUID, as get_graph_nodes returns it in node_id; a value that is not a GUID is refused.
 //   @param input_name - Optional name of one input vertex (FMetasoundFrontendVertex::Name): inputs and input_defaults then hold only that input. A name the node has no input for is an error listing the inputs.
 //   @returns { metasound_path, node_id, name, class_name, input_name?, inputs: [{name, type_name, vertex_id, has_value, literal_type?, value?}], outputs: [{name, type_name, vertex_id}], environment: [...], input_defaults: [{vertex_id, input_name, value, type}], configuration_class }
 TSharedPtr<FJsonObject> HandleGetMetaSoundNodeInfo(
@@ -2140,9 +2269,9 @@ TSharedPtr<FJsonObject> HandleGetMetaSoundNodeInfo(
 //   The Configuration struct is per-subclass — for example ArrayGet's config has
 //   NumOutputs, Index pin references, etc. We round-trip via FJsonObjectConverter.
 // ---------------------------------------------------------------------------
-// MCP:set_metasound_node_property - Write one field of a MetaSound Source node's Configuration struct, node found by GUID, by reflection directly in the frontend document (not through the MetaSound builder), then save the asset. set_properties cannot reach it: frontend nodes are document data, not UObjects. No undo step. Re-applying a value returns value_changed false but still saves. Succeeds only when the asset reaches disk; a failed save leaves the value in memory only (saved false, save_error). Read: get_metasound_node_property; GUIDs: list_metasound_nodes.
+// MCP:set_metasound_node_property - Write one field of a MetaSound Source node's Configuration struct, node found by GUID, by reflection directly in the frontend document (not through the MetaSound builder), then save the asset. set_properties cannot reach it: frontend nodes are document data, not UObjects. No undo step. Re-applying a value returns value_changed false but still saves. Succeeds only when the asset reaches disk; a failed save leaves the value in memory only (saved false, save_error). Read: get_metasound_node_property; GUIDs: get_graph_nodes.
 //   @param metasound_path - MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain"; MetaSound Patches are not accepted.
-//   @param node_id - Node GUID, as list_metasound_nodes returns it in id; a value that is not a GUID is refused.
+//   @param node_id - Node GUID, as get_graph_nodes returns it in node_id; a value that is not a GUID is refused.
 //   @param property - FProperty name on the Configuration struct.
 //   @param value [any!] - New value for the field as JSON, converted by FJsonObjectConverter: a number, bool, string, array or object (for a struct field); numbers and booleans can also be passed as strings ("0.5", "true").
 //   @returns { metasound_path, node_id, property, set, value_changed, new_value?, saved, save_error? }
@@ -2237,9 +2366,9 @@ TSharedPtr<FJsonObject> HandleSetMetaSoundNodeProperty(
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_metasound_node_property"), SaveError);
 }
 
-// MCP:get_metasound_node_property - Read one field of the Configuration struct of a MetaSound Source node, found by its node GUID (from list_metasound_nodes), returning its C++ type, has_value and value as JSON. Use it because MetaSound nodes are document structs, not UObjects, so get_properties cannot reach them; input defaults are set_metasound_node_input_default. Fails when the node has no Configuration struct or no such property; Patches are refused. Read-only; write with set_metasound_node_property.
+// MCP:get_metasound_node_property - Read one field of the Configuration struct of a MetaSound Source node, found by its node GUID (from get_graph_nodes), returning its C++ type, has_value and value as JSON. Use it because MetaSound nodes are document structs, not UObjects, so get_properties cannot reach them; input defaults are set_pin_default_value. Fails when the node has no Configuration struct or no such property; Patches are refused. Read-only; write with set_metasound_node_property.
 //   @param metasound_path - MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain"; MetaSound Patches are not accepted.
-//   @param node_id - Node GUID, as list_metasound_nodes returns it in id; a value that is not a GUID is refused.
+//   @param node_id - Node GUID, as get_graph_nodes returns it in node_id; a value that is not a GUID is refused.
 //   @param property - FProperty name on the Configuration struct.
 //   @returns { metasound_path, node_id, property, type, has_value, value? }
 TSharedPtr<FJsonObject> HandleGetMetaSoundNodeProperty(
@@ -2376,6 +2505,7 @@ namespace
 }
 
 // MCP:connect_metasound_nodes - Wire the output from_output_name of node from_node_id to the input to_input_name of node to_node_id in a MetaSound Source graph, in one undo step, then save the asset -- the node-to-node edge a patch needs (Sine.Audio -> ADSR.In). Node ids come from add_metasound_node or list_metasound_nodes, pin names from their inputs/outputs. The two pins must carry the same data type. An input takes one edge, so an input already fed from elsewhere is re-fed (replaced=true); the same edge already there changes and saves nothing (already_connected=true). A bad id, an unknown pin or a type mismatch is an error and nothing changes. Read back: list_metasound_connections; inverse: disconnect_metasound_nodes. A graph input as the source: connect_metasound_graph_input_to_node; a graph output as the target: connect_metasound_node_to_graph_output.
+//   @retired connect_pins - asset_path=<MetaSound Source>, source_node_id=<from_node_id>, source_pin=<from_output_name>, target_node_id=<to_node_id>, target_pin=<to_input_name>
 //   @param metasound_path - Asset path of the MetaSound Source.
 //   @param from_node_id - GUID of the node whose output feeds the edge.
 //   @param from_output_name - Name of that node's output pin (e.g. "Audio").
@@ -2433,6 +2563,7 @@ TSharedPtr<FJsonObject> HandleConnectMetaSoundNodeToNode(const TSharedPtr<FJsonO
 }
 
 // MCP:connect_metasound_graph_input_to_node - Wire the graph input graph_input_name of a MetaSound Source to the input to_input_name of node to_node_id, in one undo step, then save the asset -- how a parameter (a Float input "Frequency") drives a node pin. Same rules as connect_metasound_nodes: matching data types, an input already fed is re-fed (replaced=true), the same edge already there changes nothing (already_connected=true), and an unknown graph input, node or pin is an error with nothing changed. Read back: list_metasound_connections; inverse: disconnect_metasound_nodes on the node input. Graph input to graph output: connect_metasound_graph_input_to_output.
+//   @retired connect_pins - asset_path=<MetaSound Source>, source_node_id="@input", source_pin=<graph_input_name>, target_node_id=<to_node_id>, target_pin=<to_input_name>
 //   @param metasound_path - Asset path of the MetaSound Source.
 //   @param graph_input_name - Name of the graph input (get_metasound_info lists them).
 //   @param to_node_id - GUID of the node whose input receives the edge.
@@ -2478,6 +2609,7 @@ TSharedPtr<FJsonObject> HandleConnectMetaSoundGraphInputToNode(const TSharedPtr<
 }
 
 // MCP:disconnect_metasound_nodes - Drop the edge that feeds the input to_input_name of node to_node_id in a MetaSound Source graph, whatever drives it -- another node's output or a graph input -- in one undo step, then save the asset. Inverse of connect_metasound_nodes and connect_metasound_graph_input_to_node: an input takes one edge, so the input names it. The reply says which output fed it (from_node_id, from_output_name) and re-reads the input. An input with no edge is an honest no-op (disconnected=false, already_disconnected=true, nothing saved); a bad node id or an unknown pin is an error. Read first: list_metasound_connections; a graph output's edge: disconnect_metasound_node_from_graph_output.
+//   @retired disconnect_pin - asset_path=<MetaSound Source>, node_id=<to_node_id>, pin_name=<to_input_name>
 //   @param metasound_path - Asset path of the MetaSound Source.
 //   @param to_node_id - GUID of the node whose input loses its edge.
 //   @param to_input_name - Name of that node's input pin.
@@ -2559,6 +2691,7 @@ TSharedPtr<FJsonObject> HandleDisconnectMetaSoundNodeInput(const TSharedPtr<FJso
 }
 
 // MCP:list_metasound_connections - List every edge of the default graph of a MetaSound Source: from which node and output pin to which node and input pin, with each node's name and class (a graph input or output node is named after the input or output), plus count. Read-only. It reads what connect_metasound_nodes, connect_metasound_graph_input_to_node, connect_metasound_graph_input_to_output and connect_metasound_node_to_graph_output write; node ids are those of list_metasound_nodes, and an input's edge is dropped with disconnect_metasound_nodes. Patches are refused.
+//   @retired get_graph_nodes - asset_path=<MetaSound Source>; its connections field holds the same edges
 //   @param metasound_path - MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain".
 //   @returns { metasound_path: string, count: int, connections: [{ from_node_id, from_node_name, from_node_class, from_output_name, to_node_id, to_node_name, to_node_class, to_input_name, data_type }] }
 

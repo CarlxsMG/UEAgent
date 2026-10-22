@@ -2,7 +2,7 @@
 
 # Blueprint
 
-88 tools for Blueprint assets, components, variables, functions, events and dispatchers, graph nodes and pins, compiling, and Editor Utility Blueprints.
+87 tools for Blueprint assets, components, variables, functions, events and dispatchers, graph nodes and pins, compiling, and Editor Utility Blueprints.
 
 Back to the [index](README.md).
 
@@ -64,6 +64,8 @@ Add a track to a Timeline of a Blueprint, with optional keys, as the Timeline ed
 
 *Additive.*
 
+**Core tool:** every client lists it by default.
+
 Add a MEMBER variable to a Blueprint (add_function_local_variable is the function-scoped twin), then read/write it with add_graph_node node_type=variable_get/variable_set. TRAP 1: the variable is born NOT editable per instance -- placing the actor and writing that variable fails with "cannot be edited on instances" -- and get_blueprint_variables reports instance_editable:true anyway; fix it with set_blueprint_variable_metadata(instance_editable=true). TRAP 2: on a class that ALREADY has actors placed in a level, those instances keep the value of the first compile, so a default set afterwards never reaches them -- verify on the instances, not on the CDO.
 
 | Parameter | Type | Required | Description |
@@ -97,7 +99,7 @@ Add the node that BROADCASTS (fires) an event dispatcher on self -- own or inher
 
 *Destructive.*
 
-Add a resizable comment box (UEdGraphNode_Comment) with text to a graph, in one undo step. The text is written after the engine places the node (its PostPlacedNewNode resets the box to "Comment"), and the returned "comment" field is the box's text read back; without text the box keeps the engine's "Comment". It has NO pins, so a pin_defaults entry aimed at it breaks a whole build_blueprint_graph batch. Read back: get_graph_nodes (compact=false: compact skips comment boxes); remove: delete_node.
+Add a resizable comment box (UEdGraphNode_Comment) with text to a graph, in one undo step. The text is written after the engine places the node (its PostPlacedNewNode resets the box to "Comment"), and the returned "comment" field is the box's text read back; without text the box keeps the engine's "Comment". It has NO pins, so a pin_defaults entry aimed at it breaks a whole build_blueprint_graph batch. Read back: get_graph_nodes (compact=false: compact skips comment boxes); remove: remove_graph_node.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -216,12 +218,19 @@ Add an input or output (return) parameter to an existing Blueprint FUNCTION grap
 
 *Additive, idempotent.*
 
-Create ONE node in a Blueprint's event/function graph (node_type selects the kind) and return it WITH its freshly allocated pins, so connect_pins / set_pin_default_value can wire it immediately without a follow-up get_graph_nodes; with compile=true it also compiles the Blueprint afterwards. Use build_blueprint_graph instead when several nodes must be created AND wired in a single undo transaction, and get_function_pins to learn a call_function's pin names BEFORE creating anything. node_type='event' creates a REAL override (the declaring interface/parent class is resolved automatically and bOverrideFunction is set; target_class is ignored here; an existing override is returned with already_exists:true) and fails loudly for a name that is not an overridable event -- an interface method WITH a return value is not an event, use add_blueprint_function with override=true. node_type='custom_event' is idempotent by name (an existing custom event of that name in the graph comes back with already_existed:true, since a second one breaks the compile); a custom event cannot be given parameters, so anything that needs arguments (an RPC in particular) must be a function. node_type='get_component_by_class' makes a GetComponentByClass node BORN TYPED to target_class, so its ReturnValue connects without a cast -- inside build_blueprint_graph a generic one would be connected before its class pin default is applied and fail.
+**Core tool:** every client lists it by default.
+
+Create ONE node in a graph and return it WITH its node_id and its pins, so connect_pins and set_pin_default_value can wire it without a follow-up get_graph_nodes. In a Blueprint graph (an Animation or Widget Blueprint included) node_type is one of the keywords below, or the class of any graph node -- such as AnimGraphNode_Slot, with graph_name="AnimGraph" --; with compile=true the Blueprint is compiled afterwards, and it is never saved. For another graph asset node_type is: a material expression class (/Script/Engine.MaterialExpressionConstant) for a material or material function; a sound node type (WavePlayer, Mixer, Random, Looping, Modulator...) for a sound cue, with sound_wave_path for a WavePlayer; a class path from list_metasound_node_types (UE.Sine.Audio) for a MetaSound Source, with major_version; a PCG settings class from list_pcg_node_types for a PCG graph, and PCGSubgraphSettings with subgraph_path embeds another graph; a RigVM unit (BeginExecution, PrepareForExecution, GetTransform, SetTransform, AimBone, TwoBoneIKSimple) for a Control Rig, with node_name. Those assets are saved by their editor, and a Control Rig is compiled. In a Blueprint, use build_blueprint_graph instead when several nodes must be created AND wired in a single undo transaction, and get_function_pins to learn a call_function's pin names BEFORE creating anything. node_type='event' creates a REAL override (the declaring interface/parent class is resolved automatically and bOverrideFunction is set; target_class is ignored here; an existing override is returned with already_exists:true) and fails loudly for a name that is not an overridable event -- an interface method WITH a return value is not an event, use add_blueprint_function with override=true. node_type='custom_event' is idempotent by name (an existing custom event of that name in the graph comes back with already_existed:true, since a second one breaks the compile); a custom event cannot be given parameters, so anything that needs arguments (an RPC in particular) must be a function. node_type='get_component_by_class' makes a GetComponentByClass node BORN TYPED to target_class, so its ReturnValue connects without a cast -- inside build_blueprint_graph a generic one would be connected before its class pin default is applied and fail.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `blueprint_name` | string | yes | Blueprint name (resolved under /Game/Blueprints) or full asset path. Pass the FULL path when the short name is ambiguous: a bare name that matches two assets resolves to one of them silently. |
-| `node_type` | string | yes | One of event, custom_event, call_function, print_string, variable_get, variable_set, branch, sequence, self, cast, spawn_actor (alias spawn_actor_from_class), create_widget, make_struct, break_struct, get_array_item, select, make_array, make_set, make_map, switch_int, switch_string, switch_name, switch_enum, enum_literal, format_text, foreach, foreach_with_break, do_once, gate, flipflop, for_loop, while_loop, is_valid, add_delegate, macro_instance, get_component_by_class |
+| `asset_path` | string | yes | The graph asset: a Blueprint by name (resolved under /Game/Blueprints) or full path, or the path of a material, material function, sound cue, MetaSound Source, PCG graph or Control Rig. Pass the FULL path when a Blueprint short name is ambiguous: a bare name that matches two assets resolves to one of them silently. |
+| `node_type` | string | yes | In a Blueprint, one of event, custom_event, call_function, print_string, variable_get, variable_set, branch, sequence, self, cast, spawn_actor (alias spawn_actor_from_class), create_widget, make_struct, break_struct, get_array_item, select, make_array, make_set, make_map, switch_int, switch_string, switch_name, switch_enum, enum_literal, format_text, foreach, foreach_with_break, do_once, gate, flipflop, for_loop, while_loop, is_valid, add_delegate, macro_instance, get_component_by_class, or a graph node class (AnimGraphNode_Slot, /Script/AnimGraph.AnimGraphNode_SequencePlayer); for another asset, see the description |
+| `blueprint_name` | string | no | Older name of asset_path, still accepted. |
+| `sound_wave_path` | string | no | Sound cue, WavePlayer only: the sound wave it plays. |
+| `major_version` | number | no | MetaSound only: the node class's major version (default 1), as list_metasound_node_types gives it. |
+| `subgraph_path` | string | no | PCG only, with node_type=PCGSubgraphSettings: the PCG graph to embed. |
+| `node_name` | string | no | Control Rig only: the name to give the node (a taken name gets a suffix; the reply's node_id is the real one). |
 | `event_name` | string | no | Event name; required for event and custom_event node types (e.g. "ReceiveActorBeginOverlap", "ReceiveBeginPlay" for event) |
 | `function_name` | string | no | Function to call; required for call_function node type |
 | `target_class` | string | no | Class owning the function or cast/spawn target class; required for cast, create_widget and get_component_by_class. For call_function it is searched STRICTLY: a function that is not on that class is an error, never a silent fallback to another library; it also resolves a user BlueprintFunctionLibrary by asset path ("/Game/Dir/BFL_X"). For get_component_by_class it is the component class to fetch (a UActorComponent subclass). For variable_get/variable_set it names the class that owns the variable, producing a non-self member-access node (with a 'target' pin) instead of a self-context node. For create_widget it names the widget class to construct (e.g. WBP_Foo_C, a full asset path, or the widget Blueprint short name); the node exposes that widget's Expose-On-Spawn pins. |
@@ -377,13 +386,15 @@ Build several nodes, wire their pins, and set pin defaults in one pass, wrapped 
 | `graph_name` | string | no | Target graph name; defaults to the Blueprint's event graph when omitted |
 | `connections` | array | no | [{from_node, from_pin, to_node, to_pin}, ...]; from_node/to_node may be a local 'id' from 'nodes' (or "&lt;id>.custom_event" for an add_object_bound_event step's handler event) or a pre-existing real NodeGuid. |
 | `pin_defaults` | array | no | [{node, pin, value}, ...]; node may be a local 'id' from 'nodes' (or "&lt;id>.custom_event") or a pre-existing real NodeGuid. |
-| `stop_on_error` | boolean | no | Stop (and try to roll back the whole transaction) on the first failing step; defaults to true, unlike batch's default false, since connections/pin_defaults depend on earlier nodes existing. With stop_on_error:false there is NO rollback at all -- the editor's global undo is never touched, every step is attempted, and whatever half-built shape remains is cleaned up with delete_node/disconnect_pin. That is the safer mode when other work is live in the editor's undo buffer. |
+| `stop_on_error` | boolean | no | Stop (and try to roll back the whole transaction) on the first failing step; defaults to true, unlike batch's default false, since connections/pin_defaults depend on earlier nodes existing. With stop_on_error:false there is NO rollback at all -- the editor's global undo is never touched, every step is attempted, and whatever half-built shape remains is cleaned up with remove_graph_node/disconnect_pin. That is the safer mode when other work is live in the editor's undo buffer. |
 
 **Returns:** `{ blueprint_name, graph_name, nodes: [{index, id, command_type, ok, node_id?, custom_event_node_id?, error?}], connections: [{index, ok, error?}], pin_defaults: [{index, ok, error?}], stopped_early, rollback_required, rolled_back, transaction_opened, undo_queue_len_before, undo_queue_len_after, top_transaction_title, rollback_refused_reason?, warning? }. rolled_back reports whether the undo ACTUALLY ran, not the intention: the rollback is refused (rolled_back:false + rollback_refused_reason + warning) whenever the top of the editor's undo stack is not this call's own transaction, because GEditor->UndoTransaction is global and would otherwise revert another agent's or another session's work in memory while the disk stays clean. A payload that fails pre-validation returns instead { success:false, error, validation_errors: [{section, index, id?, error}], transaction_opened:false, blueprint_name, graph_name } and never opens a transaction.`
 
 ## `compile_blueprint`
 
 *Destructive.*
+
+**Core tool:** every client lists it by default.
 
 Compile a Blueprint to regenerate its class, returning the REAL outcome (succeeded == zero errors) plus the error/warning counts, and with return_messages=true the per-message log with each message anchored to its node_id/graph. Required after authoring functions, variables or RPCs and before anything calls them. TRAP: num_errors:0 is not a promise the graph works -- an unresolved WILDCARD pin on an array/ForEach node can compile clean and still block PIE, and warnings (a "was pruned" node whose consumers silently read defaults) do not lower it, so read the warnings too. Compiling dirties the package and can cascade into other packages; check_blueprint_errors / find_erroring_blueprints answer without a compile.
 
@@ -398,22 +409,27 @@ Compile a Blueprint to regenerate its class, returning the REAL outcome (succeed
 
 *Destructive.*
 
-Wire one node's OUTPUT pin to another node's INPUT pin inside one Blueprint graph, type-checked by the K2 schema (an incompatible pair is returned as an error, never a silent no-op). Nodes are addressed by NodeGuid, pins by name. Either node that still carries a WILDCARD pin is reconstructed afterwards, so array / ForEach / Select pins really re-type instead of compiling into "The type of Target Array is undetermined" (which compile_blueprint reports as compiled:true). Use validate_pin_connection to test a pair without mutating, and build_blueprint_graph to create+wire in one transaction.
+**Core tool:** every client lists it by default.
+
+Link one node's OUTPUT pin to another node's INPUT pin, in a Blueprint graph (an Animation or Widget Blueprint included) or in the graph of a material, material function, sound cue, MetaSound Source, PCG graph or Control Rig; get_graph_nodes gives the node ids and pin names. In a Blueprint the graph's own schema type-checks the pair, so an AnimGraph's pose links work too, and an incompatible pair is an error, never a silent no-op; a node that still has a WILDCARD pin is reconstructed afterwards, so array, ForEach and Select pins really take the linked type. validate_pin_connection tests a Blueprint pair without linking it, and build_blueprint_graph creates and links several Blueprint nodes in one undo step. The node ids @input and @output name the graph's own input and output: target_node_id=@output with target_pin=BaseColor (or Roughness, Normal, FrontMaterial, MaterialAttributes...) feeds a material's main input; on a sound cue @output makes the source node the cue's first node; on a MetaSound @input and @output are its graph inputs and outputs, named by the pin; on a PCG graph they are its input and output nodes. On a sound cue the child node is the source and target_pin the parent's input slot index (empty: its first free slot). A Blueprint is not compiled or saved; the other assets are saved by their editor, and a Control Rig is compiled.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `blueprint_name` | string | yes | Blueprint name or path. |
-| `source_node_id` | string | yes | NodeGuid of the source node (from add_graph_node / get_graph_nodes). |
-| `source_pin` | string | yes | Output pin name on the source node (e.g. "then", "ReturnValue"). An output pin of that name is preferred; any pin with the name is accepted as a fallback. |
-| `target_node_id` | string | yes | NodeGuid of the target node. |
-| `target_pin` | string | yes | Input pin name on the target node (e.g. "execute", "Condition"). |
-| `graph_name` | string | no | Target graph name; defaults to the Blueprint's event graph when omitted. BOTH nodes must live in this same graph. |
+| `asset_path` | string | yes | The graph asset: a Blueprint by name or path, or the path of a material, material function, sound cue, MetaSound Source, PCG graph or Control Rig. |
+| `source_node_id` | string | yes | node_id of the source node, or @input (from add_graph_node / get_graph_nodes). |
+| `source_pin` | string | yes | Output pin name on the source node (e.g. "then", "ReturnValue"; a material output name, empty for the first). In a Blueprint an output pin of that name is preferred and any pin with the name is accepted as a fallback. |
+| `target_node_id` | string | yes | node_id of the target node, or @output. |
+| `target_pin` | string | yes | Input pin name on the target node (e.g. "execute", "Condition"; a material input name without spaces; a sound cue slot index). |
+| `blueprint_name` | string | no | Older name of asset_path, still accepted. |
+| `graph_name` | string | no | Blueprint only: the graph, default the event graph ("AnimGraph" for an Animation Blueprint's anim graph). BOTH nodes must live in this same graph. The other assets have one graph: leave it out. |
 
-**Returns:** `{ connected, source_node_id, target_node_id } -- connected is always true when the call succeeds; the failure path is an error response, so there is no false to check.`
+**Returns:** `{ connected, source_node_id, target_node_id, graph_kind? } -- for a Blueprint, connected is always true when the call succeeds (the failure path is an error response); for another asset the reply is its editor's own (graph_kind names the asset kind), saved included.`
 
 ## `create_blueprint`
 
 *Additive.*
+
+**Core tool:** every client lists it by default.
 
 Create a new Blueprint asset, optionally as a child of ANY parent class -- native or another Blueprint (pass its "..._C" class or asset path) -- and save it to disk immediately unless PIE is running or save=false. This is also the way to make the framework classes (a GameMode, GameState, PlayerController, PlayerState, GameInstance or HUD Blueprint: pass that class as parent_class) and Blueprint subsystems (parent_class a USubsystem class such as "GameInstanceSubsystem"; lifetime says which family), and it makes Blueprint Function Libraries and Macro Libraries, which have no Actor parent and which the normal path would reject. It does NOT create interfaces (create_blueprint_interface). A plain Blueprint already at the path is returned unchanged with already_exists=true and saved=false, nothing saved and blueprint_type not applied -- when parent_class is given, only if its parent is parent_class or derives from it, otherwise it is an error and nothing is changed; another asset class there (a Widget or Anim Blueprint included) is an error and nothing is created. It never confirms the parent of a new Blueprint: read it back with get_blueprint_parent.
 
@@ -467,47 +483,25 @@ Create an Editor Utility Widget Blueprint at package_path/name with the editor f
 
 **Returns:** `{ name, package_path, asset_path, blueprint_class, parent_class, root_widget, root_widget_class, created, already_existed, root_created, saved, save_error? }`
 
-## `delete_blueprint_variable`
-
-*Destructive.*
-
-Remove a member variable DECLARED on this Blueprint (inherited/native variables are refused) and report whether it is really gone by re-looking it up. Nodes that still read/write it survive as broken references, so run compile_blueprint with return_messages=true afterwards. For an event dispatcher use remove_event_dispatcher instead -- this call would drop the delegate variable and strand its signature graph.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `blueprint_name` | string | yes | Blueprint asset name or path |
-| `variable_name` | string | yes | Name of a variable declared on THIS Blueprint |
-
-**Returns:** `{ blueprint_name, variable_name, deleted } -- deleted is re-checked after the removal, so false means it is still there.`
-
-## `delete_node`
-
-*Destructive.*
-
-Delete ONE node from a graph by its NodeGuid, breaking its links; refused for nodes the editor protects (FunctionEntry, Result, tunnels). This is the cleanup for orphan nodes left behind when a build_blueprint_graph batch fails and its rollback is refused, and it is reversible (the .uasset on disk is untouched until save_asset). It does NOT compile -- follow with compile_blueprint with return_messages=true.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `blueprint_name` | string | yes | Blueprint asset name or path |
-| `node_id` | string | yes | NodeGuid of the node to delete |
-| `graph_name` | string | no | Target graph name; defaults to the Blueprint's event graph when omitted |
-
-**Returns:** `{ deleted, node_id }`
-
 ## `disconnect_pin`
 
 *Destructive.*
 
-Break ALL links on one pin of one node (there is no way to drop a single link of a multi-linked pin). Main use: clearing links that point at nodes which no longer exist after a failed or refused build_blueprint_graph rollback -- get_graph_nodes with compact=false shows those as linked_to entries with dead GUIDs. To remove the whole node instead, use delete_node.
+**Core tool:** every client lists it by default.
+
+Break the links of one pin, in a Blueprint graph or in the graph of a material, material function, sound cue, MetaSound Source, PCG graph or Control Rig. Without linked_node_id it breaks every link of the pin; with linked_node_id and linked_pin only the link to that other end. On a material, sound cue and MetaSound name the INPUT end, which holds one link: node_id=@output with pin_name=BaseColor clears a material's main input, and on a MetaSound @output names a graph output. A PCG input can hold several links, so on a PCG graph linked_node_id and linked_pin are required. On a sound cue node_id is the parent node and pin_name its input slot index. Main Blueprint use: clearing links to nodes that no longer exist after a failed or refused build_blueprint_graph rollback (get_graph_nodes with compact=false shows them as linked_to entries with dead GUIDs). To remove the whole node, use remove_graph_node. A Blueprint is not compiled or saved; the other assets are saved by their editor.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `blueprint_name` | string | yes | Blueprint asset name or path |
-| `node_id` | string | yes | NodeGuid of the node owning the pin (from add_graph_node / get_graph_nodes) |
-| `pin_name` | string | yes | Pin name, in either direction |
-| `graph_name` | string | no | Target graph name; defaults to the Blueprint's event graph when omitted |
+| `asset_path` | string | yes | The graph asset: a Blueprint by name or path, or the path of a material, material function, sound cue, MetaSound Source, PCG graph or Control Rig. |
+| `node_id` | string | yes | node_id of the node owning the pin (from add_graph_node / get_graph_nodes), or @output |
+| `pin_name` | string | yes | Pin name, in either direction in a Blueprint; the input end elsewhere |
+| `blueprint_name` | string | no | Older name of asset_path, still accepted. |
+| `linked_node_id` | string | no | Optional: the node at the other end of the one link to break (in a Blueprint, its NodeGuid); without it every link of the pin breaks |
+| `linked_pin` | string | no | Optional, with linked_node_id: the pin at the other end |
+| `graph_name` | string | no | Blueprint only: the graph, default the event graph ("AnimGraph" for an Animation Blueprint's anim graph). The other assets have one graph: leave it out. |
 
-**Returns:** `{ disconnected, node_id, pin_name }`
+**Returns:** `{ disconnected, node_id, pin_name, links_broken?, graph_kind? } -- for another asset than a Blueprint the reply is its editor's own, saved included`
 
 ## `find_blueprint_node_references`
 
@@ -609,7 +603,7 @@ Resolve a Blueprint component's TEMPLATE archetype and return its object path, s
 
 *Read-only.*
 
-Read the EFFECTIVE default of a property (or, without property_name, ALL properties) on a Blueprint component TEMPLATE as typed JSON, resolving components INHERITED from a parent/grandparent Blueprint. Use it instead of get_component_properties with blueprint_name, which sees only own SCS nodes and native subobjects, not inherited SCS components or their ICH overrides. Order: own SCS template -> nearest existing ICH override -> ancestor's declaring SCS template -> native CDO subobject; source says which. NEVER mints an ICH override. group_by_field flags duplicate keys in an array of structs. Write: set_blueprint_component_properties.
+Read the EFFECTIVE default of a property (or, without property_name, ALL properties) on a Blueprint component TEMPLATE as typed JSON, resolving components INHERITED from a parent/grandparent Blueprint. Use it rather than get_object_info on one template's path, which reads that template alone and misses inherited SCS components and their ICH overrides. Order: own SCS template -> nearest existing ICH override -> ancestor's declaring SCS template -> native CDO subobject; source says which. NEVER mints an ICH override. group_by_field flags duplicate keys in an array of structs. Write: set_blueprint_component_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -643,6 +637,8 @@ List the graphs of a Blueprint -- functions, interface implementation graphs, ma
 ## `get_blueprint_info`
 
 *Read-only.*
+
+**Core tool:** every client lists it by default.
 
 One cheap overview of a Blueprint: parent class, compile status, and the counts + names of its OWN components, variables, function graphs and ubergraph pages. Everything here is what THIS asset declares -- nothing inherited, and interface-override graphs are not listed. So use it to orient, and the specialists to decide: get_blueprint_components for the real component set including ancestors, get_blueprint_functions for interface/macro/delegate graphs, get_blueprint_variables for variable flags, get_graph_nodes to read a graph.
 
@@ -735,33 +731,22 @@ Preview the EXACT pins an add_graph_node call_function node WOULD expose for a U
 
 *Read-only.*
 
-Read one Blueprint graph: every node with its node_id (NodeGuid), class, title, position, comment and pins (name, direction, type, linked_to, default) -- the read that feeds connect_pins / set_pin_default_value / delete_node, and the way to see what a graph actually DOES. TRAP: compact=true drops per-pin type metadata AND omits every pin that is unlinked and default-less (plus knots and comment boxes), so a pin missing from a compact listing is NOT proof the pin does not exist -- re-read with compact=false before concluding anything about pins. Also: a bare blueprint_name that matches two assets picks one silently (pass the full path), and reading a graph under a read-only vendor root leaves that package DIRTY in memory (reload_asset_package with on_dirty="discard" cleans it).
+**Core tool:** every client lists it by default.
+
+Read the nodes of one graph -- a Blueprint graph (an Animation or Widget Blueprint included) or the graph of a material, material function, sound cue, MetaSound Source, PCG graph or Control Rig -- without changing it: the read that feeds add_graph_node, connect_pins, disconnect_pin, set_pin_default_value and remove_graph_node, and the way to see what a graph actually DOES. Every node carries its node_id, the id those tools take, and its object_path (not for a MetaSound), which get_properties and set_properties take to read or write the node's own settings. A Blueprint node also has its class, title, position, comment and pins (name, direction, type, linked_to, default). For another asset the reply is that editor's own view, with graph_kind naming it: a material's expressions with their inputs, a sound cue's nodes with their child slots and first node, a MetaSound's nodes and connections, a PCG graph's nodes and edges (each node's settings_path is what set_properties writes), a Control Rig's nodes with their pins, links and defaults. TRAP: compact=true drops per-pin type metadata AND omits every pin that is unlinked and default-less (plus knots and comment boxes), so a pin missing from a compact listing is NOT proof the pin does not exist -- re-read with compact=false before concluding anything about pins. Also: a bare Blueprint name that matches two assets picks one silently (pass the full path), and reading a graph under a read-only vendor root leaves that package DIRTY in memory (reload_asset_package with on_dirty="discard" cleans it).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `blueprint_name` | string | yes | Blueprint asset name or path. Prefer the FULL path: a short name with more than one match resolves silently to one of them, and stale backup copies share the original's name. |
-| `graph_name` | string | no | Target graph name; defaults to the Blueprint's event graph when omitted. Also resolves a collapsed composite subgraph by its title (e.g. 'In Game HUD') and accepts a path form ('EventGraph > In Game HUD'). |
+| `asset_path` | string | yes | The graph asset: a Blueprint by name or path, or the path of a material, material function, sound cue, MetaSound Source, PCG graph or Control Rig. Prefer the FULL path: a Blueprint short name with more than one match resolves silently to one of them, and stale backup copies share the original's name. |
+| `blueprint_name` | string | no | Older name of asset_path, still accepted. |
+| `graph_name` | string | no | Blueprint only: the graph, default the event graph ("AnimGraph" for an Animation Blueprint's anim graph). Also resolves a collapsed composite subgraph by its title (e.g. 'In Game HUD') and accepts a path form ('EventGraph > In Game HUD'). The other assets have one graph: leave it out. |
 | `expand_composites` | boolean | no | When true, inline the nodes of collapsed composite subgraphs recursively; each node gains a "graph" tag naming the graph it came from. Macro-library graphs are never inlined. (Optional, default false) |
 | `compact` | boolean | no | Token-lean listing: drops pin types, positions and comments, and skips pins that are unlinked AND have no default. Also excludes K2Node_Knot + EdGraphNode_Comment unless exclude_classes is given. Good for reading topology, WRONG for checking whether a pin exists. (Optional, default false) |
 | `exclude_classes` | array | no | Array of leaf node class names to skip, matched against each node's "class" field (e.g. ["K2Node_Knot"]). Pass [] to include everything even in compact mode. Absent + compact=true means knots and comments are excluded; absent + compact=false excludes nothing. |
 | `max_nodes` | number | no | Cap on the number of nodes emitted (&lt;=0 or absent = unlimited); the response still counts every non-excluded node in total_node_count and sets truncated=true. |
-| `node_id` | string | no | Optional NodeGuid (from add_graph_node / get_graph_nodes): return ONLY that node of the graph, always at full fidelity (compact, exclude_classes, expand_composites and max_nodes are ignored) -- every pin with name, direction, type, linked_to and default, at a fraction of the tokens of a whole graph. A node_id the graph does not contain is an error. |
+| `node_id` | string | no | Optional node_id (from add_graph_node / get_graph_nodes): return ONLY that node, in a Blueprint always at full fidelity (compact, exclude_classes, expand_composites and max_nodes are ignored) -- every pin with name, direction, type, linked_to and default, at a fraction of the tokens of a whole graph. A node_id the graph does not contain is an error. |
 
-**Returns:** `{ blueprint_name, graph_name, nodes:[{node_id, class, title, pos_x, pos_y, comment, pins:[...], subgraph?}], node_count, compact, total_node_count, excluded_count, truncated } -- node_count is what was EMITTED, total_node_count what exists; a node owning a nested graph (composite / macro instance) carries "subgraph" with the name to pass back as graph_name. With node_id, nodes holds that one node (nodes[0]) and node_count is 1.`
-
-## `get_property_access_path`
-
-*Read-only.*
-
-Read a UK2Node_PropertyAccess node's binding Path -- the anim-Blueprint property binding (InAnimInstance.Foo, InDeltaTime...) that no ordinary pin read exposes -- as segments plus its display text_path, and say whether the leaf actually RESOLVED (a still-wildcard Value pin means the path points at nothing). Read-only; errors on any node that is not a K2Node_PropertyAccess. Writer twin: set_property_access_path.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `blueprint_name` | string | yes | Blueprint name or path (usually an Animation Blueprint). |
-| `node_id` | string | yes | NodeGuid of the property-access node (from get_graph_nodes). |
-| `graph_name` | string | no | Target graph name; defaults to the Blueprint's event graph when omitted. |
-
-**Returns:** `{ node_id, graph_name, path:[string], text_path, resolved, resolved_pin:{name,direction,type,...} } -- resolved:false (Value pin still wildcard) is the signal that the binding is broken.`
+**Returns:** `{ blueprint_name, graph_name, nodes:[{node_id, object_path?, class, title, pos_x, pos_y, comment, pins:[...], subgraph?}], node_count, compact, total_node_count, excluded_count, truncated, graph_kind? } -- for a Blueprint: node_count is what was EMITTED, total_node_count what exists; a node owning a nested graph (composite / macro instance) carries "subgraph" with the name to pass back as graph_name; with node_id, nodes holds that one node (nodes[0]) and node_count is 1. For another asset: its editor's view, every node with node_id and object_path, a MetaSound's connections in connections.`
 
 ## `implement_interface`
 
@@ -932,7 +917,7 @@ Delete a macro graph owned by the Blueprint (Blueprint->MacroGraphs), in one und
 
 *Destructive.*
 
-Remove a track (float, vector, color or event) from a Timeline of a Blueprint by its name, as the Timeline editor's Delete Track does, then reconstruct the timeline node (the track's output pin goes, and its links with it) and compile the Blueprint; one undo step (the compile is not undone). Inverse of add_blueprint_timeline_track. A track that is not there is an honest no-op (removed=false, nothing compiled); a missing Blueprint or timeline is an error. The reply re-reads the timeline (tracks, output_pins). Refused during PIE unless force=true. The whole timeline: delete_node on its node; read: get_blueprint_timeline_info.
+Remove a track (float, vector, color or event) from a Timeline of a Blueprint by its name, as the Timeline editor's Delete Track does, then reconstruct the timeline node (the track's output pin goes, and its links with it) and compile the Blueprint; one undo step (the compile is not undone). Inverse of add_blueprint_timeline_track. A track that is not there is an honest no-op (removed=false, nothing compiled); a missing Blueprint or timeline is an error. The reply re-reads the timeline (tracks, output_pins). Refused during PIE unless force=true. The whole timeline: remove_graph_node on its node; read: get_blueprint_timeline_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -941,6 +926,19 @@ Remove a track (float, vector, color or event) from a Timeline of a Blueprint by
 | `track_name` | string | yes | Name of the track to remove (get_blueprint_timeline_info lists them). |
 
 **Returns:** `{ blueprint_name, timeline_name, track_name, track_type?, removed, length, length_mode, auto_play, loop, replicated, ignore_time_dilation, track_count, tracks: [...], node_id, graph_name, output_pins: [string], note? }`
+
+## `remove_blueprint_variable`
+
+*Destructive.*
+
+Remove a member variable DECLARED on this Blueprint (inherited/native variables are refused) and report whether it is really gone by re-looking it up. Nodes that still read/write it survive as broken references, so run compile_blueprint with return_messages=true afterwards. For an event dispatcher use remove_event_dispatcher instead -- this call would drop the delegate variable and strand its signature graph.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `blueprint_name` | string | yes | Blueprint asset name or path |
+| `variable_name` | string | yes | Name of a variable declared on THIS Blueprint |
+
+**Returns:** `{ blueprint_name, variable_name, deleted } -- deleted is re-checked after the removal, so false means it is still there.`
 
 ## `remove_component_from_blueprint`
 
@@ -961,7 +959,7 @@ Remove one or more component nodes from a Blueprint's SCS, with a DOUBLE CENSUS 
 
 *Destructive, idempotent.*
 
-Remove an event dispatcher, dropping BOTH artifacts add_event_dispatcher created: the delegate member variable AND its signature graph (delete_blueprint_variable removes only the variable and strands the graph, which is why this exists). Idempotent -- when neither artifact is present it returns removed:false instead of erroring. Broadcast/bind nodes that referenced it are left broken: compile_blueprint with return_messages=true after.
+Remove an event dispatcher, dropping BOTH artifacts add_event_dispatcher created: the delegate member variable AND its signature graph (remove_blueprint_variable removes only the variable and strands the graph, which is why this exists). Idempotent -- when neither artifact is present it returns removed:false instead of erroring. Broadcast/bind nodes that referenced it are left broken: compile_blueprint with return_messages=true after.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -974,7 +972,7 @@ Remove an event dispatcher, dropping BOTH artifacts add_event_dispatcher created
 
 *Destructive.*
 
-Remove a local variable from one Blueprint function graph (interface-override graphs included), with the get/set nodes that read or write it in that function, in one undo step -- what deleting it from the My Blueprint panel does. Inverse of add_function_local_variable; delete_blueprint_variable removes MEMBER variables only. Nothing is compiled or saved. A local that is not there is an honest no-op (removed=false); a missing Blueprint or function is an error. The reply re-reads the function's locals (local_variables), the only reader of them: get_blueprint_variables lists members. Refused during PIE unless force=true.
+Remove a local variable from one Blueprint function graph (interface-override graphs included), with the get/set nodes that read or write it in that function, in one undo step -- what deleting it from the My Blueprint panel does. Inverse of add_function_local_variable; remove_blueprint_variable removes MEMBER variables only. Nothing is compiled or saved. A local that is not there is an honest no-op (removed=false); a missing Blueprint or function is an error. The reply re-reads the function's locals (local_variables), the only reader of them: get_blueprint_variables lists members. Refused during PIE unless force=true.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -999,6 +997,23 @@ Remove an input or output parameter from a Blueprint function graph -- interface
 
 **Returns:** `{ blueprint_name, function_name, param_name, is_output, graph_kind, removed, params_left: [string], params?: [string], note? }`
 
+## `remove_graph_node`
+
+*Destructive.*
+
+**Core tool:** every client lists it by default.
+
+Remove ONE node from a graph by its node_id, breaking its links, in a Blueprint graph (an Animation or Widget Blueprint included) or in the graph of a material, material function, sound cue, MetaSound Source, PCG graph or Control Rig. In a Blueprint the nodes the editor protects (FunctionEntry, Result, tunnels, an AnimGraph's output pose) are refused; the removal is in memory and reversible until save_asset, and nothing is compiled: follow with compile_blueprint with return_messages=true. It also cleans up orphan nodes a failed build_blueprint_graph left when its rollback was refused. The other assets are saved by their editor: on a sound cue the later node ids shift down (read id_remap), a MetaSound's graph input and output nodes and a PCG graph's input and output nodes are refused, and a Control Rig is compiled.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `asset_path` | string | yes | The graph asset: a Blueprint by name or path, or the path of a material, material function, sound cue, MetaSound Source, PCG graph or Control Rig. |
+| `node_id` | string | yes | node_id of the node to remove (from add_graph_node / get_graph_nodes) |
+| `blueprint_name` | string | no | Older name of asset_path, still accepted. |
+| `graph_name` | string | no | Blueprint only: the graph, default the event graph ("AnimGraph" for an Animation Blueprint's anim graph). The other assets have one graph: leave it out. |
+
+**Returns:** `{ deleted, node_id, graph_kind? } -- for another asset than a Blueprint the reply is its editor's own (removed, saved, id_remap...)`
+
 ## `remove_interface`
 
 *Destructive, idempotent.*
@@ -1017,7 +1032,7 @@ Remove an implemented Blueprint Interface (inverse of implement_interface) and, 
 
 *Destructive.*
 
-Delete EVERY variable the engine considers unused from a Blueprint in one shot (GatherUnusedVariables + RemoveUnusedVariables) and report which ones went. Destructive and non-selective -- "unused" means no graph node reads or writes it, so a variable only touched from C++, a DataTable, a save game or a runtime name lookup counts as unused and is deleted. Preview it by comparing get_blueprint_variables before/after, or delete a specific one with delete_blueprint_variable.
+Delete EVERY variable the engine considers unused from a Blueprint in one shot (GatherUnusedVariables + RemoveUnusedVariables) and report which ones went. Destructive and non-selective -- "unused" means no graph node reads or writes it, so a variable only touched from C++, a DataTable, a save game or a runtime name lookup counts as unused and is deleted. Preview it by comparing get_blueprint_variables before/after, or delete a specific one with remove_blueprint_variable.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1295,18 +1310,21 @@ Tint one material slot of a Blueprint component template by creating a DYNAMIC m
 
 *Destructive, idempotent.*
 
-Write the literal default of an UNCONNECTED input pin and return the value read BACK off the pin. Struct pins are canonicalized: a bare GameplayTag name becomes (TagName="X") and an UNREGISTERED tag is rejected up front instead of silently landing as an empty tag; value_json nativizes any struct (and is the only way to put SEVERAL tags in a GameplayTagContainer). Array/set/map pins are refused (use a MakeArray/MakeSet/MakeMap node) and so are pins currently split into sub-pins (recombine_blueprint_pin first). A plain string is fine for an FText pin. TRAP: on a FormatText "Format" pin the literal IS written but the {argument} pins are NOT created, leaving a valid, useless node -- build the string with Concat_StrStr / Conv_StringToText instead.
+**Core tool:** every client lists it by default.
+
+Write the literal default of an UNCONNECTED input pin and return the value read BACK off the pin, in a Blueprint graph, a MetaSound Source or a Control Rig. Blueprint: struct pins are canonicalized (a bare GameplayTag name becomes (TagName="X") and an UNREGISTERED tag is rejected up front instead of silently landing as an empty tag); value_json nativizes any struct and is the only way to put SEVERAL tags in a GameplayTagContainer; array, set and map pins are refused (use a MakeArray/MakeSet/MakeMap node), and so are pins split into sub-pins (recombine_blueprint_pin first); a plain string is fine for an FText pin. TRAP: on a FormatText "Format" pin the literal IS written but the {argument} pins are NOT created, leaving a valid, useless node -- build the string with Concat_StrStr / Conv_StringToText instead. MetaSound: value is read as the input's type ("440", "true", "Hello"), node_id=@input sets a graph input's default, and the asset is saved. Control Rig: value is export text such as (X=1.0,Y=0.0,Z=0.0); the rig is compiled and saved. Material expressions, sound cue nodes and PCG nodes keep such values as properties: write them with set_properties on the node's object_path from get_graph_nodes.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `blueprint_name` | string | yes | Blueprint asset name or path |
-| `node_id` | string | yes | NodeGuid of the node owning the pin |
-| `pin_name` | string | yes | Pin name; an INPUT pin of that name is preferred, any pin with the name is the fallback |
-| `value` | string | no | Literal default in the pin's exported-text form; empty string allowed (clears it). For a struct pin, "()" clears and a leading "(" is passed through untouched. |
-| `value_json` | object | no | Optional JSON object nativized into the struct's export-text form, for STRUCT pins only. For an FGameplayTagContainer it must carry a "GameplayTags" array (["A","B"] or [{"TagName":"A"}]) and every tag is validated; takes precedence over 'value'. |
-| `graph_name` | string | no | Target graph name; defaults to the Blueprint's event graph when omitted |
+| `asset_path` | string | yes | The graph asset: a Blueprint by name or path, or the path of a MetaSound Source or Control Rig. |
+| `node_id` | string | yes | node_id of the node owning the pin (from add_graph_node / get_graph_nodes), or @input on a MetaSound |
+| `pin_name` | string | yes | Pin name; in a Blueprint an INPUT pin of that name is preferred, any pin with the name is the fallback |
+| `blueprint_name` | string | no | Older name of asset_path, still accepted. |
+| `value` | string | no | Literal default in the pin's exported-text form; empty string allowed (clears it). For a Blueprint struct pin, "()" clears and a leading "(" is passed through untouched. |
+| `value_json` | object | no | Optional JSON object nativized into the struct's export-text form, for Blueprint STRUCT pins only. For an FGameplayTagContainer it must carry a "GameplayTags" array (["A","B"] or [{"TagName":"A"}]) and every tag is validated; takes precedence over 'value'. |
+| `graph_name` | string | no | Blueprint only: the graph, default the event graph. The other assets have one graph: leave it out. |
 
-**Returns:** `{ node_id, pin_name, default_value } -- default_value is re-read from the pin AFTER the write, so it is the oracle for what actually landed (a rejected value shows up as the old one).`
+**Returns:** `{ node_id, pin_name, default_value, graph_kind? } -- default_value is re-read from the pin AFTER the write, so it is the oracle for what actually landed (a rejected value shows up as the old one); for a MetaSound or Control Rig the reply is its editor's own, with the value read back.`
 
 ## `set_property_access_path`
 
@@ -1366,5 +1384,6 @@ Dry-run the K2 schema's verdict on a pin pair WITHOUT touching the graph: return
 | `target_node_id` | string | yes | NodeGuid of the target node; must be in the same graph as the source. |
 | `target_pin` | string | yes | Input pin name on the target node (falls back to any pin with that name). |
 | `graph_name` | string | no | Target graph name; defaults to the Blueprint's event graph when omitted |
+| `asset_path` | string | no |   |
 
 **Returns:** `{ valid, message, response_code } -- valid is false only for an outright DISALLOW; a response that would connect WITH a conversion node or by breaking an existing link still reports valid:true, and "message" is where that shows.`

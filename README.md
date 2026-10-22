@@ -6,14 +6,14 @@
 
 <p align="center">
   <b>The MCP server for Unreal Engine 5, built into the editor.</b><br>
-  More than 1,600 tools that let Claude Code, Cursor or any MCP client build in Unreal,<br>
+  More than 1,500 tools that let Claude Code, Cursor or any MCP client build in Unreal,<br>
   with every change checked before it runs and read back after.
 </p>
 
 <p align="center">
   <img alt="Unreal Engine 5.7 | 5.8" src="https://img.shields.io/badge/Unreal%20Engine-5.7%20%7C%205.8-0E1128?logo=unrealengine&logoColor=white">
   <img alt="MCP: Streamable HTTP" src="https://img.shields.io/badge/MCP-Streamable%20HTTP-6E56CF">
-  <img alt="1,600+ tools" src="https://img.shields.io/badge/tools-1%2C600%2B-2EA44F">
+  <img alt="1,500+ tools" src="https://img.shields.io/badge/tools-1%2C500%2B-2EA44F">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
   <a href="https://github.com/CarlxsMG/UEAgent/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/CarlxsMG/UEAgent/actions/workflows/ci.yml/badge.svg"></a>
   <a href="https://carlxsmg.github.io/UEAgent/"><img alt="Docs" src="https://img.shields.io/badge/docs-carlxsmg.github.io%2FUEAgent-6E56CF"></a>
@@ -51,7 +51,7 @@ Streamable HTTP from inside the editor, with no Python or Node process in betwee
 flowchart LR
     A["AI agent<br/>Claude Code, Cursor, ..."] -- "MCP over HTTP" --> P
     subgraph E["Unreal Editor + UEAgent"]
-        P["Preconditions<br/>refuse known crashes"] --> H["Tool<br/>1,600+ of them"] --> R["Readback<br/>re-read the state"]
+        P["Preconditions<br/>refuse known crashes"] --> H["Tool<br/>1,500+ of them"] --> R["Readback<br/>re-read the state"]
     end
     R -- "verified result" --> A
 ```
@@ -105,12 +105,12 @@ More in [Examples](docs/examples.md).
 
 | Client | Notes |
 |---|---|
-| Claude Code | One-click connection from the editor's status bar. Loads tools on demand, so the full catalog is fine. |
-| Cursor, VS Code, Windsurf, Claude Desktop, Gemini CLI, Codex | Any client with Streamable HTTP: see [the setup for each one](docs/clients.md). A client that loads every tool up front needs the [compact tool list](docs/clients.md#compact-tool-list). |
+| Claude Code | One-click connection from the editor's status bar. It loads tools on demand, so `?tools=all` at the end of the URL gives it every tool. |
+| Cursor, VS Code, Windsurf, Claude Desktop, Gemini CLI, Codex | Any client with Streamable HTTP: see [the setup for each one](docs/clients.md). |
 
-With `?tools=compact` at the end of the URL, the server lists three tools that search, describe and
-run the rest, for clients that cap how many tools a server may list: see
-[compact tool list](docs/clients.md#compact-tool-list).
+By default the server lists its core tools, and four tools that search, describe and run the rest or
+add a whole domain to the list. `?tools=all` at the end of the URL lists every tool, and
+`?tools=compact` only three: see [tool lists](docs/clients.md#tool-lists).
 
 UEAgent is listed on [Glama](https://glama.ai/mcp/servers/CarlxsMG/UEAgent), the MCP server directory:
 

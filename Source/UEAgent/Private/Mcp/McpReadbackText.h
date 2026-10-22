@@ -800,7 +800,7 @@ inline constexpr const TCHAR* RB_check_graph_read_1 =
 
 inline constexpr const TCHAR* RB_check_graph_read_2 =
 	TEXT("%d disabled node(s) created by the editor (%s): new Blueprints start with disabled Event BeginPlay / Event Tick placeholders. ")
-	TEXT("add_graph_node does not reuse them -- it adds a duplicate -- so delete them with delete_node before wiring.");
+	TEXT("add_graph_node does not reuse them -- it adds a duplicate -- so delete them with remove_graph_node before wiring.");
 
 inline constexpr const TCHAR* RB_check_graph_read_3 =
 	TEXT("An unwired return node returns its default values: %s. A low nodes_count does not mean an empty function -- a bool output that defaults to ")
@@ -1003,7 +1003,7 @@ inline constexpr const TCHAR* RB_check_hlod_grid_1 =
 	TEXT("You just wrote %s: changed_* says the asset changed, not that the world uses it. ");
 
 inline constexpr const TCHAR* RB_check_object_comparison_0 =
-	TEXT("%d of the %d reported differences have identical values on both sides (%s): compare_objects compares exported text without defaults while ")
+	TEXT("%d of the %d reported differences have identical values on both sides (%s): diff_objects compares exported text without defaults while ")
 	TEXT("the editor compares display strings, so FText fields and struct containers can be over-reported. Confirm with ")
 	TEXT("get_blueprint_component_property on both sides before treating it as an override; noise_count in this response estimates the known noise.");
 

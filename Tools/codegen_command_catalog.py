@@ -47,13 +47,13 @@ DIFF_TXT = _paths.report_path("command_catalog_diff.txt")
 
 # The meta-tools of the compact tool list (Mcp/McpMetaTools.cpp): the server answers these
 # names itself, so a command registered under one would be unreachable.
-META_TOOL_NAMES = {"find_tools", "describe_tool", "call_tool"}
+META_TOOL_NAMES = {"find_tools", "describe_tool", "call_tool", "enable_toolset"}
 
 # One verb per operation (the server's instructions and CONTRIBUTING.md name them): a tool name that starts with a
 # synonym of a verb the catalog uses fails the build, so the synonym cannot come back. Value: the verb to use.
 SYNONYM_VERBS = {
     "read": "get", "inspect": "get", "fetch": "get", "retrieve": "get", "dump": "list",
-    "query": "find", "search": "find", "lookup": "find", "detect": "is",
+    "query": "find", "search": "find", "lookup": "find", "detect": "is", "compare": "diff",
     "configure": "set", "edit": "set", "update": "set", "modify": "set", "change": "set",
     "make": "create", "scaffold": "create", "setup": "add", "append": "add", "insert": "add",
     "place": "spawn", "destroy": "delete", "erase": "delete",
@@ -319,6 +319,11 @@ ANNOTATION_RENAMED_RE = re.compile(r'^//\s{3,}@renamed-from\s+([a-z0-9_]+)\s*$')
 # @retired line: `//   @retired <listed_tool> - <how to make the same call with it>` -- the tool leaves tools/list
 # and still runs under its own name; the reply names the listed tool that does the same, and how.
 ANNOTATION_RETIRED_RE = re.compile(r'^//\s{3,}@retired\s+([a-z0-9_]+)\s+-\s+(.+)$')
+# @core line: `//   @core` -- the tool is in the core list, the one tools/list carries by default (FMcpToolCatalog's
+# core list); the others are reached with find_tools, call_tool and enable_toolset.
+ANNOTATION_CORE_RE = re.compile(r'^//\s{3,}@core\s*$')
+# The core list stays small: it is what every agent pays for in context, and what a directory scores.
+MAX_CORE_TOOLS = 36
 # Any other line inside an annotation block (skip silently).
 ANNOTATION_OTHER_RE   = re.compile(r'^//')
 # `// MCP-DOMAIN: <domain>` — declares a handler class's MCP domain (the domain
@@ -364,6 +369,7 @@ def find_truncated_annotations(text: str) -> list[tuple[str, str, int, str]]:
             return False
         if (ANNOTATION_PARAM_RE.match(nxt) or ANNOTATION_RETURNS_RE.match(nxt)
                 or ANNOTATION_RENAMED_RE.match(nxt) or ANNOTATION_RETIRED_RE.match(nxt)
+                or ANNOTATION_CORE_RE.match(nxt)
                 or ANNOTATION_MARKER_RE.match(nxt) or ANNOTATION_DOMAIN_RE.match(nxt)
                 or tool_hints.HINTS_LINE_RE.match(nxt)):
             return False
@@ -410,7 +416,7 @@ def parse_annotations(text: str) -> dict[str, dict]:
     """Parse `// MCP:` annotation blocks scattered through a .cpp file.
 
     Returns: {cmd: {"description": str, "params": {name: {"desc", "type", "required"}}, "returns": str,
-              "renamedFrom": [old names], "retired": {"use", "how"} or None}}.
+              "renamedFrom": [old names], "retired": {"use", "how"} or None, "core": bool}}.
 
     A block is a contiguous run of `//` comment lines that starts with a marker
     `// MCP:<cmd> - <desc>` and ends at the first non-comment line. Anything
@@ -431,7 +437,7 @@ def parse_annotations(text: str) -> dict[str, dict]:
             i += 1
             continue
         cmd, desc = m.group(1), m.group(2).rstrip()
-        entry: dict = {"description": desc, "params": {}, "returns": "", "renamedFrom": [], "retired": None}
+        entry: dict = {"description": desc, "params": {}, "returns": "", "renamedFrom": [], "retired": None, "core": False}
         j = i + 1
         while j < len(lines):
             ln = lines[j]
@@ -456,6 +462,8 @@ def parse_annotations(text: str) -> dict[str, dict]:
                 entry["renamedFrom"].append(nm.group(1))
             elif (tm := ANNOTATION_RETIRED_RE.match(ln)):
                 entry["retired"] = {"use": tm.group(1), "how": tm.group(2).rstrip()}
+            elif ANNOTATION_CORE_RE.match(ln):
+                entry["core"] = True
             else:
                 rm = ANNOTATION_RETURNS_RE.match(ln)
                 if rm:
@@ -818,6 +826,10 @@ _LITERAL_FIELD_READERS = frozenset({
     "ReadJsonVector", "ReadJsonVector2D", "ReadJsonRotator", "ReadJsonLinearColor", "ReadJsonFloatArray", "ReadRequiredString",
     "ReadRequiredNumber", "ReadRequiredBool", "ResolveWorldSelector", "ResolveWorldFromParams", "ExtractStringPath",
     "AddRequestedEcho",
+    # McpGraphRouter::Route (Commands/Common/McpGraphRouter.cpp) hands a graph tool's call on another graph asset to
+    # that asset's tool: it reads node_position as [x, y], as the handler's own ReadPosition does, and the other params
+    # it reads are declared with @param type hints. So the shapes the handler's own reads give still hold.
+    "Route",
 })
 _UNSEEN = ""  # the key of vec_reads that says some code reads Params unseen (no param has an empty name)
 
@@ -1430,6 +1442,8 @@ def build(args) -> int:
         }
         if ann and ann.get("retired"):
             entry["retired"] = dict(ann["retired"])
+        if ann and ann.get("core"):
+            entry["core"] = True
         for old in (ann.get("renamedFrom", []) if ann else []):
             renamed_from.setdefault(old, []).append(cmd)
         by_domain[domain].append(entry)
@@ -1533,6 +1547,21 @@ def build(args) -> int:
         verb = name.split("_", 1)[0]
         if verb in SYNONYM_VERBS and not entry.get("retired") and name not in SYNONYM_VERB_EXCEPTIONS:
             retirement_errors.append(f"`{name}` starts with `{verb}_`: the catalog's verb for that is `{SYNONYM_VERBS[verb]}_`")
+    # add_ puts a part in and remove_ takes it out; delete_ is for what create_ makes. A listed delete_<x> next to an
+    # add_<x> deletes a part, so its verb is remove_.
+    for name, entry in sorted(all_entries.items()):
+        if name.startswith("delete_") and not entry.get("retired"):
+            added = "add_" + name[len("delete_"):]
+            if added in all_entries and not all_entries[added].get("retired"):
+                retirement_errors.append(f"`{name}` takes out what `{added}` puts in: its verb is `remove_`")
+    # The core list: listed tools only, and few of them.
+    core = sorted(n for n, e in all_entries.items() if e.get("core"))
+    for name in core:
+        if all_entries[name].get("retired"):
+            retirement_errors.append(f"`{name}` is @core and @retired: the core list carries listed tools only")
+    if len(core) > MAX_CORE_TOOLS:
+        retirement_errors.append(f"{len(core)} @core tools, more than {MAX_CORE_TOOLS}: the core list is what every agent pays for")
+    print(f"CORE    : {len(core)} tools listed by default")
 
     # A listed tool's text sends the agent only to listed tools: an old or retired name in it would be followed.
     gone = set(renamed_from) | {n for n, e in all_entries.items() if e.get("retired")}

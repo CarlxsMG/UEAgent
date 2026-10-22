@@ -161,7 +161,7 @@ namespace
     }
 }
 
-// MCP:create_hlod_layer - Creates and saves a new UHLODLayer (World Partition HLOD layer) asset.  Idempotent on re-run: an HLOD layer already at the path is returned unchanged with created=false, already_exists=true and saved=false, layer_type not applied and nothing saved; an asset of another class there is an error. Sets default streaming-grid cell_size=25600, loading_range=51200. Layer type accepts 'Instancing', 'MeshApproximate' (also 'Custom'/'CustomHLODActor'). Defaults to 'Instancing'. A failed save makes success false with saved=false. Change it later with set_hlod_layer_settings.
+// MCP:create_hlod_layer - Creates and saves a new UHLODLayer (World Partition HLOD layer) asset.  Idempotent on re-run: an HLOD layer already at the path is returned unchanged with created=false, already_exists=true and saved=false, layer_type not applied and nothing saved; an asset of another class there is an error. Sets default streaming-grid cell_size=25600, loading_range=51200. Layer type accepts 'Instancing', 'MeshApproximate' (also 'Custom'/'CustomHLODActor'). Defaults to 'Instancing'. A failed save makes success false with saved=false. Change it later with set_properties.
 //   @param name - Name of the new HLOD layer asset
 //   @param package_path - Content folder; defaults to /Game/HLOD
 //   @param layer_type - Optional EHLODLayerType string; defaults to "Instancing"
@@ -243,6 +243,7 @@ TSharedPtr<FJsonObject> HandleCreateHLODLayer(const TSharedPtr<FJsonObject>& Par
 }
 
 // MCP:set_hlod_layer_settings - Sets streaming-grid settings / layer type on a UHLODLayer and saves it.  Partial update: only the fields you send are touched. Sending cell_size or loading_range also enables the layer spatially loaded. Layer type accepts 'Instancing'|'MeshApproximate'|'Custom'|'CustomHLODActor'.
+//   @retired set_properties - object_path=<HLOD layer>, properties={"bIsSpatiallyLoaded":true,"CellSize":25600,"LoadingRange":51200,"LayerType":"Instancing"}, save=true
 //   @param hlod_layer_path - Full /Game path to the HLOD layer asset
 //   @param cell_size - Optional streaming-grid cell size
 //   @param loading_range - Optional streaming-grid loading range
@@ -440,7 +441,7 @@ namespace UEAgentHLODImpl
     }
 }
 
-// MCP:get_hlod_layers - List every World Partition HLOD layer asset (UHLODLayer and subclasses) under a content folder and its subfolders, found through the Asset Registry, with each one's name, object path and layer type (Instancing, MeshMerge, MeshSimplify, MeshApproximate, Custom or CustomHLODActor). Each layer asset is loaded to read its type, but nothing is changed or saved. A folder with no layers, or one that does not exist, gives an empty list and count 0, not an error. Use it to find a layer path, then read one layer's grid settings with get_hlod_layer_info or its assigned actors with get_hlod_layer_actors; create_hlod_layer makes a new one and set_hlod_layer_settings changes one.
+// MCP:get_hlod_layers - List every World Partition HLOD layer asset (UHLODLayer and subclasses) under a content folder and its subfolders, found through the Asset Registry, with each one's name, object path and layer type (Instancing, MeshMerge, MeshSimplify, MeshApproximate, Custom or CustomHLODActor). Each layer asset is loaded to read its type, but nothing is changed or saved. A folder with no layers, or one that does not exist, gives an empty list and count 0, not an error. Use it to find a layer path, then read one layer's grid settings with get_hlod_layer_info or its assigned actors with get_hlod_layer_actors; create_hlod_layer makes a new one and set_properties changes one.
 //   @param path - Optional content folder searched recursively, as a long package path, e.g. '/Game/HLOD'; default /Game.
 //   @returns { path: string, hlod_layers: [{ name, path, layer_type }], count: int }
 
@@ -467,7 +468,7 @@ TSharedPtr<FJsonObject> HandleGetHLODLayers(const TSharedPtr<FJsonObject>& Param
     return mcp_common::MakeOkReply(Listing);
 }
 
-// MCP:get_hlod_layer_info - Read one World Partition HLOD layer asset (UHLODLayer): its layer type (Instancing, MeshMerge, MeshSimplify, MeshApproximate, Custom or CustomHLODActor) and its streaming-grid settings, cell_size and loading_range in centimetres and is_spatially_loaded. Read-only: it loads the asset and changes nothing. A path that does not load as an HLOD layer is an error. The grid fields are read by reflection because the engine deprecated them in 5.7; on a build without them they read 0 and false. Find layer paths with get_hlod_layers; change these values with set_hlod_layer_settings, the parent with set_hlod_layer_parent, and list the actors using the layer with get_hlod_layer_actors.
+// MCP:get_hlod_layer_info - Read one World Partition HLOD layer asset (UHLODLayer): its layer type (Instancing, MeshMerge, MeshSimplify, MeshApproximate, Custom or CustomHLODActor) and its streaming-grid settings, cell_size and loading_range in centimetres and is_spatially_loaded. Read-only: it loads the asset and changes nothing. A path that does not load as an HLOD layer is an error. The grid fields are read by reflection because the engine deprecated them in 5.7; on a build without them they read 0 and false. Find layer paths with get_hlod_layers; change these values with set_properties, the parent with set_hlod_layer_parent, and list the actors using the layer with get_hlod_layer_actors.
 //   @param hlod_layer_path - Object or package path of the HLOD layer asset, e.g. '/Game/HLOD/HLOD_Instanced' (as get_hlod_layers lists it).
 //   @returns { hlod_layer_path: string, asset_path: string, name: string, layer_type: string, cell_size: int, loading_range: number, is_spatially_loaded: bool }
 

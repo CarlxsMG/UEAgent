@@ -403,6 +403,7 @@ APlayerController* ResolvePlayerController(const TSharedPtr<FJsonObject>& Params
 // Legacy input: the UInputSettings action/axis tables and a player's UPlayerInput.
 
 // MCP:get_input_settings - Read the project's LEGACY input mappings from UInputSettings: named action mappings (key + shift/ctrl/alt/cmd modifiers) and axis mappings (key + scale), each with its row count, in one call. Legacy only -- it does NOT see Enhanced Input mapping contexts, so on an Enhanced Input project it can return almost nothing while the game is fully bound. For the complete picture across both systems use list_all_input_mappings; for one Enhanced Input context use get_input_mapping_context.
+//   @retired get_properties - object_path="/Script/Engine.Default__InputSettings", property_names=["ActionMappings","AxisMappings"]
 //   @returns { action_mappings: [{ action_name, key, shift, ctrl, alt, cmd }], action_mapping_count, axis_mappings: [{ axis_name, key, scale }], axis_mapping_count }
 TSharedPtr<FJsonObject> HandleGetInputSettings(const TSharedPtr<FJsonObject>& Params)
 {

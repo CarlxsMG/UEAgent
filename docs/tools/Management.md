@@ -58,6 +58,8 @@ Audit a fork subtree for references that still point at the SOURCE tree it was c
 
 *Destructive.*
 
+**Core tool:** every client lists it by default.
+
 Force-delete one asset with no confirmation or undo: references to it are nulled, the object is purged and its .uasset/.umap file removed from disk. Check get_asset_referencers first. Succeeds only when the file is gone from disk and the object from memory: a file left behind (read-only, or held open by another process) fails the call with file_still_exists true, and the asset comes back when the editor restarts. With expected_class it is a typed delete: an asset of any other class is refused and nothing is deleted, and a path with no asset is a no-op success.
 
 | Parameter | Type | Required | Description |
@@ -70,6 +72,8 @@ Force-delete one asset with no confirmation or undo: references to it are nulled
 ## `duplicate_asset`
 
 *Additive.*
+
+**Core tool:** every client lists it by default.
 
 Duplicates an asset to a new name, in the same directory or in destination_path, then PERSISTS the copy to disk immediately (unless Play-In-Editor is active -- see the "saved"/"save_error" note on the save step below; a duplicate is very often used AS a safety net before a risky edit, so leaving it memory-only defeats the point). A target name already taken, in memory or on disk, is refused with nothing touched, unless if_exists='return' hands back an existing asset of the source's class with created=false; a destination outside the project's writable content (engine content, a read-only root, no mounted root) is refused, and so is a source that is not of expected_class when one is given. By default (remap_internal_refs absent/false) this is otherwise a plain copy: like EditorAssetLibrary.duplicate_asset, any internal references the copy holds still point at the ORIGINAL (not remapped). Set remap_internal_refs=true to run the SAME 2nd-pass reference remap that duplicate_directory uses (FArchiveReplaceObjectRef mapping original->copy) so the copy's own self-references point at the copy, before that save. repoint_parents_within additionally re-applies a MaterialInstance parent via SetParentEditorOnly when the parent maps into the copied set (for a single asset this only fires if the copy's parent is the original itself).
 
