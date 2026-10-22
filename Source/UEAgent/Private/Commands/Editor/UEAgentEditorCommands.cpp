@@ -600,6 +600,7 @@ TSharedPtr<FJsonObject> HandleGetActorsInLevel(const TSharedPtr<FJsonObject>& Pa
 }
 
 // MCP:find_actors_by_name - Locate actors by a SUBSTRING of their internal name and/or their editor label, returning name, label, class and transform for each hit. This is the one to use when you know what a thing is CALLED but not its class -- get_actors_by_class needs an exact class name, and this one alone can search labels (match='label'), which is where hand-assigned names live. Plain case-INSENSITIVE substring, no wildcards and no regex: 'turret' matches BP_Turret_C_2, and '*' matches literally nothing. Its world selector is the canonical one: 'editor' (default), 'pie'/'game', 'server', 'client' and 'pie:N' all resolve for real, an unrecognised value FAILS instead of falling through to the editor world, and the reply stamps world_package/world_type/net_mode/pie_instance so you can tell which world answered.
+//   @core
 //   @param pattern - Substring to look for, case-insensitive, no wildcards or regex. Cannot be empty.
 //   @param match - Optional 'name' | 'label' | 'both' (default 'both'). 'name' = internal object name only; 'label' = the editor label from the outliner; 'both' = a hit on either. An unknown value is a clean error.
 //   @param max_results - Optional cap on hits (default 1000); results_truncated says whether the scan stopped early.
@@ -700,6 +701,7 @@ TSharedPtr<FJsonObject> HandleFindActorsByName(const TSharedPtr<FJsonObject>& Pa
 }
 
 // MCP:spawn_actor - Place an actor of ANY placeable class -- a built-in short name (StaticMeshActor, PointLight, SpotLight, DirectionalLight, RectLight, SkyLight, CameraActor, Character), another engine or plugin class by name or path (SkyAtmosphere, ExponentialHeightFog, VolumetricCloud, SceneCapture2D, TextRenderActor, NiagaraActor, /Script/Engine.DecalActor...) or a Blueprint asset path -- into the editor level or a live PIE world, at an optional location/rotation/scale, and set its properties in the same call: properties={"Prop": v} on the actor, {"Component.Prop": v} on a component named so or of a class only one component has (e.g. {"ExponentialHeightFogComponent.FogDensity": 0.05}), written as set_properties writes them. A volume needs a brush: spawn_box_volume places one; an abstract or non-placeable class is refused. Refuses a name an actor already has (omit name to let the engine pick a unique one); the spawn is undoable. A property that cannot be written makes the call fail with properties_failed while the actor stays, so fix it with set_properties or remove it with delete_actor. It creates the actor in MEMORY only -- save_level (with the .umap writable) puts it on disk. WARNING: with 2+ PIE clients world='pie' can land in the CLIENT world, producing an actor the authority never sees -- ask for world='server' instead, and check has_authority and world_package in the reply.
+//   @core
 //   @param type - The actor class: a built-in short name (StaticMeshActor, PointLight, SpotLight, DirectionalLight, RectLight, SkyLight, CameraActor, Character; a light also as Point, Spot, Directional, Rect or Sky), any other actor class by name or /Script path, or a Blueprint asset path (/Game/BP_Door). Volumes go through spawn_box_volume.
 //   @param name - Optional internal name (and label) for the new actor; must be unused in the target world or the call is refused. When omitted the engine names the actor uniquely and the label is the class default.
 //   @param location - Optional world location, ARRAY form only: [x, y, z]; the origin when omitted. Any other value (an object, another length) is an error and nothing is spawned.
@@ -1037,6 +1039,7 @@ TSharedPtr<FJsonObject> HandleSpawnActor(const TSharedPtr<FJsonObject>& Params)
 }
 
 // MCP:delete_actor - Remove one actor from the EDITOR level through the editor's own delete path (select + edactDeleteSelected), so it is transacted and undoable, and echo back the deleted actor's JSON. WARNING: two edges that bite: it matches the INTERNAL name only -- unlike set_actor_transform, an editor LABEL will not resolve -- and it clears the current selection as a side effect. It cannot touch PIE actors (editor world only), and the deletion lives in memory until save_level writes the .umap. Use delete_actors for several at once.
+//   @core
 //   @param name - Actor's internal name (GetName), case-insensitive but WHOLE-string. Editor labels are NOT accepted here; resolve one first with find_actors_by_name.
 //   @returns { deleted_actor: actor JSON captured before the delete }
 
@@ -2055,6 +2058,7 @@ namespace
 }
 
 // MCP:load_level - Open a map in the editor (by /Game or /Engine package path, or disk .umap), replacing the current world; default_template=true opens the engine's default template level instead (/Engine/Maps/Templates/Template_Default, ~45 actors: floor, PlayerStart, sky and lights), after which a save_level without `filename` would write over the ENGINE's own map (is_engine_template and warning say so). Also the repair for actors that VANISHED from a world in memory after compile_blueprint: reloading the same map brings the placed OFPA instances back with their per-instance config -- never re-place them. REFUSES up front when any other UWorld is still resident in memory, because the engine's world-leak check turns that into a Fatal error that kills the editor process and every unsaved edit with it; the refusal lists the resident worlds and the remedy. Run list_dirty_packages first: a reload discards unsaved work.
+//   @core
 //   @param filename - Disk path to a .umap, OR a long package path (e.g. /Game/Maps/Foo) resolved to the on-disk map file. Required unless default_template is true.
 //   @param default_template - Optional bool (default false): open the engine's default template level (/Engine/Maps/Templates/Template_Default) without naming it in filename; giving both is an error.
 //   @param load_as_template - When true, loads the level as a template; defaults to false
@@ -2181,6 +2185,7 @@ TSharedPtr<FJsonObject> HandleLoadLevel(const TSharedPtr<FJsonObject>& Params)
 }
 
 // MCP:get_current_level - Which map a world is sitting on: level_name, its package_name (/Game/... or /Engine/...), the resolved disk filename, whether the package is dirty, and a live actor count. package_name is the discriminator that catches the classic mistake -- if it starts with /Engine/ you are on an engine template (what load_level with default_template=true leaves behind) and a save_level without `filename` would overwrite the ENGINE's own map. Defaults to the EDITOR world; it also takes the standard `world` selector, so during PIE you can ask the play world ('pie'/'server'/'client'/'pie:N') instead of being told about the authoring map and having no way to know it.
+//   @core
 //   @param world - Optional world selector: absent/'editor' (default -- the authoring map even while PIE runs) | 'pie' (ambiguous: PlayWorld, else the first PIE context) | 'game' (alias of 'pie') | 'server' (the PIE world with authority) | 'client' | 'pie:N'. Case-insensitive; an unrecognised value is a clean error listing the worlds present, never a silent fallback to the editor world.
 //   @returns { level_name: string, package_name: string (the /Game or /Engine path -- read this one), filename: string, is_dirty: bool, actor_count: int, world: string (the normalized selector that resolved), world_name: string, world_package: string (the UEDPIE_N prefix lives HERE, not in world_name), world_type: string ("Editor" | "PIE" | ...), net_mode: string, pie_instance: int }
 
@@ -3240,6 +3245,7 @@ TSharedPtr<FJsonObject> HandleCancelTransaction(const TSharedPtr<FJsonObject>& P
 }
 
 // MCP:undo - Step the editor's undo stack back by one transaction, or by `count` of them, and report what is left, including next_undo (the label of the entry now on top). WARNING: `success` is ALWAYS true, including when there was nothing to undo -- the real oracle is `applied`, and with a count compare actually_undone against requested (the stack ran out, or an undo barrier stopped it); the honest verification is re-reading whatever you changed. Read get_undo_state first to look before you leap.
+//   @core
 //   @param count - Optional. How many transactions to undo, at least 1 (default 1); stops early when the stack runs out or reaches an undo barrier. Below 1 is refused.
 //   @returns { applied: bool (THE oracle -- false means nothing was undone), requested: int, actually_undone: int (compare against requested), undo_count: int, can_undo: bool, next_undo: string (label of the next entry) }
 TSharedPtr<FJsonObject> HandleUndo(const TSharedPtr<FJsonObject>& Params)

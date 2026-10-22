@@ -182,7 +182,7 @@ const TCHAR* McpAgentClients::StateName(EState State)
 
 FString McpAgentClients::ClientUrl(uint16 Port)
 {
-	return McpClaudeCode::ServerUrl(Port) + TEXT("?tools=compact");
+	return McpClaudeCode::ServerUrl(Port);
 }
 
 McpAgentClients::FStatus McpAgentClients::InspectProject(EClient Client)

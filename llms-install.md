@@ -115,8 +115,8 @@ the console commands for **your** client:
 | Cursor | `mcp.clients.connect cursor` and `mcp.skills.install agents` |
 | VS Code (Copilot) | `mcp.clients.connect vscode` and `mcp.skills.install agents` |
 | Antigravity CLI | `mcp.clients.connect antigravity` and `mcp.skills.install agents` |
-| Codex | `mcp.skills.install agents`, then run `codex mcp add unreal --url "http://127.0.0.1:55561/mcp?tools=compact"` |
-| Gemini CLI | `mcp.skills.install agents`, then run `gemini mcp add -t http unreal "http://127.0.0.1:55561/mcp?tools=compact"` |
+| Codex | `mcp.skills.install agents`, then run `codex mcp add unreal --url "http://127.0.0.1:55561/mcp"` |
+| Gemini CLI | `mcp.skills.install agents`, then run `gemini mcp add -t http unreal "http://127.0.0.1:55561/mcp"` |
 | Another client | `mcp.skills.install agents`, then add the server as https://carlxsmg.github.io/UEAgent/clients/ shows |
 
 ```powershell

@@ -9,6 +9,7 @@
 #include "Http.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
+#include "Mcp/McpHttpServer.h"     // EMcpToolsMode
 #include "UEAgentBridge.generated.h"
 
 // Native MCP server (Streamable HTTP) -- see Mcp/McpHttpServer.h.
@@ -41,8 +42,8 @@ public:
 	bool StartHttpServer();
 	void StopHttpServer();
 	bool IsHttpRunning() const;
-	/** Does tools/list carry the compact meta-tools by default (UEAGENT_TOOLS=compact)? */
-	bool IsHttpCompactTools() const;
+	/** The list tools/list carries when a client's URL asks for none (UEAGENT_TOOLS; the core list unless it says otherwise). */
+	EMcpToolsMode GetHttpToolsMode() const;
 	/** One readable line: port, connections, requests, catalog tools. */
 	FString DescribeHttpStatus() const;
 	/** Why it failed to start last time (empty if it started or is disabled). Shown by the status bar. */
@@ -68,6 +69,16 @@ public:
 	// Above zero while a tool runs other tools (mcp_common::RunSubCommands): the names it calls are its own choice, so
 	// DispatchSingleCommand adds no retired-name note to them.
 	int32 SubCommandDepth = 0;
+
+	// The call a tool forwarded to the tool that does the work (mcp_common::ForwardCall), so the READBACK contract
+	// checks that tool's call and not the forwarder's: ForwardedBy is the forwarding tool, ForwardedCommand and
+	// ForwardedParams the call it made, ForwardCount how many calls it forwarded (more than one: no single tool's
+	// contract applies). EnqueueToolCall clears them before the dispatch and reads them after it, only when
+	// ForwardedBy is the tool it ran: a forward made by an item of execute_batch is the item's, not the batch's.
+	FString ForwardedBy;
+	FString ForwardedCommand;
+	TSharedPtr<FJsonObject> ForwardedParams;
+	int32 ForwardCount = 0;
 
 private:
 	// --- PIE ownership guard (game thread only -> no locks) --------------------

@@ -1467,7 +1467,7 @@ TSharedPtr<FJsonObject> HandleWeldMeshEdges(const TSharedPtr<FJsonObject>& Param
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:remove_unused_vertices - Deletes the orphan vertices (those no triangle uses) of a DynamicMeshActor's live dynamic mesh in the editor world and refreshes its render data; triangles and their shape are untouched. Remaining vertex IDs are not renumbered: run compact_mesh afterwards for dense IDs. A mesh without orphan vertices is a success with removed false and adds no undo step; otherwise one undo step restores the mesh. The level is marked dirty, nothing is saved to an asset; an unknown actor or one without a dynamic mesh is an error. Typical after delete_mesh_triangles or apply_mesh_boolean; open seams are closed by weld_mesh_edges, overlaps by repair_mesh_self_intersections, and get_dynamic_mesh_info reads the counts.
+// MCP:remove_unused_vertices - Deletes the orphan vertices (those no triangle uses) of a DynamicMeshActor's live dynamic mesh in the editor world and refreshes its render data; triangles and their shape are untouched. Remaining vertex IDs are not renumbered: run compact_mesh afterwards for dense IDs. A mesh without orphan vertices is a success with removed false and adds no undo step; otherwise one undo step restores the mesh. The level is marked dirty, nothing is saved to an asset; an unknown actor or one without a dynamic mesh is an error. Typical after remove_mesh_triangles or apply_mesh_boolean; open seams are closed by weld_mesh_edges, overlaps by repair_mesh_self_intersections, and get_dynamic_mesh_info reads the counts.
 //   @param actor_name [!] - Label or object name (case-insensitive) of the target DynamicMeshActor in the editor world; create one with spawn_actor.
 //   @returns { actor_name: string, triangle_count: int, vertex_count: int, vertex_count_before: int, vertices_removed: int, removed: bool }
 TSharedPtr<FJsonObject> HandleRemoveUnusedVertices(const TSharedPtr<FJsonObject>& Params)
@@ -1504,7 +1504,7 @@ TSharedPtr<FJsonObject> HandleRemoveUnusedVertices(const TSharedPtr<FJsonObject>
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:compact_mesh - Compact a DynamicMeshActor's live dynamic mesh in the editor world (actor found by label or object name): renumber its vertex, triangle and edge IDs into dense ranges, dropping the free ID slots that deletions leave. Geometry and the vertex and triangle counts stay the same, but IDs move, so vertex or triangle IDs read before (select_mesh_triangles, get_mesh_components_detail) are stale afterwards. Idempotent: compacted is true when any ID moved, and one undo step restores the old IDs; an already compact mesh is a success with compacted=false and adds no undo step. Nothing is saved; an unknown actor is an error. Run it after delete_mesh_triangles or remove_unused_vertices, and before the xatlas method of unwrap_mesh_uvs.
+// MCP:compact_mesh - Compact a DynamicMeshActor's live dynamic mesh in the editor world (actor found by label or object name): renumber its vertex, triangle and edge IDs into dense ranges, dropping the free ID slots that deletions leave. Geometry and the vertex and triangle counts stay the same, but IDs move, so vertex or triangle IDs read before (select_mesh_triangles, get_mesh_components_detail) are stale afterwards. Idempotent: compacted is true when any ID moved, and one undo step restores the old IDs; an already compact mesh is a success with compacted=false and adds no undo step. Nothing is saved; an unknown actor is an error. Run it after remove_mesh_triangles or remove_unused_vertices, and before the xatlas method of unwrap_mesh_uvs.
 //   @param actor_name [!] - Label or object name of the DynamicMeshActor in the editor world (case-insensitive).
 //   @returns { actor_name: string, triangle_count: int, vertex_count: int, compacted: bool }
 TSharedPtr<FJsonObject> HandleCompactMesh(const TSharedPtr<FJsonObject>& Params)
@@ -3097,7 +3097,8 @@ TSharedPtr<FJsonObject> HandleRepackMeshUVs(const TSharedPtr<FJsonObject>& Param
         RepackError);
 }
 
-// MCP:delete_mesh_triangles - Delete the listed triangle IDs (triangle_ids, or a single triangle_id) from a DynamicMeshActor's live dynamic mesh in the editor world; IDs that do not exist are skipped, so compare num_deleted with requested_count (a missing ID is not an error: deleted just comes back false). One undo step restores the triangles, and a call that deletes none adds no undo step; reply actor_name is the component name, not the actor label.
+// MCP:remove_mesh_triangles - Delete the listed triangle IDs (triangle_ids, or a single triangle_id) from a DynamicMeshActor's live dynamic mesh in the editor world; IDs that do not exist are skipped, so compare num_deleted with requested_count (a missing ID is not an error: deleted just comes back false). One undo step restores the triangles, and a call that deletes none adds no undo step; reply actor_name is the component name, not the actor label.
+//   @renamed-from delete_mesh_triangles
 //   @param actor_name [string!] - Label or object name (case-insensitive) of the target DynamicMeshActor in the editor world.
 //   @param triangle_ids [array] - Non-empty array of non-negative integer triangle IDs, e.g. [0, 5, 12]; any negative or non-numeric entry fails the call. Required unless triangle_id is given.
 //   @param triangle_id [int] - Optional single non-negative triangle ID, read as triangle_ids [triangle_id] when triangle_ids is absent.
@@ -4743,7 +4744,7 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("copy_dynamic_mesh_to_static_mesh"), &HandleCopyDynamicMeshToStaticMesh },
     { TEXT("copy_mesh_uv_channel"), &HandleCopyMeshUVChannel },
     { TEXT("copy_static_mesh_to_dynamic_mesh"), &HandleCopyStaticMeshToDynamicMesh },
-    { TEXT("delete_mesh_triangles"), &HandleDeleteSelectedTrianglesFromMesh },
+    { TEXT("remove_mesh_triangles"), &HandleDeleteSelectedTrianglesFromMesh },
     { TEXT("find_nearest_point_on_mesh"), &HandleFindNearestPointOnMesh },
     { TEXT("find_nearest_ray_intersection_with_mesh"), &HandleFindNearestRayIntersectionWithMesh },
     { TEXT("get_dynamic_mesh_info"), &HandleGetDynamicMeshInfo },

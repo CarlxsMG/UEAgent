@@ -11,7 +11,8 @@ noon if they named none), and a screenshot to show it.
 
 UEAgent's tools are the MCP tools of the Unreal Editor's server (named `unreal` when it was connected
 from the editor's **MCP** menu). Your client may show them with a prefix, such as
-`mcp__unreal__spawn_actor`. With the compact tool list, run them through `call_tool`.
+`mcp__unreal__spawn_actor`. By default the server lists its core tools: run any other
+one through `call_tool`, or add its domain to your list with `enable_toolset`.
 
 ## Steps
 

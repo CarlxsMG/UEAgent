@@ -9,7 +9,8 @@ Usage:
 
 The edit checks spawn actors, undo them and load a new level, so they only run in an editor this
 script started: use a throwaway project for --launch. Checks:
-  - protocol: initialize (with the agent instructions), ping, the full and the compact tool list;
+  - protocol: initialize (with the agent instructions), ping, the core (default), full and compact tool lists;
+  - the core list: its session, ?domains=, and enable_toolset adding a domain and announcing it over SSE;
   - the meta-tools: find_tools, describe_tool (the same schema as the full list), call_tool (the
     same answer as a direct call), the closest names for an unknown tool;
   - edits: one undo step per call, an execute_batch as one step, undo/redo and the undo-state tools,
@@ -58,6 +59,17 @@ class Session:
         with urllib.request.urlopen(request, timeout=300) as response:
             return json.loads(response.read().decode("utf-8"))
 
+    def raw(self, method: str, params: dict | None = None, query: str = "", headers: dict | None = None) -> tuple[dict, str]:
+        """One request as it travels: (the response headers, lower-case names; the body as text)."""
+        self.next_id += 1
+        body = {"jsonrpc": "2.0", "id": self.next_id, "method": method}
+        if params is not None:
+            body["params"] = params
+        request = urllib.request.Request(self.url + query, data=json.dumps(body).encode(), method="POST", headers={
+            "Content-Type": "application/json", "Accept": "application/json, text/event-stream", **(headers or {})})
+        with urllib.request.urlopen(request, timeout=300) as response:
+            return {k.lower(): v for k, v in response.headers.items()}, response.read().decode("utf-8")
+
     def call(self, tool: str, arguments: object = None) -> tuple[bool, dict]:
         """tools/call -> (isError, the JSON the tool answered)."""
         params = {"name": tool, "arguments": {} if arguments is None else arguments}
@@ -91,7 +103,7 @@ def port_is_open(url: str) -> bool:
 
 def check_protocol(s: Session, catalog: dict) -> None:
     print("== protocol")
-    total = sum(len(d["commands"]) for d in catalog["domains"])
+    total = sum(not c.get("retired") for d in catalog["domains"] for c in d["commands"])
     init = s.rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
                                 "clientInfo": {"name": "smoke-test", "version": "1"}})["result"]
     s.check("initialize names the server", init.get("serverInfo", {}).get("name") == "UEAgent", init)
@@ -106,6 +118,52 @@ def check_protocol(s: Session, catalog: dict) -> None:
     s.check("compact initialize explains the meta-tools", "find_tools" in compact_init.get("instructions", ""), "")
     s.check("an unknown method is -32601", s.rpc("no/such/method").get("error", {}).get("code") == -32601, "")
     s.full_list = {t["name"]: t for t in full}
+
+
+def sse_messages(text: str) -> list[dict]:
+    """The JSON-RPC messages of an SSE body, in order."""
+    return [json.loads(line[len("data: "):]) for line in text.splitlines() if line.startswith("data: ")]
+
+
+def check_core_list(s: Session, catalog: dict) -> None:
+    print("== core list")
+    meta = ["find_tools", "describe_tool", "call_tool", "enable_toolset"]
+    core = [c["name"] for d in catalog["domains"] for c in d["commands"] if c.get("core") and not c.get("retired")]
+    water = [c["name"] for d in catalog["domains"] if d["domain"] == "Water" for c in d["commands"]
+             if not c.get("retired") and not c.get("core")]
+    headers, body = s.raw("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
+                                         "clientInfo": {"name": "smoke-test", "version": "1"}})
+    init = json.loads(body)["result"]
+    session = headers.get("mcp-session-id", "")
+    s.check("initialize on the core list opens a session (Mcp-Session-Id)", bool(session), headers)
+    s.check("the core list announces listChanged", init.get("capabilities", {}).get("tools", {}).get("listChanged") is True, init)
+    s.check("the core instructions name enable_toolset", "enable_toolset" in init.get("instructions", ""), "")
+    listed = [t["name"] for t in s.rpc("tools/list")["result"]["tools"]]
+    s.check(f"tools/list carries the {len(core)} core tools and the four meta-tools by default", listed == core + meta, listed[-6:])
+    listed = [t["name"] for t in s.rpc("tools/list", query="?domains=Water")["result"]["tools"]]
+    s.check("?domains=Water adds the Water tools", set(listed) == set(core + meta + water), len(listed))
+    all_headers, all_body = s.raw("initialize", {"protocolVersion": "2025-06-18"}, query="?tools=all")
+    s.check("?tools=all opens no session and does not announce listChanged",
+            "mcp-session-id" not in all_headers and not json.loads(all_body)["result"]["capabilities"]["tools"]["listChanged"], all_headers)
+
+    params = {"name": "enable_toolset", "arguments": {"domains": ["water"]}}
+    headers, body = s.raw("tools/call", params, headers={"Mcp-Session-Id": session})
+    messages = sse_messages(body) if "text/event-stream" in headers.get("content-type", "") else []
+    s.check("enable_toolset answers over SSE, the list_changed notification first",
+            [m.get("method") for m in messages[:1]] == ["notifications/tools/list_changed"], body[:300])
+    reply = json.loads(messages[-1]["result"]["content"][0]["text"]) if messages else {}
+    s.check(f"enable_toolset adds the {len(water)} Water tools", reply.get("tools_added") == len(water), reply)
+    headers, body = s.raw("tools/list", headers={"Mcp-Session-Id": session})
+    listed = [t["name"] for t in json.loads(body)["result"]["tools"]]
+    s.check("the session's tools/list now carries them", set(listed) == set(core + meta + water), len(listed))
+    headers, body = s.raw("tools/call", params, headers={"Mcp-Session-Id": session})
+    reply = json.loads(json.loads(body)["result"]["content"][0]["text"])
+    s.check("enabling it again adds nothing and answers JSON", reply.get("tools_added") == 0 and not reply.get("list_changed"), reply)
+    is_error, reply = s.call("enable_toolset", {"domains": ["Water"]})
+    s.check("without a session it adds nothing and says how to reach them", not is_error and reply.get("tools_added") == 0
+            and "call_tool" in reply.get("note", ""), reply)
+    is_error, reply = s.call("enable_toolset", {"domains": ["NoSuchDomain"]})
+    s.check("an unknown domain is an error that lists the domains", is_error and "Water" in reply.get("_text", ""), reply)
 
 
 def check_meta_tools(s: Session, catalog: dict) -> None:
@@ -203,6 +261,7 @@ def main() -> int:
             print(f"FAIL: no UEAgent server answers at {args.url}")
             return 1
         check_protocol(session, catalog)
+        check_core_list(session, catalog)
         check_meta_tools(session, catalog)
         if editor:
             check_edits(session)

@@ -2,7 +2,7 @@
 
 # Config
 
-16 tools for project settings and .ini values, collision channels and profiles, the default map, component properties and construction scripts.
+15 tools for project settings and .ini values, collision channels and profiles, the default map, component properties and construction scripts.
 
 Back to the [index](README.md).
 
@@ -63,21 +63,6 @@ Read one project collision profile by name, read-only: object_type_name, collisi
 | `profile_name` | string | yes | Name of an existing collision profile, e.g. "BlockAll" or "Pawn" |
 
 **Returns:** `{ profile_name: string, object_type_name: string, collision_enabled: string, can_modify: bool, help_message: string, custom_responses: [{channel: string, response: string}] }`
-
-## `get_component_properties`
-
-*Read-only.*
-
-Read EVERY editable or Blueprint-visible property of one component, each value as text, plus whether the component is active and registered: the read-back for set_component_property. Pick it to see a whole component, on a placed actor (actor_name; world picks the editor instance or a live PIE world) or on a Blueprint's component template by its SCS variable or native subobject name (blueprint_name); get_properties reads only the named properties of a placed actor's component (object_path "Actor.Component"), typed instead of text, and get_blueprint_component_property reads a Blueprint template property's effective default, resolving components inherited from parent Blueprints. Read-only.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `component_name` | string | yes | Name of the component: its object name on a placed actor, or its SCS variable or native subobject name in a Blueprint. |
-| `actor_name` | string | no | Object name, else editor label, of the placed actor that owns the component; ignored when blueprint_name is given. |
-| `world` | string | no | Optional world selector: absent/'editor' (default) reads the frozen editor archetype/CDO (pre-BeginPlay defaults); 'server' (the PIE world with authority -- what you want for replicated state in co-op) \| 'client' \| 'pie:N' \| 'pie' (ambiguous) resolve the LIVE running PIE actor+component so runtime-mutated values (e.g. Health after BeginPlay) are returned; 'game' is an alias of 'pie'. Only affects the actor_name path; ignored for blueprint_name. |
-| `blueprint_name` | string | no | Blueprint whose component template to read, by short name (searched under /Game/Blueprints, then the whole project) or asset path such as "/Game/Characters/BP_Hero"; it wins over actor_name, and world is ignored. |
-
-**Returns:** `{ actor_name: string, component_name: string, component_class: string, properties: [{...}], properties_count: int, editable_properties_count: int, blueprint_visible_properties_count: int, public_properties_count: int, component_owner: string, component_is_active: bool, component_is_registered: bool, component_creation_method: string, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }`
 
 ## `get_default_game_map`
 

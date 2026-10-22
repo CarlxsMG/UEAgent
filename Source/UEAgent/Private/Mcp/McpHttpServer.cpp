@@ -54,7 +54,8 @@ namespace McpHttpServerPrivate
 		TEXT("- A tool's name starts with its verb, one verb per operation: get_ reads one thing (get_<x>_info, all of it), list_ ")
 		TEXT("enumerates, find_ searches by name or condition, is_/has_ answer yes or no; create_ makes an asset, add_ puts a part ")
 		TEXT("into an asset or actor, spawn_ places an actor in a world; set_ writes; remove_ takes a part out, delete_ deletes an ")
-		TEXT("asset or actor, clear_ empties a list.\n")
+		TEXT("asset or actor, clear_ empties a list; diff_ compares two things; execute_ runs the Python, console command or batch ")
+		TEXT("you pass, run_ starts a test, query, tree or utility that already exists.\n")
 		TEXT("- Similar tools: get_properties reads named properties of one object you can path to, get_object_info one you know ")
 		TEXT("nothing about, get_actor_properties_by_class placed actors by class or label, get_component_properties a whole ")
 		TEXT("component. set_properties writes any setting of an asset, an actor or a component (\"Actor.Component\", by name or ")
@@ -88,27 +89,78 @@ namespace McpHttpServerPrivate
 		const FString* Header(const TCHAR* LowerName) const { return Headers.Find(LowerName); }
 	};
 
-	/** The list this request gets: the URL's `tools=compact|full` when it has one, else the server's mode. */
-	static bool WantsCompactTools(const FHttpRequest& Request, bool bServerCompact)
+	/** A `tools` value (core, all, full, compact) as a mode; Default, and bOutKnown false, for any other. */
+	static EMcpToolsMode ParseToolsMode(const FString& Value, EMcpToolsMode Default, bool& bOutKnown)
 	{
+		bOutKnown = true;
+		if (Value.Equals(TEXT("core"), ESearchCase::IgnoreCase))
+		{
+			return EMcpToolsMode::Core;
+		}
+		if (Value.Equals(TEXT("all"), ESearchCase::IgnoreCase) || Value.Equals(TEXT("full"), ESearchCase::IgnoreCase))
+		{
+			return EMcpToolsMode::All;
+		}
+		if (Value.Equals(TEXT("compact"), ESearchCase::IgnoreCase))
+		{
+			return EMcpToolsMode::Compact;
+		}
+		bOutKnown = false;
+		return Default;
+	}
+
+	static const TCHAR* ToolsModeName(EMcpToolsMode Mode)
+	{
+		return Mode == EMcpToolsMode::All ? TEXT("all") : Mode == EMcpToolsMode::Compact ? TEXT("compact") : TEXT("core");
+	}
+
+	/** What the URL asks for: the list (`tools=core|all|compact`, else the server's default) and the domains to add to the core list (`domains=A,B`). */
+	struct FToolsRequest
+	{
+		EMcpToolsMode Mode = EMcpToolsMode::Core;
+		TSet<FString> Domains;
+	};
+
+	static FToolsRequest ReadToolsRequest(const FHttpRequest& Request, EMcpToolsMode Default, const FMcpToolCatalog* Catalog)
+	{
+		FToolsRequest Out;
+		Out.Mode = Default;
 		TArray<FString> Pairs;
 		Request.Query.ParseIntoArray(Pairs, TEXT("&"));
 		for (const FString& Pair : Pairs)
 		{
 			FString Key, Value;
-			if (Pair.Split(TEXT("="), &Key, &Value) && Key.Equals(TEXT("tools"), ESearchCase::IgnoreCase))
+			if (!Pair.Split(TEXT("="), &Key, &Value))
 			{
-				if (Value.Equals(TEXT("compact"), ESearchCase::IgnoreCase))
+				continue;
+			}
+			if (Key.Equals(TEXT("tools"), ESearchCase::IgnoreCase))
+			{
+				bool bKnown = false;
+				Out.Mode = ParseToolsMode(Value, Out.Mode, bKnown);
+			}
+			else if (Key.Equals(TEXT("domains"), ESearchCase::IgnoreCase) && Catalog)
+			{
+				TArray<FString> Names;
+				Value.Replace(TEXT("%2C"), TEXT(","), ESearchCase::IgnoreCase).ParseIntoArray(Names, TEXT(","));
+				for (const FString& Name : Names)
 				{
-					return true;
-				}
-				if (Value.Equals(TEXT("full"), ESearchCase::IgnoreCase))
-				{
-					return false;
+					const FString Domain = Catalog->FindDomain(Name);
+					if (!Domain.IsEmpty())
+					{
+						Out.Domains.Add(Domain);
+					}
 				}
 			}
 		}
-		return bServerCompact;
+		return Out;
+	}
+
+	/** The session id the request carries (Mcp-Session-Id), or empty. */
+	static FString SessionOf(const FHttpRequest& Request)
+	{
+		const FString* Session = Request.Header(TEXT("mcp-session-id"));
+		return Session ? Session->TrimStartAndEnd() : FString();
 	}
 
 	static bool IsSupportedVersion(const FString& Version)
@@ -394,7 +446,9 @@ private:
 	/** Answers the request. Returns whether the connection stays alive for the next one. */
 	bool HandleRequest(const McpHttpServerPrivate::FHttpRequest& Request);
 	bool HandleJsonRpc(const McpHttpServerPrivate::FHttpRequest& Request, bool bKeepAlive);
-	bool HandleToolsCall(const TSharedPtr<FJsonValue>& Id, const TSharedPtr<FJsonObject>& Params, bool bKeepAlive);
+	bool HandleToolsCall(const McpHttpServerPrivate::FHttpRequest& Request, const TSharedPtr<FJsonValue>& Id, const TSharedPtr<FJsonObject>& Params, bool bKeepAlive);
+	/** enable_toolset: adds domains to the connection's session and, when the list changed and the client takes SSE, says so before the reply. */
+	bool AnswerEnableToolset(const McpHttpServerPrivate::FHttpRequest& Request, const TSharedPtr<FJsonValue>& Id, const FMcpToolCatalog& Catalog, const TSharedPtr<FJsonObject>& Arguments, bool bKeepAlive);
 
 	FMcpHttpServer* Server;
 	TSharedPtr<FSocket> Socket;
@@ -902,22 +956,41 @@ bool FMcpHttpConnection::HandleJsonRpc(const McpHttpServerPrivate::FHttpRequest&
 
 	if (Method == TEXT("tools/call"))
 	{
-		return HandleToolsCall(Id, Params, bKeepAlive);
+		return HandleToolsCall(Request, Id, Params, bKeepAlive);
 	}
 
-	const bool bCompactTools = WantsCompactTools(Request, Server->IsCompactTools());
+	const TSharedPtr<const FMcpToolCatalog> CurrentCatalog = FMcpToolCatalog::GetCurrent();
+	const FToolsRequest ToolsRequest = ReadToolsRequest(Request, Server->GetDefaultToolsMode(), CurrentCatalog.Get());
 	if (Method == TEXT("tools/list"))
 	{
 		// Megabytes that never change: served pre-serialized, without going through the game
 		// thread and without rebuilding the JSON. Only the envelope is built around them.
-		const TSharedPtr<const FMcpToolCatalog> Catalog = FMcpToolCatalog::GetCurrent();
+		const TSharedPtr<const FMcpToolCatalog>& Catalog = CurrentCatalog;
 		FString Prefix = ToJsonText(MakeEnvelope(Id));
 		Prefix.LeftChopInline(1);
 		Prefix += TEXT(",\"result\":");
 		TArray<uint8> Body = ToUtf8(Prefix);
 		if (Catalog.IsValid())
 		{
-			Body.Append(bCompactTools ? Catalog->GetCompactToolsListUtf8() : Catalog->GetToolsListUtf8());
+			if (ToolsRequest.Mode == EMcpToolsMode::Compact)
+			{
+				Body.Append(Catalog->GetCompactToolsListUtf8());
+			}
+			else if (ToolsRequest.Mode == EMcpToolsMode::All)
+			{
+				Body.Append(Catalog->GetToolsListUtf8());
+			}
+			else
+			{
+				// The core list, plus the domains the URL names and the ones this client's session enabled.
+				TSet<FString> Domains = ToolsRequest.Domains;
+				const FString Session = SessionOf(Request);
+				if (!Session.IsEmpty())
+				{
+					Server->GetSessionDomains(Session, Domains);
+				}
+				Body.Append(Domains.Num() > 0 ? Catalog->BuildCoreToolsListUtf8(Domains) : Catalog->GetCoreToolsListUtf8());
+			}
 		}
 		else
 		{
@@ -945,12 +1018,13 @@ bool FMcpHttpConnection::HandleJsonRpc(const McpHttpServerPrivate::FHttpRequest&
 			(*ClientInfo)->TryGetStringField(TEXT("name"), ClientName);
 			(*ClientInfo)->TryGetStringField(TEXT("version"), ClientVersion);
 		}
-		UE_LOG(LogUEAgentHttp, Display, TEXT("initialize: %s %s requests %s -> %s%s"),
-			*ClientName, *ClientVersion, Requested.IsEmpty() ? TEXT("<none>") : *Requested, *Negotiated,
-			bCompactTools ? TEXT(" (compact tool list)") : TEXT(""));
+		UE_LOG(LogUEAgentHttp, Display, TEXT("initialize: %s %s requests %s -> %s (%s tool list)"),
+			*ClientName, *ClientVersion, Requested.IsEmpty() ? TEXT("<none>") : *Requested, *Negotiated, ToolsModeName(ToolsRequest.Mode));
 
+		// The core list can grow (enable_toolset): it says so, and the session is what remembers the growth.
+		const bool bCoreList = ToolsRequest.Mode == EMcpToolsMode::Core;
 		TSharedRef<FJsonObject> Tools = MakeShared<FJsonObject>();
-		Tools->SetBoolField(TEXT("listChanged"), false);
+		Tools->SetBoolField(TEXT("listChanged"), bCoreList);
 		TSharedRef<FJsonObject> Capabilities = MakeShared<FJsonObject>();
 		Capabilities->SetObjectField(TEXT("tools"), Tools);
 		TSharedRef<FJsonObject> ServerInfo = MakeShared<FJsonObject>();
@@ -961,14 +1035,15 @@ bool FMcpHttpConnection::HandleJsonRpc(const McpHttpServerPrivate::FHttpRequest&
 		Result->SetStringField(TEXT("protocolVersion"), Negotiated);
 		Result->SetObjectField(TEXT("capabilities"), Capabilities);
 		Result->SetObjectField(TEXT("serverInfo"), ServerInfo);
-		const TSharedPtr<const FMcpToolCatalog> Catalog = FMcpToolCatalog::GetCurrent();
 		FString Instructions = AgentInstructions;
-		if (bCompactTools && Catalog.IsValid())
+		if (CurrentCatalog.IsValid() && ToolsRequest.Mode != EMcpToolsMode::All)
 		{
-			Instructions = McpMetaTools::Instructions(*Catalog) + TEXT("\n\n") + Instructions;
+			Instructions = (ToolsRequest.Mode == EMcpToolsMode::Compact ? McpMetaTools::Instructions(*CurrentCatalog) : McpMetaTools::CoreInstructions(*CurrentCatalog))
+				+ TEXT("\n\n") + Instructions;
 		}
 		Result->SetStringField(TEXT("instructions"), Instructions);
-		return SendJson(200, MakeRpcResult(Id, Result), bKeepAlive) && bKeepAlive;
+		const FString SessionHeader = bCoreList ? FString::Printf(TEXT("Mcp-Session-Id: %s\r\n"), *Server->OpenSession()) : FString();
+		return SendResponse(200, TEXT("application/json"), ToUtf8(MakeRpcResult(Id, Result)), bKeepAlive, SessionHeader) && bKeepAlive;
 	}
 
 	if (Method == TEXT("ping"))
@@ -979,7 +1054,7 @@ bool FMcpHttpConnection::HandleJsonRpc(const McpHttpServerPrivate::FHttpRequest&
 	return SendJson(200, MakeRpcError(Id, -32601, FString::Printf(TEXT("Method not found: %s"), *Method)), bKeepAlive) && bKeepAlive;
 }
 
-bool FMcpHttpConnection::HandleToolsCall(const TSharedPtr<FJsonValue>& Id, const TSharedPtr<FJsonObject>& Params, bool bKeepAlive)
+bool FMcpHttpConnection::HandleToolsCall(const McpHttpServerPrivate::FHttpRequest& Request, const TSharedPtr<FJsonValue>& Id, const TSharedPtr<FJsonObject>& Params, bool bKeepAlive)
 {
 	using namespace McpHttpServerPrivate;
 
@@ -1030,6 +1105,12 @@ bool FMcpHttpConnection::HandleToolsCall(const TSharedPtr<FJsonValue>& Id, const
 	const TSharedPtr<const FMcpToolCatalog> Catalog = FMcpToolCatalog::GetCurrent();
 	if (Catalog.IsValid())
 	{
+		// enable_toolset changes this connection's list, which lives here: answered here, off the game thread.
+		if (ToolName.Equals(McpMetaTools::EnableToolset, ESearchCase::IgnoreCase))
+		{
+			Server->CountToolCall();
+			return AnswerEnableToolset(Request, Id, *Catalog, Arguments, bKeepAlive);
+		}
 		// find_tools and describe_tool only read the catalog: answered here, off the game thread.
 		bool bMetaError = false;
 		if (const TSharedPtr<FJsonObject> MetaAnswer = McpMetaTools::Answer(*Catalog, ToolName, Arguments, bMetaError))
@@ -1121,6 +1202,60 @@ bool FMcpHttpConnection::HandleToolsCall(const TSharedPtr<FJsonValue>& Id, const
 	return SendJson(200, Response, bKeepAlive) && bKeepAlive;
 }
 
+bool FMcpHttpConnection::AnswerEnableToolset(const McpHttpServerPrivate::FHttpRequest& Request, const TSharedPtr<FJsonValue>& Id,
+	const FMcpToolCatalog& Catalog, const TSharedPtr<FJsonObject>& Arguments, bool bKeepAlive)
+{
+	using namespace McpHttpServerPrivate;
+
+	const FToolsRequest ToolsRequest = ReadToolsRequest(Request, Server->GetDefaultToolsMode(), &Catalog);
+	if (ToolsRequest.Mode != EMcpToolsMode::Core)
+	{
+		TSharedRef<FJsonObject> Reply = MakeShared<FJsonObject>();
+		Reply->SetBoolField(TEXT("success"), true);
+		Reply->SetNumberField(TEXT("tools_added"), 0);
+		Reply->SetBoolField(TEXT("list_changed"), false);
+		Reply->SetStringField(TEXT("note"), ToolsRequest.Mode == EMcpToolsMode::All
+			? TEXT("This connection already lists every tool (?tools=all): call them directly.")
+			: TEXT("This connection uses the compact list (?tools=compact), which does not grow: run the domain's tools with call_tool."));
+		return SendJson(200, MakeRpcResult(Id, MakeToolResult(ToJsonText(Reply), false)), bKeepAlive) && bKeepAlive;
+	}
+
+	TArray<FString> Domains;
+	FString Error;
+	if (!McpMetaTools::ReadToolsetDomains(Catalog, Arguments, Domains, Error))
+	{
+		return SendJson(200, MakeRpcResult(Id, MakeToolResult(Error, true)), bKeepAlive) && bKeepAlive;
+	}
+	const FString Session = SessionOf(Request);
+	TSet<FString> Listed = ToolsRequest.Domains;
+	if (!Session.IsEmpty())
+	{
+		Server->GetSessionDomains(Session, Listed);
+		Server->AddSessionDomains(Session, Domains);
+	}
+	const TSharedRef<FJsonObject> Reply = McpMetaTools::ToolsetReply(Catalog, Domains, Listed, !Session.IsEmpty());
+	const FString Response = MakeRpcResult(Id, MakeToolResult(ToJsonText(Reply), false));
+	UE_LOG(LogUEAgentHttp, Display, TEXT("enable_toolset: %s -> %d tools added%s"), *FString::Join(Domains, TEXT(", ")),
+		static_cast<int32>(Reply->GetNumberField(TEXT("tools_added"))), Session.IsEmpty() ? TEXT(" (no session: the list cannot change)") : TEXT(""));
+
+	// The list changed: a client that takes SSE hears it before the reply, on this response's stream (the server has no
+	// GET stream), and re-reads tools/list -- which already carries the domains, the session holds them.
+	const FString* Accept = Request.Header(TEXT("accept"));
+	if (Reply->GetBoolField(TEXT("list_changed")) && Accept && Accept->Contains(TEXT("text/event-stream"), ESearchCase::IgnoreCase))
+	{
+		TSharedRef<FJsonObject> Notification = MakeShared<FJsonObject>();
+		Notification->SetStringField(TEXT("jsonrpc"), TEXT("2.0"));
+		Notification->SetStringField(TEXT("method"), TEXT("notifications/tools/list_changed"));
+		if (!SendSseHead() || !SendSseEvent(ToJsonText(Notification)))
+		{
+			return false;
+		}
+		SendSseEvent(Response);
+		return false; // the stream ends with the connection
+	}
+	return SendJson(200, Response, bKeepAlive) && bKeepAlive;
+}
+
 // ===========================================================================
 // FMcpHttpServer
 // ===========================================================================
@@ -1173,12 +1308,17 @@ bool FMcpHttpServer::Start(uint16 InPort, const FString& InAuthToken, FString& O
 	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("UEAgent"));
 	ServerVersion = Plugin.IsValid() ? Plugin->GetDescriptor().VersionName : FString(TEXT("unknown"));
 
-	// For clients that cap how many tools a server may list: three meta-tools stand in for the catalog.
+	// The list a client gets when its URL asks for none: the core list unless UEAGENT_TOOLS says otherwise.
 	const FString ToolsMode = FPlatformMisc::GetEnvironmentVariable(TEXT("UEAGENT_TOOLS")).TrimStartAndEnd();
-	bCompactTools = ToolsMode.Equals(TEXT("compact"), ESearchCase::IgnoreCase);
-	if (!ToolsMode.IsEmpty() && !bCompactTools && !ToolsMode.Equals(TEXT("full"), ESearchCase::IgnoreCase))
+	bool bKnownMode = true;
+	DefaultToolsMode = ToolsMode.IsEmpty() ? EMcpToolsMode::Core : ParseToolsMode(ToolsMode, EMcpToolsMode::Core, bKnownMode);
+	if (!bKnownMode)
 	{
-		UE_LOG(LogUEAgentHttp, Warning, TEXT("UEAGENT_TOOLS='%s' is neither 'compact' nor 'full': tools/list carries every tool"), *ToolsMode);
+		UE_LOG(LogUEAgentHttp, Warning, TEXT("UEAGENT_TOOLS='%s' is none of core, all, compact: tools/list carries the core list"), *ToolsMode);
+	}
+	{
+		FScopeLock Lock(&SessionsLock);
+		Sessions.Reset();
 	}
 	Listener = NewListener;
 	Port = InPort;
@@ -1325,5 +1465,59 @@ void FMcpHttpServer::RunAcceptLoop(const FThreadSafeBool& bAcceptorRunning)
 		}
 		FScopeLock Lock(&ConnectionsLock);
 		Connections.Add({ Thread, Runnable });
+	}
+}
+
+FString FMcpHttpServer::OpenSession()
+{
+	const FString Session = FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphens).ToLower();
+	FScopeLock Lock(&SessionsLock);
+	Sessions.Add(Session).LastUsed = FPlatformTime::Seconds();
+	TrimSessions();
+	return Session;
+}
+
+bool FMcpHttpServer::GetSessionDomains(const FString& Session, TSet<FString>& OutDomains)
+{
+	FScopeLock Lock(&SessionsLock);
+	FSession* Found = Sessions.Find(Session);
+	if (!Found)
+	{
+		return false;
+	}
+	Found->LastUsed = FPlatformTime::Seconds();
+	OutDomains.Append(Found->Domains);
+	return true;
+}
+
+void FMcpHttpServer::AddSessionDomains(const FString& Session, const TArray<FString>& InDomains)
+{
+	FScopeLock Lock(&SessionsLock);
+	FSession& Found = Sessions.FindOrAdd(Session);
+	Found.LastUsed = FPlatformTime::Seconds();
+	Found.Domains.Append(InDomains);
+	TrimSessions();
+}
+
+void FMcpHttpServer::TrimSessions()
+{
+	while (Sessions.Num() > MaxSessions)
+	{
+		const FString* Oldest = nullptr;
+		double OldestTime = TNumericLimits<double>::Max();
+		for (const TPair<FString, FSession>& Pair : Sessions)
+		{
+			if (Pair.Value.LastUsed < OldestTime)
+			{
+				OldestTime = Pair.Value.LastUsed;
+				Oldest = &Pair.Key;
+			}
+		}
+		if (!Oldest)
+		{
+			break;
+		}
+		const FString Key = *Oldest;
+		Sessions.Remove(Key);
 	}
 }

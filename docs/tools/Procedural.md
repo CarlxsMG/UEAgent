@@ -2,7 +2,7 @@
 
 # Procedural
 
-19 tools for PCG graphs, nodes and parameters, PCG components and volumes, and generation.
+11 tools for PCG graphs, nodes and parameters, PCG components and volumes, and generation.
 
 Back to the [index](README.md).
 
@@ -33,32 +33,6 @@ Expose a tunable on a PCG graph (bool / int / float / double / string) so densit
 
 **Returns:** `{ pcg_graph_path, name, type, added, already_existed, parameter_count }`
 
-## `add_pcg_node`
-
-*Additive.*
-
-Add one unconnected node of a PCG settings class (the node type: surface sampler, static mesh spawner, filter...) with its default settings to a PCG graph asset, in one undo step, then save the graph. Each call adds another node, so a repeat call makes a duplicate. Get valid node_type names from list_pcg_node_types; wire the new node with connect_pcg_nodes using the node_name it returns, set its fields with set_pcg_node_properties, and check the graph with get_pcg_graph_info. To embed a whole graph use add_pcg_subgraph_node instead; inverse: remove_pcg_node; make the graph first with create_pcg_graph. A graph that does not load, or a node_type that is not a concrete PCG settings class, is an error and nothing changes. A failed save makes success false, with saved false, save_error and the node only in memory.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `pcg_graph_path` | string | yes | Asset path of the PCG Graph (e.g. "/Game/PCG/PCG_Example" or fully-qualified "/Game/PCG/PCG_Example.PCG_Example"), as create_pcg_graph returns it. |
-| `node_type` | string | yes | A concrete UPCGSettings subclass, as list_pcg_node_types returns it (types[].name or types[].path): e.g. "PCGSurfaceSamplerSettings", "PCGStaticMeshSpawnerSettings", or "/Script/PCG.PCGSurfaceSamplerSettings"; the U prefix is optional. |
-
-**Returns:** `{ graph_name: string, asset_path: string, node_title: string, node_name: string, settings_class: string, node_count: int, saved: bool, save_error?: string }`
-
-## `add_pcg_subgraph_node`
-
-*Additive.*
-
-Embed one PCG graph inside another as a Subgraph node -- how you reuse a scatter or filter recipe across biomes instead of duplicating nodes, and how you consume a library graph without editing it. Check first with get_pcg_graph_info that the target graph actually USES its input node (a graph with no edges from its default input cannot be fed filtered data and will ignore whatever you wire in), and with get_pcg_graph_parameters whether it exposes anything tunable.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `pcg_graph_path` | string | yes | /Game/... path to the host UPCGGraph (required) |
-| `subgraph_path` | string | yes | /Game/... path to the UPCGGraph to embed as a subgraph (required) |
-
-**Returns:** `{ graph_name, asset_path, node_name, node_title, subgraph_path, subgraph_set, node_count, saved }`
-
 ## `cleanup_pcg_component`
 
 *Destructive.*
@@ -72,27 +46,11 @@ Wipe a PCG component's generated output synchronously -- and the step you must n
 
 **Returns:** `{ actor_name, cleaned, generated }`
 
-## `connect_pcg_nodes`
-
-*Destructive, idempotent.*
-
-Connects two PCG nodes by adding a directed edge from an output pin to an input pin.  Node names come from get_pcg_graph_info; the implicit graph endpoints are addressable as "Input"/"Output". from_pin/to_pin default to the node's "Out"/"In" pin (else its first pin); the resolved labels are echoed in the response. Idempotent: an existing edge reports already_connected without error. The graph is re-saved after a new edge is added.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `pcg_graph_path` | string | yes | Asset path of the PCG Graph (e.g. "/Game/PCG/PCG_Example" or fully-qualified "/Game/PCG/PCG_Example.PCG_Example"). |
-| `from_node` | string | yes | Upstream node: a node_name from get_pcg_graph_info, or the token "Input" for the graph's implicit input node. |
-| `to_node` | string | yes | Downstream node: a node_name, or the token "Output" for the graph's implicit output node. |
-| `from_pin` | string | no | Optional output-pin label on from_node (default the node's "Out" pin, else its first output pin). |
-| `to_pin` | string | no | Optional input-pin label on to_node (default the node's "In" pin, else its first input pin). |
-
-**Returns:** `{ graph_name: string, asset_path: string, from_node: string, from_pin: string, to_node: string, to_pin: string, already_connected: bool, connected: bool, edge_count: int, saved: bool, save_error: string }`
-
 ## `create_pcg_graph`
 
 *Additive, idempotent.*
 
-Create an empty UPCGGraph asset at package_path/name and save it, or return the UPCGGraph already there unchanged (created=false, already_exists=true, nothing saved), so repeat calls are idempotent. A fresh graph holds only its implicit Input and Output nodes, which node_count leaves out (0). Another asset class at that path, or an invalid path, is an error; a failed save, as during PIE, makes success false with save_error. No undo step is recorded. Requires the PCG plugin. Next: add nodes with add_pcg_node (types from list_pcg_node_types), wire them with connect_pcg_nodes, expose tunables with add_pcg_graph_parameter, read back with get_pcg_graph_info, and use it in the level through spawn_box_volume or add_pcg_component.
+Create an empty UPCGGraph asset at package_path/name and save it, or return the UPCGGraph already there unchanged (created=false, already_exists=true, nothing saved), so repeat calls are idempotent. A fresh graph holds only its implicit Input and Output nodes, which node_count leaves out (0). Another asset class at that path, or an invalid path, is an error; a failed save, as during PIE, makes success false with save_error. No undo step is recorded. Requires the PCG plugin. Next: add nodes with add_graph_node (types from list_pcg_node_types), wire them with connect_pins, expose tunables with add_pcg_graph_parameter, read back with get_graph_nodes, and use it in the level through spawn_box_volume or add_pcg_component.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -100,22 +58,6 @@ Create an empty UPCGGraph asset at package_path/name and save it, or return the 
 | `package_path` | string | no | Destination /Game folder (default /Game/PCG); a trailing slash is ignored. |
 
 **Returns:** `{ graph_name: string, asset_path: string, created: bool, already_exists?: bool, node_count: int, saved?: bool, save_error?: string }`
-
-## `disconnect_pcg_nodes`
-
-*Destructive, idempotent.*
-
-Remove the one directed edge from an output pin of one node to an input pin of another in a PCG graph asset, in one undo step, then save the graph; both nodes and every other edge stay. Pin labels default to the node's "Out" or "In" pin (else its first pin), and the labels used are echoed back. Inverse of connect_pcg_nodes; to drop a node with all its edges use remove_pcg_node; to see nodes, pins and edges first use get_pcg_graph_info. Components already generated from the graph keep their old output until cleanup_pcg_component and generate_pcg_component run. Idempotent: when no such edge exists nothing is changed or saved and already_disconnected is true; disconnected is read back after the call. A graph, node or pin that cannot be resolved is an error before anything changes. A failed save (for example while PIE runs) makes success false, with saved false and save_error, the edge gone only in memory.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `pcg_graph_path` | string | yes | Asset path of the PCG Graph, e.g. "/Game/PCG/PCG_Example", as create_pcg_graph returns it. |
-| `from_node` | string | yes | Upstream node name as get_pcg_graph_info lists it (node_name, case-insensitive), or the token "Input" for the graph's input node. |
-| `to_node` | string | yes | Downstream node name as get_pcg_graph_info lists it (node_name, case-insensitive), or the token "Output" for the graph's output node. |
-| `from_pin` | string | no | Optional output-pin label on from_node (default the node's "Out" pin, else its first output pin). |
-| `to_pin` | string | no | Optional input-pin label on to_node (default the node's "In" pin, else its first input pin). |
-
-**Returns:** `{ graph_name: string, asset_path: string, from_node: string, from_pin: string, to_node: string, to_pin: string, already_disconnected: bool, removed: bool, disconnected: bool, edge_count: int, saved: bool, save_error: string }`
 
 ## `generate_pcg_component`
 
@@ -146,25 +88,13 @@ Read an actor's PCG component: which graph it runs, its seed, whether it is gene
 
 *Read-only.*
 
-Report what the PCG component of an editor-world actor produced in its last generation, without changing anything: per output item its pin, tags and data class (e.g. PCGPointData). Generation is asynchronous, so the list is empty, with a note, until a generate_pcg_component run has completed: poll this or get_pcg_component_info after triggering it. An actor without a PCG component answers has_component false and an empty list rather than an error; an actor that is not found is an error. For the component's graph, seed and generating state use get_pcg_component_info; for the graph's nodes get_pcg_graph_info; to clear the output cleanup_pcg_component.
+Report what the PCG component of an editor-world actor produced in its last generation, without changing anything: per output item its pin, tags and data class (e.g. PCGPointData). Generation is asynchronous, so the list is empty, with a note, until a generate_pcg_component run has completed: poll this or get_pcg_component_info after triggering it. An actor without a PCG component answers has_component false and an empty list rather than an error; an actor that is not found is an error. For the component's graph, seed and generating state use get_pcg_component_info; for the graph's nodes get_graph_nodes; to clear the output cleanup_pcg_component.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Actor holding the PCG component (an APCGVolume or an actor given one by add_pcg_component), by object name or editor label, e.g. "PCGVolume_0" (required) |
 
 **Returns:** `{ actor_name, has_component, output_data_count, data:[{index, pin, data_class, tags:[...]}], note? }`
-
-## `get_pcg_graph_info`
-
-*Read-only.*
-
-Reads the structure of a UPCGGraph: node count, per-node titles and pin labels, and every directed edge.  Pin labels and the input_node_name/output_node_name feed connect_pcg_nodes / disconnect_pcg_nodes; the implicit graph endpoints are also addressable by the tokens "Input"/"Output".
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `pcg_graph_path` | string | yes | Asset path of the PCG Graph (e.g. "/Game/PCG/PCG_Example" or fully-qualified "/Game/PCG/PCG_Example.PCG_Example"). |
-
-**Returns:** `{ graph_name: string, asset_path: string, node_count: int, nodes: [{node_name, title, settings_class, input_pins: [string], output_pins: [string]}], has_input_node: bool, has_output_node: bool, input_node_name: string, output_node_name: string, edges: [{from_node, from_pin, to_node, to_pin}], edge_count: int }`
 
 ## `get_pcg_graph_parameters`
 
@@ -178,24 +108,11 @@ List a PCG graph's user parameters with name, type and current value -- and the 
 
 **Returns:** `{ pcg_graph_path, parameter_count, parameters:[{name, type, value}] }`
 
-## `get_pcg_node_properties`
-
-*Read-only.*
-
-Read the reflected properties of one PCG node's settings object (UPCGSettings), serialized to JSON, the node found by its node_name from get_pcg_graph_info or the "Input"/"Output" tokens. Use it instead of get_properties, which would need the settings subobject's path. Read-only; write with set_pcg_node_properties.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `pcg_graph_path` | string | yes | Asset path of the PCG Graph (e.g. "/Game/PCG/PCG_Example" or fully-qualified "/Game/PCG/PCG_Example.PCG_Example"). |
-| `node_name` | string | yes | The node_name from get_pcg_graph_info of the node to read (the tokens "Input"/"Output" address the implicit endpoints). |
-
-**Returns:** `{ graph_name: string, asset_path: string, node_name: string, settings_class: string, properties: object }`
-
 ## `list_pcg_node_types`
 
 *Read-only.*
 
-Enumerate every PCG node type available in this build (all concrete PCGSettings subclasses, including plugin- and project-added ones), with class names and paths. Run it before add_pcg_node so you pass a class that exists instead of guessing a name from documentation that may not match this engine version. Read-only reflection.
+Enumerate every PCG node type available in this build (all concrete PCGSettings subclasses, including plugin- and project-added ones), with class names and paths. Run it before add_graph_node so you pass a class that exists instead of guessing a name from documentation that may not match this engine version. Read-only reflection.
 
 No parameters.
 
@@ -214,19 +131,6 @@ Remove a user parameter from a PCG graph asset, in one undo step, and delete the
 
 **Returns:** `{ pcg_graph_path, name, removed, getter_nodes_removed, parameter_count, parameters: [string], note? }`
 
-## `remove_pcg_node`
-
-*Destructive, idempotent.*
-
-Removes a user-added node from a PCG graph by name.  Uses UPCGGraph::RemoveNode, which auto-breaks the node's edges and notifies its neighbours; the graph is re-saved after the mutation. The implicit Input/Output endpoint nodes cannot be removed (doing so would silently corrupt the graph) and are rejected with an honest error. Idempotent: a node that is not present reports already_removed without error.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `pcg_graph_path` | string | yes | Asset path of the PCG Graph (e.g. "/Game/PCG/PCG_Example" or fully-qualified "/Game/PCG/PCG_Example.PCG_Example"). |
-| `node_name` | string | yes | The node_name from get_pcg_graph_info of the node to remove. The tokens "Input"/"Output" (and the endpoints' real names) are rejected: the implicit graph endpoints cannot be removed. |
-
-**Returns:** `{ graph_name: string, asset_path: string, node_name: string, removed: bool, already_removed: bool, node_count: int, saved: bool, save_error: string }`
-
 ## `set_pcg_graph_parameter`
 
 *Destructive, idempotent.*
@@ -240,17 +144,3 @@ Write the value of an existing PCG graph user parameter (bool / int / float / do
 | `value` | string | no | New value; its type must match the parameter's declared type (required) |
 
 **Returns:** `{ pcg_graph_path, name, type, set, value }`
-
-## `set_pcg_node_properties`
-
-*Destructive, idempotent.*
-
-Write fields of one PCG node's settings object, picked by node_name in a PCG Graph asset, then save the graph and read the settings back. Use it instead of set_properties, which needs the settings object's path: this also clamps numbers to ClampMin/ClampMax and runs PostEditChange, invalidating the node's cached CRC and rebuilding its pins. Only keys in properties are written, in one undo step; keys match property names case-insensitively. An empty object, a key that names no property (the error lists them), a deprecated or instanced one, a null value, or a value of the wrong kind or that does not convert is an error and nothing changes. A call that changes no value still runs PostEditChange and re-saves. "Input"/"Output" address the endpoints. Read: get_pcg_node_properties.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `pcg_graph_path` | string | yes | Asset path of the PCG Graph (e.g. "/Game/PCG/PCG_Example" or fully-qualified "/Game/PCG/PCG_Example.PCG_Example"). |
-| `node_name` | string | yes | The node_name from get_pcg_graph_info of the node to author (the tokens "Input"/"Output" address the implicit endpoints). |
-| `properties` | object | yes | Object of UPCGSettings fields to merge, keyed by property name (matched case-insensitively) (e.g. for a SurfaceSampler: bApplyDensityToPoints(bool), PointsPerSquaredMeter(float>=0), Looseness(float)); absent keys untouched. An empty object, a key that names no property of the settings class (or a deprecated one, or one holding instanced subobjects), a null value or a value that does not convert is an error and nothing is changed. |
-
-**Returns:** `{ graph_name: string, asset_path: string, node_name: string, settings_class: string, applied_keys: [string], properties: object, saved: bool, save_error?: string }`

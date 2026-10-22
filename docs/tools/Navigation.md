@@ -2,7 +2,7 @@
 
 # Navigation
 
-19 tools for the navmesh, Environment Queries (EQS), nav links and modifiers, and collision channel dumps.
+17 tools for the navmesh, Environment Queries (EQS), nav links and modifiers, and collision channel dumps.
 
 Back to the [index](README.md).
 
@@ -95,16 +95,6 @@ Reports the composition of an Environment Query (UEnvQuery) asset without runnin
 
 **Returns:** `{ query_path, option_count, options:[{index, generator_class?, generator_path?, test_count, tests:[{index, class, path}]}] }`
 
-## `get_recast_navmesh_settings`
-
-*Read-only.*
-
-Read the generation settings of the editor world's default RecastNavMesh: agent_radius, agent_height, agent_max_slope (degrees) and agent_max_step_height, tile_size_uu (resolved) and tile_size_uu_raw (the property), cell_size and cell_height at Default resolution, merge_region_size, min_region_area and the simplification values; lengths in cm. The read side of set_recast_navmesh_settings: call it before and after that tool. Whether the navmesh is actually built (bounds, tile counts) is diagnose_navmesh's job, and get_navigation_data lists the nav actors of any world. Read-only and idempotent; never creates a navmesh; editor world only. With no RecastNavMesh yet (no NavMeshBoundsVolume, or never built) it answers recast_navmesh_present=false and success=true with a note, not an error.
-
-No parameters.
-
-**Returns:** `{ recast_navmesh_present, navmesh_name, agent_radius, agent_height, agent_max_slope, agent_max_step_height, tile_size_uu, tile_size_uu_raw, cell_size, cell_height, merge_region_size, min_region_area, max_simplification_error, simplification_elevation_ratio, note, success }`
-
 ## `list_eqs_context_types`
 
 *Read-only.*
@@ -139,7 +129,7 @@ No parameters.
 
 *Destructive.*
 
-Rebuild all navigation data of the editor world (UNavigationSystemV1::Build): regenerate every navmesh tile inside the NavMeshBoundsVolumes, spawning a missing RecastNavMesh, and block until the build finishes (seconds on a large map). Call it after moving geometry or nav volumes, or after set_recast_navmesh_settings (or pass rebuild=true there). Diagnose first, and check the result after, with diagnose_navmesh (active_tile_count) or get_navigation_data; place bounds with spawn_box_volume (volume_class=NavMeshBoundsVolume). rebuilt=true only means the build ran: with no bounds volume, or a locked build, the engine builds nothing. A world with no navigation system is not an error: rebuilt=false, nav_system_present=false. A repeat call rebuilds again. No undo step; the level is not saved (save_level). Editor world only, never a PIE session.
+Rebuild all navigation data of the editor world (UNavigationSystemV1::Build): regenerate every navmesh tile inside the NavMeshBoundsVolumes, spawning a missing RecastNavMesh, and block until the build finishes (seconds on a large map). Call it after moving geometry or nav volumes, or after changing its settings with set_properties. Diagnose first, and check the result after, with diagnose_navmesh (active_tile_count) or get_navigation_data; place bounds with spawn_box_volume (volume_class=NavMeshBoundsVolume). rebuilt=true only means the build ran: with no bounds volume, or a locked build, the engine builds nothing. A world with no navigation system is not an error: rebuilt=false, nav_system_present=false. A repeat call rebuilds again. No undo step; the level is not saved (save_level). Editor world only, never a PIE session.
 
 No parameters.
 
@@ -233,26 +223,3 @@ Set the scoring and filter settings of test test_index in option option_index of
 | `float_value_max` | number | no | Optional max for FloatValueMax (default 1) |
 
 **Returns:** `{ query_path, option_index, test_index, test_name, changed, test_purpose, filter_type, scoring_equation, scoring_factor, float_value_min, float_value_max, note? }`
-
-## `set_recast_navmesh_settings`
-
-*Destructive, idempotent.*
-
-Change generation settings of the editor world's default RecastNavMesh: agent size, slope and step height, tile and cell size, region and simplification values. Only the params passed are written, each clamped first, and applied echoes the stored values, so a repeat call changes nothing more. Read current values with get_recast_navmesh_settings. Existing tiles keep the old settings until a rebuild: pass rebuild=true (synchronous, seconds on a large map) or call rebuild_navigation, then check tiles with diagnose_navmesh. One undo step; the level is marked dirty, not saved (save_level). Editor world only. Without a RecastNavMesh (no NavMeshBoundsVolume yet: spawn_box_volume with volume_class=NavMeshBoundsVolume, then rebuild_navigation) nothing changes and it answers recast_navmesh_present=false, success=true, with a note.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `agent_radius` | number | no | Optional float, cm; ARecastNavMesh::AgentRadius, e.g. 34 (>= 0; negatives become 0). When the navmesh registers again (a map reload) the navigation system's Supported Agents config writes its own radius back |
-| `agent_height` | number | no | Optional float, cm; ARecastNavMesh::AgentHeight, e.g. 144 (>= 0); like agent_radius, the Supported Agents config writes its own value back when the navmesh registers again |
-| `agent_max_slope` | number | no | Optional float degrees; ARecastNavMesh::AgentMaxSlope, e.g. 44 (clamped to 0..89) |
-| `agent_max_step_height` | number | no | Optional float, cm; SetAgentMaxStepHeight(Default, v), the highest step agents climb, e.g. 35 (>= 0) |
-| `tile_size_uu` | number | no | Optional float, cm; ARecastNavMesh::TileSizeUU, the edge of one navmesh tile, e.g. 1000 (clamped to >= 300) |
-| `cell_size` | number | no | Optional float, cm; SetCellSize(Default, v), voxel width: smaller is finer and slower to build, e.g. 19 (clamped 1..1024) |
-| `cell_height` | number | no | Optional float, cm; SetCellHeight(Default, v), voxel height, e.g. 10 (clamped 1..1024) |
-| `merge_region_size` | number | no | Optional float; ARecastNavMesh::MergeRegionSize, regions smaller than this merge with neighbours, e.g. 400 (>= 0) |
-| `min_region_area` | number | no | Optional float; ARecastNavMesh::MinRegionArea, isolated regions smaller than this are dropped, e.g. 0 (>= 0) |
-| `max_simplification_error` | number | no | Optional float; ARecastNavMesh::MaxSimplificationError, how far simplified edges may stray from the voxel outline, e.g. 1.3 (>= 0) |
-| `simplification_elevation_ratio` | number | no | Optional float; ARecastNavMesh::SimplificationElevationRatio, e.g. 0 (>= 0) |
-| `rebuild` | boolean | no | Optional bool (default false); true calls UNavigationSystemV1::Build() synchronously after writing so the change takes effect now; false leaves requires_rebuild=true |
-
-**Returns:** `{ recast_navmesh_present, navmesh_name, applied:{field:value}, requires_rebuild, rebuilt, note, success }`

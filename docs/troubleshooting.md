@@ -26,8 +26,17 @@ refuses both, so that no website can drive your editor. Connect to `127.0.0.1` o
 
 ## The client warns about too many tools, or slows down
 
-Some clients cap how many tools a server may list, and the full list has more than 1,600. Give them
-the [compact tool list](clients.md#compact-tool-list): `?tools=compact` at the end of the URL.
+Some clients cap how many tools a server may list. The default list holds the core tools only; if the
+client still warns, or other servers fill its cap, give it the
+[compact tool list](clients.md#tool-lists): `?tools=compact` at the end of the URL. A URL that ends in
+`?tools=all` lists more than 1,500 tools: take it out.
+
+## The agent needs a tool that is not listed
+
+Every tool runs whether it is listed or not. The agent finds it with `find_tools` and runs it with
+`call_tool`, or adds its whole domain to the list with `enable_toolset`. If the client does not show
+the added tools, it does not re-read its list when the server says it changed: `call_tool` still runs
+them, and `?domains=<Domain>` in the URL lists them from the start.
 
 ## A call is refused while Play-in-Editor runs
 

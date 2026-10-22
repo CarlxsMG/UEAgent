@@ -95,6 +95,8 @@ public:
 		FString RetiredFor;
 		/** How to make the same call with RetiredFor (`retired.how` in the catalog). */
 		FString RetiredHow;
+		/** In the core list, the one tools/list carries by default (`core` in the catalog, `@core` in the annotation). */
+		bool bCore = false;
 
 		const FParam* FindParam(const FString& ParamName) const;
 		/** The description tools/list and describe_tool publish: Description, then "Returns: " and
@@ -138,6 +140,18 @@ public:
 	const TArray<uint8>& GetToolsListUtf8() const { return ToolsListUtf8; }
 	/** The same for the compact list: the meta-tools of Mcp/McpMetaTools.h instead of the catalog. */
 	const TArray<uint8>& GetCompactToolsListUtf8() const { return CompactToolsListUtf8; }
+	/** The same for the core list, the default: the core tools (FTool::bCore), then the meta-tools and enable_toolset. */
+	const TArray<uint8>& GetCoreToolsListUtf8() const { return CoreToolsListUtf8; }
+	/**
+	 * The core list plus every other tool of Domains (domain names as the catalog spells them), in catalog order: what
+	 * tools/list carries for a connection that enabled those domains. The core list itself when Domains is empty.
+	 */
+	TArray<uint8> BuildCoreToolsListUtf8(const TSet<FString>& Domains) const;
+	int32 NumCoreTools() const { return NumCore; }
+	/** The catalog's domains, in catalog order. */
+	const TArray<FString>& GetDomains() const { return Domains; }
+	/** The domain Name stands for, as the catalog spells it (the case is not compared); empty when there is none. */
+	FString FindDomain(const FString& Name) const;
 
 	/**
 	 * Missing required parameters (a null counts as absent). Returns the error message, or empty
@@ -219,6 +233,13 @@ private:
 	TMap<FString, FString> RenamedTools;
 	TArray<uint8> ToolsListUtf8;
 	TArray<uint8> CompactToolsListUtf8;
+	TArray<uint8> CoreToolsListUtf8;
+	/** Each listed tool's JSON as tools/list carries it, UTF-8, at the tool's index in Tools. */
+	TArray<TArray<uint8>> ToolJsonUtf8;
+	/** The meta-tools the core list ends with, each as its JSON in UTF-8. */
+	TArray<TArray<uint8>> CoreMetaToolJsonUtf8;
+	TArray<FString> Domains;
+	int32 NumCore = 0;
 	FString SourcePath;
 	int32 TotalParams = 0;
 	/** The catalog's `nameLikeRule` (IsNameLikeKey); bHasNameRule is false when the catalog has none. */

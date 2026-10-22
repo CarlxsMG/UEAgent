@@ -59,7 +59,8 @@ namespace McpAgentClients
 	UEAGENT_API FString ProjectConfigPath(EClient Client);
 	UEAGENT_API const TCHAR* StateName(EState State);
 
-	/** The URL these clients get: the compact tool list (three meta-tools), since they load every tool up front. */
+	/** The URL these clients get: the server's own, so the core list (the core tools and the meta-tools), which every client
+	 *  can load up front; enable_toolset adds domains to it. */
 	UEAGENT_API FString ClientUrl(uint16 Port);
 
 	UEAGENT_API FStatus Inspect(EClient Client, const FString& Path, uint16 Port, bool bRequiresToken);

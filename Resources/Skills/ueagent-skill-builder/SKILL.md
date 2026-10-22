@@ -30,8 +30,8 @@ Claude Code, for example. In the skill, write the plain tool name (`spawn_actor`
 it.
 
 - If your client loads tools on demand, search for them by name or by keywords (`unreal spawn actor`).
-- With the compact tool list, search with `find_tools`, read a schema with `describe_tool` and run a
-  tool with `call_tool`.
+- Otherwise search with `find_tools`, read a schema with `describe_tool`, and run a tool that is not in
+  your list with `call_tool`; `enable_toolset` adds a whole domain to the list.
 - The tool reference, with search, is at <https://carlxsmg.github.io/UEAgent/tools/>.
 
 Read the whole description of every tool you pick: it names the traps (parameter forms, what it

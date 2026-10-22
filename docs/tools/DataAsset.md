@@ -26,7 +26,7 @@ Add or update a keyframe (time, value) on one channel of a CurveFloat, CurveVect
 
 *Destructive, idempotent.*
 
-Set one key (time, value) on a row of a UCurveTable asset with rich curves, in one undo step, then save the table: a key already at that time gets the new value, otherwise a key is added, and a row that does not exist yet is created (created_row true). Use it to key one point at a time; to create or replace a whole row with several keys at once use add_curve_table_row, to delete a key remove_curve_table_key (inverse), to delete the row delete_curve_table_row, and to read rows and keys get_curve_table_info; create the table with create_curve_table. Idempotent: the same time and value again leaves the curve as it was (and saves again). key_added is true for both an added and an updated key; time and value are read back from the stored key, and key_count tells whether a key was added. A table that does not load, or one in SimpleCurves mode (it cannot hold rich keys), is an error before anything changes; a failed save (for example while PIE runs) makes success false with the key only in memory.
+Set one key (time, value) on a row of a UCurveTable asset with rich curves, in one undo step, then save the table: a key already at that time gets the new value, otherwise a key is added, and a row that does not exist yet is created (created_row true). Use it to key one point at a time; to create or replace a whole row with several keys at once use add_curve_table_row, to delete a key remove_curve_table_key (inverse), to delete the row remove_curve_table_row, and to read rows and keys get_curve_table_info; create the table with create_curve_table. Idempotent: the same time and value again leaves the curve as it was (and saves again). key_added is true for both an added and an updated key; time and value are read back from the stored key, and key_count tells whether a key was added. A table that does not load, or one in SimpleCurves mode (it cannot hold rich keys), is an error before anything changes; a failed save (for example while PIE runs) makes success false with the key only in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -41,7 +41,7 @@ Set one key (time, value) on a row of a UCurveTable asset with rich curves, in o
 
 *Destructive, idempotent.*
 
-Create a named row (one rich curve) in a curve table asset, seeded with the given keys, in one undo step, then save the table. A row that already exists is replaced: its old keys are dropped and only the given ones remain (none when keys is omitted). Use it to write a whole row at once; to set one key without touching the others use add_curve_table_key, to delete a key remove_curve_table_key, to delete or rename the row delete_curve_table_row or rename_curve_table_row, and to read it back get_curve_table_info; create the table with create_curve_table. Idempotent: the same row_name and keys again give the same row (rebuilt and saved again). Entries of keys that are not [time, value] pairs are skipped and keys_added counts the ones applied; two keys at the same time keep the later value. A table that does not load, or one in SimpleCurves mode (imported simple curves cannot hold rich rows), is an error before anything changes; a failed save makes success false, with saved false, save_error and the change only in memory.
+Create a named row (one rich curve) in a curve table asset, seeded with the given keys, in one undo step, then save the table. A row that already exists is replaced: its old keys are dropped and only the given ones remain (none when keys is omitted). Use it to write a whole row at once; to set one key without touching the others use add_curve_table_key, to delete a key remove_curve_table_key, to delete or rename the row remove_curve_table_row or rename_curve_table_row, and to read it back get_curve_table_info; create the table with create_curve_table. Idempotent: the same row_name and keys again give the same row (rebuilt and saved again). Entries of keys that are not [time, value] pairs are skipped and keys_added counts the ones applied; two keys at the same time keep the later value. A table that does not load, or one in SimpleCurves mode (imported simple curves cannot hold rich rows), is an error before anything changes; a failed save makes success false, with saved false, save_error and the change only in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -193,32 +193,6 @@ Creates a UStringTable asset at package_path/name with the given namespace and n
 
 **Returns:** `{ name: string, package_path: string, asset_path: string, string_table_path: string, string_table_id: string, namespace: string, entry_count: int, created: bool, already_exists: bool, saved: bool, message: string, save_error?: string }`
 
-## `delete_curve_table_row`
-
-*Destructive, idempotent.*
-
-Delete one named row (curve) from a UCurveTable loaded by asset path, in one undo step, then save the table and read back that the row is gone. Works in either table mode, simple or rich curves. Idempotent: a row_name the table does not have (row names compare case-insensitively) is a success with existed=false, removed=false, saved=false and a note, and nothing is touched or saved. A table that does not load is an error. A failed save -- refused while PIE runs, under a read-only root, or a read-only file -- gives success false, saved=false and save_error, with the row already gone in memory. List rows with get_curve_table_info; drop one key but keep the row: remove_curve_table_key; rename a row: rename_curve_table_row; add one: add_curve_table_row; DataTable rows: delete_data_table_row.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `curve_table_path` | string | yes | Full asset path to the UCurveTable. |
-| `row_name` | string | yes | Name of the row (curve) to remove. |
-
-**Returns:** `{ curve_table_path: string, row_name: string, existed: bool, removed: bool, still_exists: bool, row_count: int, curve_table_mode: string, saved: bool, save_error: string?, note: string? }`
-
-## `delete_data_table_row`
-
-*Destructive.*
-
-Remove one row from a DataTable by key, saving the asset and VERIFYING the removal by re-reading (it reports existed, removed, still_exists and the new row_count, so the reply is its own oracle rather than a bare success). Check existed to tell "deleted it" from "there was never such a key" (then saved=false, nothing saved). Anything still referencing that row name by handle now resolves to nothing, silently -- audit with find_blueprint_node_references before deleting a live row.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `table_path` | string | yes | Full asset path of the DataTable |
-| `row_name` | string | yes | Name (key) of the row to remove |
-
-**Returns:** `{ table_path, row_name, existed, removed, still_exists, row_count, saved, note? }`
-
 ## `diff_data_tables`
 
 *Read-only.*
@@ -307,7 +281,7 @@ Read every keyframe of a curve asset -- time, value and interpolation mode, grou
 
 *Read-only.*
 
-Read a UCurveTable or UCompositeCurveTable asset found by content path: its class, its mode (Empty, SimpleCurves or RichCurves) and every row with its name and key count; for a composite, the rows are the ones merged from its parent tables, and parent_count says how many it stacks. Key times and values are not returned. Nothing is written; a path that does not load as a curve table is an error. Write rows and keys with add_curve_table_row, add_curve_table_key, remove_curve_table_key, rename_curve_table_row and delete_curve_table_row; a DataTable is read with get_data_table_info, a standalone curve asset with get_curve_keys.
+Read a UCurveTable or UCompositeCurveTable asset found by content path: its class, its mode (Empty, SimpleCurves or RichCurves) and every row with its name and key count; for a composite, the rows are the ones merged from its parent tables, and parent_count says how many it stacks. Key times and values are not returned. Nothing is written; a path that does not load as a curve table is an error. Write rows and keys with add_curve_table_row, add_curve_table_key, remove_curve_table_key, rename_curve_table_row and remove_curve_table_row; a DataTable is read with get_data_table_info, a standalone curve asset with get_curve_keys.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -398,6 +372,8 @@ Describe a DataTable without changing it: table class, row struct (None when it 
 ## `get_data_table_row`
 
 *Read-only.*
+
+**Core tool:** every client lists it by default.
 
 Read ONE row of a DataTable by key and get every column as JSON. Reads the row memory untyped (FindRowUnchecked), so it works on Blueprint / user-defined row structs that are not FTableRowBase children, where the typed lookup reports "Row not found" for rows that exist; a miss here really is a missing key. Serializes TMap, nested struct and GameplayTag columns in row_data. Two optional renderings of the same row: include_native_json adds row_json, the verbatim string of UE's own DataTable JSON writer -- the exact format set_data_table_row_from_json consumes, so it is the read half of a copy/round-trip (it emits GameplayTagContainers in the ExportText form the importer accepts; the round trip is not lossless for multi-word user-defined enums, so re-read what you wrote); include_export_text adds fields, every cell as its byte-exact ExportText string, so TMap&lt;Enum,SoftClass>, nested struct arrays and soft references appear in full (row_data shows such TMaps as {}) -- the form to copy a vendor row or to tell an empty enum from an unwritten one. Use get_data_table_rows when you want the enum DISPLAY names.
 
@@ -522,6 +498,19 @@ Remove a single key from an existing UCurveTable row's rich curve by index or ti
 
 **Returns:** `{ curve_table_path: string, row_name: string, row_existed: bool, key_existed: bool, removed: bool, key_count: int, row_count: int, curve_table_mode: string, saved: bool, save_error: string? }`
 
+## `remove_curve_table_row`
+
+*Destructive, idempotent.*
+
+Delete one named row (curve) from a UCurveTable loaded by asset path, in one undo step, then save the table and read back that the row is gone. Works in either table mode, simple or rich curves. Idempotent: a row_name the table does not have (row names compare case-insensitively) is a success with existed=false, removed=false, saved=false and a note, and nothing is touched or saved. A table that does not load is an error. A failed save -- refused while PIE runs, under a read-only root, or a read-only file -- gives success false, saved=false and save_error, with the row already gone in memory. List rows with get_curve_table_info; drop one key but keep the row: remove_curve_table_key; rename a row: rename_curve_table_row; add one: add_curve_table_row; DataTable rows: remove_data_table_row.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `curve_table_path` | string | yes | Full asset path to the UCurveTable. |
+| `row_name` | string | yes | Name of the row (curve) to remove. |
+
+**Returns:** `{ curve_table_path: string, row_name: string, existed: bool, removed: bool, still_exists: bool, row_count: int, curve_table_mode: string, saved: bool, save_error: string?, note: string? }`
+
 ## `remove_data_registry_source`
 
 *Destructive, idempotent.*
@@ -536,6 +525,19 @@ Remove a DataTable source from a UDataRegistry asset (the true inverse of add_da
 | `all` | boolean | no | Optional bool, default false: true removes every source (null slots included) instead of one; it excludes data_table_path and source_index. |
 
 **Returns:** `{ registry_path: string, source_index?: int, data_table_path?: string, all?: bool, source_count_before: int, source_count_after: int, removed: bool, saved: bool, save_error?: string, note?: string }`
+
+## `remove_data_table_row`
+
+*Destructive.*
+
+Remove one row from a DataTable by key, saving the asset and VERIFYING the removal by re-reading (it reports existed, removed, still_exists and the new row_count, so the reply is its own oracle rather than a bare success). Check existed to tell "deleted it" from "there was never such a key" (then saved=false, nothing saved). Anything still referencing that row name by handle now resolves to nothing, silently -- audit with find_blueprint_node_references before deleting a live row.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `table_path` | string | yes | Full asset path of the DataTable |
+| `row_name` | string | yes | Name (key) of the row to remove |
+
+**Returns:** `{ table_path, row_name, existed, removed, still_exists, row_count, saved, note? }`
 
 ## `remove_string_table_entry`
 
@@ -568,7 +570,7 @@ Remove a metadata id from a UStringTable entry (FStringTable::RemoveMetaData). I
 
 *Destructive, idempotent.*
 
-Rename one row (curve) of a UCurveTable loaded by asset path, in one undo step, then save it and read back both names. UCurveTable::RenameRow would silently do nothing when row_name is missing, new_row_name is already a row, or the names are equal (row names compare case-insensitively, so a case-only rename is one of these); the call checks first and answers those as a success with renamed=false, saved=false and a note, nothing touched -- source_existed and target_existed say which -- so a repeat call is an idempotent no-op. A table that does not load is an error. A failed save -- PIE running, a read-only root or file -- gives success false, saved=false and save_error, with the rename done in memory. List rows: get_curve_table_info; drop one: delete_curve_table_row; DataTable keys: rename_data_table_row.
+Rename one row (curve) of a UCurveTable loaded by asset path, in one undo step, then save it and read back both names. UCurveTable::RenameRow would silently do nothing when row_name is missing, new_row_name is already a row, or the names are equal (row names compare case-insensitively, so a case-only rename is one of these); the call checks first and answers those as a success with renamed=false, saved=false and a note, nothing touched -- source_existed and target_existed say which -- so a repeat call is an idempotent no-op. A table that does not load is an error. A failed save -- PIE running, a read-only root or file -- gives success false, saved=false and save_error, with the rename done in memory. List rows: get_curve_table_info; drop one: remove_curve_table_row; DataTable keys: rename_data_table_row.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -642,6 +644,8 @@ Write a DataTable row from a plain JSON object of columns and save the table. By
 ## `set_data_table_row_fields`
 
 *Destructive, idempotent.*
+
+**Core tool:** every client lists it by default.
 
 Write only the named cells of one DataTable row via the native JSON importer, deep-merged onto the current row so untouched columns and struct sub-fields survive, then save. Returns changed_columns, unchanged_despite_request, unknown_columns (skipped) and the row as ExportText. For many rows use set_data_table_rows_from_json.
 

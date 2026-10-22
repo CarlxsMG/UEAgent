@@ -104,6 +104,36 @@ namespace McpToolCatalogPrivate
 
 	/** Deep copy (an FJsonObject shared between two properties would serialize fine, but
 	 *  adding a `description` to one would also add it to the other). */
+	/** A tool object as tools/list carries it: condensed, in UTF-8. */
+	static TArray<uint8> ToCondensedUtf8(const TSharedPtr<FJsonValue>& Value)
+	{
+		FString Serialized;
+		TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
+			TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Serialized);
+		FJsonSerializer::Serialize(Value->AsObject().ToSharedRef(), Writer);
+		const FTCHARToUTF8 Utf8(*Serialized);
+		TArray<uint8> Bytes;
+		Bytes.Append(reinterpret_cast<const uint8*>(Utf8.Get()), Utf8.Length());
+		return Bytes;
+	}
+
+	/** `{"tools":[` + the fragments, comma-separated, + `]}`: the JSON FJsonSerializer writes for that list. */
+	static void AppendToolsList(TArray<uint8>& Out, const TArray<const TArray<uint8>*>& Fragments)
+	{
+		static const char Head[] = "{\"tools\":[";
+		Out.Append(reinterpret_cast<const uint8*>(Head), sizeof(Head) - 1);
+		for (int32 Index = 0; Index < Fragments.Num(); ++Index)
+		{
+			if (Index > 0)
+			{
+				Out.Add(',');
+			}
+			Out.Append(*Fragments[Index]);
+		}
+		Out.Add(']');
+		Out.Add('}');
+	}
+
 	static TSharedPtr<FJsonObject> CloneObject(const TSharedPtr<FJsonObject>& Source)
 	{
 		FString Text;
@@ -613,6 +643,7 @@ TSharedPtr<const FMcpToolCatalog> FMcpToolCatalog::LoadFromFile(const FString& P
 			}
 			(*CommandObj)->TryGetStringField(TEXT("returns"), Tool.Returns);
 			Tool.Returns.TrimStartAndEndInline();
+			(*CommandObj)->TryGetBoolField(TEXT("core"), Tool.bCore);
 			const TSharedPtr<FJsonObject>* AnnotationsObj = nullptr;
 			if ((*CommandObj)->TryGetObjectField(TEXT("annotations"), AnnotationsObj) && AnnotationsObj && AnnotationsObj->IsValid())
 			{
@@ -775,6 +806,9 @@ TSharedPtr<const FMcpToolCatalog> FMcpToolCatalog::LoadFromFile(const FString& P
 				continue;
 			}
 			ToolsJson.Add(MakeShared<FJsonValueObject>(ToolJson));
+			Catalog->ToolJsonUtf8.Add(ToCondensedUtf8(ToolsJson.Last()));
+			Catalog->Domains.AddUnique(Tool.Domain);
+			Catalog->NumCore += Tool.bCore ? 1 : 0;
 
 			Catalog->TotalParams += Tool.Params.Num();
 			Catalog->IndexByName.Add(Tool.Name, Catalog->Tools.Num());
@@ -812,8 +846,45 @@ TSharedPtr<const FMcpToolCatalog> FMcpToolCatalog::LoadFromFile(const FString& P
 	const FTCHARToUTF8 Utf8(*Serialized);
 	Catalog->ToolsListUtf8.Append(reinterpret_cast<const uint8*>(Utf8.Get()), Utf8.Length());
 	Catalog->CompactToolsListUtf8 = McpMetaTools::BuildToolsListUtf8(*Catalog);
+	for (const TSharedPtr<FJsonValue>& MetaTool : McpMetaTools::BuildMetaTools(*Catalog, McpMetaTools::EList::Core))
+	{
+		Catalog->CoreMetaToolJsonUtf8.Add(ToCondensedUtf8(MetaTool));
+	}
+	Catalog->CoreToolsListUtf8 = Catalog->BuildCoreToolsListUtf8(TSet<FString>());
 
 	return Catalog;
+}
+
+TArray<uint8> FMcpToolCatalog::BuildCoreToolsListUtf8(const TSet<FString>& InDomains) const
+{
+	TArray<const TArray<uint8>*> Fragments;
+	for (int32 Index = 0; Index < Tools.Num(); ++Index)
+	{
+		if (Tools[Index].bCore || InDomains.Contains(Tools[Index].Domain))
+		{
+			Fragments.Add(&ToolJsonUtf8[Index]);
+		}
+	}
+	for (const TArray<uint8>& MetaTool : CoreMetaToolJsonUtf8)
+	{
+		Fragments.Add(&MetaTool);
+	}
+	TArray<uint8> Bytes;
+	McpToolCatalogPrivate::AppendToolsList(Bytes, Fragments);
+	return Bytes;
+}
+
+FString FMcpToolCatalog::FindDomain(const FString& Name) const
+{
+	const FString Wanted = Name.TrimStartAndEnd();
+	for (const FString& Domain : Domains)
+	{
+		if (Domain.Equals(Wanted, ESearchCase::IgnoreCase))
+		{
+			return Domain;
+		}
+	}
+	return FString();
 }
 
 FString FMcpToolCatalog::CheckRequired(const FTool& Tool, const TSharedPtr<FJsonObject>& Args) const

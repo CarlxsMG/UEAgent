@@ -34,6 +34,11 @@
 #include "Components/ActorComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Animation/BlendSpace.h" // set_properties resamples a blend space after a write, as its editor does
+#include "EdGraph/EdGraph.h"                    // set_properties finishes a graph node it wrote
+#include "EdGraph/EdGraphNode.h"
+#include "Kismet2/BlueprintEditorUtils.h"
+#include "Sound/SoundCue.h"                     // ...a sound cue whose node it wrote
+#include "NiagaraSystem.h"                      // ...and a Niagara system whose renderer or stage it wrote
 #include "Animation/AnimInstance.h" // FindSubobjectByName's "AnimInstance" alias returns one as UObject* — needs the complete type, which only the unity blob would supply
 #include "Misc/PackageName.h"
 #include "HAL/PlatformFilemanager.h"
@@ -322,7 +327,7 @@ namespace UEAgentReflectionCommandsImpl
         return Members;
     }
 
-    /** compare_objects entry for a property that exists on one side only. */
+    /** diff_objects entry for a property that exists on one side only. */
     TSharedPtr<FJsonValue> OneSidedDifference(const FString& PropertyName, const TCHAR* Which)
     {
         TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
@@ -332,7 +337,7 @@ namespace UEAgentReflectionCommandsImpl
     }
 
     /**
-     * compare_objects' default 'identical' predicate for a property present on both sides.
+     * diff_objects' default 'identical' predicate for a property present on both sides.
      * Equality is the ENGINE's (FProperty::Identical + PPF_DeepComparison, via mcp_common): the
      * cheap struct comparison runs first and the typed JSON form is only built for what is not
      * identical. A real difference is appended to OutDifferences; one that only shows in the
@@ -1313,8 +1318,9 @@ TSharedPtr<FJsonObject> HandleGetClassFunctions(const TSharedPtr<FJsonObject>& P
 }
 
 // MCP:get_object_info - Portrait of ONE object when you do not know its property names yet: identity (name, class, class path, super class, is_valid), class flags, metadata and implemented interfaces, EVERY reflected property as { name: typed_value }, and for an actor its live components with their classes. Once you know the names, get_properties is far cheaper; get_class_properties gives the property descriptors of a class with no instance, get_class_hierarchy its ancestor chain, and get_actor_components the components alone. include_properties=false makes it the cheap "what IS this thing?" probe (identity and class only); include_property_metadata=true adds each property's editor metadata (type, editable, edit_const, blueprint_visible, replicated, save_game, clamp, tooltip, enum entries) next to its value. Accepts `world`, so the portrait can be the live server or client instance -- useful when a class is swapped at runtime -- and the reply stamps which world answered. Read-only.
+//   @core
 //   @renamed-from inspect_object
-//   @param object_path - Path or name of the object to inspect. In the editor world: full object path, asset path, CDO/archetype, or a dotted "Actor[.Component[.Subobject]]" whose first segment is the actor's INTERNAL name. In a live world: a fully-qualified PIE path or the same dotted form (first segment matches internal name OR editor label).
+//   @param object_path - Path or name of the object to inspect. In the editor world: full object path, asset path, CDO/archetype, an asset's sub-object as the readers give its object_path -- a graph node from get_graph_nodes, a sound cue node, a Niagara renderer or simulation stage, a PCG node's settings_path, a behavior tree node, a camera rig node, a Mass trait, a physics body -- also written "/Game/Asset:SubObject", or a dotted "Actor[.Component[.Subobject]]" whose first segment is the actor's INTERNAL name. In a live world: a fully-qualified PIE path or the same dotted form (first segment matches internal name OR editor label).
 //   @param world - Optional world selector: absent/'editor' (default: the editor/asset instance) | 'pie' (ambiguous: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie'). Anything other than absent/'editor' portrays the LIVE instance in that world; an UNRECOGNIZED value is an error naming the worlds that exist, never a silent fallback to another world.
 //   @param include_properties - Optional bool (default true). false skips the properties and the components list, leaving identity and class only.
 //   @param include_property_metadata - Optional bool (default false). true returns properties as an ARRAY of typed descriptors (see get_class_properties) each with its current `value`, instead of the { name: typed_value } map.
@@ -2152,7 +2158,8 @@ TSharedPtr<FJsonObject> HandleGetPackageInfo(const TSharedPtr<FJsonObject>& Para
     return mcp_common::MakeOkReply(Contents);
 }
 
-// MCP:compare_objects - Diff TWO LIVE objects property by property at the same instant, using the ENGINE's own equality (FProperty::Identical + PPF_DeepComparison) rather than exported text, so FText localization identity and object-outer differences are classified as `noise` instead of being reported as real differences. Use it for "instance vs its CDO", "fork vs original", "this actor vs that one". Accepts `world`, which resolves BOTH paths in the SAME world (e.g. two live actors inside the server world); to compare the same actor ACROSS worlds — server vs client — use capture_object_snapshot + diff_object_snapshots, which is what a replication check needs. list_instance_overrides diffs a placed actor against its archetype and also tells you which package carries the override; diff_blueprints diffs the AUTHORED graphs instead of live values.
+// MCP:diff_objects - Diff TWO LIVE objects property by property at the same instant, using the ENGINE's own equality (FProperty::Identical + PPF_DeepComparison) rather than exported text, so FText localization identity and object-outer differences are classified as `noise` instead of being reported as real differences. Use it for "instance vs its CDO", "fork vs original", "this actor vs that one". Accepts `world`, which resolves BOTH paths in the SAME world (e.g. two live actors inside the server world); to compare the same actor ACROSS worlds — server vs client — use capture_object_snapshot + diff_object_snapshots, which is what a replication check needs. list_instance_overrides diffs a placed actor against its archetype and also tells you which package carries the override; diff_blueprints diffs the AUTHORED graphs instead of live values.
+//   @renamed-from compare_objects
 //   @param object_path_1 - Path or name of the first object (full object path, asset path, CDO/archetype, or dotted "Actor[.Component[.Subobject]]" by internal name; in a live world the first segment also matches the editor LABEL)
 //   @param object_path_2 - Path or name of the second object, same resolution as object_path_1 and in the SAME world
 //   @param equality_predicate - Optional 'identical' (DEFAULT, FProperty::Identical + PPF_DeepComparison — what the engine itself calls equal) or 'export_text' (raw ExportTextItem_Direct(Defaults=nullptr, PPF_None) string compare, kept only for callers that depend on its over-reporting behavior).
@@ -2195,7 +2202,7 @@ TSharedPtr<FJsonObject> HandleCompareObjects(const TSharedPtr<FJsonObject>& Para
     // question, which capture_object_snapshot + diff_object_snapshots answers.
     Impl::FWorldChoice Where;
     TSharedPtr<FJsonObject> Refusal;
-    if (!Impl::ChooseWorld(Params, TEXT("compare_objects"), Where, Refusal))
+    if (!Impl::ChooseWorld(Params, TEXT("diff_objects"), Where, Refusal))
     {
         return Refusal;
     }
@@ -2538,7 +2545,7 @@ static const TCHAR* ReflectionOverrides_CreationMethodToString(EComponentCreatio
 // Diff every reflected property of `Object` against `Archetype`, using the shared
 // comparator (FProperty::Identical + PPF_DeepComparison). NOT GetPropertyValueAsString:
 // that one exports with Defaults=nullptr and PPF_None BY DESIGN (see its own comment), so
-// it over-reports — e.g. compare_objects' 'export_text' on FText.
+// it over-reports — e.g. diff_objects' 'export_text' on FText.
 // `OutOverrides` gets only genuine deltas; everything the engine calls equal but that
 // exports differently is COUNTED in `InOutNoiseCounts` (and listed in `OutNoise` on request),
 // never silently dropped.
@@ -2655,7 +2662,7 @@ static void ReflectionOverrides_DiffAgainstArchetype(
     }
 }
 
-// MCP:list_instance_overrides - List the property values a placed actor, and each of its components, holds as per-instance overrides in the level -- every property that differs from its archetype (the class defaults for the actor, the Blueprint's component template for a component) -- each with the archetype value beside it, plus the package that stores the actor (for a World Partition actor its own external .uasset) and whether that package is dirty. Use it to confirm that a write such as set_properties really landed on the instance (it catches an empty "()" stored where a gameplay tag was meant); to read named properties of any object use get_properties, and for every property of one component get_component_properties. Read-only: it compares the loaded actor in the editor world, so with a dirty package the result is unsaved state (caveat says which). Properties the engine counts as equal but exports differently are counted in noise_counts and listed only with include_noise. An actor not found in the editor world, or one without an archetype, is an error.
+// MCP:list_instance_overrides - List the property values a placed actor, and each of its components, holds as per-instance overrides in the level -- every property that differs from its archetype (the class defaults for the actor, the Blueprint's component template for a component) -- each with the archetype value beside it, plus the package that stores the actor (for a World Partition actor its own external .uasset) and whether that package is dirty. Use it to confirm that a write such as set_properties really landed on the instance (it catches an empty "()" stored where a gameplay tag was meant); to read named properties of any object use get_properties, and for every property of one component get_object_info. Read-only: it compares the loaded actor in the editor world, so with a dirty package the result is unsaved state (caveat says which). Properties the engine counts as equal but exports differently are counted in noise_counts and listed only with include_noise. An actor not found in the editor world, or one without an archetype, is an error.
 //   @param actor - Actor to audit: internal object name, editor label, or full object path, e.g. "BP_Door_C_3" or "Door_Main". Resolved in the EDITOR world, since a per-instance override is an editor/on-disk value, not a runtime one.
 //   @param include_components [bool] - Optional (default true). Also compare every component of the actor with its own archetype, the Blueprint's component template rather than the Blueprint class defaults (which hold no components).
 //   @param require_edit [bool] - Optional (default true). Only consider properties flagged CPF_Edit, i.e. what a human could actually have authored in the details panel. false widens to every reflected property.
@@ -2812,8 +2819,9 @@ TSharedPtr<FJsonObject> HandleListInstanceOverrides(const TSharedPtr<FJsonObject
 
 // Batch property reads and writes on one object.
 
-// MCP:get_properties - Read one or several named properties off ONE object you can already name -- an asset path, a live object's full path, a CDO/archetype, or a dotted "Actor[.Component[.Subobject]]" whose first segment is the actor's internal name -- typed rather than stringified, as { name: typed_value } plus each property's FProperty class and not_found[] for names the class does not declare. Pick it when you have the object and the names: get_object_info when you do not know the names yet, get_actor_properties_by_class when you have no path and want instances by class or label (it drops misspelled names; this reports them), get_component_properties to list every property of one component or of a Blueprint component template. property_name reads one; property_names batches several. Accepts `world` (editor, server, client, pie:N), so the same read on server and client is the cheapest proof that a value replicated; the reply stamps which world answered. Read-only.
-//   @param object_path - Path or name of the object instance. In the editor world: full object path, asset path, CDO/archetype, or a dotted "Actor[.Component[.Subobject]]" whose first segment is the actor's INTERNAL name (editor labels are not matched here). In a live world: a fully-qualified PIE path or the same dotted form (first segment matches internal name OR editor label).
+// MCP:get_properties - Read one or several named properties off ONE object you can already name -- an asset path, a live object's full path, a CDO/archetype, or a dotted "Actor[.Component[.Subobject]]" whose first segment is the actor's internal name -- typed rather than stringified, as { name: typed_value } plus each property's FProperty class and not_found[] for names the class does not declare. Pick it when you have the object and the names: get_object_info when you do not know the names yet, get_actor_properties_by_class when you have no path and want instances by class or label (it drops misspelled names; this reports them). property_name reads one; property_names batches several. Accepts `world` (editor, server, client, pie:N), so the same read on server and client is the cheapest proof that a value replicated; the reply stamps which world answered. Read-only.
+//   @core
+//   @param object_path - Path or name of the object instance. In the editor world: full object path, asset path, CDO/archetype, an asset's sub-object as the readers give its object_path -- a graph node from get_graph_nodes, a sound cue node, a Niagara renderer or simulation stage, a PCG node's settings_path, a behavior tree node, a camera rig node, a Mass trait, a physics body -- also written "/Game/Asset:SubObject", or a dotted "Actor[.Component[.Subobject]]" whose first segment is the actor's INTERNAL name (editor labels are not matched here). In a live world: a fully-qualified PIE path or the same dotted form (first segment matches internal name OR editor label).
 //   @param property_names [array] - Optional names of the properties to read; every name that the class does not declare comes back in not_found[]. Required unless property_name is given.
 //   @param property_name - Optional single property to read, added to property_names.
 //   @param world - Optional world selector: absent/'editor' (default: the editor/asset instance) | 'pie' (ambiguous: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie'). Anything other than absent/'editor' reads the LIVE instance in that world; an UNRECOGNIZED value is an error naming the worlds that exist, never a silent fallback to another world.
@@ -2894,14 +2902,15 @@ TSharedPtr<FJsonObject> HandleGetProperties(const TSharedPtr<FJsonObject>& Param
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:set_properties - Write one or several properties on ONE object -- an asset, a CDO/archetype, a placed actor, or one of its components as "Actor.Component" -- in the EDITOR world, as an edit in the Details panel: each write runs Modify/PreEditChange/PostEditChange (undoable, package dirtied, the component re-registered), and the reply lists set[] and failed[{property,error}] per name. This is the tool for any editable setting of a light, fog, sky, cloud, decal, camera, post-process volume, capture, replication flag, sound, Niagara system, physical material, montage, foliage type or other asset: pass the engine's property names (get_object_info lists them), a struct as a JSON object of only the fields to change, a color as {"R","G","B","A"}. The actor is found by its internal name or by a label only it has; the component by its name or by a class only one of its components has ("Sun.DirectionalLightComponent", "Fog.ExponentialHeightFogComponent"). A key inside a struct that names no field is refused, and nothing is written to that property. clamp=true keeps numbers inside the property's ClampMin/ClampMax, as the Details panel does, and lists what it clamped; save=true saves the asset's package (refused for a level object: save_level). A blend space is resampled after the write. Use set_component_property for a component in a live PIE world, set_blueprint_component_properties for a Blueprint's component template, set_widget_property inside a Widget Blueprint, call_function for the object's own setter. Unregistered gameplay tags are refused. No Blueprint is compiled.
-//   @param object_path - The object, resolved in the EDITOR world: an asset path, a full object path, a CDO/archetype, or "Actor[.Component[.Subobject]]" where Actor is an internal name or a unique label and Component a component name or a class only one component has.
+// MCP:set_properties - Write one or several properties on ONE object -- an asset, a CDO/archetype, a placed actor, or one of its components as "Actor.Component" -- in the EDITOR world, as an edit in the Details panel: each write runs Modify/PreEditChange/PostEditChange (undoable, package dirtied, the component re-registered), and the reply lists set[] and failed[{property,error}] per name. This is the tool for any editable setting of a light, fog, sky, cloud, decal, camera, post-process volume, capture, replication flag, sound, Niagara system, physical material, montage, foliage type or other asset: pass the engine's property names (get_object_info lists them), a struct as a JSON object of only the fields to change, a color as {"R","G","B","A"}. The actor is found by its internal name or by a label only it has; the component by its name or by a class only one of its components has ("Sun.DirectionalLightComponent", "Fog.ExponentialHeightFogComponent"). A key inside a struct that names no field is refused, and nothing is written to that property. clamp=true keeps numbers inside the property's ClampMin/ClampMax, as the Details panel does, and lists what it clamped; save=true saves the asset's package (refused for a level object: save_level). A blend space is resampled after the write. An asset's sub-object -- a graph node, a sound cue node, a Niagara renderer or stage, a PCG node's settings, a material expression, a behavior tree node, a camera rig node, a Mass trait, a physics body, by the object_path its reader gives -- is written the same way, and its asset is finished as its editor does it: a graph node is reconstructed and its Blueprint marked modified (compile it), a sound cue recaches its values, a Niagara system recompiles; save=true saves that asset. Use set_component_property for a component in a live PIE world, set_blueprint_component_properties for a Blueprint's component template, set_widget_property inside a Widget Blueprint, call_function for the object's own setter. Unregistered gameplay tags are refused. No Blueprint is compiled.
+//   @core
+//   @param object_path - The object, resolved in the EDITOR world: an asset path, a full object path, a CDO/archetype, an asset's sub-object as the readers give its object_path -- a graph node from get_graph_nodes, a sound cue node, a Niagara renderer or simulation stage, a PCG node's settings_path, a behavior tree node, a camera rig node, a Mass trait, a physics body -- also written "/Game/Asset:SubObject", or "Actor[.Component[.Subobject]]" where Actor is an internal name or a unique label and Component a component name or a class only one component has.
 //   @param properties [object] - Optional dict of {property_name: value}; values can be scalar, nested object, or array (UE-format text like "(X=1,Y=2,Z=3)" is also accepted for structs). Required unless property_name + value is given; both together write properties{} first.
 //   @param property_name - Optional single property to write (must be CPF_Edit and not EditConst, or it lands in failed[] with the reason). Needs value.
 //   @param value - Optional new value for property_name: string, number, boolean, JSON object (struct), JSON array (array/set/tag container), or a UE-format text string like "(X=1,Y=2,Z=3)"
 //   @param save [bool] - Save the asset's package after the writes (default false); refused, before anything is written, for an object in a level
 //   @param clamp [bool] - Clamp each number written to the ClampMin/ClampMax of its property, struct fields and array elements included (default false)
-//   @returns { object_path: string, resolved_path: string, set: [string], failed: [{property, error}], clamped?: [string] ("name=value", with clamp), saved?: bool, save_error?: string (with save), success: bool }
+//   @returns { object_path: string, resolved_path: string, set: [string], failed: [{property, error}], owning_asset?: string (a sub-object's asset), finished?: [string] (what ran on that asset), clamped?: [string] ("name=value", with clamp), saved?: bool, save_error?: string (with save), success: bool }
 
 TSharedPtr<FJsonObject> HandleSetProperties(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2952,6 +2961,20 @@ TSharedPtr<FJsonObject> HandleSetProperties(const TSharedPtr<FJsonObject>& Param
     TArray<TSharedPtr<FJsonValue>> Failed;
     TArray<FString> Clamped;
 
+    // A sub-object of an asset (a graph node, a sound cue node, a Niagara renderer, a PCG node's settings...): its asset
+    // is recorded too, so one undo restores both, and is finished after the writes (below).
+    UObject* OwningAsset = nullptr;
+    if (Object->GetTypedOuter<UWorld>() == nullptr)
+    {
+        UPackage* OwnerPackage = Object->GetPackage();
+        UObject* Asset = OwnerPackage ? OwnerPackage->FindAssetInPackage() : nullptr;
+        if (Asset && Asset != Object && Object->IsIn(Asset))
+        {
+            OwningAsset = Asset;
+            OwningAsset->Modify();
+        }
+    }
+
     // The writes, in order: properties{} first, then the single one.
     TArray<TPair<FString, TSharedPtr<FJsonValue>>> Writes;
     if (bHasProps)
@@ -2993,6 +3016,38 @@ TSharedPtr<FJsonObject> HandleSetProperties(const TSharedPtr<FJsonObject>& Param
         }
     }
 
+    // What the asset's own editor runs after a sub-object changed: a graph node rebuilds its pins and its Blueprint
+    // learns of it (an AnimGraph node's Node struct, a property access node), a sound cue recaches its aggregate values,
+    // a Niagara system recompiles. A Blueprint's CDO or component template is left alone: marking the Blueprint
+    // modified would make its next compile regenerate them.
+    TArray<TSharedPtr<FJsonValue>> Finished;
+    if (SetOk.Num() > 0)
+    {
+        if (UEdGraphNode* GraphNode = Cast<UEdGraphNode>(Object))
+        {
+            GraphNode->ReconstructNode();
+            if (UBlueprint* NodeBlueprint = FBlueprintEditorUtils::FindBlueprintForNode(GraphNode))
+            {
+                FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(NodeBlueprint);
+            }
+            if (UEdGraph* NodeGraph = GraphNode->GetGraph())
+            {
+                NodeGraph->NotifyGraphChanged();
+            }
+            Finished.Add(MakeShared<FJsonValueString>(TEXT("graph node reconstructed, its Blueprint marked modified (compile it)")));
+        }
+        else if (USoundCue* Cue = Cast<USoundCue>(OwningAsset))
+        {
+            Cue->CacheAggregateValues();
+            Finished.Add(MakeShared<FJsonValueString>(TEXT("sound cue aggregate values recached")));
+        }
+        else if (UNiagaraSystem* System = Cast<UNiagaraSystem>(OwningAsset))
+        {
+            System->RequestCompile(false);
+            Finished.Add(MakeShared<FJsonValueString>(TEXT("Niagara system compile requested")));
+        }
+    }
+
     bool bSaved = false;
     FString SaveError;
     if (bSave && SetOk.Num() > 0)
@@ -3011,6 +3066,14 @@ TSharedPtr<FJsonObject> HandleSetProperties(const TSharedPtr<FJsonObject>& Param
     ResultObj->SetStringField(TEXT("resolved_path"), Object->GetPathName());
     ResultObj->SetArrayField(TEXT("set"), SetOk);
     ResultObj->SetArrayField(TEXT("failed"), Failed);
+    if (OwningAsset)
+    {
+        ResultObj->SetStringField(TEXT("owning_asset"), OwningAsset->GetPathName());
+    }
+    if (Finished.Num() > 0)
+    {
+        ResultObj->SetArrayField(TEXT("finished"), Finished);
+    }
     if (bClamp)
     {
         TArray<TSharedPtr<FJsonValue>> ClampedJson;
@@ -3203,7 +3266,7 @@ TSharedPtr<FJsonObject> HandleGetActorPropertiesByClass(const TSharedPtr<FJsonOb
 const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("call_function"), &HandleCallFunction },
-    { TEXT("compare_objects"), &HandleCompareObjects },
+    { TEXT("diff_objects"), &HandleCompareObjects },
     { TEXT("get_actor_properties_by_class"), &HandleGetActorPropertiesByClass },
     { TEXT("get_class_functions"), &HandleGetClassFunctions },
     { TEXT("get_class_hierarchy"), &HandleGetClassHierarchy },

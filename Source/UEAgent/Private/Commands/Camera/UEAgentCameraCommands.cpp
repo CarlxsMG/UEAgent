@@ -158,7 +158,7 @@ namespace
     }
 }
 
-// MCP:create_camera_rig_asset - Create an empty camera rig asset (UCameraRigAsset, from the Experimental Gameplay Cameras plugin) at package_path/name and save it; it has no root node yet. Idempotent: a camera rig already at that path is returned unchanged with created=false, already_existed=true and saved=false, since nothing is written; an asset of another class there is an error. Not an undo step. Then give it a root node with set_camera_rig_root_node, tune it with set_camera_node_parameters or add_camera_node_child, build it with build_camera_rig, and run it from a camera asset (create_camera_asset) through set_camera_asset_director; get_camera_rig_nodes reads it back. A failed save of a new rig makes success false, with saved=false and save_error, and the rig left in memory.
+// MCP:create_camera_rig_asset - Create an empty camera rig asset (UCameraRigAsset, from the Experimental Gameplay Cameras plugin) at package_path/name and save it; it has no root node yet. Idempotent: a camera rig already at that path is returned unchanged with created=false, already_existed=true and saved=false, since nothing is written; an asset of another class there is an error. Not an undo step. Then give it a root node with set_camera_rig_root_node, tune it with add_camera_node_child or set_properties on a node path from get_camera_rig_nodes, build it with build_camera_rig, and run it from a camera asset (create_camera_asset) through set_camera_asset_director; get_camera_rig_nodes reads it back. A failed save of a new rig makes success false, with saved=false and save_error, and the rig left in memory.
 //   @param name - Asset name, e.g. 'CR_Player'; package_path/name must form a valid long package name.
 //   @param package_path - Content folder as a long package path, e.g. '/Game/Cameras/Rigs' (default "/Game/Cameras").
 //   @returns { name, asset_path, asset_class, created, already_existed, saved, save_error?, note? }
@@ -233,7 +233,7 @@ TSharedPtr<FJsonObject> HandleSetCameraAssetDirector(const TSharedPtr<FJsonObjec
     return mcp_common::MakeOutcomeReply(Data, bSet && bSaved, mcp_common::SavedOutcomeError(TEXT("set_camera_asset_director")));
 }
 
-// MCP:build_camera_rig - Build a Gameplay Cameras UCameraRigAsset, found by content path, in memory as the rig editor's Build does: its node hierarchy, interface and parameters are rebuilt from the current nodes, replacing the previous build data. built is true when build_status comes back Clean or CleanWithWarnings; WithErrors fails the call with the build errors in its message, and messages lists every build message with its severity (the editor log gets them too). Nothing is saved (saving the rig builds it again anyway); what the build changes is recorded in the call's undo step. A rig that does not resolve is an error. Edit the rig first with set_camera_rig_root_node, set_camera_node_parameters or add_camera_node_child; read its nodes with get_camera_rig_nodes; create one with create_camera_rig_asset.
+// MCP:build_camera_rig - Build a Gameplay Cameras UCameraRigAsset, found by content path, in memory as the rig editor's Build does: its node hierarchy, interface and parameters are rebuilt from the current nodes, replacing the previous build data. built is true when build_status comes back Clean or CleanWithWarnings; WithErrors fails the call with the build errors in its message, and messages lists every build message with its severity (the editor log gets them too). Nothing is saved (saving the rig builds it again anyway); what the build changes is recorded in the call's undo step. A rig that does not resolve is an error. Edit the rig first with set_camera_rig_root_node, add_camera_node_child or set_properties on a node path; read its nodes with get_camera_rig_nodes; create one with create_camera_rig_asset.
 //   @param camera_rig_path - Content path to the UCameraRigAsset, e.g. "/Game/Cameras/CR_Player" (required)
 //   @returns { camera_rig_path, built, build_status, messages: [{ severity, message }] }
 TSharedPtr<FJsonObject> HandleBuildCameraRig(const TSharedPtr<FJsonObject>& Params)
@@ -483,7 +483,7 @@ TSharedPtr<FJsonObject> HandleListCameraNodeTypes(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:set_camera_rig_root_node - Replace the RootNode of a Gameplay Cameras UCameraRigAsset with a new, default-valued node of node_type; the previous root and everything under it (children, parameter values) is dropped. Runs in an undo transaction and saves the rig; a failed save fails the call, with saved false and save_error, and leaves the change in memory. Does not build the rig (build_camera_rig does). Valid node_type names come from list_camera_node_types; configure the new root with set_camera_node_parameters, give an ArrayCameraNode root children with add_camera_node_child, and read it back with get_camera_rig_nodes.
+// MCP:set_camera_rig_root_node - Replace the RootNode of a Gameplay Cameras UCameraRigAsset with a new, default-valued node of node_type; the previous root and everything under it (children, parameter values) is dropped. Runs in an undo transaction and saves the rig; a failed save fails the call, with saved false and save_error, and leaves the change in memory. Does not build the rig (build_camera_rig does). Valid node_type names come from list_camera_node_types; configure the new root with set_properties on its root_node_path from get_camera_rig_nodes, give an ArrayCameraNode root children with add_camera_node_child, and read it back with get_camera_rig_nodes.
 //   @param camera_rig_path - /Game/... path to the UCameraRigAsset (required)
 //   @param node_type - A concrete UCameraNode subclass name, e.g. "FieldOfViewCameraNode", "OffsetCameraNode", "ArrayCameraNode" (required)
 //   @returns { camera_rig_path, node_type, node_class, root_set, saved, save_error }
@@ -521,6 +521,7 @@ TSharedPtr<FJsonObject> HandleSetCameraRigRootNode(const TSharedPtr<FJsonObject>
 }
 
 // MCP:set_camera_node_parameters - Sets parameters on a camera rig's RootNode by reflection, all or nothing: every property is parsed first, and an unknown property or a value that does not fit fails the call, naming each one in failed, with nothing written or saved. FXxxCameraParameter props take the raw value, a bool or a number (a whole one for an integer), written to the nested .Value; other props set directly. Otherwise all of them are written in one undo step and the rig is saved; applied reads the stored values back. Values the node already holds are a success with changed false, saved false and a note, and nothing is written or saved. A failed save fails the call, with saved false and save_error, and leaves the change in memory. With child_index the node edited is that child of a composite ArrayCameraNode root (add_camera_node_child); an index out of range, or a root that is not an ArrayCameraNode, is an error. Read the values back with get_camera_rig_nodes.
+//   @retired set_properties - object_path=<root_node_path, or a child's object_path, from get_camera_rig_nodes>, properties={"FieldOfView":{"Value":90}}, save=true
 //   @param camera_rig_path - /Game/... path to the UCameraRigAsset whose RootNode is edited (required)
 //   @param properties - JSON object { PropertyName: value, ... } (e.g. {"FieldOfView": 90})
 //   @param child_index [int] - Optional index of a child of the composite ArrayCameraNode root to edit instead of the root node itself
@@ -657,7 +658,7 @@ TSharedPtr<FJsonObject> HandleSetCameraNodeParameters(const TSharedPtr<FJsonObje
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_camera_node_parameters"), SaveError);
 }
 
-// MCP:add_camera_node_child - Populates the Children of a composite rig node (the rig RootNode must be a UArrayCameraNode ("Sequence"); set it via set_camera_rig_root_node node_type=ArrayCameraNode). Creates a new UCameraNode of child_node_type outered to the rig and appends it, in one undo step, then saves the rig. Idempotent via optional index: index<Children.Num() REPLACES that slot instead of appending. added is the read-back of the new child in its slot; a failed save fails the call, with saved false and save_error, and leaves the change in memory. Gameplay Camera System is EXPERIMENTAL (plugin GameplayCameras). Set its parameters with set_camera_node_parameters child_index; inverse: remove_camera_node_child.
+// MCP:add_camera_node_child - Populates the Children of a composite rig node (the rig RootNode must be a UArrayCameraNode ("Sequence"); set it via set_camera_rig_root_node node_type=ArrayCameraNode). Creates a new UCameraNode of child_node_type outered to the rig and appends it, in one undo step, then saves the rig. Idempotent via optional index: index<Children.Num() REPLACES that slot instead of appending. added is the read-back of the new child in its slot; a failed save fails the call, with saved false and save_error, and leaves the change in memory. Gameplay Camera System is EXPERIMENTAL (plugin GameplayCameras). Set its parameters with set_properties on its object_path from get_camera_rig_nodes; inverse: remove_camera_node_child.
 //   @param camera_rig_path - /Game/... path to the UCameraRigAsset whose composite RootNode is edited (required)
 //   @param child_node_type - A concrete UCameraNode subclass name for the new child, e.g. "OffsetCameraNode", "FieldOfViewCameraNode" (required)
 //   @param index - Optional child slot. If given and < current child count, REPLACES that slot (deterministic re-runs); otherwise appends.
@@ -789,9 +790,9 @@ TSharedPtr<FJsonObject> HandleRemoveCameraNodeChild(const TSharedPtr<FJsonObject
     return mcp_common::MakeOutcomeReply(Data, bSaved, mcp_common::SavedOutcomeError(TEXT("remove_camera_node_child")));
 }
 
-// MCP:get_camera_rig_nodes - Reports a camera rig's RootNode class and its camera-parameter fields (name + value), plus, for a composite ArrayCameraNode root, its Children (index, class and their own camera-parameter fields). Read-only. It reads what set_camera_node_parameters writes (child_index for a child), add_camera_node_child adds and remove_camera_node_child removes.
+// MCP:get_camera_rig_nodes - Reports a camera rig's RootNode class and its camera-parameter fields (name + value), plus, for a composite ArrayCameraNode root, its Children (index, class and their own camera-parameter fields). Read-only. It gives the node paths set_properties writes, and reads what add_camera_node_child adds and remove_camera_node_child removes.
 //   @param camera_rig_path - /Game/... path to the UCameraRigAsset (required)
-//   @returns { camera_rig_path, has_root_node, root_node_class, parameters:[{name, value}], children:[{index, class, parameters:[{name, value}]}] }
+//   @returns { camera_rig_path, has_root_node, root_node_class, root_node_path, parameters:[{name, value}], children:[{index, class, object_path, parameters:[{name, value}]}] }
 TSharedPtr<FJsonObject> HandleGetCameraRigNodes(const TSharedPtr<FJsonObject>& Params)
 {
     FString RigPath;
@@ -805,6 +806,8 @@ TSharedPtr<FJsonObject> HandleGetCameraRigNodes(const TSharedPtr<FJsonObject>& P
     Data->SetStringField(TEXT("camera_rig_path"), Rig->GetPathName());
     Data->SetBoolField(TEXT("has_root_node"), Node != nullptr);
     Data->SetStringField(TEXT("root_node_class"), Node ? Node->GetClass()->GetName() : TEXT("None"));
+    // The paths set_properties and get_properties take for a node's camera parameters.
+    Data->SetStringField(TEXT("root_node_path"), Node ? Node->GetPathName() : TEXT(""));
 
     // The camera-parameter fields (FXxxCameraParameter) of a node, as {name, value} export text.
     const auto CameraParameters = [](UCameraNode* InNode)
@@ -841,6 +844,7 @@ TSharedPtr<FJsonObject> HandleGetCameraRigNodes(const TSharedPtr<FJsonObject>& P
             TSharedPtr<FJsonObject> C = MakeShared<FJsonObject>();
             C->SetNumberField(TEXT("index"), i);
             C->SetStringField(TEXT("class"), Child ? Child->GetClass()->GetName() : TEXT("None"));
+            C->SetStringField(TEXT("object_path"), Child ? Child->GetPathName() : TEXT(""));
             C->SetArrayField(TEXT("parameters"), CameraParameters(Child));
             ChildArr.Add(MakeShared<FJsonValueObject>(C));
         }
@@ -1987,6 +1991,7 @@ namespace UEAgentCameraImpl
 }
 
 // MCP:get_cine_camera_settings - Read the full cine-camera configuration off a CineCameraActor's CineCameraComponent: filmback (sensor size/offsets/aspect + preset), lens (focal/f-stop range, squeeze, blades, preset), focus (method/manual distance/offset/smoothing) and the current focal length / aperture / focus distance. Pure reader; mutates nothing.
+//   @retired get_properties - object_path="<camera actor>.CineCameraComponent", property_names=["Filmback","LensSettings","FocusSettings","CurrentFocalLength","CurrentAperture","CurrentFocusDistance"]; call_function GetHorizontalFieldOfView on the same path for the field of view
 //   @param actor_name - Name or label of the CineCameraActor to query.
 //   @returns { actor_name: string, filmback: { sensor_width, sensor_height, sensor_horizontal_offset, sensor_vertical_offset, sensor_aspect_ratio, preset_name }, lens: { min_focal_length, max_focal_length, min_fstop, max_fstop, minimum_focus_distance, squeeze_factor, diaphragm_blade_count, preset_name }, focus: { method, manual_focus_distance, focus_offset, smooth_focus_changes, focus_smoothing_interp_speed }, current_focal_length, current_aperture, current_focus_distance, horizontal_fov, vertical_fov, note }
 TSharedPtr<FJsonObject> HandleGetCineCameraSettings(const TSharedPtr<FJsonObject>& Params)

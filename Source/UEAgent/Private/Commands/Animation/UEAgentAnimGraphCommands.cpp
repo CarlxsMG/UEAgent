@@ -136,6 +136,7 @@ namespace
 // add_anim_graph_node
 // ===========================================================================
 // MCP:add_anim_graph_node - Place a UAnimGraphNode_* (by class name) into an AnimGraph or a state's inner graph. Saves the ABP but does NOT recompile it -- run compile_anim_blueprint after your edits for runtime effect.
+//   @retired add_graph_node - asset_path=<anim blueprint>, graph_name="AnimGraph" (or "<StateMachine> > <State>"), node_type=<AnimGraphNode class, e.g. AnimGraphNode_Slot>, position_x=<x>, position_y=<y>; the Animation Blueprint is not saved (save_asset)
 //   @param anim_blueprint_path - Path or name of the UAnimBlueprint.
 //   @param node_class - AnimGraphNode class: short name (e.g. "AnimGraphNode_Slot", "AnimGraphNode_PoseSearchHistoryCollector") or full path.
 //   @param graph_name - Target graph; omit/"AnimGraph" for the top-level AnimGraph, or a nested name like "MainSM > Idle".
@@ -299,6 +300,7 @@ TSharedPtr<FJsonObject> HandleCopyAnimGraphNodes(const TSharedPtr<FJsonObject>& 
 // connect_anim_graph_pins
 // ===========================================================================
 // MCP:connect_anim_graph_pins - Wire two AnimGraph pins (pose links AND data pins) using the graph's OWN schema. USE THIS INSTEAD OF connect_pins inside an AnimGraph: the generic connect_pins uses the K2 schema, which does not understand FPoseLink/FComponentSpacePoseLink pose pins, whereas this goes through UAnimationGraphSchema::TryCreateConnection so pose links connect correctly. Saves the ABP but does NOT recompile it -- run compile_anim_blueprint after your edits for runtime effect.
+//   @retired connect_pins - asset_path=<anim blueprint>, graph_name="AnimGraph", source_node_id=<NodeGuid>, source_pin=<output pin>, target_node_id=<NodeGuid>, target_pin=<input pin> (the graph's own schema checks pose links); not saved
 //   @param anim_blueprint_path - Path/name of the UAnimBlueprint.
 //   @param source_node_id - NodeGuid of the source node.
 //   @param source_pin - Output pin name on the source node.
@@ -354,6 +356,7 @@ TSharedPtr<FJsonObject> HandleConnectAnimGraphPins(const TSharedPtr<FJsonObject>
 // disconnect_anim_graph_pins
 // ===========================================================================
 // MCP:disconnect_anim_graph_pins - Break AnimGraph pin links: a specific source->target link, or ALL links on the source pin. Use the specific form to insert a node into an existing chain (break A->B, then wire A->N and N->B). Saves the ABP but does NOT recompile it -- run compile_anim_blueprint after your edits for runtime effect.
+//   @retired disconnect_pin - asset_path=<anim blueprint>, graph_name="AnimGraph", node_id=<source_node_id>, pin_name=<source_pin>; add linked_node_id=<target_node_id>, linked_pin=<target_pin> to break only that link; not saved
 //   @param anim_blueprint_path - Path/name of the UAnimBlueprint.
 //   @param source_node_id - NodeGuid of the source node.
 //   @param source_pin - Pin name on the source node.
@@ -424,6 +427,7 @@ TSharedPtr<FJsonObject> HandleDisconnectAnimGraphPins(const TSharedPtr<FJsonObje
 // read — get_anim_graph_node_properties
 // ===========================================================================
 // MCP:get_anim_graph_node_properties - Read the internal FAnimNode struct of one AnimGraphNode, found by NodeGuid (node_id) in the AnimGraph or a nested graph_name, as typed JSON: the runtime settings (Pose History PoseCount/CollectorName, Slot SlotName, blend params), not the pin surface get_graph_nodes reports. Use it instead of get_properties, which cannot address a graph node by GUID; a non-anim node returns its EditAnywhere properties. Read-only; write with set_anim_graph_node_property.
+//   @retired get_properties - object_path=<the node's object_path from get_graph_nodes with graph_name="AnimGraph">, property_names=["Node"]
 //   @param anim_blueprint_path - Path/name of the UAnimBlueprint.
 //   @param node_id - NodeGuid of the target AnimGraphNode.
 //   @param graph_name - Target graph (optional, default the top-level AnimGraph).
@@ -484,6 +488,7 @@ TSharedPtr<FJsonObject> HandleGetAnimGraphNodeProperties(const TSharedPtr<FJsonO
 // write — set_anim_graph_node_property
 // ===========================================================================
 // MCP:set_anim_graph_node_property - Write one field of an AnimGraphNode's internal FAnimNode struct (runtime settings, not pins): node by NodeGuid, field by name or dotted path. set_properties cannot address a graph node by GUID; this also takes a dotted path, rebuilds the node's pins, is undoable and saves the ABP, but does NOT recompile -- run compile_anim_blueprint. Read: get_anim_graph_node_properties.
+//   @retired set_properties - object_path=<the node's object_path from get_graph_nodes with graph_name="AnimGraph">, properties={"Node":{"<field>":<value>}}; the node is reconstructed and its Blueprint marked modified (compile_blueprint)
 //   @param anim_blueprint_path - Path/name of the UAnimBlueprint.
 //   @param node_id - NodeGuid of the target AnimGraphNode.
 //   @param property - Property path inside the FAnimNode (e.g. "PoseCount", "SlotName"). A leading "Node." is tolerated. Nested structs use dots ("A.B").
@@ -782,7 +787,7 @@ namespace
     }
 }
 
-// MCP:set_anim_graph_node_pin_binding - Bind an AnimGraph node input pin to a variable or property path in the node property-binding map (the Details-panel bind chip), e.g. "TransformTrajectory" to "Trajectory"; set_anim_graph_node_property edits the FAnimNode struct instead. Returns applied and the stored binding; saves the AnimBP without recompiling (run compile_anim_blueprint).
+// MCP:set_anim_graph_node_pin_binding - Bind an AnimGraph node input pin to a variable or property path in the node property-binding map (the Details-panel bind chip), e.g. "TransformTrajectory" to "Trajectory"; set_properties on the node's object_path edits the FAnimNode struct (Node) instead. Returns applied and the stored binding; saves the AnimBP without recompiling (run compile_anim_blueprint).
 //   @param anim_blueprint_path - Path or name of the UAnimBlueprint (aliases: anim_blueprint, blueprint_name).
 //   @param node_id - NodeGuid of the target UAnimGraphNode_* (from get_graph_nodes).
 //   @param pin_name - The bound property/pin name (e.g. "TransformTrajectory").

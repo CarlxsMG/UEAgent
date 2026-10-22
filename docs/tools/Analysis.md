@@ -10,7 +10,7 @@ Back to the [index](README.md).
 
 *Destructive.*
 
-Capture the properties and components of one object into a named in-memory snapshot (read-only) for a later diff_object_snapshots: before vs after an action, editor vs PIE, or "server" vs "client" via world. persist=true also writes Saved/MCPAudits/snapshots/&lt;handle>.json to survive a restart. compare_objects diffs two live objects instead.
+Capture the properties and components of one object into a named in-memory snapshot (read-only) for a later diff_object_snapshots: before vs after an action, editor vs PIE, or "server" vs "client" via world. persist=true also writes Saved/MCPAudits/snapshots/&lt;handle>.json to survive a restart. diff_objects diffs two live objects instead.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -60,7 +60,7 @@ Compare the COMPONENT trees of two Blueprints (or of one Blueprint against a com
 
 *Read-only.*
 
-Structural diff of TWO Blueprints (or AnimBlueprints): parent class, SCS components, variables, functions, and per graph a node-by-node diff of what was added, removed and changed, where a changed node reports its title, per-pin default-value and link changes and -- for AnimGraph nodes -- the internal FAnimNode config and property-binding differences. With graph_name it diffs ONE graph pair only -- far cheaper when you already know the graph you care about (an "AnimGraph", a function, a collapsed composite by title). WARNING: nodes are matched by NodeGuid, which duplicating or forking an asset PRESERVES: this is built to compare a fork against its original, and two independently authored Blueprints will show every single node as added/removed, which is noise, not a finding. Read-only. Siblings: diff_blueprint_components for components only, get_blueprint_component_overrides for per-property provenance, compare_objects for two LIVE UObjects instead of authored structure. Watch `graphs_not_examined[]` -- when the node budget runs out the remaining graphs are listed there instead of being reported as identical.
+Structural diff of TWO Blueprints (or AnimBlueprints): parent class, SCS components, variables, functions, and per graph a node-by-node diff of what was added, removed and changed, where a changed node reports its title, per-pin default-value and link changes and -- for AnimGraph nodes -- the internal FAnimNode config and property-binding differences. With graph_name it diffs ONE graph pair only -- far cheaper when you already know the graph you care about (an "AnimGraph", a function, a collapsed composite by title). WARNING: nodes are matched by NodeGuid, which duplicating or forking an asset PRESERVES: this is built to compare a fork against its original, and two independently authored Blueprints will show every single node as added/removed, which is noise, not a finding. Read-only. Siblings: diff_blueprint_components for components only, get_blueprint_component_overrides for per-property provenance, diff_objects for two LIVE UObjects instead of authored structure. Watch `graphs_not_examined[]` -- when the node budget runs out the remaining graphs are listed there instead of being reported as identical.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -76,7 +76,7 @@ Structural diff of TWO Blueprints (or AnimBlueprints): parent class, SCS compone
 
 *Read-only.*
 
-Compare two snapshots taken by capture_object_snapshot and report which properties were added, removed or CHANGED, at the object level and per component, with both values side by side. The second half of the before/after measurement: capture a baseline, run the action, capture again, and this tells you what actually moved -- instead of trusting the acting call's own success flag. Also the way to diff editor-vs-PIE and, in co-op, SERVER-vs-CLIENT state for the same actor, which is the only proof that a value really replicated. Sides can be given as stored handles, as inline snapshot objects (from capture_object_snapshot(return_snapshot=true)), or as paths to persisted snapshot files; `a_origin`/`b_origin` report which route each side came from. compare_objects is the same idea for two LIVE objects at one instant.
+Compare two snapshots taken by capture_object_snapshot and report which properties were added, removed or CHANGED, at the object level and per component, with both values side by side. The second half of the before/after measurement: capture a baseline, run the action, capture again, and this tells you what actually moved -- instead of trusting the acting call's own success flag. Also the way to diff editor-vs-PIE and, in co-op, SERVER-vs-CLIENT state for the same actor, which is the only proof that a value really replicated. Sides can be given as stored handles, as inline snapshot objects (from capture_object_snapshot(return_snapshot=true)), or as paths to persisted snapshot files; `a_origin`/`b_origin` report which route each side came from. diff_objects is the same idea for two LIVE objects at one instant.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -124,6 +124,8 @@ List every package an asset DEPENDS ON (its outgoing edges), each with its class
 ## `get_asset_referencers`
 
 *Read-only.*
+
+**Core tool:** every client lists it by default.
 
 List every asset that REFERENCES a target asset -- "who breaks if I delete, move or rename this?" -- wrapping AssetRegistry::GetReferencers over the Package category and returning each referencing package with its primary asset's name, path, class and loaded state. It accepts an object path, a package path or a bare name, echoes `resolved_package` so you can confirm it queried the package you meant, and REFUSES an ambiguous bare name with the candidate list instead of picking one. Hard references only by default (the "what keeps this loaded" audit); dependency_type='soft' or 'all' (or include_soft_references=true) brings in TSoftObjectPtr / FSoftObjectPath edges, and exclude_engine=true drops /Engine and /Script referencers. Works for any asset type, a MetaSound included. Its mirror is get_asset_dependencies (what this asset needs), and find_blueprint_node_references finds call sites INSIDE graphs, which package-level references cannot see.
 

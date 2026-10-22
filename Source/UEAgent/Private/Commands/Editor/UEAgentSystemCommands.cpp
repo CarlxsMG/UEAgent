@@ -50,6 +50,7 @@ namespace UEAgentSystemCommands
 // MCP-DOMAIN: Editor
 
 // MCP:execute_console_command - Run a console command through the EDITOR (GEditor->Exec against the editor world): cvars, `stat` overlays, `r.*` toggles, engine commands. WARNING: it does NOT reach a running PIE session's PlayerController, so player cheats like `BugItGo` come back handled:false -- to move or cheat a PIE pawn use execute_python against the anchored PIE world. `handled` is the engine's own "some Exec claimed this string", not proof of an effect: verify with the state (get_cvar, a property read), never with this bool.
+//   @core
 //   @param command - Console command line, e.g. 'stat fps', 'r.ScreenPercentage 50', 'ShowFlag.Grid 0'. Editor-side only.
 //   @returns { command: string, handled: bool (an Exec handler claimed the string -- not evidence the effect happened) }
 TSharedPtr<FJsonObject> HandleExecuteConsoleCommand(const TSharedPtr<FJsonObject>& Params)
@@ -606,6 +607,7 @@ TSharedPtr<FJsonObject> HandleSetPluginEnabled(const TSharedPtr<FJsonObject>& Pa
 }
 
 // MCP:save_asset - Write ONE .uasset to disk by package path (a Blueprint, DataTable, material...) and VERIFY the effect: still_dirty_after_save:false plus file_on_disk:true is the oracle, not `saved`. Use save_level for the .umap and reload_asset_package to undo an in-memory edit instead. PIE: this is REFUSED while Play-in-Editor runs (it never stops or touches your session) -- the engine guard Editor.AllowSavingAssetsDuringPIE=0 rejects the write before attempting anything, so a save during play would report success without writing a byte. Stop PIE and retry, or pass force=true. WARNING: when it answers success:false with PIE down, a common cause is the file being READ-ONLY on disk (e.g. a Git LFS `lockable` file that has not been `git lfs lock`ed). You do not have to check that by hand: `file_read_only` is measured on every call and the error message states whether a read-only file IS or is NOT the explanation. WARNING: it writes exactly one package, so it cannot stop a compile cascade from dirtying a vendored asset that a LATER bulk save then rewrites -- list_dirty_packages before, `git status` after.
+//   @core
 //   @param path - Full asset path to save, e.g. /Game/MyGame/Core/BP_MyActor (an .Object suffix is tolerated). Must already exist or the call errors.
 //   @param readonly_roots - Optional array of long-path prefixes treated as vendored/upstream (default: the project's Read Only Content Roots). A save under one of them is REFUSED by default; see refuse_readonly. Pass [] to disable the classification entirely.
 //   @param refuse_readonly - Optional bool. When true, a save whose package falls under one of readonly_roots is REFUSED (success:false, saved:false, refused_readonly:true) instead of performed. Default = the process-wide switch (mcp_common::IsReadOnlyRootSaveEnforcementEnabled(), true unless `mcp.ReadOnlyRootEnforcement 0`); when false the write happens and is only reported + ledgered.
@@ -866,6 +868,7 @@ namespace
 }
 
 // MCP:list_dirty_packages - What is UNSAVED in the editor right now: every dirty package with its disk path, split into map / OFPA-external / asset, and -- the reason to run it -- readonly_dirty_count, the single go/no-go number telling you a vendored root like /Game/VendorPack would be REWRITTEN by the next bulk save. Run it before closing the editor, before compiling, and before any save; it also resolves OFPA hashes to actor labels so /__ExternalActors__/AB/CD/EF12 becomes a name. Strictly read-only: never marks dirty, never saves. WARNING: it reports IN-MEMORY state only -- a package clean here can still differ from HEAD on disk, so `git status` stays the disk authority. And do NOT use its pie_active field as the PIE gate: it can answer false with PIE running; the oracle is is_play_in_editor_active.
+//   @core
 //   @param readonly_roots - Optional array of long-path prefixes treated as vendored/upstream (default: the project's Read Only Content Roots). Only used to CLASSIFY (under_readonly_root / readonly_dirty_count); nothing is ever written. Pass [] to switch the classification off.
 //   @param path_prefix - Optional long-path prefix filter, e.g. /Game/VendorPack, to ask "is anything of THEIRS dirty". Empty (default) lists everything; what it excluded is counted in filtered_out.
 //   @param include_objects - Optional bool (default false). Also list every object carried by each dirty package. One object-hash walk per package -- a dirty map can hold thousands, so leave it off unless you need the contents.

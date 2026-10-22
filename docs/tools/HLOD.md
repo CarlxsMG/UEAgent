@@ -2,7 +2,7 @@
 
 # HLOD
 
-7 tools for HLOD layers, their settings and their actors.
+6 tools for HLOD layers, their settings and their actors.
 
 Back to the [index](README.md).
 
@@ -10,7 +10,7 @@ Back to the [index](README.md).
 
 *Additive, idempotent.*
 
-Creates and saves a new UHLODLayer (World Partition HLOD layer) asset.  Idempotent on re-run: an HLOD layer already at the path is returned unchanged with created=false, already_exists=true and saved=false, layer_type not applied and nothing saved; an asset of another class there is an error. Sets default streaming-grid cell_size=25600, loading_range=51200. Layer type accepts 'Instancing', 'MeshApproximate' (also 'Custom'/'CustomHLODActor'). Defaults to 'Instancing'. A failed save makes success false with saved=false. Change it later with set_hlod_layer_settings.
+Creates and saves a new UHLODLayer (World Partition HLOD layer) asset.  Idempotent on re-run: an HLOD layer already at the path is returned unchanged with created=false, already_exists=true and saved=false, layer_type not applied and nothing saved; an asset of another class there is an error. Sets default streaming-grid cell_size=25600, loading_range=51200. Layer type accepts 'Instancing', 'MeshApproximate' (also 'Custom'/'CustomHLODActor'). Defaults to 'Instancing'. A failed save makes success false with saved=false. Change it later with set_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -36,7 +36,7 @@ Enumerate which LOADED actors in the current editor world are assigned to a give
 
 *Read-only.*
 
-Read one World Partition HLOD layer asset (UHLODLayer): its layer type (Instancing, MeshMerge, MeshSimplify, MeshApproximate, Custom or CustomHLODActor) and its streaming-grid settings, cell_size and loading_range in centimetres and is_spatially_loaded. Read-only: it loads the asset and changes nothing. A path that does not load as an HLOD layer is an error. The grid fields are read by reflection because the engine deprecated them in 5.7; on a build without them they read 0 and false. Find layer paths with get_hlod_layers; change these values with set_hlod_layer_settings, the parent with set_hlod_layer_parent, and list the actors using the layer with get_hlod_layer_actors.
+Read one World Partition HLOD layer asset (UHLODLayer): its layer type (Instancing, MeshMerge, MeshSimplify, MeshApproximate, Custom or CustomHLODActor) and its streaming-grid settings, cell_size and loading_range in centimetres and is_spatially_loaded. Read-only: it loads the asset and changes nothing. A path that does not load as an HLOD layer is an error. The grid fields are read by reflection because the engine deprecated them in 5.7; on a build without them they read 0 and false. Find layer paths with get_hlod_layers; change these values with set_properties, the parent with set_hlod_layer_parent, and list the actors using the layer with get_hlod_layer_actors.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -48,7 +48,7 @@ Read one World Partition HLOD layer asset (UHLODLayer): its layer type (Instanci
 
 *Read-only.*
 
-List every World Partition HLOD layer asset (UHLODLayer and subclasses) under a content folder and its subfolders, found through the Asset Registry, with each one's name, object path and layer type (Instancing, MeshMerge, MeshSimplify, MeshApproximate, Custom or CustomHLODActor). Each layer asset is loaded to read its type, but nothing is changed or saved. A folder with no layers, or one that does not exist, gives an empty list and count 0, not an error. Use it to find a layer path, then read one layer's grid settings with get_hlod_layer_info or its assigned actors with get_hlod_layer_actors; create_hlod_layer makes a new one and set_hlod_layer_settings changes one.
+List every World Partition HLOD layer asset (UHLODLayer and subclasses) under a content folder and its subfolders, found through the Asset Registry, with each one's name, object path and layer type (Instancing, MeshMerge, MeshSimplify, MeshApproximate, Custom or CustomHLODActor). Each layer asset is loaded to read its type, but nothing is changed or saved. A folder with no layers, or one that does not exist, gives an empty list and count 0, not an error. Use it to find a layer path, then read one layer's grid settings with get_hlod_layer_info or its assigned actors with get_hlod_layer_actors; create_hlod_layer makes a new one and set_properties changes one.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -81,18 +81,3 @@ Sets (or clears) the parent UHLODLayer of a UHLODLayer and saves it.  The parent
 | `parent_layer_path` | string | no | Optional full /Game path to the parent HLOD layer; "" clears to null; absent leaves it untouched |
 
 **Returns:** `{ hlod_layer_path: string, asset_path: string, parent_layer_path: string, has_parent: bool, changed_parent: bool, settings_set: bool, saved: bool, note: string? }`
-
-## `set_hlod_layer_settings`
-
-*Destructive, idempotent.*
-
-Sets streaming-grid settings / layer type on a UHLODLayer and saves it.  Partial update: only the fields you send are touched. Sending cell_size or loading_range also enables the layer spatially loaded. Layer type accepts 'Instancing'|'MeshApproximate'|'Custom'|'CustomHLODActor'.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `hlod_layer_path` | string | yes | Full /Game path to the HLOD layer asset |
-| `cell_size` | number | no | Optional streaming-grid cell size |
-| `loading_range` | number | no | Optional streaming-grid loading range |
-| `layer_type` | string | no | Optional EHLODLayerType string |
-
-**Returns:** `{ hlod_layer_path: string, asset_path: string, layer_type: string, cell_size: int, loading_range: number, changed_cell_size: bool, changed_loading_range: bool, changed_layer_type: bool, settings_set: bool, saved: bool }`

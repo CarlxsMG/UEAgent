@@ -42,8 +42,8 @@ claude mcp add --transport http unreal http://127.0.0.1:55561/mcp
 ```
 
 **Any other client:** [Clients](clients.md) has the setup for Cursor, VS Code, Windsurf, Claude
-Desktop, Gemini CLI and Codex. A client that loads every tool up front connects to the
-[compact tool list](clients.md#compact-tool-list), three tools that search, describe and run the rest.
+Desktop, Gemini CLI and Codex. By default a client gets the [core tool list](clients.md#tool-lists):
+the core tools, and four tools that search, describe and run the rest.
 
 ## 4. Ask
 

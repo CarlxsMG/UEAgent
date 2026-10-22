@@ -1098,7 +1098,7 @@ void McpReadbackChecks::RegisterInResponseC(McpReadback::FTables& Tables)
 			T.Add(Command, Check);
 		}
 	};
-	T.Add(TEXT("compare_objects"), &CheckObjectComparison);
+	T.Add(TEXT("diff_objects"), &CheckObjectComparison);
 	T.Add(TEXT("reparent_blueprint"), &CheckReparentRollback);
 	T.Add(TEXT("set_data_table_row"), &CheckDataTableRowWrite);
 	T.Add(TEXT("add_blueprint_function"), &CheckNewFunction);

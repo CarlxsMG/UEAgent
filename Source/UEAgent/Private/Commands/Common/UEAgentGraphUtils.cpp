@@ -729,6 +729,9 @@ TSharedPtr<FJsonObject> FUEAgentGraphUtils::NodeToJson(UEdGraphNode* Node, bool 
         Obj->SetNumberField(TEXT("pos_x"), Node->NodePosX);
         Obj->SetNumberField(TEXT("pos_y"), Node->NodePosY);
         Obj->SetStringField(TEXT("comment"), Node->NodeComment);
+        // The path get_properties and set_properties take to read or write the node's own settings (an AnimGraph node's
+        // Node struct, a property access node's Path...).
+        Obj->SetStringField(TEXT("object_path"), Node->GetPathName());
     }
 
     if (bIncludePins)

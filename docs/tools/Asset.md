@@ -2,7 +2,7 @@
 
 # Asset
 
-57 tools for finding assets by name, type, tag or folder, collections, textures and render targets, static mesh sockets, thumbnails and imports.
+56 tools for finding assets by name, type, tag or folder, collections, textures and render targets, static mesh sockets, thumbnails and imports.
 
 Back to the [index](README.md).
 
@@ -49,20 +49,6 @@ Fill a whole UTextureRenderTarget2D with one solid color via ClearRenderTarget2D
 | `color` | string | no | Optional [r, g, b, a] clear color, defaults to opaque black |
 
 **Returns:** `{ render_target_path: string, cleared: bool, clear_color: [number], width: int, height: int }`
-
-## `compare_asset_versions`
-
-*Read-only.*
-
-Apply the binary ref-scan of scan_uasset_references to the SAME asset (rel_path) across N external Content roots, reporting ref-count / size / mtime (and optional pattern-match count) per root so you can tell an incomplete (stub) copy from the complete one at a glance.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `rel_path` | string | yes | Asset path relative to each root's Content dir, e.g. 'Characters/Mannequin/ABP_Manny.uasset' (a missing extension defaults to .uasset). |
-| `roots` | array | yes | List of external Content-root directories to compare across. |
-| `pattern` | string | no | Optional regex (ECMAScript) forwarded to the scan; when set, roots rank by pattern-match count instead of ref-path count. |
-
-**Returns:** `{ rel_path: string, pattern: string, roots: [{root, full_path, exists, size_bytes, modified, ref_path_unique, ref_path_occurrences, match_unique, match_occurrences}], most_complete_root: string, likely_stub_root: string, message: string }`
 
 ## `create_collection`
 
@@ -158,7 +144,7 @@ Creates a persisted UTexture2DArray from slices (no external file import).  If `
 
 *Destructive.*
 
-Create a UTexture2D asset filled with one solid color, with no source file: it allocates a BGRA8 editor source of width x height, fills every pixel with fill_color, sets sRGB with default compression, builds the resource and saves the asset to disk; no undo step. Use it for placeholder or mask textures; to bring in an image file use import_texture_file, to bake a render target create_static_texture_from_render_target, to change compression or sRGB afterwards set_texture_settings, and get_texture_info to read it back. It only creates: an asset already at package_path/name, of any class, is refused with success=false, its existing_class named, and nothing is deleted or created; to rebuild a texture, delete it first with delete_asset or pick a new name. An invalid package path is an error. A failed save (always while PIE runs) makes success false, with saved=false and save_error, the texture kept in memory.
+Create a UTexture2D asset filled with one solid color, with no source file: it allocates a BGRA8 editor source of width x height, fills every pixel with fill_color, sets sRGB with default compression, builds the resource and saves the asset to disk; no undo step. Use it for placeholder or mask textures; to bring in an image file use import_texture_file, to bake a render target create_static_texture_from_render_target, to change compression or sRGB afterwards set_properties, and get_texture_info to read it back. It only creates: an asset already at package_path/name, of any class, is refused with success=false, its existing_class named, and nothing is deleted or created; to rebuild a texture, delete it first with delete_asset or pick a new name. An invalid package path is an error. A failed save (always while PIE runs) makes success false, with saved=false and save_error, the texture kept in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -182,6 +168,20 @@ Deletes a Content Browser collection of the project, looked up by name within sh
 | `share_type` | string | no | ECollectionShareType the collection was created with: "Local", "Private", or "Shared" (optional, default "Local"); an unrecognised value falls back to Local. |
 
 **Returns:** `{ collection_name: string, share_type: string, destroyed: bool, already_absent: bool, exists: bool }`
+
+## `diff_asset_versions`
+
+*Read-only.*
+
+Apply the binary ref-scan of scan_uasset_references to the SAME asset (rel_path) across N external Content roots, reporting ref-count / size / mtime (and optional pattern-match count) per root so you can tell an incomplete (stub) copy from the complete one at a glance.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `rel_path` | string | yes | Asset path relative to each root's Content dir, e.g. 'Characters/Mannequin/ABP_Manny.uasset' (a missing extension defaults to .uasset). |
+| `roots` | array | yes | List of external Content-root directories to compare across. |
+| `pattern` | string | no | Optional regex (ECMAScript) forwarded to the scan; when set, roots rank by pattern-match count instead of ref-path count. |
+
+**Returns:** `{ rel_path: string, pattern: string, roots: [{root, full_path, exists, size_bytes, modified, ref_path_unique, ref_path_occurrences, match_unique, match_occurrences}], most_complete_root: string, likely_stub_root: string, message: string }`
 
 ## `diff_content_trees`
 
@@ -291,6 +291,8 @@ Export a render target to an image file on disk: PNG, except an RGBA16f or RGBA3
 ## `find_assets_by_name`
 
 *Read-only.*
+
+**Core tool:** every client lists it by default.
 
 Find assets by NAME, scanning every mounted content root (/Game, /Engine, /Water, plugin mounts, ...) and returning name, object path, class and package per hit. The broad "does anything called &lt;token> exist, and where?" search. It has TWO match modes and picks one automatically, reporting which in `match_mode`: a pattern WITHOUT `*`/`?` is a case-insensitive SUBSTRING test (FString::Contains) -- pass the bare token, this is the common case; a pattern WITH `*` or `?` is a real glob (FString::MatchesWildcard). WARNING: The glob is ANCHORED AT BOTH ENDS -- it matches the WHOLE name, not a substring -- so `Grass*` means "starts with Grass" and `*Grass*` is what reproduces substring behaviour. It only ever looks at the asset NAME, so it cannot find an asset by its folder or by a class it belongs to: use resolve_asset_by_name to check ONE exact name and get every homonym, get_assets_in_folder to enumerate a directory, get_assets_by_type for the 5 built-in type filters, and get_assets_by_tag for an Asset Registry tag.
 
@@ -789,25 +791,3 @@ Move, rotate or scale an existing socket of a UStaticMesh asset relative to the 
 | `scale` | array | no | New relative scale [x, y, z] as multipliers, e.g. [1, 1, 1] (optional). |
 
 **Returns:** `{ static_mesh_path, socket_name, updated, location:{x,y,z}, rotation:{pitch,yaw,roll}, scale:{x,y,z}, saved }`
-
-## `set_texture_settings`
-
-*Destructive, idempotent.*
-
-Sets the given sRGB, compression, LOD group and sampler/LOD fields (address X/Y, filter, mip-gen settings, LOD bias, max size, flip-green) of a UTexture2D asset, rebuilds its resource when one changed (PostEditChange + UpdateResource, no shader recompile) and saves it in every case, returning every setting read back. An unknown compression or LOD group name is still applied, as TC_Default or TEXTUREGROUP_World, with a compression_warning or lod_group_warning; an unknown address, filter or mip-gen name is skipped with an address_x_warning, address_y_warning, filter_warning or mip_gen_settings_warning. Enum params accept the name with or without its prefix.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `texture_path` | string | yes | Asset path of the texture to modify |
-| `srgb` | boolean | no | True treats the texture as sRGB color, false as linear data such as normal or mask maps; omit to keep the current value |
-| `compression_settings` | string | no | TextureCompressionSettings name with or without the TC_ prefix, e.g. "Default", "Normalmap", "Masks", "VectorDisplacementmap", "BC7", "HDR"; omit to keep the current value |
-| `lod_group` | string | no | TextureGroup name with or without the TEXTUREGROUP_ prefix, e.g. "World", "UI", "Character", "Effects"; omit to keep the current value |
-| `address_x` | string | no | Optional TextureAddress name, with or without TA_: Wrap, Clamp or Mirror; omit to keep the current value |
-| `address_y` | string | no | Optional TextureAddress name, with or without TA_: Wrap, Clamp or Mirror; omit to keep the current value |
-| `filter` | string | no | Optional TextureFilter name, with or without TF_: Nearest, Bilinear, Trilinear or Default; omit to keep the current value |
-| `mip_gen_settings` | string | no | Optional TextureMipGenSettings name, with or without TMGS_: FromTextureGroup, SimpleAverage, NoMipmaps, LeaveExistingMips, Sharpen0..10, Blur1..5, Unfiltered, Angular; omit to keep the current value |
-| `lod_bias` | number | no | Optional int LOD bias; omit to keep the current value |
-| `max_texture_size` | number | no | Optional int max texture size (0 = no limit, negatives clamp to 0); omit to keep the current value |
-| `flip_green` | boolean | no | Optional bool, flips the green channel; omit to keep the current value |
-
-**Returns:** `{ texture_name: string, asset_path: string, changed: bool, saved: bool, width: int, height: int, format: string, srgb: bool, compression: string, lod_group: string, address_x: string, address_y: string, filter: string, mip_gen_settings: string, lod_bias: int, max_texture_size: int, flip_green: bool, has_source: bool, source_width?: int, source_height?: int, source_format?: string, compression_warning?: string, lod_group_warning?: string, address_x_warning?: string, address_y_warning?: string, filter_warning?: string, mip_gen_settings_warning?: string, save_error?: string }`

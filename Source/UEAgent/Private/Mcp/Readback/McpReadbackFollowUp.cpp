@@ -46,7 +46,7 @@ namespace McpReadbackFollowUp
 	/** Connecting to an input pin that is already linked ADDS a second link instead of replacing it. */
 	static FO CheckConnectPins(const FO& Params, const FSend& Send)
 	{
-		const FV Bp = Get(Params, TEXT("blueprint_name"));
+		const FV Bp = Or(Get(Params, TEXT("asset_path")), Get(Params, TEXT("blueprint_name")));
 		const FV NodeId = Get(Params, TEXT("target_node_id"));
 		const FV Pin = Get(Params, TEXT("target_pin"));
 		if (!Truthy(Bp) || !Truthy(NodeId) || !Truthy(Pin))
@@ -252,7 +252,7 @@ namespace McpReadbackFollowUp
 	/** An edited graph lives only in memory until saved; a package that is NOT dirty after an edit is worse. */
 	static FO CheckGraphInMemory(const FO& Params, const FSend& Send)
 	{
-		const FString Name = TextOf(Get(Params, TEXT("blueprint_name")));
+		const FString Name = TextOf(Or(Get(Params, TEXT("asset_path")), Get(Params, TEXT("blueprint_name"))));
 		if (Name.IsEmpty())
 		{
 			return nullptr;
@@ -293,7 +293,7 @@ namespace McpReadbackFollowUp
 	/** A short Blueprint name that matches SEVERAL assets: the read picked one without saying which. */
 	static FO CheckAmbiguousName(const FO& Params, const FSend& Send)
 	{
-		const FString Name = TextOf(Get(Params, TEXT("blueprint_name")));
+		const FString Name = TextOf(Or(Get(Params, TEXT("asset_path")), Get(Params, TEXT("blueprint_name"))));
 		if (Name.IsEmpty() || Contains(Name, TEXT("/")))
 		{
 			return nullptr;
@@ -605,7 +605,7 @@ void McpReadbackChecks::RegisterFollowUp(McpReadback::FTables& Tables)
 	using namespace McpReadbackFollowUp;
 	TMap<FString, McpReadback::FFollowUpCustom>& F = Tables.FollowUpCustom;
 	F.Add(TEXT("build_blueprint_graph"), &CheckGraphInMemory);
-	F.Add(TEXT("delete_node"), &CheckGraphInMemory);
+	F.Add(TEXT("remove_graph_node"), &CheckGraphInMemory);
 	F.Add(TEXT("get_graph_nodes"), &CheckAmbiguousName);
 	F.Add(TEXT("get_blueprint_functions"), &CheckAmbiguousName);
 	F.Add(TEXT("set_blueprint_component_properties"), &CheckBlueprintComponentProperty);

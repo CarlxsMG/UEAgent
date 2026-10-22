@@ -2,7 +2,7 @@
 
 # Mass
 
-21 tools for Mass Entity configs and traits, spawners, entities, tags and signals.
+19 tools for Mass Entity configs and traits, spawners, entities, tags and signals.
 
 Back to the [index](README.md).
 
@@ -23,7 +23,7 @@ Add an FMassTag (a tag, not a trait or fragment, despite the name) to a Mass ent
 
 *Additive, idempotent.*
 
-Adds a trait (a concrete UMassEntityTraitBase subclass) to a UMassEntityConfigAsset and saves the config. Idempotent: if the config already holds a trait of exactly that class, itself or through its parent config chain, nothing is added or saved and the reply has added=false, already_existed=true and that trait's trait_path. trait_class takes a reflected name with or without its U prefix, or a /Script path; an unknown or non-trait class is an error, but an abstract one is not refused: the engine creates it behind an ensure and warns it is nulled out on save. Edit it with set_mass_trait_property; remove_mass_trait is the inverse; add_mass_tag_to_entity tags a live entity instead.
+Adds a trait (a concrete UMassEntityTraitBase subclass) to a UMassEntityConfigAsset and saves the config. Idempotent: if the config already holds a trait of exactly that class, itself or through its parent config chain, nothing is added or saved and the reply has added=false, already_existed=true and that trait's trait_path. trait_class takes a reflected name with or without its U prefix, or a /Script path; an unknown or non-trait class is an error, but an abstract one is not refused: the engine creates it behind an ensure and warns it is nulled out on save. Edit it with set_properties on its object_path from list_mass_traits; remove_mass_trait is the inverse; add_mass_tag_to_entity tags a live entity instead.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -133,20 +133,6 @@ Read an AMassSpawner actor of the editor world, found by actor label (first matc
 
 **Returns:** `{ actor_label, actor_name, count, entity_type_count, entity_types: [{ entity_config, proportion }] }`
 
-## `get_mass_trait_property`
-
-*Read-only.*
-
-Read a property (name or dotted path) of a trait on a Mass entity config, picked by trait_class, as ExportText plus its C++ type. Use it because a trait is an instanced object inside the config that get_properties cannot address by class. Write: set_mass_trait_property.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `config_path` | string | yes | Asset path to the UMassEntityConfigAsset |
-| `trait_class` | string | yes | Trait class name; the trait must be on the config |
-| `property_name` | string | yes | Property name or dotted path |
-
-**Returns:** `{ config_path, trait_class, property_name, value, type }`
-
 ## `list_mass_archetypes`
 
 *Read-only.*
@@ -173,7 +159,7 @@ Lists the Mass tag types loaded in this editor: every struct derived from FMassT
 
 *Read-only.*
 
-List the traits a UMassEntityConfigAsset holds itself (not those inherited from its parent config), read-only, in config order. Returns config_path, trait_count and traits [{class, name}]; edit them with add_mass_trait, remove_mass_trait and set_mass_trait_property.
+List the traits a UMassEntityConfigAsset holds itself (not those inherited from its parent config), read-only, in config order. Returns config_path, trait_count and traits [{class, name, object_path}]; add and remove them with add_mass_trait and remove_mass_trait, and read or write a trait's settings with get_properties and set_properties on its object_path.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -246,21 +232,6 @@ Replace the entity types of an AMassSpawner actor in the editor world (its prote
 | `config_paths` | array | yes | Array of Mass entity config asset paths, e.g. ["/Game/Mass/DA_CrowdAgent"], as create_mass_entity_config returns them (config_path); [] clears the list. |
 
 **Returns:** `{ actor_label, entity_type_count, linked, set }`
-
-## `set_mass_trait_property`
-
-*Destructive, idempotent.*
-
-Set one property (name or dotted struct path) of a trait on a Mass entity config asset from import text, as one undo step, and save it. set_properties needs the trait's object path; this finds it by trait_class (add it: add_mass_trait). The trait gets PostEditChange as after a Details-panel edit; there is no edit gate, and a value that does not import is refused with nothing changed. A failed save makes success false, with saved=false and save_error. Read: get_mass_trait_property.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `config_path` | string | yes | Asset path to the UMassEntityConfigAsset |
-| `trait_class` | string | yes | Trait class name; the trait must already be on the config (e.g. MassVelocityRandomizerTrait) |
-| `property_name` | string | yes | Property name or dotted path (e.g. MaxSpeed, or Movement.HighResSpeed) |
-| `value` | string | yes | String value parsed by FProperty::ImportText_Direct |
-
-**Returns:** `{ config_path, trait_class, property_name, value, set, saved, save_error? }`
 
 ## `spawn_mass_entities`
 

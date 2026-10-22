@@ -165,6 +165,8 @@ def domain_page(domain: str, commands: list[dict]) -> str:
         lines += [f"## `{c['name']}`", ""]
         if hints(c.get("annotations")):
             lines += [hints(c.get("annotations")), ""]
+        if c.get("core"):
+            lines += ["**Core tool:** every client lists it by default.", ""]
         lines += [prose(c.get("description") or "No description."), ""]
         params = c.get("params") or []
         if params:
@@ -182,10 +184,13 @@ def domain_page(domain: str, commands: list[dict]) -> str:
 
 def index_page(domains: list[dict], has_retired: bool = False) -> str:
     total = sum(len(d["commands"]) for d in domains)
+    core = sorted(c["name"] for d in domains for c in d["commands"] if c.get("core"))
     lines = [HEADER, "", "# Tool reference", "",
              f"{total} tools in {len(domains)} domains. Every tool also describes itself over MCP "
-             "(`tools/list`, or `describe_tool` in the [compact tool list](../clients.md#compact-tool-list)); "
-             "this reference is the same catalog, readable.", "",
+             "(`tools/list`, or `describe_tool` for a tool the client does not list: see "
+             "[tool lists](../clients.md#tool-lists)); this reference is the same catalog, readable.", "",
+             f"The {len(core)} core tools, which every client lists by default: "
+             + ", ".join(f"`{name}`" for name in core) + ".", "",
              "| Domain | Tools | What it covers |", "|---|---|---|"]
     for d in domains:
         covers = summary(d["domain"], d["commands"])

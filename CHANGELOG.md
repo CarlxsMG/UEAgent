@@ -2,6 +2,99 @@
 
 Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](https://semver.org).
 
+## 2.5.0 - 2026-10-22
+
+A client now lists 35 core tools instead of 1,622, and reaches the rest when it needs them. The six graph tools edit
+every kind of graph asset, the property tools reach an asset's sub-objects, 75 tools that overlapped them leave the
+list, and 10 tools get the verb their operation calls for. Every old name keeps working until 3.0.
+
+### Changed
+
+- **The core tool list is the default.** `tools/list` carries 35 core tools and 4 meta-tools: the core covers assets,
+  actors and levels, any object's properties, Blueprint and other asset graphs, data tables, Play-in-Editor and Python.
+  The meta-tools reach everything else: `find_tools` searches every tool, `describe_tool` gives one tool's schema,
+  `call_tool` runs any tool, and the new `enable_toolset` adds whole domains to the client's list for its session.
+  - The server announces the change with `notifications/tools/list_changed`, so a client that supports it shows the
+    new tools straight away.
+  - `initialize` on the core list opens a session (`Mcp-Session-Id`), which remembers the domains a client enabled.
+  - `?domains=Material,Animation` at the end of the URL lists those domains from the start.
+  - `?tools=all` gives a client every tool again, and `?tools=compact` only the first three meta-tools.
+  - `UEAGENT_TOOLS=all` or `UEAGENT_TOOLS=compact` changes the default for every client.
+  - **Connect** writes the server's own URL for every client, so the core list. Claude Code loads tools on demand:
+    add `?tools=all` to its URL to give it every tool directly.
+- **One graph API for every graph asset.** `get_graph_nodes`, `add_graph_node`, `remove_graph_node`, `connect_pins`,
+  `disconnect_pin` and `set_pin_default_value` take `asset_path` (`blueprint_name` is still accepted). Besides
+  Blueprints they now edit materials, material functions, sound cues, MetaSound Sources, PCG graphs and Control Rigs,
+  through each editor's own tool, so its saves, checks and replies apply.
+  - In an Animation Blueprint, `connect_pins` uses the graph's own schema, so pose links work, and `add_graph_node`
+    takes any graph node class (`AnimGraphNode_Slot`).
+  - The node ids `@input` and `@output` name a graph's own input and output: a material's main inputs, a sound cue's
+    first node, a MetaSound's graph inputs and outputs, a PCG graph's input and output nodes.
+  - `disconnect_pin` can break one link (`linked_node_id`, `linked_pin`) instead of every link of the pin.
+  - `get_graph_nodes` gives every node its `object_path`, which the property tools take.
+- **Sub-objects in the property tools.** `get_properties`, `set_properties` and `get_object_info` take the
+  `object_path` the readers now give for each sub-object: graph nodes, material expressions, sound cue nodes, PCG node
+  settings (`settings_path`), behavior tree nodes, Niagara renderers and simulation stages, camera rig nodes, Mass
+  traits and physics bodies. `"/Game/Asset:SubObject"` works too. After a write, `set_properties` finishes the owning
+  asset as its editor does: a graph node is reconstructed and its Blueprint marked modified, a sound cue recaches its
+  values, a Niagara system recompiles.
+- **75 tools leave the list.** They overlapped the graph and property tools above, and still run under their own names
+  until 3.0. The [retired names](docs/tools/retired.md) page says which listed tool does the same, with the call.
+  - Graph tools (44): `add_anim_graph_node`, `add_metasound_node`, `add_pcg_node`, `add_pcg_subgraph_node`,
+    `add_rigvm_link`, `add_rigvm_node`, `add_sound_cue_node`, `connect_anim_graph_pins`,
+    `connect_material_expressions`, `connect_material_function_pins`, `connect_metasound_graph_input_to_node`,
+    `connect_metasound_graph_input_to_output`, `connect_metasound_node_to_graph_output`, `connect_metasound_nodes`,
+    `connect_pcg_nodes`, `connect_sound_cue_nodes`, `connect_substrate_slab_to_material`,
+    `connect_to_material_output`, `create_material_expression`, `create_substrate_slab_node`,
+    `delete_material_expression`, `disconnect_anim_graph_pins`, `disconnect_material_expressions`,
+    `disconnect_metasound_graph_input_from_output`, `disconnect_metasound_node_from_graph_output`,
+    `disconnect_metasound_nodes`, `disconnect_pcg_nodes`, `disconnect_sound_cue_nodes`,
+    `disconnect_to_material_output`, `get_material_graph_info`, `get_metasound_node_info`, `get_pcg_graph_info`,
+    `get_rigvm_graph`, `get_sound_cue_graph`, `list_metasound_connections`, `list_metasound_nodes`,
+    `remove_metasound_node`, `remove_pcg_node`, `remove_rigvm_link`, `remove_rigvm_node`, `remove_sound_cue_node`,
+    `set_metasound_node_input_default`, `set_rigvm_pin_default`, `set_sound_cue_first_node`.
+  - Property tools (31): `get_anim_graph_node_properties`, `get_behavior_tree_node_properties`,
+    `get_cine_camera_settings`, `get_component_properties`, `get_input_settings`, `get_interchange_project_settings`,
+    `get_landscape_grass_type_properties`, `get_light_properties`, `get_mass_trait_property`,
+    `get_pcg_node_properties`, `get_post_process_settings`, `get_property_access_path`, `get_recast_navmesh_settings`,
+    `get_reflection_capture_properties`, `get_sound_class_properties`, `set_anim_additive_settings`,
+    `set_anim_graph_node_property`, `set_audio_3d_settings`, `set_camera_node_parameters`,
+    `set_geometry_collection_connection_settings`, `set_hlod_layer_settings`, `set_mass_trait_property`,
+    `set_material_expression_property`, `set_modulation_generator_settings`, `set_modulation_parameter_settings`,
+    `set_niagara_renderer_properties`, `set_pcg_node_properties`,
+    `set_recast_navmesh_settings`, `set_sound_cue_node_properties`, `set_submix_effect_settings`,
+    `set_texture_settings`.
+- **10 tools renamed to their verb.** `add_` puts a part in and `remove_` takes it out; `delete_` is for what
+  `create_` makes. The old names run the new tools.
+  - `delete_node` → `remove_graph_node`, `delete_blueprint_variable` → `remove_blueprint_variable`,
+    `delete_curve_table_row` → `remove_curve_table_row`, `delete_data_table_row` → `remove_data_table_row`,
+    `delete_material_function_input` → `remove_material_function_input`,
+    `delete_material_function_output` → `remove_material_function_output`,
+    `delete_mesh_triangles` → `remove_mesh_triangles`.
+  - `compare_objects` → `diff_objects`, `compare_asset_versions` → `diff_asset_versions`,
+    `does_foliage_type_exist` → `is_foliage_type_loadable`.
+  - The catalog generator refuses a `delete_` tool next to an `add_` tool for the same thing, and `compare_` as a
+    verb. The agent instructions say when to use `diff_`, `execute_` and `run_`.
+- `set_metasound_graph_input_default` takes its value as text too, read as the input's own type.
+- `connect_to_material_output` marks the material dirty.
+
+### Fixed
+
+- **A tool that hands its call to another reported a refusal as success.** When the PIE guard or a precondition refused
+  the inner call, the outer tool answered success. It now fails, with the refusal's detail under `data`.
+- **The graph tools edited a Control Rig as a plain Blueprint**, and could add an EventGraph page to it. They now edit
+  its rig graph.
+- `connect_material_function_pins` ignored `from_pin` and always wired the source's first output.
+- `connect_to_material_output` wired `FrontMaterial` while Substrate was disabled; it now refuses.
+- `set_rigvm_pin_default` compiled and saved after a value that did not land, and answered success. That is now an
+  error, and nothing is compiled or saved.
+- `set_metasound_node_input_default` reported `value_set: true` without comparing the value read back.
+- `connect_pcg_nodes` answered success after a failed save.
+- `remove_metasound_node` removed a graph input or output node and left the input or output declared with no node. It
+  now refuses and names the tool that removes the input or output.
+- `get_rigvm_graph` now lists each pin's default value and links; it only counted the links before.
+- `get_material_graph_info` now lists each expression's output names, which `connect_pins` takes as `source_pin`.
+
 ## 2.4.3 - 2026-10-21
 
 The 134 tool definitions Glama scored below 4 now say when to use the tool, what each parameter takes and what it

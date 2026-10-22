@@ -2,7 +2,7 @@
 
 # Material
 
-65 tools for materials and their expression graphs, material functions, instances and parameters, parameter collections and Substrate.
+54 tools for materials and their expression graphs, material functions, instances and parameters, parameter collections and Substrate.
 
 Back to the [index](README.md).
 
@@ -25,7 +25,7 @@ Add a scalar or vector (RGBA color) parameter with a new GUID to a Material Para
 
 *Additive.*
 
-Adds a new MaterialAttributeLayers expression to a UMaterial asset, turns on bUseMaterialAttributes (the separate pins such as Base Color stop driving the material), wires the node into MaterialAttributes, recompiles and saves. Not idempotent: each call adds another node. Fails when the save fails; returns connected_material_attributes and num_expressions. Unwire: disconnect_to_material_output output_property=MaterialAttributes.
+Adds a new MaterialAttributeLayers expression to a UMaterial asset, turns on bUseMaterialAttributes (the separate pins such as Base Color stop driving the material), wires the node into MaterialAttributes, recompiles and saves. Not idempotent: each call adds another node. Fails when the save fails; returns connected_material_attributes and num_expressions. Unwire: disconnect_pin node_id=@output, pin_name=MaterialAttributes.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -52,7 +52,7 @@ Insert a call to a UMaterialFunction into a UMaterial graph: a MaterialFunctionC
 
 *Additive.*
 
-Add a FunctionInput node (a new input pin) to a UMaterialFunction asset with the optional props applied, then recompile the function and mark it dirty without saving. Returns node_id, the handle for set_material_function_input_props and delete_material_function_input, plus num_inputs and added.
+Add a FunctionInput node (a new input pin) to a UMaterialFunction asset with the optional props applied, then recompile the function and mark it dirty without saving. Returns node_id, the handle for set_material_function_input_props and remove_material_function_input, plus num_inputs and added.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -70,7 +70,7 @@ Add a FunctionInput node (a new input pin) to a UMaterialFunction asset with the
 
 *Additive.*
 
-Add a FunctionOutput node, the output pin named output_name, to a UMaterialFunction asset loaded from function_path, then recompile the function (loaded materials that use it recompile too) and mark it dirty, without saving and without an undo transaction. Each call adds another node, so it is not idempotent, and output_name is stored as given: a name another output already has is not made unique. The new output starts unwired, placed right of the graph below the existing outputs, and node_id is its handle; added confirms the output count rose by one. A function that does not load is an error. Wire it with connect_material_function_pins, edit it with set_material_function_output_props, and its inverse is delete_material_function_output; inputs are add_material_function_input; list pins with get_material_function_info; persist with save_asset.
+Add a FunctionOutput node, the output pin named output_name, to a UMaterialFunction asset loaded from function_path, then recompile the function (loaded materials that use it recompile too) and mark it dirty, without saving and without an undo transaction. Each call adds another node, so it is not idempotent, and output_name is stored as given: a name another output already has is not made unique. The new output starts unwired, placed right of the graph below the existing outputs, and node_id is its handle; added confirms the output count rose by one. A function that does not load is an error. Wire it with connect_pins, edit it with set_material_function_output_props, and its inverse is remove_material_function_output; inputs are add_material_function_input; list pins with get_material_function_info; persist with save_asset.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -90,65 +90,6 @@ Recompile a UMaterial asset through UMaterialEditingLibrary::RecompileMaterial: 
 | `material_path` | string | yes | UMaterial asset path, e.g. "/Game/Materials/M_Rock"; a material instance or function path fails with Material not found. |
 
 **Returns:** `{ material: string, recompiled: bool }`
-
-## `connect_material_expressions`
-
-*Destructive.*
-
-Wire one material node's output pin into another node's input pin -- the call that turns loose expressions into a working graph, and the only headless route to some pins. Input names go WITHOUT spaces (BaseColor and AmbientOcclusion work, "Base Color" does not), and MakeMaterialAttributes accepts named pins the graph walker reports as unnamed, including Displacement. A true return only means the pin NAME resolved: confirm the connection landed by re-reading get_material_graph_info, then compile and check get_material_stats.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `material_path` | string | yes | Full path to the material (e.g., '/Game/Materials/MyMaterial.MyMaterial') |
-| `from_expression_name` | string | yes | Name of the source material expression |
-| `from_output_name` | string | yes | Name of the output pin on the source expression |
-| `to_expression_name` | string | yes | Name of the destination material expression |
-| `to_input_name` | string | yes | Name of the input pin on the destination expression |
-
-**Returns:** `{ material_path: string, from_expression_name: string, from_output_name: string, to_expression_name: string, to_input_name: string, success: bool }`
-
-## `connect_material_function_pins`
-
-*Destructive.*
-
-Wire two material expression nodes inside a UMaterialFunction graph by name. Read back: get_material_graph_info on the function; inverse: disconnect_material_expressions with material_function_path.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `material_function_path` | string | yes | Asset path of the UMaterialFunction |
-| `from_node_id` | string | yes | Name of the source expression |
-| `to_node_id` | string | yes | Name of the destination expression |
-| `from_pin` | string | no | Optional source output pin name (default: first available) |
-| `to_input` | string | no | Optional destination FExpressionInput name (e.g. "A"); if omitted, picks the first empty input |
-
-**Returns:** `{ material_function_path: string, from_node_id: string, to_node_id: string, from_pin: string, to_input: string, connected: bool, saved: bool }`
-
-## `connect_substrate_slab_to_material`
-
-*Destructive.*
-
-Connect the Slab BSDF output to the material's Front Material input.  GATED by Substrate: when Substrate is disabled this returns a clear error ("Substrate disabled: cannot connect slab to Front Material...") because the Front Material input is only meaningful with Substrate enabled. When enabled, connects via ConnectMaterialProperty(MP_FrontMaterial) and recompiles. Unwire: disconnect_to_material_output output_property=FrontMaterial.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `material_path` | string | yes | Content path to the UMaterial holding the slab node |
-
-**Returns:** `{ material_path: string, slab_node_id: string, connected_to: string, connected: bool, substrate_enabled: bool, r_substrate_cvar: int, note?: string } | (error: "Substrate disabled: ...")`
-
-## `connect_to_material_output`
-
-*Destructive.*
-
-Wire one output of an expression node into a main input of a UMaterial asset (BaseColor, Roughness, Normal...). The edit stays in memory: no recompile, no dirty flag, no save, so follow with compile_material and save_asset. Node-to-node wiring is connect_material_expressions.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `material_path` | string | yes | UMaterial asset path, e.g. "/Game/Materials/M_Rock"; a material instance path fails with Material not found. |
-| `from_node_id` | string | yes | Id of the source expression (from create_material_expression / get_material_graph_info). |
-| `output_property` | string | yes | Material input to feed, case-insensitive: BaseColor, Metallic, Specular, Roughness, Anisotropy, Normal, Tangent, EmissiveColor (or Emissive), Opacity, OpacityMask, WorldPositionOffset (WPO), AmbientOcclusion (AO), Refraction, PixelDepthOffset, SubsurfaceColor, FrontMaterial (Substrate), MaterialAttributes. |
-| `from_pin` | string | no | Output pin name on the source node, e.g. "RGB" or "R"; omitted or empty uses its first output. |
-
-**Returns:** `{ material: string, from_node_id: string, output_property: string, connected: bool }`
 
 ## `copy_material_instance_dynamic_parameters`
 
@@ -194,7 +135,7 @@ Give one material slot of a mesh component on an editor-world actor its own Mate
 
 *Additive.*
 
-Create a new base material asset (UMaterial) -- the graph-owning master whose parameters and static switches every instance of it inherits. Prefer create_material_instance when you only need a re-skin of something that exists: an instance costs no new shader permutations and leaves the original updatable. After creating, build the graph with create_material_expression + connect_material_expressions, then verify with get_material_stats (compile_errors empty and stats_valid true) -- compile_material only acknowledges, it does not report errors, and a landscape material that fails to compile silently falls back to the default material.
+Create a new base material asset (UMaterial) -- the graph-owning master whose parameters and static switches every instance of it inherits. Prefer create_material_instance when you only need a re-skin of something that exists: an instance costs no new shader permutations and leaves the original updatable. After creating, build the graph with add_graph_node + connect_pins, then verify with get_material_stats (compile_errors empty and stats_valid true) -- compile_material only acknowledges, it does not report errors, and a landscape material that fails to compile silently falls back to the default material.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -203,27 +144,11 @@ Create a new base material asset (UMaterial) -- the graph-owning master whose pa
 
 **Returns:** `{ material_path: string (object path of the new material, '/Game/Materials/M_X.M_X'), material_name: string, package_path: string, success: bool } -- an existing asset of that name is an error, never overwritten`
 
-## `create_material_expression`
-
-*Additive.*
-
-Add ONE node to a material graph -- or to a material function's internal graph -- by expression class path (e.g. /Script/Engine.MaterialExpressionConstant, ...TextureSample, ...ScalarParameter), at a graph position. The building block of headless material authoring: create the nodes, then wire them with connect_material_expressions and connect_to_material_output (inside a function: connect_material_function_pins, then recompile_material_function). The node arrives UNCONNECTED, so nothing renders differently until it is wired -- verify with get_material_graph_info and get_material_stats, not with the success flag. Inverse: delete_material_expression (with material_function_path inside a function).
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `material_path` | string | yes | Full path to the material (e.g., '/Game/Materials/MyMaterial.MyMaterial'); a UMaterialFunction path is accepted too and creates the node inside that function |
-| `expression_class_name` | string | yes | Material expression class name (e.g., '/Script/Engine.MaterialExpressionConstant') |
-| `material_function_path` | string | no | Alias of material_path that addresses a UMaterialFunction (or material layer): the node is created inside the function's graph |
-| `node_pos_x` | number | no | Optional graph editor X position; defaults to 0 |
-| `node_pos_y` | number | no | Optional graph editor Y position; defaults to 0 |
-
-**Returns:** `{ material_path: string, material_function_path?: string (the function's object path, when the node went into a function), expression_class_name: string, expression_name: string, node_pos_x: int, node_pos_y: int, success: bool }`
-
 ## `create_material_function`
 
 *Additive, idempotent.*
 
-Create an empty material function asset named name in package_path -- a plain UMaterialFunction through the editor factory, or with usage MaterialLayer / MaterialLayerBlend a material layer or layer blend function, the way the editor's factories make them -- exposed to the material function library, with the optional description stored as its tooltip, then save it. Idempotent: an existing material function at that path, whatever its class or usage, is returned untouched with already_exists=true, already_existed=true, created=false and saved=false, and nothing is saved (description is ignored then and comes back as the function's own); another asset class there, or an invalid package path, is an error. A failed save (PIE running, read-only file) makes success false with created=true, saved=false and save_error, the function kept in memory. Then add pins with add_material_function_input and add_material_function_output and nodes with create_material_expression (material_function_path); read it back with get_material_graph_info; a variant with overrides: create_material_function_instance; use it in a material: add_material_function_call (a layer or blend: set_material_layer_stack); inverse: delete_asset.
+Create an empty material function asset named name in package_path -- a plain UMaterialFunction through the editor factory, or with usage MaterialLayer / MaterialLayerBlend a material layer or layer blend function, the way the editor's factories make them -- exposed to the material function library, with the optional description stored as its tooltip, then save it. Idempotent: an existing material function at that path, whatever its class or usage, is returned untouched with already_exists=true, already_existed=true, created=false and saved=false, and nothing is saved (description is ignored then and comes back as the function's own); another asset class there, or an invalid package path, is an error. A failed save (PIE running, read-only file) makes success false with created=true, saved=false and save_error, the function kept in memory. Then add pins with add_material_function_input and add_material_function_output and nodes with add_graph_node; read it back with get_graph_nodes; a variant with overrides: create_material_function_instance; use it in a material: add_material_function_call (a layer or blend: set_material_layer_stack); inverse: delete_asset.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -295,7 +220,7 @@ Create a UMaterialParameterCollection asset at package_path/name and save it to 
 
 *Destructive, idempotent.*
 
-Create a UMaterial named name in package_path through the editor factory, configured as a post-process material (domain PostProcess, blended after tonemapping), then recompile and save it. Idempotent create or convert: an existing UMaterial at that path has those two settings overwritten, is recompiled and saved, and answers created=false, already_exists=true and a note with its old domain; one that already has them is left as it is (changed=false, saved=false, a note), nothing recompiled or saved. Another asset class there, or an invalid path, is an error. A failed save makes success false with saved=false and save_error, the material kept in memory. Add nodes with create_material_expression and wire them with connect_to_material_output; another domain: set_material_domain.
+Create a UMaterial named name in package_path through the editor factory, configured as a post-process material (domain PostProcess, blended after tonemapping), then recompile and save it. Idempotent create or convert: an existing UMaterial at that path has those two settings overwritten, is recompiled and saved, and answers created=false, already_exists=true and a note with its old domain; one that already has them is left as it is (changed=false, saved=false, a note), nothing recompiled or saved. Another asset class there, or an invalid path, is an error. A failed save makes success false with saved=false and save_error, the material kept in memory. Add nodes with add_graph_node and wire them to the output with connect_pins (target_node_id=@output); another domain: set_material_domain.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -303,20 +228,6 @@ Create a UMaterial named name in package_path through the editor factory, config
 | `name` | string | yes | Asset name for the new material |
 
 **Returns:** `{ material_path: string, name: string, package_path: string, domain: string, blendable_location: number, is_post_process: bool, created: bool, already_exists: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
-
-## `create_substrate_slab_node`
-
-*Additive, idempotent.*
-
-Add a Substrate Slab BSDF node to a UMaterial asset.  Performs a real CreateMaterialExpression on the material graph and saves the package. Idempotent: reuses an existing slab node on re-run. Node creation succeeds even when Substrate is disabled (substrate_enabled=false), but the material will not compile/render until Substrate is enabled and the editor restarts.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `material_path` | string | yes | Content path to the UMaterial (e.g. /Game/MyGame/M_Example) |
-| `node_pos_x` | number | no | Optional graph editor X position; defaults to -400 |
-| `node_pos_y` | number | no | Optional graph editor Y position; defaults to 0 |
-
-**Returns:** `{ material_path: string, material_name: string, node_id: string, node_class: string, created: bool, already_existed: bool, substrate_enabled: bool, r_substrate_cvar: int, note?: string }`
 
 ## `create_subsurface_profile`
 
@@ -331,46 +242,6 @@ Create a USubsurfaceProfile asset named name in package_path (default /Game/Game
 
 **Returns:** `{ name: string, asset_path: string, asset_class: string, mean_free_path_distance: number, is_subsurface_profile: bool, already_existed: bool, created: bool, saved: bool, save_error?: string }`
 
-## `delete_material_expression`
-
-*Destructive.*
-
-Delete ONE node from a material graph -- or from a material function's internal graph -- by name. Deliberately one at a time, and that is the safe way to empty a graph: the engine's bulk delete_all_material_expressions can leave half the nodes behind with no error, and a rebuild on top then produces duplicate parameter names that no parameter listing reveals (duplicates collapse by name). Loop this instead, re-reading get_material_graph_info until its expression_count reaches 0. The underlying engine call also returns false while having done the work, so count the nodes rather than trusting the flag. Inside a function (material_function_path, or a function path in material_path) the links into the node are broken, the node leaves the function's expressions and the reply re-reads them (deleted, expression_count); the change stays in memory until recompile_material_function saves it. Inverse of create_material_expression; a node that is not there is an error and nothing changes.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `material_path` | string | yes | Full path to the material (e.g., '/Game/Materials/MyMaterial.MyMaterial'); a UMaterialFunction path is accepted too and deletes the node inside that function |
-| `expression_name` | string | yes | Name of the material expression to delete |
-| `material_function_path` | string | no | Alias of material_path that addresses a UMaterialFunction (or material layer): the node is deleted from the function's graph |
-
-**Returns:** `{ material_path: string, material_function_path?: string, expression_name: string, deleted?: bool, expression_count?: int, success: bool }`
-
-## `delete_material_function_input`
-
-*Destructive, idempotent.*
-
-Delete a UMaterialExpressionFunctionInput node from a material function (inverse of add_material_function_input).  Located by node_id via the function's own expression list. Idempotent: an already-absent node_id returns { deleted:false, already_absent:true } as success, not an error.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `function_path` | string | yes | Full path to the material function, e.g. '/Game/MyGame/MF_Example.MF_Example' |
-| `node_id` | string | yes | The input node id (UMaterialExpression name) from add_material_function_input |
-
-**Returns:** `{ function_path: string, node_id: string, deleted: bool, already_absent: bool, num_inputs: number, num_outputs: number }`
-
-## `delete_material_function_output`
-
-*Destructive, idempotent.*
-
-Delete a UMaterialExpressionFunctionOutput node from a material function (inverse of add_material_function_output).  Located by node_id via the function's own expression list. Idempotent: an already-absent node_id returns { deleted:false, already_absent:true } as success, not an error.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `function_path` | string | yes | Full path to the material function, e.g. '/Game/MyGame/MF_Example.MF_Example' |
-| `node_id` | string | yes | The output node id (UMaterialExpression name) from add_material_function_output |
-
-**Returns:** `{ function_path: string, node_id: string, deleted: bool, already_absent: bool, num_inputs: number, num_outputs: number }`
-
 ## `diff_material_instances`
 
 *Read-only.*
@@ -384,34 +255,6 @@ Diff two Material Instance Constants: what side B overrides differ from side A (
 
 **Returns:** `{ material_instance_path_a: string, material_instance_path_b: string, parent: {a, b, same}, scalars: {changed: [{name, association?, layer_index?, value_a, value_b}], only_in_a: [{name, value}], only_in_b: [{name, value}], changed_count, only_in_a_count, only_in_b_count}, vectors: {changed: [{name, value_a:{r,g,b,a}, value_b:{r,g,b,a}}], only_in_a, only_in_b, ...counts}, textures: {changed: [{name, value_a, value_b}], only_in_a, only_in_b, ...counts}, static_switches: {changed: [{name, value_a, value_b}], only_in_a, only_in_b, ...counts}, layer_stack: {layer_count_a, layer_count_b, blend_count_a, blend_count_b, layer_diffs: [{index, function_a, function_b}], blend_diffs: [{index, function_a, function_b}]}, total_differences: int, identical: bool }`
 
-## `disconnect_material_expressions`
-
-*Destructive, idempotent.*
-
-Disconnect an input of a material expression (inverse of connect_material_expressions) -- in a material, or inside a material function's graph (inverse of connect_material_function_pins) when material_function_path, or a function path in material_path, is given.  Idempotent: an input that is already disconnected returns already_disconnected=true (still success — the expression exists, there simply was no connection to break). Inside a function the change stays in memory until recompile_material_function saves it.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `material_path` | string | yes | Full path to the material (e.g., '/Game/Materials/MyMaterial.MyMaterial'); a UMaterialFunction path is accepted too and disconnects inside that function |
-| `to_expression_name` | string | yes | Name of the destination material expression whose input is disconnected |
-| `to_input_name` | string | yes | Name of the input pin to disconnect (empty = first input) |
-| `material_function_path` | string | no | Alias of material_path that addresses a UMaterialFunction (or material layer): the input is disconnected inside the function's graph |
-
-**Returns:** `{ material_path: string, material_function_path?: string, to_expression_name: string, to_input_name: string, disconnected: bool, already_disconnected: bool, success: bool }`
-
-## `disconnect_to_material_output`
-
-*Destructive, idempotent.*
-
-Disconnect a material output property (inverse of connect_to_material_output).  Idempotent: an already-disconnected property returns already_disconnected=true (still success — the output slot always resolves to a valid input, so false is unambiguously "nothing was connected", never an error).
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `material_path` | string | yes | Material asset path. |
-| `output_property` | string | yes | BaseColor, Metallic, Roughness, Normal, Emissive, Opacity, OpacityMask, Specular, ... (same strings as connect_to_material_output), FrontMaterial (the Substrate slab wire connect_substrate_slab_to_material makes) and MaterialAttributes (the wire add_material_attribute_layers_node makes) included |
-
-**Returns:** `{ material: string, output_property: string, disconnected: bool, already_disconnected: bool }`
-
 ## `duplicate_material_expression`
 
 *Additive.*
@@ -421,7 +264,7 @@ Copy one expression node of a UMaterial asset into the same material, optionally
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `material_path` | string | yes | Full asset path of the UMaterial. |
-| `node_id` | string | yes | Object name of the expression to copy, as listed by get_material_graph_info (nodes[].name). |
+| `node_id` | string | yes | Object name of the expression to copy, as listed by get_graph_nodes (nodes[].name). |
 | `new_node_name` | string | no | Object name for the copy; when taken, a unique variant is used (read duplicate_node). Default: a name the engine picks. |
 
 **Returns:** `{ material_path: string, source_node: string, duplicate_node: string, duplicate_class: string, expression_count: number }`
@@ -458,7 +301,7 @@ Read the parameters of a Material Parameter Collection asset: scalar_params (nam
 
 *Read-only.*
 
-Describe a material function asset -- a plain function, a material layer, a layer blend or a function instance -- without changing it: its class and usage ("Default", "MaterialLayer" or "MaterialLayerBlend"), is_layer / is_blend, the input and output pin counts it exposes (num_inputs, num_outputs; an instance reports its parent's) and num_expressions, plus, for a UMaterialFunction, its FunctionInput and FunctionOutput nodes: node_id, name, type, description, sort priority and preview value for inputs; name, description and sort priority for outputs (a function instance has no nodes of its own, so its lists are empty). For the whole node graph use get_material_graph_info.
+Describe a material function asset -- a plain function, a material layer, a layer blend or a function instance -- without changing it: its class and usage ("Default", "MaterialLayer" or "MaterialLayerBlend"), is_layer / is_blend, the input and output pin counts it exposes (num_inputs, num_outputs; an instance reports its parent's) and num_expressions, plus, for a UMaterialFunction, its FunctionInput and FunctionOutput nodes: node_id, name, type, description, sort priority and preview value for inputs; name, description and sort priority for outputs (a function instance has no nodes of its own, so its lists are empty). For the whole node graph use get_graph_nodes.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -466,19 +309,6 @@ Describe a material function asset -- a plain function, a material layer, a laye
 | `layer_path` | string | no | Alias of material_function_path |
 
 **Returns:** `{ material_function_path: string, asset_path: string, class: string, usage: string, is_layer: bool, is_blend: bool, num_inputs: number, num_outputs: number, num_expressions: number, input_count: number, output_count: number, inputs: [{ node_id: string, input_name: string, input_type: string, description: string, sort_priority: number, use_preview_value: bool, preview_value: {x,y,z,w} }], outputs: [{ node_id: string, output_name: string, description: string, sort_priority: number }] }`
-
-## `get_material_graph_info`
-
-*Read-only.*
-
-Read the expression graph of a UMaterial asset -- or of a UMaterialFunction / material layer's internal graph -- without changing it: every expression node with its object name (the node_id other material tools take), class, class path and description, its inputs by index, and the node-to-node connections flattened into connections[], each with the source output index. Only wiring between expressions is listed -- what feeds the material's main outputs (BaseColor, Normal...) is not -- and node positions and property values are not read. input_name and to_input are each input's name as the node reports it (GetInputName, e.g. A, B, Alpha), and node_count counts the nodes listed. expression_count counts every expression object the asset owns, including orphan_nodes its expression collection does not list (a partial bulk delete or a duplicate leaves them behind, and duplicate parameter names hide there): it is the count to watch when deleting nodes one by one until 0. A material instance or a path that does not load is an error. Shader stats: get_material_stats; wiring: connect_material_expressions, connect_to_material_output, connect_material_function_pins.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `material_path` | string | yes | UMaterial asset path, e.g. "/Game/Materials/M_Rock" or "/Game/Materials/M_Rock.M_Rock"; a UMaterialFunction path is read as a function graph; a material instance is not accepted |
-| `material_function_path` | string | no | Alias of material_path that addresses a UMaterialFunction (or material layer / layer blend) |
-
-**Returns:** `{ material_path?: string (a material), material_name?: string, material_function_path?: string (a function), expression_count: number, orphan_count: number, orphan_nodes: [{ name: string, class: string }], node_count: number, nodes: [{ name: string, class: string, class_path: string, description: string, inputs: [{ index: number, input_name: string, source?: string, source_output_index?: number }], input_count: number }], connection_count: number, connections: [{ from: string, from_output_index: number, to: string, to_input: string }] }`
 
 ## `get_material_instance_info`
 
@@ -650,6 +480,32 @@ Remove one parameter from a Material Parameter Collection asset by name and save
 
 **Returns:** `{ collection_path: string, param_name?: string, param_type: string, removed?: bool, cleared?: bool (all=true), scalar_count_before: int, vector_count_before: int, scalar_count: int, vector_count: int, saved: bool }`
 
+## `remove_material_function_input`
+
+*Destructive, idempotent.*
+
+Delete a UMaterialExpressionFunctionInput node from a material function (inverse of add_material_function_input).  Located by node_id via the function's own expression list. Idempotent: an already-absent node_id returns { deleted:false, already_absent:true } as success, not an error.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `function_path` | string | yes | Full path to the material function, e.g. '/Game/MyGame/MF_Example.MF_Example' |
+| `node_id` | string | yes | The input node id (UMaterialExpression name) from add_material_function_input |
+
+**Returns:** `{ function_path: string, node_id: string, deleted: bool, already_absent: bool, num_inputs: number, num_outputs: number }`
+
+## `remove_material_function_output`
+
+*Destructive, idempotent.*
+
+Delete a UMaterialExpressionFunctionOutput node from a material function (inverse of add_material_function_output).  Located by node_id via the function's own expression list. Idempotent: an already-absent node_id returns { deleted:false, already_absent:true } as success, not an error.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `function_path` | string | yes | Full path to the material function, e.g. '/Game/MyGame/MF_Example.MF_Example' |
+| `node_id` | string | yes | The output node id (UMaterialExpression name) from add_material_function_output |
+
+**Returns:** `{ function_path: string, node_id: string, deleted: bool, already_absent: bool, num_inputs: number, num_outputs: number }`
+
 ## `rename_collection_parameter`
 
 *Destructive.*
@@ -705,21 +561,6 @@ Set the material domain (EMaterialDomain) of a UMaterial asset, then recompile i
 | `domain` | string | yes | One of 'Surface', 'PostProcess', 'UI', 'DeferredDecal', 'LightFunction', 'Volume', matched without case; post_process, userinterface, decal, deferred_decal and light_function (or the same words with spaces) work too |
 
 **Returns:** `{ material: string, material_path: string, previous_domain: string, requested_domain: string, domain: string, domain_set: bool }`
-
-## `set_material_expression_property`
-
-*Destructive, idempotent.*
-
-Write one property of an expression node of a UMaterial asset (not an instance), found by its object name node_id. param_name names the property on every node type (R on Constant, DefaultValue or SliderMax on ScalarParameter, Constant on Constant3Vector and Constant4Vector, DefaultValue on VectorParameter...); ParameterName renames a parameter node through its own SetParameterName. Over set_properties on the node it also runs PostEditChange on the material and accepts "[r,g,b,a]" or "r,g,b" for a linear color. A value that does not parse for the property is refused and nothing is written. No undo, no save: it marks the material dirty (persist with save_asset). value_after is the property read back. Instances: set_material_instance_parameter.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `material_path` | string | yes | Material asset path |
-| `node_id` | string | yes | Id of the target expression in the material |
-| `param_name` | string | yes | Name of the property to set (e.g. "ParameterName", "R", "DefaultValue") |
-| `value` | string | no | Text to write: a number for a numeric property, "(R=1,G=0.5,B=0,A=1)", "[1,0.5,0,1]" or "1,0.5,0" for a linear color, the new name for ParameterName, else UE import text for the property; omitted means empty text. |
-
-**Returns:** `{ material: string, node_id: string, param_name: string, value: string, value_after: string }`
 
 ## `set_material_function_input_props`
 
@@ -898,12 +739,12 @@ Turn one usage flag (EMaterialUsage: SkeletalMesh, InstancedStaticMeshes, Niagar
 
 *Destructive.*
 
-Drives one input pin of the Substrate Slab BSDF node of a material with a constant: adds a NEW Constant expression holding value to the material graph and wires it into the named pin of the material's first Slab node, replacing whatever fed that pin, then saves the material. Each call adds another Constant node, even for the same pin and value; a constant that fed the pin before stays in the graph, unwired. One undo step removes the new constant and restores what fed the pin. A failed save (a read-only file, PIE running) makes success false with saved=false and save_error, the change kept in memory. Works whether Substrate is enabled or not (substrate_enabled reports it). The material needs a Slab node from create_substrate_slab_node; connect_substrate_slab_to_material wires the slab to the output. A pin name the Slab node does not have is an error that names its pins, and nothing is added. To change a constant already wired, use set_material_expression_property on its constant_node_id; delete stray nodes with delete_material_expression.
+Drives one input pin of the Substrate Slab BSDF node of a material with a constant: adds a NEW Constant expression holding value to the material graph and wires it into the named pin of the material's first Slab node, replacing whatever fed that pin, then saves the material. Each call adds another Constant node, even for the same pin and value; a constant that fed the pin before stays in the graph, unwired. One undo step removes the new constant and restores what fed the pin. A failed save (a read-only file, PIE running) makes success false with saved=false and save_error, the change kept in memory. Works whether Substrate is enabled or not (substrate_enabled reports it). The material needs a Slab node (add_graph_node with node_type=/Script/Engine.MaterialExpressionSubstrateSlabBSDF); connect_pins to @output, pin FrontMaterial, wires it to the output. A pin name the Slab node does not have is an error that names its pins, and nothing is added. To change a constant already wired, use set_properties on its object_path (from get_graph_nodes); remove stray nodes with remove_graph_node.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `material_path` | string | yes | Package or object path of the UMaterial holding the slab node (e.g. "/Game/Materials/M_Substrate"). |
-| `pin_name` | string | yes | Slab input pin to drive, by its input name as get_material_graph_info lists it (input_name), without case: e.g. "Roughness", "Anisotropy", "F0" or "Diffuse Albedo" (a color pin receives the scalar on all channels). |
+| `pin_name` | string | yes | Slab input pin to drive, by its input name as get_graph_nodes lists it (input_name), without case: e.g. "Roughness", "Anisotropy", "F0" or "Diffuse Albedo" (a color pin receives the scalar on all channels). |
 | `value` | number | yes | Scalar the Constant node holds (e.g. 0.35 for Roughness); not range-checked. |
 
 **Returns:** `{ material_path: string, slab_node_id: string, constant_node_id: string, pin_name: string, value: number, connected: bool, saved: bool, save_error?: string, substrate_enabled: bool, r_substrate_cvar: int, note?: string } -- connected is read back from the slab pin`

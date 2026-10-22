@@ -41,7 +41,7 @@ without asking, while a wrong `false` only costs a confirmation.
 
 The annotation overrides it
 ---------------------------
-When the name misleads the verb rule (`get_frame_timing` reads, `does_foliage_type_exist` reads), the
+When the name misleads the verb rule (`get_frame_timing` reads, `is_foliage_type_loadable` reads), the
 command's `// MCP:` block says so on its own line:
 
     //   @hints read-only
