@@ -167,8 +167,8 @@ Two answers an agent gets, as the contract tests in `Resources/ContractTests` re
 
     ---
 
-    Claude Code: **MCP · 55561 > Connect Claude Code to this project**; Cursor, VS Code and
-    Antigravity CLI: **Connect another client**. Any other client: [Clients](clients.md).
+    Claude Code: **MCP · 55561 > Connect Claude Code to this project**; Cursor, VS Code,
+    Antigravity CLI and OpenCode: **Connect another client**. Any other client: [Clients](clients.md).
 
 -   **4. Ask**
 

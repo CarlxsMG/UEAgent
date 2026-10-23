@@ -10,8 +10,8 @@ every tool, for a client that loads tools on demand.
 
 The editor writes the connection for the clients that read it from a file in the project: in the
 status bar, **MCP · 55561 > Connect Claude Code to this project**, or **Connect another client** for
-Cursor, VS Code and Antigravity CLI. Only the `unreal` entry is written; the rest of the file, and its
-layout, stay as they were. For Codex, the same menu copies its command.
+Cursor, VS Code, Antigravity CLI and OpenCode. Only the `unreal` entry is written; the rest of the
+file, and its layout, stay as they were. For Codex, the same menu copies its command.
 
 Then install the [skills](skills.md) for your client, from the same menu.
 
@@ -143,6 +143,26 @@ Or in `~/.codex/config.toml`:
 [mcp_servers.unreal]
 url = "http://127.0.0.1:55561/mcp"
 ```
+### OpenCode
+
+**MCP · 55561 > Connect another client > Connect OpenCode** writes `opencode.json` in the project
+folder. By hand, there or in `~/.config/opencode/opencode.json` for every project (the key is `mcp`,
+and a remote server needs `"type": "remote"`):
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "unreal": {
+      "type": "remote",
+      "url": "http://127.0.0.1:55561/mcp"
+    }
+  }
+}
+```
+
+OpenCode connects to its servers when it starts: open the project in Unreal first, then run `opencode`
+in the project folder. `opencode mcp list` should then show `unreal` as connected.
 <!-- /tabs -->
 
 ## Tool lists
@@ -191,6 +211,9 @@ commit:
   input) and keeps it in VS Code's secret storage.
 - Codex: the copied command adds `--bearer-token-env-var UEAGENT_TOKEN`
   (`bearer_token_env_var = "UEAGENT_TOKEN"` in the server's table).
+- OpenCode: the entry that **Connect OpenCode** writes sends `Bearer {env:UEAGENT_TOKEN}`, and sets
+  `"oauth": false` so that OpenCode does not try to sign in with OAuth. If `opencode mcp list` says
+  `unreal failed` with a 405, `UEAGENT_TOKEN` is missing or wrong in the shell that started OpenCode.
 - Claude Desktop: mcp-remote's `--header` option.
 - Windsurf and Gemini CLI: the entry's `headers` field.
 - Antigravity CLI documents no headers for a remote server, so **Connect** does not offer it while a

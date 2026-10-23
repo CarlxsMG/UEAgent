@@ -8,7 +8,7 @@
  * The agent skills this plugin ships (Resources/Skills/<name>/SKILL.md, in the Agent Skills format)
  * and their copies in the project, where the AI clients look for them:
  *   - .claude/skills  Claude Code;
- *   - .agents/skills  Codex, Cursor, VS Code, Antigravity CLI and Gemini CLI.
+ *   - .agents/skills  Codex, Cursor, VS Code, Antigravity CLI, Gemini CLI and OpenCode.
  *
  * Each copy is stamped with the plugin version (`metadata: ueagent-version`): that marks it as ours
  * and tells an old copy from a current one. A folder without the stamp is the user's and is never

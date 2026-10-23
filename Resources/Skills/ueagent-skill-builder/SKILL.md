@@ -57,8 +57,8 @@ Save it next to UEAgent's own skills, in the folder the user's client reads:
 
 - Claude Code: `.claude/skills/<name>/SKILL.md` in the project (or `~/.claude/skills/` for every
   project on this machine);
-- Codex, Cursor, VS Code, Antigravity CLI and Gemini CLI: `.agents/skills/<name>/SKILL.md` in the
-  project.
+- Codex, Cursor, VS Code, Antigravity CLI, Gemini CLI and OpenCode: `.agents/skills/<name>/SKILL.md`
+  in the project.
 
 Ask which client they use if you do not know it. Fill in [template.md](template.md). Rules (the Agent
 Skills format, which every one of those clients reads):

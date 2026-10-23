@@ -31,7 +31,7 @@ the status bar menu does:
 | **Restart the server** | `mcp.http.restart` |
 | **Contract self-test** | `mcp.contract.selftest <vectors.json>` |
 | **Connect Claude Code to this project** | `mcp.claude.connect` |
-| **Connect another client** | `mcp.clients.connect <client>`, with `cursor`, `vscode` or `antigravity` |
+| **Connect another client** | `mcp.clients.connect <client>`, with `cursor`, `vscode`, `antigravity` or `opencode` |
 | **Skills** | `mcp.skills.status`, `mcp.skills.install`, `mcp.skills.remove` |
 | **Check for updates** | `mcp.update.check`, then `mcp.update.status` |
 | **Download and install** | `mcp.update.download` |

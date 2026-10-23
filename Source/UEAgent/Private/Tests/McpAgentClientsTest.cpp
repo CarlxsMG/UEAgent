@@ -152,6 +152,56 @@ bool FMcpAgentClientsTest::RunTest(const FString& Parameters)
 	// 9. The Codex command, with and without a token.
 	TestEqual(TEXT("9 codex"), McpAgentClients::CodexAddCommand(Port, false), FString(TEXT("codex mcp add unreal --url \"http://127.0.0.1:55561/mcp\"")));
 	TestTrue(TEXT("9 codex token"), McpAgentClients::CodexAddCommand(Port, true).EndsWith(TEXT(" --bearer-token-env-var UEAGENT_TOKEN")));
+
+	// 10. OpenCode, no file: opencode.json with its $schema, "mcp", "type": "remote" and the url.
+	{
+		const FString Path = CaseDir(TEXT("OpenCodeNew")) / TEXT("opencode.json");
+		StateIs(EClient::OpenCode, Path, false, EState::MissingFile, TEXT("10 before"));
+		TestTrue(TEXT("10 connects"), McpAgentClients::Connect(EClient::OpenCode, Path, Port, false, Message));
+		AddInfo(Message);
+		TestEqual(TEXT("10 content"), ReadText(Path), FString(TEXT(
+			"{\n  \"$schema\": \"https://opencode.ai/config.json\",\n  \"mcp\": {\n    \"unreal\": {\n      \"type\": \"remote\",\n      \"url\": \"http://127.0.0.1:55561/mcp\"\n    }\n  }\n}\n")));
+		StateIs(EClient::OpenCode, Path, false, EState::Connected, TEXT("10 after"));
+	}
+
+	// 11. OpenCode, an "unreal" entry switched off: only "enabled" changes.
+	{
+		const FString Path = CaseDir(TEXT("OpenCodeOff")) / TEXT("opencode.json");
+		const FString Head = TEXT("{\n  \"mcp\": {\n    \"unreal\": {\n      \"type\": \"remote\",\n      \"url\": \"http://127.0.0.1:55561/mcp\",\n      \"enabled\": ");
+		WriteText(Path, Head + TEXT("false\n    }\n  }\n}\n"));
+		StateIs(EClient::OpenCode, Path, false, EState::Disabled, TEXT("11 before"));
+		TestTrue(TEXT("11 connects"), McpAgentClients::Connect(EClient::OpenCode, Path, Port, false, Message));
+		AddInfo(Message);
+		TestEqual(TEXT("11 content"), ReadText(Path), Head + TEXT("true\n    }\n  }\n}\n"));
+		StateIs(EClient::OpenCode, Path, false, EState::Connected, TEXT("11 after"));
+	}
+
+	// 12. OpenCode, a file with a model, another server and an old "local" entry under "unreal": the entry
+	//     becomes remote (command and environment out), and the rest of the file is kept.
+	{
+		const FString Path = CaseDir(TEXT("OpenCodeLocal")) / TEXT("opencode.json");
+		const FString Other = TEXT("    \"github\": {\n      \"type\": \"remote\",\n      \"url\": \"https://api.githubcopilot.com/mcp/\"\n    }");
+		WriteText(Path, FString(TEXT("{\n  \"model\": \"anthropic/claude-sonnet-5-5\",\n  \"mcp\": {\n")) + Other
+			+ TEXT(",\n    \"unreal\": {\n      \"type\": \"local\",\n      \"command\": [\n        \"python\",\n        \"server.py\"\n      ],\n      \"environment\": {\n        \"A\": \"1\"\n      }\n    }\n  }\n}\n"));
+		StateIs(EClient::OpenCode, Path, false, EState::WrongTarget, TEXT("12 before"));
+		TestTrue(TEXT("12 connects"), McpAgentClients::Connect(EClient::OpenCode, Path, Port, false, Message));
+		AddInfo(Message);
+		const FString Text = ReadText(Path);
+		TestTrue(TEXT("12 model kept"), Text.StartsWith(TEXT("{\n  \"model\": \"anthropic/claude-sonnet-5-5\",\n  \"mcp\": {\n")));
+		TestTrue(TEXT("12 other server kept"), Text.Contains(Other + TEXT(",\n")));
+		TestFalse(TEXT("12 stdio fields out"), Text.Contains(TEXT("\"command\"")) || Text.Contains(TEXT("\"environment\"")) || Text.Contains(TEXT("\"local\"")));
+		StateIs(EClient::OpenCode, Path, false, EState::Connected, TEXT("12 after"));
+	}
+
+	// 13. OpenCode with a token: the header reads the variable with OpenCode's {env:} syntax, and OAuth is off.
+	{
+		const FString Path = CaseDir(TEXT("OpenCodeToken")) / TEXT("opencode.json");
+		TestTrue(TEXT("13 connects"), McpAgentClients::Connect(EClient::OpenCode, Path, Port, true, Message));
+		const FString Text = ReadText(Path);
+		TestTrue(TEXT("13 header from the env"), Text.Contains(TEXT("\"Authorization\": \"Bearer {env:UEAGENT_TOKEN}\"")));
+		TestTrue(TEXT("13 oauth off"), Text.Contains(TEXT("\"oauth\": false")));
+		StateIs(EClient::OpenCode, Path, true, EState::Connected, TEXT("13 after"));
+	}
 	return true;
 }
 

@@ -35,7 +35,7 @@ No green dot? Another program may hold the port: see
 
 **Claude Code:** in the status bar, **MCP · 55561 > Connect Claude Code to this project** writes the
 `unreal` entry of the project's `.mcp.json`. **Connect another client** does the same for Cursor,
-VS Code and Antigravity CLI. Or, for yourself only:
+VS Code, Antigravity CLI and OpenCode. Or, for yourself only:
 
 ```bash
 claude mcp add --transport http unreal http://127.0.0.1:55561/mcp

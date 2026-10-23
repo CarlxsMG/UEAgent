@@ -82,7 +82,8 @@ tú recargas sus servidores MCP. Ver [llms-install.md](llms-install.md). O a man
    servidor está listo (si no, consulta [Troubleshooting](docs/troubleshooting.md)).
 3. **Conecta un agente.** Desde el menú de esa barra de estado, **Connect Claude Code to this project**
    escribe la entrada `unreal` en el `.mcp.json` de tu proyecto, y **Connect another client** hace lo
-   mismo para Cursor, VS Code y Antigravity CLI (y copia el comando de Codex). O, solo para ti:
+   mismo para Cursor, VS Code, Antigravity CLI y OpenCode (y copia el comando de Codex). O, solo
+   para ti:
 
    ```
    claude mcp add --transport http unreal http://127.0.0.1:55561/mcp
@@ -124,7 +125,7 @@ UEAgent está en [Glama](https://glama.ai/mcp/servers/CarlxsMG/UEAgent), el dire
 ## Skills
 
 UEAgent trae skills en el formato abierto Agent Skills, para Claude Code, Codex, Cursor, VS Code,
-Antigravity CLI y Gemini CLI. Se instalan en el proyecto desde la barra de estado del editor:
+Antigravity CLI, Gemini CLI y OpenCode. Se instalan en el proyecto desde la barra de estado del editor:
 **MCP · 55561 > Skills**. Vienen con el plugin, así que siempre casan con sus herramientas.
 
 | Skill | |
@@ -207,7 +208,7 @@ Launcher. Después de actualizar, vuelve a conectar tu cliente para que liste de
 |---|---|
 | `mcp.http.status` / `mcp.http.restart` | estado del servidor; reiniciarlo (también recarga el catálogo de herramientas) |
 | `mcp.claude.status [ruta]` / `mcp.claude.connect [ruta]` | inspeccionar / escribir la entrada de `.mcp.json` |
-| `mcp.clients.status` / `mcp.clients.connect cursor\|vscode\|antigravity [ruta]` | lo mismo para los ficheros de los otros clientes |
+| `mcp.clients.status` / `mcp.clients.connect cursor\|vscode\|antigravity\|opencode [ruta]` | lo mismo para los ficheros de los otros clientes |
 | `mcp.skills.status` / `mcp.skills.install` / `mcp.skills.remove` `[claude\|agents\|all]` | las skills de UEAgent en el proyecto (ver [Skills](docs/skills.md)) |
 | `mcp.contract.selftest <vectors.json> [quit]` | ejecutar los vectores del contrato (ver `Resources/ContractTests`) |
 | `mcp.ReadOnlyRootEnforcement 0\|1` | 0 = solo avisar de los guardados bajo una raíz de solo lectura, en vez de rechazarlos |

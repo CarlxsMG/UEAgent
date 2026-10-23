@@ -163,7 +163,7 @@ const TCHAR* McpSkills::TargetRelativeDir(ETarget Target)
 
 const TCHAR* McpSkills::TargetClients(ETarget Target)
 {
-	return Target == ETarget::ClaudeCode ? TEXT("Claude Code") : TEXT("Codex, Cursor, VS Code, Antigravity CLI and Gemini CLI");
+	return Target == ETarget::ClaudeCode ? TEXT("Claude Code") : TEXT("Codex, Cursor, VS Code, Antigravity CLI, Gemini CLI and OpenCode");
 }
 
 FString McpSkills::ProjectTargetDir(ETarget Target)

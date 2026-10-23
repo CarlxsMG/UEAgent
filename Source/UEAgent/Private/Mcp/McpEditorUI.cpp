@@ -597,7 +597,7 @@ namespace McpEditorUIPrivate
 			}
 			Menu.AddSubMenu(
 				LOCTEXT("ConnectOther", "Connect another client"),
-				LOCTEXT("ConnectOtherTip", "Cursor, VS Code and Antigravity CLI read their servers from a file in the project; Codex from your user folder."),
+				LOCTEXT("ConnectOtherTip", "Cursor, VS Code, Antigravity CLI and OpenCode read their servers from a file in the project; Codex from your user folder."),
 				FNewMenuDelegate::CreateLambda([Others](FMenuBuilder& Sub)
 				{
 					for (const McpAgentClients::FStatus& Status : Others)
@@ -822,7 +822,7 @@ namespace McpEditorUIPrivate
 		}
 
 		FNotificationInfo Info(LOCTEXT("HintTitle", "No AI client is connected to this editor"));
-		Info.SubText = FText::FromString(Project.Detail + TEXT(" Cursor, VS Code, Antigravity CLI and Codex: the \"MCP\" menu in the status bar."));
+		Info.SubText = FText::FromString(Project.Detail + TEXT(" Cursor, VS Code, Antigravity CLI, OpenCode and Codex: the \"MCP\" menu in the status bar."));
 		Info.bFireAndForget = false;
 		Info.WidthOverride = 440.0f;
 		Info.ButtonDetails.Add(FNotificationButtonInfo(
