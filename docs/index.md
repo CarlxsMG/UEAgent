@@ -212,6 +212,11 @@ Two answers an agent gets, as the contract tests in `Resources/ContractTests` re
 
 </div>
 
-UEAgent is open source under the [MIT License](https://github.com/CarlxsMG/UEAgent/blob/main/LICENSE),
-and listed on [Glama](https://glama.ai/mcp/servers/CarlxsMG/UEAgent), the MCP server directory.
+UEAgent is open source under the [MIT License](https://github.com/CarlxsMG/UEAgent/blob/main/LICENSE).
 Questions go to [Discussions](https://github.com/CarlxsMG/UEAgent/discussions).
+
+## Directories
+
+<!-- include: README.md#directories -->
+See the [README](../README.md#directories).
+<!-- /include -->
