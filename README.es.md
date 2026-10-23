@@ -118,7 +118,15 @@ Por defecto el servidor lista sus herramientas básicas y cuatro herramientas qu
 ejecutan el resto, o añaden un dominio entero a la lista. Con `?tools=all` al final de la URL lista
 todas, y con `?tools=compact` solo tres: consulta las [listas de herramientas](docs/clients.md#tool-lists).
 
-UEAgent está en [Glama](https://glama.ai/mcp/servers/CarlxsMG/UEAgent), el directorio de servidores MCP:
+## Directorios
+
+UEAgent aparece en:
+
+- el [registro oficial de MCP](https://registry.modelcontextprotocol.io), como `io.github.CarlxsMG/UEAgent`,
+  del que leen otros directorios y clientes;
+- [Glama](https://glama.ai/mcp/servers/CarlxsMG/UEAgent), el directorio de servidores MCP;
+- [awesome-mcp-servers](https://github.com/punkpeye/awesome-mcp-servers#gaming), en Gaming;
+- [awesome-unreal](https://github.com/insthync/awesome-unreal#editor), en Editor.
 
 <a href="https://glama.ai/mcp/servers/CarlxsMG/UEAgent"><img width="380" height="200" src="https://glama.ai/mcp/servers/CarlxsMG/UEAgent/badges/card.svg" alt="UEAgent en Glama"></a>
 
