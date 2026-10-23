@@ -3,7 +3,7 @@
 UEAgent ships agent skills: instructions an AI client loads when a request matches them, so it knows
 which tools to call, in what order, and how to check the result. They follow the open
 [Agent Skills](https://agentskills.io/specification) format, which Claude Code, Codex, Cursor,
-VS Code (GitHub Copilot), Antigravity CLI and Gemini CLI all read.
+VS Code (GitHub Copilot), Antigravity CLI, Gemini CLI and OpenCode all read.
 
 They come inside the plugin, so they always name the tools of the version you have installed.
 
@@ -14,7 +14,7 @@ In the editor's status bar, **MCP · 55561 > Skills**:
 | Entry | Copies the skills into | For |
 |---|---|---|
 | **Install the skills for Claude Code** | `.claude/skills/` in the project | Claude Code |
-| **Install the skills for Codex, Cursor, VS Code, Antigravity CLI and Gemini CLI** | `.agents/skills/` in the project | every other client |
+| **Install the skills for Codex, Cursor, VS Code, Antigravity CLI, Gemini CLI and OpenCode** | `.agents/skills/` in the project | every other client |
 
 Install both if the project's team uses several clients. Each copy is stamped with the plugin's
 version: after you update UEAgent, the menu says the skills are out of date and offers **Update**.

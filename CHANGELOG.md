@@ -2,6 +2,24 @@
 
 Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](https://semver.org).
 
+## 2.6.0 - 2026-10-23
+
+The editor connects OpenCode, as it already connected Cursor, VS Code and Antigravity CLI.
+
+### Added
+
+- **OpenCode in Connect.** **MCP · 55561 > Connect another client > Connect OpenCode**, or `mcp.clients.connect
+  opencode` in the console, writes the `unreal` entry of `opencode.json` in the project folder: `"type": "remote"` and
+  the server's URL, so OpenCode gets the core list. Only that entry is written: the rest of the file and its layout
+  stay as they were, and a new file starts with OpenCode's `$schema`.
+  - An old `local` entry under `unreal` becomes remote, without its `command` and `environment`.
+  - An entry that points here with `"enabled": false` shows as switched off, and Connect turns it on.
+  - With an auth token, the entry sends `Bearer {env:UEAGENT_TOKEN}` and sets `"oauth": false`, so a missing token
+    does not start an OAuth sign-in.
+- **OpenCode reads the skills in `.agents/skills`**, so the menu and the docs name it next to Codex, Cursor, VS Code,
+  Antigravity CLI and Gemini CLI.
+- The [client guide](docs/clients.md) has an OpenCode tab, and `llms-install.md` the console commands for it.
+
 ## 2.5.1 - 2026-10-22
 
 Python stops being the way around the plugin's checks. While Play-in-Editor runs, a script's calls that compile a

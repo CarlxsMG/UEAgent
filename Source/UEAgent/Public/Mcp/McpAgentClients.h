@@ -6,7 +6,7 @@
 
 /**
  * The connection to this server of the AI clients that read their MCP servers from a file in the
- * project, other than Claude Code (McpClaudeCode): Cursor, VS Code and Antigravity CLI. Codex keeps
+ * project, other than Claude Code (McpClaudeCode): Cursor, VS Code, Antigravity CLI and OpenCode. Codex keeps
  * its servers in ~/.codex/config.toml, outside the project, so it gets the command instead.
  *
  * Same rules as McpClaudeCode: the file may belong to the team and hold other servers, so only our
@@ -21,6 +21,7 @@ namespace McpAgentClients
 		Cursor,      // .cursor/mcp.json, "mcpServers", "url"
 		VSCode,      // .vscode/mcp.json, "servers", "type": "http", "url"
 		Antigravity, // .agents/mcp_config.json, "mcpServers", "serverUrl"
+		OpenCode,    // opencode.json, "mcp", "type": "remote", "url"
 	};
 
 	enum class EState : uint8
@@ -29,6 +30,7 @@ namespace McpAgentClients
 		MissingFile,     // the client's file does not exist
 		MissingEntry,    // the file exists, but no entry points here
 		WrongTarget,     // the "unreal" entry exists and points elsewhere
+		Disabled,        // points here, but the entry is switched off (OpenCode's "enabled": false)
 		MissingAuth,     // points here, but the server requires a token and the entry sends none
 		AuthUnsupported, // the server requires a token and this client's file has no documented way to send it
 		Unreadable,      // cannot be read or is not valid JSON: left untouched
@@ -49,9 +51,9 @@ namespace McpAgentClients
 	};
 
 	UEAGENT_API TArray<EClient> All();
-	/** "Cursor", "VS Code", "Antigravity CLI". */
+	/** "Cursor", "VS Code", "Antigravity CLI", "OpenCode". */
 	UEAGENT_API const TCHAR* DisplayName(EClient Client);
-	/** "cursor", "vscode", "antigravity": the console's argument. */
+	/** "cursor", "vscode", "antigravity", "opencode": the console's argument. */
 	UEAGENT_API const TCHAR* Id(EClient Client);
 	UEAGENT_API bool FromId(const FString& Id, EClient& OutClient);
 	/** The client's file relative to the project folder, e.g. ".cursor/mcp.json". */

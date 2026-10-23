@@ -20,33 +20,52 @@ namespace McpAgentClientsPrivate
 
 	// How each client writes a remote server. From the clients' documentation (2026-10-20):
 	// cursor.com/docs/context/mcp, code.visualstudio.com/docs/agents/reference/mcp-configuration,
-	// antigravity.google/docs/cli/gcli-migration.
+	// antigravity.google/docs/cli/gcli-migration; and (2026-10-23) opencode.ai/docs/mcp-servers and
+	// opencode.ai/docs/config.
 	struct FSpec
 	{
 		const TCHAR* ServersKey;   // the object that holds the servers
 		const TCHAR* UrlKey;       // the field with the server's URL
 		const TCHAR* RequiredType; // the "type" the entry needs, or nullptr
 		bool bTokenSupported;      // whether the file has a documented way to send the Authorization header
+		const TCHAR* EnabledKey;   // a boolean that switches the entry off when false, or nullptr
 	};
 
 	static FSpec SpecOf(EClient Client)
 	{
 		switch (Client)
 		{
-		case EClient::VSCode:      return { TEXT("servers"), TEXT("url"), TEXT("http"), true };
-		case EClient::Antigravity: return { TEXT("mcpServers"), TEXT("serverUrl"), nullptr, false };
-		default:                   return { TEXT("mcpServers"), TEXT("url"), nullptr, true };
+		case EClient::VSCode:      return { TEXT("servers"), TEXT("url"), TEXT("http"), true, nullptr };
+		case EClient::Antigravity: return { TEXT("mcpServers"), TEXT("serverUrl"), nullptr, false, nullptr };
+		case EClient::OpenCode:    return { TEXT("mcp"), TEXT("url"), TEXT("remote"), true, TEXT("enabled") };
+		default:                   return { TEXT("mcpServers"), TEXT("url"), nullptr, true, nullptr };
 		}
+	}
+
+	static bool IsSwitchedOff(EClient Client, const TSharedPtr<FJsonObject>& Entry)
+	{
+		const TCHAR* Key = SpecOf(Client).EnabledKey;
+		bool bEnabled = true;
+		return Key && Entry.IsValid() && Entry->TryGetBoolField(Key, bEnabled) && !bEnabled;
 	}
 
 	// VS Code asks for the token once, through an input, and keeps it in its secret storage.
 	static const TCHAR* const VSCodeTokenInput = TEXT("ueagent-token");
 
+	// Where each client reads the token from, so that the file never holds it.
+	static FString TokenSource(EClient Client)
+	{
+		switch (Client)
+		{
+		case EClient::VSCode:   return FString::Printf(TEXT("${input:%s}"), VSCodeTokenInput);
+		case EClient::OpenCode: return FString::Printf(TEXT("{env:%s}"), McpClaudeCode::TokenEnvVar);
+		default:                return FString::Printf(TEXT("${env:%s}"), McpClaudeCode::TokenEnvVar);
+		}
+	}
+
 	static FString AuthHeaderValue(EClient Client)
 	{
-		return Client == EClient::VSCode
-			? FString::Printf(TEXT("Bearer ${input:%s}"), VSCodeTokenInput)
-			: FString::Printf(TEXT("Bearer ${env:%s}"), McpClaudeCode::TokenEnvVar);
+		return TEXT("Bearer ") + TokenSource(Client);
 	}
 
 	static bool PointsHere(EClient Client, const TSharedPtr<FJsonObject>& Entry, const FString& Url)
@@ -114,7 +133,7 @@ namespace McpAgentClientsPrivate
 
 TArray<McpAgentClients::EClient> McpAgentClients::All()
 {
-	return { EClient::Cursor, EClient::VSCode, EClient::Antigravity };
+	return { EClient::Cursor, EClient::VSCode, EClient::Antigravity, EClient::OpenCode };
 }
 
 const TCHAR* McpAgentClients::DisplayName(EClient Client)
@@ -123,6 +142,7 @@ const TCHAR* McpAgentClients::DisplayName(EClient Client)
 	{
 	case EClient::VSCode:      return TEXT("VS Code");
 	case EClient::Antigravity: return TEXT("Antigravity CLI");
+	case EClient::OpenCode:    return TEXT("OpenCode");
 	default:                   return TEXT("Cursor");
 	}
 }
@@ -133,6 +153,7 @@ const TCHAR* McpAgentClients::Id(EClient Client)
 	{
 	case EClient::VSCode:      return TEXT("vscode");
 	case EClient::Antigravity: return TEXT("antigravity");
+	case EClient::OpenCode:    return TEXT("opencode");
 	default:                   return TEXT("cursor");
 	}
 }
@@ -156,6 +177,7 @@ const TCHAR* McpAgentClients::RelativePath(EClient Client)
 	{
 	case EClient::VSCode:      return TEXT(".vscode/mcp.json");
 	case EClient::Antigravity: return TEXT(".agents/mcp_config.json");
+	case EClient::OpenCode:    return TEXT("opencode.json");
 	default:                   return TEXT(".cursor/mcp.json");
 	}
 }
@@ -173,6 +195,7 @@ const TCHAR* McpAgentClients::StateName(EState State)
 	case EState::MissingFile:     return TEXT("no file");
 	case EState::MissingEntry:    return TEXT("no entry");
 	case EState::WrongTarget:     return TEXT("points elsewhere");
+	case EState::Disabled:        return TEXT("switched off");
 	case EState::MissingAuth:     return TEXT("missing token");
 	case EState::AuthUnsupported: return TEXT("token not supported");
 	case EState::Unreadable:      return TEXT("unreadable");
@@ -250,6 +273,12 @@ McpAgentClients::FStatus McpAgentClients::Inspect(EClient Client, const FString&
 		Status.Detail = FString::Printf(TEXT("The \"%s\" entry of %s points to %s, not to this editor."), *Status.EntryName, RelativePath(Client), *DescribeTarget(Client, Entry));
 		return Status;
 	}
+	if (IsSwitchedOff(Client, Entry))
+	{
+		Status.State = EState::Disabled;
+		Status.Detail = FString::Printf(TEXT("The \"%s\" entry of %s points here, but its \"%s\" is false, so %s does not load it."), *Status.EntryName, RelativePath(Client), Spec.EnabledKey, DisplayName(Client));
+		return Status;
+	}
 	if (bRequiresToken && !HasAuthorizationHeader(Entry))
 	{
 		Status.State = Spec.bTokenSupported ? EState::MissingAuth : EState::AuthUnsupported;
@@ -286,6 +315,11 @@ bool McpAgentClients::Connect(EClient Client, const FString& Path, uint16 Port, 
 	if (Before.State == EState::MissingFile)
 	{
 		Root = MakeShared<FJsonObject>();
+		if (Client == EClient::OpenCode)
+		{
+			// OpenCode's documentation starts every config with it: editors validate the file against it.
+			Root->SetStringField(TEXT("$schema"), TEXT("https://opencode.ai/config.json"));
+		}
 	}
 	else
 	{
@@ -323,7 +357,12 @@ bool McpAgentClients::Connect(EClient Client, const FString& Path, uint16 Port, 
 	// What only makes sense for a stdio server is surplus in a remote one: with both, the client
 	// would not know which one to use.
 	TArray<FString> StdioKeys;
-	for (const TCHAR* Key : { TEXT("command"), TEXT("args"), TEXT("env"), TEXT("cwd"), TEXT("envFile") })
+	TArray<const TCHAR*> StdioOnly = { TEXT("command"), TEXT("args"), TEXT("env"), TEXT("cwd"), TEXT("envFile") };
+	if (Client == EClient::OpenCode)
+	{
+		StdioOnly.Add(TEXT("environment")); // OpenCode's "local" servers
+	}
+	for (const TCHAR* Key : StdioOnly)
 	{
 		if (Entry->HasField(Key))
 		{
@@ -350,6 +389,11 @@ bool McpAgentClients::Connect(EClient Client, const FString& Path, uint16 Port, 
 		Entry->SetStringField(Spec.UrlKey, Url);
 		Changes.Add(OldUrl.IsEmpty() ? FString::Printf(TEXT("%s %s"), Spec.UrlKey, *Url) : FString::Printf(TEXT("%s %s -> %s"), Spec.UrlKey, *OldUrl, *Url));
 	}
+	if (IsSwitchedOff(Client, Entry))
+	{
+		Entry->SetBoolField(Spec.EnabledKey, true);
+		Changes.Add(FString::Printf(TEXT("%s false -> true"), Spec.EnabledKey));
+	}
 	if (bRequiresToken && !HasAuthorizationHeader(Entry))
 	{
 		TSharedPtr<FJsonObject> Headers = ObjectField(Entry, TEXT("headers"));
@@ -362,7 +406,13 @@ bool McpAgentClients::Connect(EClient Client, const FString& Path, uint16 Port, 
 		Headers->SetStringField(TEXT("Authorization"), AuthHeaderValue(Client));
 		Changes.Add(Client == EClient::VSCode
 			? FString::Printf(TEXT("Authorization header from the \"%s\" input"), VSCodeTokenInput)
-			: FString::Printf(TEXT("Authorization header from ${env:%s}"), McpClaudeCode::TokenEnvVar));
+			: FString::Printf(TEXT("Authorization header from %s"), *TokenSource(Client)));
+		// OpenCode answers a 401 by starting an OAuth flow; this server takes a token, not OAuth.
+		if (Client == EClient::OpenCode && !Entry->HasField(TEXT("oauth")))
+		{
+			Entry->SetBoolField(TEXT("oauth"), false);
+			Changes.Add(TEXT("oauth false"));
+		}
 		if (Client == EClient::VSCode && !HasTokenInput(Root))
 		{
 			TArray<TSharedPtr<FJsonValue>> Inputs;
@@ -381,7 +431,7 @@ bool McpAgentClients::Connect(EClient Client, const FString& Path, uint16 Port, 
 		}
 	}
 
-	// The client's folder (.cursor, .vscode, .agents) may not exist yet.
+	// The client's folder (.cursor, .vscode, .agents) may not exist yet; OpenCode's file is at the root.
 	IFileManager::Get().MakeDirectory(*FPaths::GetPath(Path), /*Tree*/ true);
 	if (!WriteAtomically(Path, Serialize(Root, Layout), OutMessage))
 	{
@@ -437,7 +487,7 @@ namespace McpAgentClientsConsole
 	{
 		if (Args.Num() == 0 || !McpAgentClients::FromId(Args[0], OutClient))
 		{
-			UE_LOG(LogTemp, Error, TEXT("[MCP] Name the client first: cursor, vscode or antigravity."));
+			UE_LOG(LogTemp, Error, TEXT("[MCP] Name the client first: cursor, vscode, antigravity or opencode."));
 			return false;
 		}
 		TArray<FString> Rest(Args);
@@ -448,7 +498,7 @@ namespace McpAgentClientsConsole
 
 	static FAutoConsoleCommand StatusCommand(
 		TEXT("mcp.clients.status"),
-		TEXT("Does each client's file in the project point to this MCP server? Usage: mcp.clients.status [cursor|vscode|antigravity [path]]"),
+		TEXT("Does each client's file in the project point to this MCP server? Usage: mcp.clients.status [cursor|vscode|antigravity|opencode [path]]"),
 		FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
 		{
 			TArray<TPair<McpAgentClients::EClient, FString>> Targets;
@@ -478,7 +528,7 @@ namespace McpAgentClientsConsole
 
 	static FAutoConsoleCommand ConnectCommand(
 		TEXT("mcp.clients.connect"),
-		TEXT("Writes or fixes the \"unreal\" entry of a client's file without touching the others. Usage: mcp.clients.connect cursor|vscode|antigravity [path]"),
+		TEXT("Writes or fixes the \"unreal\" entry of a client's file without touching the others. Usage: mcp.clients.connect cursor|vscode|antigravity|opencode [path]"),
 		FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
 		{
 			McpAgentClients::EClient Client;

@@ -78,7 +78,8 @@ its MCP servers at the end. See [llms-install.md](llms-install.md). Or by hand:
    (if it does not, see [Troubleshooting](docs/troubleshooting.md)).
 3. **Connect an agent.** From that status-bar menu, **Connect Claude Code to this project** writes the
    `unreal` entry of your project's `.mcp.json`, and **Connect another client** does the same for
-   Cursor, VS Code and Antigravity CLI (and copies the command for Codex). Or, for yourself only:
+   Cursor, VS Code, Antigravity CLI and OpenCode (and copies the command for Codex). Or, for yourself
+   only:
 
    ```
    claude mcp add --transport http unreal http://127.0.0.1:55561/mcp
@@ -119,7 +120,7 @@ UEAgent is listed on [Glama](https://glama.ai/mcp/servers/CarlxsMG/UEAgent), the
 ## Skills
 
 UEAgent ships agent skills in the open Agent Skills format, for Claude Code, Codex, Cursor, VS Code,
-Antigravity CLI and Gemini CLI. Install them into the project from the editor's status bar:
+Antigravity CLI, Gemini CLI and OpenCode. Install them into the project from the editor's status bar:
 **MCP · 55561 > Skills**. They come with the plugin, so they always match its tools.
 
 | Skill | |
@@ -202,7 +203,7 @@ After an update, reconnect your client so it lists the tools again.
 |---|---|
 | `mcp.http.status` / `mcp.http.restart` | server status; restart (also reloads the tool catalog) |
 | `mcp.claude.status [path]` / `mcp.claude.connect [path]` | inspect / write the `.mcp.json` entry |
-| `mcp.clients.status` / `mcp.clients.connect cursor\|vscode\|antigravity [path]` | the same for the other clients' files |
+| `mcp.clients.status` / `mcp.clients.connect cursor\|vscode\|antigravity\|opencode [path]` | the same for the other clients' files |
 | `mcp.skills.status` / `mcp.skills.install` / `mcp.skills.remove` `[claude\|agents\|all]` | UEAgent's skills in the project (see [Skills](docs/skills.md)) |
 | `mcp.contract.selftest <vectors.json> [quit]` | run the contract vectors (see `Resources/ContractTests`) |
 | `mcp.ReadOnlyRootEnforcement 0\|1` | 0 = only report saves under a read-only root instead of refusing them |
