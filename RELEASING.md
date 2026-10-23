@@ -41,6 +41,10 @@ gh release create vX.Y.Z --title "UEAgent X.Y.Z" --target <commit> --notes-file 
 Write the notes from the changelog section, with the install steps. With `--generate-notes` instead,
 GitHub lists the merged pull requests, grouped by label as `.github/release.yml` says.
 
+Publishing the release also updates UEAgent's listing in the
+[MCP Registry](https://registry.modelcontextprotocol.io): the `MCP Registry` workflow publishes
+`server.json` under the release's version. A prerelease is left out.
+
 Then announce the release in
 [Discussions](https://github.com/CarlxsMG/UEAgent/discussions/categories/announcements).
 
