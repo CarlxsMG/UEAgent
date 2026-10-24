@@ -1999,7 +1999,7 @@ namespace UEAgentDataAssetCommandsImpl
 }
 
 // MCP:set_data_table_row_fields - Write only the named cells of one DataTable row via the native JSON importer, deep-merged onto the current row so untouched columns and struct sub-fields survive, then save. Returns changed_columns, unchanged_despite_request, unknown_columns (skipped) and the row as ExportText. For many rows use set_data_table_rows_from_json.
-//   @core
+//   @pack data_tables
 //   @param data_table - Full asset path of the DataTable (table_path also accepted)
 //   @param row_name - Name (key) of the row to write
 //   @param fields - Object of {column_name: value} to overlay onto the current row (only these cells are written); a TMap<Enum,SoftClass> value must be an object of {EnumName: bare-class-path} (e.g. {"MyEnumValue":"/Game/...ABP_x_C"}) -- passed through verbatim, never wrapped
@@ -2171,7 +2171,7 @@ TSharedPtr<FJsonObject> HandleSetDataTableRowFields(const TSharedPtr<FJsonObject
 }
 
 // MCP:get_data_table_row - Read ONE row of a DataTable by key and get every column as JSON. Reads the row memory untyped (FindRowUnchecked), so it works on Blueprint / user-defined row structs that are not FTableRowBase children, where the typed lookup reports "Row not found" for rows that exist; a miss here really is a missing key. Serializes TMap, nested struct and GameplayTag columns in row_data. Two optional renderings of the same row: include_native_json adds row_json, the verbatim string of UE's own DataTable JSON writer -- the exact format set_data_table_row_from_json consumes, so it is the read half of a copy/round-trip (it emits GameplayTagContainers in the ExportText form the importer accepts; the round trip is not lossless for multi-word user-defined enums, so re-read what you wrote); include_export_text adds fields, every cell as its byte-exact ExportText string, so TMap<Enum,SoftClass>, nested struct arrays and soft references appear in full (row_data shows such TMaps as {}) -- the form to copy a vendor row or to tell an empty enum from an unwritten one. Use get_data_table_rows when you want the enum DISPLAY names.
-//   @core
+//   @pack data_tables
 //   @param table_path - The full asset path to the DataTable.
 //   @param row_name - The name of the row to retrieve.
 //   @param include_native_json - Optional bool, default false: add row_json, the row as UE's native DataTable JSON string.

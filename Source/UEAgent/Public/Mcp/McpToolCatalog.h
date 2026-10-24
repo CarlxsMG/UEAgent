@@ -97,11 +97,24 @@ public:
 		FString RetiredHow;
 		/** In the core list, the one tools/list carries by default (`core` in the catalog, `@core` in the annotation). */
 		bool bCore = false;
+		/** The pack enable_toolset adds it with (`pack` in the catalog, `@pack` in the annotation); empty for none. */
+		FString Pack;
 
 		const FParam* FindParam(const FString& ParamName) const;
 		/** The description tools/list and describe_tool publish: Description, then "Returns: " and
 		 *  Returns, so an agent knows the reply's shape before it calls. */
 		FString PublishedDescription() const;
+	};
+
+	/** A small set of listed tools for one job the core list leaves out (`packs` in the catalog): enable_toolset adds it by
+	 *  name, as it adds a domain. No pack is named like a domain (the catalog generator checks it). */
+	struct FPack
+	{
+		FString Name;
+		/** The job, as find_tools and enable_toolset publish it. */
+		FString Description;
+		/** Its tools, in catalog order. */
+		TArray<FString> ToolNames;
 	};
 
 	/** Reads and builds. Returns null and fills OutError if the file is missing or cannot be parsed. */
@@ -143,15 +156,23 @@ public:
 	/** The same for the core list, the default: the core tools (FTool::bCore), then the meta-tools and enable_toolset. */
 	const TArray<uint8>& GetCoreToolsListUtf8() const { return CoreToolsListUtf8; }
 	/**
-	 * The core list plus every other tool of Domains (domain names as the catalog spells them), in catalog order: what
-	 * tools/list carries for a connection that enabled those domains. The core list itself when Domains is empty.
+	 * The core list plus every other tool of Toolsets (domain and pack names as the catalog spells them), in catalog
+	 * order: what tools/list carries for a connection that enabled them. The core list itself when Toolsets is empty.
 	 */
-	TArray<uint8> BuildCoreToolsListUtf8(const TSet<FString>& Domains) const;
+	TArray<uint8> BuildCoreToolsListUtf8(const TSet<FString>& Toolsets) const;
+	/** Whether the core list with Toolsets enabled carries Tool: a core tool, or one of a domain or pack in Toolsets. */
+	static bool IsInCoreList(const FTool& Tool, const TSet<FString>& Toolsets);
 	int32 NumCoreTools() const { return NumCore; }
 	/** The catalog's domains, in catalog order. */
 	const TArray<FString>& GetDomains() const { return Domains; }
 	/** The domain Name stands for, as the catalog spells it (the case is not compared); empty when there is none. */
 	FString FindDomain(const FString& Name) const;
+	/** The catalog's packs, in catalog order. */
+	const TArray<FPack>& GetPacks() const { return Packs; }
+	/** The pack Name stands for (the case is not compared); null when there is none. */
+	const FPack* FindPack(const FString& Name) const;
+	/** The domain or pack Name stands for, as the catalog spells it: what enable_toolset and ?domains= take. */
+	FString FindToolset(const FString& Name) const;
 
 	/**
 	 * Missing required parameters (a null counts as absent). Returns the error message, or empty
@@ -239,6 +260,7 @@ private:
 	/** The meta-tools the core list ends with, each as its JSON in UTF-8. */
 	TArray<TArray<uint8>> CoreMetaToolJsonUtf8;
 	TArray<FString> Domains;
+	TArray<FPack> Packs;
 	int32 NumCore = 0;
 	FString SourcePath;
 	int32 TotalParams = 0;

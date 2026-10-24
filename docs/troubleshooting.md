@@ -34,9 +34,9 @@ client still warns, or other servers fill its cap, give it the
 ## The agent needs a tool that is not listed
 
 Every tool runs whether it is listed or not. The agent finds it with `find_tools` and runs it with
-`call_tool`, or adds its whole domain to the list with `enable_toolset`. If the client does not show
-the added tools, it does not re-read its list when the server says it changed: `call_tool` still runs
-them, and `?domains=<Domain>` in the URL lists them from the start.
+`call_tool`, or adds its pack or its whole domain to the list with `enable_toolset`. If the client does
+not show the added tools, it does not re-read its list when the server says it changed: `call_tool`
+still runs them, and `?packs=<pack>` or `?domains=<Domain>` in the URL lists them from the start.
 
 ## A call is refused while Play-in-Editor runs
 

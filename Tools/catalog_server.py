@@ -246,19 +246,21 @@ META_DEFAULT_LIMIT = 25
 META_MAX_LIMIT = 300
 
 
-def meta_tools(tools: list[dict], domains: list[str], core_count: int, core: bool) -> list[dict]:
-    """find_tools, describe_tool and call_tool, then enable_toolset when the list is the core one."""
+def meta_tools(tools: list[dict], domains: list[str], packs: list[dict], core_count: int, core: bool) -> list[dict]:
+    """find_tools, describe_tool and call_tool, then enable_toolset when the list is the core one (McpMetaTools.cpp)."""
     def prop(json_type: str, description: str) -> dict:
         return {"type": json_type, "description": description}
 
-    def tool(name: str, description: str, properties: dict, required: list[str], read_only: bool) -> dict:
+    # find_tools and describe_tool read the catalog and enable_toolset this connection's list; call_tool carries the
+    # worst of any tool it can run.
+    reads_catalog = {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}
+    runs_any_tool = {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": True}
+
+    def tool(name: str, description: str, properties: dict, required: list[str], hints: dict) -> dict:
         schema: dict = {"type": "object", "properties": properties}
         if required:
             schema["required"] = required
-        out = {"name": name, "description": description, "inputSchema": schema}
-        if read_only:
-            out["annotations"] = {"readOnlyHint": True}
-        return out
+        return {"name": name, "description": description, "inputSchema": schema, "annotations": dict(hints)}
 
     domain = prop("string", "Only this domain's tools; without a query, lists them all.")
     domain["enum"] = list(domains)
@@ -272,32 +274,69 @@ def meta_tools(tools: list[dict], domains: list[str], core_count: int, core: boo
     arguments["additionalProperties"] = True
     out = [
         tool("find_tools",
-             f"Searches this server's {len(tools)} Unreal Editor tools ({len(domains)} domains) and returns the best matches: "
-             "name, domain, parameters (* = required) and a one-line summary. With no arguments it lists the domains. Then "
-             "describe_tool gives a tool's full schema and call_tool runs it"
-             + (", or enable_toolset adds its whole domain to your tool list" if core else "") + ".",
-             find_properties, [], True),
+             f"Searches this server's {len(tools)} Unreal Editor tools and returns the best matches, each with its name, domain, "
+             "parameters (* marks a required one) and the first sentence of its description. Use it before guessing a tool name "
+             "or writing Python; when you already know the name, skip it: describe_tool and call_tool take the name directly.\n\n"
+             "Each query word scores on a whole word of a tool's name first, then the start of one, then the domain, then the "
+             "description, and a tool that matches more of the words ranks higher; a query that spells a tool's name, such as "
+             '"spawn actor", puts that tool first. With `domain` the search stays inside it, and `domain` alone lists its tools. '
+             f"With no arguments it lists the {len(domains)} domains with their sizes"
+             + (", and the packs with their tools" if core else "")
+             + ". It only reads the catalog, so it is cheap to repeat with other words.\n\n"
+             "Then describe_tool gives a match's full schema and call_tool runs it"
+             + (", or enable_toolset adds its pack or domain to your tool list" if core else "") + ".\n\n"
+             "Returns: { success, matches: int, tools: [{ name, domain, params?, summary }], more?: string (when matches exceed "
+             "`limit`) } -- with no arguments { success, total_tools, domains: [{ domain, tools }]"
+             + (", packs: [{ pack, description, tools }]" if core else "")
+             + " }. An unknown `domain` is an error that lists the domains.",
+             find_properties, [], reads_catalog),
         tool("describe_tool",
-             "One tool's full description and input JSON schema: every parameter's type and meaning, the required ones, closed "
-             "value sets and accepted aliases. Read it before call_tool unless the parameter list from find_tools is enough.",
-             {"name": prop("string", "The tool's exact name, as find_tools returns it.")}, ["name"], True),
+             "Returns one tool's full description, input JSON schema and annotations, as a full tool list carries them: every "
+             "parameter's type and meaning, the required ones, closed value sets and accepted aliases, and whether the tool only "
+             "reads or can delete. Use it before call_tool when the parameter line from find_tools does not tell you how to fill "
+             "an argument, such as its format or its allowed values; a tool already in your list has its schema there.\n\n"
+             "An old name of a renamed tool, or the name of a retired one, also resolves, and `retired_name` then says what the "
+             "name became. It only reads the catalog. An unknown name is an error that lists up to five `closest` names.\n\n"
+             "Returns: { success, name, domain, description, inputSchema, annotations?, retired_name? }",
+             {"name": prop("string", "The tool's exact name, as find_tools returns it.")}, ["name"], reads_catalog),
         tool("call_tool",
-             "Runs one of this server's tools by name, with `arguments` holding that tool's own parameters. The call goes through "
-             "the same validation, guards and readback as a tool listed directly.",
-             {"name": prop("string", "The tool to run, as find_tools returns it."), "arguments": arguments}, ["name"], False),
+             "Runs any of this server's tools by name: `name` is the tool and `arguments` its own parameters, e.g. "
+             '{"name": "get_actors_by_class", "arguments": {"class_name": "PointLight"}}. Use it for a tool that is not '
+             "in your tool list, once find_tools has found it (and describe_tool, when its parameters are unclear); call a listed "
+             "tool directly.\n\n"
+             "The call takes the path of a direct one: the same validation, guards and readback, and the same effects, so it can "
+             "delete or overwrite whatever the named tool can; describe_tool shows that tool's annotations. Refused before "
+             "anything runs: no `name`, `name` set to call_tool itself, `arguments` that is not an object (a JSON string of one "
+             "is accepted), an unknown name (the error lists the closest ones) and a missing required parameter. An old name of a "
+             "renamed tool runs the new one, and the reply says so.\n\n"
+             "Returns: the named tool's own reply, unchanged.",
+             {"name": prop("string", "The tool to run, as find_tools returns it."), "arguments": arguments}, ["name"],
+             runs_any_tool),
     ]
     if core:
-        domains_property = prop("array", 'The domains whose tools to add, as find_tools lists them, e.g. ["Material"] or '
-                                         '["Animation", "Audio"].')
-        domains_property["items"] = {"type": "string", "enum": list(domains)}
+        def names_property(description: str, names: list[str]) -> dict:
+            schema = prop("array", description)
+            schema["items"] = {"type": "string", "enum": list(names)}
+            return schema
+
+        packs_line = ", ".join(f"{pack['name']} ({', '.join(pack['tools'])})" for pack in packs)
         out.append(tool(
             "enable_toolset",
-            "Adds every tool of one or more domains to this connection's tool list, so you call them directly instead of "
-            "through call_tool: use it when a task needs several tools of a domain, for example Material or Animation. "
-            f"The {core_count} core tools are always listed; find_tools with no arguments lists the {len(domains)} domains and "
-            "their sizes. Your client re-reads the list when the server announces the change; if it does not, call_tool "
-            "reaches the same tools. Lasts until the connection's session ends.",
-            {"domains": domains_property}, ["domains"], True))
+            "Adds packs or whole domains to this connection's tool list, so their tools are called directly instead of "
+            f"through call_tool; the {core_count} core tools are always listed. Give `packs`, `domains` or both.\n\n"
+            f"A pack is the few tools of one job the core leaves out: {packs_line}. A domain is every tool of one area of the "
+            "editor, such as Material or Animation, and can add a hundred tools to your context: find_tools with no arguments "
+            "lists the domains and their sizes. Prefer a pack when one covers the job.\n\n"
+            "It changes only which tools this connection lists, never the editor or the project, and lasts until the "
+            "connection's session ends; enabling the same one again adds nothing. The server announces the new list and your "
+            "client re-reads it; if your client does not, call_tool reaches the same tools. An unknown name is an error that "
+            "lists the packs and the domains.\n\n"
+            "Returns: { success, packs?: [{ pack, already_listed, tools }], domains?: [{ domain, already_listed, tools }], "
+            "tools_added: int, list_changed: bool, note?: string }",
+            {"packs": names_property('The packs to add, e.g. ["actors"] or ["play", "levels"].',
+                                     [pack["name"] for pack in packs]),
+             "domains": names_property('The whole domains to add, as find_tools lists them, e.g. ["Material"].', domains)},
+            [], reads_catalog))
     return out
 
 
@@ -314,10 +353,17 @@ def load_lists() -> dict[str, list[dict]]:
                  for command in domain.get("commands", [])}
     domains = list(dict.fromkeys(domain_of[tool["name"]] for tool in tools))
     core = [tool for tool in tools if tool["name"] in core_names]
+    # The packs, each with its listed tools in list order (FMcpToolCatalog::FPack); one named like a domain is skipped.
+    pack_of = {command["name"]: command.get("pack") for domain in catalog.get("domains", [])
+               for command in domain.get("commands", []) if not command.get("retired")}
+    lowered = {domain.lower() for domain in domains}
+    packs = [{"name": pack["name"], "description": pack.get("description", ""),
+              "tools": [tool["name"] for tool in tools if pack_of.get(tool["name"]) == pack["name"]]}
+             for pack in catalog.get("packs", []) if pack.get("name") and pack["name"].lower() not in lowered]
     return {
         "all": tools,
-        "core": core + meta_tools(tools, domains, len(core), core=True),
-        "compact": meta_tools(tools, domains, len(core), core=False),
+        "core": core + meta_tools(tools, domains, packs, len(core), core=True),
+        "compact": meta_tools(tools, domains, packs, len(core), core=False),
     }
 
 
@@ -435,8 +481,18 @@ def check() -> int:
     core_tools = [tool for tool in core if tool["name"] not in meta]
     if [tool["name"] for tool in core[-4:]] != meta:
         problems.append(f"the core list does not end with the four meta-tools: {[t['name'] for t in core[-4:]]}")
-    if not 10 <= len(core_tools) <= 36:
+    # A directory scores a list of more than 15 tools as too long: 11 core tools and the four meta-tools.
+    if not 8 <= len(core_tools) <= 11:
         problems.append(f"{len(core_tools)} core tools: the catalog's @core annotations were not read, or are too many")
+    if len(core) > 15:
+        problems.append(f"the core list has {len(core)} tools, more than 15")
+    toolset = next((tool for tool in core if tool["name"] == "enable_toolset"), {})
+    packs = toolset.get("inputSchema", {}).get("properties", {}).get("packs", {}).get("items", {}).get("enum", [])
+    if not packs:
+        problems.append("enable_toolset lists no pack: the catalog's `packs` were not read")
+    without_meta_hints = [tool["name"] for tool in core[-4:] if len(tool.get("annotations", {})) != 4]
+    if without_meta_hints:
+        problems.append(f"meta-tools without their four annotations: {without_meta_hints}")
     if any(tool not in tools for tool in core_tools):
         problems.append("a core tool differs from its entry in the full list")
     if [tool["name"] for tool in compact] != meta[:3]:

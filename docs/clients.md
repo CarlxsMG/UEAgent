@@ -178,20 +178,35 @@ ones that are not listed.
 
 ### The core list
 
-The core tools are the ones most work starts with: assets, actors and levels, any object's
-properties, Blueprint and other asset graphs, data tables, Play-in-Editor and Python. The
-[tool reference](tools/README.md) marks them. Four tools reach the rest:
+The 11 core tools are the ones most work starts with: find, read, change, save and undo any asset
+or object, edit Blueprint graphs, and Python. With the four tools that reach the rest, the list
+holds 15 tools. The [tool reference](tools/README.md) marks them.
 
 | Tool | |
 |---|---|
-| `find_tools` | Searches every tool by words and/or domain; with no arguments, lists the domains |
+| `find_tools` | Searches every tool by words and/or domain; with no arguments, lists the domains and the packs |
 | `describe_tool` | One tool's description and input schema |
 | `call_tool` | Runs any tool by name, with the same checks and readback as a direct call |
-| `enable_toolset` | Adds every tool of one or more domains to this client's list |
+| `enable_toolset` | Adds a pack, or every tool of a domain, to this client's list |
+
+A pack is the few tools of one job the core leaves out:
+
+| Pack | For |
+|---|---|
+| `actors` | Find, spawn and delete the actors of the open level |
+| `levels` | Open, save and inspect levels, and list what is unsaved |
+| `play` | Start, stop and check Play-in-Editor, and capture the viewport |
+| `assets` | Delete and duplicate assets, and find what references one |
+| `blueprint_authoring` | Create Blueprints, add variables, read their outline, unlink pins, remove nodes and build several wired nodes at once |
+| `data_tables` | Read a data table row and change its fields |
+
+The [tool reference](tools/README.md) lists each pack's tools. A domain is every tool of one area,
+such as Material or Animation, and can add a hundred tools: prefer a pack when one covers the job.
 
 `enable_toolset` lasts as long as the client's session: the server tells the client that its list
-changed, and a client that supports `tools/list_changed` reads it again. To list a domain from the
-start, name it in the URL: `?domains=Material,Animation`.
+changed, and a client that supports `tools/list_changed` reads it again. To list a pack or a domain
+from the start, name it in the URL: `?packs=actors,play` or `?domains=Material,Animation` (either
+takes both).
 
 ### Every client at once
 

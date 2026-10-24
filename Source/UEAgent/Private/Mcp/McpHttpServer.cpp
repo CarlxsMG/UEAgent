@@ -115,7 +115,8 @@ namespace McpHttpServerPrivate
 		return Mode == EMcpToolsMode::All ? TEXT("all") : Mode == EMcpToolsMode::Compact ? TEXT("compact") : TEXT("core");
 	}
 
-	/** What the URL asks for: the list (`tools=core|all|compact`, else the server's default) and the domains to add to the core list (`domains=A,B`). */
+	/** What the URL asks for: the list (`tools=core|all|compact`, else the server's default) and the packs and domains to add
+	 *  to the core list (`domains=A,b` or `packs=a,B`: either takes both kinds, since no pack is named like a domain). */
 	struct FToolsRequest
 	{
 		EMcpToolsMode Mode = EMcpToolsMode::Core;
@@ -140,16 +141,16 @@ namespace McpHttpServerPrivate
 				bool bKnown = false;
 				Out.Mode = ParseToolsMode(Value, Out.Mode, bKnown);
 			}
-			else if (Key.Equals(TEXT("domains"), ESearchCase::IgnoreCase) && Catalog)
+			else if ((Key.Equals(TEXT("domains"), ESearchCase::IgnoreCase) || Key.Equals(TEXT("packs"), ESearchCase::IgnoreCase)) && Catalog)
 			{
 				TArray<FString> Names;
 				Value.Replace(TEXT("%2C"), TEXT(","), ESearchCase::IgnoreCase).ParseIntoArray(Names, TEXT(","));
 				for (const FString& Name : Names)
 				{
-					const FString Domain = Catalog->FindDomain(Name);
-					if (!Domain.IsEmpty())
+					const FString Toolset = Catalog->FindToolset(Name);
+					if (!Toolset.IsEmpty())
 					{
-						Out.Domains.Add(Domain);
+						Out.Domains.Add(Toolset);
 					}
 				}
 			}
@@ -1223,7 +1224,7 @@ bool FMcpHttpConnection::AnswerEnableToolset(const McpHttpServerPrivate::FHttpRe
 
 	TArray<FString> Domains;
 	FString Error;
-	if (!McpMetaTools::ReadToolsetDomains(Catalog, Arguments, Domains, Error))
+	if (!McpMetaTools::ReadToolsets(Catalog, Arguments, Domains, Error))
 	{
 		return SendJson(200, MakeRpcResult(Id, MakeToolResult(Error, true)), bKeepAlive) && bKeepAlive;
 	}

@@ -15,8 +15,8 @@ class FMcpToolCatalog;
  *   find_tools      searches the catalog by words and/or domain
  *   describe_tool   one tool's description and input schema, as the full tools/list carries them
  *   call_tool       runs a catalog tool by name
- *   enable_toolset  adds a domain's tools to this connection's list (core list only: the server answers it, with the
- *                   connection's session, in McpHttpServer.cpp)
+ *   enable_toolset  adds a pack's or a domain's tools to this connection's list (core list only: the server answers it,
+ *                   with the connection's session, in McpHttpServer.cpp)
  *
  * The core list, the default, carries the core tools and the four of them. The compact list carries the first three
  * alone: UEAGENT_TOOLS=compact, or one client whose URL asks for it (/mcp?tools=compact). The full list (?tools=all)
@@ -51,16 +51,17 @@ namespace McpMetaTools
 	FString CoreInstructions(const FMcpToolCatalog& Catalog);
 
 	/**
-	 * enable_toolset's `domains` (or a single `domain`), each as the catalog spells it. Returns false with OutError, and
-	 * bOutIsError, when the call names no domain or one the catalog does not have (the error lists the domains).
+	 * enable_toolset's `packs` and `domains` (or a single `pack` or `domain`), each as the catalog spells it: the packs and
+	 * domains to add (FMcpToolCatalog::FindToolset). Returns false with OutError when the call names nothing or a name the
+	 * catalog does not have (the error lists the packs and the domains).
 	 */
-	bool ReadToolsetDomains(const FMcpToolCatalog& Catalog, const TSharedPtr<FJsonObject>& Args, TArray<FString>& OutDomains, FString& OutError);
+	bool ReadToolsets(const FMcpToolCatalog& Catalog, const TSharedPtr<FJsonObject>& Args, TArray<FString>& OutToolsets, FString& OutError);
 
 	/**
-	 * enable_toolset's reply: the domains, the tools each one adds (the core tools are already listed) and, when the
-	 * connection has a session, that the list changed; without one, how to reach them anyway.
+	 * enable_toolset's reply: the packs and domains, the tools each one adds (the core tools are already listed), how many
+	 * the list gains and, when the connection has a session, that it changed; without one, how to reach them anyway.
 	 */
-	TSharedRef<FJsonObject> ToolsetReply(const FMcpToolCatalog& Catalog, const TArray<FString>& Domains, const TSet<FString>& EnabledBefore, bool bHasSession);
+	TSharedRef<FJsonObject> ToolsetReply(const FMcpToolCatalog& Catalog, const TArray<FString>& Toolsets, const TSet<FString>& EnabledBefore, bool bHasSession);
 
 	/**
 	 * Answers find_tools or describe_tool; returns null for any other name. bOutIsError marks a

@@ -313,6 +313,9 @@ ANNOTATION_PARAM_RE  = re.compile(
     r'^//\s{3,}@param\s+(\S+)(?:\s+\[([a-zA-Z]*)(!?)\])?\s+-\s+(.+)$')
 # @returns line: `//   @returns <description or { shape }>`
 ANNOTATION_RETURNS_RE = re.compile(r'^//\s{3,}@returns\s+(.+)$')
+# @para line: `//   @para <text>` -- one more paragraph of the description, after a blank line: when to use the tool and
+# what it does that the first paragraph does not say, so a long description reads as short paragraphs. One line each.
+ANNOTATION_PARA_RE = re.compile(r'^//\s{3,}@para\s+(.+)$')
 # @renamed-from line: `//   @renamed-from <old_name>` -- a name the tool had before. The catalog's `renamed`
 # maps it to this tool: a call to the old name runs this one and the reply says so, and tools/list leaves it out.
 ANNOTATION_RENAMED_RE = re.compile(r'^//\s{3,}@renamed-from\s+([a-z0-9_]+)\s*$')
@@ -322,8 +325,23 @@ ANNOTATION_RETIRED_RE = re.compile(r'^//\s{3,}@retired\s+([a-z0-9_]+)\s+-\s+(.+)
 # @core line: `//   @core` -- the tool is in the core list, the one tools/list carries by default (FMcpToolCatalog's
 # core list); the others are reached with find_tools, call_tool and enable_toolset.
 ANNOTATION_CORE_RE = re.compile(r'^//\s{3,}@core\s*$')
-# The core list stays small: it is what every agent pays for in context, and what a directory scores.
-MAX_CORE_TOOLS = 36
+# The core list stays small: it is what every agent pays for in context, and what a directory scores. With the four
+# meta-tools it ends with, 11 core tools make a list of 15; a directory scores a longer list as too long for an agent.
+MAX_CORE_TOOLS = 11
+# @pack line: `//   @pack <name>` -- the tool belongs to that pack, a small set of tools enable_toolset adds by name for
+# a job the core list leaves out (FMcpToolCatalog's packs). A tool is in one pack at most, and a core tool in none.
+ANNOTATION_PACK_RE = re.compile(r'^//\s{3,}@pack\s+([a-z0-9_]+)\s*$')
+# The packs, in the order find_tools lists them, and the job each one is for: find_tools and enable_toolset publish it.
+# A pack name is never a domain name, so enable_toolset and ?domains= take either without ambiguity.
+PACKS = {
+    "actors": "find, spawn and delete the actors of the open level",
+    "levels": "open, save and inspect levels, and list what is unsaved",
+    "play": "start, stop and check Play-in-Editor, and capture the viewport",
+    "assets": "delete and duplicate assets, and find what references one",
+    "blueprint_authoring": "create Blueprints, add variables, read their outline, unlink pins, remove nodes and build several "
+                           "wired nodes at once",
+    "data_tables": "read a data table row and change its fields",
+}
 # Any other line inside an annotation block (skip silently).
 ANNOTATION_OTHER_RE   = re.compile(r'^//')
 # `// MCP-DOMAIN: <domain>` — declares a handler class's MCP domain (the domain
@@ -367,9 +385,9 @@ def find_truncated_annotations(text: str) -> list[tuple[str, str, int, str]]:
     def is_continuation(nxt: str) -> bool:
         if not ANNOTATION_OTHER_RE.match(nxt):
             return False
-        if (ANNOTATION_PARAM_RE.match(nxt) or ANNOTATION_RETURNS_RE.match(nxt)
+        if (ANNOTATION_PARAM_RE.match(nxt) or ANNOTATION_RETURNS_RE.match(nxt) or ANNOTATION_PARA_RE.match(nxt)
                 or ANNOTATION_RENAMED_RE.match(nxt) or ANNOTATION_RETIRED_RE.match(nxt)
-                or ANNOTATION_CORE_RE.match(nxt)
+                or ANNOTATION_CORE_RE.match(nxt) or ANNOTATION_PACK_RE.match(nxt)
                 or ANNOTATION_MARKER_RE.match(nxt) or ANNOTATION_DOMAIN_RE.match(nxt)
                 or tool_hints.HINTS_LINE_RE.match(nxt)):
             return False
@@ -389,6 +407,7 @@ def find_truncated_annotations(text: str) -> list[tuple[str, str, int, str]]:
                 break
             kind = ("description" if j == i
                     else "@param" if ANNOTATION_PARAM_RE.match(lines[j])
+                    else "@para" if ANNOTATION_PARA_RE.match(lines[j])
                     else "@retired" if ANNOTATION_RETIRED_RE.match(lines[j]) else None)
             nxt = lines[j + 1] if j + 1 < len(lines) else ""
             if kind and is_continuation(nxt):
@@ -437,7 +456,8 @@ def parse_annotations(text: str) -> dict[str, dict]:
             i += 1
             continue
         cmd, desc = m.group(1), m.group(2).rstrip()
-        entry: dict = {"description": desc, "params": {}, "returns": "", "renamedFrom": [], "retired": None, "core": False}
+        entry: dict = {"description": desc, "params": {}, "returns": "", "renamedFrom": [], "retired": None, "core": False,
+                       "pack": None}
         j = i + 1
         while j < len(lines):
             ln = lines[j]
@@ -464,6 +484,10 @@ def parse_annotations(text: str) -> dict[str, dict]:
                 entry["retired"] = {"use": tm.group(1), "how": tm.group(2).rstrip()}
             elif ANNOTATION_CORE_RE.match(ln):
                 entry["core"] = True
+            elif (km := ANNOTATION_PACK_RE.match(ln)):
+                entry["pack"] = km.group(1)
+            elif (am := ANNOTATION_PARA_RE.match(ln)):
+                entry["description"] += "\n\n" + am.group(1).rstrip()
             else:
                 rm = ANNOTATION_RETURNS_RE.match(ln)
                 if rm:
@@ -1444,6 +1468,8 @@ def build(args) -> int:
             entry["retired"] = dict(ann["retired"])
         if ann and ann.get("core"):
             entry["core"] = True
+        if ann and ann.get("pack"):
+            entry["pack"] = ann["pack"]
         for old in (ann.get("renamedFrom", []) if ann else []):
             renamed_from.setdefault(old, []).append(cmd)
         by_domain[domain].append(entry)
@@ -1562,6 +1588,26 @@ def build(args) -> int:
     if len(core) > MAX_CORE_TOOLS:
         retirement_errors.append(f"{len(core)} @core tools, more than {MAX_CORE_TOOLS}: the core list is what every agent pays for")
     print(f"CORE    : {len(core)} tools listed by default")
+    # The packs: each one known, holding listed tools that are not core, and none named like a domain.
+    pack_tools: dict[str, list[str]] = defaultdict(list)
+    for name, entry in sorted(all_entries.items()):
+        pack = entry.get("pack")
+        if not pack:
+            continue
+        if pack not in PACKS:
+            retirement_errors.append(f"`{name}` is @pack {pack}, which is not in PACKS: {', '.join(PACKS)}")
+        if entry.get("core"):
+            retirement_errors.append(f"`{name}` is @core and @pack {pack}: a core tool is always listed")
+        if entry.get("retired"):
+            retirement_errors.append(f"`{name}` is @retired and @pack {pack}: a pack lists listed tools only")
+        pack_tools[pack].append(name)
+    domain_names = {d.lower() for d in by_domain}
+    for pack in PACKS:
+        if not pack_tools.get(pack):
+            retirement_errors.append(f"pack `{pack}` has no @pack tool")
+        if pack.lower() in domain_names:
+            retirement_errors.append(f"pack `{pack}` is also a domain name: enable_toolset could not tell them apart")
+    print("PACKS   : " + ", ".join(f"{p} ({len(pack_tools.get(p, []))})" for p in PACKS))
 
     # A listed tool's text sends the agent only to listed tools: an old or retired name in it would be followed.
     gone = set(renamed_from) | {n for n, e in all_entries.items() if e.get("retired")}
@@ -1614,6 +1660,8 @@ def build(args) -> int:
             "warning": "AUTO-GENERATED -- DO NOT EDIT BY HAND; run Tools/codegen_command_catalog.py --write",
         },
         "nameLikeRule": name_like_rule(),
+        # The packs enable_toolset adds by name; each command names its own (`pack`).
+        "packs": [{"name": name, "description": description} for name, description in PACKS.items()],
         "domains": domains_list,
     }
     if renamed_from:

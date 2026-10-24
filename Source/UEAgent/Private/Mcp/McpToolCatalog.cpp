@@ -644,6 +644,7 @@ TSharedPtr<const FMcpToolCatalog> FMcpToolCatalog::LoadFromFile(const FString& P
 			(*CommandObj)->TryGetStringField(TEXT("returns"), Tool.Returns);
 			Tool.Returns.TrimStartAndEndInline();
 			(*CommandObj)->TryGetBoolField(TEXT("core"), Tool.bCore);
+			(*CommandObj)->TryGetStringField(TEXT("pack"), Tool.Pack);
 			const TSharedPtr<FJsonObject>* AnnotationsObj = nullptr;
 			if ((*CommandObj)->TryGetObjectField(TEXT("annotations"), AnnotationsObj) && AnnotationsObj && AnnotationsObj->IsValid())
 			{
@@ -822,6 +823,36 @@ TSharedPtr<const FMcpToolCatalog> FMcpToolCatalog::LoadFromFile(const FString& P
 		return nullptr;
 	}
 
+	// The packs, with the listed tools that name each one. A pack named like a domain is skipped: enable_toolset takes
+	// either name and could not tell them apart (the generator refuses such a catalog, so this is a hand-edited one).
+	const TArray<TSharedPtr<FJsonValue>>* PacksJson = nullptr;
+	if (Root->TryGetArrayField(TEXT("packs"), PacksJson) && PacksJson)
+	{
+		for (const TSharedPtr<FJsonValue>& PackValue : *PacksJson)
+		{
+			const TSharedPtr<FJsonObject>* PackObj = nullptr;
+			if (!PackValue.IsValid() || !PackValue->TryGetObject(PackObj))
+			{
+				continue;
+			}
+			FPack Pack;
+			(*PackObj)->TryGetStringField(TEXT("name"), Pack.Name);
+			(*PackObj)->TryGetStringField(TEXT("description"), Pack.Description);
+			if (Pack.Name.IsEmpty() || Catalog->FindPack(Pack.Name) || !Catalog->FindDomain(Pack.Name).IsEmpty())
+			{
+				continue;
+			}
+			for (const FTool& Tool : Catalog->Tools)
+			{
+				if (Tool.Pack == Pack.Name)
+				{
+					Pack.ToolNames.Add(Tool.Name);
+				}
+			}
+			Catalog->Packs.Add(MoveTemp(Pack));
+		}
+	}
+
 	// Old name -> new name. An old name that is still a tool, or a new name that is not one, is skipped: the call
 	// would run something other than what the old name did, or nothing.
 	const TSharedPtr<FJsonObject>* RenamedObj = nullptr;
@@ -855,12 +886,17 @@ TSharedPtr<const FMcpToolCatalog> FMcpToolCatalog::LoadFromFile(const FString& P
 	return Catalog;
 }
 
-TArray<uint8> FMcpToolCatalog::BuildCoreToolsListUtf8(const TSet<FString>& InDomains) const
+bool FMcpToolCatalog::IsInCoreList(const FTool& Tool, const TSet<FString>& Toolsets)
+{
+	return Tool.bCore || Toolsets.Contains(Tool.Domain) || (!Tool.Pack.IsEmpty() && Toolsets.Contains(Tool.Pack));
+}
+
+TArray<uint8> FMcpToolCatalog::BuildCoreToolsListUtf8(const TSet<FString>& Toolsets) const
 {
 	TArray<const TArray<uint8>*> Fragments;
 	for (int32 Index = 0; Index < Tools.Num(); ++Index)
 	{
-		if (Tools[Index].bCore || InDomains.Contains(Tools[Index].Domain))
+		if (IsInCoreList(Tools[Index], Toolsets))
 		{
 			Fragments.Add(&ToolJsonUtf8[Index]);
 		}
@@ -885,6 +921,23 @@ FString FMcpToolCatalog::FindDomain(const FString& Name) const
 		}
 	}
 	return FString();
+}
+
+const FMcpToolCatalog::FPack* FMcpToolCatalog::FindPack(const FString& Name) const
+{
+	const FString Wanted = Name.TrimStartAndEnd();
+	return Packs.FindByPredicate([&Wanted](const FPack& Pack) { return Pack.Name.Equals(Wanted, ESearchCase::IgnoreCase); });
+}
+
+FString FMcpToolCatalog::FindToolset(const FString& Name) const
+{
+	const FString Domain = FindDomain(Name);
+	if (!Domain.IsEmpty())
+	{
+		return Domain;
+	}
+	const FPack* Pack = FindPack(Name);
+	return Pack ? Pack->Name : FString();
 }
 
 FString FMcpToolCatalog::CheckRequired(const FTool& Tool, const TSharedPtr<FJsonObject>& Args) const

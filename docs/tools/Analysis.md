@@ -125,7 +125,7 @@ List every package an asset DEPENDS ON (its outgoing edges), each with its class
 
 *Read-only.*
 
-**Core tool:** every client lists it by default.
+**Pack `assets`:** `enable_toolset` adds it to a client's list ([tool lists](../clients.md#tool-lists)).
 
 List every asset that REFERENCES a target asset -- "who breaks if I delete, move or rename this?" -- wrapping AssetRegistry::GetReferencers over the Package category and returning each referencing package with its primary asset's name, path, class and loaded state. It accepts an object path, a package path or a bare name, echoes `resolved_package` so you can confirm it queried the package you meant, and REFUSES an ambiguous bare name with the candidate list instead of picking one. Hard references only by default (the "what keeps this loaded" audit); dependency_type='soft' or 'all' (or include_soft_references=true) brings in TSoftObjectPtr / FSoftObjectPath edges, and exclude_engine=true drops /Engine and /Script referencers. Works for any asset type, a MetaSound included. Its mirror is get_asset_dependencies (what this asset needs), and find_blueprint_node_references finds call sites INSIDE graphs, which package-level references cannot see.
 

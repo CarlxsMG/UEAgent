@@ -165,11 +165,56 @@ def check_core_list(s: Session, catalog: dict) -> None:
     is_error, reply = s.call("enable_toolset", {"domains": ["NoSuchDomain"]})
     s.check("an unknown domain is an error that lists the domains", is_error and "Water" in reply.get("_text", ""), reply)
 
+    # Packs: a few tools for one job, added by name like a domain.
+    packs = {p["name"]: [c["name"] for d in catalog["domains"] for c in d["commands"]
+                         if c.get("pack") == p["name"] and not c.get("retired")] for p in catalog.get("packs", [])}
+    s.check("the catalog has packs, each with tools", bool(packs) and all(packs.values()), packs)
+    actors = packs.get("actors", [])
+    listed = [t["name"] for t in s.rpc("tools/list", query="?packs=actors")["result"]["tools"]]
+    s.check("?packs=actors adds the actors pack", set(listed) == set(core + meta + actors), len(listed))
+    listed = [t["name"] for t in s.rpc("tools/list", query="?domains=actors")["result"]["tools"]]
+    s.check("?domains= takes a pack name too", set(listed) == set(core + meta + actors), len(listed))
+    headers, body = s.raw("tools/call", {"name": "enable_toolset", "arguments": {"packs": ["actors"]}},
+                          headers={"Mcp-Session-Id": session})
+    messages = sse_messages(body) if "text/event-stream" in headers.get("content-type", "") else []
+    reply = json.loads(messages[-1]["result"]["content"][0]["text"]) if messages else {}
+    s.check(f"enable_toolset adds the {len(actors)} tools of the actors pack",
+            reply.get("tools_added") == len(actors) and [p.get("pack") for p in reply.get("packs", [])] == ["actors"], reply)
+    headers, body = s.raw("tools/list", headers={"Mcp-Session-Id": session})
+    listed = [t["name"] for t in json.loads(body)["result"]["tools"]]
+    s.check("the session's tools/list carries the pack and the domain", set(listed) == set(core + meta + water + actors), len(listed))
+    play_and_level = set(packs.get("play", [])) | {c["name"] for d in catalog["domains"] if d["domain"] == "Level"
+                                                     for c in d["commands"] if not c.get("retired") and not c.get("core")}
+    is_error, reply = s.call("enable_toolset", {"packs": ["play"], "domains": ["Level"]})
+    s.check("a pack and a domain together answer both, without a session adding nothing",
+            not is_error and [p.get("pack") for p in reply.get("packs", [])] == ["play"]
+            and [d.get("domain") for d in reply.get("domains", [])] == ["Level"] and reply.get("tools_added") == 0, reply)
+    headers, body = s.raw("initialize", {"protocolVersion": "2025-06-18"})
+    other = headers.get("mcp-session-id", "")
+    headers, body = s.raw("tools/call", {"name": "enable_toolset", "arguments": {"packs": ["play"], "domains": ["Level"]}},
+                          headers={"Mcp-Session-Id": other})
+    messages = sse_messages(body) if "text/event-stream" in headers.get("content-type", "") else []
+    reply = json.loads(messages[-1]["result"]["content"][0]["text"]) if messages else {}
+    s.check(f"a pack's tools inside an enabled domain count once ({len(play_and_level)})",
+            reply.get("tools_added") == len(play_and_level), reply)
+    is_error, reply = s.call("enable_toolset", {"packs": ["no_such_pack"]})
+    s.check("an unknown pack is an error that lists the packs", is_error and "actors" in reply.get("_text", ""), reply)
+    is_error, reply = s.call("enable_toolset", {})
+    s.check("enable_toolset with nothing to add is an error", is_error, reply)
+
 
 def check_meta_tools(s: Session, catalog: dict) -> None:
     print("== meta-tools")
     is_error, found = s.call("find_tools", {})
     s.check("find_tools lists the domains", not is_error and len(found.get("domains", [])) == len(catalog["domains"]), found)
+    s.check("find_tools lists the packs with their tools",
+            [p.get("pack") for p in found.get("packs", [])] == [p["name"] for p in catalog.get("packs", [])]
+            and all(p.get("tools") for p in found.get("packs", [])), found.get("packs"))
+    core_list = {t["name"]: t for t in s.rpc("tools/list")["result"]["tools"]}
+    hints = {name: core_list.get(name, {}).get("annotations", {}) for name in ("find_tools", "describe_tool", "call_tool", "enable_toolset")}
+    s.check("the meta-tools carry all four annotations, call_tool the worst of any tool",
+            all(len(h) == 4 for h in hints.values()) and hints["call_tool"].get("destructiveHint") is True
+            and hints["find_tools"].get("readOnlyHint") is True, hints)
     is_error, found = s.call("find_tools", {"query": "spawn actor"})
     names = [t["name"] for t in found.get("tools", [])]
     s.check("find_tools ranks spawn_actor first for 'spawn actor'", names[:1] == ["spawn_actor"], names[:5])

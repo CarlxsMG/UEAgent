@@ -167,6 +167,9 @@ def domain_page(domain: str, commands: list[dict]) -> str:
             lines += [hints(c.get("annotations")), ""]
         if c.get("core"):
             lines += ["**Core tool:** every client lists it by default.", ""]
+        elif c.get("pack"):
+            lines += [f"**Pack `{c['pack']}`:** `enable_toolset` adds it to a client's list "
+                      "([tool lists](../clients.md#tool-lists)).", ""]
         lines += [prose(c.get("description") or "No description."), ""]
         params = c.get("params") or []
         if params:
@@ -182,7 +185,7 @@ def domain_page(domain: str, commands: list[dict]) -> str:
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
-def index_page(domains: list[dict], has_retired: bool = False) -> str:
+def index_page(domains: list[dict], has_retired: bool = False, packs: list[dict] | None = None) -> str:
     total = sum(len(d["commands"]) for d in domains)
     core = sorted(c["name"] for d in domains for c in d["commands"] if c.get("core"))
     lines = [HEADER, "", "# Tool reference", "",
@@ -190,8 +193,15 @@ def index_page(domains: list[dict], has_retired: bool = False) -> str:
              "(`tools/list`, or `describe_tool` for a tool the client does not list: see "
              "[tool lists](../clients.md#tool-lists)); this reference is the same catalog, readable.", "",
              f"The {len(core)} core tools, which every client lists by default: "
-             + ", ".join(f"`{name}`" for name in core) + ".", "",
-             "| Domain | Tools | What it covers |", "|---|---|---|"]
+             + ", ".join(f"`{name}`" for name in core) + ".", ""]
+    if packs:
+        lines += ["The packs, which `enable_toolset` adds by name:", "", "| Pack | Tools | For |", "|---|---|---|"]
+        for pack in packs:
+            tools = sorted(c["name"] for d in domains for c in d["commands"] if c.get("pack") == pack["name"])
+            lines.append(f"| `{pack['name']}` | {', '.join(f'`{name}`' for name in tools)} | "
+                         f"{cell(pack['description'][:1].upper() + pack['description'][1:])} |")
+        lines.append("")
+    lines += ["| Domain | Tools | What it covers |", "|---|---|---|"]
     for d in domains:
         covers = summary(d["domain"], d["commands"])
         lines.append(f"| [{d['domain']}]({d['domain']}.md) | {len(d['commands'])} | "
@@ -233,7 +243,7 @@ def render() -> dict[str, str]:
         listed = [c for c in d["commands"] if not c.get("retired")]
         if listed:
             domains.append({"domain": d["domain"], "commands": listed})
-    pages = {"README.md": index_page(domains, bool(retired or renamed))}
+    pages = {"README.md": index_page(domains, bool(retired or renamed), catalog.get("packs") or [])}
     for d in domains:
         pages[f"{d['domain']}.md"] = domain_page(d["domain"], d["commands"])
     if retired or renamed:
