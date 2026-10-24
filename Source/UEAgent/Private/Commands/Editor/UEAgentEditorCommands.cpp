@@ -3245,9 +3245,9 @@ TSharedPtr<FJsonObject> HandleCancelTransaction(const TSharedPtr<FJsonObject>& P
     return ResultObj;
 }
 
-// MCP:undo - Step the editor's undo stack back by one transaction, or by `count` of them, as Ctrl+Z does, and report what is now on top (next_undo, the label of the next entry).
-//   @para Use it to revert an edit made in the editor, by a tool or by the person at the keyboard: the stack is shared, so the newest entry may be theirs -- read get_undo_state first to see the label you are about to revert. One transaction is usually one tool call that changed something; to make several edits one entry, wrap them in begin_transaction and end_transaction. Undo reverts objects in memory, not files: an edit saved since stays in the file on disk until the next save.
-//   @para WARNING: `success` is ALWAYS true, including when there was nothing to undo -- the oracle is `applied`, and with a count compare actually_undone against requested (the stack ran out, or an undo barrier stopped it); the honest verification is re-reading whatever you changed.
+// MCP:undo - Step the editor's undo stack back by one transaction, or by `count` of them, as Ctrl+Z does, and report what is now on top.
+//   @para Use it to revert an edit made in the editor, by a tool or by a person: the stack is shared, so read get_undo_state first to see the label you are about to revert. One tool call that changed something is usually one transaction; begin_transaction and end_transaction make several edits one. Undo reverts objects in memory, not files: an edit already saved stays on disk until the next save.
+//   @para Example: {"count": 3} undoes the last three transactions. It stops early at the bottom of the stack or at an undo barrier (set_undo_barrier), and actually_undone then falls short of requested. `success` is true even with nothing to undo: read `applied`, and re-read what you changed to confirm it.
 //   @core
 //   @param count - Optional. How many transactions to undo, at least 1 (default 1); stops early when the stack runs out or reaches an undo barrier. Below 1 is refused.
 //   @returns { applied: bool, requested: int, actually_undone: int, undo_count: int, can_undo: bool, next_undo: string }
