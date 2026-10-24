@@ -2,7 +2,7 @@
 
 # Trigger
 
-10 tools for trigger boxes and spheres, volumes, and their overlap events.
+10 tools for trigger and volume actors: spawning, shaping, their events and what is inside them.
 
 Back to the [index](README.md).
 

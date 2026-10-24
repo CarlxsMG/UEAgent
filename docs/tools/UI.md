@@ -2,7 +2,7 @@
 
 # UI
 
-50 tools for Widget Blueprints and their tree, slots, bindings and animations, MVVM viewmodels, CommonUI stacks, and widgets in PIE.
+50 tools for UMG Widget Blueprints: widgets, slots, bindings, animations, viewmodels and CommonUI stacks, and widgets in PIE.
 
 Back to the [index](README.md).
 

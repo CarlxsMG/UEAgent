@@ -2,7 +2,7 @@
 
 # Replication
 
-1 tool for per-actor replication: net priority, update frequency, cull distance and dormancy.
+1 tool for an actor's replication settings.
 
 Back to the [index](README.md).
 

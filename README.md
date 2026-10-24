@@ -133,6 +133,7 @@ Antigravity CLI, Gemini CLI and OpenCode. Install them into the project from the
 
 | Skill | |
 |---|---|
+| `ueagent-tool-map` | Which core tool, pack or domain covers a task, and the order a task calls them in: find, read, change, check, compile, save |
 | `ueagent-skill-builder` | Turns a workflow you want to repeat into a new skill: it finds the tools, rehearses the task in the editor, checks the result and writes the `SKILL.md` |
 | `ueagent-blueprint-actor` | A Blueprint actor from a description: components, graph, a clean compile, and an instance in the level |
 | `ueagent-project-audit` | What is broken and what can go, most serious first |
@@ -140,7 +141,7 @@ Antigravity CLI, Gemini CLI and OpenCode. Install them into the project from the
 | `ueagent-report-issue` | Reports a bug or asks for a tool as a GitHub issue, with the versions, the call and the log |
 | `ueagent-contribute-fix` | Turns a change to the plugin's code into a pull request, following the repository's rules |
 
-The client loads them by itself when a request matches. More in [Skills](docs/skills.md).
+The client loads them by itself when a request matches. The server also serves them as MCP prompts and resources, `ueagent://guide` among them, for a client without the skills installed. More in [Skills](docs/skills.md).
 
 ## Documentation
 

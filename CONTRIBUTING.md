@@ -21,7 +21,7 @@ change has to pass. How a call travels through the editor is in
 | `Tools/` | Python scripts that derive the catalog and the generated tables from the C++, the audits, and `catalog_server.py`, which lists the tools without the editor for MCP directories. |
 | `Resources/command_catalog.json` | The tool catalog the server publishes (generated). |
 | `Resources/ContractTests/` | The contract's test vectors. |
-| `Resources/Skills/` | The agent skills the editor installs into a project (**MCP > Skills**), in the Agent Skills format. Their names start with `ueagent-`, and `Tools/check_skills.py` checks the format and that every tool they name is in the catalog. |
+| `Resources/Skills/` | The agent skills the editor installs into a project (**MCP > Skills**), in the Agent Skills format. Their names start with `ueagent-`, and `Tools/check_skills.py` checks the format and that every tool they name is in the catalog. The server also serves them as MCP prompts and resources (`McpPrompts.cpp`). The tables of `ueagent-tool-map` are generated: `Tools/codegen_tool_map.py`. |
 | `docs/tools/` | The tool reference (generated). |
 | `docs/`, `mkdocs.yml` | The documentation site. `Tools/mkdocs_hooks.py` adds, when it is built, what GitHub does not show: the README sections and root files the pages include, the client tabs, the links from tool names to the reference, the tool chips, the tool explorer's data and `llms.txt`. |
 
@@ -71,12 +71,14 @@ the synonyms (`read_`, `inspect_`, `query_`, `configure_`, `update_`...).
    python Tools/codegen_param_aliases.py --write
    python Tools/codegen_pie_safety.py --write
    python Tools/codegen_tool_docs.py --write
+   python Tools/codegen_tool_map.py --write
    ```
 
 A new family is a new `.cpp` with its namespace, a `// MCP-DOMAIN: <Domain>` marker and its
 `FRegistrar`; nothing else changes. Like every file under `Source/`, it starts with the copyright
-notice: `python Tools/check_copyright.py --write` adds it. A new domain also gets a phrase in `DOMAIN_SUMMARY`
-(`Tools/codegen_tool_docs.py`), which the reference uses to say what the domain covers. The server reads the
+notice: `python Tools/check_copyright.py --write` adds it. A new domain also gets a phrase in `DOMAINS`
+(`Tools/codegen_command_catalog.py`), which says what the domain covers in `find_tools`, the tool reference and the
+`ueagent-tool-map` skill; the catalog check fails without it. The server reads the
 catalog at editor startup and on `mcp.http.restart`.
 
 ## Renaming or retiring a tool
@@ -100,8 +102,9 @@ Both leave `tools/list`, `find_tools` and the reference, and a call answers as b
   `Tools/check_doc_links.py`, `Tools/check_skills.py` and `ruff check Tools`.
 - `python Tools/smoke_test.py --launch <a throwaway .uproject> --engine <UE root>` passes: it starts a
   headless editor and checks the server end to end over HTTP.
-- A change to how `McpToolCatalog.cpp` builds a schema is made in `Tools/catalog_server.py` too:
-  with the editor open, `python Tools/catalog_server.py --compare` must find no difference.
+- A change to how `McpToolCatalog.cpp` builds a schema, or to how `McpPrompts.cpp` serves a prompt or a
+  resource, is made in `Tools/catalog_server.py` too: with the editor open, `python Tools/catalog_server.py
+  --compare` must find no difference.
 - The contract self-tests pass in the editor: `mcp.contract.selftest` on each vector file in
   `Resources/ContractTests`, and the automation tests `Automation RunTests UEAgent` (the client
   files, the skills installer and the rest).

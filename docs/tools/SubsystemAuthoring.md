@@ -2,7 +2,7 @@
 
 # SubsystemAuthoring
 
-3 tools for listing, activating and deactivating external subsystems.
+3 tools for external subsystems: listing, activating and deactivating them.
 
 Back to the [index](README.md).
 

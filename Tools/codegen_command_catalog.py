@@ -342,6 +342,94 @@ PACKS = {
                            "wired nodes at once",
     "data_tables": "read a data table row and change its fields",
 }
+# What each domain covers, as find_tools (with no arguments) and the tool map skill publish it: an agent picks a domain by
+# these words, so they name the editor's own features. Every domain has one; a domain added without one fails the check.
+DOMAINS = {
+    "AI": "AI controllers, perception senses and stimuli, and teams",
+    "Analysis": "diffs of Blueprints, components and object snapshots, Blueprints that do not compile, asset dependencies "
+                "and referencers, and a Blueprint's components, parent and execution paths",
+    "Animation": "Animation Blueprints and state machines, sequences, montages, composites, blend spaces, notifies and "
+                 "curves, skeletons, bones and sockets, skeletal meshes and LODs, morph targets, IK rigs and retargeters, "
+                 "Control Rig, pose search and motion warping",
+    "Asset": "finding assets by name, type, tag or folder, collections, metadata tags, thumbnails, importing textures and "
+             "sounds, render targets, and static meshes (sockets, collision, Nanite, lightmaps, material slots)",
+    "Audio": "sound cues, MetaSounds, sound classes, mixes and submixes with their effects, attenuation, concurrency, "
+             "modulation, audio buses, dialogue and subtitles, and playing sounds",
+    "Audit": "health audits of asset references, Blueprints, collision profiles, replication and widgets, and a capture of "
+             "the PIE state",
+    "BehaviorTree": "behavior trees with their children, decorators and services, blackboards and their keys, and running "
+                    "a tree in PIE",
+    "Blueprint": "Blueprint authoring: Blueprints, macros and Editor Utility Blueprints, variables, functions and their "
+                 "parameters, event dispatchers, interfaces, components, timelines, graph nodes and pins, compiling, "
+                 "replication settings and reparenting",
+    "Camera": "camera and spring arm components, Gameplay Camera assets and rigs, and camera shakes",
+    "Chooser": "Chooser tables: their columns, rows, cells and outcomes, and evaluating one",
+    "Config": "project settings and the default map, collision channels and profiles, config diffs, and re-running "
+              "construction scripts",
+    "DataAsset": "data tables and their rows, curve tables and curves, data assets, data registries, string tables, CSV "
+                 "and JSON import and export, and localization",
+    "Documentation": "documentation generated for an asset, a Blueprint or the whole project",
+    "Editor": "the editor itself: actors (spawn, select, copy, transform, delete), levels, saving, undo and transactions, "
+              "Python, console commands and CVars, tests, enums and structs, screenshots, logs, media, and asset "
+              "housekeeping (delete, export, migrate, consolidate, redirectors, unused and duplicate assets)",
+    "Engine": "Niagara systems and emitters (modules, renderers, data interfaces, events, simulation stages, user "
+              "parameters), and the engine's and the editor's status",
+    "Export": "Movie Render Queue jobs, exporting assets, Blueprints and level sections, asset reports, async loading and "
+              "source control status",
+    "GameFeatures": "Game Feature plugins: their state, activating, deactivating and unloading them",
+    "GameFramework": "game mode classes and overrides, player starts and spawn points",
+    "GameplayAbilities": "the Gameplay Ability System: abilities, gameplay effects with their modifiers and components, "
+                         "attribute sets, gameplay cues, ability system components and gameplay events",
+    "GameplayBehavior": "Gameplay Behavior configs, and triggering or ending a behavior on an actor",
+    "GameplayDebugger": "Gameplay Debugger categories",
+    "GameplayTags": "gameplay tags, tag tables and redirects, and the tags of an object",
+    "GeometryScript": "dynamic meshes with Geometry Script: primitives, booleans, remeshing, simplifying, normals, UVs, "
+                      "material IDs, copying to and from static meshes, and mesh queries",
+    "Graphics": "decal actors",
+    "HLOD": "World Partition HLOD layers and their actors",
+    "Input": "Enhanced Input: input actions, mapping contexts, triggers and modifiers, key mappings, input state, and force "
+             "feedback",
+    "Interchange": "Interchange imports: pipelines, translators and factories, importing and reimporting, and resetting "
+                   "imported actors and levels",
+    "Level": "the open level and Play-in-Editor: actors by class or radius, transforms, attaching, labels and folders, "
+             "landscapes (sculpting, painting, layers, splines, heightmaps), foliage, splines, data layers, World "
+             "Partition, streaming levels, level instances, world settings, lighting builds, and starting, stopping and "
+             "driving PIE",
+    "Lighting": "lighting quality, rendering settings, shader info and reflection captures",
+    "Management": "assets as files (rename, move, duplicate, delete), primary assets, their rules and bundles, plugin "
+                  "status, and class purity audits",
+    "Mass": "Mass entities: entity configs and traits, spawners, tags, signals and archetypes",
+    "Material": "materials, material instances (constant and dynamic), material functions and layers, parameter "
+                "collections, post-process materials, Substrate, compiling and stats",
+    "Mesh": "procedural mesh components: sections, vertices, materials and slicing",
+    "Meta": "execute_batch, several tool calls in one",
+    "Navigation": "the navigation mesh, and Environment Query System queries with their generators, tests and options",
+    "Networking": "dedicated servers and network info",
+    "Optimization": "asset performance, memory, compression, LOD and streaming settings, and optimization suggestions",
+    "Packaging": "packaged builds: starting, following and cancelling one",
+    "Performance": "frame rate, frame timing and memory, Unreal Insights traces and timing regions, and runtime virtual "
+                   "textures",
+    "Physics": "physics assets, bodies and constraints, physical materials, simple and convex collision, Chaos geometry "
+               "collections and fields, instanced static meshes, raycasts, overlaps, bounds and impulses",
+    "Procedural": "PCG graphs, their parameters and components, generating and reading the generated data",
+    "Reflection": "any object by reflection: properties, functions and calls, classes, structs, enums, delegates and "
+                  "object diffs",
+    "Replication": "an actor's replication settings",
+    "SaveGame": "save game slots: saving, loading, listing and deleting, and serializing actor state",
+    "SmartObjects": "Smart Object definitions, slots, behaviors, tags and annotations, and claiming and using them",
+    "StateTree": "State Trees: states, tasks, transitions and conditions, evaluators, considerations, parameters and "
+                 "bindings, compiling and validating",
+    "Subsystem": "engine and local player subsystem instances",
+    "SubsystemAuthoring": "external subsystems: listing, activating and deactivating them",
+    "Testing": "map check, asset validation, Blueprint errors, breakpoints and debugging, and watching a property in PIE",
+    "Timeline": "Level Sequences (Sequencer): bindings, tracks, sections, keyframes, camera cuts, shots and folders, "
+                "playing a sequence in PIE, and timeline components",
+    "Trigger": "trigger and volume actors: spawning, shaping, their events and what is inside them",
+    "UI": "UMG Widget Blueprints: widgets, slots, bindings, animations, viewmodels and CommonUI stacks, and widgets in PIE",
+    "USD": "USD stages, prims, attributes, variants, references, payloads and layers, and USD stage actors",
+    "UVMapping": "UV channels and UV health",
+    "Water": "water bodies, rivers and water zones: splines, waves, materials and settings",
+}
 # Any other line inside an annotation block (skip silently).
 ANNOTATION_OTHER_RE   = re.compile(r'^//')
 # `// MCP-DOMAIN: <domain>` — declares a handler class's MCP domain (the domain
@@ -1608,6 +1696,11 @@ def build(args) -> int:
         if pack.lower() in domain_names:
             retirement_errors.append(f"pack `{pack}` is also a domain name: enable_toolset could not tell them apart")
     print("PACKS   : " + ", ".join(f"{p} ({len(pack_tools.get(p, []))})" for p in PACKS))
+    # Every domain says what it covers, and DOMAINS names no domain the catalog lacks.
+    for domain in sorted(set(by_domain) - set(DOMAINS)):
+        retirement_errors.append(f"domain `{domain}` has no entry in DOMAINS: find_tools and the tool map publish what it covers")
+    for domain in sorted(set(DOMAINS) - set(by_domain)):
+        retirement_errors.append(f"DOMAINS has `{domain}`, which is no domain of the catalog")
 
     # A listed tool's text sends the agent only to listed tools: an old or retired name in it would be followed.
     gone = set(renamed_from) | {n for n, e in all_entries.items() if e.get("retired")}
@@ -1650,7 +1743,7 @@ def build(args) -> int:
     print()
 
     domains_list = [
-        {"domain": d, "commands": lst}
+        {"domain": d, "description": DOMAINS.get(d, ""), "commands": lst}
         for d, lst in sorted(by_domain.items())
     ]
     out = {

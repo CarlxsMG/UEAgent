@@ -2,7 +2,7 @@
 
 # Export
 
-12 tools for Movie Render Queue jobs, exporting assets, Blueprints and levels as text, asset reports and source control status.
+12 tools for Movie Render Queue jobs, exporting assets, Blueprints and level sections, asset reports, async loading and source control status.
 
 Back to the [index](README.md).
 

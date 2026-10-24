@@ -2,6 +2,46 @@
 
 Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](https://semver.org).
 
+## 2.8.0 - 2026-10-24
+
+The server serves UEAgent's skills as MCP prompts and resources, and a new skill, `ueagent-tool-map`, tells an agent
+which tool, pack or domain covers a task. A client with only the default 15 tools can now see what the rest of them
+do.
+
+### Added
+
+- **Prompts.** `prompts/list` has one prompt per skill, named like it, with an optional `request` argument.
+  `prompts/get` sends the skill to the agent as a user message, with the request and the skill's other files. Claude
+  Code shows them as `/mcp__unreal__<skill>`, and Cursor, VS Code, Gemini CLI and Zed list them too.
+- **Resources.** `ueagent://guide` is the tool map, `ueagent://skills/<name>` each other skill, and
+  `ueagent://skills/<name>/<file>` a file of one.
+  - A URI is only looked up among the shipped skills, never followed as a path. One that is not listed is error
+    `-32002`, with the URI in `data`.
+  - `resources/templates/list` answers an empty list.
+- **The `ueagent-tool-map` skill.** It lists the core tools, the order of a task (find, read, change, check, compile,
+  save, undo), where to start each common task, and the packs and domains with what each one covers.
+  - Its tables are generated from the catalog by `Tools/codegen_tool_map.py`, which CI checks.
+  - The server's instructions point every agent to it.
+- **`find_tools` says what each domain covers.** With no arguments, each domain comes with a `description`.
+  - The phrases live in `DOMAINS` in `Tools/codegen_command_catalog.py`, and a domain without one fails the catalog
+    check.
+  - The [tool reference](docs/tools/README.md) uses the same phrases. They replace its own list, which had gone stale:
+    it said the Lighting domain sets lights, fog and post process, which `set_properties` does.
+- **`Tools/catalog_server.py` serves the same prompts and resources,** so a directory that inspects the server without
+  an editor lists them. `--compare` checks every prompt and resource against a running editor.
+
+### Changed
+
+- **Three descriptions say more.**
+  - `get_graph_nodes` reads unsaved edits, loads the asset from disk and compiles nothing.
+  - `set_properties` has an example call.
+  - `save_asset` says where `path` comes from, and how `readonly_roots` and `refuse_readonly` combine.
+
+### Fixed
+
+- **`add_graph_node` was marked idempotent**, although every call adds a node. Only `event` and `custom_event` give
+  back the node that is already there. Its `idempotentHint` is now false, and its description says so.
+
 ## 2.7.0 - 2026-10-24
 
 A client lists 15 tools by default: 11 core tools and the four that reach the rest. The tools that left the list are

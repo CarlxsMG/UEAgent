@@ -13,6 +13,8 @@ script started: use a throwaway project for --launch. Checks:
   - the core list: its session, ?domains=, and enable_toolset adding a domain and announcing it over SSE;
   - the meta-tools: find_tools, describe_tool (the same schema as the full list), call_tool (the
     same answer as a direct call), the closest names for an unknown tool;
+  - the shipped skills as prompts and resources: one prompt per skill, the tool map as ueagent://guide, every
+    listed resource readable, and the errors for an unknown prompt or resource;
   - edits: one undo step per call, an execute_batch as one step, undo/redo and the undo-state tools,
     mcp.UndoStepPerCall, and a level load in the middle of a call.
 """
@@ -31,6 +33,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CATALOG = ROOT / "Resources" / "command_catalog.json"
+SKILLS = ROOT / "Resources" / "Skills"
 
 
 class Session:
@@ -207,6 +210,10 @@ def check_meta_tools(s: Session, catalog: dict) -> None:
     print("== meta-tools")
     is_error, found = s.call("find_tools", {})
     s.check("find_tools lists the domains", not is_error and len(found.get("domains", [])) == len(catalog["domains"]), found)
+    covers = {d["domain"]: d.get("description") for d in catalog["domains"]}
+    s.check("find_tools says what each domain covers, as the catalog does",
+            all(d.get("description") and d.get("description") == covers.get(d.get("domain")) for d in found.get("domains", [])),
+            [d for d in found.get("domains", []) if d.get("description") != covers.get(d.get("domain"))][:3])
     s.check("find_tools lists the packs with their tools",
             [p.get("pack") for p in found.get("packs", [])] == [p["name"] for p in catalog.get("packs", [])]
             and all(p.get("tools") for p in found.get("packs", [])), found.get("packs"))
@@ -280,6 +287,46 @@ def check_edits(s: Session) -> None:
     s.check("the buffer works after the reset", newest_title(s) == ("UEAgent: spawn_actor", 1), newest_title(s))
 
 
+def check_prompts(s: Session) -> None:
+    print("== prompts and resources")
+    skills = sorted(p.name for p in SKILLS.iterdir() if (p / "SKILL.md").is_file())
+    init = s.rpc("initialize", {"protocolVersion": "2025-06-18"})["result"]
+    s.check("initialize declares prompts and resources",
+            {"prompts", "resources"} <= set(init.get("capabilities", {})), init.get("capabilities"))
+    s.check("the instructions point to ueagent://guide", "ueagent://guide" in init.get("instructions", ""), "")
+    prompts = s.rpc("prompts/list")["result"]["prompts"]
+    s.check("one prompt per shipped skill", [p["name"] for p in prompts] == skills, [p["name"] for p in prompts])
+    s.check("each prompt has a title, a description and the optional request",
+            all(p.get("title") and p.get("description") and p.get("arguments") == [
+                {"name": "request", "description": "What you want done, in your own words. Optional.", "required": False}]
+                for p in prompts), prompts[:1])
+    for name in skills:
+        got = s.rpc("prompts/get", {"name": name, "arguments": {"request": "light the level"}}).get("result", {})
+        text = (got.get("messages") or [{}])[0].get("content", {}).get("text", "")
+        s.check(f"prompts/get {name} returns the skill with the request",
+                text.startswith(f"Use the UEAgent skill `{name}` below for this request: light the level\n\n# "), text[:200])
+    unknown = s.rpc("prompts/get", {"name": "ueagent-nothing"}).get("error", {})
+    s.check("an unknown prompt is Invalid params, with the prompts", unknown.get("code") == -32602
+            and skills[0] in unknown.get("message", ""), unknown)
+    resources = s.rpc("resources/list")["result"]["resources"]
+    s.check("resources/list starts with the guide", resources[:1] and resources[0]["uri"] == "ueagent://guide",
+            resources[:1])
+    unread = []
+    for resource in resources:
+        contents = s.rpc("resources/read", {"uri": resource["uri"]}).get("result", {}).get("contents", [])
+        if not (len(contents) == 1 and contents[0].get("uri") == resource["uri"] and contents[0].get("text")):
+            unread.append(resource["uri"])
+    s.check(f"every listed resource reads ({len(resources)})", not unread, unread)
+    guide = s.rpc("resources/read", {"uri": "ueagent://guide"})["result"]["contents"][0]["text"]
+    s.check("the guide is the tool map, with its tables", "| Domain | Tools | What it covers |" in guide
+            and "| Pack | For | Tools |" in guide, guide[:200])
+    missing = s.rpc("resources/read", {"uri": "ueagent://skills/../UEAgent.uplugin"}).get("error", {})
+    s.check("a URI that is not listed is -32002, never a path", missing.get("code") == -32002
+            and missing.get("data") == {"uri": "ueagent://skills/../UEAgent.uplugin"}, missing)
+    templates = s.rpc("resources/templates/list").get("result", {})
+    s.check("resources/templates/list is empty", templates == {"resourceTemplates": []}, templates)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--url", default="http://127.0.0.1:55561/mcp", help="The MCP endpoint")
@@ -308,6 +355,7 @@ def main() -> int:
         check_protocol(session, catalog)
         check_core_list(session, catalog)
         check_meta_tools(session, catalog)
+        check_prompts(session)
         if editor:
             check_edits(session)
         else:

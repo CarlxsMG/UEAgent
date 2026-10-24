@@ -2,7 +2,7 @@
 
 # GameplayDebugger
 
-2 tools for registering Gameplay Debugger categories.
+2 tools for Gameplay Debugger categories.
 
 Back to the [index](README.md).
 

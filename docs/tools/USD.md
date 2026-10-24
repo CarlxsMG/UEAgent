@@ -2,7 +2,7 @@
 
 # USD
 
-49 tools for USD stages, prims, attributes, variants, references and layers.
+49 tools for USD stages, prims, attributes, variants, references, payloads and layers, and USD stage actors.
 
 Back to the [index](README.md).
 

@@ -167,6 +167,8 @@ public:
 	const TArray<FString>& GetDomains() const { return Domains; }
 	/** The domain Name stands for, as the catalog spells it (the case is not compared); empty when there is none. */
 	FString FindDomain(const FString& Name) const;
+	/** What a domain covers (`description` in the catalog), as find_tools publishes it; empty when the catalog has none. */
+	FString GetDomainDescription(const FString& Domain) const;
 	/** The catalog's packs, in catalog order. */
 	const TArray<FPack>& GetPacks() const { return Packs; }
 	/** The pack Name stands for (the case is not compared); null when there is none. */
@@ -260,6 +262,8 @@ private:
 	/** The meta-tools the core list ends with, each as its JSON in UTF-8. */
 	TArray<TArray<uint8>> CoreMetaToolJsonUtf8;
 	TArray<FString> Domains;
+	/** Domain -> what it covers. */
+	TMap<FString, FString> DomainDescriptions;
 	TArray<FPack> Packs;
 	int32 NumCore = 0;
 	FString SourcePath;

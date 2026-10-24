@@ -2,7 +2,7 @@
 
 # Analysis
 
-13 tools for asset referencers and dependencies, Blueprint and object diffs, and Blueprints that do not compile.
+13 tools for diffs of Blueprints, components and object snapshots, Blueprints that do not compile, asset dependencies and referencers, and a Blueprint's components, parent and execution paths.
 
 Back to the [index](README.md).
 

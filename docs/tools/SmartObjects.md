@@ -2,7 +2,7 @@
 
 # SmartObjects
 
-26 tools for Smart Object definitions, slots and their behaviors, tags and annotations, and claiming and using them.
+26 tools for Smart Object definitions, slots, behaviors, tags and annotations, and claiming and using them.
 
 Back to the [index](README.md).
 

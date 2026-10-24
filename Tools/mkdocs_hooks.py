@@ -260,7 +260,8 @@ def on_config(config):
         catalog = json.load(f)
     # Retired tools still run but are not listed, so they have no entry in the reference: their names, and the old
     # names of renamed tools, link to the Retired names page instead.
-    DOMAINS[:] = sorted(({"domain": d["domain"], "commands": [c for c in d["commands"] if not c.get("retired")]}
+    DOMAINS[:] = sorted(({"domain": d["domain"], "description": d.get("description", ""),
+                          "commands": [c for c in d["commands"] if not c.get("retired")]}
                          for d in catalog["domains"]), key=lambda d: d["domain"])
     DOMAINS[:] = [d for d in DOMAINS if d["commands"]]
     TOOLS.clear()
@@ -335,7 +336,7 @@ def on_post_build(config):
             tools.append([command["name"], index, flags, command.get("description") or "", params,
                           command.get("returns") or ""])
     catalog = {"domains": [d["domain"] for d in DOMAINS],
-               "summaries": [summary(d["domain"], d["commands"]) for d in DOMAINS],
+               "summaries": [summary(d) for d in DOMAINS],
                "tools": tools}
     with open(assets / "catalog" / "tools.json", "w", encoding="utf-8", newline="\n") as f:
         json.dump(catalog, f, ensure_ascii=False, separators=(",", ":"))

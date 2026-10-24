@@ -50,7 +50,7 @@ public:
 	 * Opens 127.0.0.1:InPort. Returns false with OutError if it cannot (e.g. the port is in use).
 	 * Empty InAuthToken = no authentication; otherwise every request must carry `Authorization: Bearer`.
 	 * UEAGENT_TOOLS=all|compact in the environment changes the default list (EMcpToolsMode). Game thread (reads the
-	 * plugin version).
+	 * plugin's version and its skills folder).
 	 */
 	bool Start(uint16 InPort, const FString& InAuthToken, FString& OutError);
 	/** Closes everything and waits for the threads. Call from the game thread. */
@@ -60,6 +60,8 @@ public:
 	uint16 GetPort() const { return Port; }
 	const FString& GetAuthToken() const { return AuthToken; }
 	const FString& GetServerVersion() const { return ServerVersion; }
+	/** <plugin>/Resources/Skills, which prompts/* and resources/* serve (Mcp/McpPrompts.h). */
+	const FString& GetSkillsDir() const { return SkillsDir; }
 	/** The list tools/list carries when a client's URL asks for none (?tools=core|all|compact). */
 	EMcpToolsMode GetDefaultToolsMode() const { return DefaultToolsMode; }
 	int32 GetNumConnections();
@@ -117,6 +119,7 @@ private:
 	// Set in Start() and read-only while the server runs: the threads read them without a lock.
 	FString AuthToken;
 	FString ServerVersion;
+	FString SkillsDir;
 	EMcpToolsMode DefaultToolsMode = EMcpToolsMode::Core;
 	TMap<FString, FSession> Sessions;
 	FCriticalSection SessionsLock;

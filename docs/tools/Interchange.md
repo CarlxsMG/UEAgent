@@ -2,7 +2,7 @@
 
 # Interchange
 
-16 tools for Interchange imports and reimports, pipelines and their stack, translators and factories.
+16 tools for Interchange imports: pipelines, translators and factories, importing and reimporting, and resetting imported actors and levels.
 
 Back to the [index](README.md).
 

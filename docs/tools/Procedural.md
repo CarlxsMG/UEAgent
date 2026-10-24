@@ -2,7 +2,7 @@
 
 # Procedural
 
-11 tools for PCG graphs, nodes and parameters, PCG components and volumes, and generation.
+11 tools for PCG graphs, their parameters and components, generating and reading the generated data.
 
 Back to the [index](README.md).
 

@@ -2,7 +2,7 @@
 
 # Input
 
-22 tools for Enhanced Input actions, mapping contexts, modifiers and triggers, key mappings and force feedback.
+22 tools for Enhanced Input: input actions, mapping contexts, triggers and modifiers, key mappings, input state, and force feedback.
 
 Back to the [index](README.md).
 

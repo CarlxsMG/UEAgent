@@ -129,6 +129,7 @@
   "domains": [
     {
       "domain": "AI",
+      "description": "AI controllers, perception senses and stimuli, and teams",
       "commands": [
         {
           "name": "add_ai_stimuli_source",
@@ -316,6 +317,7 @@
     },
     {
       "domain": "Analysis",
+      "description": "diffs of Blueprints, components and object snapshots, Blueprints that do not compile, asset dependencies and referencers, and a Blueprint's components, parent and execution paths",
       "commands": [
         {
           "name": "capture_object_snapshot",
@@ -1012,6 +1014,7 @@
     },
     {
       "domain": "Animation",
+      "description": "Animation Blueprints and state machines, sequences, montages, composites, blend spaces, notifies and curves, skeletons, bones and sockets, skeletal meshes and LODs, morph targets, IK rigs and retargeters, Control Rig, pose search and motion warping",
       "commands": [
         {
           "name": "add_anim_composite_segment",
@@ -9341,6 +9344,7 @@
     },
     {
       "domain": "Asset",
+      "description": "finding assets by name, type, tag or folder, collections, metadata tags, thumbnails, importing textures and sounds, render targets, and static meshes (sockets, collision, Nanite, lightmaps, material slots)",
       "commands": [
         {
           "name": "add_asset_to_collection",
@@ -11287,6 +11291,7 @@
     },
     {
       "domain": "Audio",
+      "description": "sound cues, MetaSounds, sound classes, mixes and submixes with their effects, attenuation, concurrency, modulation, audio buses, dialogue and subtitles, and playing sounds",
       "commands": [
         {
           "name": "add_bus_to_mix",
@@ -14788,6 +14793,7 @@
     },
     {
       "domain": "Audit",
+      "description": "health audits of asset references, Blueprints, collision profiles, replication and widgets, and a capture of the PIE state",
       "commands": [
         {
           "name": "audit_asset_references",
@@ -15125,6 +15131,7 @@
     },
     {
       "domain": "BehaviorTree",
+      "description": "behavior trees with their children, decorators and services, blackboards and their keys, and running a tree in PIE",
       "commands": [
         {
           "name": "add_behavior_tree_child",
@@ -15928,6 +15935,7 @@
     },
     {
       "domain": "Blueprint",
+      "description": "Blueprint authoring: Blueprints, macros and Editor Utility Blueprints, variables, functions and their parameters, event dispatchers, interfaces, components, timelines, graph nodes and pins, compiling, replication settings and reparenting",
       "commands": [
         {
           "name": "add_ai_perception_sense",
@@ -16575,7 +16583,7 @@
         },
         {
           "name": "add_graph_node",
-          "description": "Create ONE node in a graph and return it WITH its node_id and its pins, so connect_pins and set_pin_default_value can wire it without a follow-up get_graph_nodes.\n\nIn a Blueprint graph (an Animation or Widget Blueprint included) node_type is one of the keywords below or the class of any graph node, such as AnimGraphNode_Slot with graph_name=\"AnimGraph\". The Blueprint is compiled only with compile=true and never saved, and the call is refused while Play-in-Editor runs (see force). To create AND wire several nodes in one undo step use build_blueprint_graph; to learn a call_function's pin names BEFORE creating anything, get_function_pins.\n\nFor another graph asset node_type is: a material expression class (/Script/Engine.MaterialExpressionConstant) for a material or material function; a sound node type (WavePlayer, Mixer, Random, Looping, Modulator...) for a sound cue, with sound_wave_path for a WavePlayer; a class path from list_metasound_node_types (UE.Sine.Audio) for a MetaSound Source, with major_version; a PCG settings class from list_pcg_node_types for a PCG graph, and PCGSubgraphSettings with subgraph_path embeds another graph; a RigVM unit (BeginExecution, PrepareForExecution, GetTransform, SetTransform, AimBone, TwoBoneIKSimple) for a Control Rig, with node_name. Those assets are saved by their editor, and a Control Rig is compiled.\n\nnode_type='event' creates a REAL override: the declaring interface or parent class is resolved automatically and bOverrideFunction set (target_class is ignored here), an existing override comes back with already_exists:true, and a name that is not an overridable event fails loudly -- an interface method WITH a return value is not an event: use add_blueprint_function with override=true. node_type='custom_event' is idempotent by name (an existing one comes back with already_existed:true, since a second breaks the compile) and cannot be given parameters, so anything that needs arguments -- an RPC in particular -- must be a function. node_type='get_component_by_class' makes a GetComponentByClass node BORN TYPED to target_class, so its ReturnValue connects without a cast.\n\nRead `class` in the reply as a sanity check: a node_type expected to make an async or latent node that comes back as \"K2Node_CallFunction\" is a mute no-op that still compiles 0/0.",
+          "description": "Create ONE node in a graph and return it WITH its node_id and its pins, so connect_pins and set_pin_default_value can wire it without a follow-up get_graph_nodes.\n\nIn a Blueprint graph (an Animation or Widget Blueprint included) node_type is one of the keywords below or the class of any graph node, such as AnimGraphNode_Slot with graph_name=\"AnimGraph\". The Blueprint is compiled only with compile=true and never saved, and the call is refused while Play-in-Editor runs (see force). To create AND wire several nodes in one undo step use build_blueprint_graph; to learn a call_function's pin names BEFORE creating anything, get_function_pins.\n\nFor another graph asset node_type is: a material expression class (/Script/Engine.MaterialExpressionConstant) for a material or material function; a sound node type (WavePlayer, Mixer, Random, Looping, Modulator...) for a sound cue, with sound_wave_path for a WavePlayer; a class path from list_metasound_node_types (UE.Sine.Audio) for a MetaSound Source, with major_version; a PCG settings class from list_pcg_node_types for a PCG graph, and PCGSubgraphSettings with subgraph_path embeds another graph; a RigVM unit (BeginExecution, PrepareForExecution, GetTransform, SetTransform, AimBone, TwoBoneIKSimple) for a Control Rig, with node_name. Those assets are saved by their editor, and a Control Rig is compiled.\n\nnode_type='event' creates a REAL override: the declaring interface or parent class is resolved automatically and bOverrideFunction set (target_class is ignored here), an existing override comes back with already_exists:true, and a name that is not an overridable event fails loudly -- an interface method WITH a return value is not an event: use add_blueprint_function with override=true. node_type='custom_event' is idempotent by name (an existing one comes back with already_existed:true, since a second breaks the compile) and cannot be given parameters, so anything that needs arguments -- an RPC in particular -- must be a function. node_type='get_component_by_class' makes a GetComponentByClass node BORN TYPED to target_class, so its ReturnValue connects without a cast.\n\nEvery other node_type adds a NEW node on each call, so calling it twice leaves two nodes; remove_graph_node takes a spare one out. Read `class` in the reply as a sanity check: a node_type expected to make an async or latent node that comes back as \"K2Node_CallFunction\" is a mute no-op that still compiles 0/0.",
           "params": [
             {
               "name": "asset_path",
@@ -16777,7 +16785,7 @@
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
-            "idempotentHint": true,
+            "idempotentHint": false,
             "openWorldHint": false
           }
         },
@@ -18060,7 +18068,7 @@
         },
         {
           "name": "get_graph_nodes",
-          "description": "Read the nodes of one graph without changing it -- a Blueprint graph (an Animation or Widget Blueprint included) or the graph of a material, material function, sound cue, MetaSound Source, PCG graph or Control Rig: the read that feeds add_graph_node, connect_pins, set_pin_default_value and the other graph tools, and the way to see what a graph actually DOES.\n\nEvery node carries its node_id, the id the graph tools take, and its object_path (not for a MetaSound), which get_object_info and set_properties take for the node's own settings. A Blueprint node also has its class, title, position, comment and pins (name, direction, type, linked_to, default). Another asset's reply is its editor's own view, with graph_kind naming it: a material's expressions with their inputs, a sound cue's nodes with their child slots and first node, a MetaSound's nodes and connections, a PCG graph's nodes and edges (each node's settings_path is what set_properties writes), a Control Rig's nodes with their pins, links and defaults.\n\nTo read one node, pass node_id: it comes back at full fidelity for a fraction of a graph's tokens. TRAP: compact=true drops pin types AND every pin that is unlinked and has no default (plus knots and comment boxes), so a pin missing from a compact listing is NOT proof the pin does not exist -- re-read with compact=false, or that one node by node_id, before concluding anything about pins. Reading a graph under a read-only vendor root leaves that package DIRTY in memory (reload_asset_package with on_dirty=\"discard\" cleans it).",
+          "description": "Read the nodes of one graph without changing it -- a Blueprint graph (an Animation or Widget Blueprint included) or the graph of a material, material function, sound cue, MetaSound Source, PCG graph or Control Rig: the read that feeds add_graph_node, connect_pins, set_pin_default_value and the other graph tools, and the way to see what a graph actually DOES.\n\nEvery node carries its node_id, the id the graph tools take, and its object_path (not for a MetaSound), which get_object_info and set_properties take for the node's own settings. A Blueprint node also has its class, title, position, comment and pins (name, direction, type, linked_to, default). Another asset's reply is its editor's own view, with graph_kind naming it: a material's expressions with their inputs, a sound cue's nodes with their child slots and first node, a MetaSound's nodes and connections, a PCG graph's nodes and edges (each node's settings_path is what set_properties writes), a Control Rig's nodes with their pins, links and defaults.\n\nTo read one node, pass node_id: it comes back at full fidelity for a fraction of a graph's tokens. TRAP: compact=true drops pin types AND every pin that is unlinked and has no default (plus knots and comment boxes), so a pin missing from a compact listing is NOT proof the pin does not exist -- re-read with compact=false, or that one node by node_id, before concluding anything about pins. Reading a graph under a read-only vendor root leaves that package DIRTY in memory (reload_asset_package with on_dirty=\"discard\" cleans it).\n\nIt reads the graph as the editor holds it, unsaved edits included, and loads the asset from disk when it is not in memory. It compiles nothing, so a Blueprint that fails to compile still lists its nodes: compile_blueprint gives the errors. A large graph costs many tokens; max_nodes caps the reply and truncated says whether nodes were left out.",
           "params": [
             {
               "name": "asset_path",
@@ -19986,6 +19994,7 @@
     },
     {
       "domain": "Camera",
+      "description": "camera and spring arm components, Gameplay Camera assets and rigs, and camera shakes",
       "commands": [
         {
           "name": "add_camera_component",
@@ -21179,6 +21188,7 @@
     },
     {
       "domain": "Chooser",
+      "description": "Chooser tables: their columns, rows, cells and outcomes, and evaluating one",
       "commands": [
         {
           "name": "add_chooser_column",
@@ -21718,6 +21728,7 @@
     },
     {
       "domain": "Config",
+      "description": "project settings and the default map, collision channels and profiles, config diffs, and re-running construction scripts",
       "commands": [
         {
           "name": "add_collision_channel",
@@ -22182,6 +22193,7 @@
     },
     {
       "domain": "DataAsset",
+      "description": "data tables and their rows, curve tables and curves, data assets, data registries, string tables, CSV and JSON import and export, and localization",
       "commands": [
         {
           "name": "add_curve_key",
@@ -23902,6 +23914,7 @@
     },
     {
       "domain": "Documentation",
+      "description": "documentation generated for an asset, a Blueprint or the whole project",
       "commands": [
         {
           "name": "create_asset_documentation",
@@ -23951,6 +23964,7 @@
     },
     {
       "domain": "Editor",
+      "description": "the editor itself: actors (spawn, select, copy, transform, delete), levels, saving, undo and transactions, Python, console commands and CVars, tests, enums and structs, screenshots, logs, media, and asset housekeeping (delete, export, migrate, consolidate, redirectors, unused and duplicate assets)",
       "commands": [
         {
           "name": "add_component_to_actor",
@@ -26132,7 +26146,7 @@
         },
         {
           "name": "save_asset",
-          "description": "Write ONE asset's package to disk by its path (a Blueprint, DataTable, material...) and VERIFY the effect: still_dirty_after_save:false plus file_on_disk:true is the oracle, not `saved`.\n\nUse it after an edit you want to keep: most edit tools change the asset in memory only. save_level writes a level's .umap, and reload_asset_package throws an unsaved edit away instead. Refused while Play-in-Editor runs, because the engine would drop the write and still report success (see force).\n\nWhen it fails with PIE down, `file_read_only` says whether the file is read-only on disk -- a Git LFS `lockable` file that nobody has `git lfs lock`ed is the usual case -- and the error says whether that is the cause. It writes exactly one package, so it cannot stop a compile from dirtying a vendored asset that a LATER bulk save rewrites: list_dirty_packages before, `git status` after.",
+          "description": "Write ONE asset's package to disk by its path (a Blueprint, DataTable, material...) and VERIFY the effect: still_dirty_after_save:false plus file_on_disk:true is the oracle, not `saved`.\n\nUse it after an edit you want to keep: most edit tools change the asset in memory only. save_level writes a level's .umap, and reload_asset_package throws an unsaved edit away instead. Refused while Play-in-Editor runs, because the engine would drop the write and still report success (see force).\n\nWhen it fails with PIE down, `file_read_only` says whether the file is read-only on disk -- a Git LFS `lockable` file that nobody has `git lfs lock`ed is the usual case -- and the error says whether that is the cause. It writes exactly one package, so it cannot stop a compile from dirtying a vendored asset that a LATER bulk save rewrites: list_dirty_packages before, `git status` after.\n\npath takes the `path` or the `package` that find_assets_by_name returns, as in {\"path\": \"/Game/Core/BP_Door\"}. readonly_roots chooses which folders are protected and refuse_readonly whether a save under them is refused or only reported; leave both out to use the project's Read Only Content Roots and refuse.",
           "params": [
             {
               "name": "path",
@@ -27133,6 +27147,7 @@
     },
     {
       "domain": "Engine",
+      "description": "Niagara systems and emitters (modules, renderers, data interfaces, events, simulation stages, user parameters), and the engine's and the editor's status",
       "commands": [
         {
           "name": "add_niagara_data_interface",
@@ -30425,6 +30440,7 @@
     },
     {
       "domain": "Export",
+      "description": "Movie Render Queue jobs, exporting assets, Blueprints and level sections, asset reports, async loading and source control status",
       "commands": [
         {
           "name": "cancel_render_job",
@@ -30741,6 +30757,7 @@
     },
     {
       "domain": "GameFeatures",
+      "description": "Game Feature plugins: their state, activating, deactivating and unloading them",
       "commands": [
         {
           "name": "activate_game_feature_plugin",
@@ -30868,6 +30885,7 @@
     },
     {
       "domain": "GameFramework",
+      "description": "game mode classes and overrides, player starts and spawn points",
       "commands": [
         {
           "name": "get_game_mode_info",
@@ -31057,6 +31075,7 @@
     },
     {
       "domain": "GameplayAbilities",
+      "description": "the Gameplay Ability System: abilities, gameplay effects with their modifiers and components, attribute sets, gameplay cues, ability system components and gameplay events",
       "commands": [
         {
           "name": "activate_ability",
@@ -33183,6 +33202,7 @@
     },
     {
       "domain": "GameplayBehavior",
+      "description": "Gameplay Behavior configs, and triggering or ending a behavior on an actor",
       "commands": [
         {
           "name": "create_behavior_config",
@@ -33375,6 +33395,7 @@
     },
     {
       "domain": "GameplayDebugger",
+      "description": "Gameplay Debugger categories",
       "commands": [
         {
           "name": "register_gameplay_debugger_category",
@@ -33426,6 +33447,7 @@
     },
     {
       "domain": "GameplayTags",
+      "description": "gameplay tags, tag tables and redirects, and the tags of an object",
       "commands": [
         {
           "name": "add_gameplay_tag_redirect",
@@ -33809,6 +33831,7 @@
     },
     {
       "domain": "GeometryScript",
+      "description": "dynamic meshes with Geometry Script: primitives, booleans, remeshing, simplifying, normals, UVs, material IDs, copying to and from static meshes, and mesh queries",
       "commands": [
         {
           "name": "add_mesh_primitive",
@@ -35706,6 +35729,7 @@
     },
     {
       "domain": "Graphics",
+      "description": "decal actors",
       "commands": [
         {
           "name": "get_decal_info",
@@ -35979,6 +36003,7 @@
     },
     {
       "domain": "HLOD",
+      "description": "World Partition HLOD layers and their actors",
       "commands": [
         {
           "name": "create_hlod_layer",
@@ -36175,6 +36200,7 @@
     },
     {
       "domain": "Input",
+      "description": "Enhanced Input: input actions, mapping contexts, triggers and modifiers, key mappings, input state, and force feedback",
       "commands": [
         {
           "name": "add_input_modifier",
@@ -37188,6 +37214,7 @@
     },
     {
       "domain": "Interchange",
+      "description": "Interchange imports: pipelines, translators and factories, importing and reimporting, and resetting imported actors and levels",
       "commands": [
         {
           "name": "can_reset_interchange_actor",
@@ -37639,6 +37666,7 @@
     },
     {
       "domain": "Level",
+      "description": "the open level and Play-in-Editor: actors by class or radius, transforms, attaching, labels and folders, landscapes (sculpting, painting, layers, splines, heightmaps), foliage, splines, data layers, World Partition, streaming levels, level instances, world settings, lighting builds, and starting, stopping and driving PIE",
       "commands": [
         {
           "name": "add_foliage_instances",
@@ -41338,6 +41366,7 @@
     },
     {
       "domain": "Lighting",
+      "description": "lighting quality, rendering settings, shader info and reflection captures",
       "commands": [
         {
           "name": "get_directional_light_cascade_settings",
@@ -42967,6 +42996,7 @@
     },
     {
       "domain": "Management",
+      "description": "assets as files (rename, move, duplicate, delete), primary assets, their rules and bundles, plugin status, and class purity audits",
       "commands": [
         {
           "name": "add_primary_asset_rule",
@@ -43581,6 +43611,7 @@
     },
     {
       "domain": "Mass",
+      "description": "Mass entities: entity configs and traits, spawners, tags, signals and archetypes",
       "commands": [
         {
           "name": "add_mass_tag_to_entity",
@@ -44172,6 +44203,7 @@
     },
     {
       "domain": "Material",
+      "description": "materials, material instances (constant and dynamic), material functions and layers, parameter collections, post-process materials, Substrate, compiling and stats",
       "commands": [
         {
           "name": "add_collection_parameter",
@@ -46692,6 +46724,7 @@
     },
     {
       "domain": "Mesh",
+      "description": "procedural mesh components: sections, vertices, materials and slicing",
       "commands": [
         {
           "name": "clear_procedural_mesh",
@@ -47136,6 +47169,7 @@
     },
     {
       "domain": "Meta",
+      "description": "execute_batch, several tool calls in one",
       "commands": [
         {
           "name": "execute_batch",
@@ -47172,6 +47206,7 @@
     },
     {
       "domain": "Navigation",
+      "description": "the navigation mesh, and Environment Query System queries with their generators, tests and options",
       "commands": [
         {
           "name": "add_eqs_generator",
@@ -47837,6 +47872,7 @@
     },
     {
       "domain": "Networking",
+      "description": "dedicated servers and network info",
       "commands": [
         {
           "name": "get_dedicated_server_status",
@@ -47972,6 +48008,7 @@
     },
     {
       "domain": "Optimization",
+      "description": "asset performance, memory, compression, LOD and streaming settings, and optimization suggestions",
       "commands": [
         {
           "name": "analyze_asset_performance",
@@ -48234,6 +48271,7 @@
     },
     {
       "domain": "Packaging",
+      "description": "packaged builds: starting, following and cancelling one",
       "commands": [
         {
           "name": "cancel_package_build",
@@ -48300,6 +48338,7 @@
     },
     {
       "domain": "Performance",
+      "description": "frame rate, frame timing and memory, Unreal Insights traces and timing regions, and runtime virtual textures",
       "commands": [
         {
           "name": "add_trace_bookmark",
@@ -48705,6 +48744,7 @@
     },
     {
       "domain": "Physics",
+      "description": "physics assets, bodies and constraints, physical materials, simple and convex collision, Chaos geometry collections and fields, instanced static meshes, raycasts, overlaps, bounds and impulses",
       "commands": [
         {
           "name": "add_field_node",
@@ -51117,6 +51157,7 @@
     },
     {
       "domain": "Procedural",
+      "description": "PCG graphs, their parameters and components, generating and reading the generated data",
       "commands": [
         {
           "name": "add_pcg_component",
@@ -51764,6 +51805,7 @@
     },
     {
       "domain": "Reflection",
+      "description": "any object by reflection: properties, functions and calls, classes, structs, enums, delegates and object diffs",
       "commands": [
         {
           "name": "call_function",
@@ -52486,7 +52528,7 @@
         },
         {
           "name": "set_properties",
-          "description": "Write one or several properties on ONE object -- an asset, a CDO/archetype, a placed actor, or one of its components as \"Actor.Component\" -- in the EDITOR world, as an edit in the Details panel: each write runs Modify/PreEditChange/PostEditChange (undoable, package dirtied, the component re-registered), and the reply lists set[] and failed[{property,error}] per name.\n\nThis is the tool for any editable setting of a light, fog, sky, cloud, decal, camera, post-process volume, capture, replication flag, sound, Niagara system, physical material, montage, foliage type or other asset. Pass the engine's property names (get_object_info lists them), a struct as a JSON object of only the fields to change, a color as {\"R\",\"G\",\"B\",\"A\"}. The actor is found by its internal name or by a label only it has; the component by its name or by a class only one of its components has (\"Sun.DirectionalLightComponent\", \"Fog.ExponentialHeightFogComponent\").\n\nAn asset's sub-object -- a graph node, a sound cue node, a Niagara renderer or stage, a PCG node's settings, a material expression, a behavior tree node, a camera rig node, a Mass trait, a physics body, by the object_path its reader gives -- is written the same way, and its asset is finished as its editor does it: a graph node is reconstructed and its Blueprint marked modified (compile it), a sound cue recaches its values, a Niagara system recompiles. A blend space is resampled after the write. No Blueprint is compiled.\n\nRefused: a key inside a struct that names no field (nothing is written to that property), an unregistered gameplay tag, and any call while Play-in-Editor runs (see force). clamp=true keeps numbers inside ClampMin/ClampMax as the Details panel does, and lists what it clamped; save=true saves the asset's package (a level object is saved with save_level). Not for: a component in a live PIE world (set_component_property), a Blueprint's component template (set_blueprint_component_properties), a widget inside a Widget Blueprint (set_widget_property), or the object's own setter (call_function).",
+          "description": "Write one or several properties on ONE object -- an asset, a CDO/archetype, a placed actor, or one of its components as \"Actor.Component\" -- in the EDITOR world, as an edit in the Details panel: each write runs Modify/PreEditChange/PostEditChange (undoable, package dirtied, the component re-registered), and the reply lists set[] and failed[{property,error}] per name.\n\nThis is the tool for any editable setting of a light, fog, sky, cloud, decal, camera, post-process volume, capture, replication flag, sound, Niagara system, physical material, montage, foliage type or other asset. Pass the engine's property names (get_object_info lists them), a struct as a JSON object of only the fields to change, a color as {\"R\",\"G\",\"B\",\"A\"}. The actor is found by its internal name or by a label only it has; the component by its name or by a class only one of its components has (\"Sun.DirectionalLightComponent\", \"Fog.ExponentialHeightFogComponent\").\n\nExample: object_path \"Sun.DirectionalLightComponent\" with properties {\"Intensity\": 10, \"LightColor\": {\"R\": 255, \"G\": 200, \"B\": 150}} writes two properties in one call; property_name \"Intensity\" with value 10 writes one. Both forms together write properties first. A struct takes only the fields to change, as {\"RelativeLocation\": {\"Z\": 200}} moves a component up and keeps its X and Y.\n\nAn asset's sub-object -- a graph node, a sound cue node, a Niagara renderer or stage, a PCG node's settings, a material expression, a behavior tree node, a camera rig node, a Mass trait, a physics body, by the object_path its reader gives -- is written the same way, and its asset is finished as its editor does it: a graph node is reconstructed and its Blueprint marked modified (compile it), a sound cue recaches its values, a Niagara system recompiles. A blend space is resampled after the write. No Blueprint is compiled.\n\nRefused: a key inside a struct that names no field (nothing is written to that property), an unregistered gameplay tag, and any call while Play-in-Editor runs (see force). clamp=true keeps numbers inside ClampMin/ClampMax as the Details panel does, and lists what it clamped; save=true saves the asset's package (a level object is saved with save_level). Not for: a component in a live PIE world (set_component_property), a Blueprint's component template (set_blueprint_component_properties), a widget inside a Widget Blueprint (set_widget_property), or the object's own setter (call_function).",
           "params": [
             {
               "name": "object_path",
@@ -52586,6 +52628,7 @@
     },
     {
       "domain": "Replication",
+      "description": "an actor's replication settings",
       "commands": [
         {
           "name": "get_actor_replication_info",
@@ -52745,6 +52788,7 @@
     },
     {
       "domain": "SaveGame",
+      "description": "save game slots: saving, loading, listing and deleting, and serializing actor state",
       "commands": [
         {
           "name": "delete_save_game",
@@ -52998,6 +53042,7 @@
     },
     {
       "domain": "SmartObjects",
+      "description": "Smart Object definitions, slots, behaviors, tags and annotations, and claiming and using them",
       "commands": [
         {
           "name": "add_smart_object_definition_default_behavior",
@@ -53910,6 +53955,7 @@
     },
     {
       "domain": "StateTree",
+      "description": "State Trees: states, tasks, transitions and conditions, evaluators, considerations, parameters and bindings, compiling and validating",
       "commands": [
         {
           "name": "add_consideration",
@@ -55937,6 +55983,7 @@
     },
     {
       "domain": "Subsystem",
+      "description": "engine and local player subsystem instances",
       "commands": [
         {
           "name": "get_subsystem_instance_info",
@@ -56019,6 +56066,7 @@
     },
     {
       "domain": "SubsystemAuthoring",
+      "description": "external subsystems: listing, activating and deactivating them",
       "commands": [
         {
           "name": "activate_external_subsystem",
@@ -56090,6 +56138,7 @@
     },
     {
       "domain": "Testing",
+      "description": "map check, asset validation, Blueprint errors, breakpoints and debugging, and watching a property in PIE",
       "commands": [
         {
           "name": "check_blueprint_errors",
@@ -56383,6 +56432,7 @@
     },
     {
       "domain": "Timeline",
+      "description": "Level Sequences (Sequencer): bindings, tracks, sections, keyframes, camera cuts, shots and folders, playing a sequence in PIE, and timeline components",
       "commands": [
         {
           "name": "add_attach_track",
@@ -60627,6 +60677,7 @@
     },
     {
       "domain": "Trigger",
+      "description": "trigger and volume actors: spawning, shaping, their events and what is inside them",
       "commands": [
         {
           "name": "create_trigger",
@@ -60932,6 +60983,7 @@
     },
     {
       "domain": "UI",
+      "description": "UMG Widget Blueprints: widgets, slots, bindings, animations, viewmodels and CommonUI stacks, and widgets in PIE",
       "commands": [
         {
           "name": "add_list_view",
@@ -63275,6 +63327,7 @@
     },
     {
       "domain": "USD",
+      "description": "USD stages, prims, attributes, variants, references, payloads and layers, and USD stage actors",
       "commands": [
         {
           "name": "add_usd_internal_reference",
@@ -64829,6 +64882,7 @@
     },
     {
       "domain": "UVMapping",
+      "description": "UV channels and UV health",
       "commands": [
         {
           "name": "clear_uv_channel",
@@ -64980,6 +65034,7 @@
     },
     {
       "domain": "Water",
+      "description": "water bodies, rivers and water zones: splines, waves, materials and settings",
       "commands": [
         {
           "name": "add_water_body_to_zone",

@@ -2,7 +2,7 @@
 
 # Mesh
 
-11 tools for procedural mesh components and their sections.
+11 tools for procedural mesh components: sections, vertices, materials and slicing.
 
 Back to the [index](README.md).
 

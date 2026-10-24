@@ -2,7 +2,7 @@
 
 # Subsystem
 
-2 tools for inspecting subsystem instances.
+2 tools for engine and local player subsystem instances.
 
 Back to the [index](README.md).
 

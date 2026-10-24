@@ -196,6 +196,91 @@ TArray<FString> McpSkills::ShippedNames(const FString& Dir)
 	return Names;
 }
 
+bool McpSkills::ReadShipped(const FString& Dir, const FString& Name, FShippedSkill& OutSkill)
+{
+	using namespace McpSkillsPrivate;
+
+	// Looked up among the skills, never joined into a path as given: a name like "../x" finds nothing.
+	if (!ShippedNames(Dir).ContainsByPredicate([&Name](const FString& Shipped) { return Shipped.Equals(Name, ESearchCase::CaseSensitive); }))
+	{
+		return false;
+	}
+	const FString SkillDir = Dir / Name;
+	FString Text;
+	TArray<FString> Lines, All;
+	int32 Close = INDEX_NONE;
+	if (!FFileHelper::LoadFileToString(Text, *(SkillDir / SkillFile)) || !FrontmatterLines(Text, Lines, Close, All))
+	{
+		return false;
+	}
+	FString Description;
+	for (const FString& Line : Lines)
+	{
+		if (Line.StartsWith(TEXT("description:"), ESearchCase::CaseSensitive))
+		{
+			Description = Line.RightChop(12).TrimStartAndEnd();
+			Description.TrimQuotesInline();
+			break;
+		}
+	}
+	if (Description.IsEmpty())
+	{
+		return false;
+	}
+
+	TArray<FString> BodyLines;
+	for (int32 i = Close + 1; i < All.Num(); ++i)
+	{
+		if (BodyLines.Num() > 0 || !All[i].TrimEnd().IsEmpty())
+		{
+			BodyLines.Add(All[i]);
+		}
+	}
+	OutSkill = FShippedSkill();
+	OutSkill.Name = Name;
+	OutSkill.Description = Description;
+	OutSkill.Title = Name;
+	for (const FString& Line : BodyLines)
+	{
+		if (Line.StartsWith(TEXT("# "), ESearchCase::CaseSensitive))
+		{
+			OutSkill.Title = Line.RightChop(2).TrimStartAndEnd();
+			break;
+		}
+	}
+	OutSkill.Body = FString::Join(BodyLines, TEXT("\n")) + TEXT("\n");
+
+	TArray<FString> Found;
+	IFileManager::Get().FindFilesRecursive(Found, *SkillDir, TEXT("*"), /*Files*/ true, /*Directories*/ false);
+	FString Prefix = SkillDir + TEXT("/");
+	FPaths::NormalizeFilename(Prefix);
+	for (FString Path : Found)
+	{
+		FPaths::NormalizeFilename(Path);
+		if (Path.StartsWith(Prefix, ESearchCase::CaseSensitive))
+		{
+			const FString Relative = Path.RightChop(Prefix.Len());
+			if (!Relative.Equals(SkillFile, ESearchCase::CaseSensitive))
+			{
+				OutSkill.Files.Add(Relative);
+			}
+		}
+	}
+	OutSkill.Files.Sort([](const FString& A, const FString& B) { return A.Compare(B, ESearchCase::CaseSensitive) < 0; });
+	return true;
+}
+
+bool McpSkills::ReadShippedFile(const FString& Dir, const FShippedSkill& Skill, const FString& File, FString& OutText)
+{
+	if (!Skill.Files.ContainsByPredicate([&File](const FString& Listed) { return Listed.Equals(File, ESearchCase::CaseSensitive); })
+		|| !FFileHelper::LoadFileToString(OutText, *(Dir / Skill.Name / File)))
+	{
+		return false;
+	}
+	OutText.ReplaceInline(TEXT("\r\n"), TEXT("\n"));
+	return true;
+}
+
 int32 McpSkills::FStatus::Count(ESkillState State) const
 {
 	return Skills.FilterByPredicate([State](const FSkill& Skill) { return Skill.State == State; }).Num();

@@ -2,7 +2,7 @@
 
 # Reflection
 
-24 tools for reading and writing the properties of any object, calling functions, classes, structs and enums, and delegates.
+24 tools for any object by reflection: properties, functions and calls, classes, structs, enums, delegates and object diffs.
 
 Back to the [index](README.md).
 
@@ -320,6 +320,8 @@ Return the fires a subscribe_to_delegate subscription has recorded after cursor,
 Write one or several properties on ONE object -- an asset, a CDO/archetype, a placed actor, or one of its components as "Actor.Component" -- in the EDITOR world, as an edit in the Details panel: each write runs Modify/PreEditChange/PostEditChange (undoable, package dirtied, the component re-registered), and the reply lists set[] and failed[{property,error}] per name.
 
 This is the tool for any editable setting of a light, fog, sky, cloud, decal, camera, post-process volume, capture, replication flag, sound, Niagara system, physical material, montage, foliage type or other asset. Pass the engine's property names (get_object_info lists them), a struct as a JSON object of only the fields to change, a color as {"R","G","B","A"}. The actor is found by its internal name or by a label only it has; the component by its name or by a class only one of its components has ("Sun.DirectionalLightComponent", "Fog.ExponentialHeightFogComponent").
+
+Example: object_path "Sun.DirectionalLightComponent" with properties {"Intensity": 10, "LightColor": {"R": 255, "G": 200, "B": 150}} writes two properties in one call; property_name "Intensity" with value 10 writes one. Both forms together write properties first. A struct takes only the fields to change, as {"RelativeLocation": {"Z": 200}} moves a component up and keeps its X and Y.
 
 An asset's sub-object -- a graph node, a sound cue node, a Niagara renderer or stage, a PCG node's settings, a material expression, a behavior tree node, a camera rig node, a Mass trait, a physics body, by the object_path its reader gives -- is written the same way, and its asset is finished as its editor does it: a graph node is reconstructed and its Blueprint marked modified (compile it), a sound cue recaches its values, a Niagara system recompiles. A blend space is resampled after the write. No Blueprint is compiled.
 

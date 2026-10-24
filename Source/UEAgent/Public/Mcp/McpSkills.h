@@ -42,6 +42,28 @@ namespace McpSkills
 	/** The skills in ShippedDir: the folders with a SKILL.md, sorted. */
 	UEAGENT_API TArray<FString> ShippedNames(const FString& Dir);
 
+	/** A shipped skill as the MCP server also serves it, as a prompt and as a resource (Mcp/McpPrompts.h). */
+	struct FShippedSkill
+	{
+		FString Name;
+		/** The frontmatter's `description`. */
+		FString Description;
+		/** The body's first "# " heading, or the name when it has none. */
+		FString Title;
+		/** SKILL.md after its frontmatter, line breaks as "\n". */
+		FString Body;
+		/** The skill's other files, relative to its folder with '/', sorted (a template, a reference). */
+		TArray<FString> Files;
+	};
+
+	/**
+	 * The skill Name of Dir. False when Dir has no such skill, or its SKILL.md has no frontmatter or no
+	 * description. Name is compared exactly: a skill is found among ShippedNames, never as a path.
+	 */
+	UEAGENT_API bool ReadShipped(const FString& Dir, const FString& Name, FShippedSkill& OutSkill);
+	/** One of the skill's Files, line breaks as "\n"; false for a name that is not in Files. */
+	UEAGENT_API bool ReadShippedFile(const FString& Dir, const FShippedSkill& Skill, const FString& File, FString& OutText);
+
 	enum class ESkillState : uint8
 	{
 		Missing,  // not in the project

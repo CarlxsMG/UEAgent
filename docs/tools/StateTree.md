@@ -2,7 +2,7 @@
 
 # StateTree
 
-57 tools for State Trees: states, tasks, transitions, conditions, evaluators, considerations, parameters and bindings.
+57 tools for State Trees: states, tasks, transitions and conditions, evaluators, considerations, parameters and bindings, compiling and validating.
 
 Back to the [index](README.md).
 

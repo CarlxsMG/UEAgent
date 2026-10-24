@@ -2,7 +2,7 @@
 
 # Physics
 
-47 tools for physics assets and constraints, collision, physical materials, Chaos geometry collections and fields, instanced static meshes, raycasts and overlap queries.
+47 tools for physics assets, bodies and constraints, physical materials, simple and convex collision, Chaos geometry collections and fields, instanced static meshes, raycasts, overlaps, bounds and impulses.
 
 Back to the [index](README.md).
 

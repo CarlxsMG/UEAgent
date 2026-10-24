@@ -2,7 +2,7 @@
 
 # Audit
 
-9 tools for project-wide checks of asset references, Blueprint health, collision profiles, replication, and widget accessibility, style and text.
+9 tools for health audits of asset references, Blueprints, collision profiles, replication and widgets, and a capture of the PIE state.
 
 Back to the [index](README.md).
 

@@ -19,60 +19,60 @@ The packs, which `enable_toolset` adds by name:
 
 | Domain | Tools | What it covers |
 |---|---|---|
-| [AI](AI.md) | 7 | AI perception senses and stimuli sources, sight radius, AI controller Blueprints and team attitudes |
-| [Analysis](Analysis.md) | 13 | Asset referencers and dependencies, Blueprint and object diffs, and Blueprints that do not compile |
-| [Animation](Animation.md) | 202 | Animation Blueprints and state machines, montages, notifies and curves, blend spaces, skeletons and skeletal meshes, IK Rig and retargeting, Control Rig, Pose Search and motion warping |
-| [Asset](Asset.md) | 56 | Finding assets by name, type, tag or folder, collections, textures and render targets, static mesh sockets, thumbnails and imports |
-| [Audio](Audio.md) | 69 | Sound Cues, MetaSounds, submixes and buses, sound classes, attenuation and concurrency, modulation, dialogue and subtitles |
-| [Audit](Audit.md) | 9 | Project-wide checks of asset references, Blueprint health, collision profiles, replication, and widget accessibility, style and text |
-| [BehaviorTree](BehaviorTree.md) | 23 | Behavior Trees with their composites, decorators and services, Blackboards and their keys, and running trees |
-| [Blueprint](Blueprint.md) | 87 | Blueprint assets, components, variables, functions, events and dispatchers, graph nodes and pins, compiling, and Editor Utility Blueprints |
-| [Camera](Camera.md) | 16 | Camera actors and components, spring arms, cine camera lens and focus, camera rigs, shakes and Gameplay Cameras assets |
-| [Chooser](Chooser.md) | 14 | Chooser tables: their columns, rows and outcomes, and evaluating them |
-| [Config](Config.md) | 15 | Project settings and .ini values, collision channels and profiles, the default map, component properties and construction scripts |
-| [DataAsset](DataAsset.md) | 51 | Data Tables, Curve Tables and curves, Data Assets, Data Registries, String Tables and localization |
-| [Documentation](Documentation.md) | 3 | Markdown documentation generated for assets, Blueprints and the project |
-| [Editor](Editor.md) | 96 | Actors and the selection, the viewport and screenshots, undo and transactions, Python and console commands, logs, enums and structs, media and automation tests |
-| [Engine](Engine.md) | 50 | Niagara systems and emitters with their modules, renderers, data interfaces, simulation stages and event handlers, and the engine's status |
-| [Export](Export.md) | 12 | Movie Render Queue jobs, exporting assets, Blueprints and levels as text, asset reports and source control status |
-| [GameFeatures](GameFeatures.md) | 5 | Game Feature plugins: listing, activating, deactivating and unloading them |
-| [GameFramework](GameFramework.md) | 5 | Game modes, their classes and per-level overrides, and player starts |
-| [GameplayAbilities](GameplayAbilities.md) | 44 | The Gameplay Ability System: abilities, attribute sets, gameplay effects and their modifiers, cues, tags and events |
-| [GameplayBehavior](GameplayBehavior.md) | 8 | Gameplay Behavior configs, and triggering behaviors on actors |
-| [GameplayDebugger](GameplayDebugger.md) | 2 | Registering Gameplay Debugger categories |
-| [GameplayTags](GameplayTags.md) | 15 | Gameplay Tags, tag tables and redirects, and the tags on objects |
-| [GeometryScript](GeometryScript.md) | 43 | Dynamic meshes with Geometry Script: primitives, booleans, remeshing, UVs, normals, material IDs and spatial queries |
-| [Graphics](Graphics.md) | 2 | Decal actors: material, size, color, fade and sort order |
-| [HLOD](HLOD.md) | 6 | HLOD layers, their settings and their actors |
-| [Input](Input.md) | 22 | Enhanced Input actions, mapping contexts, modifiers and triggers, key mappings and force feedback |
-| [Interchange](Interchange.md) | 16 | Interchange imports and reimports, pipelines and their stack, translators and factories |
-| [Level](Level.md) | 111 | Placing and transforming actors, landscapes, foliage and splines, World Partition and data layers, level instances and streaming, and Play-in-Editor |
-| [Lighting](Lighting.md) | 4 | Lights and shadows, sky atmosphere, sky light, fog and volumetric clouds, post process, reflection and scene captures, and Lumen |
-| [Management](Management.md) | 19 | Moving, renaming, duplicating and deleting assets, Primary Asset rules and IDs, plugins, and the class lineage audits |
-| [Mass](Mass.md) | 19 | Mass Entity configs and traits, spawners, entities, tags and signals |
-| [Material](Material.md) | 54 | Materials and their expression graphs, material functions, instances and parameters, parameter collections and Substrate |
-| [Mesh](Mesh.md) | 11 | Procedural mesh components and their sections |
-| [Meta](Meta.md) | 1 | Running several calls in one pass on the game thread |
-| [Navigation](Navigation.md) | 17 | The navmesh, Environment Queries (EQS), nav links and modifiers, and collision channel dumps |
-| [Networking](Networking.md) | 5 | Replication settings, network information and dedicated servers |
-| [Optimization](Optimization.md) | 10 | Asset performance analysis, LODs, compression, streaming and memory |
-| [Packaging](Packaging.md) | 3 | Package builds: starting one, its status, and cancelling it |
-| [Performance](Performance.md) | 17 | Frame timing, FPS and memory, Unreal Insights traces, timing regions and runtime virtual textures |
-| [Physics](Physics.md) | 47 | Physics assets and constraints, collision, physical materials, Chaos geometry collections and fields, instanced static meshes, raycasts and overlap queries |
-| [Procedural](Procedural.md) | 11 | PCG graphs, nodes and parameters, PCG components and volumes, and generation |
-| [Reflection](Reflection.md) | 24 | Reading and writing the properties of any object, calling functions, classes, structs and enums, and delegates |
-| [Replication](Replication.md) | 1 | Per-actor replication: net priority, update frequency, cull distance and dormancy |
-| [SaveGame](SaveGame.md) | 9 | Save game slots, saving and loading, and serializing actor state |
-| [SmartObjects](SmartObjects.md) | 26 | Smart Object definitions, slots and their behaviors, tags and annotations, and claiming and using them |
-| [StateTree](StateTree.md) | 57 | State Trees: states, tasks, transitions, conditions, evaluators, considerations, parameters and bindings |
-| [Subsystem](Subsystem.md) | 2 | Inspecting subsystem instances |
-| [SubsystemAuthoring](SubsystemAuthoring.md) | 3 | Listing, activating and deactivating external subsystems |
-| [Testing](Testing.md) | 9 | Blueprint errors and breakpoints, data validation, map check and watching properties in PIE |
-| [Timeline](Timeline.md) | 68 | Level Sequences with their bindings, tracks, sections and keyframes, camera cuts and shots, playback, and Blueprint timelines |
-| [Trigger](Trigger.md) | 10 | Trigger boxes and spheres, volumes, and their overlap events |
-| [UI](UI.md) | 50 | Widget Blueprints and their tree, slots, bindings and animations, MVVM viewmodels, CommonUI stacks, and widgets in PIE |
-| [USD](USD.md) | 49 | USD stages, prims, attributes, variants, references and layers |
-| [UVMapping](UVMapping.md) | 4 | UV channels and their health |
-| [Water](Water.md) | 15 | Water bodies (ocean, lake and river), water zones, their splines and Gerstner waves |
+| [AI](AI.md) | 7 | AI controllers, perception senses and stimuli, and teams |
+| [Analysis](Analysis.md) | 13 | Diffs of Blueprints, components and object snapshots, Blueprints that do not compile, asset dependencies and referencers, and a Blueprint's components, parent and execution paths |
+| [Animation](Animation.md) | 202 | Animation Blueprints and state machines, sequences, montages, composites, blend spaces, notifies and curves, skeletons, bones and sockets, skeletal meshes and LODs, morph targets, IK rigs and retargeters, Control Rig, pose search and motion warping |
+| [Asset](Asset.md) | 56 | Finding assets by name, type, tag or folder, collections, metadata tags, thumbnails, importing textures and sounds, render targets, and static meshes (sockets, collision, Nanite, lightmaps, material slots) |
+| [Audio](Audio.md) | 69 | Sound cues, MetaSounds, sound classes, mixes and submixes with their effects, attenuation, concurrency, modulation, audio buses, dialogue and subtitles, and playing sounds |
+| [Audit](Audit.md) | 9 | Health audits of asset references, Blueprints, collision profiles, replication and widgets, and a capture of the PIE state |
+| [BehaviorTree](BehaviorTree.md) | 23 | Behavior trees with their children, decorators and services, blackboards and their keys, and running a tree in PIE |
+| [Blueprint](Blueprint.md) | 87 | Blueprint authoring: Blueprints, macros and Editor Utility Blueprints, variables, functions and their parameters, event dispatchers, interfaces, components, timelines, graph nodes and pins, compiling, replication settings and reparenting |
+| [Camera](Camera.md) | 16 | Camera and spring arm components, Gameplay Camera assets and rigs, and camera shakes |
+| [Chooser](Chooser.md) | 14 | Chooser tables: their columns, rows, cells and outcomes, and evaluating one |
+| [Config](Config.md) | 15 | Project settings and the default map, collision channels and profiles, config diffs, and re-running construction scripts |
+| [DataAsset](DataAsset.md) | 51 | Data tables and their rows, curve tables and curves, data assets, data registries, string tables, CSV and JSON import and export, and localization |
+| [Documentation](Documentation.md) | 3 | Documentation generated for an asset, a Blueprint or the whole project |
+| [Editor](Editor.md) | 96 | The editor itself: actors (spawn, select, copy, transform, delete), levels, saving, undo and transactions, Python, console commands and CVars, tests, enums and structs, screenshots, logs, media, and asset housekeeping (delete, export, migrate, consolidate, redirectors, unused and duplicate assets) |
+| [Engine](Engine.md) | 50 | Niagara systems and emitters (modules, renderers, data interfaces, events, simulation stages, user parameters), and the engine's and the editor's status |
+| [Export](Export.md) | 12 | Movie Render Queue jobs, exporting assets, Blueprints and level sections, asset reports, async loading and source control status |
+| [GameFeatures](GameFeatures.md) | 5 | Game Feature plugins: their state, activating, deactivating and unloading them |
+| [GameFramework](GameFramework.md) | 5 | Game mode classes and overrides, player starts and spawn points |
+| [GameplayAbilities](GameplayAbilities.md) | 44 | The Gameplay Ability System: abilities, gameplay effects with their modifiers and components, attribute sets, gameplay cues, ability system components and gameplay events |
+| [GameplayBehavior](GameplayBehavior.md) | 8 | Gameplay Behavior configs, and triggering or ending a behavior on an actor |
+| [GameplayDebugger](GameplayDebugger.md) | 2 | Gameplay Debugger categories |
+| [GameplayTags](GameplayTags.md) | 15 | Gameplay tags, tag tables and redirects, and the tags of an object |
+| [GeometryScript](GeometryScript.md) | 43 | Dynamic meshes with Geometry Script: primitives, booleans, remeshing, simplifying, normals, UVs, material IDs, copying to and from static meshes, and mesh queries |
+| [Graphics](Graphics.md) | 2 | Decal actors |
+| [HLOD](HLOD.md) | 6 | World Partition HLOD layers and their actors |
+| [Input](Input.md) | 22 | Enhanced Input: input actions, mapping contexts, triggers and modifiers, key mappings, input state, and force feedback |
+| [Interchange](Interchange.md) | 16 | Interchange imports: pipelines, translators and factories, importing and reimporting, and resetting imported actors and levels |
+| [Level](Level.md) | 111 | The open level and Play-in-Editor: actors by class or radius, transforms, attaching, labels and folders, landscapes (sculpting, painting, layers, splines, heightmaps), foliage, splines, data layers, World Partition, streaming levels, level instances, world settings, lighting builds, and starting, stopping and driving PIE |
+| [Lighting](Lighting.md) | 4 | Lighting quality, rendering settings, shader info and reflection captures |
+| [Management](Management.md) | 19 | Assets as files (rename, move, duplicate, delete), primary assets, their rules and bundles, plugin status, and class purity audits |
+| [Mass](Mass.md) | 19 | Mass entities: entity configs and traits, spawners, tags, signals and archetypes |
+| [Material](Material.md) | 54 | Materials, material instances (constant and dynamic), material functions and layers, parameter collections, post-process materials, Substrate, compiling and stats |
+| [Mesh](Mesh.md) | 11 | Procedural mesh components: sections, vertices, materials and slicing |
+| [Meta](Meta.md) | 1 | Execute_batch, several tool calls in one |
+| [Navigation](Navigation.md) | 17 | The navigation mesh, and Environment Query System queries with their generators, tests and options |
+| [Networking](Networking.md) | 5 | Dedicated servers and network info |
+| [Optimization](Optimization.md) | 10 | Asset performance, memory, compression, LOD and streaming settings, and optimization suggestions |
+| [Packaging](Packaging.md) | 3 | Packaged builds: starting, following and cancelling one |
+| [Performance](Performance.md) | 17 | Frame rate, frame timing and memory, Unreal Insights traces and timing regions, and runtime virtual textures |
+| [Physics](Physics.md) | 47 | Physics assets, bodies and constraints, physical materials, simple and convex collision, Chaos geometry collections and fields, instanced static meshes, raycasts, overlaps, bounds and impulses |
+| [Procedural](Procedural.md) | 11 | PCG graphs, their parameters and components, generating and reading the generated data |
+| [Reflection](Reflection.md) | 24 | Any object by reflection: properties, functions and calls, classes, structs, enums, delegates and object diffs |
+| [Replication](Replication.md) | 1 | An actor's replication settings |
+| [SaveGame](SaveGame.md) | 9 | Save game slots: saving, loading, listing and deleting, and serializing actor state |
+| [SmartObjects](SmartObjects.md) | 26 | Smart Object definitions, slots, behaviors, tags and annotations, and claiming and using them |
+| [StateTree](StateTree.md) | 57 | State Trees: states, tasks, transitions and conditions, evaluators, considerations, parameters and bindings, compiling and validating |
+| [Subsystem](Subsystem.md) | 2 | Engine and local player subsystem instances |
+| [SubsystemAuthoring](SubsystemAuthoring.md) | 3 | External subsystems: listing, activating and deactivating them |
+| [Testing](Testing.md) | 9 | Map check, asset validation, Blueprint errors, breakpoints and debugging, and watching a property in PIE |
+| [Timeline](Timeline.md) | 68 | Level Sequences (Sequencer): bindings, tracks, sections, keyframes, camera cuts, shots and folders, playing a sequence in PIE, and timeline components |
+| [Trigger](Trigger.md) | 10 | Trigger and volume actors: spawning, shaping, their events and what is inside them |
+| [UI](UI.md) | 50 | UMG Widget Blueprints: widgets, slots, bindings, animations, viewmodels and CommonUI stacks, and widgets in PIE |
+| [USD](USD.md) | 49 | USD stages, prims, attributes, variants, references, payloads and layers, and USD stage actors |
+| [UVMapping](UVMapping.md) | 4 | UV channels and UV health |
+| [Water](Water.md) | 15 | Water bodies, rivers and water zones: splines, waves, materials and settings |
 
 Old and retired names that still run are in [Retired names](retired.md).

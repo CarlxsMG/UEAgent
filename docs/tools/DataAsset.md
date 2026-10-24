@@ -2,7 +2,7 @@
 
 # DataAsset
 
-51 tools for Data Tables, Curve Tables and curves, Data Assets, Data Registries, String Tables and localization.
+51 tools for data tables and their rows, curve tables and curves, data assets, data registries, string tables, CSV and JSON import and export, and localization.
 
 Back to the [index](README.md).
 

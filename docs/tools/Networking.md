@@ -2,7 +2,7 @@
 
 # Networking
 
-5 tools for replication settings, network information and dedicated servers.
+5 tools for dedicated servers and network info.
 
 Back to the [index](README.md).
 

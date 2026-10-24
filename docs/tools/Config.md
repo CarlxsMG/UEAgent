@@ -2,7 +2,7 @@
 
 # Config
 
-15 tools for project settings and .ini values, collision channels and profiles, the default map, component properties and construction scripts.
+15 tools for project settings and the default map, collision channels and profiles, config diffs, and re-running construction scripts.
 
 Back to the [index](README.md).
 

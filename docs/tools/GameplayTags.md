@@ -2,7 +2,7 @@
 
 # GameplayTags
 
-15 tools for Gameplay Tags, tag tables and redirects, and the tags on objects.
+15 tools for gameplay tags, tag tables and redirects, and the tags of an object.
 
 Back to the [index](README.md).
 

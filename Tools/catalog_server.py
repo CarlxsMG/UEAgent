@@ -3,8 +3,8 @@ catalog_server.py -- UEAgent's tool list as an MCP server over stdio, without th
 
 UEAgent's tools run inside the editor, so a service that inspects MCP servers from a container, as
 Glama does for its directory, has nothing to start. This server answers that inspection with the
-list the editor serves: initialize, ping and tools/list as the editor answers them, and tools/call
-with an error that says where the tools run.
+list the editor serves: initialize, ping, tools/list and the shipped skills as prompts and resources
+(prompts/*, resources/*) as the editor answers them, and tools/call with an error that says where the tools run.
 
 Usage:
   python Tools/catalog_server.py [--tools core|all|compact]
@@ -13,12 +13,13 @@ Usage:
   python Tools/catalog_server.py --check
       builds the list and talks to this server over stdio, without an editor (the CI runs it)
   python Tools/catalog_server.py --compare [URL]
-      compares the three lists with the ones a running editor serves (default http://127.0.0.1:55561/mcp)
+      compares the three lists, the prompts and the resources with what a running editor serves (default
+      http://127.0.0.1:55561/mcp)
 
 The list is built the way FMcpToolCatalog::LoadFromFile builds it (Source/UEAgent/Private/Mcp/
 McpToolCatalog.cpp), from Resources/command_catalog.json and the generated PIE-safety and alias
-tables. A change to how that C++ builds a schema needs the same change here: --compare, with the
-editor open, finds any difference.
+tables, and the prompts and resources the way McpPrompts.cpp serves Resources/Skills. A change to how that C++
+builds a schema or a prompt needs the same change here: --compare, with the editor open, finds any difference.
 """
 
 from __future__ import annotations
@@ -36,6 +37,14 @@ CATALOG = ROOT / "Resources" / "command_catalog.json"
 PIE_TABLE = ROOT / "Source" / "UEAgent" / "Private" / "McpPieSafety.gen.cpp"
 ALIAS_TABLE = ROOT / "Source" / "UEAgent" / "Private" / "McpParamAliases.gen.cpp"
 DESCRIPTOR = ROOT / "UEAgent.uplugin"
+SKILLS = ROOT / "Resources" / "Skills"
+
+# As in McpPrompts.cpp.
+GUIDE_URI = "ueagent://guide"
+GUIDE_SKILL = "ueagent-tool-map"
+SKILLS_URI = "ueagent://skills/"
+REQUEST_ARGUMENT = "request"
+MARKDOWN = "text/markdown"
 
 EDITOR_URL = "http://127.0.0.1:55561/mcp"
 
@@ -46,6 +55,8 @@ INSTRUCTIONS = (
     "This server lists UEAgent's tools without the Unreal Editor. The tools themselves run inside the "
     "editor: install the UEAgent plugin (https://github.com/CarlxsMG/UEAgent) in an Unreal Engine 5.7 or 5.8 "
     f"project, open the project, and connect your MCP client to {EDITOR_URL}."
+    "\n\nWhich tool, pack or domain covers a task, and the order a task calls them in: the resource ueagent://guide, "
+    "also the skill and prompt ueagent-tool-map."
     "\n\nA tool's name starts with its verb, one verb per operation: get_ reads one thing (get_<x>_info, all of "
     "it), list_ enumerates, find_ searches by name or condition, is_/has_ answer yes or no; create_ makes an asset, "
     "add_ puts a part into an asset or actor, spawn_ places an actor in a world; set_ writes; remove_ takes a part "
@@ -280,13 +291,13 @@ def meta_tools(tools: list[dict], domains: list[str], packs: list[dict], core_co
              "Each query word scores on a whole word of a tool's name first, then the start of one, then the domain, then the "
              "description, and a tool that matches more of the words ranks higher; a query that spells a tool's name, such as "
              '"spawn actor", puts that tool first. With `domain` the search stays inside it, and `domain` alone lists its tools. '
-             f"With no arguments it lists the {len(domains)} domains with their sizes"
+             f"With no arguments it lists the {len(domains)} domains, each with what it covers and its size"
              + (", and the packs with their tools" if core else "")
              + ". It only reads the catalog, so it is cheap to repeat with other words.\n\n"
              "Then describe_tool gives a match's full schema and call_tool runs it"
              + (", or enable_toolset adds its pack or domain to your tool list" if core else "") + ".\n\n"
              "Returns: { success, matches: int, tools: [{ name, domain, params?, summary }], more?: string (when matches exceed "
-             "`limit`) } -- with no arguments { success, total_tools, domains: [{ domain, tools }]"
+             "`limit`) } -- with no arguments { success, total_tools, domains: [{ domain, description, tools }]"
              + (", packs: [{ pack, description, tools }]" if core else "")
              + " }. An unknown `domain` is an error that lists the domains.",
              find_properties, [], reads_catalog),
@@ -378,6 +389,137 @@ def server_version() -> str:
         return "unknown"
 
 
+def trim_quotes(text: str) -> str:
+    """FString::TrimQuotesInline: a leading and a trailing double quote, each if there."""
+    start, count = 0, len(text)
+    if count > 0:
+        if text[0] == '"':
+            start, count = 1, count - 1
+        if len(text) > 1 and text[-1] == '"':
+            count -= 1
+    return text[start:start + count]
+
+
+def shipped_names() -> list[str]:
+    """McpSkills::ShippedNames: the folders of Resources/Skills with a SKILL.md, sorted."""
+    if not SKILLS.is_dir():
+        return []
+    return sorted(p.name for p in SKILLS.iterdir() if p.is_dir() and (p / "SKILL.md").is_file())
+
+
+def read_skill(name: str) -> dict | None:
+    """McpSkills::ReadShipped: a skill's description, title, body after the frontmatter, and other files."""
+    if name not in shipped_names():
+        return None
+    folder = SKILLS / name
+    text = (folder / "SKILL.md").read_text(encoding="utf-8-sig").replace("\r\n", "\n")
+    if text.endswith("\n"):
+        text = text[:-1]
+    lines = text.split("\n")
+    if not lines or lines[0].rstrip() != "---":
+        return None
+    close = next((i for i in range(1, len(lines)) if lines[i].rstrip() == "---"), None)
+    if close is None:
+        return None
+    description = next((trim_quotes(line[len("description:"):].strip()) for line in lines[1:close]
+                        if line.startswith("description:")), "")
+    if not description:
+        return None
+    body: list[str] = []
+    for line in lines[close + 1:]:
+        if body or line.rstrip():
+            body.append(line)
+    title = next((line[2:].strip() for line in body if line.startswith("# ")), name)
+    files = sorted(p.relative_to(folder).as_posix() for p in folder.rglob("*")
+                   if p.is_file() and p.relative_to(folder).as_posix() != "SKILL.md")
+    return {"name": name, "description": description, "title": title, "body": "\n".join(body) + "\n", "files": files}
+
+
+def read_skill_file(skill: dict, file: str) -> str | None:
+    if file not in skill["files"]:
+        return None
+    return (SKILLS / skill["name"] / file).read_text(encoding="utf-8-sig").replace("\r\n", "\n")
+
+
+def all_skills() -> list[dict]:
+    return [skill for skill in map(read_skill, shipped_names()) if skill]
+
+
+def mime_type(file: str) -> str:
+    return MARKDOWN if file.lower().endswith(".md") else "text/plain"
+
+
+def list_prompts() -> dict:
+    """prompts/list, as McpPrompts::ListPrompts."""
+    return {"prompts": [{
+        "name": skill["name"], "title": skill["title"], "description": skill["description"],
+        "arguments": [{"name": REQUEST_ARGUMENT, "description": "What you want done, in your own words. Optional.",
+                       "required": False}],
+    } for skill in all_skills()]}
+
+
+def get_prompt(params: dict) -> tuple[dict | None, int, str]:
+    """prompts/get, as McpPrompts::GetPrompt: (result, error code, error message)."""
+    name = params.get("name")
+    if not isinstance(name, str) or not name:
+        return None, -32602, "Invalid params: prompts/get needs params.name"
+    skill = read_skill(name)
+    if skill is None:
+        names = ", ".join(s["name"] for s in all_skills())
+        return None, -32602, f"Invalid params: no prompt '{name}'. The prompts are: {names}"
+    arguments = params.get("arguments")
+    request = arguments.get(REQUEST_ARGUMENT) if isinstance(arguments, dict) else None
+    request = request.strip() if isinstance(request, str) else ""
+    text = f"Use the UEAgent skill `{skill['name']}` below" + (f" for this request: {request}" if request else ".")
+    text += "\n\n" + skill["body"]
+    for file in skill["files"]:
+        content = read_skill_file(skill, file)
+        if content is not None:
+            if not content.endswith("\n"):
+                content += "\n"
+            text += f"\n---\n\nThe skill's file `{file}`:\n\n{content}"
+    return {"description": skill["description"],
+            "messages": [{"role": "user", "content": {"type": "text", "text": text}}]}, 0, ""
+
+
+def list_resources() -> dict:
+    """resources/list, as McpPrompts::ListResources: the guide, the other skills, then their files."""
+    skills = all_skills()
+
+    def resource(uri: str, name: str, title: str, description: str, mime: str) -> dict:
+        entry = {"uri": uri, "name": name}
+        if title:
+            entry["title"] = title
+        entry.update({"description": description, "mimeType": mime})
+        return entry
+
+    out = [resource(GUIDE_URI, "guide", s["title"], s["description"], MARKDOWN) for s in skills if s["name"] == GUIDE_SKILL]
+    out += [resource(SKILLS_URI + s["name"], s["name"], s["title"], s["description"], MARKDOWN)
+            for s in skills if s["name"] != GUIDE_SKILL]
+    out += [resource(f"{SKILLS_URI}{s['name']}/{file}", f"{s['name']}/{file}", "",
+                     f"The file {file} of the {s['name']} skill, which its instructions refer to.", mime_type(file))
+            for s in skills for file in s["files"]]
+    return {"resources": out}
+
+
+def read_resource(params: dict) -> tuple[dict | None, int, str, str]:
+    """resources/read, as McpPrompts::ReadResource: (result, error code, error message, the uri asked for)."""
+    uri = params.get("uri")
+    if not isinstance(uri, str) or not uri:
+        return None, -32602, "Invalid params: resources/read needs params.uri", ""
+    name, file = (GUIDE_SKILL, "") if uri == GUIDE_URI else ("", "")
+    if not name and uri.startswith(SKILLS_URI):
+        name, _, file = uri[len(SKILLS_URI):].partition("/")
+        if not file and name == GUIDE_SKILL:
+            name = ""
+    skill = read_skill(name) if name else None
+    if skill is not None:
+        text = skill["body"] if not file else read_skill_file(skill, file)
+        if text is not None:
+            return {"contents": [{"uri": uri, "mimeType": mime_type(file) if file else MARKDOWN, "text": text}]}, 0, "", uri
+    return None, -32002, f"Resource not found: {uri}", uri
+
+
 def answer(message: object, tools: list[dict], version: str) -> dict | None:
     """The reply to one JSON-RPC message, or None when it needs none (a notification)."""
     if not isinstance(message, dict):
@@ -410,12 +552,30 @@ def answer(message: object, tools: list[dict], version: str) -> dict | None:
                             + instructions)
         return result({
             "protocolVersion": requested if requested in SUPPORTED_VERSIONS else SUPPORTED_VERSIONS[0],
-            "capabilities": {"tools": {"listChanged": False}},
+            "capabilities": {"tools": {"listChanged": False}, "prompts": {"listChanged": False},
+                             "resources": {"listChanged": False}},
             "serverInfo": {"name": "UEAgent", "version": version},
             "instructions": instructions,
         })
     if method == "ping":
         return result({})
+    if method == "prompts/list":
+        return result(list_prompts())
+    if method == "prompts/get":
+        prompt, code, text = get_prompt(params)
+        return result(prompt) if prompt is not None else error(code, text)
+    if method == "resources/list":
+        return result(list_resources())
+    if method == "resources/templates/list":
+        return result({"resourceTemplates": []})
+    if method == "resources/read":
+        contents, code, text, uri = read_resource(params)
+        if contents is not None:
+            return result(contents)
+        reply = error(code, text)
+        if uri:
+            reply["error"]["data"] = {"uri": uri}
+        return reply
     return error(-32601, f"Method not found: {method}")
 
 
@@ -503,7 +663,13 @@ def check() -> int:
         {"jsonrpc": "2.0", "method": "notifications/initialized"},
         {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
         {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": tools[0]["name"], "arguments": {}}},
-        {"jsonrpc": "2.0", "id": 4, "method": "resources/list"},
+        {"jsonrpc": "2.0", "id": 4, "method": "completion/complete"},
+        {"jsonrpc": "2.0", "id": 5, "method": "prompts/list"},
+        {"jsonrpc": "2.0", "id": 6, "method": "prompts/get", "params": {"name": GUIDE_SKILL, "arguments": {"request": "x"}}},
+        {"jsonrpc": "2.0", "id": 7, "method": "resources/list"},
+        {"jsonrpc": "2.0", "id": 8, "method": "resources/read", "params": {"uri": GUIDE_URI}},
+        {"jsonrpc": "2.0", "id": 9, "method": "resources/read", "params": {"uri": SKILLS_URI + "nothing"}},
+        {"jsonrpc": "2.0", "id": 10, "method": "prompts/get", "params": {"name": "nothing"}},
     ]
     stdin = "".join(json.dumps(r) + "\n" for r in requests).encode("utf-8")
     done = subprocess.run([sys.executable, str(Path(__file__).resolve())], input=stdin, capture_output=True, timeout=120)
@@ -514,16 +680,34 @@ def check() -> int:
     expected = {
         "initialize negotiates 2025-06-18":
             replies.get(1, {}).get("result", {}).get("protocolVersion") == "2025-06-18",
-        "the notification gets no reply": len(replies) == 4,
+        "the notification gets no reply": len(replies) == 10,
         "tools/list over stdio lists the core list by default": replies.get(2, {}).get("result", {}).get("tools") == core,
         "tools/list with --tools all lists every tool": replies_all.get(2, {}).get("result", {}).get("tools") == tools,
         "tools/call answers isError": replies.get(3, {}).get("result", {}).get("isError") is True,
         "an unknown method is -32601": replies.get(4, {}).get("error", {}).get("code") == -32601,
+        "initialize declares prompts and resources":
+            {"prompts", "resources"} <= set(replies.get(1, {}).get("result", {}).get("capabilities", {})),
+        "the instructions point to the guide": GUIDE_URI in replies.get(1, {}).get("result", {}).get("instructions", ""),
+        "one prompt per shipped skill, the tool map among them":
+            [p["name"] for p in replies.get(5, {}).get("result", {}).get("prompts", [])] == shipped_names()
+            and GUIDE_SKILL in shipped_names(),
+        "prompts/get returns the skill with the request":
+            replies.get(6, {}).get("result", {}).get("messages", [{}])[0].get("content", {}).get("text", "").startswith(
+                f"Use the UEAgent skill `{GUIDE_SKILL}` below for this request: x\n\n# "),
+        "resources/list starts with the guide":
+            replies.get(7, {}).get("result", {}).get("resources", [{}])[0].get("uri") == GUIDE_URI,
+        "the guide is the tool map's body, with its tables":
+            "| Domain | Tools | What it covers |" in replies.get(8, {}).get("result", {}).get("contents", [{}])[0].get("text", ""),
+        "an unknown resource is -32002 with its uri":
+            replies.get(9, {}).get("error", {}).get("code") == -32002
+            and replies.get(9, {}).get("error", {}).get("data") == {"uri": SKILLS_URI + "nothing"},
+        "an unknown prompt is -32602": replies.get(10, {}).get("error", {}).get("code") == -32602,
     }
     problems += [name for name, ok in expected.items() if not ok]
     print(f"{len(tools)} tools, {with_force} with `force`, {aliases} alias parameters, "
           f"{len(spellings)} handler spellings, {read_only} read-only, {with_returns} with `Returns:`, served over stdio; "
-          f"{len(core_tools)} core tools listed by default")
+          f"{len(core_tools)} core tools listed by default; {len(shipped_names())} prompts, "
+          f"{len(list_resources()['resources'])} resources")
     for problem in problems:
         print(f"  FAIL {problem}")
     return 1 if problems else 0
@@ -536,7 +720,45 @@ def compare(url: str) -> int:
     for mode in ("all", "core", "compact"):
         print(f"--- ?tools={mode}")
         failed |= compare_list(f"{url}?tools={mode}", lists[mode])
+    print("--- prompts and resources")
+    failed |= compare_prompts(url)
     return failed
+
+
+def editor_rpc(url: str, method: str, params: dict | None = None) -> dict:
+    """The editor's whole JSON-RPC reply to one request."""
+    message = {"jsonrpc": "2.0", "id": 1, "method": method}
+    if params is not None:
+        message["params"] = params
+    request = urllib.request.Request(url, data=json.dumps(message).encode("utf-8"), method="POST", headers={
+        "Content-Type": "application/json", "Accept": "application/json, text/event-stream"})
+    with urllib.request.urlopen(request, timeout=60) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def compare_prompts(url: str) -> int:
+    """prompts/* and resources/*, every prompt and resource included, against the editor at `url`."""
+    calls: list[tuple[str, dict | None]] = [("prompts/list", None), ("resources/list", None),
+                                             ("resources/templates/list", None)]
+    for skill in all_skills():
+        calls.append(("prompts/get", {"name": skill["name"]}))
+        calls.append(("prompts/get", {"name": skill["name"], "arguments": {"request": "  build a door  "}}))
+    calls += [("resources/read", {"uri": r["uri"]}) for r in list_resources()["resources"]]
+    calls += [("prompts/get", {"name": "nothing"}), ("prompts/get", {}), ("resources/read", {"uri": SKILLS_URI + "nothing"}),
+              ("resources/read", {"uri": SKILLS_URI + GUIDE_SKILL}), ("resources/read", {})]
+    different = 0
+    for method, params in calls:
+        message = {"jsonrpc": "2.0", "id": 1, "method": method}
+        if params is not None:
+            message["params"] = params
+        ours = answer(message, [], server_version())
+        theirs = editor_rpc(url, method, params)
+        if ours != theirs:
+            different += 1
+            print(f"  DIFFERENT {method} {json.dumps(params)}\n    editor: {json.dumps(theirs)[:600]}\n"
+                  f"    here:   {json.dumps(ours)[:600]}")
+    print(f"{len(calls)} prompt and resource requests, {different} different")
+    return 1 if different else 0
 
 
 def compare_list(url: str, ours: list[dict]) -> int:
