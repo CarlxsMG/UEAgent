@@ -77,12 +77,12 @@ public:
 
 	/**
 	 * Sessions: `initialize` on the core list opens one and answers its id in Mcp-Session-Id, which the client sends
-	 * back on every request; the session remembers the domains enable_toolset added to that client's list. The server
+	 * back on every request; the session remembers the packs and domains enable_toolset added to that client's list. The server
 	 * requires no session: a request without one, or with one it does not know (the editor restarted), gets the list
 	 * its URL asks for. At most MaxSessions are kept, the least recently used dropped first. Any thread.
 	 */
 	FString OpenSession();
-	/** The domains Session enabled; false when the server does not know Session. */
+	/** The packs and domains Session enabled (FMcpToolCatalog::FindToolset names); false when the server does not know Session. */
 	bool GetSessionDomains(const FString& Session, TSet<FString>& OutDomains);
 	/** Adds Domains to Session's list, opening it under that id if the server does not know it. */
 	void AddSessionDomains(const FString& Session, const TArray<FString>& Domains);

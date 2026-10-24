@@ -100,6 +100,32 @@
     ],
     "notNameDomainKeepWord": "actor"
   },
+  "packs": [
+    {
+      "name": "actors",
+      "description": "find, spawn and delete the actors of the open level"
+    },
+    {
+      "name": "levels",
+      "description": "open, save and inspect levels, and list what is unsaved"
+    },
+    {
+      "name": "play",
+      "description": "start, stop and check Play-in-Editor, and capture the viewport"
+    },
+    {
+      "name": "assets",
+      "description": "delete and duplicate assets, and find what references one"
+    },
+    {
+      "name": "blueprint_authoring",
+      "description": "create Blueprints, add variables, read their outline, unlink pins, remove nodes and build several wired nodes at once"
+    },
+    {
+      "name": "data_tables",
+      "description": "read a data table row and change its fields"
+    }
+  ],
   "domains": [
     {
       "domain": "AI",
@@ -712,7 +738,7 @@
             }
           ],
           "returns": "{ asset_path, resolved_package, include_soft_references, dependency_type, exclude_engine, total, returned, results_truncated, referencers:[{ package_name, asset_name?, asset_path?, asset_class?, is_loaded? }] } -- total counts every referencer the registry returned, engine ones included; results_truncated says a referencer that would have been listed was left out by max_results; is_loaded is whether the referencing asset is loaded now.",
-          "core": true,
+          "pack": "assets",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -10036,7 +10062,7 @@
         },
         {
           "name": "find_assets_by_name",
-          "description": "Find assets by NAME, scanning every mounted content root (/Game, /Engine, /Water, plugin mounts, ...) and returning name, object path, class and package per hit. The broad \"does anything called <token> exist, and where?\" search. It has TWO match modes and picks one automatically, reporting which in `match_mode`: a pattern WITHOUT `*`/`?` is a case-insensitive SUBSTRING test (FString::Contains) -- pass the bare token, this is the common case; a pattern WITH `*` or `?` is a real glob (FString::MatchesWildcard). WARNING: The glob is ANCHORED AT BOTH ENDS -- it matches the WHOLE name, not a substring -- so `Grass*` means \"starts with Grass\" and `*Grass*` is what reproduces substring behaviour. It only ever looks at the asset NAME, so it cannot find an asset by its folder or by a class it belongs to: use resolve_asset_by_name to check ONE exact name and get every homonym, get_assets_in_folder to enumerate a directory, get_assets_by_type for the 5 built-in type filters, and get_assets_by_tag for an Asset Registry tag.",
+          "description": "Find assets by NAME across every mounted content root (/Game, /Engine, /Water, plugin mounts...), returning each hit's name, object path, class and package: the broad \"does anything called <token> exist, and where?\" search.\n\nPass the bare token, the common case: `Grass` finds every asset whose name contains it, ignoring case. Put a `*` or `?` in only to anchor the match, because the pattern must then match the WHOLE name: `Grass*` is \"starts with Grass\", and `*Grass*` is the plain substring search again. `match_mode` says which of the two ran.\n\nIt reads names only, never folders or classes: get_assets_in_folder lists a directory, get_assets_by_type filters by the 5 built-in types, get_assets_by_tag reads an Asset Registry tag, and resolve_asset_by_name checks ONE exact name and returns every homonym. A hit's `path` is what save_asset, get_object_info and set_properties take.",
           "params": [
             {
               "name": "search_pattern",
@@ -16116,7 +16142,7 @@
             }
           ],
           "returns": "{ blueprint_name, variable_name, variable_type, is_array } -- an echo of the request, NOT a verification: read the variable back with get_blueprint_variables (or the CDO) before relying on it.",
-          "core": true,
+          "pack": "blueprint_authoring",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
@@ -16549,7 +16575,7 @@
         },
         {
           "name": "add_graph_node",
-          "description": "Create ONE node in a graph and return it WITH its node_id and its pins, so connect_pins and set_pin_default_value can wire it without a follow-up get_graph_nodes. In a Blueprint graph (an Animation or Widget Blueprint included) node_type is one of the keywords below, or the class of any graph node -- such as AnimGraphNode_Slot, with graph_name=\"AnimGraph\" --; with compile=true the Blueprint is compiled afterwards, and it is never saved. For another graph asset node_type is: a material expression class (/Script/Engine.MaterialExpressionConstant) for a material or material function; a sound node type (WavePlayer, Mixer, Random, Looping, Modulator...) for a sound cue, with sound_wave_path for a WavePlayer; a class path from list_metasound_node_types (UE.Sine.Audio) for a MetaSound Source, with major_version; a PCG settings class from list_pcg_node_types for a PCG graph, and PCGSubgraphSettings with subgraph_path embeds another graph; a RigVM unit (BeginExecution, PrepareForExecution, GetTransform, SetTransform, AimBone, TwoBoneIKSimple) for a Control Rig, with node_name. Those assets are saved by their editor, and a Control Rig is compiled. In a Blueprint, use build_blueprint_graph instead when several nodes must be created AND wired in a single undo transaction, and get_function_pins to learn a call_function's pin names BEFORE creating anything. node_type='event' creates a REAL override (the declaring interface/parent class is resolved automatically and bOverrideFunction is set; target_class is ignored here; an existing override is returned with already_exists:true) and fails loudly for a name that is not an overridable event -- an interface method WITH a return value is not an event, use add_blueprint_function with override=true. node_type='custom_event' is idempotent by name (an existing custom event of that name in the graph comes back with already_existed:true, since a second one breaks the compile); a custom event cannot be given parameters, so anything that needs arguments (an RPC in particular) must be a function. node_type='get_component_by_class' makes a GetComponentByClass node BORN TYPED to target_class, so its ReturnValue connects without a cast -- inside build_blueprint_graph a generic one would be connected before its class pin default is applied and fail.",
+          "description": "Create ONE node in a graph and return it WITH its node_id and its pins, so connect_pins and set_pin_default_value can wire it without a follow-up get_graph_nodes.\n\nIn a Blueprint graph (an Animation or Widget Blueprint included) node_type is one of the keywords below or the class of any graph node, such as AnimGraphNode_Slot with graph_name=\"AnimGraph\". The Blueprint is compiled only with compile=true and never saved, and the call is refused while Play-in-Editor runs (see force). To create AND wire several nodes in one undo step use build_blueprint_graph; to learn a call_function's pin names BEFORE creating anything, get_function_pins.\n\nFor another graph asset node_type is: a material expression class (/Script/Engine.MaterialExpressionConstant) for a material or material function; a sound node type (WavePlayer, Mixer, Random, Looping, Modulator...) for a sound cue, with sound_wave_path for a WavePlayer; a class path from list_metasound_node_types (UE.Sine.Audio) for a MetaSound Source, with major_version; a PCG settings class from list_pcg_node_types for a PCG graph, and PCGSubgraphSettings with subgraph_path embeds another graph; a RigVM unit (BeginExecution, PrepareForExecution, GetTransform, SetTransform, AimBone, TwoBoneIKSimple) for a Control Rig, with node_name. Those assets are saved by their editor, and a Control Rig is compiled.\n\nnode_type='event' creates a REAL override: the declaring interface or parent class is resolved automatically and bOverrideFunction set (target_class is ignored here), an existing override comes back with already_exists:true, and a name that is not an overridable event fails loudly -- an interface method WITH a return value is not an event: use add_blueprint_function with override=true. node_type='custom_event' is idempotent by name (an existing one comes back with already_existed:true, since a second breaks the compile) and cannot be given parameters, so anything that needs arguments -- an RPC in particular -- must be a function. node_type='get_component_by_class' makes a GetComponentByClass node BORN TYPED to target_class, so its ReturnValue connects without a cast.\n\nRead `class` in the reply as a sanity check: a node_type expected to make an async or latent node that comes back as \"K2Node_CallFunction\" is a mute no-op that still compiles 0/0.",
           "params": [
             {
               "name": "asset_path",
@@ -16746,7 +16772,7 @@
               "description": "Node canvas position as [x, y]; takes precedence over position_x/position_y"
             }
           ],
-          "returns": "{ node_id, class, title, pos_x, pos_y, comment, pins:[{name, direction:'input'|'output', type, linked_to, default}], blueprint_name, graph_name, compiled, event_name?, node_title?, already_existed?, is_override?, already_exists?, cast_to?, function_library?, function?, struct_type?, index_pin?, return_value_pin?, option_pins?, option_count?, index_enum?, input_pins?, output_pins?, component_class?, return_pin_type? } -- the created node WITH its freshly-allocated pins. The pin names are already here, so you can wire the node via connect_pins/set_pin_default_value WITHOUT a follow-up get_graph_nodes. The optional fields belong to their node_type: event_name/node_title/already_existed for custom_event; event_name/is_override/already_exists for event (is_override:true is what tells a live override from a dead look-alike); cast_to for cast; function_library/function for call_function; struct_type for make_struct/break_struct; index_pin/return_value_pin/option_pins/option_count/index_enum for select; input_pins/output_pins (pin names by direction) for macro_instance; component_class/return_pin_type for get_component_by_class (return_pin_type is the oracle: if it does not name the requested class, the pin stayed generic). Read \"class\" as a sanity check: a node_type that was expected to produce an async/latent node and comes back as \"K2Node_CallFunction\" is a mute no-op that still compiles 0/0.",
+          "returns": "{ node_id, class, title, pos_x, pos_y, comment, pins:[{name, direction:'input'|'output', type, linked_to, default}], blueprint_name, graph_name, compiled, event_name?, node_title?, already_existed?, is_override?, already_exists?, cast_to?, function_library?, function?, struct_type?, index_pin?, return_value_pin?, option_pins?, option_count?, index_enum?, input_pins?, output_pins?, component_class?, return_pin_type? } -- the optional fields belong to their node_type: event_name/node_title/already_existed for custom_event; event_name/is_override/already_exists for event (is_override:true is what tells a live override from a dead look-alike); cast_to for cast; function_library/function for call_function; struct_type for make_struct/break_struct; index_pin/return_value_pin/option_pins/option_count/index_enum for select; input_pins/output_pins (pin names by direction) for macro_instance; component_class/return_pin_type for get_component_by_class (return_pin_type is the oracle: if it does not name the requested class, the pin stayed generic).",
           "core": true,
           "annotations": {
             "readOnlyHint": false,
@@ -17162,6 +17188,7 @@
             }
           ],
           "returns": "{ blueprint_name, graph_name, nodes: [{index, id, command_type, ok, node_id?, custom_event_node_id?, error?}], connections: [{index, ok, error?}], pin_defaults: [{index, ok, error?}], stopped_early, rollback_required, rolled_back, transaction_opened, undo_queue_len_before, undo_queue_len_after, top_transaction_title, rollback_refused_reason?, warning? }. rolled_back reports whether the undo ACTUALLY ran, not the intention: the rollback is refused (rolled_back:false + rollback_refused_reason + warning) whenever the top of the editor's undo stack is not this call's own transaction, because GEditor->UndoTransaction is global and would otherwise revert another agent's or another session's work in memory while the disk stays clean. A payload that fails pre-validation returns instead { success:false, error, validation_errors: [{section, index, id?, error}], transaction_opened:false, blueprint_name, graph_name } and never opens a transaction.",
+          "pack": "blueprint_authoring",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -17171,7 +17198,7 @@
         },
         {
           "name": "compile_blueprint",
-          "description": "Compile a Blueprint to regenerate its class, returning the REAL outcome (succeeded == zero errors) plus the error/warning counts, and with return_messages=true the per-message log with each message anchored to its node_id/graph. Required after authoring functions, variables or RPCs and before anything calls them. TRAP: num_errors:0 is not a promise the graph works -- an unresolved WILDCARD pin on an array/ForEach node can compile clean and still block PIE, and warnings (a \"was pruned\" node whose consumers silently read defaults) do not lower it, so read the warnings too. Compiling dirties the package and can cascade into other packages; check_blueprint_errors / find_erroring_blueprints answer without a compile.",
+          "description": "Compile a Blueprint to regenerate its class, returning the REAL outcome (succeeded == zero errors) with the error and warning counts, and with return_messages=true every compiler message anchored to its node_id and graph.\n\nCompile after authoring nodes, functions, variables or RPCs, and before anything calls them or Play-in-Editor starts. To look for errors without compiling, use check_blueprint_errors for one Blueprint or find_erroring_blueprints for a content path. Refused while Play-in-Editor runs, because a compile then kills the editor when PIE stops (see force). It does not save: save_asset writes the result, and compiling can dirty other packages too.\n\nWith return_messages=true each message carries the node_id and graph that get_graph_nodes and remove_graph_node take, so an error leads straight to its node. TRAP: num_errors:0 is not a promise the graph works -- an unresolved WILDCARD pin on an array/ForEach node can compile clean and still block PIE, and warnings (a \"was pruned\" node whose consumers silently read defaults) do not count as errors, so read the warnings too.",
           "params": [
             {
               "name": "blueprint_name",
@@ -17187,7 +17214,7 @@
               "description": "Optional (default false). When true, ALSO returns the per-message compiler results log so callers can see node-anchored errors/warnings. When false/absent the response omits the `messages` array but still reports the REAL compile status."
             }
           ],
-          "returns": "{ name: string, compiled: bool, succeeded: bool, num_errors: int, num_warnings: int } -- `compiled`/`succeeded` reflect the ACTUAL compile outcome (true iff zero errors; warnings still compile). Both the default and return_messages paths return these fields. When return_messages=true additionally { messages: [{severity: 'error'|'warning'|'note', text: string, node_id: string, node_title: string, graph_name: string}] } (node_id/node_title/graph_name are empty strings when the message is not anchored to a graph node)",
+          "returns": "{ name: string, compiled: bool, succeeded: bool, num_errors: int, num_warnings: int, messages?: [{severity: 'error'|'warning'|'note', text: string, node_id: string, node_title: string, graph_name: string}] } -- compiled and succeeded are true iff the compile had zero errors (warnings still compile); messages only with return_messages=true, its node fields empty for a message not anchored to a node",
           "core": true,
           "annotations": {
             "readOnlyHint": false,
@@ -17198,7 +17225,7 @@
         },
         {
           "name": "connect_pins",
-          "description": "Link one node's OUTPUT pin to another node's INPUT pin, in a Blueprint graph (an Animation or Widget Blueprint included) or in the graph of a material, material function, sound cue, MetaSound Source, PCG graph or Control Rig; get_graph_nodes gives the node ids and pin names. In a Blueprint the graph's own schema type-checks the pair, so an AnimGraph's pose links work too, and an incompatible pair is an error, never a silent no-op; a node that still has a WILDCARD pin is reconstructed afterwards, so array, ForEach and Select pins really take the linked type. validate_pin_connection tests a Blueprint pair without linking it, and build_blueprint_graph creates and links several Blueprint nodes in one undo step. The node ids @input and @output name the graph's own input and output: target_node_id=@output with target_pin=BaseColor (or Roughness, Normal, FrontMaterial, MaterialAttributes...) feeds a material's main input; on a sound cue @output makes the source node the cue's first node; on a MetaSound @input and @output are its graph inputs and outputs, named by the pin; on a PCG graph they are its input and output nodes. On a sound cue the child node is the source and target_pin the parent's input slot index (empty: its first free slot). A Blueprint is not compiled or saved; the other assets are saved by their editor, and a Control Rig is compiled.",
+          "description": "Link one node's OUTPUT pin to another node's INPUT pin, in a Blueprint graph (an Animation or Widget Blueprint included) or in the graph of a material, material function, sound cue, MetaSound Source, PCG graph or Control Rig; get_graph_nodes gives the node ids and pin names.\n\nIn a Blueprint the graph's own schema type-checks the pair, so an AnimGraph's pose links work too, and an incompatible pair is an error, never a silent no-op; a node that still has a WILDCARD pin is reconstructed afterwards, so array, ForEach and Select pins really take the linked type. Not for: testing a pair without linking it (validate_pin_connection), unlinking (disconnect_pin), or creating and linking several Blueprint nodes in one undo step (build_blueprint_graph). Refused while Play-in-Editor runs (see force).\n\nThe node ids @input and @output name the graph's own input and output: target_node_id=@output with target_pin=BaseColor (or Roughness, Normal, FrontMaterial, MaterialAttributes...) feeds a material's main input; on a sound cue @output makes the source node the cue's first node; on a MetaSound @input and @output are its graph inputs and outputs, named by the pin; on a PCG graph they are its input and output nodes. On a sound cue the child node is the source and target_pin the parent's input slot index (empty: its first free slot).\n\nA Blueprint is not compiled or saved: compile_blueprint, then save_asset. The other assets are saved by their editor, and a Control Rig is compiled.",
           "params": [
             {
               "name": "asset_path",
@@ -17300,7 +17327,7 @@
             }
           ],
           "returns": "{ name: string, path: string, package_path: string, parent_class: string, generated_class: string, blueprint_type: string, already_exists: bool, saved: bool (false for a Blueprint already there: nothing saved), save_error?: string, note?: string, is_multiplayer?: bool, lifetime?: string } -- parent_class is, for a new Blueprint, what was REQUESTED and resolved, not proof the asset carries it (confirm a child's real parent with get_blueprint_parent), and for one already there its own parent. is_multiplayer appears for a GameMode (true when the parent derives from AGameMode); lifetime for a subsystem (Editor, Engine, GameInstance, World, LocalPlayer or Unknown). saved:false is honest: it carries save_error when PIE was running or the Blueprint already there has unsaved changes, and a note when save=false or an existing Blueprint is returned unchanged -- an unsaved Blueprint exists only in the editor and a later compile on it also returns success.",
-          "core": true,
+          "pack": "blueprint_authoring",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
@@ -17452,7 +17479,7 @@
             }
           ],
           "returns": "{ disconnected, node_id, pin_name, links_broken?, graph_kind? } -- for another asset than a Blueprint the reply is its editor's own, saved included",
-          "core": true,
+          "pack": "blueprint_authoring",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -17856,7 +17883,7 @@
             }
           ],
           "returns": "{ blueprint_name: string, parent_class: string, components: [{ name, type }], component_count: int, variables: [{ name, type }], variable_count: int, functions: [{ name }], function_count: int, graphs: [{ name, type }], graph_count: int, has_event_graph: bool, event_graph_name?: string, status: string } -- parent_class is a short NAME (ambiguous between an engine class and a same-named project one), variable \"type\" is only the pin CATEGORY (no struct/class), and status is UpToDate/Error/Unknown.",
-          "core": true,
+          "pack": "blueprint_authoring",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -18033,7 +18060,7 @@
         },
         {
           "name": "get_graph_nodes",
-          "description": "Read the nodes of one graph -- a Blueprint graph (an Animation or Widget Blueprint included) or the graph of a material, material function, sound cue, MetaSound Source, PCG graph or Control Rig -- without changing it: the read that feeds add_graph_node, connect_pins, disconnect_pin, set_pin_default_value and remove_graph_node, and the way to see what a graph actually DOES. Every node carries its node_id, the id those tools take, and its object_path (not for a MetaSound), which get_properties and set_properties take to read or write the node's own settings. A Blueprint node also has its class, title, position, comment and pins (name, direction, type, linked_to, default). For another asset the reply is that editor's own view, with graph_kind naming it: a material's expressions with their inputs, a sound cue's nodes with their child slots and first node, a MetaSound's nodes and connections, a PCG graph's nodes and edges (each node's settings_path is what set_properties writes), a Control Rig's nodes with their pins, links and defaults. TRAP: compact=true drops per-pin type metadata AND omits every pin that is unlinked and default-less (plus knots and comment boxes), so a pin missing from a compact listing is NOT proof the pin does not exist -- re-read with compact=false before concluding anything about pins. Also: a bare Blueprint name that matches two assets picks one silently (pass the full path), and reading a graph under a read-only vendor root leaves that package DIRTY in memory (reload_asset_package with on_dirty=\"discard\" cleans it).",
+          "description": "Read the nodes of one graph without changing it -- a Blueprint graph (an Animation or Widget Blueprint included) or the graph of a material, material function, sound cue, MetaSound Source, PCG graph or Control Rig: the read that feeds add_graph_node, connect_pins, set_pin_default_value and the other graph tools, and the way to see what a graph actually DOES.\n\nEvery node carries its node_id, the id the graph tools take, and its object_path (not for a MetaSound), which get_object_info and set_properties take for the node's own settings. A Blueprint node also has its class, title, position, comment and pins (name, direction, type, linked_to, default). Another asset's reply is its editor's own view, with graph_kind naming it: a material's expressions with their inputs, a sound cue's nodes with their child slots and first node, a MetaSound's nodes and connections, a PCG graph's nodes and edges (each node's settings_path is what set_properties writes), a Control Rig's nodes with their pins, links and defaults.\n\nTo read one node, pass node_id: it comes back at full fidelity for a fraction of a graph's tokens. TRAP: compact=true drops pin types AND every pin that is unlinked and has no default (plus knots and comment boxes), so a pin missing from a compact listing is NOT proof the pin does not exist -- re-read with compact=false, or that one node by node_id, before concluding anything about pins. Reading a graph under a read-only vendor root leaves that package DIRTY in memory (reload_asset_package with on_dirty=\"discard\" cleans it).",
           "params": [
             {
               "name": "asset_path",
@@ -18760,7 +18787,7 @@
             }
           ],
           "returns": "{ deleted, node_id, graph_kind? } -- for another asset than a Blueprint the reply is its editor's own (removed, saved, id_remap...)",
-          "core": true,
+          "pack": "blueprint_authoring",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -19620,7 +19647,7 @@
         },
         {
           "name": "set_pin_default_value",
-          "description": "Write the literal default of an UNCONNECTED input pin and return the value read BACK off the pin, in a Blueprint graph, a MetaSound Source or a Control Rig. Blueprint: struct pins are canonicalized (a bare GameplayTag name becomes (TagName=\"X\") and an UNREGISTERED tag is rejected up front instead of silently landing as an empty tag); value_json nativizes any struct and is the only way to put SEVERAL tags in a GameplayTagContainer; array, set and map pins are refused (use a MakeArray/MakeSet/MakeMap node), and so are pins split into sub-pins (recombine_blueprint_pin first); a plain string is fine for an FText pin. TRAP: on a FormatText \"Format\" pin the literal IS written but the {argument} pins are NOT created, leaving a valid, useless node -- build the string with Concat_StrStr / Conv_StringToText instead. MetaSound: value is read as the input's type (\"440\", \"true\", \"Hello\"), node_id=@input sets a graph input's default, and the asset is saved. Control Rig: value is export text such as (X=1.0,Y=0.0,Z=0.0); the rig is compiled and saved. Material expressions, sound cue nodes and PCG nodes keep such values as properties: write them with set_properties on the node's object_path from get_graph_nodes.",
+          "description": "Write the literal default of an UNCONNECTED input pin and return the value read BACK off the pin, in a Blueprint graph, a MetaSound Source or a Control Rig.\n\nBlueprint: struct pins are canonicalized -- a bare GameplayTag name becomes (TagName=\"X\"), and an UNREGISTERED tag is rejected up front instead of silently landing as an empty tag; value_json nativizes any struct and is the only way to put SEVERAL tags in a GameplayTagContainer; a plain string is fine for an FText pin. Refused: array, set and map pins (use a MakeArray/MakeSet/MakeMap node), pins split into sub-pins (recombine_blueprint_pin first), and any call while Play-in-Editor runs (see force). TRAP: on a FormatText \"Format\" pin the literal IS written but the {argument} pins are NOT created, leaving a valid, useless node -- build the string with Concat_StrStr / Conv_StringToText instead.\n\nMetaSound: value is read as the input's type (\"440\", \"true\", \"Hello\"), node_id=@input sets a graph input's default, and the asset is saved. Control Rig: value is export text such as (X=1.0,Y=0.0,Z=0.0); the rig is compiled and saved. Material expressions, sound cue nodes and PCG nodes keep such values as properties: write them with set_properties on the node's object_path from get_graph_nodes.",
           "params": [
             {
               "name": "asset_path",
@@ -23050,7 +23077,7 @@
             }
           ],
           "returns": "{ table_path: string, row_name: string, row_struct: string, row_data: object, row_json?: string, fields?: object } where row_data is the fully serialized row struct (TMap / nested struct / FGameplayTag columns included)",
-          "core": true,
+          "pack": "data_tables",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -23713,7 +23740,7 @@
             }
           ],
           "returns": "{ table_path, row_name, row_struct, success, saved, created, updated_existing, written_fields:[..], changed_columns:[..], unchanged_despite_request:[..], unknown_columns?:[..], problems:[..], row_after_exporttext:{column:exporttext} }",
-          "core": true,
+          "pack": "data_tables",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -24233,7 +24260,7 @@
             }
           ],
           "returns": "{ file_path: string, width: int, height: int, byte_size: int, image_base64: string, image_format: string }",
-          "core": true,
+          "pack": "play",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -24579,7 +24606,7 @@
             }
           ],
           "returns": "{ deleted_actor: actor JSON captured before the delete }",
-          "core": true,
+          "pack": "actors",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -24755,7 +24782,6 @@
             }
           ],
           "returns": "{ command: string, handled: bool (an Exec handler claimed the string -- not evidence the effect happened) }",
-          "core": true,
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -24765,7 +24791,7 @@
         },
         {
           "name": "execute_python",
-          "description": "Execute Python code inside the running Unreal Editor, for what no tool does: a client lists only the core tools, so search find_tools before writing a script -- most tools are not in that list. A script that raises fails the call, with the traceback in command_result. DO NOT GUESS A FIELD NAME: most of this tool's errors are \"object has no attribute\" -- and the field usually EXISTS, just not where you reached for it: `HitResult().impact_point` raises, `get_editor_property` cannot find it, and only `to_dict()` returns it (Transform.translation is the reverse). The engine's own stub and Epic's web docs list it either way, so neither settles it -- ask the object (dir(x), x.to_dict(), x.get_editor_property(...)). PIE: while Play-in-Editor runs, a call that compiles a Blueprint or saves (BlueprintEditorLibrary.compile_blueprint, EditorAssetLibrary.save_asset, save_loaded_asset, save_directory, EditorLoadingAndSavingUtils.save_packages, save_current_level...) does NOT run, however the script reaches it: the script gets a RuntimeError there, and the tool call fails with pie_refused even if the script catches it: compiling during PIE ends in a DEAD EDITOR when PIE stops (UREINST_* retains a world, CheckForWorldGCLeaks is Fatal), and a save during PIE writes nothing (Editor.AllowSavingAssetsDuringPIE=0). What the guard does NOT see is a script that changes a Blueprint without compiling it -- stop PIE before editing a Blueprint. READING the live world during PIE is safe and is exactly what this tool is for -- do not avoid it for that. BEFORE writing a loop, check what already answers it in ONE call (a script that only enumerates actors gets a `hint` naming the tool): scripts that re-implement something a tool already does fail far more often than scripts doing something genuinely new -- hand-rolled scaffolding is where the errors are, and a bug in the scaffold reads exactly like a finding about the game. enumerate actors of a class -> get_actors_by_class. enumerate them AND read their properties, filtered by class or editor label, drilling into one component, with the answering world STAMPED on the result (this tool cannot tell you which world answered) -> get_actor_properties_by_class. read properties off ONE known object -> get_properties. list an actor's components -> get_actor_components. one line trace -> raycast_scene. sample a property across a whole PIE session ARMED BEFORE BeginPlay -- a window a post-tick callback cannot reach at all -> watch_pie_property. But do NOT read this as \"always prefer the specific tool\": only a minority of scripts are replaceable end-to-end. Python remains the right answer when the script does what those cannot: several classes in one round trip, walking components AND calling a method, filtering by name substring, correlating two values in the same tick, or anything that mutates. Do not trade one call for twelve. WARNING: `log_output` IS NOT THE LOG OF THE CALL -- it is Python's own prints only (UE fills it from a delegate broadcast solely by unreal.log/log_warning/log_error), so every UE_LOG the ENGINE emits during your script is absent from it. Read `engine_log` instead: it is the GLog slice bracketed to this call, Warning+Error by default. Example: build_meta_human can run, return None, write zero assets and report a clean `log_output` while \"LogMetaHumanCoreTechLib: Error: Texture Synthesis has not been initialized\" sits in GLog. When a call reports success and NOTHING HAPPENED, `engine_log` is the first place to look; widen with engine_log_level=Log, or pass `log_cursor_before` to get_output_log_lines(since_sequence_id=...) for the unfiltered rest.",
+          "description": "Execute Python code inside the running Unreal Editor, for what no tool does: most tools are not in a client's list, so search find_tools before writing a script. A script that raises fails the call, with the traceback in command_result.\n\n`mode` decides how `command` runs: ExecuteFile (the default) runs it as a script of any length, ExecuteStatement runs one statement and prints its result, and EvaluateStatement evaluates one expression and returns its value in command_result. A script runs in the editor console's globals, so `import unreal` and any variable it defines are still there for the next call.\n\nDO NOT GUESS A FIELD NAME: most of this tool's errors are \"object has no attribute\" -- and the field usually EXISTS, just not where you reached for it: `HitResult().impact_point` raises, `get_editor_property` cannot find it, and only `to_dict()` returns it (Transform.translation is the reverse). The engine's own stub and Epic's web docs list it either way, so neither settles it -- ask the object (dir(x), x.to_dict(), x.get_editor_property(...)).\n\nPIE: while Play-in-Editor runs, a call that compiles a Blueprint or saves (BlueprintEditorLibrary.compile_blueprint, EditorAssetLibrary.save_asset, save_loaded_asset, save_directory, EditorLoadingAndSavingUtils.save_packages, save_current_level...) does NOT run, however the script reaches it: the script gets a RuntimeError there, and the call fails with pie_refused even if the script catches it -- compiling during PIE ends in a DEAD EDITOR when PIE stops (UREINST_* retains a world, CheckForWorldGCLeaks is Fatal), and a save during PIE writes nothing (Editor.AllowSavingAssetsDuringPIE=0). The guard does NOT see a script that changes a Blueprint without compiling it: stop PIE before editing a Blueprint. READING the live world during PIE is safe, and is exactly what this tool is for.\n\nBEFORE writing a loop, check whether one call already answers it (a script that only enumerates actors gets a `hint` naming the tool): a script that re-implements a tool fails far more often than one doing something new, and a bug in the scaffold reads exactly like a finding about the game. Actors of a class: get_actors_by_class. Their properties, by class or editor label, with the answering world stamped (this tool cannot say which world answered): get_actor_properties_by_class. Properties of ONE known object: get_properties. An actor's components: get_actor_components. One line trace: raycast_scene. A property sampled across a whole PIE session, armed before BeginPlay: watch_pie_property. Python stays the right answer for several classes in one round trip, walking components AND calling a method, filtering by name substring, correlating two values in the same tick, or anything that mutates: do not trade one call for twelve.\n\nWARNING: `log_output` IS NOT THE LOG OF THE CALL -- it is Python's own prints only (UE fills it from a delegate broadcast solely by unreal.log/log_warning/log_error), so every UE_LOG the ENGINE emits during your script is absent from it. Read `engine_log`: the GLog slice bracketed to this call, Warning+Error by default. Example: build_meta_human can run, return None, write zero assets and report a clean `log_output` while \"LogMetaHumanCoreTechLib: Error: Texture Synthesis has not been initialized\" sits in GLog. When a call reports success and NOTHING HAPPENED, read `engine_log` first; widen it with engine_log_level=Log, or pass `log_cursor_before` to get_output_log_lines(since_sequence_id=...) for the unfiltered rest.",
           "params": [
             {
               "name": "command",
@@ -24777,14 +24803,14 @@
               "name": "capture_output",
               "jsonType": "boolean",
               "required": false,
-              "description": "Run as a file and collect captured log (default true)"
+              "description": "Has no effect, and is accepted so older calls keep working: the output is always captured, and `mode` decides whether the code runs as a script or as one statement."
             },
             {
               "name": "mode",
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "description": "Execution mode: ExecuteFile, ExecuteStatement, or EvaluateStatement (default ExecuteFile)"
+              "description": "Execution mode: ExecuteFile, ExecuteStatement, or EvaluateStatement (default ExecuteFile). Any other value runs as ExecuteFile; execution_mode in the reply says which ran."
             },
             {
               "name": "engine_log_level",
@@ -24898,7 +24924,7 @@
             }
           ],
           "returns": "{ matching_actors: [ { name, actor_name, label, class, location, rotation, scale, is_loaded } ], matching_actors_count: int, search_pattern: string, match: string, results_truncated: bool, max_results: int, world: string (the normalized selector that resolved), world_name: string, world_package: string (in World Partition the UEDPIE_N prefix lives HERE, not in world_name), world_type: string, net_mode: string, pie_instance: int }",
-          "core": true,
+          "pack": "actors",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -25100,7 +25126,7 @@
             }
           ],
           "returns": "{ level_name: string, package_name: string (the /Game or /Engine path -- read this one), filename: string, is_dirty: bool, actor_count: int, world: string (the normalized selector that resolved), world_name: string, world_package: string (the UEDPIE_N prefix lives HERE, not in world_name), world_type: string (\"Editor\" | \"PIE\" | ...), net_mode: string, pie_instance: int }",
-          "core": true,
+          "pack": "levels",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -25529,7 +25555,7 @@
             }
           ],
           "returns": "{ dirty_count: int, readonly_dirty_count: int, map_dirty_count: int, external_dirty_count: int, asset_dirty_count: int, filtered_out: int, pie_active: bool, current_world_package: string, path_prefix: string, readonly_roots: [string], readonly_roots_defaulted: bool, packages: [{ package_name: string, file_path: string, exists_on_disk: bool, kind: string, contains_map: bool, newly_created: bool, actor_label: string, actor_name: string, asset_name: string, asset_class: string, under_readonly_root: bool, objects?: [string] }], message: string, note: string }",
-          "core": true,
+          "pack": "levels",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -25592,7 +25618,7 @@
             }
           ],
           "returns": "{ success: bool, error?: string, refused?: bool, load_attempted?: bool, resident_world_count?: int, resident_worlds?: [{ package: string, world_name: string, world_type: string, has_world_context: bool, is_load_target: bool }], remedy?: string, data?: { loaded_filename: string, target_package: string, default_template: bool, level_name?: string, world_name?: string, loaded_package?: string, is_engine_template?: bool, warning?: string (when the loaded map belongs to the engine), resident_world_count: int, forced_past_resident_worlds: bool, resident_worlds?: [...] } }",
-          "core": true,
+          "pack": "levels",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -26106,7 +26132,7 @@
         },
         {
           "name": "save_asset",
-          "description": "Write ONE .uasset to disk by package path (a Blueprint, DataTable, material...) and VERIFY the effect: still_dirty_after_save:false plus file_on_disk:true is the oracle, not `saved`. Use save_level for the .umap and reload_asset_package to undo an in-memory edit instead. PIE: this is REFUSED while Play-in-Editor runs (it never stops or touches your session) -- the engine guard Editor.AllowSavingAssetsDuringPIE=0 rejects the write before attempting anything, so a save during play would report success without writing a byte. Stop PIE and retry, or pass force=true. WARNING: when it answers success:false with PIE down, a common cause is the file being READ-ONLY on disk (e.g. a Git LFS `lockable` file that has not been `git lfs lock`ed). You do not have to check that by hand: `file_read_only` is measured on every call and the error message states whether a read-only file IS or is NOT the explanation. WARNING: it writes exactly one package, so it cannot stop a compile cascade from dirtying a vendored asset that a LATER bulk save then rewrites -- list_dirty_packages before, `git status` after.",
+          "description": "Write ONE asset's package to disk by its path (a Blueprint, DataTable, material...) and VERIFY the effect: still_dirty_after_save:false plus file_on_disk:true is the oracle, not `saved`.\n\nUse it after an edit you want to keep: most edit tools change the asset in memory only. save_level writes a level's .umap, and reload_asset_package throws an unsaved edit away instead. Refused while Play-in-Editor runs, because the engine would drop the write and still report success (see force).\n\nWhen it fails with PIE down, `file_read_only` says whether the file is read-only on disk -- a Git LFS `lockable` file that nobody has `git lfs lock`ed is the usual case -- and the error says whether that is the cause. It writes exactly one package, so it cannot stop a compile from dirtying a vendored asset that a LATER bulk save rewrites: list_dirty_packages before, `git status` after.",
           "params": [
             {
               "name": "path",
@@ -26155,6 +26181,7 @@
             }
           ],
           "returns": "{ success: bool, error?: string, data?: { saved_filename?: string, saved_package?: string, saved_disk_path?: string, level_name?: string, file_exists_on_disk: bool, file_size_bytes: int, file_existed_before: bool, file_mtime_changed: bool (the write itself -- see the read-only note above), save_call_returned: bool, rescued_with_save_packages: bool, pie_was_stopped: bool, orphan_world_risk?: bool, requested?: { filename?: string, save_as?: bool } } }",
+          "pack": "levels",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -27070,7 +27097,7 @@
             }
           ],
           "returns": "{ actor JSON via DescribeActorObject: name, class, location, rotation, scale, plus world: string (the normalized selector that resolved), world_name: string, world_package: string (the UEDPIE_N prefix lives HERE), world_type: string, net_mode: string, pie_instance: int, has_authority: bool, local_role: string, light_intensity?: number (light types: the intensity now on the component), light_color?: [r, g, b] (light types: the color now on the component), properties_set?: [string], properties_failed?: [{property, error}] (with properties) }",
-          "core": true,
+          "pack": "actors",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -27080,7 +27107,7 @@
         },
         {
           "name": "undo",
-          "description": "Step the editor's undo stack back by one transaction, or by `count` of them, and report what is left, including next_undo (the label of the entry now on top). WARNING: `success` is ALWAYS true, including when there was nothing to undo -- the real oracle is `applied`, and with a count compare actually_undone against requested (the stack ran out, or an undo barrier stopped it); the honest verification is re-reading whatever you changed. Read get_undo_state first to look before you leap.",
+          "description": "Step the editor's undo stack back by one transaction, or by `count` of them, as Ctrl+Z does, and report what is now on top (next_undo, the label of the next entry).\n\nUse it to revert an edit made in the editor, by a tool or by the person at the keyboard: the stack is shared, so the newest entry may be theirs -- read get_undo_state first to see the label you are about to revert. One transaction is usually one tool call that changed something; to make several edits one entry, wrap them in begin_transaction and end_transaction. Undo reverts objects in memory, not files: an edit saved since stays in the file on disk until the next save.\n\nWARNING: `success` is ALWAYS true, including when there was nothing to undo -- the oracle is `applied`, and with a count compare actually_undone against requested (the stack ran out, or an undo barrier stopped it); the honest verification is re-reading whatever you changed.",
           "params": [
             {
               "name": "count",
@@ -27093,7 +27120,7 @@
               "description": "Optional. How many transactions to undo, at least 1 (default 1); stops early when the stack runs out or reaches an undo barrier. Below 1 is refused."
             }
           ],
-          "returns": "{ applied: bool (THE oracle -- false means nothing was undone), requested: int, actually_undone: int (compare against requested), undo_count: int, can_undo: bool, next_undo: string (label of the next entry) }",
+          "returns": "{ applied: bool, requested: int, actually_undone: int, undo_count: int, can_undo: bool, next_undo: string }",
           "core": true,
           "annotations": {
             "readOnlyHint": false,
@@ -38745,7 +38772,7 @@
             }
           ],
           "returns": "{ class_name: string, world: string, actors: [{ name: string, class: string, location: { x: number, y: number, z: number } }], actors_count: number, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }",
-          "core": true,
+          "pack": "actors",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -39412,7 +39439,7 @@
           "description": "THE oracle for \"is the game running right now\": asks ULevelEditorSubsystem::IsInPlayInEditor and returns is_pie_active plus status 'Playing'/'Stopped' and the current level name. Cheap, read-only, no params. Use it to confirm start_play_in_editor / stop_play_in_editor (both answer from before the async transition finishes) and as the gate before any save -- saving with PIE up is refused by the engine. WARNING: Do NOT use the pie_active field of list_dirty_packages for this: it can report false with PIE running and answering.",
           "params": [],
           "returns": "{ is_pie_active: bool, current_level: string (the EDITOR's current level, not the PIE world), status: 'Playing'|'Stopped' }",
-          "core": true,
+          "pack": "play",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -41234,7 +41261,7 @@
             }
           ],
           "returns": "{ pie_started: bool (probed synchronously right after an ASYNC request -- usually false even on success; confirm with is_play_in_editor_active), already_in_pie: bool, message: string, number_of_clients: int, net_mode: string, dirty_package_count: int, readonly_dirty_count: int, dirty_packages: [string] (capped at 25), dirty_packages_truncated: bool }",
-          "core": true,
+          "pack": "play",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -41254,7 +41281,7 @@
             }
           ],
           "returns": "{ pie_stopped: bool (hardcoded true when PIE was up -- not a measurement), was_in_pie: bool, still_in_pie: bool (read immediately, so usually still true: teardown is async), message: string }",
-          "core": true,
+          "pack": "play",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -43093,7 +43120,7 @@
             }
           ],
           "returns": "{ asset_path: string, object_path: string, asset_class: string (class path), asset_class_name: string (short class name of the asset), generated_class_name?: string, expected_class_matched?: bool, package_name: string, original_file_size_bytes: number, original_file_size_mb: number, delete_success: bool, delete_message: string, asset_verified_deleted: bool, file_still_exists: bool, deleted: bool, already_existed: bool, note?: string, deletion_timestamp: string? }",
-          "core": true,
+          "pack": "assets",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -43153,7 +43180,7 @@
             }
           ],
           "returns": "{ original_asset_path: string, new_asset_name: string, new_asset_path: string, destination_path: string, created: bool, duplication_success: bool, duplication_message: string, new_asset_class: string, new_package_name: string, asset_verified: bool, new_file_size_bytes: number?, new_file_size_mb: number?, original_asset_class: string, original_package_name: string, new_path: string?, refs_remapped: int?, saved: bool?, save_error: string? }",
-          "core": true,
+          "pack": "assets",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
@@ -47134,7 +47161,6 @@
             }
           ],
           "returns": "{ success: bool, results: [{index: int, command_type: string, ok: bool, payload?: any, error?: string}], stopped_early: bool, transaction_rolled_back?: bool (with transaction, when stop_on_error tripped) }",
-          "core": true,
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -52099,7 +52125,7 @@
         },
         {
           "name": "get_object_info",
-          "description": "Portrait of ONE object when you do not know its property names yet: identity (name, class, class path, super class, is_valid), class flags, metadata and implemented interfaces, EVERY reflected property as { name: typed_value }, and for an actor its live components with their classes. Once you know the names, get_properties is far cheaper; get_class_properties gives the property descriptors of a class with no instance, get_class_hierarchy its ancestor chain, and get_actor_components the components alone. include_properties=false makes it the cheap \"what IS this thing?\" probe (identity and class only); include_property_metadata=true adds each property's editor metadata (type, editable, edit_const, blueprint_visible, replicated, save_game, clamp, tooltip, enum entries) next to its value. Accepts `world`, so the portrait can be the live server or client instance -- useful when a class is swapped at runtime -- and the reply stamps which world answered. Read-only.",
+          "description": "Portrait of ONE object when you do not know its property names yet: identity (name, class, class path, super class, is_valid), class flags, metadata and implemented interfaces, EVERY reflected property as { name: typed_value }, and for an actor its live components with their classes.\n\nUse it first on anything unfamiliar, then write with set_properties using the names it lists. Once you know the names, get_properties reads just those and is far cheaper -- an actor's full portrait can run to hundreds of properties; get_class_properties describes a class with no instance, get_class_hierarchy gives its ancestor chain, and get_actor_components the components alone.\n\ninclude_properties=false makes it the cheap \"what IS this thing?\" probe, identity and class only. include_property_metadata=true puts each property's editor metadata (type, editable, edit_const, blueprint_visible, replicated, save_game, clamp, tooltip, enum entries) next to its value, which tells you before writing whether set_properties can change it. With `world` the portrait is of the live instance in Play-in-Editor, on the server or on a client -- useful when a class is swapped at runtime -- and the reply stamps which world answered. An object it cannot find is an error naming the path and the world it searched.",
           "params": [
             {
               "name": "object_path",
@@ -52191,7 +52217,6 @@
             }
           ],
           "returns": "{ object_path: string, class_name: string, values: object (typed: bool/number/string natively, struct/map as object, array/set as array, object-ref as path string), property_types: object ({name: FProperty class name}), not_found: [string], world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }",
-          "core": true,
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -52461,7 +52486,7 @@
         },
         {
           "name": "set_properties",
-          "description": "Write one or several properties on ONE object -- an asset, a CDO/archetype, a placed actor, or one of its components as \"Actor.Component\" -- in the EDITOR world, as an edit in the Details panel: each write runs Modify/PreEditChange/PostEditChange (undoable, package dirtied, the component re-registered), and the reply lists set[] and failed[{property,error}] per name. This is the tool for any editable setting of a light, fog, sky, cloud, decal, camera, post-process volume, capture, replication flag, sound, Niagara system, physical material, montage, foliage type or other asset: pass the engine's property names (get_object_info lists them), a struct as a JSON object of only the fields to change, a color as {\"R\",\"G\",\"B\",\"A\"}. The actor is found by its internal name or by a label only it has; the component by its name or by a class only one of its components has (\"Sun.DirectionalLightComponent\", \"Fog.ExponentialHeightFogComponent\"). A key inside a struct that names no field is refused, and nothing is written to that property. clamp=true keeps numbers inside the property's ClampMin/ClampMax, as the Details panel does, and lists what it clamped; save=true saves the asset's package (refused for a level object: save_level). A blend space is resampled after the write. An asset's sub-object -- a graph node, a sound cue node, a Niagara renderer or stage, a PCG node's settings, a material expression, a behavior tree node, a camera rig node, a Mass trait, a physics body, by the object_path its reader gives -- is written the same way, and its asset is finished as its editor does it: a graph node is reconstructed and its Blueprint marked modified (compile it), a sound cue recaches its values, a Niagara system recompiles; save=true saves that asset. Use set_component_property for a component in a live PIE world, set_blueprint_component_properties for a Blueprint's component template, set_widget_property inside a Widget Blueprint, call_function for the object's own setter. Unregistered gameplay tags are refused. No Blueprint is compiled.",
+          "description": "Write one or several properties on ONE object -- an asset, a CDO/archetype, a placed actor, or one of its components as \"Actor.Component\" -- in the EDITOR world, as an edit in the Details panel: each write runs Modify/PreEditChange/PostEditChange (undoable, package dirtied, the component re-registered), and the reply lists set[] and failed[{property,error}] per name.\n\nThis is the tool for any editable setting of a light, fog, sky, cloud, decal, camera, post-process volume, capture, replication flag, sound, Niagara system, physical material, montage, foliage type or other asset. Pass the engine's property names (get_object_info lists them), a struct as a JSON object of only the fields to change, a color as {\"R\",\"G\",\"B\",\"A\"}. The actor is found by its internal name or by a label only it has; the component by its name or by a class only one of its components has (\"Sun.DirectionalLightComponent\", \"Fog.ExponentialHeightFogComponent\").\n\nAn asset's sub-object -- a graph node, a sound cue node, a Niagara renderer or stage, a PCG node's settings, a material expression, a behavior tree node, a camera rig node, a Mass trait, a physics body, by the object_path its reader gives -- is written the same way, and its asset is finished as its editor does it: a graph node is reconstructed and its Blueprint marked modified (compile it), a sound cue recaches its values, a Niagara system recompiles. A blend space is resampled after the write. No Blueprint is compiled.\n\nRefused: a key inside a struct that names no field (nothing is written to that property), an unregistered gameplay tag, and any call while Play-in-Editor runs (see force). clamp=true keeps numbers inside ClampMin/ClampMax as the Details panel does, and lists what it clamped; save=true saves the asset's package (a level object is saved with save_level). Not for: a component in a live PIE world (set_component_property), a Blueprint's component template (set_blueprint_component_properties), a widget inside a Widget Blueprint (set_widget_property), or the object's own setter (call_function).",
           "params": [
             {
               "name": "object_path",

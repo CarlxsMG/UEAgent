@@ -2132,7 +2132,7 @@ TSharedPtr<FJsonObject> HandleCheckAssetCircularDependency(const TSharedPtr<FJso
 // ---------------------------------------------------------------------------
 
 // MCP:get_asset_referencers - List every asset that REFERENCES a target asset -- "who breaks if I delete, move or rename this?" -- wrapping AssetRegistry::GetReferencers over the Package category and returning each referencing package with its primary asset's name, path, class and loaded state. It accepts an object path, a package path or a bare name, echoes `resolved_package` so you can confirm it queried the package you meant, and REFUSES an ambiguous bare name with the candidate list instead of picking one. Hard references only by default (the "what keeps this loaded" audit); dependency_type='soft' or 'all' (or include_soft_references=true) brings in TSoftObjectPtr / FSoftObjectPath edges, and exclude_engine=true drops /Engine and /Script referencers. Works for any asset type, a MetaSound included. Its mirror is get_asset_dependencies (what this asset needs), and find_blueprint_node_references finds call sites INSIDE graphs, which package-level references cannot see.
-//   @core
+//   @pack assets
 //   @param asset_path - Target asset: an object path ('/Game/X/DT_ItemRows.DT_ItemRows'), a package path ('/Game/X/DT_ItemRows'), or an unambiguous bare asset name ('DT_ItemRows'). An ambiguous bare name is an error listing the candidates, never a silent pick.
 //   @param asset_name - Alias of asset_path.
 //   @param dependency_type - Optional 'hard' | 'soft' | 'all' (case-insensitive): which edges count. When given it wins over include_soft_references; when absent, include_soft_references decides (hard, or all).

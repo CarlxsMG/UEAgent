@@ -4,7 +4,18 @@
 
 1547 tools in 55 domains. Every tool also describes itself over MCP (`tools/list`, or `describe_tool` for a tool the client does not list: see [tool lists](../clients.md#tool-lists)); this reference is the same catalog, readable.
 
-The 35 core tools, which every client lists by default: `add_blueprint_variable`, `add_graph_node`, `capture_viewport`, `compile_blueprint`, `connect_pins`, `create_blueprint`, `delete_actor`, `delete_asset`, `disconnect_pin`, `duplicate_asset`, `execute_batch`, `execute_console_command`, `execute_python`, `find_actors_by_name`, `find_assets_by_name`, `get_actors_by_class`, `get_asset_referencers`, `get_blueprint_info`, `get_current_level`, `get_data_table_row`, `get_graph_nodes`, `get_object_info`, `get_properties`, `is_play_in_editor_active`, `list_dirty_packages`, `load_level`, `remove_graph_node`, `save_asset`, `set_data_table_row_fields`, `set_pin_default_value`, `set_properties`, `spawn_actor`, `start_play_in_editor`, `stop_play_in_editor`, `undo`.
+The 11 core tools, which every client lists by default: `add_graph_node`, `compile_blueprint`, `connect_pins`, `execute_python`, `find_assets_by_name`, `get_graph_nodes`, `get_object_info`, `save_asset`, `set_pin_default_value`, `set_properties`, `undo`.
+
+The packs, which `enable_toolset` adds by name:
+
+| Pack | Tools | For |
+|---|---|---|
+| `actors` | `delete_actor`, `find_actors_by_name`, `get_actors_by_class`, `spawn_actor` | Find, spawn and delete the actors of the open level |
+| `levels` | `get_current_level`, `list_dirty_packages`, `load_level`, `save_level` | Open, save and inspect levels, and list what is unsaved |
+| `play` | `capture_viewport`, `is_play_in_editor_active`, `start_play_in_editor`, `stop_play_in_editor` | Start, stop and check Play-in-Editor, and capture the viewport |
+| `assets` | `delete_asset`, `duplicate_asset`, `get_asset_referencers` | Delete and duplicate assets, and find what references one |
+| `blueprint_authoring` | `add_blueprint_variable`, `build_blueprint_graph`, `create_blueprint`, `disconnect_pin`, `get_blueprint_info`, `remove_graph_node` | Create Blueprints, add variables, read their outline, unlink pins, remove nodes and build several wired nodes at once |
+| `data_tables` | `get_data_table_row`, `set_data_table_row_fields` | Read a data table row and change its fields |
 
 | Domain | Tools | What it covers |
 |---|---|---|

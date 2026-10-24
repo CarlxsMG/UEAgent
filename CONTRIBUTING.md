@@ -56,6 +56,11 @@ the synonyms (`read_`, `inspect_`, `query_`, `configure_`, `update_`...).
    (`python Tools/tool_hints.py --why do_thing` shows the verdict and its evidence). A `read-only`
    that the code contradicts fails the generator.
 
+   A long description reads better as short paragraphs: each one after the first goes on its own
+   `//   @para` line, one line each. `//   @core` puts the tool in the list every client gets by default
+   (at most 11, so that with the four meta-tools the list stays at 15), and `//   @pack <name>` puts it in
+   a pack that `enable_toolset` adds by name, one of `PACKS` in `Tools/codegen_command_catalog.py`.
+
 3. Add its row to the family's `FRegistrar`: `{ TEXT("do_thing"), &HandleDoThing },`
 4. Regenerate, in this order (the tables read the catalog):
 

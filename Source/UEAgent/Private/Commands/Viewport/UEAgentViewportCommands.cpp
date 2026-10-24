@@ -58,7 +58,7 @@ namespace
 }
 
 // MCP:capture_viewport - Screenshot the active editor viewport to a PNG (forcing a fresh draw first), optionally resized and optionally returned inline as base64. Use it to SHOW a result -- proof that something looks right, an image to hand to a human. Do NOT use it to diagnose: an image costs far more context than a command and is read far less reliably than one, so for "is the actor there / did the value change / did it move" prefer get_actor_bounds, get_properties, raycast_scene or a property read, which answer exactly and cheaply. Captures the EDITOR viewport, not a PIE window; capture_high_res_screenshot is the higher-resolution sibling.
-//   @core
+//   @pack play
 //   @param width - Optional target width to downscale/upscale to (omit to keep native viewport size).
 //   @param height - Optional target height (only used when width is also supplied).
 //   @param filename - Optional output filename (default MCP_Capture_<timestamp>.png); ".png" extension is added if missing.

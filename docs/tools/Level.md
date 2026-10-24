@@ -504,7 +504,7 @@ Read whether an EDITOR-world actor is location-locked in the viewport (AActor::I
 
 *Read-only.*
 
-**Core tool:** every client lists it by default.
+**Pack `actors`:** `enable_toolset` adds it to a client's list ([tool lists](../clients.md#tool-lists)).
 
 Census of one class in a chosen world: names + locations of every actor whose class name matches EXACTLY (no subclasses; a Blueprint needs its runtime name with the _C suffix, e.g. BP_Foo_C), capped at 1000. The co-op workhorse -- world='editor'|'pie'|'server'|'client'|'pie:N' ('server' = the PIE world with authority, 'client' = the other), and the reply stamps world_name/world_package/net_mode/pie_instance so actors_count:0 is readable as "not in THIS world" instead of "does not exist". Use find_actors_by_name for substring/label search, get_actors_in_radius for proximity. Two false zeros: with 2+ PIE clients a bare world='pie' resolves to only ONE of the two worlds; and after compile_blueprint the placed OFPA instances vanish from BOTH editor and PIE worlds in memory (git shows them intact on disk -- the fix is load_level of the same map, never re-placing them).
 
@@ -831,7 +831,7 @@ Yes/no guard: does this FoliageType asset path exist and load? Cheap preconditio
 
 *Read-only.*
 
-**Core tool:** every client lists it by default.
+**Pack `play`:** `enable_toolset` adds it to a client's list ([tool lists](../clients.md#tool-lists)).
 
 THE oracle for "is the game running right now": asks ULevelEditorSubsystem::IsInPlayInEditor and returns is_pie_active plus status 'Playing'/'Stopped' and the current level name. Cheap, read-only, no params. Use it to confirm start_play_in_editor / stop_play_in_editor (both answer from before the async transition finishes) and as the gate before any save -- saving with PIE up is refused by the engine. WARNING: Do NOT use the pie_active field of list_dirty_packages for this: it can report false with PIE running and answering.
 
@@ -1484,7 +1484,7 @@ Spawn an ALevelStreamingVolume in the editor world with a real box brush (half-e
 
 *Destructive.*
 
-**Core tool:** every client lists it by default.
+**Pack `play`:** `enable_toolset` adds it to a client's list ([tool lists](../clients.md#tool-lists)).
 
 Press Play: starts a real PlayInEditor session (a true play world with a spawned PlayerController, not SimulateInEditor), optionally multi-client and networked for co-op testing via number_of_clients + net_mode=ListenServer. WARNING: RequestPlaySession is ASYNC and this tool probes right after asking, so `pie_started` comes back FALSE on a start that is perfectly fine -- the oracle is a follow-up is_play_in_editor_active, never this field. With 2+ clients the worlds are UEDPIE_0 (server) and UEDPIE_1 (client), and later reads must be anchored with world='server'/'client' because PIE actor NAMES are swapped between them. Refuses if another MCP session (or a human) already owns PIE unless force=true.
 
@@ -1501,7 +1501,7 @@ Press Play: starts a real PlayInEditor session (a true play world with a spawned
 
 *Destructive.*
 
-**Core tool:** every client lists it by default.
+**Pack `play`:** `enable_toolset` adds it to a client's list ([tool lists](../clients.md#tool-lists)).
 
 Press Stop: requests the end of the Play-in-Editor session (EditorRequestEndPlay). WARNING: `pie_stopped` is HARDCODED true whenever PIE was running and teardown is async, so the only oracle is a follow-up is_play_in_editor_active. WARNING: Treat every call as an operation that CAN KILL THE EDITOR: any UWorld/UPackage handle left in an execute_python global keeps the PIE world rooted and the engine aborts with "Object ... from PIE level still referenced" -- purge the __main__ namespace and gc.collect() BEFORE calling. Refuses when another MCP session (or a human) started the PIE, and then needs force=true.
 

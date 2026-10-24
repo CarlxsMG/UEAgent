@@ -2,6 +2,42 @@
 
 Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](https://semver.org).
 
+## 2.7.0 - 2026-10-24
+
+A client lists 15 tools by default: 11 core tools and the four that reach the rest. The tools that left the list are
+one call away in packs, small sets of tools for one job that `enable_toolset` adds by name.
+
+### Changed
+
+- **The core list holds 11 tools:** `find_assets_by_name`, `get_object_info`, `set_properties`, `save_asset`, `undo`,
+  `execute_python`, `get_graph_nodes`, `add_graph_node`, `connect_pins`, `set_pin_default_value` and
+  `compile_blueprint`. With `find_tools`, `describe_tool`, `call_tool` and `enable_toolset`, a client lists 15 tools
+  by default instead of 39. The 24 that left still run through `call_tool`, and `?tools=all` still lists every tool.
+- **New descriptions for the 11 core tools and the four meta-tools.** In short paragraphs, each one says when to use
+  the tool and which sibling to use instead, what its arguments mean beyond the schema, and what it refuses, without
+  repeating the schema or the shape of the reply. Every fact in them was checked against the handler.
+- **The meta-tools carry all four annotations.** `call_tool` is marked destructive and open-world, since it runs any
+  tool. `find_tools`, `describe_tool` and `enable_toolset` are marked read-only: `enable_toolset` changes only which
+  tools the connection lists.
+
+### Added
+
+- **Packs.** `enable_toolset` takes `packs` as well as `domains`. `actors`, `levels`, `play`, `assets`,
+  `blueprint_authoring` and `data_tables` hold 2 to 6 tools each: 21 of the 24 that left the core list, plus
+  `save_level` and `build_blueprint_graph`.
+  - `find_tools` with no arguments lists the packs with their tools.
+  - `?packs=actors`, or `?domains=actors`, lists a pack from the start.
+  - A tool that is both in a pack and in an enabled domain counts once in `tools_added`.
+  - The [tool reference](docs/tools/README.md) lists each pack's tools and marks each tool's pack.
+- **Two tags for a handler's annotation:** `//   @pack <name>` puts the tool in a pack, and `//   @para <text>` adds a
+  paragraph to its description (see [CONTRIBUTING](CONTRIBUTING.md)).
+
+### Fixed
+
+- **`execute_python`'s `capture_output` did nothing**, although its description said it chose how the code ran. The
+  output is always captured, and `mode` decides whether the code runs as a script or as one statement. The parameter
+  is still accepted, and its description now says it has no effect.
+
 ## 2.6.0 - 2026-10-23
 
 The editor connects OpenCode, as it already connected Cursor, VS Code and Antigravity CLI.

@@ -70,4 +70,4 @@ itself: the lists only show what each task touches. Every tool is described in t
 - Name things exactly: `/Game/Characters/BP_Hero` beats "the hero".
 - After a graph edit, ask the agent to compile and fix what the compiler reports.
 - A tool that is not in the client's list is one call away: the agent finds it with `find_tools`
-  and runs it with `call_tool`, or adds its domain with `enable_toolset` ([tool lists](clients.md#tool-lists)).
+  and runs it with `call_tool`, or adds its pack or domain with `enable_toolset` ([tool lists](clients.md#tool-lists)).

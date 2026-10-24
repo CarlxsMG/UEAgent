@@ -552,7 +552,7 @@ TSharedPtr<FJsonObject> HandleGetActorsInRadius(const TSharedPtr<FJsonObject>& P
 }
 
 // MCP:get_actors_by_class - Census of one class in a chosen world: names + locations of every actor whose class name matches EXACTLY (no subclasses; a Blueprint needs its runtime name with the _C suffix, e.g. BP_Foo_C), capped at 1000. The co-op workhorse -- world='editor'|'pie'|'server'|'client'|'pie:N' ('server' = the PIE world with authority, 'client' = the other), and the reply stamps world_name/world_package/net_mode/pie_instance so actors_count:0 is readable as "not in THIS world" instead of "does not exist". Use find_actors_by_name for substring/label search, get_actors_in_radius for proximity. Two false zeros: with 2+ PIE clients a bare world='pie' resolves to only ONE of the two worlds; and after compile_blueprint the placed OFPA instances vanish from BOTH editor and PIE worlds in memory (git shows them intact on disk -- the fix is load_level of the same map, never re-placing them).
-//   @core
+//   @pack actors
 //   @param class_name - Whole UClass name, e.g. 'StaticMeshActor' or 'BP_MyTurret_C'. Compared case-insensitively but WHOLE-string: not a path, not a substring, and never matched against parent classes.
 //   @param world - Optional world selector: absent/'editor' (default) | 'pie' (ambiguous: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie').
 //   @returns { class_name: string, world: string, actors: [{ name: string, class: string, location: { x: number, y: number, z: number } }], actors_count: number, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }
@@ -1051,7 +1051,7 @@ namespace McpPieDirtyAdvisory
 }
 
 // MCP:start_play_in_editor - Press Play: starts a real PlayInEditor session (a true play world with a spawned PlayerController, not SimulateInEditor), optionally multi-client and networked for co-op testing via number_of_clients + net_mode=ListenServer. WARNING: RequestPlaySession is ASYNC and this tool probes right after asking, so `pie_started` comes back FALSE on a start that is perfectly fine -- the oracle is a follow-up is_play_in_editor_active, never this field. With 2+ clients the worlds are UEDPIE_0 (server) and UEDPIE_1 (client), and later reads must be anchored with world='server'/'client' because PIE actor NAMES are swapped between them. Refuses if another MCP session (or a human) already owns PIE unless force=true.
-//   @core
+//   @pack play
 //   @param number_of_clients - Optional int (default 1, clamped 1-10). >1 opens additional client windows -- that is what makes a co-op reading possible at all.
 //   @param net_mode - Optional string: "Standalone"|"ListenServer"|"Client" (default "Standalone"). Any other value is a clean error, not a silent fallback. Use ListenServer for co-op.
 //   @param run_under_one_process - Optional bool (default true). Must stay true for multi-client windows to open inside this single editor process.
@@ -1137,7 +1137,7 @@ TSharedPtr<FJsonObject> HandleStartPlayInEditor(const TSharedPtr<FJsonObject>& P
 }
 
 // MCP:stop_play_in_editor - Press Stop: requests the end of the Play-in-Editor session (EditorRequestEndPlay). WARNING: `pie_stopped` is HARDCODED true whenever PIE was running and teardown is async, so the only oracle is a follow-up is_play_in_editor_active. WARNING: Treat every call as an operation that CAN KILL THE EDITOR: any UWorld/UPackage handle left in an execute_python global keeps the PIE world rooted and the engine aborts with "Object ... from PIE level still referenced" -- purge the __main__ namespace and gc.collect() BEFORE calling. Refuses when another MCP session (or a human) started the PIE, and then needs force=true.
-//   @core
+//   @pack play
 //   @param force [bool] - Optional bool (default false). Override the PIE-ownership guard: stop even if another session (or a manually-started PIE) currently owns Play-in-Editor. Read by the server before the tool runs; without it, stopping a PIE your session does not own is refused with pie_owner/requester in the payload.
 //   @returns { pie_stopped: bool (hardcoded true when PIE was up -- not a measurement), was_in_pie: bool, still_in_pie: bool (read immediately, so usually still true: teardown is async), message: string }
 
@@ -1172,7 +1172,7 @@ TSharedPtr<FJsonObject> HandleStopPlayInEditor(const TSharedPtr<FJsonObject>& Pa
 }
 
 // MCP:is_play_in_editor_active - THE oracle for "is the game running right now": asks ULevelEditorSubsystem::IsInPlayInEditor and returns is_pie_active plus status 'Playing'/'Stopped' and the current level name. Cheap, read-only, no params. Use it to confirm start_play_in_editor / stop_play_in_editor (both answer from before the async transition finishes) and as the gate before any save -- saving with PIE up is refused by the engine. WARNING: Do NOT use the pie_active field of list_dirty_packages for this: it can report false with PIE running and answering.
-//   @core
+//   @pack play
 //   @returns { is_pie_active: bool, current_level: string (the EDITOR's current level, not the PIE world), status: 'Playing'|'Stopped' }
 
 TSharedPtr<FJsonObject> HandleIsPlayInEditorActive(const TSharedPtr<FJsonObject>& Params)

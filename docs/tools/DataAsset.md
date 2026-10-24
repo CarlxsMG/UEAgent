@@ -373,7 +373,7 @@ Describe a DataTable without changing it: table class, row struct (None when it 
 
 *Read-only.*
 
-**Core tool:** every client lists it by default.
+**Pack `data_tables`:** `enable_toolset` adds it to a client's list ([tool lists](../clients.md#tool-lists)).
 
 Read ONE row of a DataTable by key and get every column as JSON. Reads the row memory untyped (FindRowUnchecked), so it works on Blueprint / user-defined row structs that are not FTableRowBase children, where the typed lookup reports "Row not found" for rows that exist; a miss here really is a missing key. Serializes TMap, nested struct and GameplayTag columns in row_data. Two optional renderings of the same row: include_native_json adds row_json, the verbatim string of UE's own DataTable JSON writer -- the exact format set_data_table_row_from_json consumes, so it is the read half of a copy/round-trip (it emits GameplayTagContainers in the ExportText form the importer accepts; the round trip is not lossless for multi-word user-defined enums, so re-read what you wrote); include_export_text adds fields, every cell as its byte-exact ExportText string, so TMap&lt;Enum,SoftClass>, nested struct arrays and soft references appear in full (row_data shows such TMaps as {}) -- the form to copy a vendor row or to tell an empty enum from an unwritten one. Use get_data_table_rows when you want the enum DISPLAY names.
 
@@ -645,7 +645,7 @@ Write a DataTable row from a plain JSON object of columns and save the table. By
 
 *Destructive, idempotent.*
 
-**Core tool:** every client lists it by default.
+**Pack `data_tables`:** `enable_toolset` adds it to a client's list ([tool lists](../clients.md#tool-lists)).
 
 Write only the named cells of one DataTable row via the native JSON importer, deep-merged onto the current row so untouched columns and struct sub-fields survive, then save. Returns changed_columns, unchanged_despite_request, unknown_columns (skipped) and the row as ExportText. For many rows use set_data_table_rows_from_json.
 

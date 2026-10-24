@@ -294,7 +294,11 @@ Export a render target to an image file on disk: PNG, except an RGBA16f or RGBA3
 
 **Core tool:** every client lists it by default.
 
-Find assets by NAME, scanning every mounted content root (/Game, /Engine, /Water, plugin mounts, ...) and returning name, object path, class and package per hit. The broad "does anything called &lt;token> exist, and where?" search. It has TWO match modes and picks one automatically, reporting which in `match_mode`: a pattern WITHOUT `*`/`?` is a case-insensitive SUBSTRING test (FString::Contains) -- pass the bare token, this is the common case; a pattern WITH `*` or `?` is a real glob (FString::MatchesWildcard). WARNING: The glob is ANCHORED AT BOTH ENDS -- it matches the WHOLE name, not a substring -- so `Grass*` means "starts with Grass" and `*Grass*` is what reproduces substring behaviour. It only ever looks at the asset NAME, so it cannot find an asset by its folder or by a class it belongs to: use resolve_asset_by_name to check ONE exact name and get every homonym, get_assets_in_folder to enumerate a directory, get_assets_by_type for the 5 built-in type filters, and get_assets_by_tag for an Asset Registry tag.
+Find assets by NAME across every mounted content root (/Game, /Engine, /Water, plugin mounts...), returning each hit's name, object path, class and package: the broad "does anything called &lt;token> exist, and where?" search.
+
+Pass the bare token, the common case: `Grass` finds every asset whose name contains it, ignoring case. Put a `*` or `?` in only to anchor the match, because the pattern must then match the WHOLE name: `Grass*` is "starts with Grass", and `*Grass*` is the plain substring search again. `match_mode` says which of the two ran.
+
+It reads names only, never folders or classes: get_assets_in_folder lists a directory, get_assets_by_type filters by the 5 built-in types, get_assets_by_tag reads an Asset Registry tag, and resolve_asset_by_name checks ONE exact name and returns every homonym. A hit's `path` is what save_asset, get_object_info and set_properties take.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

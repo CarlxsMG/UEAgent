@@ -330,8 +330,21 @@ namespace McpMetaToolsPrivate
 				Entry->SetNumberField(TEXT("tools"), D.NumTools);
 				DomainsJson.Add(MakeShared<FJsonValueObject>(Entry));
 			}
+			TArray<TSharedPtr<FJsonValue>> PacksJson;
+			for (const FMcpToolCatalog::FPack& Pack : Catalog.GetPacks())
+			{
+				TSharedRef<FJsonObject> Entry = MakeShared<FJsonObject>();
+				Entry->SetStringField(TEXT("pack"), Pack.Name);
+				Entry->SetStringField(TEXT("description"), Pack.Description);
+				Entry->SetArrayField(TEXT("tools"), ToJsonStrings(Pack.ToolNames));
+				PacksJson.Add(MakeShared<FJsonValueObject>(Entry));
+			}
 			Result->SetNumberField(TEXT("total_tools"), Catalog.NumTools());
 			Result->SetArrayField(TEXT("domains"), DomainsJson);
+			if (PacksJson.Num() > 0)
+			{
+				Result->SetArrayField(TEXT("packs"), PacksJson);
+			}
 			Result->SetStringField(TEXT("next"), TEXT("Pass `query` (words from a tool's name or purpose) and/or `domain` to list tools."));
 			return Result;
 		}
@@ -413,8 +426,23 @@ namespace McpMetaToolsPrivate
 		return Schema;
 	}
 
+	/** A meta-tool's MCP annotations, all four stated. */
+	struct FHints
+	{
+		bool bReadOnly = false;
+		bool bDestructive = false;
+		bool bIdempotent = false;
+		bool bOpenWorld = false;
+	};
+
+	/** find_tools and describe_tool only read the catalog, and enable_toolset only this connection's list: a client may run
+	 *  them without asking. call_tool does whatever the tool it names does, so it carries the worst of any tool: it can
+	 *  delete, and execute_python_file reaches outside the editor. */
+	constexpr FHints ReadsCatalog{ /*bReadOnly*/ true, /*bDestructive*/ false, /*bIdempotent*/ true, /*bOpenWorld*/ false };
+	constexpr FHints RunsAnyTool{ /*bReadOnly*/ false, /*bDestructive*/ true, /*bIdempotent*/ false, /*bOpenWorld*/ true };
+
 	static TSharedPtr<FJsonValue> MakeTool(const TCHAR* Name, const FString& Description, const TSharedRef<FJsonObject>& Properties,
-		const TArray<FString>& Required, bool bReadOnly)
+		const TArray<FString>& Required, const FHints& Hints)
 	{
 		TSharedRef<FJsonObject> InputSchema = MakeShared<FJsonObject>();
 		InputSchema->SetStringField(TEXT("type"), TEXT("object"));
@@ -427,14 +455,59 @@ namespace McpMetaToolsPrivate
 		Tool->SetStringField(TEXT("name"), Name);
 		Tool->SetStringField(TEXT("description"), Description);
 		Tool->SetObjectField(TEXT("inputSchema"), InputSchema);
-		if (bReadOnly)
-		{
-			// Lets a client run them without asking: they only read the catalog.
-			TSharedRef<FJsonObject> Annotations = MakeShared<FJsonObject>();
-			Annotations->SetBoolField(TEXT("readOnlyHint"), true);
-			Tool->SetObjectField(TEXT("annotations"), Annotations);
-		}
+		TSharedRef<FJsonObject> Annotations = MakeShared<FJsonObject>();
+		Annotations->SetBoolField(TEXT("readOnlyHint"), Hints.bReadOnly);
+		Annotations->SetBoolField(TEXT("destructiveHint"), Hints.bDestructive);
+		Annotations->SetBoolField(TEXT("idempotentHint"), Hints.bIdempotent);
+		Annotations->SetBoolField(TEXT("openWorldHint"), Hints.bOpenWorld);
+		Tool->SetObjectField(TEXT("annotations"), Annotations);
 		return MakeShared<FJsonValueObject>(Tool);
+	}
+
+	/** "actors (get_actors_by_class, spawn_actor), levels (load_level)": each pack with its tools. */
+	static FString PacksLine(const FMcpToolCatalog& Catalog)
+	{
+		TArray<FString> Parts;
+		for (const FMcpToolCatalog::FPack& Pack : Catalog.GetPacks())
+		{
+			Parts.Add(FString::Printf(TEXT("%s (%s)"), *Pack.Name, *FString::Join(Pack.ToolNames, TEXT(", "))));
+		}
+		return FString::Join(Parts, TEXT(", "));
+	}
+
+	static TArray<FString> PackNames(const FMcpToolCatalog& Catalog)
+	{
+		TArray<FString> Names;
+		for (const FMcpToolCatalog::FPack& Pack : Catalog.GetPacks())
+		{
+			Names.Add(Pack.Name);
+		}
+		return Names;
+	}
+
+	/** Reads one toolset argument (an array of names, or one string with names separated by commas) into Requested. */
+	static void ReadNames(const TSharedPtr<FJsonObject>& Args, const TCHAR* Field, TArray<FString>& Requested)
+	{
+		const TArray<TSharedPtr<FJsonValue>>* Values = nullptr;
+		if (Args->TryGetArrayField(Field, Values) && Values)
+		{
+			for (const TSharedPtr<FJsonValue>& Value : *Values)
+			{
+				FString Name;
+				if (Value.IsValid() && Value->TryGetString(Name))
+				{
+					Requested.Add(Name);
+				}
+			}
+		}
+		FString Single;
+		if (Args->TryGetStringField(Field, Single))
+		{
+			// One name as a string, or several separated by commas: a model sends either.
+			TArray<FString> Parts;
+			Single.ParseIntoArray(Parts, TEXT(","));
+			Requested.Append(Parts);
+		}
 	}
 }
 
@@ -470,36 +543,73 @@ TArray<TSharedPtr<FJsonValue>> McpMetaTools::BuildMetaTools(const FMcpToolCatalo
 
 	TArray<TSharedPtr<FJsonValue>> Tools;
 	Tools.Add(MakeTool(FindTools, FString::Printf(
-		TEXT("Searches this server's %d Unreal Editor tools (%d domains) and returns the best matches: name, domain, parameters ")
-		TEXT("(* = required) and a one-line summary. With no arguments it lists the domains. Then describe_tool gives a tool's ")
-		TEXT("full schema and call_tool runs it%s."), Catalog.NumTools(), Domains.Num(),
-		bCore ? TEXT(", or enable_toolset adds its whole domain to your tool list") : TEXT("")),
-		FindProperties, {}, /*bReadOnly*/ true));
+		TEXT("Searches this server's %d Unreal Editor tools and returns the best matches, each with its name, domain, parameters ")
+		TEXT("(* marks a required one) and the first sentence of its description. Use it before guessing a tool name or writing ")
+		TEXT("Python; when you already know the name, skip it: describe_tool and call_tool take the name directly.\n\n")
+		TEXT("Each query word scores on a whole word of a tool's name first, then the start of one, then the domain, then the ")
+		TEXT("description, and a tool that matches more of the words ranks higher; a query that spells a tool's name, such as ")
+		TEXT("\"spawn actor\", puts that tool first. With `domain` the search stays inside it, and `domain` alone lists its tools. ")
+		TEXT("With no arguments it lists the %d domains with their sizes%s. It only reads the catalog, so it is cheap to repeat ")
+		TEXT("with other words.\n\n")
+		TEXT("Then describe_tool gives a match's full schema and call_tool runs it%s.\n\n")
+		TEXT("Returns: { success, matches: int, tools: [{ name, domain, params?, summary }], more?: string (when matches exceed ")
+		TEXT("`limit`) } -- with no arguments { success, total_tools, domains: [{ domain, tools }]%s }. An unknown `domain` is an ")
+		TEXT("error that lists the domains."),
+		Catalog.NumTools(), Domains.Num(), bCore ? TEXT(", and the packs with their tools") : TEXT(""),
+		bCore ? TEXT(", or enable_toolset adds its pack or domain to your tool list") : TEXT(""),
+		bCore ? TEXT(", packs: [{ pack, description, tools }]") : TEXT("")),
+		FindProperties, {}, ReadsCatalog));
 	Tools.Add(MakeTool(DescribeTool,
-		TEXT("One tool's full description and input JSON schema: every parameter's type and meaning, the required ones, closed ")
-		TEXT("value sets and accepted aliases. Read it before call_tool unless the parameter list from find_tools is enough."),
-		DescribeProperties, { TEXT("name") }, /*bReadOnly*/ true));
+		TEXT("Returns one tool's full description, input JSON schema and annotations, as a full tool list carries them: every ")
+		TEXT("parameter's type and meaning, the required ones, closed value sets and accepted aliases, and whether the tool only ")
+		TEXT("reads or can delete. Use it before call_tool when the parameter line from find_tools does not tell you how to fill ")
+		TEXT("an argument, such as its format or its allowed values; a tool already in your list has its schema there.\n\n")
+		TEXT("An old name of a renamed tool, or the name of a retired one, also resolves, and `retired_name` then says what the ")
+		TEXT("name became. It only reads the catalog. An unknown name is an error that lists up to five `closest` names.\n\n")
+		TEXT("Returns: { success, name, domain, description, inputSchema, annotations?, retired_name? }"),
+		DescribeProperties, { TEXT("name") }, ReadsCatalog));
 	Tools.Add(MakeTool(CallTool,
-		TEXT("Runs one of this server's tools by name, with `arguments` holding that tool's own parameters. The call goes through ")
-		TEXT("the same validation, guards and readback as a tool listed directly."),
-		CallProperties, { TEXT("name") }, /*bReadOnly*/ false));
+		TEXT("Runs any of this server's tools by name: `name` is the tool and `arguments` its own parameters, e.g. ")
+		TEXT("{\"name\": \"get_actors_by_class\", \"arguments\": {\"class_name\": \"PointLight\"}}. Use it for a tool that is not ")
+		TEXT("in your tool list, once find_tools has found it (and describe_tool, when its parameters are unclear); call a listed ")
+		TEXT("tool directly.\n\n")
+		TEXT("The call takes the path of a direct one: the same validation, guards and readback, and the same effects, so it can ")
+		TEXT("delete or overwrite whatever the named tool can; describe_tool shows that tool's annotations. Refused before ")
+		TEXT("anything runs: no `name`, `name` set to call_tool itself, `arguments` that is not an object (a JSON string of one ")
+		TEXT("is accepted), an unknown name (the error lists the closest ones) and a missing required parameter. An old name of a ")
+		TEXT("renamed tool runs the new one, and the reply says so.\n\n")
+		TEXT("Returns: the named tool's own reply, unchanged."),
+		CallProperties, { TEXT("name") }, RunsAnyTool));
 	if (bCore)
 	{
 		TSharedRef<FJsonObject> EnableProperties = MakeShared<FJsonObject>();
-		TSharedRef<FJsonObject> DomainsProperty = Property(TEXT("array"),
-			TEXT("The domains whose tools to add, as find_tools lists them, e.g. [\"Material\"] or [\"Animation\", \"Audio\"]."));
-		TSharedRef<FJsonObject> Items = MakeShared<FJsonObject>();
-		Items->SetStringField(TEXT("type"), TEXT("string"));
-		Items->SetArrayField(TEXT("enum"), ToJsonStrings(DomainNames));
-		DomainsProperty->SetObjectField(TEXT("items"), Items);
-		EnableProperties->SetObjectField(TEXT("domains"), DomainsProperty);
+		auto NamesProperty = [](const FString& Description, const TArray<FString>& Names)
+		{
+			TSharedRef<FJsonObject> Schema = Property(TEXT("array"), Description);
+			TSharedRef<FJsonObject> Items = MakeShared<FJsonObject>();
+			Items->SetStringField(TEXT("type"), TEXT("string"));
+			Items->SetArrayField(TEXT("enum"), ToJsonStrings(Names));
+			Schema->SetObjectField(TEXT("items"), Items);
+			return Schema;
+		};
+		EnableProperties->SetObjectField(TEXT("packs"), NamesProperty(
+			TEXT("The packs to add, e.g. [\"actors\"] or [\"play\", \"levels\"]."), PackNames(Catalog)));
+		EnableProperties->SetObjectField(TEXT("domains"), NamesProperty(
+			TEXT("The whole domains to add, as find_tools lists them, e.g. [\"Material\"]."), DomainNames));
 		Tools.Add(MakeTool(EnableToolset, FString::Printf(
-			TEXT("Adds every tool of one or more domains to this connection's tool list, so you call them directly instead of ")
-			TEXT("through call_tool: use it when a task needs several tools of a domain, for example Material or Animation. ")
-			TEXT("The %d core tools are always listed; find_tools with no arguments lists the %d domains and their sizes. Your ")
-			TEXT("client re-reads the list when the server announces the change; if it does not, call_tool reaches the same tools. ")
-			TEXT("Lasts until the connection's session ends."), Catalog.NumCoreTools(), Domains.Num()),
-			EnableProperties, { TEXT("domains") }, /*bReadOnly*/ true));
+			TEXT("Adds packs or whole domains to this connection's tool list, so their tools are called directly instead of ")
+			TEXT("through call_tool; the %d core tools are always listed. Give `packs`, `domains` or both.\n\n")
+			TEXT("A pack is the few tools of one job the core leaves out: %s. A domain is every tool of one area of the editor, ")
+			TEXT("such as Material or Animation, and can add a hundred tools to your context: find_tools with no arguments lists ")
+			TEXT("the domains and their sizes. Prefer a pack when one covers the job.\n\n")
+			TEXT("It changes only which tools this connection lists, never the editor or the project, and lasts until the ")
+			TEXT("connection's session ends; enabling the same one again adds nothing. The server announces the new list and your ")
+			TEXT("client re-reads it; if your client does not, call_tool reaches the same tools. An unknown name is an error that ")
+			TEXT("lists the packs and the domains.\n\n")
+			TEXT("Returns: { success, packs?: [{ pack, already_listed, tools }], domains?: [{ domain, already_listed, tools }], ")
+			TEXT("tools_added: int, list_changed: bool, note?: string }"),
+			Catalog.NumCoreTools(), *PacksLine(Catalog)),
+			EnableProperties, {}, ReadsCatalog));
 	}
 	return Tools;
 }
@@ -528,99 +638,107 @@ FString McpMetaTools::Instructions(const FMcpToolCatalog& Catalog)
 
 FString McpMetaTools::CoreInstructions(const FMcpToolCatalog& Catalog)
 {
+	using namespace McpMetaToolsPrivate;
+
 	return FString::Printf(
-		TEXT("This connection lists the %d core tools of the %d Unreal Editor tools: assets, actors and levels, any object's ")
-		TEXT("properties, Blueprint and other asset graphs, data tables, Play-in-Editor and Python. The rest are one call away: ")
-		TEXT("find_tools searches all of them, describe_tool returns one's input schema, call_tool runs any of them, and ")
-		TEXT("enable_toolset adds a whole domain's tools to this list. Search before guessing a tool name, and before writing ")
-		TEXT("Python: most tools are not in this list, and execute_python is for what no tool does."),
-		Catalog.NumCoreTools(), Catalog.NumTools());
+		TEXT("This connection lists %d core tools of the %d Unreal Editor tools -- find, read, change, save and undo any asset ")
+		TEXT("or object, edit Blueprint graphs, and Python -- and four meta-tools for the rest: find_tools searches every tool, ")
+		TEXT("describe_tool returns one's input schema, call_tool runs any of them, and enable_toolset adds a pack (%s) or a ")
+		TEXT("whole domain to this list. Search before guessing a tool name, and before writing Python: most tools are not in ")
+		TEXT("this list, and execute_python is for what no tool does."),
+		Catalog.NumCoreTools(), Catalog.NumTools(), *FString::Join(PackNames(Catalog), TEXT(", ")));
 }
 
-bool McpMetaTools::ReadToolsetDomains(const FMcpToolCatalog& Catalog, const TSharedPtr<FJsonObject>& Args, TArray<FString>& OutDomains, FString& OutError)
+bool McpMetaTools::ReadToolsets(const FMcpToolCatalog& Catalog, const TSharedPtr<FJsonObject>& Args, TArray<FString>& OutToolsets, FString& OutError)
 {
-	OutDomains.Reset();
+	using namespace McpMetaToolsPrivate;
+
+	OutToolsets.Reset();
 	TArray<FString> Requested;
 	if (Args.IsValid())
 	{
-		const TArray<TSharedPtr<FJsonValue>>* Values = nullptr;
-		if (Args->TryGetArrayField(TEXT("domains"), Values) && Values)
+		// A name is looked up as a pack and as a domain whichever field holds it: no pack is named like a domain.
+		static const TCHAR* const Fields[] = { TEXT("packs"), TEXT("pack"), TEXT("domains"), TEXT("domain") };
+		for (const TCHAR* Field : Fields)
 		{
-			for (const TSharedPtr<FJsonValue>& Value : *Values)
-			{
-				FString Name;
-				if (Value.IsValid() && Value->TryGetString(Name))
-				{
-					Requested.Add(Name);
-				}
-			}
-		}
-		FString Single;
-		if (Args->TryGetStringField(TEXT("domains"), Single) || Args->TryGetStringField(TEXT("domain"), Single))
-		{
-			// One domain as a string, or several separated by commas: a model sends either.
-			TArray<FString> Parts;
-			Single.ParseIntoArray(Parts, TEXT(","));
-			Requested.Append(Parts);
+			ReadNames(Args, Field, Requested);
 		}
 	}
 	TArray<FString> Unknown;
 	for (const FString& Name : Requested)
 	{
-		const FString Domain = Catalog.FindDomain(Name);
-		if (Domain.IsEmpty())
+		const FString Toolset = Catalog.FindToolset(Name);
+		if (Toolset.IsEmpty())
 		{
 			Unknown.Add(Name.TrimStartAndEnd());
 		}
 		else
 		{
-			OutDomains.AddUnique(Domain);
+			OutToolsets.AddUnique(Toolset);
 		}
 	}
-	if (Unknown.Num() > 0 || OutDomains.Num() == 0)
+	if (Unknown.Num() > 0 || OutToolsets.Num() == 0)
 	{
-		OutError = FString::Printf(TEXT("enable_toolset: %s. The domains are: %s"),
-			Unknown.Num() > 0 ? *FString::Printf(TEXT("unknown domain %s"), *FString::Join(Unknown, TEXT(", "))) : TEXT("`domains` names no domain"),
-			*FString::Join(Catalog.GetDomains(), TEXT(", ")));
-		OutDomains.Reset();
+		OutError = FString::Printf(TEXT("enable_toolset: %s. The packs are: %s. The domains are: %s"),
+			Unknown.Num() > 0 ? *FString::Printf(TEXT("unknown pack or domain %s"), *FString::Join(Unknown, TEXT(", ")))
+				: TEXT("`packs` and `domains` name nothing"),
+			*FString::Join(PackNames(Catalog), TEXT(", ")), *FString::Join(Catalog.GetDomains(), TEXT(", ")));
+		OutToolsets.Reset();
 		return false;
 	}
 	return true;
 }
 
-TSharedRef<FJsonObject> McpMetaTools::ToolsetReply(const FMcpToolCatalog& Catalog, const TArray<FString>& Domains, const TSet<FString>& EnabledBefore, bool bHasSession)
+TSharedRef<FJsonObject> McpMetaTools::ToolsetReply(const FMcpToolCatalog& Catalog, const TArray<FString>& Toolsets, const TSet<FString>& EnabledBefore, bool bHasSession)
 {
 	using namespace McpMetaToolsPrivate;
 
 	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
 	Result->SetBoolField(TEXT("success"), true);
+	TArray<TSharedPtr<FJsonValue>> PacksJson;
 	TArray<TSharedPtr<FJsonValue>> DomainsJson;
-	int32 Added = 0;
-	for (const FString& Domain : Domains)
+	for (const FString& Toolset : Toolsets)
 	{
+		const FMcpToolCatalog::FPack* Pack = Catalog.FindPack(Toolset);
 		TArray<FString> Names;
 		for (const FMcpToolCatalog::FTool& Tool : Catalog.GetTools())
 		{
-			if (Tool.Domain == Domain && !Tool.bCore)
+			if (!Tool.bCore && (Pack ? Tool.Pack == Pack->Name : Tool.Domain == Toolset))
 			{
 				Names.Add(Tool.Name);
 			}
 		}
-		const bool bAlready = EnabledBefore.Contains(Domain);
-		Added += bAlready ? 0 : Names.Num();
 		TSharedRef<FJsonObject> Entry = MakeShared<FJsonObject>();
-		Entry->SetStringField(TEXT("domain"), Domain);
-		Entry->SetBoolField(TEXT("already_listed"), bAlready);
+		Entry->SetStringField(Pack ? TEXT("pack") : TEXT("domain"), Toolset);
+		Entry->SetBoolField(TEXT("already_listed"), EnabledBefore.Contains(Toolset));
 		Entry->SetArrayField(TEXT("tools"), ToJsonStrings(Names));
-		DomainsJson.Add(MakeShared<FJsonValueObject>(Entry));
+		(Pack ? PacksJson : DomainsJson).Add(MakeShared<FJsonValueObject>(Entry));
 	}
-	Result->SetArrayField(TEXT("domains"), DomainsJson);
+	if (PacksJson.Num() > 0)
+	{
+		Result->SetArrayField(TEXT("packs"), PacksJson);
+	}
+	if (DomainsJson.Num() > 0)
+	{
+		Result->SetArrayField(TEXT("domains"), DomainsJson);
+	}
+	// What the list gains: a pack's tool already listed by an enabled domain (or the other way round) counts once.
+	TSet<FString> EnabledAfter = EnabledBefore;
+	for (const FString& Toolset : Toolsets)
+	{
+		EnabledAfter.Add(Toolset);
+	}
+	int32 Added = 0;
+	for (const FMcpToolCatalog::FTool& Tool : Catalog.GetTools())
+	{
+		Added += FMcpToolCatalog::IsInCoreList(Tool, EnabledAfter) && !FMcpToolCatalog::IsInCoreList(Tool, EnabledBefore) ? 1 : 0;
+	}
 	Result->SetNumberField(TEXT("tools_added"), bHasSession ? Added : 0);
 	Result->SetBoolField(TEXT("list_changed"), bHasSession && Added > 0);
 	if (!bHasSession)
 	{
 		Result->SetStringField(TEXT("note"), TEXT("This connection sent no Mcp-Session-Id, so its tool list cannot change: call these tools ")
-			TEXT("with call_tool, or add ?domains=<Domain> to the server URL to list them from the start."));
+			TEXT("with call_tool, or add ?domains=<pack or domain> to the server URL to list them from the start."));
 	}
 	else if (Added > 0)
 	{

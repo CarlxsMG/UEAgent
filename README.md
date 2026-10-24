@@ -109,8 +109,8 @@ More in [Examples](docs/examples.md).
 | Claude Code | One-click connection from the editor's status bar. It loads tools on demand, so `?tools=all` at the end of the URL gives it every tool. |
 | Cursor, VS Code, Windsurf, Claude Desktop, Gemini CLI, Codex | Any client with Streamable HTTP: see [the setup for each one](docs/clients.md). |
 
-By default the server lists its core tools, and four tools that search, describe and run the rest or
-add a whole domain to the list. `?tools=all` at the end of the URL lists every tool, and
+By default the server lists its 11 core tools, and four tools that search, describe and run the rest or
+add a pack or a whole domain to the list. `?tools=all` at the end of the URL lists every tool, and
 `?tools=compact` only three: see [tool lists](docs/clients.md#tool-lists).
 
 ## Directories
