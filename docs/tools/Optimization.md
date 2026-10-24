@@ -2,7 +2,7 @@
 
 # Optimization
 
-10 tools for asset performance analysis, LODs, compression, streaming and memory.
+10 tools for asset performance, memory, compression, LOD and streaming settings, and optimization suggestions.
 
 Back to the [index](README.md).
 

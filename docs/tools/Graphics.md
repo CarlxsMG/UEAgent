@@ -2,7 +2,7 @@
 
 # Graphics
 
-2 tools for decal actors: material, size, color, fade and sort order.
+2 tools for decal actors.
 
 Back to the [index](README.md).
 

@@ -2,7 +2,7 @@
 
 # Packaging
 
-3 tools for package builds: starting one, its status, and cancelling it.
+3 tools for packaged builds: starting, following and cancelling one.
 
 Back to the [index](README.md).
 

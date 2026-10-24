@@ -2,7 +2,7 @@
 
 # Audio
 
-69 tools for Sound Cues, MetaSounds, submixes and buses, sound classes, attenuation and concurrency, modulation, dialogue and subtitles.
+69 tools for sound cues, MetaSounds, sound classes, mixes and submixes with their effects, attenuation, concurrency, modulation, audio buses, dialogue and subtitles, and playing sounds.
 
 Back to the [index](README.md).
 

@@ -2,7 +2,7 @@
 
 # Documentation
 
-3 tools for Markdown documentation generated for assets, Blueprints and the project.
+3 tools for documentation generated for an asset, a Blueprint or the whole project.
 
 Back to the [index](README.md).
 

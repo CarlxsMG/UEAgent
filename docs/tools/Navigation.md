@@ -2,7 +2,7 @@
 
 # Navigation
 
-17 tools for the navmesh, Environment Queries (EQS), nav links and modifiers, and collision channel dumps.
+17 tools for the navigation mesh, and Environment Query System queries with their generators, tests and options.
 
 Back to the [index](README.md).
 

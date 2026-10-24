@@ -2,7 +2,7 @@
 
 # GameFramework
 
-5 tools for game modes, their classes and per-level overrides, and player starts.
+5 tools for game mode classes and overrides, player starts and spawn points.
 
 Back to the [index](README.md).
 

@@ -327,6 +327,11 @@ namespace McpMetaToolsPrivate
 			{
 				TSharedRef<FJsonObject> Entry = MakeShared<FJsonObject>();
 				Entry->SetStringField(TEXT("domain"), D.Name);
+				const FString Description = Catalog.GetDomainDescription(D.Name);
+				if (!Description.IsEmpty())
+				{
+					Entry->SetStringField(TEXT("description"), Description);
+				}
 				Entry->SetNumberField(TEXT("tools"), D.NumTools);
 				DomainsJson.Add(MakeShared<FJsonValueObject>(Entry));
 			}
@@ -549,11 +554,11 @@ TArray<TSharedPtr<FJsonValue>> McpMetaTools::BuildMetaTools(const FMcpToolCatalo
 		TEXT("Each query word scores on a whole word of a tool's name first, then the start of one, then the domain, then the ")
 		TEXT("description, and a tool that matches more of the words ranks higher; a query that spells a tool's name, such as ")
 		TEXT("\"spawn actor\", puts that tool first. With `domain` the search stays inside it, and `domain` alone lists its tools. ")
-		TEXT("With no arguments it lists the %d domains with their sizes%s. It only reads the catalog, so it is cheap to repeat ")
+		TEXT("With no arguments it lists the %d domains, each with what it covers and its size%s. It only reads the catalog, so it is cheap to repeat ")
 		TEXT("with other words.\n\n")
 		TEXT("Then describe_tool gives a match's full schema and call_tool runs it%s.\n\n")
 		TEXT("Returns: { success, matches: int, tools: [{ name, domain, params?, summary }], more?: string (when matches exceed ")
-		TEXT("`limit`) } -- with no arguments { success, total_tools, domains: [{ domain, tools }]%s }. An unknown `domain` is an ")
+		TEXT("`limit`) } -- with no arguments { success, total_tools, domains: [{ domain, description, tools }]%s }. An unknown `domain` is an ")
 		TEXT("error that lists the domains."),
 		Catalog.NumTools(), Domains.Num(), bCore ? TEXT(", and the packs with their tools") : TEXT(""),
 		bCore ? TEXT(", or enable_toolset adds its pack or domain to your tool list") : TEXT(""),

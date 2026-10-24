@@ -2,7 +2,7 @@
 
 # BehaviorTree
 
-23 tools for Behavior Trees with their composites, decorators and services, Blackboards and their keys, and running trees.
+23 tools for behavior trees with their children, decorators and services, blackboards and their keys, and running a tree in PIE.
 
 Back to the [index](README.md).
 

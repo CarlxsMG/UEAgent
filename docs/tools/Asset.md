@@ -2,7 +2,7 @@
 
 # Asset
 
-56 tools for finding assets by name, type, tag or folder, collections, textures and render targets, static mesh sockets, thumbnails and imports.
+56 tools for finding assets by name, type, tag or folder, collections, metadata tags, thumbnails, importing textures and sounds, render targets, and static meshes (sockets, collision, Nanite, lightmaps, material slots).
 
 Back to the [index](README.md).
 

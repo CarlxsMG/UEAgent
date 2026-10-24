@@ -2,7 +2,7 @@
 
 # Camera
 
-16 tools for camera actors and components, spring arms, cine camera lens and focus, camera rigs, shakes and Gameplay Cameras assets.
+16 tools for camera and spring arm components, Gameplay Camera assets and rigs, and camera shakes.
 
 Back to the [index](README.md).
 

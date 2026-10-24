@@ -21,12 +21,14 @@ The words these docs, the tools' descriptions and their answers use.
 | **Open world** | A tool whose code talks to the network or runs arbitrary code |
 | **Pack** | A few tools for one job the core tool list leaves out, such as `actors` or `play`: `enable_toolset` adds one to a client's list by name. See [Clients](clients.md#tool-lists) |
 | **PIE** | Play-in-Editor. While it runs, the calls that compile a Blueprint or write to disk are refused unless they pass `force: true` |
+| **Prompt** | A skill served over MCP: the client offers it to you, usually as a slash command, and it sends the skill to the agent with your request. See [Skills](skills.md#without-installing-them-prompts-and-resources) |
 | **Precondition** | A check before a call runs. It refuses a call known to crash or freeze the editor in that situation, and its message says what works instead |
 | **Read-only** | A tool that reads the editor and changes nothing |
 | **Read Only Content Root** | A content folder, set in **Project Settings > Plugins > UEAgent**, under which no tool can save, rename, move or delete. Meant for vendored libraries. See [Settings](settings.md) |
 | **Readback** | The re-read of the state after a call, in the same pass. A write that did not stick, a zero that proves nothing or a change in the wrong world is reported in `readback` instead of a plain `success: true`. See [Readback](responses.md#readback) |
 | **Refusal** | The answer to a call that never ran, because a precondition or a PIE guard stopped it: a tool error with the reason in `error`. See [Refusals](responses.md#refusals) |
 | **Unattended mode** | While a call runs, the editor's modal dialogs are suppressed and answered, so no call waits for a click |
+| **Tool map** | The `ueagent-tool-map` skill, also the resource `ueagent://guide`: which core tool, pack or domain covers each kind of task, and the order a task calls them in. Its tables are generated from the catalog |
 | **Undo step** | Every call is one undo transaction named after its tool ("UEAgent: spawn_actor"), so Ctrl+Z reverts the whole call. A call that changes nothing leaves no entry |
 | **Unknown parameter** | An argument the tool does not read. The call runs without it, and `data.unknown_params` lists it |
 | **Verdict** | `readback.verdict`: `ok`, or the name of what went wrong, such as `wrote_nothing` |

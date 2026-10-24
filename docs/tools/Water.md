@@ -2,7 +2,7 @@
 
 # Water
 
-15 tools for water bodies (ocean, lake and river), water zones, their splines and Gerstner waves.
+15 tools for water bodies, rivers and water zones: splines, waves, materials and settings.
 
 Back to the [index](README.md).
 

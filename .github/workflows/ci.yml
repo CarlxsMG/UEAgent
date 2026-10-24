@@ -28,6 +28,8 @@ jobs:
         run: python Tools/codegen_pie_safety.py --check
       - name: Tool reference
         run: python Tools/codegen_tool_docs.py --check
+      - name: Tool map skill
+        run: python Tools/codegen_tool_map.py --check
       - name: Catalog server
         run: python Tools/catalog_server.py --check
       - name: Copyright notice in every source file (Fab refuses a plugin without it)

@@ -3,6 +3,8 @@
 #include "Mcp/McpHttpServer.h"
 
 #include "Mcp/McpMetaTools.h"
+#include "Mcp/McpPrompts.h"
+#include "Mcp/McpSkills.h"
 #include "Mcp/McpToolCatalog.h"
 #include "UEAgentBridge.h"
 
@@ -51,6 +53,8 @@ namespace McpHttpServerPrivate
 		TEXT("- A refusal (isError) comes before the call runs: the call is known to crash or freeze the editor, or is unreliable ")
 		TEXT("while Play-in-Editor runs. The message says what to do instead; stop PIE before compiling Blueprints or saving.\n")
 		TEXT("- Look assets and actors up instead of guessing their names, and name assets by their full path (/Game/...).\n")
+		TEXT("- Which tool, pack or domain covers a task, and the order a task calls them in: the resource ueagent://guide, ")
+		TEXT("also the skill and prompt ueagent-tool-map.\n")
 		TEXT("- A tool's name starts with its verb, one verb per operation: get_ reads one thing (get_<x>_info, all of it), list_ ")
 		TEXT("enumerates, find_ searches by name or condition, is_/has_ answer yes or no; create_ makes an asset, add_ puts a part ")
 		TEXT("into an asset or actor, spawn_ places an actor in a world; set_ writes; remove_ takes a part out, delete_ deletes an ")
@@ -215,11 +219,15 @@ namespace McpHttpServerPrivate
 		return ToJsonText(Envelope);
 	}
 
-	static FString MakeRpcError(const TSharedPtr<FJsonValue>& Id, int32 Code, const FString& Message)
+	static FString MakeRpcError(const TSharedPtr<FJsonValue>& Id, int32 Code, const FString& Message, const TSharedPtr<FJsonObject>& Data = nullptr)
 	{
 		TSharedRef<FJsonObject> Error = MakeShared<FJsonObject>();
 		Error->SetNumberField(TEXT("code"), Code);
 		Error->SetStringField(TEXT("message"), Message);
+		if (Data.IsValid())
+		{
+			Error->SetObjectField(TEXT("data"), Data);
+		}
 		TSharedRef<FJsonObject> Envelope = MakeEnvelope(Id);
 		Envelope->SetObjectField(TEXT("error"), Error);
 		return ToJsonText(Envelope);
@@ -1029,6 +1037,13 @@ bool FMcpHttpConnection::HandleJsonRpc(const McpHttpServerPrivate::FHttpRequest&
 		Tools->SetBoolField(TEXT("listChanged"), bCoreList);
 		TSharedRef<FJsonObject> Capabilities = MakeShared<FJsonObject>();
 		Capabilities->SetObjectField(TEXT("tools"), Tools);
+		// The shipped skills, as prompts and resources (Mcp/McpPrompts.h): they change only with the plugin.
+		TSharedRef<FJsonObject> Prompts = MakeShared<FJsonObject>();
+		Prompts->SetBoolField(TEXT("listChanged"), false);
+		Capabilities->SetObjectField(TEXT("prompts"), Prompts);
+		TSharedRef<FJsonObject> Resources = MakeShared<FJsonObject>();
+		Resources->SetBoolField(TEXT("listChanged"), false);
+		Capabilities->SetObjectField(TEXT("resources"), Resources);
 		TSharedRef<FJsonObject> ServerInfo = MakeShared<FJsonObject>();
 		ServerInfo->SetStringField(TEXT("name"), TEXT("UEAgent"));
 		ServerInfo->SetStringField(TEXT("version"), Server->GetServerVersion());
@@ -1051,6 +1066,46 @@ bool FMcpHttpConnection::HandleJsonRpc(const McpHttpServerPrivate::FHttpRequest&
 	if (Method == TEXT("ping"))
 	{
 		return SendJson(200, MakeRpcResult(Id, MakeShared<FJsonObject>()), bKeepAlive) && bKeepAlive;
+	}
+
+	// The shipped skills as prompts and resources: files read on this thread, no editor state.
+	if (Method == TEXT("prompts/list"))
+	{
+		return SendJson(200, MakeRpcResult(Id, McpPrompts::ListPrompts(Server->GetSkillsDir())), bKeepAlive) && bKeepAlive;
+	}
+	if (Method == TEXT("prompts/get"))
+	{
+		int32 Code = 0;
+		FString Error;
+		const TSharedPtr<FJsonObject> Prompt = McpPrompts::GetPrompt(Server->GetSkillsDir(), Params, Code, Error);
+		return SendJson(200, Prompt.IsValid() ? MakeRpcResult(Id, Prompt.ToSharedRef()) : MakeRpcError(Id, Code, Error), bKeepAlive) && bKeepAlive;
+	}
+	if (Method == TEXT("resources/list"))
+	{
+		return SendJson(200, MakeRpcResult(Id, McpPrompts::ListResources(Server->GetSkillsDir())), bKeepAlive) && bKeepAlive;
+	}
+	if (Method == TEXT("resources/templates/list"))
+	{
+		TSharedRef<FJsonObject> Templates = MakeShared<FJsonObject>();
+		Templates->SetArrayField(TEXT("resourceTemplates"), TArray<TSharedPtr<FJsonValue>>());
+		return SendJson(200, MakeRpcResult(Id, Templates), bKeepAlive) && bKeepAlive;
+	}
+	if (Method == TEXT("resources/read"))
+	{
+		int32 Code = 0;
+		FString Error, Uri;
+		const TSharedPtr<FJsonObject> Contents = McpPrompts::ReadResource(Server->GetSkillsDir(), Params, Code, Error, Uri);
+		if (Contents.IsValid())
+		{
+			return SendJson(200, MakeRpcResult(Id, Contents.ToSharedRef()), bKeepAlive) && bKeepAlive;
+		}
+		TSharedPtr<FJsonObject> Data;
+		if (!Uri.IsEmpty())
+		{
+			Data = MakeShared<FJsonObject>();
+			Data->SetStringField(TEXT("uri"), Uri);
+		}
+		return SendJson(200, MakeRpcError(Id, Code, Error, Data), bKeepAlive) && bKeepAlive;
 	}
 
 	return SendJson(200, MakeRpcError(Id, -32601, FString::Printf(TEXT("Method not found: %s"), *Method)), bKeepAlive) && bKeepAlive;
@@ -1309,6 +1364,7 @@ bool FMcpHttpServer::Start(uint16 InPort, const FString& InAuthToken, FString& O
 
 	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("UEAgent"));
 	ServerVersion = Plugin.IsValid() ? Plugin->GetDescriptor().VersionName : FString(TEXT("unknown"));
+	SkillsDir = McpSkills::ShippedDir();
 
 	// The list a client gets when its URL asks for none: the core list unless UEAGENT_TOOLS says otherwise.
 	const FString ToolsMode = FPlatformMisc::GetEnvironmentVariable(TEXT("UEAGENT_TOOLS")).TrimStartAndEnd();

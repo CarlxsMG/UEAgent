@@ -2,7 +2,7 @@
 
 # Engine
 
-50 tools for Niagara systems and emitters with their modules, renderers, data interfaces, simulation stages and event handlers, and the engine's status.
+50 tools for Niagara systems and emitters (modules, renderers, data interfaces, events, simulation stages, user parameters), and the engine's and the editor's status.
 
 Back to the [index](README.md).
 

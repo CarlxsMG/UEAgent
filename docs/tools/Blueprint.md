@@ -2,7 +2,7 @@
 
 # Blueprint
 
-87 tools for Blueprint assets, components, variables, functions, events and dispatchers, graph nodes and pins, compiling, and Editor Utility Blueprints.
+87 tools for Blueprint authoring: Blueprints, macros and Editor Utility Blueprints, variables, functions and their parameters, event dispatchers, interfaces, components, timelines, graph nodes and pins, compiling, replication settings and reparenting.
 
 Back to the [index](README.md).
 
@@ -216,7 +216,7 @@ Add an input or output (return) parameter to an existing Blueprint FUNCTION grap
 
 ## `add_graph_node`
 
-*Additive, idempotent.*
+*Additive.*
 
 **Core tool:** every client lists it by default.
 
@@ -228,7 +228,7 @@ For another graph asset node_type is: a material expression class (/Script/Engin
 
 node_type='event' creates a REAL override: the declaring interface or parent class is resolved automatically and bOverrideFunction set (target_class is ignored here), an existing override comes back with already_exists:true, and a name that is not an overridable event fails loudly -- an interface method WITH a return value is not an event: use add_blueprint_function with override=true. node_type='custom_event' is idempotent by name (an existing one comes back with already_existed:true, since a second breaks the compile) and cannot be given parameters, so anything that needs arguments -- an RPC in particular -- must be a function. node_type='get_component_by_class' makes a GetComponentByClass node BORN TYPED to target_class, so its ReturnValue connects without a cast.
 
-Read `class` in the reply as a sanity check: a node_type expected to make an async or latent node that comes back as "K2Node_CallFunction" is a mute no-op that still compiles 0/0.
+Every other node_type adds a NEW node on each call, so calling it twice leaves two nodes; remove_graph_node takes a spare one out. Read `class` in the reply as a sanity check: a node_type expected to make an async or latent node that comes back as "K2Node_CallFunction" is a mute no-op that still compiles 0/0.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -758,6 +758,8 @@ Read the nodes of one graph without changing it -- a Blueprint graph (an Animati
 Every node carries its node_id, the id the graph tools take, and its object_path (not for a MetaSound), which get_object_info and set_properties take for the node's own settings. A Blueprint node also has its class, title, position, comment and pins (name, direction, type, linked_to, default). Another asset's reply is its editor's own view, with graph_kind naming it: a material's expressions with their inputs, a sound cue's nodes with their child slots and first node, a MetaSound's nodes and connections, a PCG graph's nodes and edges (each node's settings_path is what set_properties writes), a Control Rig's nodes with their pins, links and defaults.
 
 To read one node, pass node_id: it comes back at full fidelity for a fraction of a graph's tokens. TRAP: compact=true drops pin types AND every pin that is unlinked and has no default (plus knots and comment boxes), so a pin missing from a compact listing is NOT proof the pin does not exist -- re-read with compact=false, or that one node by node_id, before concluding anything about pins. Reading a graph under a read-only vendor root leaves that package DIRTY in memory (reload_asset_package with on_dirty="discard" cleans it).
+
+It reads the graph as the editor holds it, unsaved edits included, and loads the asset from disk when it is not in memory. It compiles nothing, so a Blueprint that fails to compile still lists its nodes: compile_blueprint gives the errors. A large graph costs many tokens; max_nodes caps the reply and truncated says whether nodes were left out.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

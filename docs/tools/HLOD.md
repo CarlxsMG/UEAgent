@@ -2,7 +2,7 @@
 
 # HLOD
 
-6 tools for HLOD layers, their settings and their actors.
+6 tools for World Partition HLOD layers and their actors.
 
 Back to the [index](README.md).
 

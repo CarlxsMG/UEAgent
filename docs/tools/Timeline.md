@@ -2,7 +2,7 @@
 
 # Timeline
 
-68 tools for Level Sequences with their bindings, tracks, sections and keyframes, camera cuts and shots, playback, and Blueprint timelines.
+68 tools for Level Sequences (Sequencer): bindings, tracks, sections, keyframes, camera cuts, shots and folders, playing a sequence in PIE, and timeline components.
 
 Back to the [index](README.md).
 

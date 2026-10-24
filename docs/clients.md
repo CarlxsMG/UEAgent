@@ -213,6 +213,12 @@ takes both).
 `UEAGENT_TOOLS=all` or `UEAGENT_TOOLS=compact` in the environment the editor starts in changes the
 default for every client; `?tools=core` gives one client the core list back.
 
+### Prompts and resources
+
+Whatever the list, the server also serves UEAgent's [skills](skills.md) as MCP prompts and
+resources. The resource `ueagent://guide` is the map of the tools: which core tool, pack or domain
+covers each kind of task, and the order a task calls them in.
+
 ## With an auth token
 
 When an **Auth token** is set, every request needs the header `Authorization: Bearer <token>`.

@@ -2,7 +2,7 @@
 
 # SaveGame
 
-9 tools for save game slots, saving and loading, and serializing actor state.
+9 tools for save game slots: saving, loading, listing and deleting, and serializing actor state.
 
 Back to the [index](README.md).
 

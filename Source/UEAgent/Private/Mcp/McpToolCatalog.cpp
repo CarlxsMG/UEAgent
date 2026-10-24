@@ -613,6 +613,11 @@ TSharedPtr<const FMcpToolCatalog> FMcpToolCatalog::LoadFromFile(const FString& P
 			continue;
 		}
 		const FString DomainName = (*DomainObj)->GetStringField(TEXT("domain"));
+		FString DomainDescription;
+		if ((*DomainObj)->TryGetStringField(TEXT("description"), DomainDescription) && !DomainDescription.IsEmpty())
+		{
+			Catalog->DomainDescriptions.Add(DomainName, DomainDescription);
+		}
 		const TArray<TSharedPtr<FJsonValue>>* Commands = nullptr;
 		if (!(*DomainObj)->TryGetArrayField(TEXT("commands"), Commands) || !Commands)
 		{
@@ -908,6 +913,12 @@ TArray<uint8> FMcpToolCatalog::BuildCoreToolsListUtf8(const TSet<FString>& Tools
 	TArray<uint8> Bytes;
 	McpToolCatalogPrivate::AppendToolsList(Bytes, Fragments);
 	return Bytes;
+}
+
+FString FMcpToolCatalog::GetDomainDescription(const FString& Domain) const
+{
+	const FString* Description = DomainDescriptions.Find(Domain);
+	return Description ? *Description : FString();
 }
 
 FString FMcpToolCatalog::FindDomain(const FString& Name) const

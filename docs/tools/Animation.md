@@ -2,7 +2,7 @@
 
 # Animation
 
-202 tools for Animation Blueprints and state machines, montages, notifies and curves, blend spaces, skeletons and skeletal meshes, IK Rig and retargeting, Control Rig, Pose Search and motion warping.
+202 tools for Animation Blueprints and state machines, sequences, montages, composites, blend spaces, notifies and curves, skeletons, bones and sockets, skeletal meshes and LODs, morph targets, IK rigs and retargeters, Control Rig, pose search and motion warping.
 
 Back to the [index](README.md).
 

@@ -2,7 +2,7 @@
 
 # Lighting
 
-4 tools for lights and shadows, sky atmosphere, sky light, fog and volumetric clouds, post process, reflection and scene captures, and Lumen.
+4 tools for lighting quality, rendering settings, shader info and reflection captures.
 
 Back to the [index](README.md).
 

@@ -2,7 +2,7 @@
 
 # Chooser
 
-14 tools for Chooser tables: their columns, rows and outcomes, and evaluating them.
+14 tools for Chooser tables: their columns, rows, cells and outcomes, and evaluating one.
 
 Back to the [index](README.md).
 

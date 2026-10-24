@@ -2,7 +2,7 @@
 
 # UVMapping
 
-4 tools for UV channels and their health.
+4 tools for UV channels and UV health.
 
 Back to the [index](README.md).
 

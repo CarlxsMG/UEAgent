@@ -2,7 +2,7 @@
 
 # Material
 
-54 tools for materials and their expression graphs, material functions, instances and parameters, parameter collections and Substrate.
+54 tools for materials, material instances (constant and dynamic), material functions and layers, parameter collections, post-process materials, Substrate, compiling and stats.
 
 Back to the [index](README.md).
 

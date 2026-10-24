@@ -2,7 +2,7 @@
 
 # Mass
 
-19 tools for Mass Entity configs and traits, spawners, entities, tags and signals.
+19 tools for Mass entities: entity configs and traits, spawners, tags, signals and archetypes.
 
 Back to the [index](README.md).
 

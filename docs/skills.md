@@ -36,6 +36,7 @@ The skills need UEAgent's MCP server connected to the client: see [Clients](clie
 
 | Skill | What it does |
 |---|---|
+| `ueagent-tool-map` | Which core tool, pack or domain covers a task, and the order a task calls them in: find, read, change, check, compile, save |
 | `ueagent-skill-builder` | Turns a workflow you want to repeat into a new skill |
 | `ueagent-blueprint-actor` | A Blueprint actor from a description: components, graph, a clean compile, and an instance in the level |
 | `ueagent-project-audit` | What is broken and what can go in the project or a folder, most serious first; it changes nothing |
@@ -45,6 +46,25 @@ The skills need UEAgent's MCP server connected to the client: see [Clients](clie
 
 Just ask, and the client loads the skill that matches. To call one by name: `/ueagent-skill-builder`
 in Claude Code, `$ueagent-skill-builder` in Codex, or the skill picker of your client.
+
+The tables of `ueagent-tool-map` (the core tools, the packs and the domains) are generated from the tool
+catalog, so they always match the tools of the installed version.
+
+## Without installing them: prompts and resources
+
+The server also serves the skills over MCP, from the same files, so a client reaches them without
+copying anything into the project:
+
+- **Prompts**: one per skill, named like it, with an optional `request` (what you want done). A client
+  offers them to you, usually as slash commands: `/mcp__unreal__ueagent-blueprint-actor` in Claude
+  Code. The prompt sends the skill to the agent, with your request and the skill's other files.
+- **Resources**: `ueagent://guide` is the tool map, `ueagent://skills/<name>` each other skill, and
+  `ueagent://skills/<name>/<file>` a file of one. In Claude Code, mention one with
+  `@unreal:ueagent://guide`; some clients let the agent read them by itself.
+
+The server's instructions point every agent to `ueagent://guide`. Which of the two a client supports
+varies: Claude Code, Cursor, VS Code, Gemini CLI and Zed list prompts; Codex, OpenCode and Windsurf do
+not, and read the installed skills instead.
 
 ## Building your own skills
 

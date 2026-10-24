@@ -2,7 +2,7 @@
 
 # Level
 
-111 tools for placing and transforming actors, landscapes, foliage and splines, World Partition and data layers, level instances and streaming, and Play-in-Editor.
+111 tools for the open level and Play-in-Editor: actors by class or radius, transforms, attaching, labels and folders, landscapes (sculpting, painting, layers, splines, heightmaps), foliage, splines, data layers, World Partition, streaming levels, level instances, world settings, lighting builds, and starting, stopping and driving PIE.
 
 Back to the [index](README.md).
 

@@ -2,7 +2,7 @@
 
 # Editor
 
-96 tools for actors and the selection, the viewport and screenshots, undo and transactions, Python and console commands, logs, enums and structs, media and automation tests.
+96 tools for the editor itself: actors (spawn, select, copy, transform, delete), levels, saving, undo and transactions, Python, console commands and CVars, tests, enums and structs, screenshots, logs, media, and asset housekeeping (delete, export, migrate, consolidate, redirectors, unused and duplicate assets).
 
 Back to the [index](README.md).
 
@@ -1050,6 +1050,8 @@ Write ONE asset's package to disk by its path (a Blueprint, DataTable, material.
 Use it after an edit you want to keep: most edit tools change the asset in memory only. save_level writes a level's .umap, and reload_asset_package throws an unsaved edit away instead. Refused while Play-in-Editor runs, because the engine would drop the write and still report success (see force).
 
 When it fails with PIE down, `file_read_only` says whether the file is read-only on disk -- a Git LFS `lockable` file that nobody has `git lfs lock`ed is the usual case -- and the error says whether that is the cause. It writes exactly one package, so it cannot stop a compile from dirtying a vendored asset that a LATER bulk save rewrites: list_dirty_packages before, `git status` after.
+
+path takes the `path` or the `package` that find_assets_by_name returns, as in {"path": "/Game/Core/BP_Door"}. readonly_roots chooses which folders are protected and refuse_readonly whether a save under them is refused or only reported; leave both out to use the project's Read Only Content Roots and refuse.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
