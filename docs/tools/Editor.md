@@ -401,17 +401,17 @@ Run a console command through the EDITOR (GEditor->Exec against the editor world
 
 **Core tool:** every client lists it by default.
 
-Execute Python code inside the running Unreal Editor, for what no tool does: most tools are not in a client's list, so search find_tools before writing a script. A script that raises fails the call, with the traceback in command_result.
+Run Python in the running Unreal Editor, with Unreal's `unreal` API, for what no tool does: search find_tools first, since most tools are not in a client's list. A script that raises fails the call, with the traceback in command_result.
 
-`mode` decides how `command` runs: ExecuteFile (the default) runs it as a script of any length, ExecuteStatement runs one statement and prints its result, and EvaluateStatement evaluates one expression and returns its value in command_result. A script runs in the editor console's globals, so `import unreal` and any variable it defines are still there for the next call.
+`mode` picks how `command` runs: ExecuteFile (the default) runs a script of any length, ExecuteStatement runs one statement and prints its result, and EvaluateStatement returns one expression's value in command_result, as in {"command": "len(unreal.get_editor_subsystem(unreal.EditorActorSubsystem).get_all_level_actors())", "mode": "EvaluateStatement"}. Scripts share the editor console's globals, so a variable one call defines is there for the next.
 
-DO NOT GUESS A FIELD NAME: most of this tool's errors are "object has no attribute" -- and the field usually EXISTS, just not where you reached for it: `HitResult().impact_point` raises, `get_editor_property` cannot find it, and only `to_dict()` returns it (Transform.translation is the reverse). The engine's own stub and Epic's web docs list it either way, so neither settles it -- ask the object (dir(x), x.to_dict(), x.get_editor_property(...)).
+`output` and `log_output` hold what the script prints and logs through unreal.log; what the engine itself logs during the call is only in `engine_log`, warnings and errors by default. When a call reports success and nothing happened, read engine_log first, widen it with engine_log_level=Log, or pass log_cursor_before to get_output_log_lines for the unfiltered rest.
 
-PIE: while Play-in-Editor runs, a call that compiles a Blueprint or saves (BlueprintEditorLibrary.compile_blueprint, EditorAssetLibrary.save_asset, save_loaded_asset, save_directory, EditorLoadingAndSavingUtils.save_packages, save_current_level...) does NOT run, however the script reaches it: the script gets a RuntimeError there, and the call fails with pie_refused even if the script catches it -- compiling during PIE ends in a DEAD EDITOR when PIE stops (UREINST_* retains a world, CheckForWorldGCLeaks is Fatal), and a save during PIE writes nothing (Editor.AllowSavingAssetsDuringPIE=0). The guard does NOT see a script that changes a Blueprint without compiling it: stop PIE before editing a Blueprint. READING the live world during PIE is safe, and is exactly what this tool is for.
+"Object has no attribute" is the commonest error, and the field usually exists elsewhere: HitResult's impact_point is only in to_dict(), while Transform.translation is an attribute. Ask the object (dir(x), x.to_dict(), x.get_editor_property(...)) instead of guessing.
 
-BEFORE writing a loop, check whether one call already answers it (a script that only enumerates actors gets a `hint` naming the tool): a script that re-implements a tool fails far more often than one doing something new, and a bug in the scaffold reads exactly like a finding about the game. Actors of a class: get_actors_by_class. Their properties, by class or editor label, with the answering world stamped (this tool cannot say which world answered): get_actor_properties_by_class. Properties of ONE known object: get_properties. An actor's components: get_actor_components. One line trace: raycast_scene. A property sampled across a whole PIE session, armed before BeginPlay: watch_pie_property. Python stays the right answer for several classes in one round trip, walking components AND calling a method, filtering by name substring, correlating two values in the same tick, or anything that mutates: do not trade one call for twelve.
+During Play-in-Editor, a call in the script that compiles a Blueprint or saves (compile_blueprint, save_asset, save_loaded_asset, save_packages, save_current_level...) does not run: the script gets a RuntimeError there, and the call fails with pie_refused even if the script catches it. The guard does not see a Blueprint edited without a compile, so stop PIE before editing one. Reading the live world during PIE is safe.
 
-WARNING: `log_output` IS NOT THE LOG OF THE CALL -- it is Python's own prints only (UE fills it from a delegate broadcast solely by unreal.log/log_warning/log_error), so every UE_LOG the ENGINE emits during your script is absent from it. Read `engine_log`: the GLog slice bracketed to this call, Warning+Error by default. Example: build_meta_human can run, return None, write zero assets and report a clean `log_output` while "LogMetaHumanCoreTechLib: Error: Texture Synthesis has not been initialized" sits in GLog. When a call reports success and NOTHING HAPPENED, read `engine_log` first; widen it with engine_log_level=Log, or pass `log_cursor_before` to get_output_log_lines(since_sequence_id=...) for the unfiltered rest.
+One call often answers what a loop would: get_actors_by_class for the actors of a class, get_actor_properties_by_class for their properties with the world that answered, get_properties for one object, get_actor_components, raycast_scene, and watch_pie_property for a value over a PIE session. A script that only enumerates actors gets a `hint` naming the tool. Python stays the right answer for several classes in one round trip, values correlated in one tick, or anything that mutates.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1045,13 +1045,13 @@ No parameters.
 
 **Core tool:** every client lists it by default.
 
-Write ONE asset's package to disk by its path (a Blueprint, DataTable, material...) and VERIFY the effect: still_dirty_after_save:false plus file_on_disk:true is the oracle, not `saved`.
+Write one asset's package to disk by its path and verify the result: still_dirty_after_save false and file_on_disk true are the proof, not `saved`.
 
-Use it after an edit you want to keep: most edit tools change the asset in memory only. save_level writes a level's .umap, and reload_asset_package throws an unsaved edit away instead. Refused while Play-in-Editor runs, because the engine would drop the write and still report success (see force).
+Use it after an edit you want to keep, because most edit tools change the asset in memory only. save_level writes a level's .umap, and reload_asset_package throws an unsaved edit away instead. It writes exactly one package: a compile can dirty others, so run list_dirty_packages before a bulk save and read `git status` after.
 
-When it fails with PIE down, `file_read_only` says whether the file is read-only on disk -- a Git LFS `lockable` file that nobody has `git lfs lock`ed is the usual case -- and the error says whether that is the cause. It writes exactly one package, so it cannot stop a compile from dirtying a vendored asset that a LATER bulk save rewrites: list_dirty_packages before, `git status` after.
+path takes the `path` or the `package` that find_assets_by_name returns, as in {"path": "/Game/Core/BP_Door"}. readonly_roots chooses which folders count as vendored, and refuse_readonly whether a save under them is refused or only reported; leave both out to use the project's Read Only Content Roots, which refuse.
 
-path takes the `path` or the `package` that find_assets_by_name returns, as in {"path": "/Game/Core/BP_Door"}. readonly_roots chooses which folders are protected and refuse_readonly whether a save under them is refused or only reported; leave both out to use the project's Read Only Content Roots and refuse.
+Refused during Play-in-Editor, where the engine would drop the write and still report success (see force). When a save fails otherwise, file_read_only says whether the file is read-only on disk (usually a Git LFS lockable file nobody has locked), and the error says whether that is the cause.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1059,7 +1059,7 @@ path takes the `path` or the `package` that find_assets_by_name returns, as in {
 | `readonly_roots` | array | no | Optional array of long-path prefixes treated as vendored/upstream (default: the project's Read Only Content Roots). A save under one of them is REFUSED by default; see refuse_readonly. Pass [] to disable the classification entirely. |
 | `refuse_readonly` | boolean | no | Optional bool. When true, a save whose package falls under one of readonly_roots is REFUSED (success:false, saved:false, refused_readonly:true) instead of performed. Default = the process-wide switch (mcp_common::IsReadOnlyRootSaveEnforcementEnabled(), true unless `mcp.ReadOnlyRootEnforcement 0`); when false the write happens and is only reported + ledgered. |
 
-**Returns:** `` { path: string, package_name: string, saved: bool, success: bool, under_readonly_root: bool, readonly_root_matched: string, refused_readonly: bool, readonly_roots: [string], readonly_roots_defaulted: bool, still_dirty_after_save: bool, file_on_disk: bool, file_read_only: bool (measured on disk -- true means the file is read-only, e.g. an unlocked Git LFS `lockable` file), verification: object, verification_checks: [object], error?: string } ``
+**Returns:** `{ path: string, package_name: string, saved: bool, success: bool, under_readonly_root: bool, readonly_root_matched: string, refused_readonly: bool, readonly_roots: [string], readonly_roots_defaulted: bool, still_dirty_after_save: bool, file_on_disk: bool, file_read_only: bool, verification: object, verification_checks: [object], error?: string }`
 
 ## `save_level`
 
@@ -1318,11 +1318,11 @@ Place an actor of ANY placeable class -- a built-in short name (StaticMeshActor,
 
 **Core tool:** every client lists it by default.
 
-Step the editor's undo stack back by one transaction, or by `count` of them, as Ctrl+Z does, and report what is now on top (next_undo, the label of the next entry).
+Step the editor's undo stack back by one transaction, or by `count` of them, as Ctrl+Z does, and report what is now on top.
 
-Use it to revert an edit made in the editor, by a tool or by the person at the keyboard: the stack is shared, so the newest entry may be theirs -- read get_undo_state first to see the label you are about to revert. One transaction is usually one tool call that changed something; to make several edits one entry, wrap them in begin_transaction and end_transaction. Undo reverts objects in memory, not files: an edit saved since stays in the file on disk until the next save.
+Use it to revert an edit made in the editor, by a tool or by a person: the stack is shared, so read get_undo_state first to see the label you are about to revert. One tool call that changed something is usually one transaction; begin_transaction and end_transaction make several edits one. Undo reverts objects in memory, not files: an edit already saved stays on disk until the next save.
 
-WARNING: `success` is ALWAYS true, including when there was nothing to undo -- the oracle is `applied`, and with a count compare actually_undone against requested (the stack ran out, or an undo barrier stopped it); the honest verification is re-reading whatever you changed.
+Example: {"count": 3} undoes the last three transactions. It stops early at the bottom of the stack or at an undo barrier (set_undo_barrier), and actually_undone then falls short of requested. `success` is true even with nothing to undo: read `applied`, and re-read what you changed to confirm it.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

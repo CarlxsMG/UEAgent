@@ -288,26 +288,30 @@ def meta_tools(tools: list[dict], domains: list[str], packs: list[dict], core_co
              f"Searches this server's {len(tools)} Unreal Editor tools and returns the best matches, each with its name, domain, "
              "parameters (* marks a required one) and the first sentence of its description. Use it before guessing a tool name "
              "or writing Python; when you already know the name, skip it: describe_tool and call_tool take the name directly.\n\n"
-             "Each query word scores on a whole word of a tool's name first, then the start of one, then the domain, then the "
-             "description, and a tool that matches more of the words ranks higher; a query that spells a tool's name, such as "
-             '"spawn actor", puts that tool first. With `domain` the search stays inside it, and `domain` alone lists its tools. '
+             'Examples: {"query": "material parameter"} searches every tool, {"query": "landscape", "domain": "Level"} '
+             'searches one domain, and {"domain": "Water"} lists a domain\'s tools. Each query word scores on a whole word of a '
+             "tool's name first, then the start of one, then the domain, then the description, and a tool that matches more of the "
+             'words ranks higher, so a query that spells a tool\'s name, such as "spawn actor", puts it first. '
+             f"`limit` (default {META_DEFAULT_LIMIT}, up to {META_MAX_LIMIT}) caps the list; `more` then says how many matched "
+             "beyond it, and a query that matches nothing gets `next`, with what to try.\n\n"
              f"With no arguments it lists the {len(domains)} domains, each with what it covers and its size"
              + (", and the packs with their tools" if core else "")
-             + ". It only reads the catalog, so it is cheap to repeat with other words.\n\n"
-             "Then describe_tool gives a match's full schema and call_tool runs it"
+             + ". It only reads the catalog, so it is cheap to repeat. Then describe_tool gives a match's full schema and "
+             "call_tool runs it"
              + (", or enable_toolset adds its pack or domain to your tool list" if core else "") + ".\n\n"
-             "Returns: { success, matches: int, tools: [{ name, domain, params?, summary }], more?: string (when matches exceed "
-             "`limit`) } -- with no arguments { success, total_tools, domains: [{ domain, description, tools }]"
+             "Returns: { success, matches: int, tools: [{ name, domain, params?, summary }], more?: string, next?: string } -- "
+             "with no arguments { success, total_tools, domains: [{ domain, description, tools }]"
              + (", packs: [{ pack, description, tools }]" if core else "")
-             + " }. An unknown `domain` is an error that lists the domains.",
+             + ", next }. An unknown `domain` is an error that lists the domains.",
              find_properties, [], reads_catalog),
         tool("describe_tool",
-             "Returns one tool's full description, input JSON schema and annotations, as a full tool list carries them: every "
-             "parameter's type and meaning, the required ones, closed value sets and accepted aliases, and whether the tool only "
-             "reads or can delete. Use it before call_tool when the parameter line from find_tools does not tell you how to fill "
-             "an argument, such as its format or its allowed values; a tool already in your list has its schema there.\n\n"
-             "An old name of a renamed tool, or the name of a retired one, also resolves, and `retired_name` then says what the "
-             "name became. It only reads the catalog. An unknown name is an error that lists up to five `closest` names.\n\n"
+             "Returns one tool's full description, input JSON schema and annotations, as a full tool list carries them. Use it "
+             "before call_tool when find_tools' parameter line does not say how to fill an argument, such as its format or its "
+             "allowed values; a tool already in your list has its schema there.\n\n"
+             '`name` takes a name from find_tools, as in {"name": "spawn_actor"}; spaces around it are ignored. A current '
+             "tool's name always means that tool. An old name of a renamed tool resolves to the new one and a retired tool's name "
+             "to that tool, and `retired_name` then says what the name became. It only reads the catalog; an unknown name is an "
+             "error that lists up to five `closest` names.\n\n"
              "Returns: { success, name, domain, description, inputSchema, annotations?, retired_name? }",
              {"name": prop("string", "The tool's exact name, as find_tools returns it.")}, ["name"], reads_catalog),
         tool("call_tool",

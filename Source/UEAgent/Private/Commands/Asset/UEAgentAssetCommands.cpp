@@ -473,9 +473,9 @@ TSharedPtr<FJsonObject> HandleGetAssetsInFolder(const TSharedPtr<FJsonObject>& P
     return Reply;
 }
 
-// MCP:find_assets_by_name - Find assets by NAME across every mounted content root (/Game, /Engine, /Water, plugin mounts...), returning each hit's name, object path, class and package: the broad "does anything called <token> exist, and where?" search.
-//   @para Pass the bare token, the common case: `Grass` finds every asset whose name contains it, ignoring case. Put a `*` or `?` in only to anchor the match, because the pattern must then match the WHOLE name: `Grass*` is "starts with Grass", and `*Grass*` is the plain substring search again. `match_mode` says which of the two ran.
-//   @para It reads names only, never folders or classes: get_assets_in_folder lists a directory, get_assets_by_type filters by the 5 built-in types, get_assets_by_tag reads an Asset Registry tag, and resolve_asset_by_name checks ONE exact name and returns every homonym. A hit's `path` is what save_asset, get_object_info and set_properties take.
+// MCP:find_assets_by_name - Find assets by name across every mounted content root (/Game, /Engine, plugin mounts...): the broad "does anything called <token> exist, and where?" search, with each hit's name, object path, class and package.
+//   @para Use it before reading or writing an asset whose path you do not know: a hit's `path` is what get_object_info, set_properties and save_asset take. Other searches: get_assets_in_folder for a folder, get_assets_by_type for a class, get_assets_by_tag for an Asset Registry tag, and resolve_asset_by_name for one exact name with all its homonyms.
+//   @para Examples: {"search_pattern": "Grass"} finds every name that contains Grass, in any case; {"search_pattern": "BP_*", "case_sensitive": true} only names that start with BP_, in that case. `match_mode` in the reply says whether the pattern ran as a substring or a wildcard. For a broad token, lower max_results and read results_truncated; keep wait_for_scan on right after the editor opens, while the registry may still be loading.
 //   @core
 //   @renamed-from search_assets_by_pattern
 //   @param search_pattern - Matched against the asset NAME. Contains no `*`/`?` -> case-insensitive substring (FString::Contains). Contains `*` or `?` -> glob (FString::MatchesWildcard), ANCHORED at both ends: `*` matches any run including empty, `?` matches 0 or 1 character (UE semantics, not exactly 1). Not a regex.

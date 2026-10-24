@@ -551,26 +551,29 @@ TArray<TSharedPtr<FJsonValue>> McpMetaTools::BuildMetaTools(const FMcpToolCatalo
 		TEXT("Searches this server's %d Unreal Editor tools and returns the best matches, each with its name, domain, parameters ")
 		TEXT("(* marks a required one) and the first sentence of its description. Use it before guessing a tool name or writing ")
 		TEXT("Python; when you already know the name, skip it: describe_tool and call_tool take the name directly.\n\n")
-		TEXT("Each query word scores on a whole word of a tool's name first, then the start of one, then the domain, then the ")
-		TEXT("description, and a tool that matches more of the words ranks higher; a query that spells a tool's name, such as ")
-		TEXT("\"spawn actor\", puts that tool first. With `domain` the search stays inside it, and `domain` alone lists its tools. ")
-		TEXT("With no arguments it lists the %d domains, each with what it covers and its size%s. It only reads the catalog, so it is cheap to repeat ")
-		TEXT("with other words.\n\n")
-		TEXT("Then describe_tool gives a match's full schema and call_tool runs it%s.\n\n")
-		TEXT("Returns: { success, matches: int, tools: [{ name, domain, params?, summary }], more?: string (when matches exceed ")
-		TEXT("`limit`) } -- with no arguments { success, total_tools, domains: [{ domain, description, tools }]%s }. An unknown `domain` is an ")
+		TEXT("Examples: {\"query\": \"material parameter\"} searches every tool, {\"query\": \"landscape\", \"domain\": \"Level\"} ")
+		TEXT("searches one domain, and {\"domain\": \"Water\"} lists a domain's tools. Each query word scores on a whole word of a ")
+		TEXT("tool's name first, then the start of one, then the domain, then the description, and a tool that matches more of the ")
+		TEXT("words ranks higher, so a query that spells a tool's name, such as \"spawn actor\", puts it first. `limit` (default %d, ")
+		TEXT("up to %d) caps the list; `more` then says how many matched beyond it, and a query that matches nothing gets `next`, ")
+		TEXT("with what to try.\n\n")
+		TEXT("With no arguments it lists the %d domains, each with what it covers and its size%s. It only reads the catalog, so it ")
+		TEXT("is cheap to repeat. Then describe_tool gives a match's full schema and call_tool runs it%s.\n\n")
+		TEXT("Returns: { success, matches: int, tools: [{ name, domain, params?, summary }], more?: string, next?: string } -- with ")
+		TEXT("no arguments { success, total_tools, domains: [{ domain, description, tools }]%s, next }. An unknown `domain` is an ")
 		TEXT("error that lists the domains."),
-		Catalog.NumTools(), Domains.Num(), bCore ? TEXT(", and the packs with their tools") : TEXT(""),
+		Catalog.NumTools(), DefaultLimit, MaxLimit, Domains.Num(), bCore ? TEXT(", and the packs with their tools") : TEXT(""),
 		bCore ? TEXT(", or enable_toolset adds its pack or domain to your tool list") : TEXT(""),
 		bCore ? TEXT(", packs: [{ pack, description, tools }]") : TEXT("")),
 		FindProperties, {}, ReadsCatalog));
 	Tools.Add(MakeTool(DescribeTool,
-		TEXT("Returns one tool's full description, input JSON schema and annotations, as a full tool list carries them: every ")
-		TEXT("parameter's type and meaning, the required ones, closed value sets and accepted aliases, and whether the tool only ")
-		TEXT("reads or can delete. Use it before call_tool when the parameter line from find_tools does not tell you how to fill ")
-		TEXT("an argument, such as its format or its allowed values; a tool already in your list has its schema there.\n\n")
-		TEXT("An old name of a renamed tool, or the name of a retired one, also resolves, and `retired_name` then says what the ")
-		TEXT("name became. It only reads the catalog. An unknown name is an error that lists up to five `closest` names.\n\n")
+		TEXT("Returns one tool's full description, input JSON schema and annotations, as a full tool list carries them. Use it ")
+		TEXT("before call_tool when find_tools' parameter line does not say how to fill an argument, such as its format or its ")
+		TEXT("allowed values; a tool already in your list has its schema there.\n\n")
+		TEXT("`name` takes a name from find_tools, as in {\"name\": \"spawn_actor\"}; spaces around it are ignored. A current ")
+		TEXT("tool's name always means that tool. An old name of a renamed tool resolves to the new one and a retired tool's name ")
+		TEXT("to that tool, and `retired_name` then says what the name became. It only reads the catalog; an unknown name is an ")
+		TEXT("error that lists up to five `closest` names.\n\n")
 		TEXT("Returns: { success, name, domain, description, inputSchema, annotations?, retired_name? }"),
 		DescribeProperties, { TEXT("name") }, ReadsCatalog));
 	Tools.Add(MakeTool(CallTool,

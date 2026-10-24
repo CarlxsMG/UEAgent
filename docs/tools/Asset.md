@@ -294,11 +294,11 @@ Export a render target to an image file on disk: PNG, except an RGBA16f or RGBA3
 
 **Core tool:** every client lists it by default.
 
-Find assets by NAME across every mounted content root (/Game, /Engine, /Water, plugin mounts...), returning each hit's name, object path, class and package: the broad "does anything called &lt;token> exist, and where?" search.
+Find assets by name across every mounted content root (/Game, /Engine, plugin mounts...): the broad "does anything called &lt;token> exist, and where?" search, with each hit's name, object path, class and package.
 
-Pass the bare token, the common case: `Grass` finds every asset whose name contains it, ignoring case. Put a `*` or `?` in only to anchor the match, because the pattern must then match the WHOLE name: `Grass*` is "starts with Grass", and `*Grass*` is the plain substring search again. `match_mode` says which of the two ran.
+Use it before reading or writing an asset whose path you do not know: a hit's `path` is what get_object_info, set_properties and save_asset take. Other searches: get_assets_in_folder for a folder, get_assets_by_type for a class, get_assets_by_tag for an Asset Registry tag, and resolve_asset_by_name for one exact name with all its homonyms.
 
-It reads names only, never folders or classes: get_assets_in_folder lists a directory, get_assets_by_type filters by the 5 built-in types, get_assets_by_tag reads an Asset Registry tag, and resolve_asset_by_name checks ONE exact name and returns every homonym. A hit's `path` is what save_asset, get_object_info and set_properties take.
+Examples: {"search_pattern": "Grass"} finds every name that contains Grass, in any case; {"search_pattern": "BP_*", "case_sensitive": true} only names that start with BP_, in that case. `match_mode` in the reply says whether the pattern ran as a substring or a wildcard. For a broad token, lower max_results and read results_truncated; keep wait_for_scan on right after the editor opens, while the registry may still be loading.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

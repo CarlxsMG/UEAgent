@@ -2,6 +2,26 @@
 
 Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](https://semver.org).
 
+## 2.8.1 - 2026-10-24
+
+Clearer descriptions for twelve of the 15 tools a client lists by default. No tool behaves differently.
+
+### Changed
+
+- **Ten core tools and two meta-tools are rewritten:** `find_assets_by_name`, `get_object_info`, `set_properties`,
+  `save_asset`, `undo`, `execute_python`, `get_graph_nodes`, `add_graph_node`, `connect_pins`, `compile_blueprint`,
+  `find_tools` and `describe_tool`.
+  - Each says where its arguments come from and how they combine, with an example call, instead of restating the
+    schema.
+  - They are shorter (15-40%), with no capitals for emphasis and no reply fields repeated in the prose.
+  - Every example call was run as written on both engines, and every new fact was checked against the code.
+- **`compile_blueprint` says what a compile costs.** It blocks the editor, recompiles the bytecode of the Blueprints
+  that depend on it, reinstances its class's instances and runs a garbage collection afterwards.
+- **`find_tools` documents `limit`, `more` and `next`.** **`describe_tool`** says that a current tool's name always
+  means that tool, and that spaces around a name are ignored.
+- **`add_graph_node` lists which arguments each `node_type` takes**, in one paragraph, instead of leaving it to the
+  schema.
+
 ## 2.8.0 - 2026-10-24
 
 The server serves UEAgent's skills as MCP prompts and resources, and a new skill, `ueagent-tool-map`, tells an agent

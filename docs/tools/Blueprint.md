@@ -220,15 +220,15 @@ Add an input or output (return) parameter to an existing Blueprint FUNCTION grap
 
 **Core tool:** every client lists it by default.
 
-Create ONE node in a graph and return it WITH its node_id and its pins, so connect_pins and set_pin_default_value can wire it without a follow-up get_graph_nodes.
+Create one node in a graph and return it with its node_id and pins, so connect_pins and set_pin_default_value can wire it without another read.
 
-In a Blueprint graph (an Animation or Widget Blueprint included) node_type is one of the keywords below or the class of any graph node, such as AnimGraphNode_Slot with graph_name="AnimGraph". The Blueprint is compiled only with compile=true and never saved, and the call is refused while Play-in-Editor runs (see force). To create AND wire several nodes in one undo step use build_blueprint_graph; to learn a call_function's pin names BEFORE creating anything, get_function_pins.
+Works in a Blueprint graph (Animation and Widget Blueprints included) and in the graph of a material, material function, sound cue, MetaSound Source, PCG graph or Control Rig. To create and wire several Blueprint nodes in one undo step use build_blueprint_graph; to learn a function's pin names before creating anything, get_function_pins. Every call adds a new node, except event and custom_event, which give back the one already there; remove_graph_node takes a spare node out.
 
-For another graph asset node_type is: a material expression class (/Script/Engine.MaterialExpressionConstant) for a material or material function; a sound node type (WavePlayer, Mixer, Random, Looping, Modulator...) for a sound cue, with sound_wave_path for a WavePlayer; a class path from list_metasound_node_types (UE.Sine.Audio) for a MetaSound Source, with major_version; a PCG settings class from list_pcg_node_types for a PCG graph, and PCGSubgraphSettings with subgraph_path embeds another graph; a RigVM unit (BeginExecution, PrepareForExecution, GetTransform, SetTransform, AimBone, TwoBoneIKSimple) for a Control Rig, with node_name. Those assets are saved by their editor, and a Control Rig is compiled.
+In a Blueprint, node_type decides which other arguments count: call_function takes function_name, and target_class or function_library; variable_get and variable_set take variable_name, with scope and target_class; event and custom_event take event_name; cast, create_widget and get_component_by_class take target_class; make_struct and break_struct take struct_type; switch_enum and enum_literal take enum_path; select takes enum_path or option_count; make_array, make_set and make_map take num_inputs; switch_int, switch_string and switch_name take cases; format_text takes arguments; add_delegate takes dispatcher; macro_instance takes macro_graph_name. Example: {"asset_path": "/Game/Blueprints/BP_Door", "node_type": "call_function", "function_name": "PrintString", "function_library": "KismetSystemLibrary"}.
 
-node_type='event' creates a REAL override: the declaring interface or parent class is resolved automatically and bOverrideFunction set (target_class is ignored here), an existing override comes back with already_exists:true, and a name that is not an overridable event fails loudly -- an interface method WITH a return value is not an event: use add_blueprint_function with override=true. node_type='custom_event' is idempotent by name (an existing one comes back with already_existed:true, since a second breaks the compile) and cannot be given parameters, so anything that needs arguments -- an RPC in particular -- must be a function. node_type='get_component_by_class' makes a GetComponentByClass node BORN TYPED to target_class, so its ReturnValue connects without a cast.
+In another asset, node_type is its editor's own node: a material expression class (/Script/Engine.MaterialExpressionConstant), a sound node type (WavePlayer with sound_wave_path, Mixer, Random...), a MetaSound class path from list_metasound_node_types (UE.Sine.Audio, with major_version), a PCG settings class from list_pcg_node_types (PCGSubgraphSettings with subgraph_path embeds a graph), or a Control Rig unit (SetTransform, TwoBoneIKSimple..., with node_name). Those assets are saved by their editor, and a Control Rig is compiled.
 
-Every other node_type adds a NEW node on each call, so calling it twice leaves two nodes; remove_graph_node takes a spare one out. Read `class` in the reply as a sanity check: a node_type expected to make an async or latent node that comes back as "K2Node_CallFunction" is a mute no-op that still compiles 0/0.
+A Blueprint is compiled only with compile=true and never saved, and the call is refused during Play-in-Editor (see force). event creates a real override, finding the interface or parent class itself; a name that is not an overridable event is an error, and an interface function with a return value needs add_blueprint_function with override=true. custom_event takes no parameters, so an RPC or anything with arguments must be a function. get_component_by_class makes a node already typed to target_class, so its ReturnValue connects without a cast. Check `class` in the reply: an async or latent node that comes back as K2Node_CallFunction does nothing, though it compiles clean.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -262,7 +262,7 @@ Every other node_type adds a NEW node on each call, so calling it twice leaves t
 | `position_y` | number | no | Node Y position on the graph canvas (ignored when node_position is set) |
 | `node_position` | array | no | Node canvas position as [x, y]; takes precedence over position_x/position_y |
 
-**Returns:** `{ node_id, class, title, pos_x, pos_y, comment, pins:[{name, direction:'input'|'output', type, linked_to, default}], blueprint_name, graph_name, compiled, event_name?, node_title?, already_existed?, is_override?, already_exists?, cast_to?, function_library?, function?, struct_type?, index_pin?, return_value_pin?, option_pins?, option_count?, index_enum?, input_pins?, output_pins?, component_class?, return_pin_type? } -- the optional fields belong to their node_type: event_name/node_title/already_existed for custom_event; event_name/is_override/already_exists for event (is_override:true is what tells a live override from a dead look-alike); cast_to for cast; function_library/function for call_function; struct_type for make_struct/break_struct; index_pin/return_value_pin/option_pins/option_count/index_enum for select; input_pins/output_pins (pin names by direction) for macro_instance; component_class/return_pin_type for get_component_by_class (return_pin_type is the oracle: if it does not name the requested class, the pin stayed generic).`
+**Returns:** `{ node_id, class, title, pos_x, pos_y, comment, pins: [{ name, direction, type, linked_to, default }], blueprint_name, graph_name, compiled, plus the fields of its node_type } -- event: event_name, is_override (true for a live override), already_exists; custom_event: event_name, node_title, already_existed; cast: cast_to; call_function: function_library, function; make_struct and break_struct: struct_type; select: index_pin, return_value_pin, option_pins, option_count, index_enum; macro_instance: input_pins, output_pins; get_component_by_class: component_class, return_pin_type (when it does not name the class, the pin stayed generic).`
 
 ## `add_input_action_event_node`
 
@@ -406,18 +406,22 @@ Build several nodes, wire their pins, and set pin defaults in one pass, wrapped 
 
 **Core tool:** every client lists it by default.
 
-Compile a Blueprint to regenerate its class, returning the REAL outcome (succeeded == zero errors) with the error and warning counts, and with return_messages=true every compiler message anchored to its node_id and graph.
+Compile a Blueprint to regenerate its class and return the real outcome: succeeded is true only with zero errors, with the error and warning counts and, on request, every compiler message tied to its node.
 
-Compile after authoring nodes, functions, variables or RPCs, and before anything calls them or Play-in-Editor starts. To look for errors without compiling, use check_blueprint_errors for one Blueprint or find_erroring_blueprints for a content path. Refused while Play-in-Editor runs, because a compile then kills the editor when PIE stops (see force). It does not save: save_asset writes the result, and compiling can dirty other packages too.
+Compile after adding nodes, functions, variables or RPCs, and before anything calls them or Play-in-Editor starts. To look for errors without compiling, use check_blueprint_errors for one Blueprint or find_erroring_blueprints for a folder. It does not save: save_asset writes the result.
 
-With return_messages=true each message carries the node_id and graph that get_graph_nodes and remove_graph_node take, so an error leads straight to its node. TRAP: num_errors:0 is not a promise the graph works -- an unresolved WILDCARD pin on an array/ForEach node can compile clean and still block PIE, and warnings (a "was pruned" node whose consumers silently read defaults) do not count as errors, so read the warnings too.
+blueprint_name takes a short name or, safer, the full path that find_assets_by_name returns, since a short name shared by two assets compiles one of them. Example: {"blueprint_name": "/Game/Blueprints/BP_Door", "return_messages": true}. With return_messages each message carries the node_id and graph that get_graph_nodes and remove_graph_node take.
+
+The compile blocks the editor until it ends. Blueprints that depend on this one get their bytecode recompiled, instances of its class are reinstanced, and a garbage collection runs afterwards, so a Blueprint with many dependents costs more and other packages can end up dirty. During Play-in-Editor the reinstancing leaves a world behind that kills the editor when PIE stops, which is why the call is refused then (see force).
+
+num_errors 0 does not prove the graph works: an unresolved wildcard pin on an array or ForEach node can compile clean and still block PIE, and a "was pruned" warning means consumers read defaults, so read the warnings too.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `blueprint_name` | string | yes | Name of the blueprint, or its full asset path (e.g. /Game/MyGame/Core/BP_MyActor). A short name matching two assets compiles ONE of them silently -- pass the full path when in doubt. |
 | `return_messages` | boolean | no | Optional (default false). When true, ALSO returns the per-message compiler results log so callers can see node-anchored errors/warnings. When false/absent the response omits the `messages` array but still reports the REAL compile status. |
 
-**Returns:** `{ name: string, compiled: bool, succeeded: bool, num_errors: int, num_warnings: int, messages?: [{severity: 'error'|'warning'|'note', text: string, node_id: string, node_title: string, graph_name: string}] } -- compiled and succeeded are true iff the compile had zero errors (warnings still compile); messages only with return_messages=true, its node fields empty for a message not anchored to a node`
+**Returns:** `{ name, compiled, succeeded, num_errors, num_warnings, messages?: [{ severity: 'error'|'warning'|'note', text, node_id, node_title, graph_name }] } -- messages only with return_messages; the node fields are empty for a message tied to no node.`
 
 ## `connect_pins`
 
@@ -425,13 +429,13 @@ With return_messages=true each message carries the node_id and graph that get_gr
 
 **Core tool:** every client lists it by default.
 
-Link one node's OUTPUT pin to another node's INPUT pin, in a Blueprint graph (an Animation or Widget Blueprint included) or in the graph of a material, material function, sound cue, MetaSound Source, PCG graph or Control Rig; get_graph_nodes gives the node ids and pin names.
+Link one node's output pin to another node's input pin, in a Blueprint graph (Animation and Widget Blueprints included) or in the graph of a material, material function, sound cue, MetaSound Source, PCG graph or Control Rig.
 
-In a Blueprint the graph's own schema type-checks the pair, so an AnimGraph's pose links work too, and an incompatible pair is an error, never a silent no-op; a node that still has a WILDCARD pin is reconstructed afterwards, so array, ForEach and Select pins really take the linked type. Not for: testing a pair without linking it (validate_pin_connection), unlinking (disconnect_pin), or creating and linking several Blueprint nodes in one undo step (build_blueprint_graph). Refused while Play-in-Editor runs (see force).
+Use it after add_graph_node, or on nodes that get_graph_nodes lists: both give the node ids and pin names. Not for: testing a pair without linking it (validate_pin_connection), unlinking (disconnect_pin), or creating and linking several Blueprint nodes in one undo step (build_blueprint_graph). Refused during Play-in-Editor (see force).
 
-The node ids @input and @output name the graph's own input and output: target_node_id=@output with target_pin=BaseColor (or Roughness, Normal, FrontMaterial, MaterialAttributes...) feeds a material's main input; on a sound cue @output makes the source node the cue's first node; on a MetaSound @input and @output are its graph inputs and outputs, named by the pin; on a PCG graph they are its input and output nodes. On a sound cue the child node is the source and target_pin the parent's input slot index (empty: its first free slot).
+Example: {"asset_path": "/Game/Blueprints/BP_Door", "source_node_id": "&lt;a Branch's node_id>", "source_pin": "then", "target_node_id": "&lt;a PrintString's node_id>", "target_pin": "execute"}. @input and @output stand for the graph's own input and output: target_node_id "@output" with target_pin "BaseColor" feeds a material's main input. On a sound cue, @output makes the source the cue's first node, and target_pin is the parent's input slot index (empty: its first free slot); on a MetaSound they are its graph inputs and outputs, named by the pin; on a PCG graph its input and output nodes.
 
-A Blueprint is not compiled or saved: compile_blueprint, then save_asset. The other assets are saved by their editor, and a Control Rig is compiled.
+In a Blueprint the graph's schema type-checks the pair, so AnimGraph pose links work too and an incompatible pair is an error, never a silent no-op; a node with a wildcard pin is reconstructed afterwards, so array, ForEach and Select pins take the linked type. A Blueprint is not compiled or saved: compile_blueprint, then save_asset. The other assets are saved by their editor, and a Control Rig is compiled.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -443,7 +447,7 @@ A Blueprint is not compiled or saved: compile_blueprint, then save_asset. The ot
 | `blueprint_name` | string | no | Older name of asset_path, still accepted. |
 | `graph_name` | string | no | Blueprint only: the graph, default the event graph ("AnimGraph" for an Animation Blueprint's anim graph). BOTH nodes must live in this same graph. The other assets have one graph: leave it out. |
 
-**Returns:** `{ connected, source_node_id, target_node_id, graph_kind? } -- for a Blueprint, connected is always true when the call succeeds (the failure path is an error response); for another asset the reply is its editor's own (graph_kind names the asset kind), saved included.`
+**Returns:** `{ connected, source_node_id, target_node_id, graph_kind? } -- a failed link is an error, so connected is true in every Blueprint reply; another asset answers with its editor's own reply, saved included.`
 
 ## `create_blueprint`
 
@@ -753,13 +757,13 @@ Preview the EXACT pins an add_graph_node call_function node WOULD expose for a U
 
 **Core tool:** every client lists it by default.
 
-Read the nodes of one graph without changing it -- a Blueprint graph (an Animation or Widget Blueprint included) or the graph of a material, material function, sound cue, MetaSound Source, PCG graph or Control Rig: the read that feeds add_graph_node, connect_pins, set_pin_default_value and the other graph tools, and the way to see what a graph actually DOES.
+Read the nodes of one graph without changing it: a Blueprint graph (Animation and Widget Blueprints included), or the graph of a material, material function, sound cue, MetaSound Source, PCG graph or Control Rig. It is the read behind add_graph_node, connect_pins and set_pin_default_value, and the way to see what a graph does.
 
-Every node carries its node_id, the id the graph tools take, and its object_path (not for a MetaSound), which get_object_info and set_properties take for the node's own settings. A Blueprint node also has its class, title, position, comment and pins (name, direction, type, linked_to, default). Another asset's reply is its editor's own view, with graph_kind naming it: a material's expressions with their inputs, a sound cue's nodes with their child slots and first node, a MetaSound's nodes and connections, a PCG graph's nodes and edges (each node's settings_path is what set_properties writes), a Control Rig's nodes with their pins, links and defaults.
+Every node has its node_id, which the graph tools take, and its object_path (not in a MetaSound), which get_object_info and set_properties take for the node's own settings. A Blueprint node also lists its class, title, position, comment and pins with their links and defaults; another asset answers with its editor's own view, named by graph_kind.
 
-To read one node, pass node_id: it comes back at full fidelity for a fraction of a graph's tokens. TRAP: compact=true drops pin types AND every pin that is unlinked and has no default (plus knots and comment boxes), so a pin missing from a compact listing is NOT proof the pin does not exist -- re-read with compact=false, or that one node by node_id, before concluding anything about pins. Reading a graph under a read-only vendor root leaves that package DIRTY in memory (reload_asset_package with on_dirty="discard" cleans it).
+Read a graph, then one node: {"asset_path": "/Game/Blueprints/BP_Door", "compact": true} for the topology, then the same asset_path with "node_id" for every pin of one node. compact leaves out unlinked pins without a default, so a pin missing from a compact listing may still exist: check it by node_id. graph_name picks another graph of a Blueprint, a collapsed graph by its title included, and expand_composites inlines the collapsed graphs instead.
 
-It reads the graph as the editor holds it, unsaved edits included, and loads the asset from disk when it is not in memory. It compiles nothing, so a Blueprint that fails to compile still lists its nodes: compile_blueprint gives the errors. A large graph costs many tokens; max_nodes caps the reply and truncated says whether nodes were left out.
+It reads the graph as the editor holds it, unsaved edits included, loading the asset from disk if needed, and compiles nothing, so a Blueprint that fails to compile still lists its nodes. A large graph costs many tokens: max_nodes caps the reply, and truncated says whether nodes were left out. Reading a graph under a read-only vendor root leaves its package dirty in memory; reload_asset_package with on_dirty="discard" cleans it.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -772,7 +776,7 @@ It reads the graph as the editor holds it, unsaved edits included, and loads the
 | `max_nodes` | number | no | Cap on the number of nodes emitted (&lt;=0 or absent = unlimited); the response still counts every non-excluded node in total_node_count and sets truncated=true. |
 | `node_id` | string | no | Optional node_id (from add_graph_node / get_graph_nodes): return ONLY that node, in a Blueprint always at full fidelity (compact, exclude_classes, expand_composites and max_nodes are ignored) -- every pin with name, direction, type, linked_to and default, at a fraction of the tokens of a whole graph. A node_id the graph does not contain is an error. |
 
-**Returns:** `{ blueprint_name, graph_name, nodes:[{node_id, object_path?, class, title, pos_x, pos_y, comment, pins:[...], subgraph?}], node_count, compact, total_node_count, excluded_count, truncated, graph_kind? } -- for a Blueprint: node_count is what was EMITTED, total_node_count what exists; a node owning a nested graph (composite / macro instance) carries "subgraph" with the name to pass back as graph_name; with node_id, nodes holds that one node (nodes[0]) and node_count is 1. For another asset: its editor's view, every node with node_id and object_path, a MetaSound's connections in connections.`
+**Returns:** `` { blueprint_name, graph_name, nodes: [{ node_id, object_path?, class, title, pos_x, pos_y, comment, pins: [...], subgraph? }], node_count, compact, total_node_count, excluded_count, truncated, graph_kind? } -- node_count counts the nodes returned and total_node_count those that exist; a node holding a nested graph has `subgraph`, the graph_name to read it with. Another asset: its editor's view, a MetaSound's links in connections. ``
 
 ## `implement_interface`
 
