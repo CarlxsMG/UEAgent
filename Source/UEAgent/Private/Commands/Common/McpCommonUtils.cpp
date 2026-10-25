@@ -1407,6 +1407,9 @@ namespace UEAgentCommonImpl
     template <typename NodeType>
     NodeType* PlaceNewNode(UEdGraph& Graph, NodeType* Node, const FVector2D& Position)
     {
+        // Transactional, as UEdGraph::CreateNode makes it: without the flag Modify() records nothing, so an undo
+        // of a later link leaves this node's half of it behind.
+        Node->SetFlags(RF_Transactional);
         Node->NodePosX = static_cast<int32>(Position.X);
         Node->NodePosY = static_cast<int32>(Position.Y);
         Graph.AddNode(Node, true);

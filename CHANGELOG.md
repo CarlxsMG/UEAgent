@@ -4,7 +4,17 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 ## 2.8.2 - 2026-10-24
 
-What four of the default tools do to the editor, said where an agent reads it. No tool behaves differently.
+Undo works on every node `add_graph_node` makes, and four of the default tools say what they do to the editor.
+
+### Fixed
+
+- **Undo left half a link behind on nodes the tools had made.** Function call, variable get and set, self,
+  spawn-actor and create-widget nodes from `add_graph_node` and `build_blueprint_graph`, the node of
+  `add_enhanced_input_action_node`, and the nodes `set_anim_transition_rule_from_comparison` adds were created without
+  the transactional flag the editor gives its own nodes, so undo could not restore them. Undoing a `connect_pins` that
+  had replaced a link left the new node still linked on its side only, and undoing `set_pin_default_value` on one of
+  them changed nothing. New nodes now get the flag. A node made by an earlier version gets it when its Blueprint is
+  opened in the Blueprint editor.
 
 ### Changed
 
