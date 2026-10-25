@@ -2,7 +2,7 @@
 
 Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](https://semver.org).
 
-## 2.8.2 - 2026-10-24
+## 2.8.2 - 2026-10-25
 
 Undo works on every node `add_graph_node` makes, and four of the default tools say what they do to the editor.
 
