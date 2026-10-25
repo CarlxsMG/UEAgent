@@ -572,8 +572,9 @@ TArray<TSharedPtr<FJsonValue>> McpMetaTools::BuildMetaTools(const FMcpToolCatalo
 		TEXT("allowed values; a tool already in your list has its schema there.\n\n")
 		TEXT("`name` takes a name from find_tools, as in {\"name\": \"spawn_actor\"}; spaces around it are ignored. A current ")
 		TEXT("tool's name always means that tool. An old name of a renamed tool resolves to the new one and a retired tool's name ")
-		TEXT("to that tool, and `retired_name` then says what the name became. It only reads the catalog; an unknown name is an ")
-		TEXT("error that lists up to five `closest` names.\n\n")
+		TEXT("to that tool, and `retired_name` then says what the name became. It only reads the catalog, which the server loads ")
+		TEXT("once when it starts: a repeat is cheap, nothing limits how often it runs, and the answer stays the same until the ")
+		TEXT("server restarts. An unknown name is an error that lists up to five `closest` names.\n\n")
 		TEXT("Returns: { success, name, domain, description, inputSchema, annotations?, retired_name? }"),
 		DescribeProperties, { TEXT("name") }, ReadsCatalog));
 	Tools.Add(MakeTool(CallTool,
