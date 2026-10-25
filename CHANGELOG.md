@@ -2,6 +2,36 @@
 
 Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](https://semver.org).
 
+## 2.8.2 - 2026-10-25
+
+Undo works on every node `add_graph_node` makes, and four of the default tools say what they do to the editor.
+
+### Fixed
+
+- **Undo left half a link behind on nodes the tools had made.** Function call, variable get and set, self,
+  spawn-actor and create-widget nodes from `add_graph_node` and `build_blueprint_graph`, the node of
+  `add_enhanced_input_action_node`, and the nodes `set_anim_transition_rule_from_comparison` adds were created without
+  the transactional flag the editor gives its own nodes, so undo could not restore them. Undoing a `connect_pins` that
+  had replaced a link left the new node still linked on its side only, and undoing `set_pin_default_value` on one of
+  them changed nothing. New nodes now get the flag. A node made by an earlier version gets it when its Blueprint is
+  opened in the Blueprint editor.
+
+### Changed
+
+- **`compile_blueprint` says what undo does after a compile.** Undo takes back the edit before the compile, not the
+  compile: the class keeps the compiled code until the next compile, so compile again after an undo. It also says
+  what `force` does: it only matters during Play-in-Editor.
+- **`connect_pins` says when a link replaces another.** An exec output and a data input hold one link each, so
+  linking one that is already linked drops its old link. Each call is one undo step, and undo puts the old link
+  back.
+- **`add_graph_node` says where each argument's value comes from**, such as `event_name` from
+  `list_overridable_functions` and `struct_type` from `list_structs`, and which one wins when two are given. The list of
+  which arguments each `node_type` takes is gone from the description: the parameters already say it.
+- **`describe_tool` says it reads the catalog the server loads when it starts**, so repeating it is cheap and nothing
+  limits it.
+
+Every new fact was checked on both engines with a new set of checks.
+
 ## 2.8.1 - 2026-10-24
 
 Clearer descriptions for twelve of the 15 tools a client lists by default. No tool behaves differently.

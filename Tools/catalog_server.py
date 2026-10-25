@@ -310,8 +310,9 @@ def meta_tools(tools: list[dict], domains: list[str], packs: list[dict], core_co
              "allowed values; a tool already in your list has its schema there.\n\n"
              '`name` takes a name from find_tools, as in {"name": "spawn_actor"}; spaces around it are ignored. A current '
              "tool's name always means that tool. An old name of a renamed tool resolves to the new one and a retired tool's name "
-             "to that tool, and `retired_name` then says what the name became. It only reads the catalog; an unknown name is an "
-             "error that lists up to five `closest` names.\n\n"
+             "to that tool, and `retired_name` then says what the name became. It only reads the catalog, which the server loads "
+             "once when it starts: a repeat is cheap, nothing limits how often it runs, and the answer stays the same until the "
+             "server restarts. An unknown name is an error that lists up to five `closest` names.\n\n"
              "Returns: { success, name, domain, description, inputSchema, annotations?, retired_name? }",
              {"name": prop("string", "The tool's exact name, as find_tools returns it.")}, ["name"], reads_catalog),
         tool("call_tool",
