@@ -108,7 +108,7 @@ Open one undoable transaction so a whole batch of edits collapses into a SINGLE 
 
 *Destructive.*
 
-Abort the transaction opened by begin_transaction: the edits made inside it are rolled back (rolled_back true) and NO entry is written to the undo stack (undo_count is unchanged). The escape hatch when a multi-step edit goes wrong halfway -- cleaner than committing with end_transaction and then calling undo, which leaves history behind. Only what the transaction recorded rolls back: a change the editor does not record for undo (one to a Play-in-Editor object, for instance) stays, and rolled_back is false when nothing was recorded.
+Abort the transaction opened by begin_transaction: the edits made inside it are rolled back (rolled_back true) and NO entry is written to the undo stack (undo_count is unchanged). The escape hatch when a multi-step edit goes wrong halfway -- cleaner than committing with end_transaction and then calling undo, which leaves history behind. Only what the transaction recorded rolls back: a change the editor does not record for undo (one to a Play-in-Editor object, for instance) stays, and rolled_back is false when nothing was recorded. A transaction that recorded an asset made inside it is not rolled back at all (rolled_back false, with a note): rolling back the making of an asset leaves it broken in memory.
 
 No parameters.
 
@@ -377,7 +377,7 @@ Copy one editor-world actor in place through the editor's duplicate path, keepin
 
 *Destructive.*
 
-Close the transaction opened by begin_transaction and COMMIT it, so everything done inside becomes one entry on the editor's undo stack (undo_count grows by one). Pair it with every begin_transaction -- leaving one open makes later edits silently join it. Use cancel_transaction instead when you want the batch thrown away rather than kept. A transaction that holds objects of the running Play-in-Editor session (a widget made with create_widget) is closed without an undo entry, recorded false: the edits stay, and keeping it would close the editor when PIE stops.
+Close the transaction opened by begin_transaction and COMMIT it, so everything done inside becomes one entry on the editor's undo stack (undo_count grows by one). Pair it with every begin_transaction -- leaving one open makes later edits silently join it. Use cancel_transaction instead when you want the batch thrown away rather than kept. A transaction that holds objects of the running Play-in-Editor session (a widget made with create_widget) is closed without an undo entry, recorded false: the edits stay, and keeping it would close the editor when PIE stops. So is one that recorded an asset made inside it, because undoing the making of an asset leaves it broken in memory.
 
 No parameters.
 

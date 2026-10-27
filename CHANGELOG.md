@@ -2,6 +2,47 @@
 
 Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](https://semver.org).
 
+## 2.9.0 - 2026-10-27
+
+A new tool turns actors placed in the level into a reusable Blueprint, and undo no longer breaks an asset a call has
+just made.
+
+### Fixed
+
+- **Undoing a call that made an asset left that asset broken in memory.** Each tool call is one undo step, and that
+  step recorded the new asset's objects a moment after they were made, so undoing it put them back that way. A
+  Blueprint, Widget Blueprint or material function came back with no parent class or construction script, so
+  `load_asset` returned nothing for it, and the next save would have written it like that. A material was changed
+  too. A call that makes an asset now has no undo step, as making an asset in the editor has none: its reply says so
+  (`undo_step`), and `delete_asset` removes the asset. The fix is in the dispatcher, so it covers every tool that
+  makes an asset. A spawned actor is not an asset here and keeps its undo step, World Partition levels included.
+- For the same reason, `end_transaction` closes a transaction that made an asset without an undo entry, and
+  `cancel_transaction` does not roll one back. Each says so in a note.
+
+### Added
+
+- **`create_blueprint_from_actors`**, in the `blueprint_authoring` pack: the editor's **Convert Selection to Blueprint
+  Class** for an agent. It takes actors by name or label and makes one Blueprint asset from them in one of the three
+  ways the editor's dialog offers:
+  - `harvest`, the default, copies the components of every actor into one Actor Blueprint. The actors' own classes
+    do not come along: the reply names the Blueprint actors whose variables, functions and graphs stay behind
+    (`logic_not_carried`) and the components a Blueprint cannot hold (`skipped_components`), and the copied scene
+    components become Movable, as in the editor.
+  - `child_actors` keeps each actor whole, class and logic included, as a Child Actor component.
+  - `subclass` makes a child of one actor's class, with that actor's edited values as defaults.
+
+  By default it saves the asset and replaces the actors with one instance of it, then measures that the instance
+  shows what the actors showed in the same place (`placement`). Undo brings the actors back and keeps the asset. It
+  refuses, before changing anything, during Play-in-Editor, inside an open undo transaction, over an existing asset,
+  for an actor it cannot find or a label several actors share, for actors in different levels, and for a mode that
+  does not fit the actors.
+- The `blueprint_authoring` pack's description says it also makes Blueprints from actors placed in the level.
+
+Every promise of the description was checked on both engines with a new set of checks, the example call included.
+One of them found that undoing a transaction that holds the new asset leaves the Blueprint broken in memory, with
+no construction script and an invalid class; so the tool runs outside the per-call undo step, like the editor's
+dialog, and refuses a call inside a transaction someone else opened.
+
 ## 2.8.2 - 2026-10-25
 
 Undo works on every node `add_graph_node` makes, and four of the default tools say what they do to the editor.

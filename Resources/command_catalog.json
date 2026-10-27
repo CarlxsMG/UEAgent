@@ -119,7 +119,7 @@
     },
     {
       "name": "blueprint_authoring",
-      "description": "create Blueprints, add variables, read their outline, unlink pins, remove nodes and build several wired nodes at once"
+      "description": "create Blueprints, from scratch or from actors placed in the level, add variables, read their outline, unlink pins, remove nodes and build several wired nodes at once"
     },
     {
       "name": "data_tables",
@@ -17344,6 +17344,67 @@
           }
         },
         {
+          "name": "create_blueprint_from_actors",
+          "description": "Turn actors placed in the level into a reusable Blueprint asset, as the editor's Convert Selection to Blueprint Class does, and by default put one instance of it where they stood.\n\nUse it when something was assembled out of level actors (meshes, lights, Blueprint actors) and should be reused or placed again. For an empty Blueprint use create_blueprint; to add a component to a Blueprint that exists, add_component_to_blueprint.\n\nmode is the choice the editor's dialog offers. harvest, the default, copies the components of every actor into one new Actor Blueprint and drops the actors' own classes: a Blueprint actor's variables, functions and graphs do not come along (logic_not_carried names those actors), components a Blueprint cannot hold are skipped (skipped_components), and the copied scene components become Movable. child_actors keeps each actor whole, class and logic included, as a Child Actor component. subclass takes one actor and makes a child of its class with that actor's edited values as defaults.\n\nWith several actors the Blueprint's origin is their average location, unrotated; with one, that actor's transform. replace_actors, true by default, removes the actors and spawns one instance in their place, named after the Blueprint and selected; placement compares the bounds of what stood there with the instance's, and the call fails when they are more than 1 cm apart. The level is then unsaved (save_level). Undo is one step that brings the actors back and removes the instance; the asset stays, and delete_asset removes it.\n\nactor_names takes names or labels as get_actors_in_level returns them; name and path work as in create_blueprint. Nothing changes when Play-in-Editor is running, an undo transaction is open, an asset exists at the path, an actor is missing or its label is shared, the actors are in different levels, or the mode does not fit them. Example: {\"actor_names\": [\"Table\", \"Lamp\"], \"name\": \"BP_TableSet\", \"path\": \"/Game/Props\"}.",
+          "params": [
+            {
+              "name": "actor_names",
+              "jsonType": "array",
+              "required": true,
+              "nameLike": true,
+              "description": "Required array of the actors to convert, each by name or by label (a label several actors share is an error), all in one level of the editor world."
+            },
+            {
+              "name": "name",
+              "jsonType": "string",
+              "required": true,
+              "nameLike": true,
+              "description": "Required Blueprint name: a bare name goes under path (default /Game/Blueprints), a full content path (\"/Game/Props/BP_TableSet\") is used as it is. No asset may exist there yet."
+            },
+            {
+              "name": "path",
+              "jsonType": "string",
+              "required": false,
+              "nameLike": true,
+              "description": "Optional content folder for a bare name."
+            },
+            {
+              "name": "mode",
+              "jsonType": "string",
+              "required": false,
+              "nameLike": true,
+              "description": "Optional: \"harvest\" (default; the components only, in one Actor Blueprint), \"child_actors\" (each actor whole, as a Child Actor component) or \"subclass\" (exactly one actor; a child of its class)."
+            },
+            {
+              "name": "parent_class",
+              "jsonType": "string",
+              "required": false,
+              "nameLike": true,
+              "description": "Optional parent class, named as in create_blueprint. harvest and child_actors default to Actor and take any Actor class; subclass defaults to the actor's class and takes only that class or a child of it."
+            },
+            {
+              "name": "replace_actors",
+              "jsonType": "boolean",
+              "required": false,
+              "description": "Optional bool, default true: remove the actors and place one instance of the Blueprint where they stood. false leaves the level as it is."
+            },
+            {
+              "name": "save",
+              "jsonType": "boolean",
+              "required": false,
+              "description": "Optional bool, default true: save the new Blueprint. false leaves it in memory with unsaved changes, for save_asset."
+            }
+          ],
+          "returns": "{ name: string, path: string, package_path: string, mode: string, parent_class: string, generated_class: string, compiled: bool, saved: bool, file_on_disk: bool, save_error?: string, source_actors: [{name, label, class}], components: [{name, class}] (the Blueprint's own construction-script components; a subclass also has its parent's), skipped_components: [{actor, component, class}], logic_not_carried: [{actor, class}], replaced: bool, new_actor?: {name, label, location}, removed_actors: [string], placement: {checked: bool, offset_cm?: number, reason?: string}, note?: string }",
+          "pack": "blueprint_authoring",
+          "annotations": {
+            "readOnlyHint": false,
+            "destructiveHint": true,
+            "idempotentHint": false,
+            "openWorldHint": false
+          }
+        },
+        {
           "name": "create_blueprint_macro",
           "description": "Create an EMPTY, Tunnel-terminated macro graph owned by this Blueprint's MacroGraphs (a reusable snippet, not a function: macros inline at compile time and can carry multiple exec outputs). Idempotent -- an existing macro of that name is returned with already_existed:true. Fill it with add_graph_node using graph_name=<macro>, then instantiate it with add_graph_node node_type=\"macro_instance\", which finds the Blueprint's own macros. Give it inputs and outputs (exec included) with add_function_parameter function_name=<macro>; inverse: remove_blueprint_macro.",
           "params": [
@@ -24201,7 +24262,7 @@
         },
         {
           "name": "cancel_transaction",
-          "description": "Abort the transaction opened by begin_transaction: the edits made inside it are rolled back (rolled_back true) and NO entry is written to the undo stack (undo_count is unchanged). The escape hatch when a multi-step edit goes wrong halfway -- cleaner than committing with end_transaction and then calling undo, which leaves history behind. Only what the transaction recorded rolls back: a change the editor does not record for undo (one to a Play-in-Editor object, for instance) stays, and rolled_back is false when nothing was recorded.",
+          "description": "Abort the transaction opened by begin_transaction: the edits made inside it are rolled back (rolled_back true) and NO entry is written to the undo stack (undo_count is unchanged). The escape hatch when a multi-step edit goes wrong halfway -- cleaner than committing with end_transaction and then calling undo, which leaves history behind. Only what the transaction recorded rolls back: a change the editor does not record for undo (one to a Play-in-Editor object, for instance) stays, and rolled_back is false when nothing was recorded. A transaction that recorded an asset made inside it is not rolled back at all (rolled_back false, with a note): rolling back the making of an asset leaves it broken in memory.",
           "params": [],
           "returns": "{ success: bool, transaction_index: int (the one that was cancelled), rolled_back: bool (whether recorded edits were reverted), undo_count: int (unchanged -- nothing was recorded), note?: string }",
           "annotations": {
@@ -24774,7 +24835,7 @@
         },
         {
           "name": "end_transaction",
-          "description": "Close the transaction opened by begin_transaction and COMMIT it, so everything done inside becomes one entry on the editor's undo stack (undo_count grows by one). Pair it with every begin_transaction -- leaving one open makes later edits silently join it. Use cancel_transaction instead when you want the batch thrown away rather than kept. A transaction that holds objects of the running Play-in-Editor session (a widget made with create_widget) is closed without an undo entry, recorded false: the edits stay, and keeping it would close the editor when PIE stops.",
+          "description": "Close the transaction opened by begin_transaction and COMMIT it, so everything done inside becomes one entry on the editor's undo stack (undo_count grows by one). Pair it with every begin_transaction -- leaving one open makes later edits silently join it. Use cancel_transaction instead when you want the batch thrown away rather than kept. A transaction that holds objects of the running Play-in-Editor session (a widget made with create_widget) is closed without an undo entry, recorded false: the edits stay, and keeping it would close the editor when PIE stops. So is one that recorded an asset made inside it, because undoing the making of an asset leaves it broken in memory.",
           "params": [],
           "returns": "{ success: bool, transaction_index: int (the one that was closed), recorded: bool (false: no undo entry, see note), undo_count: int after the commit, note?: string }",
           "annotations": {

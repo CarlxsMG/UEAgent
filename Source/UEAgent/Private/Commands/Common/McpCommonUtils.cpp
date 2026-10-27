@@ -1779,6 +1779,44 @@ namespace mcp_common
         return false;
     }
 
+    FString TransactionRecordedPackage(const FTransaction* Transaction, const TSet<FName>& Packages)
+    {
+        if (!Transaction || Packages.Num() == 0)
+        {
+            return FString();
+        }
+        TArray<UObject*> Objects;
+        Transaction->GetTransactionObjects(Objects);
+        for (const UObject* Object : Objects)
+        {
+            if (Object && Packages.Contains(Object->GetOutermost()->GetFName()))
+            {
+                return Object->GetOutermost()->GetName();
+            }
+        }
+        return FString();
+    }
+
+    // The assets made since begin_transaction opened the transaction that is open now. Game thread only, like every
+    // dispatch.
+    static TSet<FName> GAssetsMadeInOpenTransaction;
+
+    void NoteAssetsMadeInOpenTransaction(const TSet<FName>& Packages)
+    {
+        GAssetsMadeInOpenTransaction.Append(Packages);
+    }
+
+    FString AssetMadeInOpenTransaction()
+    {
+        // GUndo is the open transaction; the editor's buffer makes only FTransactions.
+        return TransactionRecordedPackage(static_cast<const FTransaction*>(GUndo), GAssetsMadeInOpenTransaction);
+    }
+
+    void ForgetAssetsMadeInOpenTransaction()
+    {
+        GAssetsMadeInOpenTransaction.Reset();
+    }
+
     bool ResetUndoHistoryHoldingPieSession()
     {
         UTransactor* Trans = GEditor ? GEditor->Trans.Get() : nullptr;

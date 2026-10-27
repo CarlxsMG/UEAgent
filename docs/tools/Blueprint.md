@@ -2,7 +2,7 @@
 
 # Blueprint
 
-87 tools for Blueprint authoring: Blueprints, macros and Editor Utility Blueprints, variables, functions and their parameters, event dispatchers, interfaces, components, timelines, graph nodes and pins, compiling, replication settings and reparenting.
+88 tools for Blueprint authoring: Blueprints, macros and Editor Utility Blueprints, variables, functions and their parameters, event dispatchers, interfaces, components, timelines, graph nodes and pins, compiling, replication settings and reparenting.
 
 Back to the [index](README.md).
 
@@ -466,6 +466,34 @@ Create a new Blueprint asset, optionally as a child of ANY parent class -- nativ
 | `save` | boolean | no | Optional bool (default true). false registers the new Blueprint and marks its package dirty without saving it -- persist it later with save_asset. |
 
 **Returns:** `{ name: string, path: string, package_path: string, parent_class: string, generated_class: string, blueprint_type: string, already_exists: bool, saved: bool (false for a Blueprint already there: nothing saved), save_error?: string, note?: string, is_multiplayer?: bool, lifetime?: string } -- parent_class is, for a new Blueprint, what was REQUESTED and resolved, not proof the asset carries it (confirm a child's real parent with get_blueprint_parent), and for one already there its own parent. is_multiplayer appears for a GameMode (true when the parent derives from AGameMode); lifetime for a subsystem (Editor, Engine, GameInstance, World, LocalPlayer or Unknown). saved:false is honest: it carries save_error when PIE was running or the Blueprint already there has unsaved changes, and a note when save=false or an existing Blueprint is returned unchanged -- an unsaved Blueprint exists only in the editor and a later compile on it also returns success.`
+
+## `create_blueprint_from_actors`
+
+*Destructive.*
+
+**Pack `blueprint_authoring`:** `enable_toolset` adds it to a client's list ([tool lists](../clients.md#tool-lists)).
+
+Turn actors placed in the level into a reusable Blueprint asset, as the editor's Convert Selection to Blueprint Class does, and by default put one instance of it where they stood.
+
+Use it when something was assembled out of level actors (meshes, lights, Blueprint actors) and should be reused or placed again. For an empty Blueprint use create_blueprint; to add a component to a Blueprint that exists, add_component_to_blueprint.
+
+mode is the choice the editor's dialog offers. harvest, the default, copies the components of every actor into one new Actor Blueprint and drops the actors' own classes: a Blueprint actor's variables, functions and graphs do not come along (logic_not_carried names those actors), components a Blueprint cannot hold are skipped (skipped_components), and the copied scene components become Movable. child_actors keeps each actor whole, class and logic included, as a Child Actor component. subclass takes one actor and makes a child of its class with that actor's edited values as defaults.
+
+With several actors the Blueprint's origin is their average location, unrotated; with one, that actor's transform. replace_actors, true by default, removes the actors and spawns one instance in their place, named after the Blueprint and selected; placement compares the bounds of what stood there with the instance's, and the call fails when they are more than 1 cm apart. The level is then unsaved (save_level). Undo is one step that brings the actors back and removes the instance; the asset stays, and delete_asset removes it.
+
+actor_names takes names or labels as get_actors_in_level returns them; name and path work as in create_blueprint. Nothing changes when Play-in-Editor is running, an undo transaction is open, an asset exists at the path, an actor is missing or its label is shared, the actors are in different levels, or the mode does not fit them. Example: {"actor_names": ["Table", "Lamp"], "name": "BP_TableSet", "path": "/Game/Props"}.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `actor_names` | array | yes | Required array of the actors to convert, each by name or by label (a label several actors share is an error), all in one level of the editor world. |
+| `name` | string | yes | Required Blueprint name: a bare name goes under path (default /Game/Blueprints), a full content path ("/Game/Props/BP_TableSet") is used as it is. No asset may exist there yet. |
+| `path` | string | no | Optional content folder for a bare name. |
+| `mode` | string | no | Optional: "harvest" (default; the components only, in one Actor Blueprint), "child_actors" (each actor whole, as a Child Actor component) or "subclass" (exactly one actor; a child of its class). |
+| `parent_class` | string | no | Optional parent class, named as in create_blueprint. harvest and child_actors default to Actor and take any Actor class; subclass defaults to the actor's class and takes only that class or a child of it. |
+| `replace_actors` | boolean | no | Optional bool, default true: remove the actors and place one instance of the Blueprint where they stood. false leaves the level as it is. |
+| `save` | boolean | no | Optional bool, default true: save the new Blueprint. false leaves it in memory with unsaved changes, for save_asset. |
+
+**Returns:** `{ name: string, path: string, package_path: string, mode: string, parent_class: string, generated_class: string, compiled: bool, saved: bool, file_on_disk: bool, save_error?: string, source_actors: [{name, label, class}], components: [{name, class}] (the Blueprint's own construction-script components; a subclass also has its parent's), skipped_components: [{actor, component, class}], logic_not_carried: [{actor, class}], replaced: bool, new_actor?: {name, label, location}, removed_actors: [string], placement: {checked: bool, offset_cm?: number, reason?: string}, note?: string }`
 
 ## `create_blueprint_macro`
 

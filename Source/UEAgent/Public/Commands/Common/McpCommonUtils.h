@@ -642,6 +642,24 @@ namespace mcp_common
     UEAGENT_API bool ResetUndoHistoryHoldingPieSession();
 
     /**
+     * The package of the first object Transaction recorded that lives in one of Packages, or empty. Undoing a
+     * transaction that recorded an object of an asset made while it was open puts that object back to how it was a
+     * moment after it was made: a Blueprint comes back with no parent class and no construction script, and the next
+     * save writes it so. The editor has no undo for making an asset.
+     */
+    UEAGENT_API FString TransactionRecordedPackage(const FTransaction* Transaction, const TSet<FName>& Packages);
+
+    /** Adds Packages, the assets a call made while begin_transaction's transaction was open, to those that transaction
+     *  is checked against when it ends (the bridge calls it). */
+    UEAGENT_API void NoteAssetsMadeInOpenTransaction(const TSet<FName>& Packages);
+
+    /** TransactionRecordedPackage of the open transaction and the assets noted since it began, or empty. */
+    UEAGENT_API FString AssetMadeInOpenTransaction();
+
+    /** Forgets the noted assets: begin_transaction, end_transaction and cancel_transaction call it. */
+    UEAGENT_API void ForgetAssetsMadeInOpenTransaction();
+
+    /**
      * Import Text into the value at ValuePtr with Property's own text parser, and only when the parser reads ALL of it
      * (surrounding whitespace aside). FProperty::ImportText_Direct alone answers success for text it did not read:
      * a float or integer takes "abc" as 0 and "1e5" as 1. The text is parsed into a scratch copy, so ValuePtr is left
