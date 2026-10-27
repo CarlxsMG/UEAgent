@@ -1044,6 +1044,48 @@ namespace McpUndoStep
             && mcp_common::TransactionHoldsPieSessionObjects(static_cast<const FTransaction*>(GUndo));
     }
 
+    // The assets a call creates while its undo step is open, by package: FAssetRegistryModule::AssetCreated, which the
+    // factories and the tools call for every new asset, reports each one. Undoing a step that recorded one of them puts
+    // its objects back to how they were when first recorded, a moment after they were made: a Blueprint came back with
+    // no parent class and no construction script, still in memory for the next save to write. The editor has no undo
+    // for making an asset either.
+    struct FNewAssetWatch
+    {
+        TSet<FName> Packages;
+        FDelegateHandle Handle;
+
+        FNewAssetWatch()
+        {
+            if (IAssetRegistry* Registry = IAssetRegistry::Get())
+            {
+                // An actor is not one: in a World Partition level a spawned actor gets its own package (an external
+                // actor), which the registry reports too, and undo removes a spawned actor as it should.
+                Handle = Registry->OnInMemoryAssetCreated().AddLambda([this](UObject* Asset)
+                {
+                    if (Asset && !Asset->IsA<AActor>())
+                    {
+                        Packages.Add(Asset->GetOutermost()->GetFName());
+                    }
+                });
+            }
+        }
+
+        ~FNewAssetWatch()
+        {
+            if (IAssetRegistry* Registry = IAssetRegistry::Get())
+            {
+                Registry->OnInMemoryAssetCreated().Remove(Handle);
+            }
+        }
+
+        // The first asset the open undo step recorded an object of, or empty. GUndo is the open transaction; the
+        // editor's buffer makes only FTransactions.
+        FString RecordedAsset() const
+        {
+            return mcp_common::TransactionRecordedPackage(static_cast<const FTransaction*>(GUndo), Packages);
+        }
+    };
+
     // A `execute_batch` is one step for all its commands, unless it opens its own transaction
     // (`transaction: true`) or holds a command that has to run outside one.
     static bool ShouldWrap(const FString& CommandType, const TSharedPtr<FJsonObject>& Params)
@@ -1171,12 +1213,16 @@ TSharedPtr<FJsonObject> UUEAgentBridge::DispatchSingleCommand(const FString& Req
     try
     {
         TSharedPtr<FJsonObject> ResultJson;
+        // The package of an asset this call created, when that dropped the call's undo step (see FNewAssetWatch).
+        FString NewAssetWithoutUndo;
         {
             const bool bWrap = McpUndoStep::ShouldWrap(CommandType, Params);
             // The step is the whole undo entry only when no transaction is open around it (not inside a batch,
             // a begin_transaction or another dispatch): only then may a call that changed nothing drop it.
-            const bool bOutermostStep = bWrap && GEditor && GEditor->Trans && !GEditor->IsTransactionActive();
+            const bool bInsideOpenTransaction = GEditor && GEditor->Trans && GEditor->IsTransactionActive();
+            const bool bOutermostStep = bWrap && GEditor && GEditor->Trans && !bInsideOpenTransaction;
             mcp_common::ConsumeDiscardUndoStepRequest(); // a request left by a probe dispatch is not this call's
+            McpUndoStep::FNewAssetWatch NewAssets;
             FScopedTransaction UndoStep(TEXT("UEAgent"),
                 FText::Format(NSLOCTEXT("UEAgent", "UndoStep", "UEAgent: {0}"), FText::FromString(CommandType)),
                 nullptr, bWrap);
@@ -1192,6 +1238,22 @@ TSharedPtr<FJsonObject> UUEAgentBridge::DispatchSingleCommand(const FString& Req
             else if (bOutermostStep && McpUndoStep::HoldsPieSessionObjects())
             {
                 UndoStep.Cancel();
+            }
+            // A step that recorded an asset the call created is dropped too (everything the call did stays): undoing
+            // it would leave that asset broken in memory. The reply says the call has no undo step.
+            else if (bOutermostStep)
+            {
+                NewAssetWithoutUndo = NewAssets.RecordedAsset();
+                if (!NewAssetWithoutUndo.IsEmpty())
+                {
+                    UndoStep.Cancel();
+                }
+            }
+            // Inside a transaction the caller opened, the step is the caller's: end_transaction and cancel_transaction
+            // check it against the assets made inside it.
+            else if (bInsideOpenTransaction && NewAssets.Packages.Num() > 0)
+            {
+                mcp_common::NoteAssetsMadeInOpenTransaction(NewAssets.Packages);
             }
         }
 
@@ -1344,6 +1406,26 @@ TSharedPtr<FJsonObject> UUEAgentBridge::DispatchSingleCommand(const FString& Req
                 {
                     TSharedPtr<FJsonObject> NewData = MakeShareable(new FJsonObject);
                     NewData->SetStringField(TEXT("retired_name"), RetiredNameNote);
+                    ResultJson->SetObjectField(TEXT("data"), NewData);
+                }
+            }
+
+            // A call whose undo step was dropped because it created an asset says so, inside `data` like the notes
+            // around it.
+            if (ResultJson.IsValid() && !NewAssetWithoutUndo.IsEmpty())
+            {
+                const FString UndoNote = FString::Printf(TEXT("none: this call created %s, and undoing the making of an ")
+                    TEXT("asset would leave it broken in memory, so nothing this call did is in the undo history; ")
+                    TEXT("delete_asset removes the asset"), *NewAssetWithoutUndo);
+                const TSharedPtr<FJsonObject>* ExistingData = nullptr;
+                if (ResultJson->TryGetObjectField(TEXT("data"), ExistingData) && ExistingData != nullptr && ExistingData->IsValid())
+                {
+                    (*ExistingData)->SetStringField(TEXT("undo_step"), UndoNote);
+                }
+                else
+                {
+                    TSharedPtr<FJsonObject> NewData = MakeShareable(new FJsonObject);
+                    NewData->SetStringField(TEXT("undo_step"), UndoNote);
                     ResultJson->SetObjectField(TEXT("data"), NewData);
                 }
             }

@@ -54,6 +54,11 @@ Yes. Every tool call is one undo step, named after the tool ("UEAgent: spawn_act
 the call saved stays saved until you save again. `mcp.UndoStepPerCall 0` in the editor console
 leaves undo to each tool.
 
+A call that creates an asset has no undo step, as creating an asset in the editor has none: undoing it
+would leave the new asset broken in memory. Its reply says so (`undo_step`), and `delete_asset` removes
+the asset. For the same reason, `end_transaction` and `cancel_transaction` drop a transaction that made an
+asset instead of keeping or rolling it back.
+
 ## How do I see what the agent did?
 
 Open **Activity** from the MCP menu in the editor's status bar: the last 200 tool calls, newest

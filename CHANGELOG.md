@@ -4,7 +4,20 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 ## 2.9.0 - 2026-10-27
 
-A new tool turns actors placed in the level into a reusable Blueprint.
+A new tool turns actors placed in the level into a reusable Blueprint, and undo no longer breaks an asset a call has
+just made.
+
+### Fixed
+
+- **Undoing a call that made an asset left that asset broken in memory.** Each tool call is one undo step, and that
+  step recorded the new asset's objects a moment after they were made, so undoing it put them back that way. A
+  Blueprint, Widget Blueprint or material function came back with no parent class or construction script, so
+  `load_asset` returned nothing for it, and the next save would have written it like that. A material was changed
+  too. A call that makes an asset now has no undo step, as making an asset in the editor has none: its reply says so
+  (`undo_step`), and `delete_asset` removes the asset. The fix is in the dispatcher, so it covers every tool that
+  makes an asset. A spawned actor is not an asset here and keeps its undo step, World Partition levels included.
+- For the same reason, `end_transaction` closes a transaction that made an asset without an undo entry, and
+  `cancel_transaction` does not roll one back. Each says so in a note.
 
 ### Added
 
