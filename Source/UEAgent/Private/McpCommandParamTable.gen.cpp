@@ -55,7 +55,7 @@ static const TCHAR* const GProtocolKeys[] =
 // names and a nullptr terminator; one extra nullptr closes the array. Walked
 // exactly ONCE (see GetTable) into a static map -- nothing is rebuilt per call,
 // and one array of literals is far cheaper object code than one Add() per
-// command (1789 of them).
+// command (1790 of them).
 //
 // A command with an EMPTY param set is still in the table (name + terminator):
 // "this command takes no params" is a real answer, and different from "I do not
@@ -1129,6 +1129,10 @@ static const TCHAR* const GFlatCommandParams[] =
     nullptr,
     TEXT("create_blueprint"),
         TEXT("blueprint_type"), TEXT("name"), TEXT("parent_class"), TEXT("path"), TEXT("save"),
+    nullptr,
+    TEXT("create_blueprint_from_actors"),
+        TEXT("actor_names"), TEXT("mode"), TEXT("name"), TEXT("parent_class"), TEXT("path"),
+        TEXT("replace_actors"), TEXT("save"),
     nullptr,
     TEXT("create_blueprint_interface"),
         TEXT("name"), TEXT("path"),
@@ -5983,8 +5987,8 @@ static const TCHAR* const GFlatCommandParams[] =
     nullptr
 };
 
-static constexpr int32 GNumCommands = 1789;
-static constexpr int32 GNumParamNames = 6047;
+static constexpr int32 GNumCommands = 1790;
+static constexpr int32 GNumParamNames = 6054;
 
 // Built ONCE, on first use (function-local static => thread-safe init). The
 // dispatcher is game-thread only, so there is no contention after that.

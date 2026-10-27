@@ -72,7 +72,7 @@ The core tools: `add_graph_node`, `compile_blueprint`, `connect_pins`, `execute_
 | `levels` | Open, save and inspect levels, and list what is unsaved | `get_current_level`, `list_dirty_packages`, `load_level`, `save_level` |
 | `play` | Start, stop and check Play-in-Editor, and capture the viewport | `capture_viewport`, `is_play_in_editor_active`, `start_play_in_editor`, `stop_play_in_editor` |
 | `assets` | Delete and duplicate assets, and find what references one | `delete_asset`, `duplicate_asset`, `get_asset_referencers` |
-| `blueprint_authoring` | Create Blueprints, add variables, read their outline, unlink pins, remove nodes and build several wired nodes at once | `add_blueprint_variable`, `build_blueprint_graph`, `create_blueprint`, `disconnect_pin`, `get_blueprint_info`, `remove_graph_node` |
+| `blueprint_authoring` | Create Blueprints, from scratch or from actors placed in the level, add variables, read their outline, unlink pins, remove nodes and build several wired nodes at once | `add_blueprint_variable`, `build_blueprint_graph`, `create_blueprint`, `create_blueprint_from_actors`, `disconnect_pin`, `get_blueprint_info`, `remove_graph_node` |
 | `data_tables` | Read a data table row and change its fields | `get_data_table_row`, `set_data_table_row_fields` |
 <!-- END codegen_tool_map: packs -->
 
@@ -88,7 +88,7 @@ The core tools: `add_graph_node`, `compile_blueprint`, `connect_pins`, `execute_
 | Audio | 69 | Sound cues, MetaSounds, sound classes, mixes and submixes with their effects, attenuation, concurrency, modulation, audio buses, dialogue and subtitles, and playing sounds |
 | Audit | 9 | Health audits of asset references, Blueprints, collision profiles, replication and widgets, and a capture of the PIE state |
 | BehaviorTree | 23 | Behavior trees with their children, decorators and services, blackboards and their keys, and running a tree in PIE |
-| Blueprint | 87 | Blueprint authoring: Blueprints, macros and Editor Utility Blueprints, variables, functions and their parameters, event dispatchers, interfaces, components, timelines, graph nodes and pins, compiling, replication settings and reparenting |
+| Blueprint | 88 | Blueprint authoring: Blueprints, macros and Editor Utility Blueprints, variables, functions and their parameters, event dispatchers, interfaces, components, timelines, graph nodes and pins, compiling, replication settings and reparenting |
 | Camera | 16 | Camera and spring arm components, Gameplay Camera assets and rigs, and camera shakes |
 | Chooser | 14 | Chooser tables: their columns, rows, cells and outcomes, and evaluating one |
 | Config | 15 | Project settings and the default map, collision channels and profiles, config diffs, and re-running construction scripts |

@@ -2,7 +2,7 @@
 
 # Tool reference
 
-1547 tools in 55 domains. Every tool also describes itself over MCP (`tools/list`, or `describe_tool` for a tool the client does not list: see [tool lists](../clients.md#tool-lists)); this reference is the same catalog, readable.
+1548 tools in 55 domains. Every tool also describes itself over MCP (`tools/list`, or `describe_tool` for a tool the client does not list: see [tool lists](../clients.md#tool-lists)); this reference is the same catalog, readable.
 
 The 11 core tools, which every client lists by default: `add_graph_node`, `compile_blueprint`, `connect_pins`, `execute_python`, `find_assets_by_name`, `get_graph_nodes`, `get_object_info`, `save_asset`, `set_pin_default_value`, `set_properties`, `undo`.
 
@@ -14,7 +14,7 @@ The packs, which `enable_toolset` adds by name:
 | `levels` | `get_current_level`, `list_dirty_packages`, `load_level`, `save_level` | Open, save and inspect levels, and list what is unsaved |
 | `play` | `capture_viewport`, `is_play_in_editor_active`, `start_play_in_editor`, `stop_play_in_editor` | Start, stop and check Play-in-Editor, and capture the viewport |
 | `assets` | `delete_asset`, `duplicate_asset`, `get_asset_referencers` | Delete and duplicate assets, and find what references one |
-| `blueprint_authoring` | `add_blueprint_variable`, `build_blueprint_graph`, `create_blueprint`, `disconnect_pin`, `get_blueprint_info`, `remove_graph_node` | Create Blueprints, add variables, read their outline, unlink pins, remove nodes and build several wired nodes at once |
+| `blueprint_authoring` | `add_blueprint_variable`, `build_blueprint_graph`, `create_blueprint`, `create_blueprint_from_actors`, `disconnect_pin`, `get_blueprint_info`, `remove_graph_node` | Create Blueprints, from scratch or from actors placed in the level, add variables, read their outline, unlink pins, remove nodes and build several wired nodes at once |
 | `data_tables` | `get_data_table_row`, `set_data_table_row_fields` | Read a data table row and change its fields |
 
 | Domain | Tools | What it covers |
@@ -26,7 +26,7 @@ The packs, which `enable_toolset` adds by name:
 | [Audio](Audio.md) | 69 | Sound cues, MetaSounds, sound classes, mixes and submixes with their effects, attenuation, concurrency, modulation, audio buses, dialogue and subtitles, and playing sounds |
 | [Audit](Audit.md) | 9 | Health audits of asset references, Blueprints, collision profiles, replication and widgets, and a capture of the PIE state |
 | [BehaviorTree](BehaviorTree.md) | 23 | Behavior trees with their children, decorators and services, blackboards and their keys, and running a tree in PIE |
-| [Blueprint](Blueprint.md) | 87 | Blueprint authoring: Blueprints, macros and Editor Utility Blueprints, variables, functions and their parameters, event dispatchers, interfaces, components, timelines, graph nodes and pins, compiling, replication settings and reparenting |
+| [Blueprint](Blueprint.md) | 88 | Blueprint authoring: Blueprints, macros and Editor Utility Blueprints, variables, functions and their parameters, event dispatchers, interfaces, components, timelines, graph nodes and pins, compiling, replication settings and reparenting |
 | [Camera](Camera.md) | 16 | Camera and spring arm components, Gameplay Camera assets and rigs, and camera shakes |
 | [Chooser](Chooser.md) | 14 | Chooser tables: their columns, rows, cells and outcomes, and evaluating one |
 | [Config](Config.md) | 15 | Project settings and the default map, collision channels and profiles, config diffs, and re-running construction scripts |

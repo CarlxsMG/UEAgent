@@ -57,6 +57,9 @@
 #include "UObject/SavePackage.h"
 #include "Engine/CollisionProfile.h" // UCollisionProfile channel-name <-> index resolution
 #include "Editor.h"                                    // GEditor
+#include "EngineUtils.h"                               // TActorIterator: create_blueprint_from_actors finds its instance
+#include "HAL/FileManager.h"                           // IFileManager: whether a package file is on disk
+#include "Engine/Level.h"
 // Not used directly here (PIE detection is mcp_common::IsPieActive). The include stays:
 // bUseUnity=true, and removing it could break another file of the same unity blob that gets
 // it through here.
@@ -209,6 +212,32 @@ TSharedPtr<FJsonObject> ReadOwnComponentTemplate(const TSharedPtr<FJsonObject>& 
     OutTemplate = ResolveOwnComponentTemplate<TemplateType>(OutBlueprintName, OutComponentName, WrongTypeError, OutBlueprint, ResolveError);
     return ResolveError;
 }
+
+// The package of a new Blueprint named Name: no blind concatenation, because appending a full-path name
+// ("/Game/MyGame/.../BP_Foo") to the default folder makes a malformed package ("/Game/Blueprints//Game/MyGame/...")
+// and a slashed object FName, which crashes the editor. A full-path Name (with or without the ".Object" suffix) is
+// taken as it is; a bare Name goes under Folder, or /Game/Blueprints when Folder is empty. Null when OutPackageName
+// is valid, otherwise the error reply. Everything is validated before anyone touches CreatePackage.
+TSharedPtr<FJsonObject> ResolveNewBlueprintPackage(const FString& Name, const FString& Folder, FString& OutPackageName)
+{
+    if (Name.StartsWith(TEXT("/")))
+    {
+        OutPackageName = FPackageName::ObjectPathToPackageName(Name); // no-op when there is no ".Object" suffix
+    }
+    else
+    {
+        FString Parent = Folder.IsEmpty() ? FString(TEXT("/Game/Blueprints")) : Folder;
+        Parent.RemoveFromEnd(TEXT("/"));
+        OutPackageName = Parent / Name;
+    }
+    if (!FPackageName::IsValidLongPackageName(OutPackageName))
+    {
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("Invalid blueprint package path resolved from name='%s': '%s'"), *Name, *OutPackageName));
+    }
+    // The folder and the name each fit an FName and can still join past one, which an existence check aborts on.
+    return mcp_common::InvalidPackageNameReply(OutPackageName);
+}
 }
 
 // MCP-DOMAIN: Blueprint
@@ -263,30 +292,11 @@ TSharedPtr<FJsonObject> HandleCreateBlueprint(const TSharedPtr<FJsonObject>& Par
             *RequestedParentClass->GetName());
     };
 
-    // Resolve the package path -- no blind concatenation: appending a full-path name ("/Game/MyGame/.../BP_Foo")
-    // to the default folder makes a malformed package ("/Game/Blueprints//Game/MyGame/...") and a slashed object
-    // FName, which crashes the editor. A full-path 'name' (with or without the ".Object" suffix) is honored
-    // as-is; a bare 'name' goes under 'path' (if given) or the /Game/Blueprints default. Everything is
-    // validated before we touch CreatePackage.
     FString PackageName;
-    if (BlueprintName.StartsWith(TEXT("/")))
+    if (TSharedPtr<FJsonObject> Invalid = UEAgentBlueprintCommandsImpl::ResolveNewBlueprintPackage(BlueprintName, FolderOverride, PackageName))
     {
-        PackageName = FPackageName::ObjectPathToPackageName(BlueprintName); // no-op when there is no ".Object" suffix
+        return Invalid;
     }
-    else
-    {
-        FString Folder = FolderOverride.IsEmpty() ? FString(TEXT("/Game/Blueprints")) : FolderOverride;
-        Folder.RemoveFromEnd(TEXT("/"));
-        PackageName = Folder / BlueprintName;
-    }
-
-    if (!FPackageName::IsValidLongPackageName(PackageName))
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Invalid blueprint package path resolved from name='%s': '%s'"), *BlueprintName, *PackageName));
-    }
-    // The folder and the name each fit an FName and can still join past one, which the existence check below aborts on.
-    if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(PackageName)) { return Invalid; }
     const FString AssetName = FPackageName::GetShortName(PackageName);
 
     // The reply: the Blueprint, the parent class it reports and whether this call saved it.
@@ -496,6 +506,517 @@ TSharedPtr<FJsonObject> HandleCreateBlueprint(const TSharedPtr<FJsonObject>& Par
         Reply->SetStringField(TEXT("note"), TEXT("save=false: the Blueprint is registered and its package marked dirty, but not saved; persist it with save_asset"));
     }
     return Reply;
+}
+
+namespace UEAgentBlueprintCommandsImpl
+{
+// The world box of what Actors show in the level: the bounds of their primitives, child actors' included, leaving out
+// the editor-only and visualization ones (sprites, arrows), which a Blueprint made from them does not carry, and, with
+// bOnlySpawnable, the ones a harvest skips because a Blueprint cannot hold them (a volume's brush). Invalid when they
+// show nothing.
+FBox PlacedContentBox(const TArray<AActor*>& Actors, bool bOnlySpawnable)
+{
+    FBox Box(ForceInit);
+    for (const AActor* Actor : Actors)
+    {
+        Actor->ForEachComponent<UPrimitiveComponent>(/*bIncludeFromChildActors=*/true, [&Box, bOnlySpawnable](const UPrimitiveComponent* Primitive)
+        {
+            if (Primitive->IsRegistered() && !Primitive->IsVisualizationComponent() && !Primitive->IsEditorOnly()
+                && (!bOnlySpawnable || FKismetEditorUtilities::IsClassABlueprintSpawnableComponent(Primitive->GetClass())))
+            {
+                Box += Primitive->Bounds.GetBox();
+            }
+        });
+    }
+    return Box;
+}
+
+// An actor as an error message names it: its label, or its object name when it has none.
+FString ActorTitle(const AActor* Actor)
+{
+    const FString Label = Actor->GetActorLabel();
+    return Label.IsEmpty() ? Actor->GetName() : Label;
+}
+
+// A level as an error message names it: the short name of its map.
+FString LevelTitle(const ULevel* Level)
+{
+    return Level ? FPackageName::GetShortName(Level->GetOutermost()->GetName()) : FString(TEXT("none"));
+}
+}
+
+// MCP:create_blueprint_from_actors - Turn actors placed in the level into a reusable Blueprint asset, as the editor's Convert Selection to Blueprint Class does, and by default put one instance of it where they stood.
+//   @pack blueprint_authoring
+//   @para Use it when something was assembled out of level actors (meshes, lights, Blueprint actors) and should be reused or placed again. For an empty Blueprint use create_blueprint; to add a component to a Blueprint that exists, add_component_to_blueprint.
+//   @para mode is the choice the editor's dialog offers. harvest, the default, copies the components of every actor into one new Actor Blueprint and drops the actors' own classes: a Blueprint actor's variables, functions and graphs do not come along (logic_not_carried names those actors), components a Blueprint cannot hold are skipped (skipped_components), and the copied scene components become Movable. child_actors keeps each actor whole, class and logic included, as a Child Actor component. subclass takes one actor and makes a child of its class with that actor's edited values as defaults.
+//   @para With several actors the Blueprint's origin is their average location, unrotated; with one, that actor's transform. replace_actors, true by default, removes the actors and spawns one instance in their place, named after the Blueprint and selected; placement compares the bounds of what stood there with the instance's, and the call fails when they are more than 1 cm apart. The level is then unsaved (save_level). Undo is one step that brings the actors back and removes the instance; the asset stays, and delete_asset removes it.
+//   @para actor_names takes names or labels as get_actors_in_level returns them; name and path work as in create_blueprint. Nothing changes when Play-in-Editor is running, an undo transaction is open, an asset exists at the path, an actor is missing or its label is shared, the actors are in different levels, or the mode does not fit them. Example: {"actor_names": ["Table", "Lamp"], "name": "BP_TableSet", "path": "/Game/Props"}.
+//   @param actor_names - Required array of the actors to convert, each by name or by label (a label several actors share is an error), all in one level of the editor world.
+//   @param name - Required Blueprint name: a bare name goes under path (default /Game/Blueprints), a full content path ("/Game/Props/BP_TableSet") is used as it is. No asset may exist there yet.
+//   @param path - Optional content folder for a bare name.
+//   @param mode - Optional: "harvest" (default; the components only, in one Actor Blueprint), "child_actors" (each actor whole, as a Child Actor component) or "subclass" (exactly one actor; a child of its class).
+//   @param parent_class - Optional parent class, named as in create_blueprint. harvest and child_actors default to Actor and take any Actor class; subclass defaults to the actor's class and takes only that class or a child of it.
+//   @param replace_actors - Optional bool, default true: remove the actors and place one instance of the Blueprint where they stood. false leaves the level as it is.
+//   @param save - Optional bool, default true: save the new Blueprint. false leaves it in memory with unsaved changes, for save_asset.
+//   @returns { name: string, path: string, package_path: string, mode: string, parent_class: string, generated_class: string, compiled: bool, saved: bool, file_on_disk: bool, save_error?: string, source_actors: [{name, label, class}], components: [{name, class}] (the Blueprint's own construction-script components; a subclass also has its parent's), skipped_components: [{actor, component, class}], logic_not_carried: [{actor, class}], replaced: bool, new_actor?: {name, label, location}, removed_actors: [string], placement: {checked: bool, offset_cm?: number, reason?: string}, note?: string }
+
+TSharedPtr<FJsonObject> HandleCreateBlueprintFromActors(const TSharedPtr<FJsonObject>& Params)
+{
+    using UEAgentBlueprintCommandsImpl::ActorTitle;
+    using UEAgentBlueprintCommandsImpl::LevelTitle;
+
+    const TArray<TSharedPtr<FJsonValue>>* ActorNamesArray = nullptr;
+    if (!Params->TryGetArrayField(TEXT("actor_names"), ActorNamesArray) || !ActorNamesArray || ActorNamesArray->Num() == 0)
+    {
+        return mcp_common::MakeErrorReply(TEXT("Missing required parameter: actor_names (an array of actor names or labels)"));
+    }
+    FString BlueprintName;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("name"), BlueprintName)) { return Missing; }
+
+    FString FolderOverride;
+    Params->TryGetStringField(TEXT("path"), FolderOverride);
+    FString ModeName = TEXT("harvest");
+    Params->TryGetStringField(TEXT("mode"), ModeName);
+    FString ParentClassStr;
+    Params->TryGetStringField(TEXT("parent_class"), ParentClassStr);
+    bool bReplaceActors = true;
+    Params->TryGetBoolField(TEXT("replace_actors"), bReplaceActors);
+    bool bSave = true;
+    Params->TryGetBoolField(TEXT("save"), bSave);
+
+    // The three ways the editor's Create Blueprint From Selection dialog offers (ECreateBlueprintFromActorMode).
+    enum class EFromActorsMode : uint8 { Harvest, ChildActors, Subclass };
+    EFromActorsMode Mode = EFromActorsMode::Harvest;
+    ModeName = ModeName.TrimStartAndEnd().ToLower();
+    if (ModeName.IsEmpty() || ModeName == TEXT("harvest"))
+    {
+        ModeName = TEXT("harvest");
+    }
+    else if (ModeName == TEXT("child_actors") || ModeName == TEXT("childactors") || ModeName == TEXT("child_actor"))
+    {
+        Mode = EFromActorsMode::ChildActors;
+        ModeName = TEXT("child_actors");
+    }
+    else if (ModeName == TEXT("subclass"))
+    {
+        Mode = EFromActorsMode::Subclass;
+    }
+    else
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Unknown mode '%s': use harvest, child_actors or subclass. Nothing was created."), *ModeName));
+    }
+
+    // The dispatcher refuses this tool during PIE (McpPieSafety.gen.h); this covers a forced call. The replacement and
+    // the save are what a running session gets in the way of.
+    if (mcp_common::IsPieActive())
+    {
+        return mcp_common::MakeErrorReply(TEXT("A Play-in-Editor session is running: stop it first. Nothing was created or changed."));
+    }
+    // Undoing a transaction that holds the new asset takes it apart: its objects go back to before they were made, which
+    // leaves the Blueprint in memory with no construction script and an invalid class, for the next save to write. So the
+    // asset is made outside any transaction (the bridge opens none for this tool), and a call inside one is refused.
+    if (GEditor && GEditor->IsTransactionActive())
+    {
+        return mcp_common::MakeErrorReply(TEXT("An undo transaction is open (begin_transaction, or an execute_batch with ")
+            TEXT("transaction=true), and undoing it would take the new Blueprint apart in memory: close it with end_transaction, ")
+            TEXT("or make this call outside it. Nothing was created."));
+    }
+
+    UWorld* World = nullptr;
+    if (TSharedPtr<FJsonObject> NoWorld = mcp_common::RequireEditorWorld(World)) { return NoWorld; }
+
+    // Each entry is an actor's object name or, failing that, a label only one actor has.
+    TArray<AActor*> Actors;
+    TArray<FString> NotFound;
+    TArray<FString> SharedLabels;
+    for (const TSharedPtr<FJsonValue>& Entry : *ActorNamesArray)
+    {
+        FString Wanted;
+        if (!Entry.IsValid() || !Entry->TryGetString(Wanted) || Wanted.TrimStartAndEnd().IsEmpty())
+        {
+            NotFound.Add(TEXT("(an entry that is not a non-empty string)"));
+            continue;
+        }
+        Wanted.TrimStartAndEndInline();
+        AActor* Actor = mcp_common::FindActorByObjectName(World, Wanted);
+        if (!Actor)
+        {
+            int32 Matches = 0;
+            Actor = mcp_common::FindActorByUniqueLabel(World, Wanted, &Matches);
+            if (!Actor)
+            {
+                if (Matches > 1)
+                {
+                    SharedLabels.Add(FString::Printf(TEXT("%s (%d actors)"), *Wanted, Matches));
+                }
+                else
+                {
+                    NotFound.Add(Wanted);
+                }
+                continue;
+            }
+        }
+        Actors.AddUnique(Actor);
+    }
+    if (NotFound.Num() > 0 || SharedLabels.Num() > 0)
+    {
+        TArray<FString> Parts;
+        if (NotFound.Num() > 0)
+        {
+            Parts.Add(FString::Printf(TEXT("not found in the editor world: %s"), *FString::Join(NotFound, TEXT(", "))));
+        }
+        if (SharedLabels.Num() > 0)
+        {
+            Parts.Add(FString::Printf(TEXT("a label several actors share, so pass their names: %s"), *FString::Join(SharedLabels, TEXT(", "))));
+        }
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Some actors do not resolve -- %s. get_actors_in_level lists names and labels. Nothing was created."),
+            *FString::Join(Parts, TEXT("; "))));
+    }
+
+    // One level: the engine spawns the instance that replaces the actors in the world's current level.
+    ULevel* const Level = Actors[0]->GetLevel();
+    for (const AActor* Actor : Actors)
+    {
+        if (Actor->GetLevel() != Level)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("%s is in level %s and %s in level %s: pass actors of one level. Nothing was created."),
+                *ActorTitle(Actors[0]), *LevelTitle(Level), *ActorTitle(Actor), *LevelTitle(Actor->GetLevel())));
+        }
+    }
+    if (bReplaceActors && Level != World->GetCurrentLevel())
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("The actors are in level %s, but the current level is %s, where the instance that replaces them would go: ")
+            TEXT("make %s current with set_current_level, or pass replace_actors=false. Nothing was created."),
+            *LevelTitle(Level), *LevelTitle(World->GetCurrentLevel()), *LevelTitle(Level)));
+    }
+
+    // The tests the editor's dialog makes before it offers each mode (FCreateBlueprintFromActorDialog::GetValidCreationMethods).
+    switch (Mode)
+    {
+    case EFromActorsMode::Subclass:
+        if (Actors.Num() != 1)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("mode subclass takes exactly one actor and got %d; harvest and child_actors take several. Nothing was created."),
+                Actors.Num()));
+        }
+        if (!FKismetEditorUtilities::CanCreateBlueprintOfClass(Actors[0]->GetClass()))
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("%s's class %s cannot be a Blueprint parent, so mode subclass does not fit it; use harvest or child_actors. Nothing was created."),
+                *ActorTitle(Actors[0]), *Actors[0]->GetClass()->GetName()));
+        }
+        break;
+    case EFromActorsMode::ChildActors:
+        for (const AActor* Actor : Actors)
+        {
+            if (Actor->GetClass()->HasAnyClassFlags(CLASS_NotPlaceable))
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(
+                    TEXT("%s's class %s cannot be placed, so it cannot be a child actor; use harvest. Nothing was created."),
+                    *ActorTitle(Actor), *Actor->GetClass()->GetName()));
+            }
+        }
+        break;
+    case EFromActorsMode::Harvest:
+    {
+        bool bAnyComponent = false;
+        for (const AActor* Actor : Actors)
+        {
+            for (const UActorComponent* Component : Actor->GetComponents())
+            {
+                if (Component && !Component->IsVisualizationComponent()
+                    && FKismetEditorUtilities::IsClassABlueprintSpawnableComponent(Component->GetClass()))
+                {
+                    bAnyComponent = true;
+                    break;
+                }
+            }
+        }
+        if (!bAnyComponent)
+        {
+            return mcp_common::MakeErrorReply(TEXT("None of these actors has a component a Blueprint can hold, so there is ")
+                TEXT("nothing to harvest; use child_actors. Nothing was created."));
+        }
+        break;
+    }
+    }
+
+    UClass* ParentClass = nullptr;
+    if (!ParentClassStr.IsEmpty())
+    {
+        ParentClass = FUEAgentGraphUtils::ResolveClass(ParentClassStr);
+        if (!ParentClass)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(TEXT("Parent class not found: %s"), *ParentClassStr));
+        }
+    }
+    if (Mode == EFromActorsMode::Subclass)
+    {
+        // The engine refuses a parent outside the actor's class, after it has made the package.
+        const UClass* ActorClass = Actors[0]->GetClass();
+        if (ParentClass && !ParentClass->IsChildOf(ActorClass))
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("parent_class %s does not derive from %s, the class of %s; in mode subclass the parent is that class or a child of it. Nothing was created."),
+                *ParentClass->GetName(), *ActorClass->GetName(), *ActorTitle(Actors[0])));
+        }
+    }
+    else
+    {
+        if (!ParentClass)
+        {
+            ParentClass = AActor::StaticClass();
+        }
+        if (!ParentClass->IsChildOf(AActor::StaticClass()) || !FKismetEditorUtilities::CanCreateBlueprintOfClass(ParentClass))
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("parent_class %s is not an Actor class a Blueprint can derive from. Nothing was created."), *ParentClass->GetName()));
+        }
+    }
+
+    FString PackageName;
+    if (TSharedPtr<FJsonObject> Invalid = UEAgentBlueprintCommandsImpl::ResolveNewBlueprintPackage(BlueprintName, FolderOverride, PackageName))
+    {
+        return Invalid;
+    }
+    const FString AssetName = FPackageName::GetShortName(PackageName);
+    const FString PackageFile = FPackageName::LongPackageNameToFilename(PackageName, FPackageName::GetAssetPackageExtension());
+    // Never over an asset: the engine's CreateBlueprint aborts the editor when the package already holds an object of
+    // that name, and the registry alone can still list one that was deleted, or miss one that is only in memory.
+    UPackage* const LoadedPackage = FindPackage(nullptr, *PackageName);
+    if (UEditorAssetLibrary::DoesAssetExist(PackageName) || IFileManager::Get().FileExists(*PackageFile)
+        || (LoadedPackage && FindObject<UObject>(LoadedPackage, *AssetName)))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("An asset already exists at %s, and this tool does not overwrite one: pick another name, or delete that asset first (delete_asset). Nothing was created."),
+            *PackageName));
+    }
+    FString PackageError;
+    UPackage* const Package = mcp_common::CreateAssetPackage(PackageName, AssetName, UBlueprint::StaticClass(), PackageError);
+    if (!Package)
+    {
+        return mcp_common::MakeErrorReply(PackageError);
+    }
+    Package->FullyLoad();
+
+    // What the reply reports about the actors has to be read now: the replacement destroys them.
+    TArray<TSharedPtr<FJsonValue>> SourceRows;
+    TArray<TSharedPtr<FJsonValue>> SkippedRows;
+    TArray<TSharedPtr<FJsonValue>> LogicRows;
+    TArray<TSharedPtr<FJsonValue>> RemovedRows;
+    TArray<TWeakObjectPtr<AActor>> Originals;
+    for (AActor* Actor : Actors)
+    {
+        TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
+        Row->SetStringField(TEXT("name"), Actor->GetName());
+        Row->SetStringField(TEXT("label"), Actor->GetActorLabel());
+        Row->SetStringField(TEXT("class"), Actor->GetClass()->GetPathName());
+        SourceRows.Add(MakeShared<FJsonValueObject>(Row));
+        RemovedRows.Add(MakeShared<FJsonValueString>(Actor->GetName()));
+        Originals.Add(Actor);
+        if (Mode != EFromActorsMode::Harvest)
+        {
+            continue;
+        }
+        // Harvest copies components into a new class: the class of a Blueprint actor, and what it defines, stay behind.
+        if (Cast<UBlueprintGeneratedClass>(Actor->GetClass()))
+        {
+            TSharedPtr<FJsonObject> Logic = MakeShared<FJsonObject>();
+            Logic->SetStringField(TEXT("actor"), ActorTitle(Actor));
+            Logic->SetStringField(TEXT("class"), Actor->GetClass()->GetPathName());
+            LogicRows.Add(MakeShared<FJsonValueObject>(Logic));
+        }
+        // AddComponentsToBlueprint drops what a Blueprint cannot spawn; the visualization ones are not offered to it.
+        for (const UActorComponent* Component : Actor->GetComponents())
+        {
+            if (Component && !Component->IsVisualizationComponent()
+                && !FKismetEditorUtilities::IsClassABlueprintSpawnableComponent(Component->GetClass()))
+            {
+                TSharedPtr<FJsonObject> Skipped = MakeShared<FJsonObject>();
+                Skipped->SetStringField(TEXT("actor"), ActorTitle(Actor));
+                Skipped->SetStringField(TEXT("component"), Component->GetName());
+                Skipped->SetStringField(TEXT("class"), Component->GetClass()->GetName());
+                SkippedRows.Add(MakeShared<FJsonValueObject>(Skipped));
+            }
+        }
+    }
+    const FBox SourceBox = UEAgentBlueprintCommandsImpl::PlacedContentBox(Actors, /*bOnlySpawnable=*/Mode == EFromActorsMode::Harvest);
+
+    // The engine's own conversion, without opening the Blueprint editor. It registers the asset, compiles it and, on
+    // request, replaces the actors inside its own transaction ("Replace Actor(s) with blueprint").
+    const FName BlueprintFName(*AssetName);
+    UBlueprint* Blueprint = nullptr;
+    switch (Mode)
+    {
+    case EFromActorsMode::Harvest:
+    {
+        FKismetEditorUtilities::FHarvestBlueprintFromActorsParams HarvestParams;
+        HarvestParams.bReplaceActors = bReplaceActors;
+        HarvestParams.bOpenBlueprint = false;
+        HarvestParams.ParentClass = ParentClass;
+        Blueprint = FKismetEditorUtilities::HarvestBlueprintFromActors(BlueprintFName, Package, Actors, HarvestParams);
+        break;
+    }
+    case EFromActorsMode::ChildActors:
+    {
+        FKismetEditorUtilities::FCreateBlueprintFromActorsParams ChildParams(Actors);
+        ChildParams.bReplaceActors = bReplaceActors;
+        ChildParams.bOpenBlueprint = false;
+        ChildParams.ParentClass = ParentClass;
+        Blueprint = FKismetEditorUtilities::CreateBlueprintFromActors(BlueprintFName, Package, ChildParams);
+        break;
+    }
+    case EFromActorsMode::Subclass:
+    {
+        FKismetEditorUtilities::FCreateBlueprintFromActorParams SubclassParams;
+        SubclassParams.bReplaceActor = bReplaceActors;
+        SubclassParams.bOpenBlueprint = false;
+        SubclassParams.ParentClassOverride = ParentClass;
+        Blueprint = FKismetEditorUtilities::CreateBlueprintFromActor(BlueprintFName, Package, Actors[0], SubclassParams);
+        break;
+    }
+    }
+    if (!Blueprint)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("The engine made no Blueprint from these actors at %s; the level was not changed."), *PackageName));
+    }
+
+    // The instance: the replacement spawns one actor of the new class.
+    AActor* NewActor = nullptr;
+    if (bReplaceActors && Blueprint->GeneratedClass)
+    {
+        for (TActorIterator<AActor> It(World, Blueprint->GeneratedClass.Get()); It; ++It)
+        {
+            NewActor = *It;
+            break;
+        }
+    }
+    int32 StillPlaced = 0;
+    for (const TWeakObjectPtr<AActor>& Original : Originals)
+    {
+        StillPlaced += Original.IsValid() ? 1 : 0;
+    }
+    const bool bReplaced = bReplaceActors && NewActor && StillPlaced == 0;
+    const bool bCompiled = Blueprint->GeneratedClass && Blueprint->Status != BS_Error;
+
+    bool bSaved = false;
+    FString SaveError;
+    if (bSave)
+    {
+        bSaved = mcp_common::SaveAssetPackage(Package, Blueprint, SaveError);
+    }
+    const bool bOnDisk = IFileManager::Get().FileExists(*PackageFile);
+
+    // The instance has to show what the actors showed, where they showed it.
+    TSharedPtr<FJsonObject> Placement = MakeShared<FJsonObject>();
+    bool bPlacementOk = true;
+    double PlacementOffset = 0.0;
+    const FBox NewBox = NewActor ? UEAgentBlueprintCommandsImpl::PlacedContentBox(TArray<AActor*>{ NewActor }, /*bOnlySpawnable=*/false) : FBox(ForceInit);
+    if (NewActor && SourceBox.IsValid && NewBox.IsValid)
+    {
+        PlacementOffset = FMath::Max((NewBox.Min - SourceBox.Min).GetAbsMax(), (NewBox.Max - SourceBox.Max).GetAbsMax());
+        bPlacementOk = PlacementOffset <= 1.0;
+        Placement->SetBoolField(TEXT("checked"), true);
+        Placement->SetNumberField(TEXT("offset_cm"), FMath::RoundToDouble(PlacementOffset * 100.0) / 100.0);
+    }
+    else
+    {
+        Placement->SetBoolField(TEXT("checked"), false);
+        Placement->SetStringField(TEXT("reason"), !bReplaceActors ? TEXT("replace_actors is false, so no instance was placed")
+            : !NewActor ? TEXT("no instance of the new class was found in the level")
+            : TEXT("the actors show no primitive with bounds (a light alone, for example)"));
+    }
+
+    TArray<TSharedPtr<FJsonValue>> ComponentRows;
+    if (const USimpleConstructionScript* SCS = Blueprint->SimpleConstructionScript)
+    {
+        for (const USCS_Node* Node : SCS->GetAllNodes())
+        {
+            if (Node)
+            {
+                TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
+                Row->SetStringField(TEXT("name"), Node->GetVariableName().ToString());
+                Row->SetStringField(TEXT("class"), Node->ComponentClass ? Node->ComponentClass->GetName() : FString());
+                ComponentRows.Add(MakeShared<FJsonValueObject>(Row));
+            }
+        }
+    }
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("name"), Blueprint->GetName());
+    Data->SetStringField(TEXT("path"), Blueprint->GetPathName());
+    Data->SetStringField(TEXT("package_path"), PackageName);
+    Data->SetStringField(TEXT("mode"), ModeName);
+    Data->SetStringField(TEXT("parent_class"), Blueprint->ParentClass ? Blueprint->ParentClass->GetPathName() : FString());
+    Data->SetStringField(TEXT("generated_class"), Blueprint->GeneratedClass ? Blueprint->GeneratedClass->GetPathName() : FString());
+    Data->SetBoolField(TEXT("compiled"), bCompiled);
+    Data->SetBoolField(TEXT("saved"), bSaved);
+    Data->SetBoolField(TEXT("file_on_disk"), bOnDisk);
+    if (!SaveError.IsEmpty())
+    {
+        Data->SetStringField(TEXT("save_error"), SaveError);
+    }
+    Data->SetArrayField(TEXT("source_actors"), SourceRows);
+    Data->SetArrayField(TEXT("components"), ComponentRows);
+    Data->SetArrayField(TEXT("skipped_components"), SkippedRows);
+    Data->SetArrayField(TEXT("logic_not_carried"), LogicRows);
+    Data->SetBoolField(TEXT("replaced"), bReplaced);
+    if (NewActor)
+    {
+        TSharedPtr<FJsonObject> NewActorObj = MakeShared<FJsonObject>();
+        NewActorObj->SetStringField(TEXT("name"), NewActor->GetName());
+        NewActorObj->SetStringField(TEXT("label"), NewActor->GetActorLabel());
+        const FVector Location = NewActor->GetActorLocation();
+        TArray<TSharedPtr<FJsonValue>> LocationRow;
+        LocationRow.Add(MakeShared<FJsonValueNumber>(Location.X));
+        LocationRow.Add(MakeShared<FJsonValueNumber>(Location.Y));
+        LocationRow.Add(MakeShared<FJsonValueNumber>(Location.Z));
+        NewActorObj->SetArrayField(TEXT("location"), LocationRow);
+        Data->SetObjectField(TEXT("new_actor"), NewActorObj);
+    }
+    Data->SetArrayField(TEXT("removed_actors"), bReplaced ? RemovedRows : TArray<TSharedPtr<FJsonValue>>());
+    Data->SetObjectField(TEXT("placement"), Placement);
+    TArray<FString> Notes;
+    if (bReplaced)
+    {
+        Notes.Add(TEXT("the level has unsaved changes (the actors were removed and the instance placed): save_level writes them, undo brings the actors back"));
+    }
+    if (!bSave)
+    {
+        Notes.Add(TEXT("save=false: the Blueprint is in memory with unsaved changes; save_asset writes it"));
+    }
+    if (Notes.Num() > 0)
+    {
+        Data->SetStringField(TEXT("note"), FString::Join(Notes, TEXT("; ")));
+    }
+
+    TArray<FString> Failures;
+    if (!bCompiled)
+    {
+        Failures.Add(TEXT("the Blueprint did not compile (compile_blueprint with return_messages says why)"));
+    }
+    if (bSave && !bSaved)
+    {
+        Failures.Add(FString::Printf(TEXT("it was not saved: %s"), *SaveError));
+    }
+    if (bReplaceActors && !bReplaced)
+    {
+        Failures.Add(FString::Printf(TEXT("the actors were not replaced (%d of %d still in the level, %s)"),
+            StillPlaced, Originals.Num(), NewActor ? TEXT("an instance was placed") : TEXT("no instance was placed")));
+    }
+    if (!bPlacementOk)
+    {
+        Failures.Add(FString::Printf(TEXT("the instance's bounds are %.2f cm away from the actors' bounds"), PlacementOffset));
+    }
+    const bool bOk = Failures.Num() == 0;
+    return mcp_common::MakeOutcomeReply(Data, bOk, bOk ? FString()
+        : FString::Printf(TEXT("create_blueprint_from_actors made %s, but %s."), *PackageName, *FString::Join(Failures, TEXT("; "))));
 }
 
 // ---------------------------------------------------------------------------
@@ -5176,6 +5697,7 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("attach_blueprint_component"), &HandleAttachBlueprintComponent },
     { TEXT("compile_blueprint"), &HandleCompileBlueprint },
     { TEXT("create_blueprint"), &HandleCreateBlueprint },
+    { TEXT("create_blueprint_from_actors"), &HandleCreateBlueprintFromActors },
     { TEXT("get_actor_material_info"), &HandleGetActorMaterialInfo },
     { TEXT("get_ai_perception_senses"), &HandleGetAIPerceptionSenses },
     { TEXT("remove_ai_perception_sense"), &HandleRemoveAIPerceptionSense },

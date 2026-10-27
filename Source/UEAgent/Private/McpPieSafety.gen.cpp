@@ -77,6 +77,7 @@ static const FRow GRows[] =
     { TEXT("create_anim_blueprint"), EReason::Compiles, TEXT("Animation/UEAgentAnimBlueprintCommands.cpp HandleCreateAnimBlueprint: FKismetEditorUtilities::CompileBlueprint") },
     { TEXT("create_attribute_set_blueprint"), EReason::Compiles, TEXT("Gameplay/UEAgentGASAuthoringCommands.cpp HandleCreateAttributeSetBlueprint: FKismetEditorUtilities::CompileBlueprint") },
     { TEXT("create_blueprint"), EReason::Creates, TEXT("Blueprint/UEAgentBlueprintCommands.cpp HandleCreateBlueprint: FKismetEditorUtilities::CreateBlueprint") },
+    { TEXT("create_blueprint_from_actors"), EReason::Creates, TEXT("Blueprint/UEAgentBlueprintCommands.cpp HandleCreateBlueprintFromActors: FKismetEditorUtilities::CreateBlueprint") },
     { TEXT("create_blueprint_interface"), EReason::Creates, TEXT("Editor/UEAgentTypeCommands.cpp HandleCreateBlueprintInterface: FKismetEditorUtilities::CreateBlueprint") },
     { TEXT("create_camera_shake_blueprint"), EReason::Compiles, TEXT("Common/McpCommonUtils.cpp CreateOrLoadBlueprint: FKismetEditorUtilities::CompileBlueprint") },
     { TEXT("create_common_ui_stack"), EReason::Compiles, TEXT("UI/UEAgentUMGMVVMCommands.cpp SaveWidgetBlueprint: FKismetEditorUtilities::CompileBlueprint") },

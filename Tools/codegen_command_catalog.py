@@ -338,8 +338,8 @@ PACKS = {
     "levels": "open, save and inspect levels, and list what is unsaved",
     "play": "start, stop and check Play-in-Editor, and capture the viewport",
     "assets": "delete and duplicate assets, and find what references one",
-    "blueprint_authoring": "create Blueprints, add variables, read their outline, unlink pins, remove nodes and build several "
-                           "wired nodes at once",
+    "blueprint_authoring": "create Blueprints, from scratch or from actors placed in the level, add variables, read their "
+                           "outline, unlink pins, remove nodes and build several wired nodes at once",
     "data_tables": "read a data table row and change its fields",
 }
 # What each domain covers, as find_tools (with no arguments) and the tool map skill publish it: an agent picks a domain by

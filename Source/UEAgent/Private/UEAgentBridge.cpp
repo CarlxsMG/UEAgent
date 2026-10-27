@@ -1021,14 +1021,16 @@ namespace McpUndoStep
 
     // The tools that drive or read the undo buffer themselves stay outside: undo and redo refuse to run
     // inside a transaction, the history readers would see it open, and build_blueprint_graph rolls back
-    // with UndoTransaction, which an enclosing transaction would block.
+    // with UndoTransaction, which an enclosing transaction would block. create_blueprint_from_actors builds
+    // its new asset outside any transaction, as the editor's Convert Selection to Blueprint Class does, so
+    // that its one undo step is the engine's replacement of the actors and never takes the asset apart.
     static bool ManagesUndoBuffer(const FString& CommandType)
     {
         static const TSet<FString> Commands = {
             TEXT("undo"), TEXT("redo"), TEXT("get_undo_state"), TEXT("get_transaction_history"),
             TEXT("begin_transaction"), TEXT("end_transaction"), TEXT("cancel_transaction"),
             TEXT("reset_transaction_buffer"), TEXT("set_undo_barrier"), TEXT("remove_undo_barrier"),
-            TEXT("build_blueprint_graph") };
+            TEXT("build_blueprint_graph"), TEXT("create_blueprint_from_actors") };
         return Commands.Contains(CommandType);
     }
 

@@ -2,6 +2,34 @@
 
 Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](https://semver.org).
 
+## 2.9.0 - 2026-10-27
+
+A new tool turns actors placed in the level into a reusable Blueprint.
+
+### Added
+
+- **`create_blueprint_from_actors`**, in the `blueprint_authoring` pack: the editor's **Convert Selection to Blueprint
+  Class** for an agent. It takes actors by name or label and makes one Blueprint asset from them in one of the three
+  ways the editor's dialog offers:
+  - `harvest`, the default, copies the components of every actor into one Actor Blueprint. The actors' own classes
+    do not come along: the reply names the Blueprint actors whose variables, functions and graphs stay behind
+    (`logic_not_carried`) and the components a Blueprint cannot hold (`skipped_components`), and the copied scene
+    components become Movable, as in the editor.
+  - `child_actors` keeps each actor whole, class and logic included, as a Child Actor component.
+  - `subclass` makes a child of one actor's class, with that actor's edited values as defaults.
+
+  By default it saves the asset and replaces the actors with one instance of it, then measures that the instance
+  shows what the actors showed in the same place (`placement`). Undo brings the actors back and keeps the asset. It
+  refuses, before changing anything, during Play-in-Editor, inside an open undo transaction, over an existing asset,
+  for an actor it cannot find or a label several actors share, for actors in different levels, and for a mode that
+  does not fit the actors.
+- The `blueprint_authoring` pack's description says it also makes Blueprints from actors placed in the level.
+
+Every promise of the description was checked on both engines with a new set of checks, the example call included.
+One of them found that undoing a transaction that holds the new asset leaves the Blueprint broken in memory, with
+no construction script and an invalid class; so the tool runs outside the per-call undo step, like the editor's
+dialog, and refuses a call inside a transaction someone else opened.
+
 ## 2.8.2 - 2026-10-25
 
 Undo works on every node `add_graph_node` makes, and four of the default tools say what they do to the editor.
