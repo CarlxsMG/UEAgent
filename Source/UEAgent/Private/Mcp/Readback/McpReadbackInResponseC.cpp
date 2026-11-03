@@ -543,16 +543,35 @@ namespace McpReadbackInResponseC
 		return WarnLocalRpc(Params, Result);
 	}
 
-	/** add_function_parameter adds a parameter but nothing can retype it afterwards. */
+	/** Whether a param_type spells a container: "int[]", "Array<...>", "Set<...>", "Map<...>" (and their T-forms). */
+	static bool SpellsContainer(const FString& ParamType)
+	{
+		const FString Type = ParamType.TrimStartAndEnd();
+		if (Type.EndsWith(TEXT("[]")))
+		{
+			return true;
+		}
+		for (const TCHAR* Prefix : { TEXT("Array<"), TEXT("TArray<"), TEXT("Set<"), TEXT("TSet<"), TEXT("Map<"), TEXT("TMap<") })
+		{
+			if (Type.StartsWith(Prefix, ESearchCase::IgnoreCase))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** add_function_parameter: a container asked for in param_type must be on the pin made, whose container the reply reads. */
 	static FO CheckFunctionParameter(const FO& Params, const FO& Result)
 	{
 		const FO Data = Payload(Result);
-		if (TextOf(Get(Data, TEXT("param_name"))).IsEmpty())
+		const FString Container = TextOf(Get(Data, TEXT("container")));
+		if (Container.IsEmpty() || !Container.Equals(TEXT("none")) || !SpellsContainer(TextOf(Get(Params, TEXT("param_type")))))
 		{
 			return nullptr;
 		}
-		return WarningFinding(TEXT("parameter_added_not_retypable"), TextField(Params, TEXT("param_type")), TextField(Data, TEXT("param_type")),
-			TEXT("response:param_name"), RB_check_function_parameter_0);
+		return DegradingFinding(TEXT("container_dropped"), TextField(Params, TEXT("param_type")), TextField(Data, TEXT("pin_type")),
+			TEXT("response:container"), RB_check_function_parameter_0);
 	}
 
 	/** The nav modifier volume's flags are echoes: they do not distinguish the requested area class. */

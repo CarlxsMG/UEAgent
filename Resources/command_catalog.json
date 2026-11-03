@@ -16140,7 +16140,7 @@
               "name": "is_array",
               "jsonType": "boolean",
               "required": false,
-              "description": "When true, make the variable an array container; defaults to false. This is the ONLY array authoring path -- add_function_parameter has no equivalent."
+              "description": "When true, make the variable an array container; defaults to false. A parameter takes its container in param_type instead (add_function_parameter with \"int[]\")."
             },
             {
               "name": "default_value",
@@ -16536,7 +16536,7 @@
         },
         {
           "name": "add_function_parameter",
-          "description": "Add an input or output (return) parameter to an existing Blueprint FUNCTION graph -- interface-override graphs included -- or to a MACRO graph (create_blueprint_macro), and reconstruct its Entry/Result node or the macro's input/output tunnel. A macro also takes param_type \"exec\", an execution pin, so it can get several exec inputs and outputs. TWO HARD LIMITS, both silent-ish: it cannot create an ARRAY parameter (there is no is_array; the param comes out SCALAR with success), so redesign the signature to read the array where it lives; and it cannot reach a CUSTOM EVENT (\"Function graph not found\"), so a Server/Client RPC WITH arguments must be authored as a function plus set_blueprint_function_rpc. On a Blueprint just given a new function, compile_blueprint between creation and this call. Inverse: remove_function_parameter.",
+          "description": "Add an input or output (return) parameter to an existing Blueprint FUNCTION graph -- interface-override graphs included --, to a MACRO graph (create_blueprint_macro), or an input to a CUSTOM EVENT (an RPC event included), and reconstruct its Entry/Result node, the macro's input/output tunnel or the event node. The name is looked up in that order: function, macro, custom event.\n\nparam_type takes a container: \"int[]\" or \"Array<int>\", \"Set<Name>\", \"Map<Name,int>\" (a hashable key); the reply's pin_type is read back from the pin made, so it shows the container that was really created. A macro also takes param_type \"exec\", an execution pin, so it can get several exec inputs and outputs. A custom event has inputs only, and one bound to an event dispatcher keeps the dispatcher's signature, so it is refused. On a Blueprint just given a new function, compile_blueprint between creation and this call. Inverse: remove_function_parameter; set_function_parameter_type changes the type of a parameter that exists.",
           "params": [
             {
               "name": "blueprint_name",
@@ -16550,7 +16550,7 @@
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Name of an existing function graph (FunctionGraphs or an interface-override graph), or of a macro graph of this Blueprint when no function has that name. A custom event is NOT a function graph and is rejected here."
+              "description": "Name of an existing function graph (FunctionGraphs or an interface-override graph), else of a macro graph, else of a custom event of this Blueprint."
             },
             {
               "name": "param_name",
@@ -16564,16 +16564,16 @@
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Type string: bool, int, int64, float, string, name, text, byte, Vector, or a struct/enum/class/object name or path; \"exec\" on a macro. Arrays are NOT expressible."
+              "description": "Type string: bool, int, int64, float, string, name, text, byte, Vector, or a struct/enum/class/object name or path, optionally in a container: \"int[]\", \"Array<int>\", \"Set<Name>\", \"Map<Name,int>\"; \"exec\" on a macro."
             },
             {
               "name": "is_output",
               "jsonType": "boolean",
               "required": false,
-              "description": "When true, add an output/return param (an input pin on the Result node) instead of an input; defaults to false"
+              "description": "When true, add an output/return param (an input pin on the Result node) instead of an input; defaults to false. A custom event has inputs only."
             }
           ],
-          "returns": "{ blueprint_name, function_name, param_name, param_type, is_output, graph_kind? } -- param_name is the pin name actually created (uniquified); graph_kind is \"macro\" when the parameter went on a macro. Verify with get_graph_nodes at compact=false: compact hides the new, still-unlinked pin and makes it look like nothing was created.",
+          "returns": "{ blueprint_name, function_name, param_name, param_type, pin_type, container, is_output, graph_kind? } -- param_name is the pin name actually created; pin_type and container (\"none\", \"array\", \"set\" or \"map\") are read from that pin; graph_kind is \"macro\" or \"custom_event\" when the parameter went there. Verify with get_graph_nodes at compact=false: compact hides the new, still-unlinked pin and makes it look like nothing was created.",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
@@ -18783,7 +18783,7 @@
         },
         {
           "name": "remove_function_parameter",
-          "description": "Remove an input or output parameter from a Blueprint function graph -- interface-override graphs included -- or from a macro graph, in one undo step: the user pin leaves the Entry node (inputs) or every Result node (outputs), or the macro's input or output tunnel, and the node is reconstructed, so links to that pin break. Inverse of add_function_parameter; for an override of a C++ or interface function, reconcile_function_signature fits the signature to the parent instead. Nothing is compiled or saved: call sites update at the next compile_blueprint. A parameter that is not there is an honest no-op (removed=false, the parameters it does have in params); a missing Blueprint or graph is an error. The reply re-reads the signature (params_left). Read the pins: get_graph_nodes at compact=false. Refused during PIE unless force=true.",
+          "description": "Remove an input or output parameter from a Blueprint function graph -- interface-override graphs included --, from a macro graph, or an input from a custom event, in one undo step: the user pin leaves the Entry node (inputs) or every Result node (outputs), the macro's input or output tunnel, or the event node, and the node is reconstructed, so links to that pin break. Inverse of add_function_parameter; for an override of a C++ or interface function, reconcile_function_signature fits the signature to the parent instead. Nothing is compiled or saved: call sites update at the next compile_blueprint. A parameter that is not there is an honest no-op (removed=false, the parameters it does have in params); a missing Blueprint or graph is an error. The reply re-reads the signature (params_left). Read the pins: get_graph_nodes at compact=false. Refused during PIE unless force=true.",
           "params": [
             {
               "name": "blueprint_name",
@@ -18797,7 +18797,7 @@
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Name of the function graph, or of a macro graph when no function has that name."
+              "description": "Name of the function graph, else of a macro graph, else of a custom event."
             },
             {
               "name": "param_name",
@@ -18959,7 +18959,7 @@
         },
         {
           "name": "rename_function_parameter",
-          "description": "Rename a PARAMETER of a Blueprint function graph -- the parameter counterpart of rename_blueprint_variable, and the only headless way to do it: add_function_parameter only ADDS, there is no remove_function_parameter, so \"delete and re-add\" is not even available. It renames the pin on the Entry node and on EVERY Result node of the graph, and registers a CoreRedirect so that call sites re-map themselves. That redirect is not a nicety: it is what stops this from being a PHANTOM PIN FACTORY. With the redirect, the call site's pin takes the new name AND KEEPS ITS LITERAL VALUE; renamed WITHOUT one, the old pin stays alive and ORPHANED on the caller. WARNING: that orphan is silent: it survives compiles that report num_errors:0 -- so `compile_blueprint` is NOT the oracle here. The oracle is get_graph_nodes(compact=false) on the callers, checking that NO pin still carries the old name. The redirect matches on `Class.Function.Param`, so it reaches callers that merely CALL the function (K2Node_Message included) without implementing its interface, and dependents that are not even loaded -- both of which rename_blueprint_variable cannot reach. It does NOT rename anything that names the parameter as TEXT (a DataTable cell, a saved game, Python). Run compile_blueprint afterwards and save_asset on this Blueprint AND on every caller. AND THE COMPILE IS NOT THE END OF IT: what reaches the .uasset is UserDefinedPins, not the EdGraphPins you read back -- a rename checked only on the latter can report renamed:true, compile at num_errors:0, be saved and COMMITTED, and still come back as the OLD name the next time the editor starts. So it also reports entry_user_pins_after/result_user_pins_after (the serialized side, legitimately EMPTY on an interface-override graph) and refuses to claim success while any UserDefinedPin still carries the old name. The end-to-end oracle is still disk: save_asset -> reload_asset_package -> get_function_pins.",
+          "description": "Rename a PARAMETER of a Blueprint function graph -- the parameter counterpart of rename_blueprint_variable, and the only way to rename one that keeps call sites: removing it (remove_function_parameter) and adding it again breaks every link and literal the callers had. It renames the pin on the Entry node and on EVERY Result node of the graph, and registers a CoreRedirect so that call sites re-map themselves. That redirect is not a nicety: it is what stops this from being a PHANTOM PIN FACTORY. With the redirect, the call site's pin takes the new name AND KEEPS ITS LITERAL VALUE; renamed WITHOUT one, the old pin stays alive and ORPHANED on the caller. WARNING: that orphan is silent: it survives compiles that report num_errors:0 -- so `compile_blueprint` is NOT the oracle here. The oracle is get_graph_nodes(compact=false) on the callers, checking that NO pin still carries the old name. The redirect matches on `Class.Function.Param`, so it reaches callers that merely CALL the function (K2Node_Message included) without implementing its interface, and dependents that are not even loaded -- both of which rename_blueprint_variable cannot reach. It does NOT rename anything that names the parameter as TEXT (a DataTable cell, a saved game, Python). Run compile_blueprint afterwards and save_asset on this Blueprint AND on every caller. AND THE COMPILE IS NOT THE END OF IT: what reaches the .uasset is UserDefinedPins, not the EdGraphPins you read back -- a rename checked only on the latter can report renamed:true, compile at num_errors:0, be saved and COMMITTED, and still come back as the OLD name the next time the editor starts. So it also reports entry_user_pins_after/result_user_pins_after (the serialized side, legitimately EMPTY on an interface-override graph) and refuses to claim success while any UserDefinedPin still carries the old name. The end-to-end oracle is still disk: save_asset -> reload_asset_package -> get_function_pins.",
           "params": [
             {
               "name": "blueprint_name",
@@ -19595,6 +19595,53 @@
             }
           ],
           "returns": "{ blueprint_name, dispatcher_name, mode, added: [string], params: [ { name, type } ], param_count }",
+          "annotations": {
+            "readOnlyHint": false,
+            "destructiveHint": true,
+            "idempotentHint": true,
+            "openWorldHint": false
+          }
+        },
+        {
+          "name": "set_function_parameter_type",
+          "description": "Change the TYPE of an existing parameter of a Blueprint function, macro or custom event, keeping its name and its place in the signature: what the parameter's type picker in the Details panel does. Adding the parameter again under the same name is not the same: remove_function_parameter breaks every link and literal its callers had, and this keeps the links that still fit.\n\nThe new type goes on the Entry node (an input), on every Result node (an output), on the macro's tunnel or on the event node, and the parameter's default value is cleared, as the editor clears it, because it rarely fits the new type. Then every LOADED call site is rebuilt, in this Blueprint and in the others that call it (function and event calls, interface messages, macro instances), and each link of the parameter that the new type no longer allows is broken: links_broken lists them, with the node and pin at both ends, so they can be rewired; links_kept counts the rest. A Blueprint that calls it and is not loaded updates when it is compiled.\n\nparam_type is spelled as for add_function_parameter, containers included (\"int[]\", \"Set<Name>\", \"Map<Name,int>\"); new_type is read back from the pin. The same type again is an honest no-op (changed=false). Nothing is compiled or saved: compile_blueprint this Blueprint and each one in blueprints_to_compile. A graph whose signature comes from an interface or a parent function is refused: change it there (in a Blueprint interface, with this tool: the Blueprints that implement it take the new type when they are compiled), or fit an override with reconcile_function_signature. Refused during PIE unless force=true.",
+          "params": [
+            {
+              "name": "blueprint_name",
+              "jsonType": "string",
+              "required": true,
+              "nameLike": true,
+              "description": "Blueprint name or path."
+            },
+            {
+              "name": "function_name",
+              "jsonType": "string",
+              "required": true,
+              "nameLike": true,
+              "description": "Name of the function graph, else of a macro graph, else of a custom event."
+            },
+            {
+              "name": "param_name",
+              "jsonType": "string",
+              "required": true,
+              "nameLike": true,
+              "description": "The parameter to retype, as get_function_pins or add_function_parameter names it."
+            },
+            {
+              "name": "param_type",
+              "jsonType": "string",
+              "required": true,
+              "nameLike": true,
+              "description": "The new type: bool, int, int64, float, string, name, text, byte, Vector, or a struct/enum/class/object name or path, optionally in a container (\"int[]\", \"Set<Name>\", \"Map<Name,int>\"); \"exec\" on a macro."
+            },
+            {
+              "name": "is_output",
+              "jsonType": "boolean",
+              "required": false,
+              "description": "true to retype an output/return parameter, false (default) an input. A custom event has inputs only."
+            }
+          ],
+          "returns": "{ blueprint_name, function_name, param_name, is_output, graph_kind, old_type, new_type, container, changed, default_value_cleared, call_sites_refreshed, links_kept, links_broken: [{node_id, node_title, pin, linked_node_id, linked_node_title, linked_pin, blueprint}], blueprints_to_compile: [string], note? }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -52288,7 +52335,7 @@
         },
         {
           "name": "get_properties",
-          "description": "Read one or several named properties off ONE object you can already name -- an asset path, a live object's full path, a CDO/archetype, or a dotted \"Actor[.Component[.Subobject]]\" whose first segment is the actor's internal name -- typed rather than stringified, as { name: typed_value } plus each property's FProperty class and not_found[] for names the class does not declare. Pick it when you have the object and the names: get_object_info when you do not know the names yet, get_actor_properties_by_class when you have no path and want instances by class or label (it drops misspelled names; this reports them). property_name reads one; property_names batches several. Accepts `world` (editor, server, client, pie:N), so the same read on server and client is the cheapest proof that a value replicated; the reply stamps which world answered. Read-only.",
+          "description": "Read one or several named properties off ONE object you can already name -- an asset path, a live object's full path, a CDO/archetype, or a dotted \"Actor[.Component[.Subobject]]\" whose first segment is the actor's internal name -- typed rather than stringified, as { name: typed_value } plus each property's FProperty class and not_found[] for names the class does not declare. Pick it when you have the object and the names: get_object_info when you do not know the names yet, get_actor_properties_by_class when you have no path and want instances by class or label (it drops misspelled names; this reports them). property_name reads one; property_names batches several. A name can be a PATH into the value: \"RelativeLocation.Z\", \"Items[2].Name\", or through an object reference, \"Layer.Settings.Size\" (the object Layer points to); a path that does not resolve is in not_found[], and path_errors says at which segment and what is there. Accepts `world` (editor, server, client, pie:N), so the same read on server and client is the cheapest proof that a value replicated; the reply stamps which world answered. Read-only.",
           "params": [
             {
               "name": "object_path",
@@ -52302,14 +52349,14 @@
               "jsonType": "array",
               "required": false,
               "nameLike": true,
-              "description": "Optional names of the properties to read; every name that the class does not declare comes back in not_found[]. Required unless property_name is given."
+              "description": "Optional names of the properties to read, each a property name or a path (\"Struct.Field\", \"Array[2].Field\", \"Reference.Property\"); every name that does not resolve comes back in not_found[]. Required unless property_name is given."
             },
             {
               "name": "property_name",
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "description": "Optional single property to read, added to property_names."
+              "description": "Optional single property name or path to read, added to property_names."
             },
             {
               "name": "world",
@@ -52319,7 +52366,7 @@
               "description": "Optional world selector: absent/'editor' (default: the editor/asset instance) | 'pie' (ambiguous: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie'). Anything other than absent/'editor' reads the LIVE instance in that world; an UNRECOGNIZED value is an error naming the worlds that exist, never a silent fallback to another world."
             }
           ],
-          "returns": "{ object_path: string, class_name: string, values: object (typed: bool/number/string natively, struct/map as object, array/set as array, object-ref as path string), property_types: object ({name: FProperty class name}), not_found: [string], world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }",
+          "returns": "{ object_path: string, class_name: string, values: object (typed: bool/number/string natively, struct/map as object, array/set as array, object-ref as path string), property_types: object ({name: FProperty class name}), not_found: [string], path_errors?: object ({path: why it did not resolve}), world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -52589,7 +52636,7 @@
         },
         {
           "name": "set_properties",
-          "description": "Write one or several editable properties of one object in the editor world, as the Details panel does: an asset, a CDO, a placed actor, one of its components (\"Actor.Component\") or an asset's sub-object. Each write is undoable, dirties the package and re-registers the component, and the reply lists what was set and what failed, with why.\n\nUse it for any setting of a light, fog, sky, decal, camera, post-process volume, sound, Niagara system, material expression or other asset. Not for: a component in a live PIE world (set_component_property), a Blueprint's component template (set_blueprint_component_properties), a widget inside a Widget Blueprint (set_widget_property), or an object's own setter function (call_function).\n\nTake the property names from get_object_info, and object_path from the tool that found the object: find_assets_by_name for an asset, get_graph_nodes for a graph node, or \"Label.ComponentClass\" for a placed actor, such as \"Sun.DirectionalLightComponent\". Example: {\"object_path\": \"Sun.DirectionalLightComponent\", \"properties\": {\"Intensity\": 10, \"LightColor\": {\"R\": 255, \"G\": 200, \"B\": 150}}} writes two properties; property_name \"Intensity\" with value 10 writes one, and both forms together write properties first. A struct takes only the fields to change: {\"RelativeLocation\": {\"Z\": 200}} keeps X and Y.\n\nA sub-object's asset is finished as its editor does it: a graph node is reconstructed and its Blueprint marked modified (compile it), a sound cue recaches, a Niagara system recompiles and a blend space is resampled; no Blueprint is compiled. clamp=true keeps numbers inside ClampMin/ClampMax and lists what it clamped. save=true saves an asset's package and is refused for an object in a level, which save_level writes. Refused before anything is written: a struct key that names no field, an unregistered gameplay tag, and any call during Play-in-Editor (see force).",
+          "description": "Write one or several editable properties of one object in the editor world, as the Details panel does: an asset, a CDO, a placed actor, one of its components (\"Actor.Component\") or an asset's sub-object. Each write is undoable, dirties the package and re-registers the component, and the reply lists what was set and what failed, with why.\n\nUse it for any setting of a light, fog, sky, decal, camera, post-process volume, sound, Niagara system, material expression or other asset. Not for: a component in a live PIE world (set_component_property), a Blueprint's component template (set_blueprint_component_properties), a widget inside a Widget Blueprint (set_widget_property), or an object's own setter function (call_function).\n\nTake the property names from get_object_info, and object_path from the tool that found the object: find_assets_by_name for an asset, get_graph_nodes for a graph node, or \"Label.ComponentClass\" for a placed actor, such as \"Sun.DirectionalLightComponent\". Example: {\"object_path\": \"Sun.DirectionalLightComponent\", \"properties\": {\"Intensity\": 10, \"LightColor\": {\"R\": 255, \"G\": 200, \"B\": 150}}} writes two properties; property_name \"Intensity\" with value 10 writes one, and both forms together write properties first. A struct takes only the fields to change: {\"RelativeLocation\": {\"Z\": 200}} keeps X and Y.\n\nA name can also be a PATH, to write one value deep inside without rewriting what holds it: \"RelativeLocation.Z\", \"Items[2]\" or \"Items[2].Name\" (an existing element; to resize an array, write the whole array), and through an object reference to the object it points to, such as an instanced sub-object: \"Layer.Settings.Size\". The object holding the last segment is the one written, made undoable and notified with the chain of its segments, as the Details panel does for a nested edit; every segment it holds must be writable, and a reference the path goes through only needs to be visible.\n\nA sub-object's asset is finished as its editor does it: a graph node is reconstructed and its Blueprint marked modified (compile it), a sound cue recaches, a Niagara system recompiles and a blend space is resampled; no Blueprint is compiled. clamp=true keeps numbers inside ClampMin/ClampMax and lists what it clamped. save=true saves an asset's package and is refused for an object in a level, which save_level writes. Refused before anything is written: a struct key that names no field, an unregistered gameplay tag, and any call during Play-in-Editor (see force).",
           "params": [
             {
               "name": "object_path",
@@ -52602,14 +52649,14 @@
               "name": "properties",
               "jsonType": "object",
               "required": false,
-              "description": "Optional dict of {property_name: value}; values can be scalar, nested object, or array (UE-format text like \"(X=1,Y=2,Z=3)\" is also accepted for structs). Required unless property_name + value is given; both together write properties{} first."
+              "description": "Optional dict of {property_name or path: value}; values can be scalar, nested object, or array (UE-format text like \"(X=1,Y=2,Z=3)\" is also accepted for structs). Required unless property_name + value is given; both together write properties{} first."
             },
             {
               "name": "property_name",
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "description": "Optional single property to write (must be CPF_Edit and not EditConst, or it lands in failed[] with the reason). Needs value."
+              "description": "Optional single property, or path such as \"Items[2].Name\", to write (must be CPF_Edit and not EditConst, or it lands in failed[] with the reason). Needs value."
             },
             {
               "name": "value",

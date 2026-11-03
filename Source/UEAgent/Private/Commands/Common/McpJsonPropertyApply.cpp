@@ -1355,158 +1355,203 @@ namespace
 // ResolvePropertyPath
 // ============================================================================================
 
-bool ResolvePropertyPath(UStruct* OwnerStruct, void* Container, const FString& Path,
-                         FProperty*& OutLeafProp, void*& OutLeafPtr, FString& OutError)
+namespace
 {
-    OutLeafProp = nullptr;
-    OutLeafPtr = nullptr;
-    OutError.Reset();
-
-    if (!OwnerStruct || !Container)
+    /** The walk behind ResolvePropertyPath; OutSegments, when given, gets each segment with the object holding it. */
+    bool ResolvePropertyPathImpl_JsonApply(UStruct* OwnerStruct, void* Container, UObject* RootObject, const FString& Path,
+                                           FProperty*& OutLeafProp, void*& OutLeafPtr, FString& OutError,
+                                           TArray<FPropertyPathSegment>* OutSegments)
     {
-        OutError = TEXT("null container or owner UStruct");
-        return false;
-    }
-    if (Path.IsEmpty())
-    {
-        OutError = TEXT("empty property path");
-        return false;
-    }
+        OutLeafProp = nullptr;
+        OutLeafPtr = nullptr;
+        OutError.Reset();
 
-    TArray<FString> Segments;
-    Path.ParseIntoArray(Segments, TEXT("."), /*InCullEmpty=*/ true);
-    if (Segments.Num() == 0)
-    {
-        OutError = FString::Printf(TEXT("path '%s' contains no segment"), *Path);
-        return false;
-    }
-
-    UStruct* CurrentStruct = OwnerStruct;
-    void* CurrentContainer = Container;
-    FProperty* CurrentProperty = nullptr;
-    void* CurrentValuePtr = nullptr;
-
-    for (int32 SegmentIndex = 0; SegmentIndex < Segments.Num(); ++SegmentIndex)
-    {
-        const FString RawSegment = Segments[SegmentIndex];
-
-        // Split "Name[3][1]" into name + indices.
-        FString Name = RawSegment;
-        TArray<int32> Indices;
+        if (!OwnerStruct || !Container)
         {
-            int32 BracketPos = INDEX_NONE;
-            if (RawSegment.FindChar(TEXT('['), BracketPos))
+            OutError = TEXT("null container or owner UStruct");
+            return false;
+        }
+        if (Path.IsEmpty())
+        {
+            OutError = TEXT("empty property path");
+            return false;
+        }
+
+        TArray<FString> Segments;
+        Path.ParseIntoArray(Segments, TEXT("."), /*InCullEmpty=*/ true);
+        if (Segments.Num() == 0)
+        {
+            OutError = FString::Printf(TEXT("path '%s' contains no segment"), *Path);
+            return false;
+        }
+
+        UStruct* CurrentStruct = OwnerStruct;
+        void* CurrentContainer = Container;
+        UObject* CurrentOwner = RootObject;
+        FProperty* CurrentProperty = nullptr;
+        void* CurrentValuePtr = nullptr;
+        if (OutSegments)
+        {
+            OutSegments->Reset();
+        }
+
+        for (int32 SegmentIndex = 0; SegmentIndex < Segments.Num(); ++SegmentIndex)
+        {
+            const FString RawSegment = Segments[SegmentIndex];
+
+            // Split "Name[3][1]" into name + indices.
+            FString Name = RawSegment;
+            TArray<int32> Indices;
             {
-                Name = RawSegment.Left(BracketPos);
-                FString Rest = RawSegment.RightChop(BracketPos);
-                while (!Rest.IsEmpty())
+                int32 BracketPos = INDEX_NONE;
+                if (RawSegment.FindChar(TEXT('['), BracketPos))
                 {
-                    int32 Open = INDEX_NONE;
-                    int32 Close = INDEX_NONE;
-                    if (!Rest.FindChar(TEXT('['), Open) || !Rest.FindChar(TEXT(']'), Close) || Close < Open)
+                    Name = RawSegment.Left(BracketPos);
+                    FString Rest = RawSegment.RightChop(BracketPos);
+                    while (!Rest.IsEmpty())
                     {
-                        OutError = FString::Printf(TEXT("malformed index in segment '%s' of path '%s'"),
-                                                   *RawSegment, *Path);
-                        return false;
+                        int32 Open = INDEX_NONE;
+                        int32 Close = INDEX_NONE;
+                        if (!Rest.FindChar(TEXT('['), Open) || !Rest.FindChar(TEXT(']'), Close) || Close < Open)
+                        {
+                            OutError = FString::Printf(TEXT("malformed index in segment '%s' of path '%s'"),
+                                                       *RawSegment, *Path);
+                            return false;
+                        }
+                        const FString IndexText = Rest.Mid(Open + 1, Close - Open - 1).TrimStartAndEnd();
+                        int32 ParsedIndex = 0;
+                        if (IndexText.IsEmpty() || !LexTryParseString(ParsedIndex, *IndexText))
+                        {
+                            OutError = FString::Printf(TEXT("'%s' is not a numeric index in segment '%s'"),
+                                                       *IndexText, *RawSegment);
+                            return false;
+                        }
+                        Indices.Add(ParsedIndex);
+                        Rest = Rest.RightChop(Close + 1);
                     }
-                    const FString IndexText = Rest.Mid(Open + 1, Close - Open - 1).TrimStartAndEnd();
-                    int32 ParsedIndex = 0;
-                    if (IndexText.IsEmpty() || !LexTryParseString(ParsedIndex, *IndexText))
-                    {
-                        OutError = FString::Printf(TEXT("'%s' is not a numeric index in segment '%s'"),
-                                                   *IndexText, *RawSegment);
-                        return false;
-                    }
-                    Indices.Add(ParsedIndex);
-                    Rest = Rest.RightChop(Close + 1);
                 }
             }
-        }
 
-        if (Name.IsEmpty())
-        {
-            OutError = FString::Printf(TEXT("unnamed segment in path '%s'"), *Path);
-            return false;
-        }
-        if (!CurrentStruct)
-        {
-            OutError = FString::Printf(TEXT("cannot descend into '%s': the previous segment of '%s' is neither a struct nor an object"),
-                                       *Name, *Path);
-            return false;
-        }
-
-        FProperty* Property = FindPropertyRelaxed_JsonApply(CurrentStruct, Name);
-        if (!Property)
-        {
-            const FString Available = DescribeAvailableProperties_JsonApply(CurrentStruct);
-            OutError = Available.IsEmpty()
-                ? FString::Printf(TEXT("segment '%s' of path '%s' does not exist in %s"),
-                                  *Name, *Path, *CurrentStruct->GetName())
-                : FString::Printf(TEXT("segment '%s' of path '%s' does not exist in %s. Available: %s"),
-                                  *Name, *Path, *CurrentStruct->GetName(), *Available);
-            return false;
-        }
-
-        void* ValuePtr = Property->ContainerPtrToValuePtr<void>(CurrentContainer);
-
-        for (int32 Index : Indices)
-        {
-            FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property);
-            if (!ArrayProperty)
+            if (Name.IsEmpty())
             {
-                OutError = FString::Printf(TEXT("'%s' (%s) is not an array, so [%d] means nothing in path '%s'"),
-                                           *Name, *Property->GetCPPType(), Index, *Path);
+                OutError = FString::Printf(TEXT("unnamed segment in path '%s'"), *Path);
                 return false;
             }
-            FScriptArrayHelper ArrayHelper(ArrayProperty, ValuePtr);
-            if (!ArrayHelper.IsValidIndex(Index))
+            if (!CurrentStruct)
             {
-                OutError = FString::Printf(TEXT("index %d out of range in '%s' of path '%s' (%d elements)"),
-                                           Index, *Name, *Path, ArrayHelper.Num());
-                return false;
-            }
-            ValuePtr = ArrayHelper.GetElementPtr(Index);
-            Property = ArrayProperty->Inner;
-        }
-
-        CurrentProperty = Property;
-        CurrentValuePtr = ValuePtr;
-
-        const bool bIsLastSegment = (SegmentIndex + 1 == Segments.Num());
-        if (bIsLastSegment)
-        {
-            break;
-        }
-
-        if (FStructProperty* StructProperty = CastField<FStructProperty>(Property))
-        {
-            CurrentStruct = StructProperty->Struct;
-            CurrentContainer = ValuePtr;
-        }
-        else if (FObjectPropertyBase* ObjectProperty = CastField<FObjectPropertyBase>(Property))
-        {
-            // Descending through a reference means FOLLOWING THE POINTER, not writing over it.
-            UObject* Inner = ObjectProperty->GetObjectPropertyValue(ValuePtr);
-            if (!Inner)
-            {
-                OutError = FString::Printf(TEXT("segment '%s' of path '%s' is null: there is no object to keep descending through"),
+                OutError = FString::Printf(TEXT("cannot descend into '%s': the previous segment of '%s' is neither a struct nor an object"),
                                            *Name, *Path);
                 return false;
             }
-            CurrentStruct = Inner->GetClass();
-            CurrentContainer = Inner;
-        }
-        else
-        {
-            OutError = FString::Printf(TEXT("segment '%s' of path '%s' is of type %s: cannot descend through it"),
-                                       *Name, *Path, *Property->GetCPPType());
-            return false;
-        }
-    }
 
-    OutLeafProp = CurrentProperty;
-    OutLeafPtr = CurrentValuePtr;
-    return OutLeafProp != nullptr && OutLeafPtr != nullptr;
+            FProperty* Property = FindPropertyRelaxed_JsonApply(CurrentStruct, Name);
+            if (!Property)
+            {
+                const FString Available = DescribeAvailableProperties_JsonApply(CurrentStruct);
+                OutError = Available.IsEmpty()
+                    ? FString::Printf(TEXT("segment '%s' of path '%s' does not exist in %s"),
+                                      *Name, *Path, *CurrentStruct->GetName())
+                    : FString::Printf(TEXT("segment '%s' of path '%s' does not exist in %s. Available: %s"),
+                                      *Name, *Path, *CurrentStruct->GetName(), *Available);
+                return false;
+            }
+
+            void* ValuePtr = Property->ContainerPtrToValuePtr<void>(CurrentContainer);
+            if (OutSegments)
+            {
+                FPropertyPathSegment& Segment = OutSegments->AddDefaulted_GetRef();
+                Segment.Property = Property;
+                Segment.Owner = CurrentOwner;
+            }
+
+            for (int32 Index : Indices)
+            {
+                FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property);
+                if (!ArrayProperty)
+                {
+                    OutError = FString::Printf(TEXT("'%s' (%s) is not an array, so [%d] means nothing in path '%s'"),
+                                               *Name, *Property->GetCPPType(), Index, *Path);
+                    return false;
+                }
+                FScriptArrayHelper ArrayHelper(ArrayProperty, ValuePtr);
+                if (!ArrayHelper.IsValidIndex(Index))
+                {
+                    OutError = FString::Printf(TEXT("index %d out of range in '%s' of path '%s' (%d elements)"),
+                                               Index, *Name, *Path, ArrayHelper.Num());
+                    return false;
+                }
+                ValuePtr = ArrayHelper.GetElementPtr(Index);
+                Property = ArrayProperty->Inner;
+            }
+
+            CurrentProperty = Property;
+            CurrentValuePtr = ValuePtr;
+
+            const bool bIsLastSegment = (SegmentIndex + 1 == Segments.Num());
+            if (bIsLastSegment)
+            {
+                break;
+            }
+
+            if (FStructProperty* StructProperty = CastField<FStructProperty>(Property))
+            {
+                CurrentStruct = StructProperty->Struct;
+                CurrentContainer = ValuePtr;
+            }
+            else if (FObjectPropertyBase* ObjectProperty = CastField<FObjectPropertyBase>(Property))
+            {
+                // Descending through a reference means FOLLOWING THE POINTER, not writing over it.
+                UObject* Inner = ObjectProperty->GetObjectPropertyValue(ValuePtr);
+                if (!Inner)
+                {
+                    OutError = FString::Printf(TEXT("segment '%s' of path '%s' is null: there is no object to keep descending through"),
+                                               *Name, *Path);
+                    return false;
+                }
+                CurrentStruct = Inner->GetClass();
+                CurrentContainer = Inner;
+                CurrentOwner = Inner;
+            }
+            else
+            {
+                OutError = FString::Printf(TEXT("segment '%s' of path '%s' is of type %s: cannot descend through it"),
+                                           *Name, *Path, *Property->GetCPPType());
+                return false;
+            }
+        }
+
+        OutLeafProp = CurrentProperty;
+        OutLeafPtr = CurrentValuePtr;
+        return OutLeafProp != nullptr && OutLeafPtr != nullptr;
+    }
+} // anonymous namespace
+
+bool ResolvePropertyPath(UStruct* OwnerStruct, void* Container, const FString& Path,
+                         FProperty*& OutLeafProp, void*& OutLeafPtr, FString& OutError)
+{
+    return ResolvePropertyPathImpl_JsonApply(OwnerStruct, Container, /*RootObject=*/nullptr, Path, OutLeafProp, OutLeafPtr,
+        OutError, /*OutSegments=*/nullptr);
+}
+
+bool ResolveObjectPropertyPath(UObject* Root, const FString& Path, TArray<FPropertyPathSegment>& OutSegments,
+                               FProperty*& OutLeafProp, void*& OutLeafPtr, FString& OutError)
+{
+    if (!Root)
+    {
+        OutLeafProp = nullptr;
+        OutLeafPtr = nullptr;
+        OutSegments.Reset();
+        OutError = TEXT("null object");
+        return false;
+    }
+    return ResolvePropertyPathImpl_JsonApply(Root->GetClass(), Root, Root, Path, OutLeafProp, OutLeafPtr, OutError,
+        &OutSegments);
+}
+
+bool IsPropertyPath(const FString& Name)
+{
+    int32 Unused = INDEX_NONE;
+    return Name.FindChar(TEXT('.'), Unused) || Name.FindChar(TEXT('['), Unused);
 }
 
 // ============================================================================================

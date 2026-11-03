@@ -56,6 +56,26 @@ namespace mcp_common
     UEAGENT_API bool ResolvePropertyPath(UStruct* OwnerStruct, void* Container, const FString& Path,
                                            FProperty*& OutLeafProp, void*& OutLeafPtr, FString& OutError);
 
+    /** One segment of a resolved path: the property it names and the object whose memory holds that property. */
+    struct FPropertyPathSegment
+    {
+        /** The property the segment names: an array's own property for "Items[2]", not its Inner. */
+        FProperty* Property = nullptr;
+        /** The root object, or the object the last pointer of the path led to. */
+        UObject* Owner = nullptr;
+    };
+
+    /**
+     * ResolvePropertyPath from an object, also returning every segment with the object that holds it. A writer needs
+     * both: the object to Modify and to notify is the Owner of the LAST segment, and the edit chain it is told about
+     * is the run of segments that same object holds.
+     */
+    UEAGENT_API bool ResolveObjectPropertyPath(UObject* Root, const FString& Path, TArray<FPropertyPathSegment>& OutSegments,
+                                                 FProperty*& OutLeafProp, void*& OutLeafPtr, FString& OutError);
+
+    /** True when Name is a path ("A.B", "Items[2]") rather than one property name, which never holds '.' or '['. */
+    UEAGENT_API bool IsPropertyPath(const FString& Name);
+
     /**
      * Writes Value into the property pointed to by ValuePtr. PathPrefix only feeds the report.
      *

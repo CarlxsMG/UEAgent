@@ -535,6 +535,9 @@ static const TCHAR* const GRows[] =
         TEXT("args"), TEXT("params"), TEXT("args_json"), TEXT("params"),
         TEXT("blueprint_path"), TEXT("blueprint_name"), TEXT("parameters"), TEXT("params"),
         nullptr,
+    TEXT("set_function_parameter_type"),
+        TEXT("blueprint_path"), TEXT("blueprint_name"),
+        nullptr,
     TEXT("set_gameplay_effect_component"),
         TEXT("blueprint_name"), TEXT("ge_blueprint_path"),
         nullptr,
@@ -654,7 +657,7 @@ static const TMap<FName, TArray<FAlias>>& GetMap()
     static const TMap<FName, TArray<FAlias>> Map = []
     {
         TMap<FName, TArray<FAlias>> Out;
-        Out.Reserve(205);
+        Out.Reserve(206);
         const TCHAR* const* Cursor = GRows;
         while (*Cursor)
         {
@@ -691,4 +694,4 @@ TConstArrayView<FAlias> For(FName CommandName)
 
 } // namespace McpParamAliases
 
-// 205 commands / 228 pairs.
+// 206 commands / 229 pairs.

@@ -2,7 +2,7 @@
 
 # Blueprint
 
-88 tools for Blueprint authoring: Blueprints, macros and Editor Utility Blueprints, variables, functions and their parameters, event dispatchers, interfaces, components, timelines, graph nodes and pins, compiling, replication settings and reparenting.
+89 tools for Blueprint authoring: Blueprints, macros and Editor Utility Blueprints, variables, functions and their parameters, event dispatchers, interfaces, components, timelines, graph nodes and pins, compiling, replication settings and reparenting.
 
 Back to the [index](README.md).
 
@@ -73,7 +73,7 @@ Add a MEMBER variable to a Blueprint (add_function_local_variable is the functio
 | `blueprint_name` | string | yes | Blueprint name or path. |
 | `variable_name` | string | yes | New variable name (fails if the name already exists on this Blueprint). |
 | `variable_type` | string | yes | Type string: bool, int, int64, float, string, name, text, byte, or the name/path of a struct, enum, class or object (e.g. Vector, /Game/Dir/S_Foo.S_Foo, /Script/Engine.Actor). |
-| `is_array` | boolean | no | When true, make the variable an array container; defaults to false. This is the ONLY array authoring path -- add_function_parameter has no equivalent. |
+| `is_array` | boolean | no | When true, make the variable an array container; defaults to false. A parameter takes its container in param_type instead (add_function_parameter with "int[]"). |
 | `default_value` | string | no | Initial default value for the new variable, in exported-text form; optional |
 
 **Returns:** `{ blueprint_name, variable_name, variable_type, is_array } -- an echo of the request, NOT a verification: read the variable back with get_blueprint_variables (or the CDO) before relying on it.`
@@ -202,17 +202,19 @@ Add a variable scoped to ONE function graph (interface-override graphs included)
 
 *Additive.*
 
-Add an input or output (return) parameter to an existing Blueprint FUNCTION graph -- interface-override graphs included -- or to a MACRO graph (create_blueprint_macro), and reconstruct its Entry/Result node or the macro's input/output tunnel. A macro also takes param_type "exec", an execution pin, so it can get several exec inputs and outputs. TWO HARD LIMITS, both silent-ish: it cannot create an ARRAY parameter (there is no is_array; the param comes out SCALAR with success), so redesign the signature to read the array where it lives; and it cannot reach a CUSTOM EVENT ("Function graph not found"), so a Server/Client RPC WITH arguments must be authored as a function plus set_blueprint_function_rpc. On a Blueprint just given a new function, compile_blueprint between creation and this call. Inverse: remove_function_parameter.
+Add an input or output (return) parameter to an existing Blueprint FUNCTION graph -- interface-override graphs included --, to a MACRO graph (create_blueprint_macro), or an input to a CUSTOM EVENT (an RPC event included), and reconstruct its Entry/Result node, the macro's input/output tunnel or the event node. The name is looked up in that order: function, macro, custom event.
+
+param_type takes a container: "int[]" or "Array&lt;int>", "Set&lt;Name>", "Map&lt;Name,int>" (a hashable key); the reply's pin_type is read back from the pin made, so it shows the container that was really created. A macro also takes param_type "exec", an execution pin, so it can get several exec inputs and outputs. A custom event has inputs only, and one bound to an event dispatcher keeps the dispatcher's signature, so it is refused. On a Blueprint just given a new function, compile_blueprint between creation and this call. Inverse: remove_function_parameter; set_function_parameter_type changes the type of a parameter that exists.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `blueprint_name` | string | yes | Blueprint name or path. |
-| `function_name` | string | yes | Name of an existing function graph (FunctionGraphs or an interface-override graph), or of a macro graph of this Blueprint when no function has that name. A custom event is NOT a function graph and is rejected here. |
+| `function_name` | string | yes | Name of an existing function graph (FunctionGraphs or an interface-override graph), else of a macro graph, else of a custom event of this Blueprint. |
 | `param_name` | string | yes | New parameter name; made unique, so the applied name is the one echoed back in the response. |
-| `param_type` | string | yes | Type string: bool, int, int64, float, string, name, text, byte, Vector, or a struct/enum/class/object name or path; "exec" on a macro. Arrays are NOT expressible. |
-| `is_output` | boolean | no | When true, add an output/return param (an input pin on the Result node) instead of an input; defaults to false |
+| `param_type` | string | yes | Type string: bool, int, int64, float, string, name, text, byte, Vector, or a struct/enum/class/object name or path, optionally in a container: "int[]", "Array&lt;int>", "Set&lt;Name>", "Map&lt;Name,int>"; "exec" on a macro. |
+| `is_output` | boolean | no | When true, add an output/return param (an input pin on the Result node) instead of an input; defaults to false. A custom event has inputs only. |
 
-**Returns:** `{ blueprint_name, function_name, param_name, param_type, is_output, graph_kind? } -- param_name is the pin name actually created (uniquified); graph_kind is "macro" when the parameter went on a macro. Verify with get_graph_nodes at compact=false: compact hides the new, still-unlinked pin and makes it look like nothing was created.`
+**Returns:** `{ blueprint_name, function_name, param_name, param_type, pin_type, container, is_output, graph_kind? } -- param_name is the pin name actually created; pin_type and container ("none", "array", "set" or "map") are read from that pin; graph_kind is "macro" or "custom_event" when the parameter went there. Verify with get_graph_nodes at compact=false: compact hides the new, still-unlinked pin and makes it look like nothing was created.`
 
 ## `add_graph_node`
 
@@ -1044,12 +1046,12 @@ Remove a local variable from one Blueprint function graph (interface-override gr
 
 *Destructive.*
 
-Remove an input or output parameter from a Blueprint function graph -- interface-override graphs included -- or from a macro graph, in one undo step: the user pin leaves the Entry node (inputs) or every Result node (outputs), or the macro's input or output tunnel, and the node is reconstructed, so links to that pin break. Inverse of add_function_parameter; for an override of a C++ or interface function, reconcile_function_signature fits the signature to the parent instead. Nothing is compiled or saved: call sites update at the next compile_blueprint. A parameter that is not there is an honest no-op (removed=false, the parameters it does have in params); a missing Blueprint or graph is an error. The reply re-reads the signature (params_left). Read the pins: get_graph_nodes at compact=false. Refused during PIE unless force=true.
+Remove an input or output parameter from a Blueprint function graph -- interface-override graphs included --, from a macro graph, or an input from a custom event, in one undo step: the user pin leaves the Entry node (inputs) or every Result node (outputs), the macro's input or output tunnel, or the event node, and the node is reconstructed, so links to that pin break. Inverse of add_function_parameter; for an override of a C++ or interface function, reconcile_function_signature fits the signature to the parent instead. Nothing is compiled or saved: call sites update at the next compile_blueprint. A parameter that is not there is an honest no-op (removed=false, the parameters it does have in params); a missing Blueprint or graph is an error. The reply re-reads the signature (params_left). Read the pins: get_graph_nodes at compact=false. Refused during PIE unless force=true.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `blueprint_name` | string | yes | Blueprint name or path. |
-| `function_name` | string | yes | Name of the function graph, or of a macro graph when no function has that name. |
+| `function_name` | string | yes | Name of the function graph, else of a macro graph, else of a custom event. |
 | `param_name` | string | yes | Name of the parameter to remove, as add_function_parameter returned it. |
 | `is_output` | boolean | no | true to remove an output/return parameter, false (default) an input. |
 
@@ -1117,7 +1119,7 @@ Rename a member variable DECLARED on this Blueprint, KEEPING everything the dele
 
 *Destructive.*
 
-Rename a PARAMETER of a Blueprint function graph -- the parameter counterpart of rename_blueprint_variable, and the only headless way to do it: add_function_parameter only ADDS, there is no remove_function_parameter, so "delete and re-add" is not even available. It renames the pin on the Entry node and on EVERY Result node of the graph, and registers a CoreRedirect so that call sites re-map themselves. That redirect is not a nicety: it is what stops this from being a PHANTOM PIN FACTORY. With the redirect, the call site's pin takes the new name AND KEEPS ITS LITERAL VALUE; renamed WITHOUT one, the old pin stays alive and ORPHANED on the caller. WARNING: that orphan is silent: it survives compiles that report num_errors:0 -- so `compile_blueprint` is NOT the oracle here. The oracle is get_graph_nodes(compact=false) on the callers, checking that NO pin still carries the old name. The redirect matches on `Class.Function.Param`, so it reaches callers that merely CALL the function (K2Node_Message included) without implementing its interface, and dependents that are not even loaded -- both of which rename_blueprint_variable cannot reach. It does NOT rename anything that names the parameter as TEXT (a DataTable cell, a saved game, Python). Run compile_blueprint afterwards and save_asset on this Blueprint AND on every caller. AND THE COMPILE IS NOT THE END OF IT: what reaches the .uasset is UserDefinedPins, not the EdGraphPins you read back -- a rename checked only on the latter can report renamed:true, compile at num_errors:0, be saved and COMMITTED, and still come back as the OLD name the next time the editor starts. So it also reports entry_user_pins_after/result_user_pins_after (the serialized side, legitimately EMPTY on an interface-override graph) and refuses to claim success while any UserDefinedPin still carries the old name. The end-to-end oracle is still disk: save_asset -> reload_asset_package -> get_function_pins.
+Rename a PARAMETER of a Blueprint function graph -- the parameter counterpart of rename_blueprint_variable, and the only way to rename one that keeps call sites: removing it (remove_function_parameter) and adding it again breaks every link and literal the callers had. It renames the pin on the Entry node and on EVERY Result node of the graph, and registers a CoreRedirect so that call sites re-map themselves. That redirect is not a nicety: it is what stops this from being a PHANTOM PIN FACTORY. With the redirect, the call site's pin takes the new name AND KEEPS ITS LITERAL VALUE; renamed WITHOUT one, the old pin stays alive and ORPHANED on the caller. WARNING: that orphan is silent: it survives compiles that report num_errors:0 -- so `compile_blueprint` is NOT the oracle here. The oracle is get_graph_nodes(compact=false) on the callers, checking that NO pin still carries the old name. The redirect matches on `Class.Function.Param`, so it reaches callers that merely CALL the function (K2Node_Message included) without implementing its interface, and dependents that are not even loaded -- both of which rename_blueprint_variable cannot reach. It does NOT rename anything that names the parameter as TEXT (a DataTable cell, a saved game, Python). Run compile_blueprint afterwards and save_asset on this Blueprint AND on every caller. AND THE COMPILE IS NOT THE END OF IT: what reaches the .uasset is UserDefinedPins, not the EdGraphPins you read back -- a rename checked only on the latter can report renamed:true, compile at num_errors:0, be saved and COMMITTED, and still come back as the OLD name the next time the editor starts. So it also reports entry_user_pins_after/result_user_pins_after (the serialized side, legitimately EMPTY on an interface-override graph) and refuses to claim success while any UserDefinedPin still carries the old name. The end-to-end oracle is still disk: save_asset -> reload_asset_package -> get_function_pins.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1346,6 +1348,26 @@ Add to (mode="add", the idempotent default) or rewrite (mode="replace") the para
 | `mode` | string | no | "add" (default, idempotent: skip a param whose name already exists) or "replace" (clear the existing signature first, then add the given params). |
 
 **Returns:** `{ blueprint_name, dispatcher_name, mode, added: [string], params: [ { name, type } ], param_count }`
+
+## `set_function_parameter_type`
+
+*Destructive, idempotent.*
+
+Change the TYPE of an existing parameter of a Blueprint function, macro or custom event, keeping its name and its place in the signature: what the parameter's type picker in the Details panel does. Adding the parameter again under the same name is not the same: remove_function_parameter breaks every link and literal its callers had, and this keeps the links that still fit.
+
+The new type goes on the Entry node (an input), on every Result node (an output), on the macro's tunnel or on the event node, and the parameter's default value is cleared, as the editor clears it, because it rarely fits the new type. Then every LOADED call site is rebuilt, in this Blueprint and in the others that call it (function and event calls, interface messages, macro instances), and each link of the parameter that the new type no longer allows is broken: links_broken lists them, with the node and pin at both ends, so they can be rewired; links_kept counts the rest. A Blueprint that calls it and is not loaded updates when it is compiled.
+
+param_type is spelled as for add_function_parameter, containers included ("int[]", "Set&lt;Name>", "Map&lt;Name,int>"); new_type is read back from the pin. The same type again is an honest no-op (changed=false). Nothing is compiled or saved: compile_blueprint this Blueprint and each one in blueprints_to_compile. A graph whose signature comes from an interface or a parent function is refused: change it there (in a Blueprint interface, with this tool: the Blueprints that implement it take the new type when they are compiled), or fit an override with reconcile_function_signature. Refused during PIE unless force=true.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `blueprint_name` | string | yes | Blueprint name or path. |
+| `function_name` | string | yes | Name of the function graph, else of a macro graph, else of a custom event. |
+| `param_name` | string | yes | The parameter to retype, as get_function_pins or add_function_parameter names it. |
+| `param_type` | string | yes | The new type: bool, int, int64, float, string, name, text, byte, Vector, or a struct/enum/class/object name or path, optionally in a container ("int[]", "Set&lt;Name>", "Map&lt;Name,int>"); "exec" on a macro. |
+| `is_output` | boolean | no | true to retype an output/return parameter, false (default) an input. A custom event has inputs only. |
+
+**Returns:** `{ blueprint_name, function_name, param_name, is_output, graph_kind, old_type, new_type, container, changed, default_value_cleared, call_sites_refreshed, links_kept, links_broken: [{node_id, node_title, pin, linked_node_id, linked_node_title, linked_pin, blueprint}], blueprints_to_compile: [string], note? }`
 
 ## `set_mesh_material_color`
 

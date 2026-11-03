@@ -148,6 +148,7 @@ static const FRow GRows[] =
     { TEXT("set_box_slot_properties"), EReason::Compiles, TEXT("UI/UEAgentWidgetCommands.cpp SaveWidgetBlueprint: FKismetEditorUtilities::CompileBlueprint") },
     { TEXT("set_component_replication"), EReason::Compiles, TEXT("Blueprint/UEAgentGraphCommands.cpp HandleSetComponentReplication: FKismetEditorUtilities::CompileBlueprint") },
     { TEXT("set_event_dispatcher_signature"), EReason::Reinstances, TEXT("Blueprint/UEAgentGraphCommands.cpp HandleSetEventDispatcherSignature: FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified") },
+    { TEXT("set_function_parameter_type"), EReason::Reinstances, TEXT("Blueprint/UEAgentGraphCommands.cpp HandleSetFunctionParameterType: FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified") },
     { TEXT("set_grid_slot_properties"), EReason::Compiles, TEXT("UI/UEAgentWidgetCommands.cpp SaveWidgetBlueprint: FKismetEditorUtilities::CompileBlueprint") },
     { TEXT("set_mesh_material_color"), EReason::Reinstances, TEXT("Blueprint/UEAgentBlueprintCommands.cpp HandleSetMeshMaterialColor: FBlueprintEditorUtils::MarkBlueprintAsModified") },
     { TEXT("set_named_slot_content"), EReason::Compiles, TEXT("UI/UEAgentWidgetCommands.cpp SaveWidgetBlueprint: FKismetEditorUtilities::CompileBlueprint") },

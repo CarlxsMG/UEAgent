@@ -1898,7 +1898,18 @@ namespace mcp_common
                 : FString::Printf(TEXT("Property not found: %s"), *PropertyName);
             return false;
         }
-        void* PropertyAddr = Property->ContainerPtrToValuePtr<void>(Object);
+        return SetPropertyValueFromJson(Property, Property->ContainerPtrToValuePtr<void>(Object), PropertyName, Value,
+            OutErrorMessage);
+    }
+
+    bool SetPropertyValueFromJson(FProperty* Property, void* PropertyAddr, const FString& PropertyName,
+                                  const TSharedPtr<FJsonValue>& Value, FString& OutErrorMessage)
+    {
+        if (Property == nullptr || PropertyAddr == nullptr)
+        {
+            OutErrorMessage = FString::Printf(TEXT("No value to write for '%s'"), *PropertyName);
+            return false;
+        }
 
         // Ergonomic sugar: a FGameplayTagContainer property accepts a simple
         // JSON array of tag-name strings (["A.B","C.D"]) -- the verbose struct form that
