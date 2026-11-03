@@ -41,6 +41,7 @@
 #include "K2Node_FormatText.h"
 // Macro-instance + delegate-bind node types (module BlueprintGraph)
 #include "K2Node_MacroInstance.h"
+#include "UObject/UObjectIterator.h" // the signature tools find every loaded call site
 #include "K2Node_Composite.h"
 #include "K2Node_AddDelegate.h"
 // Parent: super-call + multicast broadcast node types (module BlueprintGraph)
@@ -2059,7 +2060,7 @@ TSharedPtr<FJsonObject> HandleGetGraphNodes(const TSharedPtr<FJsonObject>& Param
 //   @param blueprint_name - Blueprint name or path.
 //   @param variable_name - New variable name (fails if the name already exists on this Blueprint).
 //   @param variable_type - Type string: bool, int, int64, float, string, name, text, byte, or the name/path of a struct, enum, class or object (e.g. Vector, /Game/Dir/S_Foo.S_Foo, /Script/Engine.Actor).
-//   @param is_array - When true, make the variable an array container; defaults to false. This is the ONLY array authoring path -- add_function_parameter has no equivalent.
+//   @param is_array - When true, make the variable an array container; defaults to false. A parameter takes its container in param_type instead (add_function_parameter with "int[]").
 //   @param default_value - Initial default value for the new variable, in exported-text form; optional
 //   @returns { blueprint_name, variable_name, variable_type, is_array } -- an echo of the request, NOT a verification: read the variable back with get_blueprint_variables (or the CDO) before relying on it.
 TSharedPtr<FJsonObject> HandleAddBlueprintVariable(const TSharedPtr<FJsonObject>& Params)
@@ -2475,7 +2476,7 @@ TSharedPtr<FJsonObject> HandleRenameBpVariable(const TSharedPtr<FJsonObject>& Pa
     return Result;
 }
 
-// MCP:rename_function_parameter - Rename a PARAMETER of a Blueprint function graph -- the parameter counterpart of rename_blueprint_variable, and the only headless way to do it: add_function_parameter only ADDS, there is no remove_function_parameter, so "delete and re-add" is not even available. It renames the pin on the Entry node and on EVERY Result node of the graph, and registers a CoreRedirect so that call sites re-map themselves. That redirect is not a nicety: it is what stops this from being a PHANTOM PIN FACTORY. With the redirect, the call site's pin takes the new name AND KEEPS ITS LITERAL VALUE; renamed WITHOUT one, the old pin stays alive and ORPHANED on the caller. WARNING: that orphan is silent: it survives compiles that report num_errors:0 -- so `compile_blueprint` is NOT the oracle here. The oracle is get_graph_nodes(compact=false) on the callers, checking that NO pin still carries the old name. The redirect matches on `Class.Function.Param`, so it reaches callers that merely CALL the function (K2Node_Message included) without implementing its interface, and dependents that are not even loaded -- both of which rename_blueprint_variable cannot reach. It does NOT rename anything that names the parameter as TEXT (a DataTable cell, a saved game, Python). Run compile_blueprint afterwards and save_asset on this Blueprint AND on every caller. AND THE COMPILE IS NOT THE END OF IT: what reaches the .uasset is UserDefinedPins, not the EdGraphPins you read back -- a rename checked only on the latter can report renamed:true, compile at num_errors:0, be saved and COMMITTED, and still come back as the OLD name the next time the editor starts. So it also reports entry_user_pins_after/result_user_pins_after (the serialized side, legitimately EMPTY on an interface-override graph) and refuses to claim success while any UserDefinedPin still carries the old name. The end-to-end oracle is still disk: save_asset -> reload_asset_package -> get_function_pins.
+// MCP:rename_function_parameter - Rename a PARAMETER of a Blueprint function graph -- the parameter counterpart of rename_blueprint_variable, and the only way to rename one that keeps call sites: removing it (remove_function_parameter) and adding it again breaks every link and literal the callers had. It renames the pin on the Entry node and on EVERY Result node of the graph, and registers a CoreRedirect so that call sites re-map themselves. That redirect is not a nicety: it is what stops this from being a PHANTOM PIN FACTORY. With the redirect, the call site's pin takes the new name AND KEEPS ITS LITERAL VALUE; renamed WITHOUT one, the old pin stays alive and ORPHANED on the caller. WARNING: that orphan is silent: it survives compiles that report num_errors:0 -- so `compile_blueprint` is NOT the oracle here. The oracle is get_graph_nodes(compact=false) on the callers, checking that NO pin still carries the old name. The redirect matches on `Class.Function.Param`, so it reaches callers that merely CALL the function (K2Node_Message included) without implementing its interface, and dependents that are not even loaded -- both of which rename_blueprint_variable cannot reach. It does NOT rename anything that names the parameter as TEXT (a DataTable cell, a saved game, Python). Run compile_blueprint afterwards and save_asset on this Blueprint AND on every caller. AND THE COMPILE IS NOT THE END OF IT: what reaches the .uasset is UserDefinedPins, not the EdGraphPins you read back -- a rename checked only on the latter can report renamed:true, compile at num_errors:0, be saved and COMMITTED, and still come back as the OLD name the next time the editor starts. So it also reports entry_user_pins_after/result_user_pins_after (the serialized side, legitimately EMPTY on an interface-override graph) and refuses to claim success while any UserDefinedPin still carries the old name. The end-to-end oracle is still disk: save_asset -> reload_asset_package -> get_function_pins.
 //   @param blueprint_name - Blueprint asset name or path owning the function graph.
 //   @param function_name - Name of the function graph (an interface's own function graph and an interface-override graph both work).
 //   @param old_name - Current parameter name, matched on the Entry node and on every Result node. A name present on only one of them is fine.
@@ -2944,15 +2945,215 @@ namespace
         }
         return Names;
     }
+
+    /** "none", "array", "set" or "map": the container of a pin type, as the signature tools report it. */
+    const TCHAR* PinContainerName(const FEdGraphPinType& PinType)
+    {
+        switch (PinType.ContainerType)
+        {
+        case EPinContainerType::Array: return TEXT("array");
+        case EPinContainerType::Set: return TEXT("set");
+        case EPinContainerType::Map: return TEXT("map");
+        default: return TEXT("none");
+        }
+    }
+
+    /** The custom event of the Blueprint named EventName, in any of its graphs, or null. */
+    UK2Node_CustomEvent* FindCustomEventNode(UBlueprint* Blueprint, const FString& EventName)
+    {
+        if (!Blueprint)
+        {
+            return nullptr;
+        }
+        TArray<UK2Node_CustomEvent*> Events;
+        FBlueprintEditorUtils::GetAllNodesOfClass<UK2Node_CustomEvent>(Blueprint, Events);
+        const FName EventFName(*EventName);
+        for (UK2Node_CustomEvent* Event : Events)
+        {
+            if (Event && Event->CustomFunctionName == EventFName)
+            {
+                return Event;
+            }
+        }
+        return nullptr;
+    }
+
+    /** What the signature tools edit, found by one name: a function graph, else a macro graph, else a custom event. */
+    struct FSignatureOwner
+    {
+        UEdGraph* FuncGraph = nullptr;
+        UEdGraph* MacroGraph = nullptr;
+        UK2Node_CustomEvent* Event = nullptr;
+
+        bool IsFound() const { return FuncGraph || MacroGraph || Event; }
+        const TCHAR* Kind() const { return MacroGraph ? TEXT("macro") : (Event ? TEXT("custom_event") : TEXT("function")); }
+    };
+
+    FSignatureOwner FindSignatureOwner(UBlueprint* Blueprint, const FString& Name)
+    {
+        FSignatureOwner Owner;
+        Owner.FuncGraph = FindFunctionGraph(Blueprint, Name);
+        if (!Owner.FuncGraph)
+        {
+            Owner.MacroGraph = FindMacroGraph(Blueprint, Name);
+        }
+        if (!Owner.FuncGraph && !Owner.MacroGraph)
+        {
+            Owner.Event = FindCustomEventNode(Blueprint, Name);
+        }
+        return Owner;
+    }
+
+    /** SignatureNodes for any owner: a custom event's parameters are the user pins of the event node, inputs only. */
+    TArray<UK2Node_EditablePinBase*> SignatureNodes(const FSignatureOwner& Owner, bool bIsOutput)
+    {
+        if (Owner.Event)
+        {
+            TArray<UK2Node_EditablePinBase*> Out;
+            if (!bIsOutput)
+            {
+                Out.Add(Owner.Event);
+            }
+            return Out;
+        }
+        return SignatureNodes(Owner.FuncGraph, Owner.MacroGraph, bIsOutput);
+    }
+
+    /**
+     * The direction of a parameter's pin on a signature node: an input is an OUTPUT of the entry node, event or entry
+     * tunnel, and an output an INPUT of the result node or exit tunnel. On a call site it is the other way round.
+     */
+    EEdGraphPinDirection SignaturePinDirection(bool bIsOutput)
+    {
+        return bIsOutput ? EGPD_Input : EGPD_Output;
+    }
+
+    /**
+     * The nodes that call the owner in every loaded graph, other Blueprints included: the calls of a function or a custom
+     * event (interface messages too), or the instances of a macro.
+     */
+    TArray<UEdGraphNode*> SignatureCallSites(UBlueprint* Blueprint, const FSignatureOwner& Owner, const FString& Name)
+    {
+        TArray<UEdGraphNode*> Out;
+        if (Owner.MacroGraph)
+        {
+            for (TObjectIterator<UK2Node_MacroInstance> It; It; ++It)
+            {
+                UK2Node_MacroInstance* Node = *It;
+                if (IsValid(Node) && !Node->IsTemplate() && Node->GetGraph() && Node->GetMacroGraph() == Owner.MacroGraph)
+                {
+                    Out.Add(Node);
+                }
+            }
+            return Out;
+        }
+        const FName FunctionFName(*Name);
+        for (TObjectIterator<UK2Node_CallFunction> It; It; ++It)
+        {
+            UK2Node_CallFunction* Node = *It;
+            if (!IsValid(Node) || Node->IsTemplate() || !Node->GetGraph() || Node->FunctionReference.GetMemberName() != FunctionFName)
+            {
+                continue;
+            }
+            const UFunction* Target = Node->GetTargetFunction();
+            if (Target && UBlueprint::GetBlueprintFromClass(Target->GetOuterUClass()) == Blueprint)
+            {
+                Out.Add(Node);
+            }
+        }
+        return Out;
+    }
+
+    /** One link of a parameter's pin: the node holding the pin, and the pin at the other end. */
+    struct FParamLink
+    {
+        UEdGraphNode* Node = nullptr;
+        UEdGraphNode* LinkedNode = nullptr;
+        FName LinkedPin;
+
+        bool operator==(const FParamLink& Other) const
+        {
+            return Node == Other.Node && LinkedNode == Other.LinkedNode && LinkedPin == Other.LinkedPin;
+        }
+    };
+
+    /** The links of the pin named PinName, in direction Direction, on each of Nodes. */
+    TArray<FParamLink> CollectParamLinks(const TArray<UEdGraphNode*>& Nodes, FName PinName, EEdGraphPinDirection Direction)
+    {
+        TArray<FParamLink> Out;
+        for (UEdGraphNode* Node : Nodes)
+        {
+            const UEdGraphPin* Pin = Node ? Node->FindPin(PinName, Direction) : nullptr;
+            if (!Pin)
+            {
+                continue;
+            }
+            for (const UEdGraphPin* Linked : Pin->LinkedTo)
+            {
+                if (Linked && Linked->GetOwningNode())
+                {
+                    FParamLink& Link = Out.AddDefaulted_GetRef();
+                    Link.Node = Node;
+                    Link.LinkedNode = Linked->GetOwningNode();
+                    Link.LinkedPin = Linked->PinName;
+                }
+            }
+        }
+        return Out;
+    }
+
+    /** Breaks each link of Node's pin PinName that the K2 schema no longer allows between the two pin types. */
+    void BreakIncompatibleParamLinks(UEdGraphNode* Node, FName PinName, EEdGraphPinDirection Direction)
+    {
+        UEdGraphPin* Pin = Node ? Node->FindPin(PinName, Direction) : nullptr;
+        if (!Pin)
+        {
+            return;
+        }
+        const UEdGraphSchema_K2* K2Schema = GetDefault<UEdGraphSchema_K2>();
+        const UBlueprint* NodeBlueprint = FBlueprintEditorUtils::FindBlueprintForNode(Node);
+        const UClass* Context = NodeBlueprint ? NodeBlueprint->SkeletonGeneratedClass.Get() : nullptr;
+        const TArray<UEdGraphPin*> Links = Pin->LinkedTo;
+        for (UEdGraphPin* Linked : Links)
+        {
+            if (!Linked)
+            {
+                continue;
+            }
+            const UEdGraphPin* OutputPin = Pin->Direction == EGPD_Output ? Pin : Linked;
+            const UEdGraphPin* InputPin = Pin->Direction == EGPD_Output ? Linked : Pin;
+            if (!K2Schema->ArePinsCompatible(OutputPin, InputPin, Context))
+            {
+                Pin->BreakLinkTo(Linked);
+            }
+        }
+    }
+
+    TSharedPtr<FJsonObject> ParamLinkJson(const FParamLink& Link, FName PinName)
+    {
+        TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
+        Out->SetStringField(TEXT("node_id"), Link.Node->NodeGuid.ToString());
+        Out->SetStringField(TEXT("node_title"), Link.Node->GetNodeTitle(ENodeTitleType::ListView).ToString());
+        Out->SetStringField(TEXT("pin"), PinName.ToString());
+        Out->SetStringField(TEXT("linked_node_id"), Link.LinkedNode->NodeGuid.ToString());
+        Out->SetStringField(TEXT("linked_node_title"), Link.LinkedNode->GetNodeTitle(ENodeTitleType::ListView).ToString());
+        Out->SetStringField(TEXT("linked_pin"), Link.LinkedPin.ToString());
+        if (const UBlueprint* LinkBlueprint = FBlueprintEditorUtils::FindBlueprintForNode(Link.Node))
+        {
+            Out->SetStringField(TEXT("blueprint"), LinkBlueprint->GetName());
+        }
+        return Out;
+    }
 }
 
-// MCP:add_function_parameter - Add an input or output (return) parameter to an existing Blueprint FUNCTION graph -- interface-override graphs included -- or to a MACRO graph (create_blueprint_macro), and reconstruct its Entry/Result node or the macro's input/output tunnel. A macro also takes param_type "exec", an execution pin, so it can get several exec inputs and outputs. TWO HARD LIMITS, both silent-ish: it cannot create an ARRAY parameter (there is no is_array; the param comes out SCALAR with success), so redesign the signature to read the array where it lives; and it cannot reach a CUSTOM EVENT ("Function graph not found"), so a Server/Client RPC WITH arguments must be authored as a function plus set_blueprint_function_rpc. On a Blueprint just given a new function, compile_blueprint between creation and this call. Inverse: remove_function_parameter.
+// MCP:add_function_parameter - Add an input or output (return) parameter to an existing Blueprint FUNCTION graph -- interface-override graphs included --, to a MACRO graph (create_blueprint_macro), or an input to a CUSTOM EVENT (an RPC event included), and reconstruct its Entry/Result node, the macro's input/output tunnel or the event node. The name is looked up in that order: function, macro, custom event.
+//   @para param_type takes a container: "int[]" or "Array<int>", "Set<Name>", "Map<Name,int>" (a hashable key); the reply's pin_type is read back from the pin made, so it shows the container that was really created. A macro also takes param_type "exec", an execution pin, so it can get several exec inputs and outputs. A custom event has inputs only, and one bound to an event dispatcher keeps the dispatcher's signature, so it is refused. On a Blueprint just given a new function, compile_blueprint between creation and this call. Inverse: remove_function_parameter; set_function_parameter_type changes the type of a parameter that exists.
 //   @param blueprint_name - Blueprint name or path.
-//   @param function_name - Name of an existing function graph (FunctionGraphs or an interface-override graph), or of a macro graph of this Blueprint when no function has that name. A custom event is NOT a function graph and is rejected here.
+//   @param function_name - Name of an existing function graph (FunctionGraphs or an interface-override graph), else of a macro graph, else of a custom event of this Blueprint.
 //   @param param_name - New parameter name; made unique, so the applied name is the one echoed back in the response.
-//   @param param_type - Type string: bool, int, int64, float, string, name, text, byte, Vector, or a struct/enum/class/object name or path; "exec" on a macro. Arrays are NOT expressible.
-//   @param is_output - When true, add an output/return param (an input pin on the Result node) instead of an input; defaults to false
-//   @returns { blueprint_name, function_name, param_name, param_type, is_output, graph_kind? } -- param_name is the pin name actually created (uniquified); graph_kind is "macro" when the parameter went on a macro. Verify with get_graph_nodes at compact=false: compact hides the new, still-unlinked pin and makes it look like nothing was created.
+//   @param param_type - Type string: bool, int, int64, float, string, name, text, byte, Vector, or a struct/enum/class/object name or path, optionally in a container: "int[]", "Array<int>", "Set<Name>", "Map<Name,int>"; "exec" on a macro.
+//   @param is_output - When true, add an output/return param (an input pin on the Result node) instead of an input; defaults to false. A custom event has inputs only.
+//   @returns { blueprint_name, function_name, param_name, param_type, pin_type, container, is_output, graph_kind? } -- param_name is the pin name actually created; pin_type and container ("none", "array", "set" or "map") are read from that pin; graph_kind is "macro" or "custom_event" when the parameter went there. Verify with get_graph_nodes at compact=false: compact hides the new, still-unlinked pin and makes it look like nothing was created.
 TSharedPtr<FJsonObject> HandleAddFunctionParameter(const TSharedPtr<FJsonObject>& Params)
 {
     FString BlueprintName, FunctionName, ParamName, ParamType;
@@ -2964,11 +3165,12 @@ TSharedPtr<FJsonObject> HandleAddFunctionParameter(const TSharedPtr<FJsonObject>
     UBlueprint* Blueprint = nullptr;
     if (TSharedPtr<FJsonObject> Error = UEAgentGraphCommandsImpl::FindBlueprint(BlueprintName, Blueprint)) { return Error; }
 
-    // A function first, as before; a macro only when no function graph has that name.
-    UEdGraph* FuncGraph = FindFunctionGraph(Blueprint, FunctionName);
-    UEdGraph* MacroGraph = FuncGraph ? nullptr : FindMacroGraph(Blueprint, FunctionName);
-    if (!FuncGraph && !MacroGraph)
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Function graph not found: %s (no macro graph has that name either)"), *FunctionName));
+    // A function first, as before; then a macro; then a custom event.
+    const FSignatureOwner Owner = FindSignatureOwner(Blueprint, FunctionName);
+    UEdGraph* FuncGraph = Owner.FuncGraph;
+    UEdGraph* MacroGraph = Owner.MacroGraph;
+    if (!Owner.IsFound())
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Function graph not found: %s (no macro graph or custom event has that name either)"), *FunctionName));
 
     FEdGraphPinType PinType;
     if (MacroGraph && ParamType.TrimStartAndEnd().Equals(TEXT("exec"), ESearchCase::IgnoreCase))
@@ -2980,6 +3182,53 @@ TSharedPtr<FJsonObject> HandleAddFunctionParameter(const TSharedPtr<FJsonObject>
 
     bool bIsOutput = false;
     Params->TryGetBoolField(TEXT("is_output"), bIsOutput);
+
+    if (UK2Node_CustomEvent* Event = Owner.Event)
+    {
+        // A custom event's parameters are OUTPUT pins of the event node, and it has no outputs of its own.
+        if (bIsOutput)
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("'%s' is a custom event, which has inputs only; nothing was added."), *FunctionName));
+        for (const UEdGraphPin* P : Event->Pins)
+        {
+            if (P && P->Direction == EGPD_Output && P->PinName == FName(*ParamName))
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(
+                    TEXT("Custom event '%s' already has a parameter named '%s'; nothing was added."), *FunctionName, *ParamName));
+            }
+        }
+        FText CannotCreate;
+        if (!Event->CanCreateUserDefinedPin(PinType, EGPD_Output, CannotCreate))
+        {
+            return mcp_common::MakeErrorReply(CannotCreate.IsEmpty()
+                ? FString::Printf(TEXT("Custom event '%s' cannot take parameters: it is bound to an event dispatcher, whose signature it keeps. Change the dispatcher's signature instead (set_event_dispatcher_signature)."), *FunctionName)
+                : FString::Printf(TEXT("Custom event '%s' refused the parameter: %s"), *FunctionName, *CannotCreate.ToString()));
+        }
+
+        FScopedTransaction Transaction(LOCTEXT("AddEventParam", "MCP: Add Custom Event Parameter"));
+        Blueprint->Modify();
+        Event->Modify();
+        UEdGraphPin* NewEventPin = Event->CreateUserDefinedPin(FName(*ParamName), PinType, EGPD_Output, /*bUseUniqueName=*/false);
+        if (!NewEventPin)
+            return mcp_common::MakeErrorReply(TEXT("Failed to create the custom event parameter pin (invalid type or duplicate name)"));
+        Event->ReconstructNode();
+        FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+
+        // Read back from the pin the reconstruction made, not from the one returned before it.
+        const UEdGraphPin* MadePin = Event->FindPin(FName(*ParamName), EGPD_Output);
+        TSharedPtr<FJsonObject> EventResult = UEAgentGraphCommandsImpl::BlueprintReply(BlueprintName, TEXT("function_name"), FunctionName);
+        EventResult->SetStringField(TEXT("param_name"), ParamName);
+        EventResult->SetStringField(TEXT("param_type"), ParamType);
+        if (MadePin)
+        {
+            EventResult->SetStringField(TEXT("pin_type"), UEdGraphSchema_K2::TypeToText(MadePin->PinType).ToString());
+            EventResult->SetStringField(TEXT("container"), PinContainerName(MadePin->PinType));
+        }
+        EventResult->SetBoolField(TEXT("is_output"), false);
+        EventResult->SetStringField(TEXT("graph_kind"), TEXT("custom_event"));
+        return mcp_common::MakeOutcomeReply(EventResult, MadePin != nullptr,
+            FString::Printf(TEXT("'%s' is not on the event node after it was reconstructed"), *ParamName));
+    }
 
     if (MacroGraph)
     {
@@ -3011,9 +3260,16 @@ TSharedPtr<FJsonObject> HandleAddFunctionParameter(const TSharedPtr<FJsonObject>
         TSharedPtr<FJsonObject> MacroResult = UEAgentGraphCommandsImpl::BlueprintReply(BlueprintName, TEXT("function_name"), FunctionName);
         MacroResult->SetStringField(TEXT("param_name"), NewMacroPin->PinName.ToString());
         MacroResult->SetStringField(TEXT("param_type"), ParamType);
+        const UEdGraphPin* MadeMacroPin = Tunnel->FindPin(NewMacroPin->PinName, PinDir);
+        if (MadeMacroPin)
+        {
+            MacroResult->SetStringField(TEXT("pin_type"), UEdGraphSchema_K2::TypeToText(MadeMacroPin->PinType).ToString());
+            MacroResult->SetStringField(TEXT("container"), PinContainerName(MadeMacroPin->PinType));
+        }
         MacroResult->SetBoolField(TEXT("is_output"), bIsOutput);
         MacroResult->SetStringField(TEXT("graph_kind"), TEXT("macro"));
-        return MacroResult;
+        return mcp_common::MakeOutcomeReply(MacroResult, MadeMacroPin != nullptr,
+            FString::Printf(TEXT("'%s' is not on the macro's tunnel after it was reconstructed"), *ParamName));
     }
 
     TArray<UK2Node_FunctionEntry*> EntryNodes;
@@ -3073,14 +3329,23 @@ TSharedPtr<FJsonObject> HandleAddFunctionParameter(const TSharedPtr<FJsonObject>
     if (!NewPin)
         return mcp_common::MakeErrorReply(TEXT("Failed to create parameter pin (invalid type or duplicate name)"));
 
+    const FName MadeName = NewPin->PinName;
     ModifiedNode->ReconstructNode();
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 
     TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::BlueprintReply(BlueprintName, TEXT("function_name"), FunctionName);
-    Result->SetStringField(TEXT("param_name"), NewPin->PinName.ToString());
+    Result->SetStringField(TEXT("param_name"), MadeName.ToString());
     Result->SetStringField(TEXT("param_type"), ParamType);
+    // Read back from the pin the reconstruction made, not from the one returned before it.
+    const UEdGraphPin* MadePin = ModifiedNode->FindPin(MadeName, bIsOutput ? EGPD_Input : EGPD_Output);
+    if (MadePin)
+    {
+        Result->SetStringField(TEXT("pin_type"), UEdGraphSchema_K2::TypeToText(MadePin->PinType).ToString());
+        Result->SetStringField(TEXT("container"), PinContainerName(MadePin->PinType));
+    }
     Result->SetBoolField(TEXT("is_output"), bIsOutput);
-    return Result;
+    return mcp_common::MakeOutcomeReply(Result, MadePin != nullptr,
+        FString::Printf(TEXT("'%s' is not on the %s node after it was reconstructed"), *MadeName.ToString(), bIsOutput ? TEXT("result") : TEXT("entry")));
 }
 
 // MCP:add_function_local_variable - Add a variable scoped to ONE function graph (interface-override graphs included), instead of a class member like add_blueprint_variable -- use it for scratch state that no other graph should see. Reach it from the graph with add_graph_node node_type=variable_get/variable_set and scope="local" (the default scope="auto" already prefers a local over a member of the same name). Inverse: remove_function_local_variable, whose reply lists the function's locals.
@@ -3124,9 +3389,9 @@ TSharedPtr<FJsonObject> HandleAddFunctionLocalVariable(const TSharedPtr<FJsonObj
     return Result;
 }
 
-// MCP:remove_function_parameter - Remove an input or output parameter from a Blueprint function graph -- interface-override graphs included -- or from a macro graph, in one undo step: the user pin leaves the Entry node (inputs) or every Result node (outputs), or the macro's input or output tunnel, and the node is reconstructed, so links to that pin break. Inverse of add_function_parameter; for an override of a C++ or interface function, reconcile_function_signature fits the signature to the parent instead. Nothing is compiled or saved: call sites update at the next compile_blueprint. A parameter that is not there is an honest no-op (removed=false, the parameters it does have in params); a missing Blueprint or graph is an error. The reply re-reads the signature (params_left). Read the pins: get_graph_nodes at compact=false. Refused during PIE unless force=true.
+// MCP:remove_function_parameter - Remove an input or output parameter from a Blueprint function graph -- interface-override graphs included --, from a macro graph, or an input from a custom event, in one undo step: the user pin leaves the Entry node (inputs) or every Result node (outputs), the macro's input or output tunnel, or the event node, and the node is reconstructed, so links to that pin break. Inverse of add_function_parameter; for an override of a C++ or interface function, reconcile_function_signature fits the signature to the parent instead. Nothing is compiled or saved: call sites update at the next compile_blueprint. A parameter that is not there is an honest no-op (removed=false, the parameters it does have in params); a missing Blueprint or graph is an error. The reply re-reads the signature (params_left). Read the pins: get_graph_nodes at compact=false. Refused during PIE unless force=true.
 //   @param blueprint_name - Blueprint name or path.
-//   @param function_name - Name of the function graph, or of a macro graph when no function has that name.
+//   @param function_name - Name of the function graph, else of a macro graph, else of a custom event.
 //   @param param_name - Name of the parameter to remove, as add_function_parameter returned it.
 //   @param is_output - true to remove an output/return parameter, false (default) an input.
 //   @returns { blueprint_name, function_name, param_name, is_output, graph_kind, removed, params_left: [string], params?: [string], note? }
@@ -3142,12 +3407,11 @@ TSharedPtr<FJsonObject> HandleRemoveFunctionParameter(const TSharedPtr<FJsonObje
     UBlueprint* Blueprint = nullptr;
     if (TSharedPtr<FJsonObject> Error = UEAgentGraphCommandsImpl::FindBlueprint(BlueprintName, Blueprint)) { return Error; }
 
-    UEdGraph* FuncGraph = FindFunctionGraph(Blueprint, FunctionName);
-    UEdGraph* MacroGraph = FuncGraph ? nullptr : FindMacroGraph(Blueprint, FunctionName);
-    if (!FuncGraph && !MacroGraph)
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Function graph not found: %s (no macro graph has that name either); nothing was changed"), *FunctionName));
+    const FSignatureOwner Owner = FindSignatureOwner(Blueprint, FunctionName);
+    if (!Owner.IsFound())
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Function graph not found: %s (no macro graph or custom event has that name either); nothing was changed"), *FunctionName));
 
-    const TArray<UK2Node_EditablePinBase*> Nodes = SignatureNodes(FuncGraph, MacroGraph, bIsOutput);
+    const TArray<UK2Node_EditablePinBase*> Nodes = SignatureNodes(Owner, bIsOutput);
     const FName PinFName(*ParamName);
     TArray<UK2Node_EditablePinBase*> Holders;
     for (UK2Node_EditablePinBase* Node : Nodes)
@@ -3161,7 +3425,7 @@ TSharedPtr<FJsonObject> HandleRemoveFunctionParameter(const TSharedPtr<FJsonObje
     TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::BlueprintReply(BlueprintName, TEXT("function_name"), FunctionName);
     Result->SetStringField(TEXT("param_name"), ParamName);
     Result->SetBoolField(TEXT("is_output"), bIsOutput);
-    Result->SetStringField(TEXT("graph_kind"), MacroGraph ? TEXT("macro") : TEXT("function"));
+    Result->SetStringField(TEXT("graph_kind"), Owner.Kind());
     if (Holders.Num() == 0)
     {
         const TArray<FString> Existing = UserPinNames(Nodes);
@@ -3169,7 +3433,7 @@ TSharedPtr<FJsonObject> HandleRemoveFunctionParameter(const TSharedPtr<FJsonObje
         Result->SetArrayField(TEXT("params"), mcp_common::StringsToJson(Existing));
         Result->SetArrayField(TEXT("params_left"), mcp_common::StringsToJson(Existing));
         Result->SetStringField(TEXT("note"), FString::Printf(TEXT("the %s has no %s parameter named '%s'; nothing changed"),
-            MacroGraph ? TEXT("macro") : TEXT("function"), bIsOutput ? TEXT("output") : TEXT("input"), *ParamName));
+            Owner.Kind(), bIsOutput ? TEXT("output") : TEXT("input"), *ParamName));
         return Result;
     }
 
@@ -3184,7 +3448,7 @@ TSharedPtr<FJsonObject> HandleRemoveFunctionParameter(const TSharedPtr<FJsonObje
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 
     // The re-read: no signature node keeps the parameter.
-    const TArray<FString> Left = UserPinNames(SignatureNodes(FuncGraph, MacroGraph, bIsOutput));
+    const TArray<FString> Left = UserPinNames(SignatureNodes(Owner, bIsOutput));
     if (Left.Contains(ParamName))
     {
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("'%s' is still on the signature after RemoveUserDefinedPinByName"), *ParamName));
@@ -3192,6 +3456,221 @@ TSharedPtr<FJsonObject> HandleRemoveFunctionParameter(const TSharedPtr<FJsonObje
     Result->SetBoolField(TEXT("removed"), true);
     Result->SetArrayField(TEXT("params_left"), mcp_common::StringsToJson(Left));
     return Result;
+}
+
+// MCP:set_function_parameter_type - Change the TYPE of an existing parameter of a Blueprint function, macro or custom event, keeping its name and its place in the signature: what the parameter's type picker in the Details panel does. Adding the parameter again under the same name is not the same: remove_function_parameter breaks every link and literal its callers had, and this keeps the links that still fit.
+//   @para The new type goes on the Entry node (an input), on every Result node (an output), on the macro's tunnel or on the event node, and the parameter's default value is cleared, as the editor clears it, because it rarely fits the new type. Then every LOADED call site is rebuilt, in this Blueprint and in the others that call it (function and event calls, interface messages, macro instances), and each link of the parameter that the new type no longer allows is broken: links_broken lists them, with the node and pin at both ends, so they can be rewired; links_kept counts the rest. A Blueprint that calls it and is not loaded updates when it is compiled.
+//   @para param_type is spelled as for add_function_parameter, containers included ("int[]", "Set<Name>", "Map<Name,int>"); new_type is read back from the pin. The same type again is an honest no-op (changed=false). Nothing is compiled or saved: compile_blueprint this Blueprint and each one in blueprints_to_compile. A graph whose signature comes from an interface or a parent function is refused: change it there (in a Blueprint interface, with this tool: the Blueprints that implement it take the new type when they are compiled), or fit an override with reconcile_function_signature. Refused during PIE unless force=true.
+//   @param blueprint_name - Blueprint name or path.
+//   @param function_name - Name of the function graph, else of a macro graph, else of a custom event.
+//   @param param_name - The parameter to retype, as get_function_pins or add_function_parameter names it.
+//   @param param_type - The new type: bool, int, int64, float, string, name, text, byte, Vector, or a struct/enum/class/object name or path, optionally in a container ("int[]", "Set<Name>", "Map<Name,int>"); "exec" on a macro.
+//   @param is_output - true to retype an output/return parameter, false (default) an input. A custom event has inputs only.
+//   @returns { blueprint_name, function_name, param_name, is_output, graph_kind, old_type, new_type, container, changed, default_value_cleared, call_sites_refreshed, links_kept, links_broken: [{node_id, node_title, pin, linked_node_id, linked_node_title, linked_pin, blueprint}], blueprints_to_compile: [string], note? }
+TSharedPtr<FJsonObject> HandleSetFunctionParameterType(const TSharedPtr<FJsonObject>& Params)
+{
+    FString BlueprintName, FunctionName, ParamName, ParamType;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("blueprint_name"), BlueprintName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("function_name"), FunctionName)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("param_name"), ParamName)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("param_type"), ParamType)) { return Missing; }
+    bool bIsOutput = false;
+    Params->TryGetBoolField(TEXT("is_output"), bIsOutput);
+
+    UBlueprint* Blueprint = nullptr;
+    if (TSharedPtr<FJsonObject> Error = UEAgentGraphCommandsImpl::FindBlueprint(BlueprintName, Blueprint)) { return Error; }
+
+    const FSignatureOwner Owner = FindSignatureOwner(Blueprint, FunctionName);
+    if (!Owner.IsFound())
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Function graph not found: %s (no macro graph or custom event has that name either); nothing was changed"), *FunctionName));
+    if (Owner.Event && bIsOutput)
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("'%s' is a custom event, which has inputs only; nothing was changed."), *FunctionName));
+
+    FEdGraphPinType NewType;
+    if (Owner.MacroGraph && ParamType.TrimStartAndEnd().Equals(TEXT("exec"), ESearchCase::IgnoreCase))
+    {
+        NewType.PinCategory = UEdGraphSchema_K2::PC_Exec;
+    }
+    else if (!FUEAgentGraphUtils::ResolvePinType(ParamType, NewType))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Could not resolve param_type: %s; nothing was changed"), *ParamType));
+    }
+
+    // A signature declared somewhere else is changed there: an interface's function, a parent class's function, or the
+    // event dispatcher a custom event is bound to.
+    const TCHAR* DeclaredElsewhere = nullptr;
+    if (Owner.Event)
+    {
+        if (!Owner.Event->IsEditable())
+        {
+            DeclaredElsewhere = TEXT("the event dispatcher this custom event is bound to (set_event_dispatcher_signature)");
+        }
+    }
+    else if (Owner.FuncGraph)
+    {
+        for (const FBPInterfaceDescription& Interface : Blueprint->ImplementedInterfaces)
+        {
+            if (Interface.Graphs.Contains(Owner.FuncGraph))
+            {
+                DeclaredElsewhere = TEXT("the interface this graph implements");
+            }
+        }
+        if (!DeclaredElsewhere && Blueprint->ParentClass && Blueprint->ParentClass->FindFunctionByName(Owner.FuncGraph->GetFName()))
+        {
+            DeclaredElsewhere = TEXT("the parent class whose function this graph overrides (reconcile_function_signature fits the override to it)");
+        }
+    }
+    if (DeclaredElsewhere)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("The signature of '%s' is declared in %s: change the type there. Nothing was changed."), *FunctionName, DeclaredElsewhere));
+    }
+
+    const FName PinFName(*ParamName);
+    const TArray<UK2Node_EditablePinBase*> Nodes = SignatureNodes(Owner, bIsOutput);
+    TArray<UK2Node_EditablePinBase*> Holders;
+    TSharedPtr<FUserPinInfo> FirstInfo;
+    for (UK2Node_EditablePinBase* Node : Nodes)
+    {
+        const TSharedPtr<FUserPinInfo>* Info = Node->UserDefinedPins.FindByPredicate(
+            [&PinFName](const TSharedPtr<FUserPinInfo>& Candidate) { return Candidate.IsValid() && Candidate->PinName == PinFName; });
+        if (Info)
+        {
+            Holders.Add(Node);
+            if (!FirstInfo.IsValid())
+            {
+                FirstInfo = *Info;
+            }
+        }
+    }
+    if (Holders.Num() == 0)
+    {
+        const TArray<FString> Existing = UserPinNames(Nodes);
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("The %s '%s' has no %s parameter named '%s' (its %ss: %s); nothing was changed"),
+            Owner.Kind(), *FunctionName, bIsOutput ? TEXT("output") : TEXT("input"), *ParamName,
+            bIsOutput ? TEXT("output") : TEXT("input"), Existing.Num() ? *FString::Join(Existing, TEXT(", ")) : TEXT("none")));
+    }
+
+    TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::BlueprintReply(BlueprintName, TEXT("function_name"), FunctionName);
+    Result->SetStringField(TEXT("param_name"), ParamName);
+    Result->SetBoolField(TEXT("is_output"), bIsOutput);
+    Result->SetStringField(TEXT("graph_kind"), Owner.Kind());
+    const FEdGraphPinType OldType = FirstInfo->PinType;
+    Result->SetStringField(TEXT("old_type"), UEdGraphSchema_K2::TypeToText(OldType).ToString());
+
+    bool bAllSame = true;
+    for (UK2Node_EditablePinBase* Holder : Holders)
+    {
+        for (const TSharedPtr<FUserPinInfo>& Info : Holder->UserDefinedPins)
+        {
+            if (Info.IsValid() && Info->PinName == PinFName && !(Info->PinType == NewType))
+            {
+                bAllSame = false;
+            }
+        }
+    }
+    if (bAllSame)
+    {
+        // Measured above: every holder already stores the type asked for.
+        Result->SetStringField(TEXT("new_type"), UEdGraphSchema_K2::TypeToText(NewType).ToString());
+        Result->SetStringField(TEXT("container"), PinContainerName(NewType));
+        Result->SetBoolField(TEXT("changed"), false);
+        Result->SetStringField(TEXT("note"), TEXT("the parameter already has that type; nothing changed"));
+        return mcp_common::MakeOutcomeReply(Result, bAllSame);
+    }
+
+    const EEdGraphPinDirection HolderDir = SignaturePinDirection(bIsOutput);
+    const EEdGraphPinDirection CallDir = bIsOutput ? EGPD_Output : EGPD_Input;
+    TArray<UEdGraphNode*> HolderNodes;
+    for (UK2Node_EditablePinBase* Holder : Holders)
+    {
+        HolderNodes.Add(Holder);
+    }
+    const TArray<UEdGraphNode*> CallSitesBefore = SignatureCallSites(Blueprint, Owner, FunctionName);
+    TArray<FParamLink> LinksBefore = CollectParamLinks(HolderNodes, PinFName, HolderDir);
+    LinksBefore.Append(CollectParamLinks(CallSitesBefore, PinFName, CallDir));
+
+    FScopedTransaction Transaction(LOCTEXT("SetFnParamType", "MCP: Change Parameter Type"));
+    Blueprint->Modify();
+    bool bDefaultCleared = false;
+    for (UK2Node_EditablePinBase* Holder : Holders)
+    {
+        Holder->Modify();
+        for (const TSharedPtr<FUserPinInfo>& Info : Holder->UserDefinedPins)
+        {
+            if (Info.IsValid() && Info->PinName == PinFName)
+            {
+                Info->PinType = NewType;
+                bDefaultCleared |= !Info->PinDefaultValue.IsEmpty();
+                Info->PinDefaultValue.Reset();
+            }
+        }
+        // The pin keeps its name, so the reconstruction matches it and moves its links over whatever the new type;
+        // the ones the type no longer allows are broken below.
+        Holder->ReconstructNode();
+    }
+    // Regenerates the skeleton class, so the call sites rebuilt below read the new signature.
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+
+    const TArray<UEdGraphNode*> CallSites = SignatureCallSites(Blueprint, Owner, FunctionName);
+    TArray<FString> OtherBlueprints;
+    for (UEdGraphNode* Site : CallSites)
+    {
+        Site->Modify();
+        Site->ReconstructNode();
+        BreakIncompatibleParamLinks(Site, PinFName, CallDir);
+        if (UBlueprint* SiteBlueprint = FBlueprintEditorUtils::FindBlueprintForNode(Site))
+        {
+            if (SiteBlueprint != Blueprint)
+            {
+                FBlueprintEditorUtils::MarkBlueprintAsModified(SiteBlueprint);
+                OtherBlueprints.AddUnique(SiteBlueprint->GetPathName());
+            }
+        }
+    }
+    for (UEdGraphNode* Holder : HolderNodes)
+    {
+        BreakIncompatibleParamLinks(Holder, PinFName, HolderDir);
+    }
+    FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+
+    // The re-read: the serialized side (UserDefinedPins) and the pin on every holder carry the new type.
+    bool bTypeStored = true;
+    FString StoreError;
+    for (UK2Node_EditablePinBase* Holder : Holders)
+    {
+        const UEdGraphPin* Pin = Holder->FindPin(PinFName, HolderDir);
+        const TSharedPtr<FUserPinInfo>* Info = Holder->UserDefinedPins.FindByPredicate(
+            [&PinFName](const TSharedPtr<FUserPinInfo>& Candidate) { return Candidate.IsValid() && Candidate->PinName == PinFName; });
+        if (!Pin || !Info || !((*Info)->PinType == NewType) || !(Pin->PinType == NewType))
+        {
+            bTypeStored = false;
+            StoreError = FString::Printf(TEXT("'%s' does not carry the new type on %s after the change"), *ParamName, *Holder->GetName());
+        }
+    }
+
+    TArray<FParamLink> LinksAfter = CollectParamLinks(HolderNodes, PinFName, HolderDir);
+    LinksAfter.Append(CollectParamLinks(CallSites, PinFName, CallDir));
+    TArray<TSharedPtr<FJsonValue>> Broken;
+    for (const FParamLink& Link : LinksBefore)
+    {
+        if (!LinksAfter.Contains(Link) && IsValid(Link.Node) && IsValid(Link.LinkedNode))
+        {
+            Broken.Add(MakeShared<FJsonValueObject>(ParamLinkJson(Link, PinFName)));
+        }
+    }
+
+    const UEdGraphPin* NewPin = Holders[0]->FindPin(PinFName, HolderDir);
+    const FEdGraphPinType ReadType = NewPin ? NewPin->PinType : FEdGraphPinType();
+    Result->SetStringField(TEXT("new_type"), UEdGraphSchema_K2::TypeToText(ReadType).ToString());
+    Result->SetStringField(TEXT("container"), PinContainerName(ReadType));
+    Result->SetBoolField(TEXT("changed"), !(ReadType == OldType));
+    Result->SetBoolField(TEXT("default_value_cleared"), bDefaultCleared);
+    Result->SetNumberField(TEXT("call_sites_refreshed"), CallSites.Num());
+    Result->SetNumberField(TEXT("links_kept"), LinksAfter.Num());
+    Result->SetArrayField(TEXT("links_broken"), Broken);
+    Result->SetArrayField(TEXT("blueprints_to_compile"), mcp_common::StringsToJson(OtherBlueprints));
+    return mcp_common::MakeOutcomeReply(Result, bTypeStored, StoreError);
 }
 
 // MCP:remove_function_local_variable - Remove a local variable from one Blueprint function graph (interface-override graphs included), with the get/set nodes that read or write it in that function, in one undo step -- what deleting it from the My Blueprint panel does. Inverse of add_function_local_variable; remove_blueprint_variable removes MEMBER variables only. Nothing is compiled or saved. A local that is not there is an honest no-op (removed=false); a missing Blueprint or function is an error. The reply re-reads the function's locals (local_variables), the only reader of them: get_blueprint_variables lists members. Refused during PIE unless force=true.
@@ -6542,6 +7021,7 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("remove_blueprint_timeline_track"), &HandleRemoveBlueprintTimelineTrack },
     { TEXT("remove_function_local_variable"), &HandleRemoveFunctionLocalVariable },
     { TEXT("remove_function_parameter"), &HandleRemoveFunctionParameter },
+    { TEXT("set_function_parameter_type"), &HandleSetFunctionParameterType },
     { TEXT("add_graph_node"), &HandleAddGraphNode },
     { TEXT("add_input_action_event_node"), &HandleAddInputActionEventNode },
     { TEXT("add_object_bound_event"), &HandleAddObjectBoundEvent },

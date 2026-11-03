@@ -2,6 +2,45 @@
 
 Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](https://semver.org).
 
+## 2.10.0 - 2026-11-03
+
+`get_properties` and `set_properties` reach nested properties by path, a new tool changes the type of a Blueprint
+function's parameter, and `add_function_parameter` takes maps and works on custom events.
+
+### Added
+
+- **`set_function_parameter_type`**, in the `blueprint_authoring` pack: the type picker of a parameter in the Details
+  panel. It changes the type of an input or output of a Blueprint function, macro or custom event and keeps its name,
+  its place and the links that still fit, which removing the parameter and adding it again does not. Every loaded
+  call site is rebuilt, in other Blueprints too, and each link the new type no longer allows is broken and listed
+  (`links_broken`, with the node and pin at both ends), so it can be rewired. The parameter's default value is
+  cleared, as the editor clears it. It refuses a signature declared somewhere else: an interface's function, a parent
+  class's function, or the event dispatcher a custom event is bound to. The same type again changes nothing
+  (`changed: false`).
+- **Property paths in `get_properties` and `set_properties`.** A name can now be a path into the object:
+  `StaticMeshComponent.RelativeScale3D.X`, `BodyInstance.MassInKgOverride`, `Tags[1]`. A path goes through struct
+  fields, array elements and object references such as a component. A write tells the object that holds the last
+  property about the change as the Details panel does (`PreEditChange` and `PostEditChangeChainProperty` with the
+  whole chain), so a component updates as it does when the value is edited by hand. `get_properties` says why a path
+  failed in `path_errors`.
+- `add_function_parameter` takes a map, `"Map<Name,int>"`, with a key type that can be hashed. Arrays and sets were
+  already accepted.
+- `add_function_parameter` and `remove_function_parameter` work on custom events, Server and Client RPC events
+  included. A custom event has inputs only, and one bound to an event dispatcher is refused, because it keeps the
+  dispatcher's signature.
+- `add_function_parameter` returns the type of the pin it made, `pin_type` and `container`, read from the node after
+  it is rebuilt, and fails if the pin is not there.
+
+### Fixed
+
+- **A false warning on every `add_function_parameter` call.** Each reply carried a note saying the tool could not
+  make array parameters, that "an array parameter comes out scalar", and that there was no
+  `remove_function_parameter`. None of it was true: an array or set parameter comes out as a container, and
+  `remove_function_parameter` exists. The note is gone. In its place, the call fails when `param_type` asks for a
+  container and the pin made has none.
+- The descriptions of `add_function_parameter`, `rename_function_parameter` and `add_blueprint_variable` repeated the
+  same limits, and now say what the tools do.
+
 ## 2.9.0 - 2026-10-27
 
 A new tool turns actors placed in the level into a reusable Blueprint, and undo no longer breaks an asset a call has

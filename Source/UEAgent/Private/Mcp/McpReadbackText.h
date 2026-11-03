@@ -1160,9 +1160,8 @@ inline constexpr const TCHAR* RB_warn_local_rpc_0 =
 	TEXT("player.");
 
 inline constexpr const TCHAR* RB_check_function_parameter_0 =
-	TEXT("This tool adds parameters but cannot retype them or create arrays (an array parameter comes out scalar); rename_function_parameter does not ")
-	TEXT("retype either, and there is no remove_function_parameter. To change a parameter's type, author the signature in a Blueprint interface ")
-	TEXT("(add_function_parameter on the interface, compile_blueprint, add_blueprint_function with override=true).");
+	TEXT("param_type asked for a container, and the pin made has none: the parameter is a single value. Read the pin with get_function_pins; ")
+	TEXT("spell the container as \"int[]\", \"Array<int>\", \"Set<Name>\" or \"Map<Name,int>\", and fix the type with set_function_parameter_type.");
 
 inline constexpr const TCHAR* RB_check_nav_modifier_volume_0 =
 	TEXT("This tool works, but brush_built and area_class_applied are echoes: they are just as true with NavArea_Default. Verify the geometry with ")

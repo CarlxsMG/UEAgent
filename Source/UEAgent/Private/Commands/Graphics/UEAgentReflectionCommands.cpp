@@ -2,6 +2,7 @@
 
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Commands/Common/McpJsonPropertyApply.h" // get_properties / set_properties: property paths
 #include "Commands/Common/UEAgentGraphUtils.h" // FUEAgentGraphUtils::ResolveClass (name / /Script / BP-asset resolver: call_function class_name / component_class)
 #include "Commands/Subsystem/SubsystemLifetime.h" // get_class_hierarchy: lifetime of a subsystem class
 #include "Commands/Asset/AssetCommandHelpers.h"
@@ -1147,6 +1148,95 @@ namespace UEAgentReflectionWriteImpl
 // change take effect and persist. All notify calls are WITH_EDITOR (our harness runs an editor target).
 // A JSON key that names no field of a struct is refused before anything is written. With OutClamped, the value is
 // clamped to the property's ClampMin/ClampMax metadata before PostEditChange, and each value changed is listed.
+// The path form of ApplyCheckedPropertySet: "Settings.Intensity", "Items[2].Name", or through an object reference
+// ("Layer.Settings.Size" follows the object Layer points to). Only the object that holds the LAST segment is written, so it
+// is the one modified (inside the call's undo step) and told about the change, with the chain of its own segments, as the
+// Details panel tells an object about a nested edit. Each segment that object holds must be writable as a top-level property
+// is; a reference the path only goes through must be visible (Edit or BlueprintVisible) and may be EditConst, since it is
+// followed, not overwritten.
+bool ApplyCheckedPropertyPathSet(UObject* Object, const FString& Path, const TSharedPtr<FJsonValue>& Value, FString& OutError,
+    TArray<FString>* OutClamped)
+{
+    TArray<mcp_common::FPropertyPathSegment> Segments;
+    FProperty* LeafProperty = nullptr;
+    void* LeafPtr = nullptr;
+    FString ResolveError;
+    if (!mcp_common::ResolveObjectPropertyPath(Object, Path, Segments, LeafProperty, LeafPtr, ResolveError) || Segments.Num() == 0)
+    {
+        OutError = FString::Printf(TEXT("Path '%s' does not resolve: %s"), *Path, *ResolveError);
+        return false;
+    }
+    UObject* Holder = Segments.Last().Owner;
+    if (!Holder)
+    {
+        OutError = FString::Printf(TEXT("Path '%s' resolved to no object to write"), *Path);
+        return false;
+    }
+
+    for (const mcp_common::FPropertyPathSegment& Segment : Segments)
+    {
+        const FProperty* SegmentProperty = Segment.Property;
+        if (Segment.Owner != Holder)
+        {
+            if (!SegmentProperty->HasAnyPropertyFlags(CPF_Edit | CPF_BlueprintVisible))
+            {
+                OutError = FString::Printf(TEXT("'%s' in path '%s' is neither visible in the editor nor to Blueprint, so the path cannot go through it"),
+                    *SegmentProperty->GetName(), *Path);
+                return false;
+            }
+            continue;
+        }
+        const bool bEditable = SegmentProperty->HasAnyPropertyFlags(CPF_Edit) && !SegmentProperty->HasAnyPropertyFlags(CPF_EditConst);
+        const bool bBlueprintWritable = SegmentProperty->HasAnyPropertyFlags(CPF_BlueprintVisible) && !SegmentProperty->HasAnyPropertyFlags(CPF_BlueprintReadOnly);
+        if (!bEditable && !bBlueprintWritable)
+        {
+            OutError = FString::Printf(TEXT("'%s' in path '%s' is not writable via reflection (requires EditAnywhere/EditDefaultsOnly-and-not-EditConst, or BlueprintReadWrite)"),
+                *SegmentProperty->GetName(), *Path);
+            return false;
+        }
+    }
+
+    TArray<FString> Unknown;
+    UEAgentReflectionWriteImpl::CollectUnknownValueKeys(LeafProperty, Value, Path, Unknown);
+    if (Unknown.Num() > 0)
+    {
+        OutError = FString::Printf(TEXT("%s names no field of its struct: %s. Nothing was written to %s; get_properties shows its fields."),
+            Unknown.Num() == 1 ? TEXT("This key") : TEXT("These keys"), *FString::Join(Unknown, TEXT(", ")), *Path);
+        return false;
+    }
+
+    // The holder's own segments, outermost first: the member it holds, down to the property written.
+    FEditPropertyChain Chain;
+    for (const mcp_common::FPropertyPathSegment& Segment : Segments)
+    {
+        if (Segment.Owner == Holder)
+        {
+            Chain.AddTail(Segment.Property);
+        }
+    }
+    FProperty* MemberProperty = Chain.GetHead()->GetValue();
+    FProperty* ChangedProperty = Chain.GetTail()->GetValue();
+    Chain.SetActiveMemberPropertyNode(MemberProperty);
+    Chain.SetActivePropertyNode(ChangedProperty);
+
+    Holder->Modify();
+    Holder->PreEditChange(Chain);
+
+    const bool bSet = mcp_common::SetPropertyValueFromJson(LeafProperty, LeafPtr, Path, Value, OutError);
+    if (bSet && OutClamped)
+    {
+        UEAgentReflectionWriteImpl::ClampValue(LeafProperty, LeafPtr, Path, *OutClamped);
+    }
+
+    // Always close the edit cycle, as the top-level write does.
+    FPropertyChangedEvent ChangeEvent(ChangedProperty, bSet ? EPropertyChangeType::ValueSet : EPropertyChangeType::Unspecified);
+    ChangeEvent.SetActiveMemberProperty(MemberProperty);
+    FPropertyChangedChainEvent ChainEvent(Chain, ChangeEvent);
+    Holder->PostEditChangeChainProperty(ChainEvent);
+
+    return bSet;
+}
+
 bool ApplyCheckedPropertySet(UObject* Object, const FString& PropertyName, const TSharedPtr<FJsonValue>& Value, FString& OutError,
     TArray<FString>* OutClamped = nullptr)
 {
@@ -1154,6 +1244,10 @@ bool ApplyCheckedPropertySet(UObject* Object, const FString& PropertyName, const
     {
         OutError = TEXT("Invalid object");
         return false;
+    }
+    if (mcp_common::IsPropertyPath(PropertyName))
+    {
+        return ApplyCheckedPropertyPathSet(Object, PropertyName, Value, OutError, OutClamped);
     }
 
     FProperty* Property = Object->GetClass()->FindPropertyByName(*PropertyName);
@@ -2822,12 +2916,12 @@ TSharedPtr<FJsonObject> HandleListInstanceOverrides(const TSharedPtr<FJsonObject
 
 // Batch property reads and writes on one object.
 
-// MCP:get_properties - Read one or several named properties off ONE object you can already name -- an asset path, a live object's full path, a CDO/archetype, or a dotted "Actor[.Component[.Subobject]]" whose first segment is the actor's internal name -- typed rather than stringified, as { name: typed_value } plus each property's FProperty class and not_found[] for names the class does not declare. Pick it when you have the object and the names: get_object_info when you do not know the names yet, get_actor_properties_by_class when you have no path and want instances by class or label (it drops misspelled names; this reports them). property_name reads one; property_names batches several. Accepts `world` (editor, server, client, pie:N), so the same read on server and client is the cheapest proof that a value replicated; the reply stamps which world answered. Read-only.
+// MCP:get_properties - Read one or several named properties off ONE object you can already name -- an asset path, a live object's full path, a CDO/archetype, or a dotted "Actor[.Component[.Subobject]]" whose first segment is the actor's internal name -- typed rather than stringified, as { name: typed_value } plus each property's FProperty class and not_found[] for names the class does not declare. Pick it when you have the object and the names: get_object_info when you do not know the names yet, get_actor_properties_by_class when you have no path and want instances by class or label (it drops misspelled names; this reports them). property_name reads one; property_names batches several. A name can be a PATH into the value: "RelativeLocation.Z", "Items[2].Name", or through an object reference, "Layer.Settings.Size" (the object Layer points to); a path that does not resolve is in not_found[], and path_errors says at which segment and what is there. Accepts `world` (editor, server, client, pie:N), so the same read on server and client is the cheapest proof that a value replicated; the reply stamps which world answered. Read-only.
 //   @param object_path - Path or name of the object instance. In the editor world: full object path, asset path, CDO/archetype, an asset's sub-object as the readers give its object_path -- a graph node from get_graph_nodes, a sound cue node, a Niagara renderer or simulation stage, a PCG node's settings_path, a behavior tree node, a camera rig node, a Mass trait, a physics body -- also written "/Game/Asset:SubObject", or a dotted "Actor[.Component[.Subobject]]" whose first segment is the actor's INTERNAL name (editor labels are not matched here). In a live world: a fully-qualified PIE path or the same dotted form (first segment matches internal name OR editor label).
-//   @param property_names [array] - Optional names of the properties to read; every name that the class does not declare comes back in not_found[]. Required unless property_name is given.
-//   @param property_name - Optional single property to read, added to property_names.
+//   @param property_names [array] - Optional names of the properties to read, each a property name or a path ("Struct.Field", "Array[2].Field", "Reference.Property"); every name that does not resolve comes back in not_found[]. Required unless property_name is given.
+//   @param property_name - Optional single property name or path to read, added to property_names.
 //   @param world - Optional world selector: absent/'editor' (default: the editor/asset instance) | 'pie' (ambiguous: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie'). Anything other than absent/'editor' reads the LIVE instance in that world; an UNRECOGNIZED value is an error naming the worlds that exist, never a silent fallback to another world.
-//   @returns { object_path: string, class_name: string, values: object (typed: bool/number/string natively, struct/map as object, array/set as array, object-ref as path string), property_types: object ({name: FProperty class name}), not_found: [string], world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }
+//   @returns { object_path: string, class_name: string, values: object (typed: bool/number/string natively, struct/map as object, array/set as array, object-ref as path string), property_types: object ({name: FProperty class name}), not_found: [string], path_errors?: object ({path: why it did not resolve}), world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }
 
 TSharedPtr<FJsonObject> HandleGetProperties(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2877,9 +2971,28 @@ TSharedPtr<FJsonObject> HandleGetProperties(const TSharedPtr<FJsonObject>& Param
     TSharedPtr<FJsonObject> ValuesObj = MakeShared<FJsonObject>();
     TSharedPtr<FJsonObject> TypesObj = MakeShared<FJsonObject>();
     TArray<TSharedPtr<FJsonValue>> NotFound;
+    TSharedPtr<FJsonObject> PathErrors = MakeShared<FJsonObject>();
 
     for (const FString& PropName : Names)
     {
+        // A path ("Settings.Intensity", "Items[2].Name", "Layer.Size" through an object reference) reads the value it
+        // leads to; one that does not resolve is not_found, and path_errors says at which segment and what is there.
+        if (mcp_common::IsPropertyPath(PropName))
+        {
+            FProperty* LeafProperty = nullptr;
+            void* LeafPtr = nullptr;
+            FString PathError;
+            if (!mcp_common::ResolvePropertyPath(Class, Object, PropName, LeafProperty, LeafPtr, PathError))
+            {
+                NotFound.Add(MakeShared<FJsonValueString>(PropName));
+                PathErrors->SetStringField(PropName, PathError);
+                continue;
+            }
+            ValuesObj->SetField(PropName, mcp_common::PropertyValueToJson(LeafProperty, LeafPtr));
+            TypesObj->SetStringField(PropName, LeafProperty->GetClass()->GetName());
+            continue;
+        }
+
         FProperty* Property = Class->FindPropertyByName(*PropName);
         if (!Property)
         {
@@ -2897,6 +3010,10 @@ TSharedPtr<FJsonObject> HandleGetProperties(const TSharedPtr<FJsonObject>& Param
     ResultObj->SetObjectField(TEXT("values"), ValuesObj);
     ResultObj->SetObjectField(TEXT("property_types"), TypesObj);
     ResultObj->SetArrayField(TEXT("not_found"), NotFound);
+    if (PathErrors->Values.Num() > 0)
+    {
+        ResultObj->SetObjectField(TEXT("path_errors"), PathErrors);
+    }
     ResultObj->SetStringField(TEXT("world"), Target.WorldLabel);
     // WHICH world produced these values. Server and client can legitimately differ;
     // without this stamp the difference is indistinguishable from a game bug.
@@ -2907,11 +3024,12 @@ TSharedPtr<FJsonObject> HandleGetProperties(const TSharedPtr<FJsonObject>& Param
 // MCP:set_properties - Write one or several editable properties of one object in the editor world, as the Details panel does: an asset, a CDO, a placed actor, one of its components ("Actor.Component") or an asset's sub-object. Each write is undoable, dirties the package and re-registers the component, and the reply lists what was set and what failed, with why.
 //   @para Use it for any setting of a light, fog, sky, decal, camera, post-process volume, sound, Niagara system, material expression or other asset. Not for: a component in a live PIE world (set_component_property), a Blueprint's component template (set_blueprint_component_properties), a widget inside a Widget Blueprint (set_widget_property), or an object's own setter function (call_function).
 //   @para Take the property names from get_object_info, and object_path from the tool that found the object: find_assets_by_name for an asset, get_graph_nodes for a graph node, or "Label.ComponentClass" for a placed actor, such as "Sun.DirectionalLightComponent". Example: {"object_path": "Sun.DirectionalLightComponent", "properties": {"Intensity": 10, "LightColor": {"R": 255, "G": 200, "B": 150}}} writes two properties; property_name "Intensity" with value 10 writes one, and both forms together write properties first. A struct takes only the fields to change: {"RelativeLocation": {"Z": 200}} keeps X and Y.
+//   @para A name can also be a PATH, to write one value deep inside without rewriting what holds it: "RelativeLocation.Z", "Items[2]" or "Items[2].Name" (an existing element; to resize an array, write the whole array), and through an object reference to the object it points to, such as an instanced sub-object: "Layer.Settings.Size". The object holding the last segment is the one written, made undoable and notified with the chain of its segments, as the Details panel does for a nested edit; every segment it holds must be writable, and a reference the path goes through only needs to be visible.
 //   @para A sub-object's asset is finished as its editor does it: a graph node is reconstructed and its Blueprint marked modified (compile it), a sound cue recaches, a Niagara system recompiles and a blend space is resampled; no Blueprint is compiled. clamp=true keeps numbers inside ClampMin/ClampMax and lists what it clamped. save=true saves an asset's package and is refused for an object in a level, which save_level writes. Refused before anything is written: a struct key that names no field, an unregistered gameplay tag, and any call during Play-in-Editor (see force).
 //   @core
 //   @param object_path - The object, resolved in the EDITOR world: an asset path, a full object path, a CDO/archetype, an asset's sub-object as the readers give its object_path -- a graph node from get_graph_nodes, a sound cue node, a Niagara renderer or simulation stage, a PCG node's settings_path, a behavior tree node, a camera rig node, a Mass trait, a physics body -- also written "/Game/Asset:SubObject", or "Actor[.Component[.Subobject]]" where Actor is an internal name or a unique label and Component a component name or a class only one component has.
-//   @param properties [object] - Optional dict of {property_name: value}; values can be scalar, nested object, or array (UE-format text like "(X=1,Y=2,Z=3)" is also accepted for structs). Required unless property_name + value is given; both together write properties{} first.
-//   @param property_name - Optional single property to write (must be CPF_Edit and not EditConst, or it lands in failed[] with the reason). Needs value.
+//   @param properties [object] - Optional dict of {property_name or path: value}; values can be scalar, nested object, or array (UE-format text like "(X=1,Y=2,Z=3)" is also accepted for structs). Required unless property_name + value is given; both together write properties{} first.
+//   @param property_name - Optional single property, or path such as "Items[2].Name", to write (must be CPF_Edit and not EditConst, or it lands in failed[] with the reason). Needs value.
 //   @param value - Optional new value for property_name: string, number, boolean, JSON object (struct), JSON array (array/set/tag container), or a UE-format text string like "(X=1,Y=2,Z=3)"
 //   @param save [bool] - Save the asset's package after the writes (default false); refused, before anything is written, for an object in a level
 //   @param clamp [bool] - Clamp each number written to the ClampMin/ClampMax of its property, struct fields and array elements included (default false)

@@ -9,6 +9,7 @@
 #include "EdGraphSchema_K2.h"
 #include "K2Node_Composite.h"
 #include "K2Node_MacroInstance.h"
+#include "Kismet2/BlueprintEditorUtils.h" // HasGetTypeHash: a map key or set element must be hashable
 #include "UObject/UObjectGlobals.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h" // TObjectIterator<UClass> -- DescribeClassNotFound's near-miss sweep (failure path only)
@@ -281,6 +282,38 @@ bool FUEAgentGraphUtils::ResolvePinType(const FString& TypeName, FEdGraphPinType
     FString Base = TypeName.TrimStartAndEnd();
     OutPinType = FEdGraphPinType();
     OutPinType.ContainerType = EPinContainerType::None;
+
+    // A map, "Map<Key,Value>" or "TMap<Key,Value>": each side is a type of its own, neither a container, and the key
+    // must be hashable, as the editor's type picker requires.
+    for (const TCHAR* MapPrefix : { TEXT("Map<"), TEXT("TMap<") })
+    {
+        const FString Prefix(MapPrefix);
+        if (Base.StartsWith(Prefix, ESearchCase::IgnoreCase) && Base.EndsWith(TEXT(">")))
+        {
+            const FString Inner = Base.Mid(Prefix.Len(), Base.Len() - Prefix.Len() - 1);
+            int32 Depth = 0;
+            int32 Comma = INDEX_NONE;
+            for (int32 Index = 0; Index < Inner.Len() && Comma == INDEX_NONE; ++Index)
+            {
+                const TCHAR Char = Inner[Index];
+                if (Char == TEXT('<')) { ++Depth; }
+                else if (Char == TEXT('>')) { --Depth; }
+                else if (Char == TEXT(',') && Depth == 0) { Comma = Index; }
+            }
+            FEdGraphPinType KeyType;
+            FEdGraphPinType ValueType;
+            if (Comma == INDEX_NONE
+                || !ResolvePinType(Inner.Left(Comma), KeyType) || !ResolvePinType(Inner.Mid(Comma + 1), ValueType)
+                || KeyType.IsContainer() || ValueType.IsContainer() || !FBlueprintEditorUtils::HasGetTypeHash(KeyType))
+            {
+                return false;
+            }
+            OutPinType = KeyType;
+            OutPinType.ContainerType = EPinContainerType::Map;
+            OutPinType.PinValueType = FEdGraphTerminalType::FromPinType(ValueType);
+            return true;
+        }
+    }
 
     // Detect a container suffix/wrapper.
     auto StripWrapper = [&Base](const TCHAR* Prefix) -> bool

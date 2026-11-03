@@ -680,6 +680,14 @@ namespace mcp_common
                                          const TSharedPtr<FJsonValue>& Value, FString& OutErrorMessage);
 
     /**
+     * What SetObjectProperty does once the property is found: writes Value into the value at PropertyAddr, with the
+     * same gameplay-tag and scalar checks, so a field reached through a path is written exactly like a top-level one.
+     * Property is the property of that value (an array's Inner for an element); PropertyName only feeds the errors.
+     */
+    UEAGENT_API bool SetPropertyValueFromJson(FProperty* Property, void* PropertyAddr, const FString& PropertyName,
+                                                const TSharedPtr<FJsonValue>& Value, FString& OutErrorMessage);
+
+    /**
      * The editor world (GEditor's edit context), or nullptr if
      * GEditor is null. Used by every handler that needs to spawn /
      * look up / mutate actors in the editor's world.

@@ -58,8 +58,8 @@ public:
      * FPinTypeResolver: map a human type string to an FEdGraphPinType. Covers
      * bool, int/int32, int64, float/double/real, string, name, text, byte,
      * object/class references (/Game/... or native names), structs, enums, and
-     * a trailing container suffix ("[]" / "<Array>"/"<Set>"). Returns false if
-     * the base type could not be resolved.
+     * and a container: "int[]", "Array<int>", "Set<Name>", or "Map<Name,int>" (a hashable
+     * key, and neither side a container). Returns false if a type could not be resolved.
      */
     static bool ResolvePinType(const FString& TypeName, FEdGraphPinType& OutPinType);
 
