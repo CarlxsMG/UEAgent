@@ -411,9 +411,10 @@ private:
 class FMcpHttpConnection : public FRunnable
 {
 public:
-	FMcpHttpConnection(FMcpHttpServer* InServer, TSharedPtr<FSocket> InSocket)
+	FMcpHttpConnection(FMcpHttpServer* InServer, TSharedPtr<FSocket> InSocket, uint32 InConnectionId)
 		: Server(InServer)
 		, Socket(MoveTemp(InSocket))
+		, ConnectionId(InConnectionId)
 		, bConnectionRunning(true)
 		, bFinished(false)
 	{
@@ -462,6 +463,11 @@ private:
 
 	FMcpHttpServer* Server;
 	TSharedPtr<FSocket> Socket;
+	/** Names the connection in the log, so the lines of one client can be told from another's. */
+	const uint32 ConnectionId;
+	/** The request being answered ("POST /mcp initialize"), for the log lines of its response. */
+	FString Exchange;
+	int32 NumAnswered = 0;
 	/** Bytes read but not yet consumed (keep-alive: may hold the start of the next request). */
 	TArray<uint8> Buffer;
 	TArray<uint8> RecvScratch;
@@ -480,6 +486,7 @@ uint32 FMcpHttpConnection::Run()
 		// Blocking: what keeps Stop() observable is the bounded Wait() in FillBuffer.
 		Socket->SetNonBlocking(false);
 		RecvScratch.SetNumUninitialized(RecvChunkBytes);
+		UE_LOG(LogUEAgentHttp, Verbose, TEXT("conn %u: opened"), ConnectionId);
 
 		while (KeepGoing())
 		{
@@ -496,10 +503,12 @@ uint32 FMcpHttpConnection::Run()
 					Read == EReadResult::BodyTooLarge ? 413 :
 					Read == EReadResult::Stalled ? 408 : 400;
 				UE_LOG(LogUEAgentHttp, Warning, TEXT("HTTP request dropped (%d %s)"), Status, StatusText(Status));
+				Exchange = TEXT("unreadable request");
 				SendEmpty(Status, false);
 				break;
 			}
 			Server->CountRequest();
+			Exchange = Request.Method + TEXT(" ") + Request.Path;
 			if (!HandleRequest(Request))
 			{
 				break;
@@ -508,6 +517,7 @@ uint32 FMcpHttpConnection::Run()
 
 		Socket->Close();
 		Socket.Reset();
+		UE_LOG(LogUEAgentHttp, Verbose, TEXT("conn %u: closed after %d responses"), ConnectionId, NumAnswered);
 	}
 
 	bFinished = true;
@@ -646,6 +656,7 @@ FMcpHttpConnection::EReadResult FMcpHttpConnection::ReadRequest(McpHttpServerPri
 	{
 		if (Expect->Equals(TEXT("100-continue"), ESearchCase::IgnoreCase))
 		{
+			Exchange = Out.Method + TEXT(" ") + Out.Path + TEXT(" (100 Continue)");
 			static const char Continue[] = "HTTP/1.1 100 Continue\r\n\r\n";
 			SendBytes(reinterpret_cast<const uint8*>(Continue), sizeof(Continue) - 1);
 		}
@@ -776,13 +787,19 @@ bool FMcpHttpConnection::SendBytes(const uint8* Data, int32 Count)
 	int32 Sent = 0;
 	while (Sent < Count)
 	{
-		if (!Socket.IsValid())
-		{
-			return false;
-		}
 		int32 SentNow = 0;
-		if (!Socket->Send(Data + Sent, FMath::Min(Count - Sent, 65536), SentNow) || SentNow <= 0)
+		if (!Socket.IsValid() || !Socket->Send(Data + Sent, FMath::Min(Count - Sent, 65536), SentNow) || SentNow <= 0)
 		{
+			// The editor log is the only place that can tell a response the server never finished sending from one
+			// that left whole and was lost on the way to the client. A stopping server closes the socket itself.
+			if (KeepGoing())
+			{
+				ISocketSubsystem* Subsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
+				const TCHAR* Why = !Socket.IsValid() ? TEXT("the socket is closed")
+					: Subsystem ? Subsystem->GetSocketError(Subsystem->GetLastErrorCode()) : TEXT("no socket subsystem");
+				UE_LOG(LogUEAgentHttp, Warning, TEXT("conn %u: %s: sending failed after %d of %d bytes (%s), so the client did not get the whole response"),
+					ConnectionId, *Exchange, Sent, Count, Why);
+			}
 			return false;
 		}
 		Sent += SentNow;
@@ -808,8 +825,15 @@ bool FMcpHttpConnection::SendResponse(int32 Status, const TCHAR* ContentType, co
 	Head += TEXT("\r\n");
 
 	const TArray<uint8> HeadBytes = ToUtf8(Head);
-	return SendBytes(HeadBytes.GetData(), HeadBytes.Num())
-		&& (Body.Num() == 0 || SendBytes(Body.GetData(), Body.Num()));
+	if (!SendBytes(HeadBytes.GetData(), HeadBytes.Num()) || (Body.Num() > 0 && !SendBytes(Body.GetData(), Body.Num())))
+	{
+		return false;
+	}
+	// Logged once the socket has taken every byte: the furthest the server can see a response go.
+	++NumAnswered;
+	UE_LOG(LogUEAgentHttp, Verbose, TEXT("conn %u: %s -> %d, %d body bytes, %s"),
+		ConnectionId, *Exchange, Status, Body.Num(), bKeepAlive ? TEXT("keep-alive") : TEXT("close"));
+	return true;
 }
 
 bool FMcpHttpConnection::SendJson(int32 Status, const FString& Json, bool bKeepAlive)
@@ -832,13 +856,24 @@ bool FMcpHttpConnection::SendSseHead()
 		"X-Accel-Buffering: no\r\n"
 		"Connection: close\r\n"
 		"\r\n";
-	return SendBytes(reinterpret_cast<const uint8*>(Head), sizeof(Head) - 1);
+	if (!SendBytes(reinterpret_cast<const uint8*>(Head), sizeof(Head) - 1))
+	{
+		return false;
+	}
+	++NumAnswered;
+	UE_LOG(LogUEAgentHttp, Verbose, TEXT("conn %u: %s -> 200, event stream, close"), ConnectionId, *Exchange);
+	return true;
 }
 
 bool FMcpHttpConnection::SendSseEvent(const FString& Json)
 {
 	const TArray<uint8> Bytes = McpHttpServerPrivate::ToUtf8(TEXT("event: message\r\ndata: ") + Json + TEXT("\r\n\r\n"));
-	return SendBytes(Bytes.GetData(), Bytes.Num());
+	if (!SendBytes(Bytes.GetData(), Bytes.Num()))
+	{
+		return false;
+	}
+	UE_LOG(LogUEAgentHttp, Verbose, TEXT("conn %u: %s: event, %d bytes"), ConnectionId, *Exchange, Bytes.Num());
+	return true;
 }
 
 bool FMcpHttpConnection::PeerHasClosed()
@@ -950,6 +985,7 @@ bool FMcpHttpConnection::HandleJsonRpc(const McpHttpServerPrivate::FHttpRequest&
 		// A response from the client: this server never sends it requests, so it expects none.
 		return SendJson(400, MakeRpcError(nullptr, -32600, TEXT("Invalid Request: missing 'method'")), bKeepAlive) && bKeepAlive;
 	}
+	Exchange += TEXT(" ") + Method;
 
 	// Notification (no `id`): initialized, cancelled... Nothing to answer.
 	if (!Message->HasField(TEXT("id")))
@@ -1158,6 +1194,7 @@ bool FMcpHttpConnection::HandleToolsCall(const McpHttpServerPrivate::FHttpReques
 		}
 		Arguments = InnerArguments;
 	}
+	Exchange += TEXT(" ") + ToolName;
 
 	const TSharedPtr<const FMcpToolCatalog> Catalog = FMcpToolCatalog::GetCurrent();
 	if (Catalog.IsValid())
@@ -1513,8 +1550,9 @@ void FMcpHttpServer::RunAcceptLoop(const FThreadSafeBool& bAcceptorRunning)
 			continue;
 		}
 
-		FMcpHttpConnection* Runnable = new FMcpHttpConnection(this, Client);
-		FRunnableThread* Thread = FRunnableThread::Create(Runnable, *FString::Printf(TEXT("UEAgentHttp_%u"), NextConnectionId++), 0, TPri_Normal);
+		const uint32 ConnectionId = NextConnectionId++;
+		FMcpHttpConnection* Runnable = new FMcpHttpConnection(this, Client, ConnectionId);
+		FRunnableThread* Thread = FRunnableThread::Create(Runnable, *FString::Printf(TEXT("UEAgentHttp_%u"), ConnectionId), 0, TPri_Normal);
 		if (!Thread)
 		{
 			delete Runnable;
