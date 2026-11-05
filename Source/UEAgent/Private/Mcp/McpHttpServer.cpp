@@ -910,6 +910,12 @@ bool FMcpHttpConnection::HandleRequest(const McpHttpServerPrivate::FHttpRequest&
 			bKeepAlive = true;
 		}
 	}
+	// Keep-alive off (UUEAgentSettings::bHttpKeepAlive): a proxy, antivirus or VPN in front of the server may finish
+	// relaying a response only when the server closes the connection, and with keep-alive the client waits for it.
+	if (!Server->GetKeepAlive())
+	{
+		bKeepAlive = false;
+	}
 
 	// Security FIRST, before looking at path or method: a browser must not even get a 404.
 	const FString* Host = Request.Header(TEXT("host"));
@@ -1367,7 +1373,7 @@ FMcpHttpServer::~FMcpHttpServer()
 	Stop();
 }
 
-bool FMcpHttpServer::Start(uint16 InPort, const FString& InAuthToken, FString& OutError)
+bool FMcpHttpServer::Start(uint16 InPort, const FString& InAuthToken, bool bInKeepAlive, FString& OutError)
 {
 	using namespace McpHttpServerPrivate;
 
@@ -1420,6 +1426,7 @@ bool FMcpHttpServer::Start(uint16 InPort, const FString& InAuthToken, FString& O
 	Listener = NewListener;
 	Port = InPort;
 	AuthToken = InAuthToken;
+	bKeepAlive = bInKeepAlive;
 	bRunning = true;
 
 	AcceptorRunnable = new FMcpHttpAcceptor(this);

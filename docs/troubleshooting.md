@@ -14,6 +14,51 @@ whether the server started:
 
 `mcp.http.status` in the editor console prints the server's state at any time.
 
+## A client connects but times out
+
+The client gives up while it connects (Claude Code: `CONNECT_TIMEOUT`, "Version negotiation probe
+timed out"), and the editor's Output Log shows `initialize: <client> ...` again every few seconds,
+from a new connection each time. The request reaches the server and the server answers it: the answer
+does not reach the client. With curl the response's head arrives, often with
+`Transfer-Encoding: chunked`, which UEAgent never sends (each of its responses has a
+`Content-Length`), and its body does not.
+
+Something relays the traffic between the client and the editor: a proxy, an antivirus that scans web
+traffic, a VPN or a traffic filter. Some finish relaying a response only when the server closes the
+connection, and UEAgent keeps a connection open for the client's next request.
+
+- **A proxy in the environment.** Claude Code and curl read the proxy variables (`HTTP_PROXY`,
+  `HTTPS_PROXY`, `ALL_PROXY`, and their lower-case forms). Leave the loopback out with
+  `NO_PROXY=127.0.0.1,localhost`, in the environment the client starts in, or in the `env` block of
+  Claude Code's `settings.json`: `"env": { "NO_PROXY": "127.0.0.1,localhost" }`.
+- **An antivirus, VPN or filter.** Leave the loopback, or `UnrealEditor.exe`, out of what it scans,
+  or turn it off for a test.
+- **Close each connection.** Turn off **HTTP keep-alive** in **Editor Preferences > Plugins >
+  UEAgent**, or start the editor with `-McpHttpNoKeepAlive`, and restart the server
+  (`mcp.http.restart`). Each response then says `Connection: close`, and the server closes its
+  connection after it.
+
+To find which one it is, with the editor open (`curl.exe` in PowerShell):
+
+1. `curl.exe -v --raw http://127.0.0.1:55561/mcp` gets `405 Method Not Allowed` with
+   `Content-Length: 0`, and curl ends at once. If it hangs, or the head says
+   `Transfer-Encoding: chunked`, something rewrites the response.
+2. The same with `--noproxy "*"`: if this one ends at once, a proxy variable is the cause.
+3. The same with `-H "Connection: close"`: if this one ends at once, the relay waits for the
+   connection to close: turn keep-alive off.
+4. A raw socket, which no proxy setting touches:
+   `python -c "import socket;s=socket.create_connection(('127.0.0.1',55561));s.sendall(b'GET /mcp HTTP/1.1\r\nHost: 127.0.0.1:55561\r\nConnection: close\r\n\r\n');print(s.recv(4096))"`
+   prints the response as the server sent it.
+5. `netstat -ano | findstr :55561` lists who listens on the port. A program that listens on
+   `[::]:55561` gets the connections of a client whose URL says `localhost` and goes to `::1`: give the
+   client `127.0.0.1`.
+
+The server logs each response at Verbose once the network has taken all of it:
+`log LogUEAgentHttp Verbose` in the editor console, or `-LogCmds="LogUEAgentHttp Verbose"` on its
+command line, shows lines such as `conn 12: POST /mcp initialize -> 200, 1834 body bytes, keep-alive`.
+So with that line in the log, the response left the server whole, and what happened to it after that
+is outside the editor. A warning `sending failed after N of M bytes` says it did not leave whole.
+
 ## 401 Unauthorized
 
 An **Auth token** is set and the request did not carry `Authorization: Bearer <token>`. Give the

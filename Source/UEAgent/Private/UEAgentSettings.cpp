@@ -13,6 +13,11 @@ uint16 UUEAgentSettings::GetEffectiveHttpPort() const
 	return static_cast<uint16>(FMath::Clamp(Port, 1, 65535));
 }
 
+bool UUEAgentSettings::GetEffectiveHttpKeepAlive() const
+{
+	return bHttpKeepAlive && !FParse::Param(FCommandLine::Get(), TEXT("McpHttpNoKeepAlive"));
+}
+
 namespace UEAgentSettingsPrivate
 {
 	static FString TrimContentRoot(FString Root)

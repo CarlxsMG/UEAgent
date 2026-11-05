@@ -35,6 +35,16 @@ public:
 	FString AuthToken;
 
 	/**
+	 * Keeps a connection open after each response, for the client's next request. Turn it off when a
+	 * proxy, antivirus or VPN between the client and the editor relays a response only once the
+	 * server closes the connection, so the client times out waiting for `initialize`: each response
+	 * then says `Connection: close` and its connection closes. `-McpHttpNoKeepAlive` on the command
+	 * line turns it off too. It applies when the server starts (mcp.http.restart).
+	 */
+	UPROPERTY(config, EditAnywhere, Category = "MCP Server", meta = (DisplayName = "HTTP Keep-Alive"))
+	bool bHttpKeepAlive = true;
+
+	/**
 	 * On editor startup, warns if the project's `.mcp.json` does not lead Claude Code to this
 	 * server, with a button to fix it. "Don't show again" turns it off here.
 	 */
@@ -57,4 +67,7 @@ public:
 
 	/** The port actually used: the command line wins over the settings. */
 	uint16 GetEffectiveHttpPort() const;
+
+	/** Whether the server keeps connections alive: off with bHttpKeepAlive off or -McpHttpNoKeepAlive. */
+	bool GetEffectiveHttpKeepAlive() const;
 };

@@ -568,7 +568,7 @@ bool UUEAgentBridge::StartHttpServer()
     }
     FString Error;
     const uint16 HttpPort = Settings->GetEffectiveHttpPort();
-    if (!HttpServer->Start(HttpPort, Settings->AuthToken, Error))
+    if (!HttpServer->Start(HttpPort, Settings->AuthToken, Settings->GetEffectiveHttpKeepAlive(), Error))
     {
         LastHttpError = Error;
         UE_LOG(LogTemp, Error, TEXT("UEAgentBridge: MCP HTTP server NOT started: %s"), *Error);
@@ -577,13 +577,14 @@ bool UUEAgentBridge::StartHttpServer()
         return false;
     }
 
-    UE_LOG(LogTemp, Display, TEXT("UEAgentBridge: MCP HTTP server started on http://127.0.0.1:%d/mcp (%d tools, %d params)%s%s"),
+    UE_LOG(LogTemp, Display, TEXT("UEAgentBridge: MCP HTTP server started on http://127.0.0.1:%d/mcp (%d tools, %d params)%s%s%s"),
         HttpPort,
         Catalog.IsValid() ? Catalog->NumTools() : 0,
         Catalog.IsValid() ? Catalog->NumParams() : 0,
         Settings->AuthToken.IsEmpty() ? TEXT("") : TEXT(", with token"),
         HttpServer->GetDefaultToolsMode() == EMcpToolsMode::All ? TEXT(", every tool listed (UEAGENT_TOOLS=all)")
-        : HttpServer->GetDefaultToolsMode() == EMcpToolsMode::Compact ? TEXT(", compact tool list (UEAGENT_TOOLS=compact)") : TEXT(", core tool list"));
+        : HttpServer->GetDefaultToolsMode() == EMcpToolsMode::Compact ? TEXT(", compact tool list (UEAGENT_TOOLS=compact)") : TEXT(", core tool list"),
+        HttpServer->GetKeepAlive() ? TEXT("") : TEXT(", keep-alive off (each response closes its connection)"));
     return true;
 }
 
@@ -608,10 +609,11 @@ FString UUEAgentBridge::DescribeHttpStatus() const
     {
         return FString::Printf(TEXT("MCP HTTP: stopped | %s"), *CatalogText);
     }
-    return FString::Printf(TEXT("MCP HTTP: http://127.0.0.1:%d/mcp | %d connections | %lld requests | %lld tools/call | %s%s"),
+    return FString::Printf(TEXT("MCP HTTP: http://127.0.0.1:%d/mcp | %d connections | %lld requests | %lld tools/call | %s%s%s"),
         HttpServer->GetPort(), HttpServer->GetNumConnections(), HttpServer->GetNumRequests(), HttpServer->GetNumToolCalls(), *CatalogText,
         HttpServer->GetDefaultToolsMode() == EMcpToolsMode::All ? TEXT(" | every tool listed")
-        : HttpServer->GetDefaultToolsMode() == EMcpToolsMode::Compact ? TEXT(" | compact tool list") : TEXT(" | core tool list"));
+        : HttpServer->GetDefaultToolsMode() == EMcpToolsMode::Compact ? TEXT(" | compact tool list") : TEXT(" | core tool list"),
+        HttpServer->GetKeepAlive() ? TEXT("") : TEXT(" | keep-alive off"));
 }
 
 uint16 UUEAgentBridge::GetHttpPort() const
