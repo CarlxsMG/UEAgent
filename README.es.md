@@ -199,6 +199,7 @@ Launcher. Después de actualizar, vuelve a conectar tu cliente para que liste de
 | Enable HTTP server | activado | el servidor MCP |
 | HTTP port | 55561 | `-McpHttpPort=N` en la línea de comandos lo sustituye |
 | Auth token | vacío | si se rellena, cada petición necesita `Authorization: Bearer <token>` |
+| HTTP keep-alive | activado | desactivado: cada respuesta cierra su conexión, para un proxy, antivirus o VPN que retiene la respuesta hasta entonces (ver [A client connects but times out](docs/troubleshooting.md#a-client-connects-but-times-out)); `-McpHttpNoKeepAlive` en la línea de comandos lo desactiva |
 | Show connect hint | activado | al arrancar, ofrece conectar Claude Code si el proyecto no lo está |
 | Check for updates at startup | desactivado | preguntar a GitHub como mucho una vez al día si hay una versión nueva (ver [Actualizar](#actualizar)) |
 

@@ -49,16 +49,19 @@ public:
 	/**
 	 * Opens 127.0.0.1:InPort. Returns false with OutError if it cannot (e.g. the port is in use).
 	 * Empty InAuthToken = no authentication; otherwise every request must carry `Authorization: Bearer`.
+	 * bInKeepAlive false = every response says `Connection: close` and its connection closes after it.
 	 * UEAGENT_TOOLS=all|compact in the environment changes the default list (EMcpToolsMode). Game thread (reads the
 	 * plugin's version and its skills folder).
 	 */
-	bool Start(uint16 InPort, const FString& InAuthToken, FString& OutError);
+	bool Start(uint16 InPort, const FString& InAuthToken, bool bInKeepAlive, FString& OutError);
 	/** Closes everything and waits for the threads. Call from the game thread. */
 	void Stop();
 
 	bool IsRunning() const { return bRunning; }
 	uint16 GetPort() const { return Port; }
 	const FString& GetAuthToken() const { return AuthToken; }
+	/** Whether a connection stays open for the client's next request (UUEAgentSettings::GetEffectiveHttpKeepAlive). */
+	bool GetKeepAlive() const { return bKeepAlive; }
 	const FString& GetServerVersion() const { return ServerVersion; }
 	/** <plugin>/Resources/Skills, which prompts/* and resources/* serve (Mcp/McpPrompts.h). */
 	const FString& GetSkillsDir() const { return SkillsDir; }
@@ -118,6 +121,7 @@ private:
 	uint16 Port = 0;
 	// Set in Start() and read-only while the server runs: the threads read them without a lock.
 	FString AuthToken;
+	bool bKeepAlive = true;
 	FString ServerVersion;
 	FString SkillsDir;
 	EMcpToolsMode DefaultToolsMode = EMcpToolsMode::Core;

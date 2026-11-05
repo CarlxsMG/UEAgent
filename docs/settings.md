@@ -14,6 +14,7 @@ The settings are listed in the [README](../README.md#settings).
 | | |
 |---|---|
 | `-McpHttpPort=N` | On the editor's command line: the server's port, instead of **HTTP port** |
+| `-McpHttpNoKeepAlive` | On the editor's command line: each response closes its connection, as with **HTTP keep-alive** off (see [A client connects but times out](troubleshooting.md#a-client-connects-but-times-out)) |
 | `UEAGENT_TOOLS=all` or `UEAGENT_TOOLS=compact` | In the environment the editor starts in: every client lists every tool, or the three meta-tools, instead of the [core tool list](clients.md#tool-lists); `?tools=core` gives one client the core list back |
 | `UEAGENT_TOKEN` | The token the `.mcp.json` entry written by **Connect Claude Code** sends, as `Authorization: Bearer ${UEAGENT_TOKEN}`: give it the value of **Auth token** |
 

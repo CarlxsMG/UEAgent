@@ -195,6 +195,7 @@ After an update, reconnect your client so it lists the tools again.
 | Enable HTTP server | on | the MCP server |
 | HTTP port | 55561 | `-McpHttpPort=N` on the command line overrides it |
 | Auth token | empty | when set, every request needs `Authorization: Bearer <token>` |
+| HTTP keep-alive | on | off: each response closes its connection, for a proxy, antivirus or VPN that holds a response until then (see [A client connects but times out](docs/troubleshooting.md#a-client-connects-but-times-out)); `-McpHttpNoKeepAlive` on the command line turns it off |
 | Show connect hint | on | at startup, offer to connect Claude Code if the project is not |
 | Check for updates at startup | off | ask GitHub at most once a day whether a newer release is out (see [How do I update it?](docs/faq.md#how-do-i-update-it)) |
 
