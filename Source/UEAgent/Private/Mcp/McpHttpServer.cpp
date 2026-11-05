@@ -824,8 +824,10 @@ bool FMcpHttpConnection::SendResponse(int32 Status, const TCHAR* ContentType, co
 	Head += ExtraHeaders;
 	Head += TEXT("\r\n");
 
-	const TArray<uint8> HeadBytes = ToUtf8(Head);
-	if (!SendBytes(HeadBytes.GetData(), HeadBytes.Num()) || (Body.Num() > 0 && !SendBytes(Body.GetData(), Body.Num())))
+	// One send, so that a small response leaves as one segment rather than a head and then a body.
+	TArray<uint8> Bytes = ToUtf8(Head);
+	Bytes.Append(Body);
+	if (!SendBytes(Bytes.GetData(), Bytes.Num()))
 	{
 		return false;
 	}
