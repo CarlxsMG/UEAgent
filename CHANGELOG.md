@@ -4,6 +4,8 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 ## Unreleased
 
+## 2.10.1 - 2026-11-05
+
 A client that cannot get past `initialize` through a proxy, antivirus or VPN has a setting to try, and the log says
 what the server sent.
 
