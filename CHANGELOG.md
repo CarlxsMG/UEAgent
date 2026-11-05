@@ -2,6 +2,38 @@
 
 Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](https://semver.org).
 
+## Unreleased
+
+A client that cannot get past `initialize` through a proxy, antivirus or VPN has a setting to try, and the log says
+what the server sent.
+
+### Added
+
+- **HTTP keep-alive**, in **Editor Preferences > Plugins > UEAgent**, on by default. Off, each response says
+  `Connection: close` and the server closes its connection after it. It is for a proxy, antivirus or VPN between the
+  client and the editor that relays a response only once the connection closes: there the client times out while it
+  connects, and the editor log shows its `initialize` arriving again every few seconds. `-McpHttpNoKeepAlive` on the
+  command line turns it off too. It applies when the server starts, and the startup line and `mcp.http.status` say
+  when it is off.
+- At Verbose, `LogUEAgentHttp` logs each response once the network has taken all of it, with the request, the status,
+  the body's size and whether the connection stays open: `conn 12: POST /mcp initialize -> 200, 1834 body bytes,
+  keep-alive`. It also logs when each connection opens and closes. `log LogUEAgentHttp Verbose` in the editor console
+  shows them.
+- [Troubleshooting](docs/troubleshooting.md#a-client-connects-but-times-out) has a section for a client that connects
+  but times out: the proxy variables (`NO_PROXY=127.0.0.1,localhost`, in Claude Code's `env` settings too), the
+  antivirus or VPN, and the curl, socket and netstat checks that tell them apart.
+
+### Fixed
+
+- **A response the server could not send left no trace.** When sending failed, the connection closed without a log
+  line, so the log could not tell a response the server never finished from one that was lost on the way to the
+  client. The server now logs a warning with the request, how many of the response's bytes left, and the socket's
+  error.
+
+### Changed
+
+- A response's head and body leave in one send, so a small response is one TCP segment.
+
 ## 2.10.0 - 2026-11-03
 
 `get_properties` and `set_properties` reach nested properties by path, a new tool changes the type of a Blueprint
