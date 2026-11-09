@@ -127,10 +127,12 @@ UEAgent aparece en:
 - [Glama](https://glama.ai/mcp/servers/CarlxsMG/UEAgent), el directorio de servidores MCP;
 - [mcp.so](https://mcp.so/servers/ueagent), el mercado de servidores MCP;
 - [mcpservers.org](https://mcpservers.org/servers/carlxsmg/ueagent), la web del directorio awesome-mcp-servers;
+- [mcprush](https://mcprush.com/to/ueagent-mcp), el mercado de servidores MCP con notas de seguridad;
 - [awesome-mcp-servers](https://github.com/punkpeye/awesome-mcp-servers#gaming), en Gaming;
 - [awesome-unreal](https://github.com/insthync/awesome-unreal#editor), en Editor.
 
 <a href="https://glama.ai/mcp/servers/CarlxsMG/UEAgent"><img width="380" height="200" src="https://glama.ai/mcp/servers/CarlxsMG/UEAgent/badges/card.svg" alt="UEAgent en Glama"></a>
+<a href="https://mcprush.com/to/ueagent-mcp?ref=badge"><img width="380" height="200" src="https://mcprush.com/badge/ueagent-mcp/card.svg" alt="UEAgent en mcprush"></a>
 
 ## Skills
 
