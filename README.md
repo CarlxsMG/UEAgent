@@ -120,6 +120,8 @@ UEAgent is listed in:
 - the [official MCP Registry](https://registry.modelcontextprotocol.io), as `io.github.CarlxsMG/UEAgent`,
   which other directories and clients read from;
 - [Glama](https://glama.ai/mcp/servers/CarlxsMG/UEAgent), the MCP server directory;
+- [mcp.so](https://mcp.so/servers/ueagent), the MCP server marketplace;
+- [mcpservers.org](https://mcpservers.org/servers/carlxsmg/ueagent), the awesome-mcp-servers directory site;
 - [awesome-mcp-servers](https://github.com/punkpeye/awesome-mcp-servers#gaming), under Gaming;
 - [awesome-unreal](https://github.com/insthync/awesome-unreal#editor), under Editor.
 
