@@ -1,7 +1,11 @@
 version: 2
 updates:
-  # Keeps the CI's actions (checkout, setup-python) up to date.
+  # The workflows' actions are the only dependency manifest in the repository: the plugin's C++
+  # builds against the engine, and the Python tools pin their few packages inline in the workflows.
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: monthly
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
