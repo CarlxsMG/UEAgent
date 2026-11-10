@@ -124,6 +124,7 @@ UEAgent is listed in:
 - [mcpservers.org](https://mcpservers.org/servers/carlxsmg/ueagent), the awesome-mcp-servers directory site;
 - [mcprush](https://mcprush.com/to/ueagent-mcp), the MCP server marketplace with security grades;
 - [awesome-mcp-servers](https://github.com/punkpeye/awesome-mcp-servers#gaming), under Gaming;
+- [TensorBlock's awesome-mcp-servers](https://github.com/TensorBlock/awesome-mcp-servers/blob/main/docs/gaming.md), under Gaming;
 - [awesome-unreal](https://github.com/insthync/awesome-unreal#editor), under Editor.
 
 <a href="https://glama.ai/mcp/servers/CarlxsMG/UEAgent"><img width="380" height="200" src="https://glama.ai/mcp/servers/CarlxsMG/UEAgent/badges/card.svg" alt="UEAgent MCP server on Glama"></a>
