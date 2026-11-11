@@ -124,8 +124,9 @@ Capture a high-resolution (supersampled) screenshot and write it to a PNG SYNCHR
 |---|---|---|---|
 | `resolution_multiplier` | number | no | Resolution multiplier (clamped 1..16, default 2). |
 | `filename` | string | no | Optional output path; a bare name lands under &lt;ProjectSaved>/Screenshots/, an absolute path is respected verbatim. ".png" is appended if missing. Defaults to a timestamped name. |
+| `return_image` | boolean | no | Also return the picture as an MCP image block next to this JSON (default true); a picture over the size limits is sent as a smaller copy. |
 
-**Returns:** `{ written: bool, file_path: string, resolution_multiplier: int, width: int, height: int, captured_pie: bool }`
+**Returns:** `{ written: bool, file_path: string, resolution_multiplier: int, width: int, height: int, captured_pie: bool, image_returned: bool, image_width?: int, image_height?: int, image_note?: string }`
 
 ## `capture_viewport`
 
@@ -141,8 +142,9 @@ Screenshot the active editor viewport to a PNG (forcing a fresh draw first), opt
 | `height` | number | no | Optional target height (only used when width is also supplied). |
 | `filename` | string | no | Optional output filename (default MCP_Capture_&lt;timestamp>.png); ".png" extension is added if missing. |
 | `return_base64` | boolean | no | bool, also include image_base64 + image_format in the response (default false). |
+| `return_image` | boolean | no | Also return the picture as an MCP image block next to this JSON (default true); a picture over the size limits is sent as a smaller copy. |
 
-**Returns:** `{ file_path: string, width: int, height: int, byte_size: int, image_base64: string, image_format: string }`
+**Returns:** `{ file_path: string, width: int, height: int, byte_size: int, image_base64: string, image_format: string, image_returned: bool, image_width?: int, image_height?: int, image_note?: string }`
 
 ## `clear_message_log`
 

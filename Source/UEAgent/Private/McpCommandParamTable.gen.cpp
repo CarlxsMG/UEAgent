@@ -906,20 +906,21 @@ static const TCHAR* const GFlatCommandParams[] =
     TEXT("cancel_transaction"),
     nullptr,
     TEXT("capture_high_res_screenshot"),
-        TEXT("filename"), TEXT("resolution_multiplier"),
+        TEXT("filename"), TEXT("resolution_multiplier"), TEXT("return_image"),
     nullptr,
     TEXT("capture_object_snapshot"),
         TEXT("handle"), TEXT("include_component_templates"), TEXT("object_path"), TEXT("persist"),
         TEXT("return_snapshot"), TEXT("snapshot_id"), TEXT("world"),
     nullptr,
     TEXT("capture_pie_screenshot"),
-        TEXT("include_ui"), TEXT("output_path"),
+        TEXT("include_ui"), TEXT("output_path"), TEXT("return_image"),
     nullptr,
     TEXT("capture_pie_state"),
         TEXT("class_filter"), TEXT("max_actors"), TEXT("pie_client_index"),
     nullptr,
     TEXT("capture_viewport"),
-        TEXT("filename"), TEXT("height"), TEXT("return_base64"), TEXT("width"),
+        TEXT("filename"), TEXT("height"), TEXT("return_base64"), TEXT("return_image"),
+        TEXT("width"),
     nullptr,
     TEXT("check_asset_circular_dependency"),
         TEXT("asset_name"), TEXT("dependency_type"), TEXT("max_depth"), TEXT("max_visited"),
@@ -1851,7 +1852,7 @@ static const TCHAR* const GFlatCommandParams[] =
         TEXT("asset_path"), TEXT("report_format"), TEXT("visible_only"),
     nullptr,
     TEXT("generate_asset_thumbnail"),
-        TEXT("asset_path"),
+        TEXT("asset_path"), TEXT("return_image"),
     nullptr,
     TEXT("generate_blueprint_docs"),
     nullptr,
@@ -3953,8 +3954,8 @@ static const TCHAR* const GFlatCommandParams[] =
         TEXT("map_path"), TEXT("sequence_name"),
     nullptr,
     TEXT("render_widget_preview"),
-        TEXT("height"), TEXT("opaque_background"), TEXT("output_path"), TEXT("scale"),
-        TEXT("widget_bp_path"), TEXT("width"),
+        TEXT("height"), TEXT("opaque_background"), TEXT("output_path"), TEXT("return_image"),
+        TEXT("scale"), TEXT("widget_bp_path"), TEXT("width"),
     nullptr,
     TEXT("reorder_enum_entry"),
         TEXT("entry_name"), TEXT("enum_path"), TEXT("to_index"),
@@ -5992,7 +5993,7 @@ static const TCHAR* const GFlatCommandParams[] =
 };
 
 static constexpr int32 GNumCommands = 1791;
-static constexpr int32 GNumParamNames = 6060;
+static constexpr int32 GNumParamNames = 6065;
 
 // Built ONCE, on first use (function-local static => thread-safe init). The
 // dispatcher is game-thread only, so there is no contention after that.

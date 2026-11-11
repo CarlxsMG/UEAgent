@@ -313,13 +313,14 @@ Examples: {"search_pattern": "Grass"} finds every name that contains Grass, in a
 
 *Additive.*
 
-Render and cache an asset's thumbnail (or report the existing cached one).  When the editor can render (FApp::CanEverRender() and the RHI is initialized), this generates a fresh thumbnail via ThumbnailTools and caches it into the package's thumbnail map. When rendering is unavailable, or the object type has no thumbnail renderer, it honestly reports the existing cached thumbnail state.
+Render and cache an asset's thumbnail (or report the existing cached one), and write it to a PNG under &lt;Project>/Saved/MCP/Thumbnails/.  When the editor can render (FApp::CanEverRender() and the RHI is initialized), this generates a fresh thumbnail via ThumbnailTools and caches it into the package's thumbnail map. When rendering is unavailable, or the object type has no thumbnail renderer, it honestly reports the existing cached thumbnail state. file_path is set only when there is a thumbnail to write.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `asset_path` | string | yes | Object path or package path of the asset. |
+| `return_image` | boolean | no | Also return the thumbnail as an MCP image block next to this JSON (default true). |
 
-**Returns:** `{ asset_path: string, object_path: string, asset_class: string, rendered: bool, has_thumbnail: bool, width: int, height: int, compressed_bytes: int, message: string }`
+**Returns:** `{ asset_path: string, object_path: string, asset_class: string, rendered: bool, has_thumbnail: bool, width: int, height: int, compressed_bytes: int, message: string, file_path?: string, image_returned?: bool, image_width?: int, image_height?: int, image_note?: string }`
 
 ## `get_asset_by_name`
 

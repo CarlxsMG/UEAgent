@@ -213,8 +213,9 @@ Write a PNG of what the running game shows: the PIE game viewport, or the active
 |---|---|---|---|
 | `output_path` | string | no | File path of the PNG, absolute or relative to the editor's working directory, e.g. "D:/Shots/hud.png"; folders are created. Omit it to auto-name &lt;Project>/Saved/MCP/PIE_&lt;yyyyMMdd_HHmmss UTC>.png. |
 | `include_ui` | boolean | no | true to also write the HUD version over output_path on a later frame (PIE with rendering only, SDR only, abandoned after 8 s, e.g. with an HDR editor display); default false keeps only the scene-only PNG. |
+| `return_image` | boolean | no | Also return the picture as an MCP image block next to this JSON (default true); a picture over the size limits is sent as a smaller copy. |
 
-**Returns:** `{ saved_to_pie_active, output_path, width, height, bytes_written, includes_ui, ui_overwrite_next_frame, ui_note?, note? }`
+**Returns:** `{ saved_to_pie_active, output_path, width, height, bytes_written, includes_ui, ui_overwrite_next_frame, ui_note?, note?, image_returned: bool, image_width?: int, image_height?: int, image_note?: string }`
 
 ## `commit_level_instance`
 

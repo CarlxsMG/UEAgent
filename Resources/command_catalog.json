@@ -10108,7 +10108,7 @@
         },
         {
           "name": "generate_asset_thumbnail",
-          "description": "Render and cache an asset's thumbnail (or report the existing cached one).  When the editor can render (FApp::CanEverRender() and the RHI is initialized), this generates a fresh thumbnail via ThumbnailTools and caches it into the package's thumbnail map. When rendering is unavailable, or the object type has no thumbnail renderer, it honestly reports the existing cached thumbnail state.",
+          "description": "Render and cache an asset's thumbnail (or report the existing cached one), and write it to a PNG under <Project>/Saved/MCP/Thumbnails/.  When the editor can render (FApp::CanEverRender() and the RHI is initialized), this generates a fresh thumbnail via ThumbnailTools and caches it into the package's thumbnail map. When rendering is unavailable, or the object type has no thumbnail renderer, it honestly reports the existing cached thumbnail state. file_path is set only when there is a thumbnail to write.",
           "params": [
             {
               "name": "asset_path",
@@ -10116,9 +10116,15 @@
               "required": true,
               "nameLike": true,
               "description": "Object path or package path of the asset."
+            },
+            {
+              "name": "return_image",
+              "jsonType": "boolean",
+              "required": false,
+              "description": "Also return the thumbnail as an MCP image block next to this JSON (default true)."
             }
           ],
-          "returns": "{ asset_path: string, object_path: string, asset_class: string, rendered: bool, has_thumbnail: bool, width: int, height: int, compressed_bytes: int, message: string }",
+          "returns": "{ asset_path: string, object_path: string, asset_class: string, rendered: bool, has_thumbnail: bool, width: int, height: int, compressed_bytes: int, message: string, file_path?: string, image_returned?: bool, image_width?: int, image_height?: int, image_note?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
@@ -24335,9 +24341,15 @@
               "jsonType": "string",
               "required": false,
               "description": "Optional output path; a bare name lands under <ProjectSaved>/Screenshots/, an absolute path is respected verbatim. \".png\" is appended if missing. Defaults to a timestamped name."
+            },
+            {
+              "name": "return_image",
+              "jsonType": "boolean",
+              "required": false,
+              "description": "Also return the picture as an MCP image block next to this JSON (default true); a picture over the size limits is sent as a smaller copy."
             }
           ],
-          "returns": "{ written: bool, file_path: string, resolution_multiplier: int, width: int, height: int, captured_pie: bool }",
+          "returns": "{ written: bool, file_path: string, resolution_multiplier: int, width: int, height: int, captured_pie: bool, image_returned: bool, image_width?: int, image_height?: int, image_note?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -24381,9 +24393,15 @@
               "jsonType": "boolean",
               "required": false,
               "description": "bool, also include image_base64 + image_format in the response (default false)."
+            },
+            {
+              "name": "return_image",
+              "jsonType": "boolean",
+              "required": false,
+              "description": "Also return the picture as an MCP image block next to this JSON (default true); a picture over the size limits is sent as a smaller copy."
             }
           ],
-          "returns": "{ file_path: string, width: int, height: int, byte_size: int, image_base64: string, image_format: string }",
+          "returns": "{ file_path: string, width: int, height: int, byte_size: int, image_base64: string, image_format: string, image_returned: bool, image_width?: int, image_height?: int, image_note?: string }",
           "pack": "play",
           "annotations": {
             "readOnlyHint": false,
@@ -38258,9 +38276,15 @@
               "jsonType": "boolean",
               "required": false,
               "description": "true to also write the HUD version over output_path on a later frame (PIE with rendering only, SDR only, abandoned after 8 s, e.g. with an HDR editor display); default false keeps only the scene-only PNG."
+            },
+            {
+              "name": "return_image",
+              "jsonType": "boolean",
+              "required": false,
+              "description": "Also return the picture as an MCP image block next to this JSON (default true); a picture over the size limits is sent as a smaller copy."
             }
           ],
-          "returns": "{ saved_to_pie_active, output_path, width, height, bytes_written, includes_ui, ui_overwrite_next_frame, ui_note?, note? }",
+          "returns": "{ saved_to_pie_active, output_path, width, height, bytes_written, includes_ui, ui_overwrite_next_frame, ui_note?, note?, image_returned: bool, image_width?: int, image_height?: int, image_note?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -62623,9 +62647,15 @@
               "jsonType": "boolean",
               "required": false,
               "description": "Optional (default false). Force every pixel's alpha to 255 so the PNG is not transparent where the widget did not paint -- the same trick capture_viewport uses. Leave false to keep real transparency."
+            },
+            {
+              "name": "return_image",
+              "jsonType": "boolean",
+              "required": false,
+              "description": "Also return the picture as an MCP image block next to this JSON (default true); a picture over the size limits is sent as a smaller copy."
             }
           ],
-          "returns": "{ widget_bp_path: string, rendered: bool, file_path: string, width: int, height: int, scale: number, drew_at_desired_size: bool, byte_size: int, designer_flags: string, preview_note: string, error?: string }",
+          "returns": "{ widget_bp_path: string, rendered: bool, file_path: string, width: int, height: int, scale: number, drew_at_desired_size: bool, byte_size: int, designer_flags: string, preview_note: string, error?: string, image_returned: bool, image_width?: int, image_height?: int, image_note?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,

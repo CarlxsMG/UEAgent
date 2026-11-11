@@ -554,8 +554,9 @@ Render a Widget Blueprint to a PNG on disk WITHOUT running the game: builds the 
 | `height` | number | no | Optional render height in pixels. Omit BOTH width and height to render at the widget's own desired size. |
 | `scale` | number | no | Optional draw scale applied by the renderer (default 1.0), the equivalent of DPI scaling in the Designer. |
 | `opaque_background` | boolean | no | Optional (default false). Force every pixel's alpha to 255 so the PNG is not transparent where the widget did not paint -- the same trick capture_viewport uses. Leave false to keep real transparency. |
+| `return_image` | boolean | no | Also return the picture as an MCP image block next to this JSON (default true); a picture over the size limits is sent as a smaller copy. |
 
-**Returns:** `{ widget_bp_path: string, rendered: bool, file_path: string, width: int, height: int, scale: number, drew_at_desired_size: bool, byte_size: int, designer_flags: string, preview_note: string, error?: string }`
+**Returns:** `{ widget_bp_path: string, rendered: bool, file_path: string, width: int, height: int, scale: number, drew_at_desired_size: bool, byte_size: int, designer_flags: string, preview_note: string, error?: string, image_returned: bool, image_width?: int, image_height?: int, image_note?: string }`
 
 ## `reorder_widget_child`
 
