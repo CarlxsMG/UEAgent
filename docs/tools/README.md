@@ -2,7 +2,7 @@
 
 # Tool reference
 
-1562 tools in 57 domains. Every tool also describes itself over MCP (`tools/list`, or `describe_tool` for a tool the client does not list: see [tool lists](../clients.md#tool-lists)); this reference is the same catalog, readable.
+1567 tools in 57 domains. Every tool also describes itself over MCP (`tools/list`, or `describe_tool` for a tool the client does not list: see [tool lists](../clients.md#tool-lists)); this reference is the same catalog, readable.
 
 The 11 core tools, which every client lists by default: `add_graph_node`, `compile_blueprint`, `connect_pins`, `execute_python`, `find_assets_by_name`, `get_graph_nodes`, `get_object_info`, `save_asset`, `set_pin_default_value`, `set_properties`, `undo`.
 
@@ -12,7 +12,7 @@ The packs, which `enable_toolset` adds by name:
 |---|---|---|
 | `actors` | `delete_actor`, `find_actors_by_name`, `get_actors_by_class`, `spawn_actor` | Find, spawn and delete the actors of the open level |
 | `levels` | `get_current_level`, `list_dirty_packages`, `load_level`, `save_level` | Open, save and inspect levels, and list what is unsaved |
-| `play` | `capture_viewport`, `is_play_in_editor_active`, `start_play_in_editor`, `stop_play_in_editor` | Start, stop and check Play-in-Editor, and capture the viewport |
+| `play` | `capture_viewport`, `is_play_in_editor_active`, `pause_play_in_editor`, `resume_play_in_editor`, `start_play_in_editor`, `step_play_in_editor_frame`, `stop_play_in_editor` | Start, stop and check Play-in-Editor, and capture the viewport |
 | `assets` | `delete_asset`, `duplicate_asset`, `get_asset_referencers` | Delete and duplicate assets, and find what references one |
 | `blueprint_authoring` | `add_blueprint_variable`, `build_blueprint_graph`, `create_blueprint`, `create_blueprint_from_actors`, `disconnect_pin`, `get_blueprint_info`, `remove_graph_node` | Create Blueprints, from scratch or from actors placed in the level, add variables, read their outline, unlink pins, remove nodes and build several wired nodes at once |
 | `data_tables` | `get_data_table_row`, `set_data_table_row_fields` | Read a data table row and change its fields |
@@ -33,7 +33,7 @@ The packs, which `enable_toolset` adds by name:
 | [Config](Config.md) | 15 | Project settings and the default map, collision channels and profiles, config diffs, and re-running construction scripts |
 | [DataAsset](DataAsset.md) | 51 | Data tables and their rows, curve tables and curves, data assets, data registries, string tables, CSV and JSON import and export, and localization |
 | [Documentation](Documentation.md) | 3 | Documentation generated for an asset, a Blueprint or the whole project |
-| [Editor](Editor.md) | 96 | The editor itself: actors (spawn, select, copy, transform, delete), levels, saving, undo and transactions, Python, console commands and CVars, tests, enums and structs, screenshots, logs, media, and asset housekeeping (delete, export, migrate, consolidate, redirectors, unused and duplicate assets) |
+| [Editor](Editor.md) | 98 | The editor itself: actors (spawn, select, copy, transform, delete), levels, saving, undo and transactions, Python, console commands and CVars, tests, enums and structs, screenshots, logs, media, and asset housekeeping (delete, export, migrate, consolidate, redirectors, unused and duplicate assets) |
 | [Engine](Engine.md) | 50 | Niagara systems and emitters (modules, renderers, data interfaces, events, simulation stages, user parameters), and the engine's and the editor's status |
 | [Export](Export.md) | 11 | Movie Render Queue jobs, exporting assets, Blueprints and level sections, asset reports and async loading |
 | [GameFeatures](GameFeatures.md) | 5 | Game Feature plugins: their state, activating, deactivating and unloading them |
@@ -47,7 +47,7 @@ The packs, which `enable_toolset` adds by name:
 | [HLOD](HLOD.md) | 6 | World Partition HLOD layers and their actors |
 | [Input](Input.md) | 22 | Enhanced Input: input actions, mapping contexts, triggers and modifiers, key mappings, input state, and force feedback |
 | [Interchange](Interchange.md) | 16 | Interchange imports: pipelines, translators and factories, importing and reimporting, and resetting imported actors and levels |
-| [Level](Level.md) | 111 | The open level and Play-in-Editor: actors by class or radius, transforms, attaching, labels and folders, landscapes (sculpting, painting, layers, splines, heightmaps), foliage, splines, data layers, World Partition, streaming levels, level instances, world settings, lighting builds, and starting, stopping and driving PIE |
+| [Level](Level.md) | 114 | The open level and Play-in-Editor: actors by class or radius, transforms, attaching, labels and folders, landscapes (sculpting, painting, layers, splines, heightmaps), foliage, splines, data layers, World Partition, streaming levels, level instances, world settings, lighting builds, and starting, stopping and driving PIE |
 | [Lighting](Lighting.md) | 4 | Lighting quality, rendering settings, shader info and reflection captures |
 | [Management](Management.md) | 19 | Assets as files (rename, move, duplicate, delete), primary assets, their rules and bundles, plugin status, and class purity audits |
 | [Mass](Mass.md) | 19 | Mass entities: entity configs and traits, spawners, tags, signals and archetypes |

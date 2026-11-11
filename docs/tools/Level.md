@@ -2,7 +2,7 @@
 
 # Level
 
-111 tools for the open level and Play-in-Editor: actors by class or radius, transforms, attaching, labels and folders, landscapes (sculpting, painting, layers, splines, heightmaps), foliage, splines, data layers, World Partition, streaming levels, level instances, world settings, lighting builds, and starting, stopping and driving PIE.
+114 tools for the open level and Play-in-Editor: actors by class or radius, transforms, attaching, labels and folders, landscapes (sculpting, painting, layers, splines, heightmaps), foliage, splines, data layers, World Partition, streaming levels, level instances, world settings, lighting builds, and starting, stopping and driving PIE.
 
 Back to the [index](README.md).
 
@@ -834,11 +834,11 @@ Yes/no guard: does this FoliageType asset path exist and load? Cheap preconditio
 
 **Pack `play`:** `enable_toolset` adds it to a client's list ([tool lists](../clients.md#tool-lists)).
 
-THE oracle for "is the game running right now": asks ULevelEditorSubsystem::IsInPlayInEditor and returns is_pie_active plus status 'Playing'/'Stopped' and the current level name. Cheap, read-only, no params. Use it to confirm start_play_in_editor / stop_play_in_editor (both answer from before the async transition finishes) and as the gate before any save -- saving with PIE up is refused by the engine. WARNING: Do NOT use the pie_active field of list_dirty_packages for this: it can report false with PIE running and answering.
+THE oracle for "is the game running right now": asks ULevelEditorSubsystem::IsInPlayInEditor and returns is_pie_active plus status 'Playing'/'Stopped' and the current level name. Cheap, read-only, no params. Use it to confirm start_play_in_editor / stop_play_in_editor (both answer from before the async transition finishes) and as the gate before any save -- saving with PIE up is refused by the engine. is_paused says whether pause_play_in_editor (or the editor's Pause button) holds the play world, and frames_pending how many frames step_play_in_editor_frame has still to advance. WARNING: Do NOT use the pie_active field of list_dirty_packages for this: it can report false with PIE running and answering.
 
 No parameters.
 
-**Returns:** `{ is_pie_active: bool, current_level: string (the EDITOR's current level, not the PIE world), status: 'Playing'|'Stopped' }`
+**Returns:** `{ is_pie_active: bool, is_paused: bool, frames_pending: int, current_level: string (the EDITOR's current level, not the PIE world), status: 'Playing'|'Paused'|'Stopped' }`
 
 ## `list_orphaned_ofpa_actors`
 
@@ -910,6 +910,20 @@ Paint terrain texture layers headless: write ONE uniform weight (0-255) into a l
 | `region` | array | no | Optional [minX, minY, maxX, maxY] vertex region, defaults to the whole landscape |
 
 **Returns:** `{ landscape_actor_name: string, layer_info_path: string, layer_name: string, weight: int, painted: bool, vertices_painted: number, region: [int], paint_warning: string }`
+
+## `pause_play_in_editor`
+
+*Destructive, idempotent.*
+
+**Pack `play`:** `enable_toolset` adds it to a client's list ([tool lists](../clients.md#tool-lists)).
+
+Pause the running Play-in-Editor session, as the editor's Pause button does: every play world stops ticking from its next frame, so actor state can be read at a fixed frame (get_actor_properties_by_class, capture_pie_state, execute_python). Answers paused (read back from the play world), was_paused, and pie_active false with nothing changed when no session runs; a repeated call changes nothing. Advance it with step_play_in_editor_frame, continue it with resume_play_in_editor, and check it with is_play_in_editor_active (is_paused). Pausing a session another MCP session (or a human) started needs force=true.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `force` | boolean | no | Optional bool (default false). Override the PIE-ownership guard: pause a session another session (or a human) started. Read by the server before the tool runs. |
+
+**Returns:** `{ paused, was_paused, pie_active, note? }`
 
 ## `possess_pawn`
 
@@ -1031,6 +1045,20 @@ Detach a streaming sub-level from the current editor world: a loaded one is unlo
 | `level_package_path` | string | yes | Package path of an existing streaming sub-level, e.g. "/Game/Maps/Arena_Lighting", as get_streaming_levels returns it, or its object path; the bare level name ("Arena_Lighting") also matches, case ignored, when no other sub-level has that name. |
 
 **Returns:** `{ package_name: string, removed: bool, method: string, streaming_level_count: number }`
+
+## `resume_play_in_editor`
+
+*Destructive, idempotent.*
+
+**Pack `play`:** `enable_toolset` adds it to a client's list ([tool lists](../clients.md#tool-lists)).
+
+Resume a Play-in-Editor session that pause_play_in_editor (or the editor's Pause button) paused: every play world ticks again from the next frame, and frames step_play_in_editor_frame has not advanced yet are dropped. Answers paused (read back), was_paused, and pie_active false with nothing changed when no session runs; a repeated call changes nothing. Resuming a session another MCP session (or a human) started needs force=true.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `force` | boolean | no | Optional bool (default false). Override the PIE-ownership guard: resume a session another session (or a human) started. Read by the server before the tool runs. |
+
+**Returns:** `{ paused, was_paused, pie_active, note? }`
 
 ## `scatter_foliage_in_box`
 
@@ -1487,7 +1515,7 @@ Spawn an ALevelStreamingVolume in the editor world with a real box brush (half-e
 
 **Pack `play`:** `enable_toolset` adds it to a client's list ([tool lists](../clients.md#tool-lists)).
 
-Press Play: starts a real PlayInEditor session (a true play world with a spawned PlayerController, not SimulateInEditor), optionally multi-client and networked for co-op testing via number_of_clients + net_mode=ListenServer. WARNING: RequestPlaySession is ASYNC and this tool probes right after asking, so `pie_started` comes back FALSE on a start that is perfectly fine -- the oracle is a follow-up is_play_in_editor_active, never this field. With 2+ clients the worlds are UEDPIE_0 (server) and UEDPIE_1 (client), and later reads must be anchored with world='server'/'client' because PIE actor NAMES are swapped between them. Refuses if another MCP session (or a human) already owns PIE unless force=true.
+Press Play: starts a real PlayInEditor session (a true play world with a spawned PlayerController, not SimulateInEditor), optionally multi-client and networked for co-op testing via number_of_clients + net_mode=ListenServer. WARNING: RequestPlaySession is ASYNC and this tool probes right after asking, so `pie_started` comes back FALSE on a start that is perfectly fine -- the oracle is a follow-up is_play_in_editor_active, never this field. With 2+ clients the worlds are UEDPIE_0 (server) and UEDPIE_1 (client), and later reads must be anchored with world='server'/'client' because PIE actor NAMES are swapped between them. Refuses if another MCP session (or a human) already owns PIE unless force=true, and while a test started by run_automation_test or run_functional_test_in_pie runs.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1498,13 +1526,28 @@ Press Play: starts a real PlayInEditor session (a true play world with a spawned
 
 **Returns:** `{ pie_started: bool (probed synchronously right after an ASYNC request -- usually false even on success; confirm with is_play_in_editor_active), already_in_pie: bool, message: string, number_of_clients: int, net_mode: string, dirty_package_count: int, readonly_dirty_count: int, dirty_packages: [string] (capped at 25), dirty_packages_truncated: bool }`
 
+## `step_play_in_editor_frame`
+
+*Destructive.*
+
+**Pack `play`:** `enable_toolset` adds it to a client's list ([tool lists](../clients.md#tool-lists)).
+
+Advance a Play-in-Editor session by a number of frames and leave it paused, as the editor's Advance Frame button does; a running session is paused first. The frames are played after this reply, one per engine tick: confirm with is_play_in_editor_active, where frames_pending reaches 0 and is_paused is true, then read the state you want at that frame. Each call steps again, so it is not idempotent. Fails when no session runs. Stepping a session another MCP session (or a human) started needs force=true.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `frames` | number | no | Optional int (default 1, clamped 1-1000): how many frames to advance. |
+| `force` | boolean | no | Optional bool (default false). Override the PIE-ownership guard: step a session another session (or a human) started. Read by the server before the tool runs. |
+
+**Returns:** `{ frames_requested, paused, was_paused, frame_counter_before, pie_active }`
+
 ## `stop_play_in_editor`
 
 *Destructive.*
 
 **Pack `play`:** `enable_toolset` adds it to a client's list ([tool lists](../clients.md#tool-lists)).
 
-Press Stop: requests the end of the Play-in-Editor session (EditorRequestEndPlay). WARNING: `pie_stopped` is HARDCODED true whenever PIE was running and teardown is async, so the only oracle is a follow-up is_play_in_editor_active. WARNING: Treat every call as an operation that CAN KILL THE EDITOR: any UWorld/UPackage handle left in an execute_python global keeps the PIE world rooted and the engine aborts with "Object ... from PIE level still referenced" -- purge the __main__ namespace and gc.collect() BEFORE calling. Refuses when another MCP session (or a human) started the PIE, and then needs force=true.
+Press Stop: requests the end of the Play-in-Editor session (EditorRequestEndPlay). WARNING: `pie_stopped` is HARDCODED true whenever PIE was running and teardown is async, so the only oracle is a follow-up is_play_in_editor_active. WARNING: Treat every call as an operation that CAN KILL THE EDITOR: any UWorld/UPackage handle left in an execute_python global keeps the PIE world rooted and the engine aborts with "Object ... from PIE level still referenced" -- purge the __main__ namespace and gc.collect() BEFORE calling. Refuses when another MCP session (or a human) started the PIE, and then needs force=true; refused too while a test started by run_automation_test or run_functional_test_in_pie runs (cancel_automation_test stops it).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1528,7 +1571,7 @@ Release the region load_world_partition_region pinned under label in the editor 
 
 *Read-only.*
 
-Block until the human closes Play-in-Editor (or the timeout fires), pumping the game thread while it polls, and report elapsed_seconds + whether it completed or timed out. Use it to hand the session to a human for a piloted run and get control back when they hit Stop; use is_play_in_editor_active for an instant, non-blocking check. Returns immediately with started_in_pie:false when PIE was not running.
+Block until the human closes Play-in-Editor (or the timeout fires), pumping the game thread while it polls, and report elapsed_seconds + whether it completed or timed out. Use it to hand the session to a human for a piloted run and get control back when they hit Stop; use is_play_in_editor_active for an instant, non-blocking check. Returns immediately with started_in_pie:false when PIE was not running. Do not call it while run_automation_test or run_functional_test_in_pie has a test running: it blocks the ticks the test needs to finish.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

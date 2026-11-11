@@ -55,7 +55,7 @@ static const TCHAR* const GProtocolKeys[] =
 // names and a nullptr terminator; one extra nullptr closes the array. Walked
 // exactly ONCE (see GetTable) into a static map -- nothing is rebuilt per call,
 // and one array of literals is far cheaper object code than one Add() per
-// command (1804 of them).
+// command (1809 of them).
 //
 // A command with an EMPTY param set is still in the table (name + terminator):
 // "this command takes no params" is a real answer, and different from "I do not
@@ -900,6 +900,8 @@ static const TCHAR* const GFlatCommandParams[] =
     nullptr,
     TEXT("cancel_ability"),
         TEXT("ability_name"), TEXT("actor_name"),
+    nullptr,
+    TEXT("cancel_automation_test"),
     nullptr,
     TEXT("cancel_package_build"),
     nullptr,
@@ -2317,6 +2319,8 @@ static const TCHAR* const GFlatCommandParams[] =
     TEXT("get_function_pins"),
         TEXT("blueprint_name"), TEXT("function_name"), TEXT("target_class"),
     nullptr,
+    TEXT("get_functional_test_status"),
+    nullptr,
     TEXT("get_game_feature_plugin_state"),
         TEXT("plugin_name"), TEXT("plugin_url"),
     nullptr,
@@ -3268,6 +3272,9 @@ static const TCHAR* const GFlatCommandParams[] =
     TEXT("pause_level_sequence_runtime"),
         TEXT("player_key"),
     nullptr,
+    TEXT("pause_play_in_editor"),
+        TEXT("force"),
+    nullptr,
     TEXT("pause_timeline"),
         TEXT("sequence_name"),
     nullptr,
@@ -4043,6 +4050,9 @@ static const TCHAR* const GFlatCommandParams[] =
     TEXT("resume_level_sequence_runtime"),
         TEXT("player_key"),
     nullptr,
+    TEXT("resume_play_in_editor"),
+        TEXT("force"),
+    nullptr,
     TEXT("revert_files"),
         TEXT("asset_paths"), TEXT("files"), TEXT("reload"),
     nullptr,
@@ -4054,7 +4064,7 @@ static const TCHAR* const GFlatCommandParams[] =
         TEXT("function_name"), TEXT("utility_path"),
     nullptr,
     TEXT("run_automation_test"),
-        TEXT("test_name"),
+        TEXT("force"), TEXT("test_name"), TEXT("timeout_seconds"),
     nullptr,
     TEXT("run_behavior_tree"),
         TEXT("actor_name"), TEXT("behavior_tree_path"),
@@ -4070,7 +4080,7 @@ static const TCHAR* const GFlatCommandParams[] =
         TEXT("timeout_seconds"), TEXT("uproject"),
     nullptr,
     TEXT("run_functional_test_in_pie"),
-        TEXT("auto_stop_pie"), TEXT("test_asset_path"),
+        TEXT("auto_stop_pie"), TEXT("keep_actor"), TEXT("test_asset_path"), TEXT("timeout_seconds"),
     nullptr,
     TEXT("run_map_check"),
         TEXT("base_libraries"), TEXT("check_deprecated_only"),
@@ -5919,6 +5929,9 @@ static const TCHAR* const GFlatCommandParams[] =
     TEXT("start_trace"),
         TEXT("channels"), TEXT("output_path"),
     nullptr,
+    TEXT("step_play_in_editor_frame"),
+        TEXT("force"), TEXT("frames"),
+    nullptr,
     TEXT("stop_animation"),
         TEXT("component_name"), TEXT("montage_path"), TEXT("world"),
     nullptr,
@@ -6030,8 +6043,8 @@ static const TCHAR* const GFlatCommandParams[] =
     nullptr
 };
 
-static constexpr int32 GNumCommands = 1804;
-static constexpr int32 GNumParamNames = 6092;
+static constexpr int32 GNumCommands = 1809;
+static constexpr int32 GNumParamNames = 6100;
 
 // Built ONCE, on first use (function-local static => thread-safe init). The
 // dispatcher is game-thread only, so there is no contention after that.

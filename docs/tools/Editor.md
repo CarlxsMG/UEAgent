@@ -2,7 +2,7 @@
 
 # Editor
 
-96 tools for the editor itself: actors (spawn, select, copy, transform, delete), levels, saving, undo and transactions, Python, console commands and CVars, tests, enums and structs, screenshots, logs, media, and asset housekeeping (delete, export, migrate, consolidate, redirectors, unused and duplicate assets).
+98 tools for the editor itself: actors (spawn, select, copy, transform, delete), levels, saving, undo and transactions, Python, console commands and CVars, tests, enums and structs, screenshots, logs, media, and asset housekeeping (delete, export, migrate, consolidate, redirectors, unused and duplicate assets).
 
 Back to the [index](README.md).
 
@@ -103,6 +103,16 @@ Open one undoable transaction so a whole batch of edits collapses into a SINGLE 
 | `primary_object_path` | string | no | Optional object path recorded as the transaction's PrimaryObject, so the undo entry is attributable to one asset/actor. |
 
 **Returns:** `{ description: string, transaction_index: int, already_open: bool, undo_count: int }`
+
+## `cancel_automation_test`
+
+*Destructive, idempotent.*
+
+Stop the test that run_automation_test or run_functional_test_in_pie left running: an automation test is stopped with its entries so far (get_automation_test_results answers verdict canceled), a functional test is finished as Failed and its session ended when the run requested it (get_functional_test_status answers verdict canceled). With nothing running it changes nothing and answers was_running false, so a repeated call is safe.
+
+No parameters.
+
+**Returns:** `{ canceled, was_running, test_name, kind: "automation"|"functional"|"" }`
 
 ## `cancel_transaction`
 
@@ -534,11 +544,11 @@ Dump EVERY actor of a world (name, class, transform), capped by max_results at 5
 
 *Read-only.*
 
-Returns the cached result of the last synchronous test completed through run_automation_test, without running anything: test_name, passed, verdict, duration_s, errors, warnings and entries. Skipped or multi-tick tests leave the cache unchanged; fails when no test has completed this editor session.
+The state of the test run_automation_test started, without running anything: while a latent test runs, running true with verdict running and elapsed_seconds; once it ended, its verdict, duration_s, errors, warnings and entries, with timed_out or canceled when it was stopped before it finished. Poll it after run_automation_test answers verdict running. Skipped tests leave it unchanged; fails when no test has run this editor session.
 
 No parameters.
 
-**Returns:** `{ test_name, started, completed, passed, verdict, duration_s, errors, warnings, entries:[{type,message,context,filename,line}], entry_count }`
+**Returns:** `{ test_name, started, completed, running, passed?, verdict: "pass"|"fail"|"canceled"|"running", elapsed_seconds, timed_out, canceled?, duration_s?, errors?, warnings?, entries?:[{type,message,context,filename,line}], entry_count?, timeout_seconds?, note? }`
 
 ## `get_current_level`
 
@@ -579,6 +589,16 @@ Read one key from the merged in-memory config (GConfig) of an INI such as Engine
 | `config_file` | string | no | Config base name without extension, e.g. "Engine" (default), "Game", "Input", "Editor", "Scalability"; "Engine.ini" is not resolved. |
 
 **Returns:** `{ section, key, value, found }`
+
+## `get_functional_test_status`
+
+*Read-only.*
+
+The state of the functional test run_functional_test_in_pie started, without changing anything: running, then its verdict (pass, fail, unknown or not_run), the actor's test_result, the last message it logged, elapsed_seconds, timed_out, and pie_stopped when the session this run requested was ended. has_test is false when no functional test has run this editor session. Poll it after run_functional_test_in_pie.
+
+No parameters.
+
+**Returns:** `{ has_test, running, test_asset_path, verdict: "running"|"pass"|"fail"|"unknown"|"not_run"|"canceled", test_result, message, elapsed_seconds, timeout_seconds, timed_out, canceled, session_started_by_call, pie_stopped, test_started }`
 
 ## `get_level_blueprint`
 
@@ -799,7 +819,7 @@ List the section names of one INI (Engine, Game, Input, Editor, Scalability...) 
 
 **Pack `levels`:** `enable_toolset` adds it to a client's list ([tool lists](../clients.md#tool-lists)).
 
-Open a map in the editor (by /Game or /Engine package path, or disk .umap), replacing the current world; default_template=true opens the engine's default template level instead (/Engine/Maps/Templates/Template_Default, ~45 actors: floor, PlayerStart, sky and lights), after which a save_level without `filename` would write over the ENGINE's own map (is_engine_template and warning say so). Also the repair for actors that VANISHED from a world in memory after compile_blueprint: reloading the same map brings the placed OFPA instances back with their per-instance config -- never re-place them. REFUSES up front when any other UWorld is still resident in memory, because the engine's world-leak check turns that into a Fatal error that kills the editor process and every unsaved edit with it; the refusal lists the resident worlds and the remedy. Run list_dirty_packages first: a reload discards unsaved work.
+Open a map in the editor (by /Game or /Engine package path, or disk .umap), replacing the current world; default_template=true opens the engine's default template level instead (/Engine/Maps/Templates/Template_Default, ~45 actors: floor, PlayerStart, sky and lights), after which a save_level without `filename` would write over the ENGINE's own map (is_engine_template and warning say so). Also the repair for actors that VANISHED from a world in memory after compile_blueprint: reloading the same map brings the placed OFPA instances back with their per-instance config -- never re-place them. REFUSES up front when any other UWorld is still resident in memory, because the engine's world-leak check turns that into a Fatal error that kills the editor process and every unsaved edit with it; the refusal lists the resident worlds and the remedy. Run list_dirty_packages first: a reload discards unsaved work. Refused while a test started by run_automation_test or run_functional_test_in_pie runs.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1010,32 +1030,44 @@ IRREVERSIBLE: wipes the editor's ENTIRE undo AND redo history (the human's entri
 
 *Destructive.*
 
-Run ONE registered automation test in this editor, synchronously, and return its verdict (pass, fail or skipped) with its errors, warnings and log entries. Find the name first with list_automation_tests; re-read the last result later without running anything with get_automation_test_results; run every smoke test at once with run_smoke_tests. A test that needs several ticks (PIE, a map load, a wait) cannot be run here: it is answered verdict skipped with the reason, and no tool runs it for you -- run_functional_test_in_pie does not start a test, it only reads the verdict a Functional Test actor reports in a session where something else ran it. The same skipped answer comes for a test that needs an interactive user or a real renderer in a headless editor; an editor busy with a slow task or PIE refuses the start. Marked destructive and not idempotent because the test's own code runs in the editor and can create, change or delete assets and actors as it was written to, so two runs need not do the same; this tool itself saves nothing and adds no undo step for what the test did.
+Run ONE registered automation test in this editor and return its verdict (pass, fail or skipped) with its errors, warnings and log entries; a test that needs several ticks (PIE, a map load, a wait) answers verdict running instead and goes on after the reply. Find the name first with list_automation_tests; run every smoke test at once with run_smoke_tests.
+
+A test whose work fits in this call answers its verdict here. A latent one keeps running across ticks: poll get_automation_test_results until running is false for its verdict and entries, or stop it with cancel_automation_test; one that outlives timeout_seconds is stopped with timed_out true. While it runs, a second test, start_play_in_editor, stop_play_in_editor and load_level are refused with a message naming it, and wait_for_pie_completion must not be called (it blocks the ticks the test needs). A latent test is refused while the open level has unsaved changes, since a test that opens a map discards them: save first, or pass force=true.
+
+A test that needs an interactive user, or a real renderer in a headless editor, is answered skipped with the reason; a test started outside UEAgent that is still running, or an editor busy with a slow task, refuses the start. Marked destructive and not idempotent because the test's own code runs in the editor and can create, change or delete assets and actors as it was written to; this tool itself saves nothing and adds no undo step for what the test did.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `test_name` | string | yes | The test's test_name or its full_test_path, exactly as list_automation_tests gives them (e.g. "UEAgent.ClaudeCode") |
+| `timeout_seconds` | number | no | Optional number (default 300): a latent test still running after this many seconds is stopped, with timed_out true in get_automation_test_results. |
+| `force` | boolean | no | Optional bool (default false): run a latent test even though the open level has unsaved changes, which a test that opens a map discards. |
 
-**Returns:** `{ test_name, started, completed, passed, verdict, duration_s, errors, warnings, entries:[{type,message,context,filename,line}], entry_count, note }`
+**Returns:** `{ test_name, started, completed, running?, passed?, verdict: "pass"|"fail"|"skipped"|"running", duration_s?, errors?, warnings?, entries?:[{type,message,context,filename,line}], entry_count?, timeout_seconds?, note? }`
 
 ## `run_functional_test_in_pie`
 
 *Destructive.*
 
-Place one instance of a Functional Test Blueprint class in the editor level (unless one is already there) and, when no Play-in-Editor session is running or starting, request a Simulate-in-Editor session. It does not run the test (the engine's functional testing manager does, in a Play session with a player) and cannot wait for it: verdict comes from the test actor's own Result, read in the running session's world -- pass, fail, running, not_run (it has not run) or unknown (it finished with Default) -- and is not_run when no session was running at the call, since the requested one starts only after the reply (pie_requested true, pie_started usually false). With auto_stop_pie (default) the session this call requests is ended as soon as it has started; with false it keeps running until stop_play_in_editor. A session that was already running or starting is never ended. Call it again while a session runs to read the test's state; confirm the session with is_play_in_editor_active. The placed actor stays in the level, unsaved and with no undo step. Create the test first with create_functional_test; a class that is not found, is not a Functional Test, or whose name matches several loaded classes is an error.
+Run a Functional Test Blueprint in a Play-in-Editor session and report its verdict: the call starts it and answers verdict running; get_functional_test_status polls it until running is false, with verdict pass, fail, unknown (it finished with Default) or not_run, and timed_out when it outlived timeout_seconds or its own Time Limit.
+
+With no session running, it requests a Play session (with a player, not Simulate), and once that session has begun play it calls RunTest on the test's instance in the play world: the one copied from the editor level, or one it spawns there. A session that was already running is used as it is, with the test spawned into it, and is never ended; one this call requested is ended when the test ends unless auto_stop_pie=false. A session that is still starting is refused: call again once is_play_in_editor_active answers true.
+
+The actor spawned into the session is removed when the test ends, so the editor level is left as it was; keep_actor=true instead places the test in the editor level (unsaved, no undo step) before the session starts and keeps it there and in the session. While the test runs, a second test, start_play_in_editor, stop_play_in_editor and load_level are refused naming it, cancel_automation_test stops it, and wait_for_pie_completion must not be called (it blocks the ticks the test needs). Create the test first with create_functional_test; a class that is not found, is not a Functional Test, or whose name matches several loaded classes is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `test_asset_path` | string | yes | Functional Test Blueprint, as an asset path ("/Game/Tests/BP_FT_PlayerHealth", as create_functional_test returns it), object path or generated-class path ("/Game/Tests/BP_FT_PlayerHealth.BP_FT_PlayerHealth_C"); when none loads, a loaded Functional Test class named exactly like the last path segment (with or without _C) is used. |
-| `auto_stop_pie` | boolean | no | Optional bool (default true): end the Simulate session this call requests as soon as it has started; false leaves it running. A session that was already running is never ended. |
+| `auto_stop_pie` | boolean | no | Optional bool (default true): end the Play session this call requests once the test has ended; false leaves it running. A session that was already running is never ended. |
+| `timeout_seconds` | number | no | Optional number (default 120): a test still running after this many seconds is finished as Failed, with timed_out true. |
+| `keep_actor` | boolean | no | Optional bool (default false): place the test in the editor level and leave it there; by default it only exists in the session. |
 
-**Returns:** `{ test_asset_path, test_class, verdict: "pass"|"fail"|"running"|"not_run"|"unknown", test_result?, test_in_session, already_in_pie, pie_requested, pie_started, pie_stop_scheduled, spawned, already_in_world, note }`
+**Returns:** `{ test_asset_path, test_class, verdict: "running", test_result?, test_in_session, already_in_pie, pie_requested, pie_started, pie_stop_scheduled, spawned, already_in_world, keep_actor, timeout_seconds, note }`
 
 ## `run_smoke_tests`
 
 *Destructive.*
 
-Runs every registered automation test with the smoke filter, synchronously in the editor, and returns only the aggregate: ran, all_passed and a note. Under a commandlet the engine skips them, so ran and all_passed come back false. For one test with its log entries use run_automation_test.
+Runs every registered automation test with the smoke filter, synchronously in the editor, and returns only the aggregate: ran, all_passed and a note. Under a commandlet the engine skips them, so ran and all_passed come back false. Refused while run_automation_test or run_functional_test_in_pie has a test running. For one test with its log entries use run_automation_test.
 
 No parameters.
 

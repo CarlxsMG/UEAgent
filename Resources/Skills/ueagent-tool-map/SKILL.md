@@ -72,7 +72,7 @@ The core tools: `add_graph_node`, `compile_blueprint`, `connect_pins`, `execute_
 |---|---|---|
 | `actors` | Find, spawn and delete the actors of the open level | `delete_actor`, `find_actors_by_name`, `get_actors_by_class`, `spawn_actor` |
 | `levels` | Open, save and inspect levels, and list what is unsaved | `get_current_level`, `list_dirty_packages`, `load_level`, `save_level` |
-| `play` | Start, stop and check Play-in-Editor, and capture the viewport | `capture_viewport`, `is_play_in_editor_active`, `start_play_in_editor`, `stop_play_in_editor` |
+| `play` | Start, stop and check Play-in-Editor, and capture the viewport | `capture_viewport`, `is_play_in_editor_active`, `pause_play_in_editor`, `resume_play_in_editor`, `start_play_in_editor`, `step_play_in_editor_frame`, `stop_play_in_editor` |
 | `assets` | Delete and duplicate assets, and find what references one | `delete_asset`, `duplicate_asset`, `get_asset_referencers` |
 | `blueprint_authoring` | Create Blueprints, from scratch or from actors placed in the level, add variables, read their outline, unlink pins, remove nodes and build several wired nodes at once | `add_blueprint_variable`, `build_blueprint_graph`, `create_blueprint`, `create_blueprint_from_actors`, `disconnect_pin`, `get_blueprint_info`, `remove_graph_node` |
 | `data_tables` | Read a data table row and change its fields | `get_data_table_row`, `set_data_table_row_fields` |
@@ -97,7 +97,7 @@ The core tools: `add_graph_node`, `compile_blueprint`, `connect_pins`, `execute_
 | Config | 15 | Project settings and the default map, collision channels and profiles, config diffs, and re-running construction scripts |
 | DataAsset | 51 | Data tables and their rows, curve tables and curves, data assets, data registries, string tables, CSV and JSON import and export, and localization |
 | Documentation | 3 | Documentation generated for an asset, a Blueprint or the whole project |
-| Editor | 96 | The editor itself: actors (spawn, select, copy, transform, delete), levels, saving, undo and transactions, Python, console commands and CVars, tests, enums and structs, screenshots, logs, media, and asset housekeeping (delete, export, migrate, consolidate, redirectors, unused and duplicate assets) |
+| Editor | 98 | The editor itself: actors (spawn, select, copy, transform, delete), levels, saving, undo and transactions, Python, console commands and CVars, tests, enums and structs, screenshots, logs, media, and asset housekeeping (delete, export, migrate, consolidate, redirectors, unused and duplicate assets) |
 | Engine | 50 | Niagara systems and emitters (modules, renderers, data interfaces, events, simulation stages, user parameters), and the engine's and the editor's status |
 | Export | 11 | Movie Render Queue jobs, exporting assets, Blueprints and level sections, asset reports and async loading |
 | GameFeatures | 5 | Game Feature plugins: their state, activating, deactivating and unloading them |
@@ -111,7 +111,7 @@ The core tools: `add_graph_node`, `compile_blueprint`, `connect_pins`, `execute_
 | HLOD | 6 | World Partition HLOD layers and their actors |
 | Input | 22 | Enhanced Input: input actions, mapping contexts, triggers and modifiers, key mappings, input state, and force feedback |
 | Interchange | 16 | Interchange imports: pipelines, translators and factories, importing and reimporting, and resetting imported actors and levels |
-| Level | 111 | The open level and Play-in-Editor: actors by class or radius, transforms, attaching, labels and folders, landscapes (sculpting, painting, layers, splines, heightmaps), foliage, splines, data layers, World Partition, streaming levels, level instances, world settings, lighting builds, and starting, stopping and driving PIE |
+| Level | 114 | The open level and Play-in-Editor: actors by class or radius, transforms, attaching, labels and folders, landscapes (sculpting, painting, layers, splines, heightmaps), foliage, splines, data layers, World Partition, streaming levels, level instances, world settings, lighting builds, and starting, stopping and driving PIE |
 | Lighting | 4 | Lighting quality, rendering settings, shader info and reflection captures |
 | Management | 19 | Assets as files (rename, move, duplicate, delete), primary assets, their rules and bundles, plugin status, and class purity audits |
 | Mass | 19 | Mass entities: entity configs and traits, spawners, tags, signals and archetypes |
