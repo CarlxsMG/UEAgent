@@ -3707,6 +3707,449 @@
      "expect_probe_calls": []
     }
    ]
+  },
+  {
+   "id": "policy-read-only-read",
+   "steps": [
+    {
+     "op": "policy",
+     "command": "get_project_info",
+     "settings": {
+      "read_only": true
+     },
+     "expect": {
+      "refused": false,
+      "policy": ""
+     }
+    }
+   ]
+  },
+  {
+   "id": "policy-read-only-capture",
+   "steps": [
+    {
+     "op": "policy",
+     "command": "capture_viewport",
+     "settings": {
+      "read_only": true
+     },
+     "expect": {
+      "refused": false,
+      "policy": ""
+     }
+    }
+   ]
+  },
+  {
+   "id": "policy-read-only-capture-widget",
+   "steps": [
+    {
+     "op": "policy",
+     "command": "render_widget_preview",
+     "settings": {
+      "read_only": true
+     },
+     "expect": {
+      "refused": false,
+      "policy": ""
+     }
+    }
+   ]
+  },
+  {
+   "id": "policy-read-only-batch-container",
+   "steps": [
+    {
+     "op": "policy",
+     "command": "execute_batch",
+     "settings": {
+      "read_only": true
+     },
+     "expect": {
+      "refused": false,
+      "policy": ""
+     }
+    }
+   ]
+  },
+  {
+   "id": "policy-read-only-write",
+   "steps": [
+    {
+     "op": "policy",
+     "command": "spawn_actor",
+     "settings": {
+      "read_only": true
+     },
+     "expect": {
+      "refused": true,
+      "policy": "read_only"
+     }
+    }
+   ]
+  },
+  {
+   "id": "policy-read-only-undo",
+   "steps": [
+    {
+     "op": "policy",
+     "command": "undo",
+     "settings": {
+      "read_only": true
+     },
+     "expect": {
+      "refused": true,
+      "policy": "read_only"
+     }
+    }
+   ]
+  },
+  {
+   "id": "policy-read-only-transaction",
+   "steps": [
+    {
+     "op": "policy",
+     "command": "begin_transaction",
+     "settings": {
+      "read_only": true
+     },
+     "expect": {
+      "refused": true,
+      "policy": "read_only"
+     }
+    }
+   ]
+  },
+  {
+   "id": "policy-read-only-code",
+   "steps": [
+    {
+     "op": "policy",
+     "command": "execute_python",
+     "settings": {
+      "read_only": true
+     },
+     "expect": {
+      "refused": true,
+      "policy": "read_only"
+     }
+    }
+   ]
+  },
+  {
+   "id": "policy-read-only-export-is-a-write",
+   "steps": [
+    {
+     "op": "policy",
+     "command": "export_asset",
+     "settings": {
+      "read_only": true
+     },
+     "expect": {
+      "refused": true,
+      "policy": "read_only"
+     }
+    }
+   ]
+  },
+  {
+   "id": "policy-read-only-renamed-write",
+   "steps": [
+    {
+     "op": "policy",
+     "command": "place_player_start",
+     "settings": {
+      "read_only": true
+     },
+     "expect": {
+      "refused": true,
+      "policy": "read_only"
+     }
+    }
+   ]
+  },
+  {
+   "id": "policy-read-only-retired-write",
+   "steps": [
+    {
+     "op": "policy",
+     "command": "add_anim_graph_node",
+     "settings": {
+      "read_only": true
+     },
+     "expect": {
+      "refused": true,
+      "policy": "read_only"
+     }
+    }
+   ]
+  },
+  {
+   "id": "policy-read-only-unknown-name",
+   "steps": [
+    {
+     "op": "policy",
+     "command": "no_such_tool",
+     "settings": {
+      "read_only": true
+     },
+     "expect": {
+      "refused": true,
+      "policy": "read_only"
+     }
+    }
+   ]
+  },
+  {
+   "id": "policy-no-code-python",
+   "steps": [
+    {
+     "op": "policy",
+     "command": "execute_python",
+     "settings": {
+      "allow_code_execution": false
+     },
+     "expect": {
+      "refused": true,
+      "policy": "code_execution"
+     }
+    }
+   ]
+  },
+  {
+   "id": "policy-no-code-python-file",
+   "steps": [
+    {
+     "op": "policy",
+     "command": "execute_python_file",
+     "settings": {
+      "allow_code_execution": false
+     },
+     "expect": {
+      "refused": true,
+      "policy": "code_execution"
+     }
+    }
+   ]
+  },
+  {
+   "id": "policy-no-code-console",
+   "steps": [
+    {
+     "op": "policy",
+     "command": "execute_console_command",
+     "settings": {
+      "allow_code_execution": false
+     },
+     "expect": {
+      "refused": true,
+      "policy": "code_execution"
+     }
+    }
+   ]
+  },
+  {
+   "id": "policy-no-code-call-function",
+   "steps": [
+    {
+     "op": "policy",
+     "command": "call_function",
+     "settings": {
+      "allow_code_execution": false
+     },
+     "expect": {
+      "refused": true,
+      "policy": "code_execution"
+     }
+    }
+   ]
+  },
+  {
+   "id": "policy-no-code-external-script",
+   "steps": [
+    {
+     "op": "policy",
+     "command": "run_external_project_script",
+     "settings": {
+      "allow_code_execution": false
+     },
+     "expect": {
+      "refused": true,
+      "policy": "code_execution"
+     }
+    }
+   ]
+  },
+  {
+   "id": "policy-no-code-dedicated-server",
+   "steps": [
+    {
+     "op": "policy",
+     "command": "launch_dedicated_server",
+     "settings": {
+      "allow_code_execution": false
+     },
+     "expect": {
+      "refused": true,
+      "policy": "code_execution"
+     }
+    }
+   ]
+  },
+  {
+   "id": "policy-no-code-write-still-runs",
+   "steps": [
+    {
+     "op": "policy",
+     "command": "spawn_actor",
+     "settings": {
+      "allow_code_execution": false
+     },
+     "expect": {
+      "refused": false,
+      "policy": ""
+     }
+    }
+   ]
+  },
+  {
+   "id": "policy-no-code-unknown-name",
+   "steps": [
+    {
+     "op": "policy",
+     "command": "no_such_tool",
+     "settings": {
+      "allow_code_execution": false
+     },
+     "expect": {
+      "refused": false,
+      "policy": ""
+     }
+    }
+   ]
+  },
+  {
+   "id": "policy-disabled-domain",
+   "steps": [
+    {
+     "op": "policy",
+     "command": "get_water_body_info",
+     "settings": {
+      "disabled_domains": [
+       "water"
+      ]
+     },
+     "expect": {
+      "refused": true,
+      "policy": "disabled_domain"
+     }
+    }
+   ]
+  },
+  {
+   "id": "policy-disabled-domain-other",
+   "steps": [
+    {
+     "op": "policy",
+     "command": "spawn_actor",
+     "settings": {
+      "disabled_domains": [
+       "Water"
+      ]
+     },
+     "expect": {
+      "refused": false,
+      "policy": ""
+     }
+    }
+   ]
+  },
+  {
+   "id": "policy-disabled-tool",
+   "steps": [
+    {
+     "op": "policy",
+     "command": "spawn_actor",
+     "settings": {
+      "disabled_tools": [
+       "spawn_actor"
+      ]
+     },
+     "expect": {
+      "refused": true,
+      "policy": "disabled_tool"
+     }
+    }
+   ]
+  },
+  {
+   "id": "policy-disabled-tool-by-new-name",
+   "steps": [
+    {
+     "op": "policy",
+     "command": "place_player_start",
+     "settings": {
+      "disabled_tools": [
+       "spawn_player_start"
+      ]
+     },
+     "expect": {
+      "refused": true,
+      "policy": "disabled_tool"
+     }
+    }
+   ]
+  },
+  {
+   "id": "policy-disabled-tool-by-old-name",
+   "steps": [
+    {
+     "op": "policy",
+     "command": "place_player_start",
+     "settings": {
+      "disabled_tools": [
+       "place_player_start"
+      ]
+     },
+     "expect": {
+      "refused": true,
+      "policy": "disabled_tool"
+     }
+    }
+   ]
+  },
+  {
+   "id": "policy-disabled-tool-wins-over-read-only",
+   "steps": [
+    {
+     "op": "policy",
+     "command": "get_project_info",
+     "settings": {
+      "read_only": true,
+      "disabled_tools": [
+       "get_project_info"
+      ]
+     },
+     "expect": {
+      "refused": true,
+      "policy": "disabled_tool"
+     }
+    }
+   ]
+  },
+  {
+   "id": "policy-nothing-off",
+   "steps": [
+    {
+     "op": "policy",
+     "command": "execute_python",
+     "settings": {},
+     "expect": {
+      "refused": false,
+      "policy": ""
+     }
+    }
+   ]
   }
  ]
 }

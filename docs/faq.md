@@ -44,7 +44,10 @@ to the clients you configure. Calls known to crash or freeze the editor are refu
 
 But a connected agent acts with the editor's rights: it can run Python, save, rename and delete
 assets, and launch processes. Keep the project under source control, and list vendored content in
-**Read Only Content Roots** so that no tool can save, rename, move or delete it. See
+**Read Only Content Roots** so that no tool can save, rename, move or delete it. To give an agent less,
+**Editor Preferences > Plugins > UEAgent > Permissions** has a **Read-only mode** (it can only read and capture
+images; also in the status bar's **MCP** menu, or `-McpReadOnly` on the command line), a switch for the tools that
+run code, and lists of domains and tools to turn off. See
 [Security](https://github.com/CarlxsMG/UEAgent/blob/main/README.md#security).
 
 ## Can I undo what the agent did?

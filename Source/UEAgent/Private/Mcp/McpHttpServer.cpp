@@ -7,6 +7,7 @@
 #include "Mcp/McpPrompts.h"
 #include "Mcp/McpSkills.h"
 #include "Mcp/McpToolCatalog.h"
+#include "Mcp/McpToolPolicy.h"
 #include "UEAgentBridge.h"
 
 #include "Sockets.h"
@@ -475,6 +476,11 @@ private:
 	/** Bytes read but not yet consumed (keep-alive: may hold the start of the next request). */
 	TArray<uint8> Buffer;
 	TArray<uint8> RecvScratch;
+	/** The tool permissions changed since this request's session last read its list, and the client takes SSE: the
+	 *  response goes as an event stream with notifications/tools/list_changed first (SendSseHead). */
+	bool bListChangedPending = false;
+	/** The response went as an event stream, which ends with the connection. */
+	bool bCloseAfterResponse = false;
 	FThreadSafeBool bConnectionRunning;
 	FThreadSafeBool bFinished;
 };
@@ -513,7 +519,9 @@ uint32 FMcpHttpConnection::Run()
 			}
 			Server->CountRequest();
 			Exchange = Request.Method + TEXT(" ") + Request.Path;
-			if (!HandleRequest(Request))
+			bListChangedPending = false;
+			bCloseAfterResponse = false;
+			if (!HandleRequest(Request) || bCloseAfterResponse)
 			{
 				break;
 			}
@@ -815,6 +823,14 @@ bool FMcpHttpConnection::SendResponse(int32 Status, const TCHAR* ContentType, co
 {
 	using namespace McpHttpServerPrivate;
 
+	// The list changed and the client takes SSE: it hears that first, on this response's stream (the server has no GET
+	// stream), then the answer.
+	if (bListChangedPending && Status == 200 && ContentType && FCString::Strcmp(ContentType, TEXT("application/json")) == 0)
+	{
+		bCloseAfterResponse = true;
+		return SendSseHead() && SendSseEvent(FromUtf8(Body.GetData(), Body.Num()));
+	}
+
 	FString Head = FString::Printf(TEXT("HTTP/1.1 %d %s\r\n"), Status, StatusText(Status));
 	if (ContentType && *ContentType)
 	{
@@ -868,6 +884,12 @@ bool FMcpHttpConnection::SendSseHead()
 	}
 	++NumAnswered;
 	UE_LOG(LogUEAgentHttp, Verbose, TEXT("conn %u: %s -> 200, event stream, close"), ConnectionId, *Exchange);
+	if (bListChangedPending)
+	{
+		bListChangedPending = false;
+		UE_LOG(LogUEAgentHttp, Display, TEXT("conn %u: the tool permissions changed: notifications/tools/list_changed sent"), ConnectionId);
+		return SendSseEvent(TEXT("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}"));
+	}
 	return true;
 }
 
@@ -1012,6 +1034,21 @@ bool FMcpHttpConnection::HandleJsonRpc(const McpHttpServerPrivate::FHttpRequest&
 		Params = *ParamsObject;
 	}
 
+	// A session whose list was read under other tool permissions hears that it changed, once, on its next request
+	// that takes SSE; a tools/list or an initialize reads the new list anyway.
+	const FString RequestSession = SessionOf(Request);
+	if (!RequestSession.IsEmpty())
+	{
+		if (Method == TEXT("tools/list") || Method == TEXT("initialize"))
+		{
+			Server->NoteSessionListed(RequestSession);
+		}
+		else if (const FString* Accept = Request.Header(TEXT("accept")))
+		{
+			bListChangedPending = Accept->Contains(TEXT("text/event-stream"), ESearchCase::IgnoreCase) && Server->TakeSessionListChanged(RequestSession);
+		}
+	}
+
 	if (Method == TEXT("tools/call"))
 	{
 		return HandleToolsCall(Request, Id, Params, bKeepAlive);
@@ -1028,6 +1065,8 @@ bool FMcpHttpConnection::HandleJsonRpc(const McpHttpServerPrivate::FHttpRequest&
 		Prefix.LeftChopInline(1);
 		Prefix += TEXT(",\"result\":");
 		TArray<uint8> Body = ToUtf8(Prefix);
+		// Without the tools the user's permissions turn off (FMcpToolPolicy); the meta-tools are always listed.
+		const TSharedRef<const FMcpToolPolicy> Policy = FMcpToolPolicy::GetCurrent();
 		if (Catalog.IsValid())
 		{
 			if (ToolsRequest.Mode == EMcpToolsMode::Compact)
@@ -1036,7 +1075,7 @@ bool FMcpHttpConnection::HandleJsonRpc(const McpHttpServerPrivate::FHttpRequest&
 			}
 			else if (ToolsRequest.Mode == EMcpToolsMode::All)
 			{
-				Body.Append(Catalog->GetToolsListUtf8());
+				Body.Append(Catalog->BuildFullToolsListUtf8(*Policy));
 			}
 			else
 			{
@@ -1047,7 +1086,7 @@ bool FMcpHttpConnection::HandleJsonRpc(const McpHttpServerPrivate::FHttpRequest&
 				{
 					Server->GetSessionDomains(Session, Domains);
 				}
-				Body.Append(Domains.Num() > 0 ? Catalog->BuildCoreToolsListUtf8(Domains) : Catalog->GetCoreToolsListUtf8());
+				Body.Append(Catalog->BuildCoreToolsListUtf8(Domains, *Policy));
 			}
 		}
 		else
@@ -1079,10 +1118,10 @@ bool FMcpHttpConnection::HandleJsonRpc(const McpHttpServerPrivate::FHttpRequest&
 		UE_LOG(LogUEAgentHttp, Display, TEXT("initialize: %s %s requests %s -> %s (%s tool list)"),
 			*ClientName, *ClientVersion, Requested.IsEmpty() ? TEXT("<none>") : *Requested, *Negotiated, ToolsModeName(ToolsRequest.Mode));
 
-		// The core list can grow (enable_toolset): it says so, and the session is what remembers the growth.
-		const bool bCoreList = ToolsRequest.Mode == EMcpToolsMode::Core;
+		// Every list can change (the user's tool permissions), and the core list can grow (enable_toolset): the session
+		// remembers both, so the server can say so.
 		TSharedRef<FJsonObject> Tools = MakeShared<FJsonObject>();
-		Tools->SetBoolField(TEXT("listChanged"), bCoreList);
+		Tools->SetBoolField(TEXT("listChanged"), true);
 		TSharedRef<FJsonObject> Capabilities = MakeShared<FJsonObject>();
 		Capabilities->SetObjectField(TEXT("tools"), Tools);
 		// The shipped skills, as prompts and resources (Mcp/McpPrompts.h): they change only with the plugin.
@@ -1106,8 +1145,13 @@ bool FMcpHttpConnection::HandleJsonRpc(const McpHttpServerPrivate::FHttpRequest&
 			Instructions = (ToolsRequest.Mode == EMcpToolsMode::Compact ? McpMetaTools::Instructions(*CurrentCatalog) : McpMetaTools::CoreInstructions(*CurrentCatalog))
 				+ TEXT("\n\n") + Instructions;
 		}
+		const FString PolicyInstructions = FMcpToolPolicy::GetCurrent()->Instructions();
+		if (!PolicyInstructions.IsEmpty())
+		{
+			Instructions = PolicyInstructions + TEXT("\n\n") + Instructions;
+		}
 		Result->SetStringField(TEXT("instructions"), Instructions);
-		const FString SessionHeader = bCoreList ? FString::Printf(TEXT("Mcp-Session-Id: %s\r\n"), *Server->OpenSession()) : FString();
+		const FString SessionHeader = FString::Printf(TEXT("Mcp-Session-Id: %s\r\n"), *Server->OpenSession());
 		return SendResponse(200, TEXT("application/json"), ToUtf8(MakeRpcResult(Id, Result)), bKeepAlive, SessionHeader) && bKeepAlive;
 	}
 
@@ -1237,6 +1281,17 @@ bool FMcpHttpConnection::HandleToolsCall(const McpHttpServerPrivate::FHttpReques
 		}
 		return SendJson(200, MakeRpcResult(Id, MakeToolResult(Unknown, true)), bKeepAlive) && bKeepAlive;
 	}
+	// A tool the user's permissions turn off is refused here, without waiting in the game thread's queue; the bridge
+	// checks again (DispatchSingleCommand is the authority, and covers execute_batch's items).
+	const TSharedRef<const FMcpToolPolicy> Policy = FMcpToolPolicy::GetCurrent();
+	const FMcpToolPolicy::EVerdict Verdict = Policy->Evaluate(*Tool, ToolName);
+	if (Verdict != FMcpToolPolicy::EVerdict::Allowed)
+	{
+		Server->CountToolCall();
+		UE_LOG(LogUEAgentHttp, Display, TEXT("tools/call %s refused by the tool permissions (%s)"), *Tool->Name, FMcpToolPolicy::VerdictName(Verdict));
+		const TSharedRef<FJsonObject> Refusal = Policy->MakeRefusalPayload(Verdict, Tool->Name, Tool->Domain);
+		return SendJson(200, MakeRpcResult(Id, MakeToolResult(ToJsonText(Refusal), true)), bKeepAlive) && bKeepAlive;
+	}
 	const FString Missing = Catalog->CheckRequired(*Tool, Arguments);
 	if (!Missing.IsEmpty())
 	{
@@ -1349,8 +1404,9 @@ bool FMcpHttpConnection::AnswerEnableToolset(const McpHttpServerPrivate::FHttpRe
 	// The list changed: a client that takes SSE hears it before the reply, on this response's stream (the server has no
 	// GET stream), and re-reads tools/list -- which already carries the domains, the session holds them.
 	const FString* Accept = Request.Header(TEXT("accept"));
-	if (Reply->GetBoolField(TEXT("list_changed")) && Accept && Accept->Contains(TEXT("text/event-stream"), ESearchCase::IgnoreCase))
+	if ((Reply->GetBoolField(TEXT("list_changed")) || bListChangedPending) && Accept && Accept->Contains(TEXT("text/event-stream"), ESearchCase::IgnoreCase))
 	{
+		bListChangedPending = false;
 		TSharedRef<FJsonObject> Notification = MakeShared<FJsonObject>();
 		Notification->SetStringField(TEXT("jsonrpc"), TEXT("2.0"));
 		Notification->SetStringField(TEXT("method"), TEXT("notifications/tools/list_changed"));
@@ -1582,8 +1638,11 @@ void FMcpHttpServer::RunAcceptLoop(const FThreadSafeBool& bAcceptorRunning)
 FString FMcpHttpServer::OpenSession()
 {
 	const FString Session = FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphens).ToLower();
+	const uint32 Generation = FMcpToolPolicy::GetCurrent()->GetGeneration();
 	FScopeLock Lock(&SessionsLock);
-	Sessions.Add(Session).LastUsed = FPlatformTime::Seconds();
+	FSession& Opened = Sessions.Add(Session);
+	Opened.LastUsed = FPlatformTime::Seconds();
+	Opened.ListedGeneration = Generation;
 	TrimSessions();
 	return Session;
 }
@@ -1608,6 +1667,30 @@ void FMcpHttpServer::AddSessionDomains(const FString& Session, const TArray<FStr
 	Found.LastUsed = FPlatformTime::Seconds();
 	Found.Domains.Append(InDomains);
 	TrimSessions();
+}
+
+void FMcpHttpServer::NoteSessionListed(const FString& Session)
+{
+	const uint32 Generation = FMcpToolPolicy::GetCurrent()->GetGeneration();
+	FScopeLock Lock(&SessionsLock);
+	if (FSession* Found = Sessions.Find(Session))
+	{
+		Found->LastUsed = FPlatformTime::Seconds();
+		Found->ListedGeneration = Generation;
+	}
+}
+
+bool FMcpHttpServer::TakeSessionListChanged(const FString& Session)
+{
+	const uint32 Generation = FMcpToolPolicy::GetCurrent()->GetGeneration();
+	FScopeLock Lock(&SessionsLock);
+	FSession* Found = Sessions.Find(Session);
+	if (!Found || Found->ListedGeneration == Generation)
+	{
+		return false;
+	}
+	Found->ListedGeneration = Generation;
+	return true;
 }
 
 void FMcpHttpServer::TrimSessions()

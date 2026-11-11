@@ -45,6 +45,8 @@ one through `call_tool`, or add its pack or domain to your list with `enable_too
 - On a child Blueprint whose scene root is inherited, read the trap note in
   `add_component_to_blueprint`'s description before you parent a scene component.
 - Compiling and saving are refused while Play-in-Editor runs: stop PIE first.
+- A refusal with `refused_by: "policy"` is the user's choice (read-only mode, code execution off, or a
+  domain or tool turned off): stop, do not retry it another way, and ask the user.
 
 ## Undo
 

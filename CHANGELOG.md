@@ -23,6 +23,17 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
   `enabled: false` and the writes refuse; paths under a Read Only Content Root are refused, and `revert_files` and
   the submit are refused during Play-in-Editor without `force`. `get_source_control_status` moves from `Export` to
   `SourceControl`, with the same name and reply: a client that enabled `Export` to reach it enables `SourceControl`.
+- **Read-only mode, and turning off tools, domains and code execution** (Editor Preferences > Plugins > UEAgent >
+  Permissions, per user). Read-only mode lets an agent run only the tools that read, or that only capture an image
+  under `Saved`; `-McpReadOnly` on the command line or `UEAGENT_READONLY=1` turns it on, and the status bar shows it
+  (`MCP · 55561 · read-only`) with a toggle in its menu. **Allow code execution** off refuses the six tools that run
+  code or a process, and **Disabled domains** and **Disabled tools** turn tools off by domain or name. A tool that is
+  off is left out of `tools/list` (core, full and compact) and `find_tools`, and is refused with
+  `refused_by: "policy"` however it is called: directly, through `call_tool`, as an `execute_batch` item, or by an
+  old or retired name. The internal reads of the preconditions and the readback still run. A change rebuilds the
+  lists at once and reaches a session as `notifications/tools/list_changed` on its next request that accepts SSE;
+  `initialize` opens a session and announces `listChanged` in every mode. `mcp.readonly 0|1` and `mcp.policy` set it
+  from the console, and `mcp.http.status` prints it.
 - `Tools/check_tool_count.py` checks the tool counts the README, its Spanish version, the documentation and the
   plugin's description state against the catalog: a count above the tools listed, or more than one hundred below
   their number rounded down to the hundred, fails. It runs in CI with the documentation checks.

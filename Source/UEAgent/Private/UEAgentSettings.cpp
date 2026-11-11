@@ -3,6 +3,10 @@
 #include "UEAgentSettings.h"
 #include "UEAgentProjectSettings.h"
 
+#include "Mcp/McpToolCatalog.h"
+#include "Mcp/McpToolPolicy.h"
+
+#include "HAL/PlatformMisc.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 
@@ -17,6 +21,72 @@ bool UUEAgentSettings::GetEffectiveHttpKeepAlive() const
 {
 	return bHttpKeepAlive && !FParse::Param(FCommandLine::Get(), TEXT("McpHttpNoKeepAlive"));
 }
+
+bool UUEAgentSettings::IsReadOnlyForcedByLaunch(FString* OutSource)
+{
+	if (FParse::Param(FCommandLine::Get(), TEXT("McpReadOnly")))
+	{
+		if (OutSource)
+		{
+			*OutSource = TEXT("-McpReadOnly");
+		}
+		return true;
+	}
+	const FString Env = FPlatformMisc::GetEnvironmentVariable(TEXT("UEAGENT_READONLY")).TrimStartAndEnd();
+	if (Env == TEXT("1") || Env.Equals(TEXT("true"), ESearchCase::IgnoreCase) || Env.Equals(TEXT("yes"), ESearchCase::IgnoreCase))
+	{
+		if (OutSource)
+		{
+			*OutSource = TEXT("UEAGENT_READONLY");
+		}
+		return true;
+	}
+	return false;
+}
+
+bool UUEAgentSettings::GetEffectiveReadOnly(FString& OutSource) const
+{
+	OutSource.Reset();
+	if (IsReadOnlyForcedByLaunch(&OutSource))
+	{
+		return true;
+	}
+	if (bReadOnlyMode)
+	{
+		OutSource = TEXT("settings");
+		return true;
+	}
+	return false;
+}
+
+void UUEAgentSettings::SetReadOnlyMode(bool bReadOnly)
+{
+	if (bReadOnlyMode != bReadOnly)
+	{
+		bReadOnlyMode = bReadOnly;
+		SaveConfig();
+	}
+	FMcpToolPolicy::Rebuild();
+}
+
+TArray<FString> UUEAgentSettings::GetDomainOptions() const
+{
+	TSharedPtr<const FMcpToolCatalog> Catalog = FMcpToolCatalog::GetCurrent();
+	if (!Catalog.IsValid())
+	{
+		FString Error;
+		Catalog = FMcpToolCatalog::LoadFromFile(FMcpToolCatalog::DefaultCatalogPath(), Error);
+	}
+	return Catalog.IsValid() ? Catalog->GetDomains() : TArray<FString>();
+}
+
+#if WITH_EDITOR
+void UUEAgentSettings::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+{
+	Super::PostEditChangeProperty(PropertyChangedEvent);
+	FMcpToolPolicy::Rebuild();
+}
+#endif
 
 namespace UEAgentSettingsPrivate
 {

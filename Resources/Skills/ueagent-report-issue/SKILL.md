@@ -17,7 +17,8 @@ token, a write under a read-only content root) never goes in a public issue: poi
 ## 1. Bug or feature?
 
 - **Bug**: a tool failed, answered `success: true` without doing the work (its `readback` or a read
-  tool shows the truth), refused a call that should work, or closed or froze the editor.
+  tool shows the truth), refused a call that should work, or closed or froze the editor. A refusal with
+  `refused_by: "policy"` is not a bug: the user's settings turn that tool off.
 - **Feature**: something the user wants an agent to do in Unreal that no tool does. Search first with
   `find_tools` (or the reference at <https://carlxsmg.github.io/UEAgent/tools/>): the tool may exist
   under another name.

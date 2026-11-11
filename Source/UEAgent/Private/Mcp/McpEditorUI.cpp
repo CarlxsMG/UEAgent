@@ -9,6 +9,7 @@
 #include "Mcp/McpSkills.h"
 #include "Mcp/McpPreconditions.h"
 #include "Mcp/McpToolCatalog.h"
+#include "Mcp/McpToolPolicy.h"
 #include "Mcp/McpUpdate.h"
 #include "UEAgentSettings.h"
 
@@ -491,12 +492,15 @@ namespace McpEditorUIPrivate
 	{
 		// Queried on every paint: a new FText each time would force the text to be rebuilt every time.
 		static uint16 CachedPort = 0;
+		static bool bCachedReadOnly = false;
 		static FText Cached;
 		const uint16 Port = McpClaudeCode::CurrentPort();
-		if (Port != CachedPort || Cached.IsEmpty())
+		const bool bReadOnly = FMcpToolPolicy::GetCurrent()->IsReadOnly();
+		if (Port != CachedPort || bReadOnly != bCachedReadOnly || Cached.IsEmpty())
 		{
 			CachedPort = Port;
-			Cached = FText::FromString(FString::Printf(TEXT("MCP \u00B7 %d"), Port));
+			bCachedReadOnly = bReadOnly;
+			Cached = FText::FromString(FString::Printf(TEXT("MCP \u00B7 %d%s"), Port, bReadOnly ? TEXT(" \u00B7 read-only") : TEXT("")));
 		}
 		return Cached;
 	}
@@ -560,7 +564,29 @@ namespace McpEditorUIPrivate
 					? FString::Printf(TEXT("%d tools in the catalog, all listed (UEAGENT_TOOLS=all)"), Catalog->NumTools())
 					: FString::Printf(TEXT("%d tools in the catalog: %d core tools listed, the rest one call away"), Catalog->NumTools(), Catalog->NumCoreTools()));
 			}
+			Lines.Add(FString::Printf(TEXT("Permissions: %s"), *FMcpToolPolicy::GetCurrent()->Describe()));
 			Menu.AddWidget(InfoBlock(Lines), FText::GetEmpty(), /*bNoIndent*/ true);
+			FString ForcedBy;
+			const bool bForced = UUEAgentSettings::IsReadOnlyForcedByLaunch(&ForcedBy);
+			Menu.AddMenuEntry(
+				LOCTEXT("ReadOnly", "Read-only mode"),
+				bForced
+					? FText::Format(LOCTEXT("ReadOnlyForcedTip", "On for this editor session: {0} turns it on."), FText::FromString(ForcedBy))
+					: LOCTEXT("ReadOnlyTip", "Agents can only run the tools that read, or that only capture an image: anything that changes the project or runs code is refused. Saved in Editor Preferences > Plugins > UEAgent > Permissions."),
+				FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Lock"),
+				FUIAction(
+					FExecuteAction::CreateLambda([]()
+					{
+						UUEAgentSettings* Settings = GetMutableDefault<UUEAgentSettings>();
+						Settings->SetReadOnlyMode(!Settings->bReadOnlyMode);
+					}),
+					FCanExecuteAction::CreateLambda([bForced]() { return !bForced; }),
+					FGetActionCheckState::CreateLambda([]()
+					{
+						return FMcpToolPolicy::GetCurrent()->IsReadOnly() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+					})),
+				NAME_None,
+				EUserInterfaceActionType::ToggleButton);
 			Menu.AddMenuEntry(
 				LOCTEXT("Activity", "Activity..."),
 				LOCTEXT("ActivityTip", "The last tool calls the agents made in this editor: time, duration, outcome and detail."),

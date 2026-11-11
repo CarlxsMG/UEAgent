@@ -45,6 +45,31 @@ public:
 	bool bHttpKeepAlive = true;
 
 	/**
+	 * Only the tools that read, or that only capture an image under Saved, are listed and run: anything that changes
+	 * the project or runs code is refused, undo and the transaction tools included. `-McpReadOnly` on the command line
+	 * or UEAGENT_READONLY=1 in the environment turns it on whatever this says. Also in the "MCP" status bar menu.
+	 */
+	UPROPERTY(config, EditAnywhere, Category = "Permissions", meta = (DisplayName = "Read-only mode"))
+	bool bReadOnlyMode = false;
+
+	/**
+	 * Off, the tools that run code or a process the caller supplies (execute_python, execute_python_file,
+	 * execute_console_command, call_function, run_external_project_script, launch_dedicated_server) are not listed
+	 * and are refused. With it on, execute_python has the editor's own rights.
+	 */
+	UPROPERTY(config, EditAnywhere, Category = "Permissions")
+	bool bAllowCodeExecution = true;
+
+	/** Every tool of these domains (as find_tools names them) is not listed and is refused. */
+	UPROPERTY(config, EditAnywhere, Category = "Permissions", meta = (GetOptions = "GetDomainOptions"))
+	TArray<FString> DisabledDomains;
+
+	/** These tools, by name, are not listed and are refused. An internal check of the preconditions or the readback
+	 *  that reads with one of them still runs. */
+	UPROPERTY(config, EditAnywhere, Category = "Permissions")
+	TArray<FString> DisabledTools;
+
+	/**
 	 * On editor startup, warns if the project's `.mcp.json` does not lead Claude Code to this
 	 * server, with a button to fix it. "Don't show again" turns it off here.
 	 */
@@ -87,4 +112,19 @@ public:
 
 	/** Whether the server keeps connections alive: off with bHttpKeepAlive off or -McpHttpNoKeepAlive. */
 	bool GetEffectiveHttpKeepAlive() const;
+
+	/** Whether read-only mode is on: bReadOnlyMode, -McpReadOnly or UEAGENT_READONLY=1. OutSource says which. */
+	bool GetEffectiveReadOnly(FString& OutSource) const;
+	/** Whether the command line or the environment turns read-only mode on, so the setting cannot turn it off. */
+	static bool IsReadOnlyForcedByLaunch(FString* OutSource = nullptr);
+	/** Sets bReadOnlyMode, saves it and applies it (FMcpToolPolicy::Rebuild). Game thread. */
+	void SetReadOnlyMode(bool bReadOnly);
+
+	/** The catalog's domains, offered for DisabledDomains. */
+	UFUNCTION()
+	TArray<FString> GetDomainOptions() const;
+
+#if WITH_EDITOR
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+#endif
 };

@@ -71,6 +71,11 @@ public:
 	// DispatchSingleCommand adds no retired-name note to them.
 	int32 SubCommandDepth = 0;
 
+	// Above zero while the bridge runs a command of its own (a precondition probe, a readback re-read, execute_batch's
+	// transaction): the user's tool policy (FMcpToolPolicy) judges the calls an agent makes, not these. A tool's own
+	// sub-commands (SubCommandDepth) are not judged either: the tool that runs them was.
+	int32 PolicyExemptDepth = 0;
+
 	// The call a tool forwarded to the tool that does the work (mcp_common::ForwardCall), so the READBACK contract
 	// checks that tool's call and not the forwarder's: ForwardedBy is the forwarding tool, ForwardedCommand and
 	// ForwardedParams the call it made, ForwardCount how many calls it forwarded (more than one: no single tool's
@@ -133,6 +138,10 @@ private:
 	// the queued work item: `execute_batch` calls DispatchSingleCommand directly, so a gate in the work
 	// item would be skipped by a batch -- which is exactly how a bulk compile gets triggered.
 	TSharedPtr<FJsonObject> CheckPIESafetyGuard(const FString& CommandType, const TSharedPtr<FJsonObject>& Params);
+
+	// The user's tool permissions (FMcpToolPolicy) for a call to RequestedCommandType, which runs as CommandType: the
+	// refusal envelope, or null to proceed (also while PolicyExemptDepth or SubCommandDepth is above zero). Game thread.
+	TSharedPtr<FJsonObject> CheckToolPolicy(const FString& RequestedCommandType, const FString& CommandType) const;
 
 	// Command marshaling. The network thread enqueues each command's work item
 	// here; an FTSTicker drains it on the game thread at the top-level frame point
