@@ -346,7 +346,7 @@ static const TCHAR* const GFlatCommandParams[] =
     nullptr,
     TEXT("add_impulse_to_actor"),
         TEXT("actor_name"), TEXT("bone_name"), TEXT("component_name"), TEXT("impulse"),
-        TEXT("location"), TEXT("vel_change"),
+        TEXT("location"), TEXT("vel_change"), TEXT("world"),
     nullptr,
     TEXT("add_input_action_event_node"),
         TEXT("blueprint_name"), TEXT("graph_name"), TEXT("input_action_name"),
@@ -5992,7 +5992,7 @@ static const TCHAR* const GFlatCommandParams[] =
 };
 
 static constexpr int32 GNumCommands = 1791;
-static constexpr int32 GNumParamNames = 6059;
+static constexpr int32 GNumParamNames = 6060;
 
 // Built ONCE, on first use (function-local static => thread-safe init). The
 // dispatcher is game-thread only, so there is no contention after that.

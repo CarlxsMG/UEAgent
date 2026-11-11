@@ -942,13 +942,13 @@ Remove one member from a Blueprint user-defined struct, found by display name or
 
 *Destructive.*
 
-Lift the most recent undo barrier so undo can step past it again -- the counterpart of set_undo_barrier, for when the protected batch is finished -- or, with all=true, every barrier at once (including ones another session or the human placed to protect their work). Nothing is undone; it only lifts the floor. WARNING: `success` is hardcoded true: `removed` is the oracle and comes back false as an honest no-op when there was no barrier.
+Lift the most recent undo barrier so undo can step past it again -- the counterpart of set_undo_barrier, for when the protected batch is finished -- or, with all=true, every barrier at once (including ones another session or the human placed to protect their work). Nothing is undone; it only lifts the floor. A single pop with no barrier to lift fails; all=true with none succeeds with removed:false and a note, since clearing nothing is not a failure.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `all` | boolean | no | Optional bool (default false). true clears ALL undo barriers instead of popping the most recent one. |
 
-**Returns:** `{ success: bool (hardcoded), removed: bool (THE oracle -- false = there was nothing to pop), all: bool (echo), undo_barrier: int now in force, undo_count: int, queue_length: int }`
+**Returns:** `{ removed: bool (false = there was no barrier), all: bool (echo), undo_barrier: int now in force (-1 = none), undo_count: int, queue_length: int, note?: string }`
 
 ## `rename_enum_entry`
 
@@ -1219,7 +1219,7 @@ Drop a floor in the undo stack at the current position so no later undo can cros
 
 No parameters.
 
-**Returns:** `{ success: bool (hardcoded), already_existed: bool (true = nothing new was pushed), undo_barrier: int (cursor it sits at), undo_count: int, queue_length: int }`
+**Returns:** `{ already_existed: bool (true = nothing new was pushed), undo_barrier: int (cursor it sits at), undo_count: int, queue_length: int }`
 
 ## `set_viewport_settings`
 

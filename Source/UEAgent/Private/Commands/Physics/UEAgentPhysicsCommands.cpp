@@ -725,24 +725,32 @@ TSharedPtr<FJsonObject> HandleGetCollisionInfo(const TSharedPtr<FJsonObject>& Pa
 
 // Impulse + ISM CRUD
 
-// MCP:add_impulse_to_actor - Kick a physics body: apply an impulse (or, with vel_change, a mass-independent velocity change) to an actor's primitive component, optionally at a world location for torque via AddImpulseAtLocation, or on a named skeletal bone. Acts on the EDITOR world, where nothing is simulating unless the component has simulate_physics on -- so on a resting editor actor this is a no-op that still reports applied:true; verify with a transform re-read, and for gameplay-time forces drive it in PIE.
-//   @param actor_name - Display label or internal name of the target editor-world actor (required)
+// MCP:add_impulse_to_actor - Kick a physics body: apply an impulse (or, with vel_change, a mass-independent velocity change) to an actor's primitive component, optionally at a world location for torque via AddImpulseAtLocation, or on a named skeletal bone. An impulse moves only a body that simulates physics: in the editor world nothing does unless the component has simulate_physics on, so on a resting editor actor nothing happens and the reply says applied:false with a note. For gameplay-time forces call it with world:"pie" during Play-in-Editor.
+//   @param actor_name - Display label or internal name of the target actor (required)
 //   @param component_name - Optional primitive component name (defaults to the actor's RootComponent)
 //   @param impulse - [x, y, z] impulse vector in world units (required)
 //   @param location - Optional [x, y, z] world location for AddImpulseAtLocation (omit to use AddImpulse)
 //   @param bone_name - Optional skeletal bone name to apply the impulse to
 //   @param vel_change - Optional; if true, impulse is treated as a velocity change (mass-independent)
-//   @returns { actor_name: string, component_name: string, applied: bool }
+//   @param world - Optional "editor" (default) | "pie" | "server" | "client" | "pie:N": the world whose actor gets the impulse
+//   @returns { actor_name: string, component_name: string, applied: bool (the body simulated physics, so the impulse reached it), simulating_physics: bool, world: "editor" | "pie", note?: string (when nothing was applied: why, and what to do) }
 TSharedPtr<FJsonObject> HandleAddImpulseToActor(const TSharedPtr<FJsonObject>& Params)
 {
     FString ActorName;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("actor_name"), ActorName)) { return Missing; }
 
-    AActor* Actor = nullptr;
-    if (TSharedPtr<FJsonObject> Error = Physics_FindEditorActor(ActorName, Actor))
+    FString WorldSelector, WorldError;
+    UWorld* World = mcp_common::ResolveWorldSelector(Params, TEXT("editor"), WorldSelector, WorldError);
+    if (!World)
     {
-        return Error;
+        return mcp_common::MakeErrorReply(WorldError.IsEmpty() ? TEXT("No world could be resolved for add_impulse_to_actor") : WorldError);
     }
+    AActor* Actor = mcp_common::FindActorByName(World, ActorName);
+    if (!Actor)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Actor '%s' not found in the %s world"), *ActorName, *WorldSelector));
+    }
+    const bool bPieWorld = World->WorldType == EWorldType::PIE;
 
     FString ComponentName;
     Params->TryGetStringField(TEXT("component_name"), ComponentName);
@@ -767,6 +775,9 @@ TSharedPtr<FJsonObject> HandleAddImpulseToActor(const TSharedPtr<FJsonObject>& P
     bool bVelChange = false;
     Params->TryGetBoolField(TEXT("vel_change"), bVelChange);
 
+    // AddImpulse does nothing to a body that does not simulate, so this reading is what tells the call applied.
+    const bool bSimulating = Prim->IsSimulatingPhysics(Bone);
+
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("actor_name"), ActorName);
     Result->SetStringField(TEXT("component_name"), Prim->GetName());
@@ -790,7 +801,18 @@ TSharedPtr<FJsonObject> HandleAddImpulseToActor(const TSharedPtr<FJsonObject>& P
         Prim->AddImpulse(Impulse, Bone, bVelChange);
     }
 
-    Result->SetBoolField(TEXT("applied"), true);
+    Result->SetBoolField(TEXT("applied"), bSimulating);
+    Result->SetBoolField(TEXT("simulating_physics"), bSimulating);
+    Result->SetStringField(TEXT("world"), bPieWorld ? TEXT("pie") : TEXT("editor"));
+    if (!bSimulating)
+    {
+        const FString BodyName = Bone.IsNone() ? Prim->GetName() : FString::Printf(TEXT("%s (bone %s)"), *Prim->GetName(), *Bone.ToString());
+        Result->SetStringField(TEXT("note"), FString::Printf(
+            TEXT("Nothing was applied: %s does not simulate physics in the %s world, and an impulse only moves a simulating body. ")
+            TEXT("Turn Simulate Physics on for the component (set_properties, BodyInstance.bSimulatePhysics = true), or call this with world:\"pie\" during Play-in-Editor on a body that simulates."),
+            *BodyName, bPieWorld ? TEXT("pie") : TEXT("editor")));
+    }
+    // The call ran and changed nothing when the body does not simulate: `applied` says which.
     return mcp_common::MakeOkReply(Result);
 }
 

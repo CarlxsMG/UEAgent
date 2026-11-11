@@ -99,7 +99,9 @@ Both leave `tools/list`, `find_tools` and the reference, and a call answers as b
 - The plugin builds with no warning of its own.
 - The documentation site builds with no warning: `pip install mkdocs-material==9.7.7`, then `mkdocs build --strict`.
 - Every generator passes `--check`; CI runs them on each push, with `Tools/check_copyright.py`,
-  `Tools/check_doc_links.py`, `Tools/check_skills.py` and `ruff check Tools`.
+  `Tools/check_doc_links.py`, `Tools/check_skills.py`, `Tools/check_tool_count.py` and `ruff check Tools`.
+- The tool counts in the prose say the catalog's count rounded down to the hundred ("more than 1,500"):
+  `Tools/check_tool_count.py` fails when a pull request crosses a hundred and leaves them behind.
 - `python Tools/smoke_test.py --launch <a throwaway .uproject> --engine <UE root>` passes: it starts a
   headless editor and checks the server end to end over HTTP.
 - A change to how `McpToolCatalog.cpp` builds a schema, or to how `McpPrompts.cpp` serves a prompt or a

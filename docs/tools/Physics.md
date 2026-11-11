@@ -54,18 +54,19 @@ Append an additional StaticMesh source to an existing geometry collection, then 
 
 *Additive.*
 
-Kick a physics body: apply an impulse (or, with vel_change, a mass-independent velocity change) to an actor's primitive component, optionally at a world location for torque via AddImpulseAtLocation, or on a named skeletal bone. Acts on the EDITOR world, where nothing is simulating unless the component has simulate_physics on -- so on a resting editor actor this is a no-op that still reports applied:true; verify with a transform re-read, and for gameplay-time forces drive it in PIE.
+Kick a physics body: apply an impulse (or, with vel_change, a mass-independent velocity change) to an actor's primitive component, optionally at a world location for torque via AddImpulseAtLocation, or on a named skeletal bone. An impulse moves only a body that simulates physics: in the editor world nothing does unless the component has simulate_physics on, so on a resting editor actor nothing happens and the reply says applied:false with a note. For gameplay-time forces call it with world:"pie" during Play-in-Editor.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Display label or internal name of the target editor-world actor (required) |
+| `actor_name` | string | yes | Display label or internal name of the target actor (required) |
 | `component_name` | string | no | Optional primitive component name (defaults to the actor's RootComponent) |
 | `impulse` | array | no | [x, y, z] impulse vector in world units (required) |
 | `location` | array | no | Optional [x, y, z] world location for AddImpulseAtLocation (omit to use AddImpulse) |
 | `bone_name` | string | no | Optional skeletal bone name to apply the impulse to |
 | `vel_change` | boolean | no | Optional; if true, impulse is treated as a velocity change (mass-independent) |
+| `world` | string | no | Optional "editor" (default) \| "pie" \| "server" \| "client" \| "pie:N": the world whose actor gets the impulse |
 
-**Returns:** `{ actor_name: string, component_name: string, applied: bool }`
+**Returns:** `{ actor_name: string, component_name: string, applied: bool (the body simulated physics, so the impulse reached it), simulating_physics: bool, world: "editor" | "pie", note?: string (when nothing was applied: why, and what to do) }`
 
 ## `add_instanced_static_mesh_component`
 

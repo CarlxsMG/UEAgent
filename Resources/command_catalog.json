@@ -26053,7 +26053,7 @@
         },
         {
           "name": "remove_undo_barrier",
-          "description": "Lift the most recent undo barrier so undo can step past it again -- the counterpart of set_undo_barrier, for when the protected batch is finished -- or, with all=true, every barrier at once (including ones another session or the human placed to protect their work). Nothing is undone; it only lifts the floor. WARNING: `success` is hardcoded true: `removed` is the oracle and comes back false as an honest no-op when there was no barrier.",
+          "description": "Lift the most recent undo barrier so undo can step past it again -- the counterpart of set_undo_barrier, for when the protected batch is finished -- or, with all=true, every barrier at once (including ones another session or the human placed to protect their work). Nothing is undone; it only lifts the floor. A single pop with no barrier to lift fails; all=true with none succeeds with removed:false and a note, since clearing nothing is not a failure.",
           "params": [
             {
               "name": "all",
@@ -26062,7 +26062,7 @@
               "description": "Optional bool (default false). true clears ALL undo barriers instead of popping the most recent one."
             }
           ],
-          "returns": "{ success: bool (hardcoded), removed: bool (THE oracle -- false = there was nothing to pop), all: bool (echo), undo_barrier: int now in force, undo_count: int, queue_length: int }",
+          "returns": "{ removed: bool (false = there was no barrier), all: bool (echo), undo_barrier: int now in force (-1 = none), undo_count: int, queue_length: int, note?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -26784,7 +26784,7 @@
           "name": "set_undo_barrier",
           "description": "Drop a floor in the undo stack at the current position so no later undo can cross it -- the way to protect everything done SO FAR (yours or the human's) before starting a risky batch that you may want to unwind. Idempotent: a barrier already sitting at the cursor is not pushed twice (already_existed:true). Lift it with remove_undo_barrier (all=true lifts every barrier).",
           "params": [],
-          "returns": "{ success: bool (hardcoded), already_existed: bool (true = nothing new was pushed), undo_barrier: int (cursor it sits at), undo_count: int, queue_length: int }",
+          "returns": "{ already_existed: bool (true = nothing new was pushed), undo_barrier: int (cursor it sits at), undo_count: int, queue_length: int }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -49030,14 +49030,14 @@
         },
         {
           "name": "add_impulse_to_actor",
-          "description": "Kick a physics body: apply an impulse (or, with vel_change, a mass-independent velocity change) to an actor's primitive component, optionally at a world location for torque via AddImpulseAtLocation, or on a named skeletal bone. Acts on the EDITOR world, where nothing is simulating unless the component has simulate_physics on -- so on a resting editor actor this is a no-op that still reports applied:true; verify with a transform re-read, and for gameplay-time forces drive it in PIE.",
+          "description": "Kick a physics body: apply an impulse (or, with vel_change, a mass-independent velocity change) to an actor's primitive component, optionally at a world location for torque via AddImpulseAtLocation, or on a named skeletal bone. An impulse moves only a body that simulates physics: in the editor world nothing does unless the component has simulate_physics on, so on a resting editor actor nothing happens and the reply says applied:false with a note. For gameplay-time forces call it with world:\"pie\" during Play-in-Editor.",
           "params": [
             {
               "name": "actor_name",
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Display label or internal name of the target editor-world actor (required)"
+              "description": "Display label or internal name of the target actor (required)"
             },
             {
               "name": "component_name",
@@ -49071,9 +49071,16 @@
               "jsonType": "boolean",
               "required": false,
               "description": "Optional; if true, impulse is treated as a velocity change (mass-independent)"
+            },
+            {
+              "name": "world",
+              "jsonType": "string",
+              "required": false,
+              "nameLike": true,
+              "description": "Optional \"editor\" (default) | \"pie\" | \"server\" | \"client\" | \"pie:N\": the world whose actor gets the impulse"
             }
           ],
-          "returns": "{ actor_name: string, component_name: string, applied: bool }",
+          "returns": "{ actor_name: string, component_name: string, applied: bool (the body simulated physics, so the impulse reached it), simulating_physics: bool, world: \"editor\" | \"pie\", note?: string (when nothing was applied: why, and what to do) }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,

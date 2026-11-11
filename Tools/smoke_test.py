@@ -16,7 +16,8 @@ script started: use a throwaway project for --launch. Checks:
   - the shipped skills as prompts and resources: one prompt per skill, the tool map as ueagent://guide, every
     listed resource readable, and the errors for an unknown prompt or resource;
   - edits: one undo step per call, an execute_batch as one step, undo/redo and the undo-state tools,
-    mcp.UndoStepPerCall, and a level load in the middle of a call.
+    mcp.UndoStepPerCall, undo barriers set and removed, an impulse on a body that does not simulate, and a
+    level load in the middle of a call.
 """
 
 from __future__ import annotations
@@ -279,6 +280,26 @@ def check_edits(s: Session) -> None:
     s.call("execute_console_command", {"command": "mcp.UndoStepPerCall 1"})
     s.call("spawn_actor", {"type": "PointLight", "name": "SmokeE"})
     s.check("1 brings the step back", newest_title(s)[0] == "UEAgent: spawn_actor", newest_title(s))
+
+    print("== undo barriers")
+    s.call("remove_undo_barrier", {"all": True})
+    _, none = s.call("remove_undo_barrier")
+    s.check("removing a barrier that is not there fails", none.get("success") is False
+            and none.get("data", {}).get("removed") is False, none)
+    s.call("set_undo_barrier")
+    _, popped = s.call("remove_undo_barrier")
+    s.check("removing a barrier that is there succeeds", popped.get("success") is True
+            and popped.get("data", {}).get("removed") is True, popped)
+    _, cleared = s.call("remove_undo_barrier", {"all": True})
+    s.check("all=true with none succeeds with a note", cleared.get("success") is True
+            and cleared.get("data", {}).get("removed") is False and cleared.get("data", {}).get("note"), cleared)
+
+    print("== an impulse on a body that does not simulate")
+    s.call("spawn_actor", {"type": "StaticMeshActor", "name": "SmokeImpulse"})
+    _, kicked = s.call("add_impulse_to_actor", {"actor_name": "SmokeImpulse", "impulse": [0, 0, 1000]})
+    data = kicked.get("data", {})
+    s.check("it answers applied=false with a note", kicked.get("success") is True and data.get("applied") is False
+            and data.get("simulating_physics") is False and data.get("world") == "editor" and data.get("note"), kicked)
 
     print("== a level load in the middle of a call")
     is_error, loaded = s.call("load_level", {"default_template": True})

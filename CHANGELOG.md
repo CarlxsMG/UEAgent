@@ -4,6 +4,25 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 ## Unreleased
 
+### Added
+
+- `Tools/check_tool_count.py` checks the tool counts the README, its Spanish version, the documentation and the
+  plugin's description state against the catalog: a count above the tools listed, or more than one hundred below
+  their number rounded down to the hundred, fails. It runs in CI with the documentation checks.
+
+### Fixed
+
+- **`remove_undo_barrier` answered `success: true` when there was no barrier to remove.** A single pop with no
+  barrier now fails, with an error that says there was none; with `all: true` and none, it still succeeds, with
+  `removed: false` and a note. Its fields, and those of `set_undo_barrier`, are now under `data` like other tools',
+  and `set_undo_barrier` succeeds when it reads its barrier back at the cursor.
+- **`add_impulse_to_actor` answered `applied: true` when nothing moved.** An impulse moves only a body that
+  simulates physics, and in the editor world nothing does unless it is turned on. `applied` now says whether the body
+  was simulating, and the reply adds `simulating_physics`, `world` and, when nothing was applied, a note that says
+  why and what to do. `success` stays `true`: the call ran and changed nothing. A new `world` parameter (`"pie"`,
+  `"server"`, `"client"`, `"pie:N"`) applies the impulse during Play-in-Editor, where bodies simulate.
+- The plugin's description said "more than 1,600 tools"; the catalog lists 1,549, and it says "more than 1,500".
+
 ## 2.10.1 - 2026-11-05
 
 A client that cannot get past `initialize` through a proxy, antivirus or VPN has a setting to try, and the log says

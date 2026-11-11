@@ -47,6 +47,8 @@ jobs:
         run: python Tools/check_doc_links.py
       - name: Skills follow the Agent Skills format and the catalog
         run: python Tools/check_skills.py
+      - name: Tool counts in the prose follow the catalog
+        run: python Tools/check_tool_count.py
 
   lint:
     name: Python tools lint
