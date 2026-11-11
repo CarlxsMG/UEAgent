@@ -4,6 +4,11 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 ## Unreleased
 
+## 2.11.0 - 2026-11-11
+
+The capture tools return their picture to the agent, new tools drive source control, the C++ compile and tests to a
+verdict, Play-in-Editor can be paused and stepped, and a user can turn tools off or put the server in read-only mode.
+
 ### Added
 
 - **The capture tools return the picture they take.** `capture_viewport`, `capture_high_res_screenshot`,
@@ -13,7 +18,7 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
   (`image_returned`, `image_width`, `image_height`, `image_note`). `execute_batch` returns its items' images, at
   most 4. Turn it off per call (`return_image: false`), per user (**Return images** in Editor Preferences > Plugins
   > UEAgent, with the size limits) or per client (`?images=off` in the server URL). `generate_asset_thumbnail`
-  writes the thumbnail to `Saved/MCP/Thumbnails/` and returns its `file_path`; every existing field stays.
+  writes the thumbnail to `Saved/MCP/Thumbnails/` and returns its `file_path`; every existing field stays. ([#66](https://github.com/CarlxsMG/UEAgent/issues/66))
 - **Source control tools**, in a new `SourceControl` domain, through the editor's own provider (Perforce, Git...):
   `get_source_control_file_status` and `list_source_control_changes` read file state and local changes;
   `checkout_files`, `add_files_to_source_control` and `revert_files` (which reloads the reverted packages) change
@@ -21,8 +26,26 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
   saved files asynchronously, one submit at a time; `get_source_control_history` reads a file's revisions. Files are
   named by content path (`asset_paths`) or disk path (`files`). With revision control disabled the readers answer
   `enabled: false` and the writes refuse; paths under a Read Only Content Root are refused, and `revert_files` and
-  the submit are refused during Play-in-Editor without `force`. `get_source_control_status` moves from `Export` to
-  `SourceControl`, with the same name and reply: a client that enabled `Export` to reach it enables `SourceControl`.
+  the submit are refused during Play-in-Editor without `force`. ([#63](https://github.com/CarlxsMG/UEAgent/issues/63))
+- **The C++ loop, in a new `Code` domain.** `start_cpp_compile` compiles the running editor's modules with Live Coding
+  and returns at once; `get_cpp_compile_status` polls it and answers `success`, `no_changes`, `failure` or
+  `cancelled` with the compiler's `errors` and `warnings` (file, line, column, code, message). Live Coding keeps the
+  compiler's output out of the editor log, so they are read from the UnrealBuildTool log of that compile. Hot reload
+  runs only with `mode: "hot_reload"`, never on its own. `set_live_coding_enabled` turns Live Coding on for the
+  session (an editor started with `-unattended` does not start it), and `create_cpp_class` writes the header and
+  source of a new class into a project module, without regenerating project files or compiling. Both writers are
+  refused during Play-in-Editor without `force`, and `start_cpp_compile` runs code: with code execution
+  off it is refused. ([#64](https://github.com/CarlxsMG/UEAgent/issues/64))
+- **Tests run to a verdict.** `run_automation_test` runs a test that needs several ticks (Play-in-Editor, a map load, a
+  wait) instead of skipping it, and `run_functional_test_in_pie` runs the Functional Test in a Play session instead of
+  only placing it. Both start the test and answer; `get_automation_test_results` and the new
+  `get_functional_test_status` are the polls, and the new `cancel_automation_test` stops either. A test that outlives
+  its `timeout_seconds` is stopped with `timed_out: true`. While one runs, a second test, `start_play_in_editor`,
+  `stop_play_in_editor` and `load_level` are refused with a message naming it. A latent automation test is refused
+  while the open level has unsaved changes, unless `force: true`, since a test that opens a map discards them. ([#65](https://github.com/CarlxsMG/UEAgent/issues/65))
+- **`pause_play_in_editor`, `resume_play_in_editor` and `step_play_in_editor_frame`** (pack `play`) pause a
+  Play-in-Editor session, resume it, and advance it a number of frames, so state can be read at a fixed frame. Like
+  `stop_play_in_editor`, they need `force: true` on a session another session started. ([#65](https://github.com/CarlxsMG/UEAgent/issues/65))
 - **Read-only mode, and turning off tools, domains and code execution** (Editor Preferences > Plugins > UEAgent >
   Permissions, per user). Read-only mode lets an agent run only the tools that read, or that only capture an image
   under `Saved`; `-McpReadOnly` on the command line or `UEAGENT_READONLY=1` turns it on, and the status bar shows it
@@ -33,57 +56,41 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
   old or retired name. The internal reads of the preconditions and the readback still run. A change rebuilds the
   lists at once and reaches a session as `notifications/tools/list_changed` on its next request that accepts SSE;
   `initialize` opens a session and announces `listChanged` in every mode. `mcp.readonly 0|1` and `mcp.policy` set it
-  from the console, and `mcp.http.status` prints it.
+  from the console, and `mcp.http.status` prints it. ([#67](https://github.com/CarlxsMG/UEAgent/issues/67))
 - `Tools/check_tool_count.py` checks the tool counts the README, its Spanish version, the documentation and the
   plugin's description state against the catalog: a count above the tools listed, or more than one hundred below
-  their number rounded down to the hundred, fails. It runs in CI with the documentation checks.
-- **The C++ loop, in a new `Code` domain.** `start_cpp_compile` compiles the running editor's modules with Live Coding
-  and returns at once; `get_cpp_compile_status` polls it and answers `success`, `no_changes`, `failure` or
-  `cancelled` with the compiler's `errors` and `warnings` (file, line, column, code, message). Live Coding keeps the
-  compiler's output out of the editor log, so they are read from the UnrealBuildTool log of that compile. Hot reload
-  runs only with `mode: "hot_reload"`, never on its own. `set_live_coding_enabled` turns Live Coding on for the
-  session (an editor started with `-unattended` does not start it), and `create_cpp_class` writes the header and
-  source of a new class into a project module, without regenerating project files or compiling. Both writers are
-  refused during Play-in-Editor without `force`, and `start_cpp_compile` runs code: with code
-  execution off it is refused.
-- **Tests run to a verdict.** `run_automation_test` runs a test that needs several ticks (Play-in-Editor, a map load, a
-  wait) instead of skipping it, and `run_functional_test_in_pie` runs the Functional Test in a Play session instead of
-  only placing it. Both start the test and answer; `get_automation_test_results` and the new
-  `get_functional_test_status` are the polls, and the new `cancel_automation_test` stops either. A test that outlives
-  its `timeout_seconds` is stopped with `timed_out: true`. While one runs, a second test, `start_play_in_editor`,
-  `stop_play_in_editor` and `load_level` are refused with a message naming it. A latent automation test is refused
-  while the open level has unsaved changes, unless `force: true`, since a test that opens a map discards them.
-- **`pause_play_in_editor`, `resume_play_in_editor` and `step_play_in_editor_frame`** (pack `play`) pause a
-  Play-in-Editor session, resume it, and advance it a number of frames, so state can be read at a fixed frame. Like
-  `stop_play_in_editor`, they need `force: true` on a session another session started.
+  their number rounded down to the hundred, fails. It runs in CI with the documentation checks. ([#68](https://github.com/CarlxsMG/UEAgent/issues/68))
 
 ### Changed
 
-Return shapes, all additive:
-
-- `run_automation_test` answers verdict `"running"` with `completed: false` and `running: true` for a latent test,
-  where it answered `"skipped"`. New parameters `timeout_seconds` (default 300) and `force`.
-- `get_automation_test_results` adds `running`, `elapsed_seconds` and `timed_out`, and `canceled` with verdict
-  `"canceled"` for a test `cancel_automation_test` stopped; while a test runs it answers verdict `"running"`.
-- `run_functional_test_in_pie` answers verdict `"running"` where it answered `"not_run"`, starts a Play session instead
-  of Simulate, runs the test, and by default leaves no actor in the editor level (it spawns the test into the session
-  and removes it afterwards; `keep_actor: true` places it in the level as before). It adds `keep_actor` and
-  `timeout_seconds` (default 120) to its parameters and reply; the final verdict and `test_result` come from
-  `get_functional_test_status`.
-- `is_play_in_editor_active` adds `is_paused` and `frames_pending`, and `status` can be `"Paused"`.
+- `get_source_control_status` moves from the `Export` domain to `SourceControl`, with the same name and reply: a
+  client that enabled `Export` to reach it enables `SourceControl` ([#63](https://github.com/CarlxsMG/UEAgent/issues/63)).
+- The test and Play-in-Editor tools report a test that is still running, and a paused session ([#65](https://github.com/CarlxsMG/UEAgent/issues/65)):
+  - `run_automation_test` answers verdict `"running"` with `completed: false` and `running: true` for a latent test,
+    where it answered `"skipped"`. New parameters `timeout_seconds` (default 300) and `force`.
+  - `get_automation_test_results` adds `running`, `elapsed_seconds` and `timed_out`, and `canceled` with verdict
+    `"canceled"` for a test `cancel_automation_test` stopped; while a test runs it answers verdict `"running"`.
+  - `run_functional_test_in_pie` answers verdict `"running"` where it answered `"not_run"`, starts a Play session instead
+    of Simulate, runs the test, and by default leaves no actor in the editor level (it spawns the test into the session
+    and removes it afterwards; `keep_actor: true` places it in the level as before). It adds `keep_actor` and
+    `timeout_seconds` (default 120) to its parameters and reply; the final verdict and `test_result` come from
+    `get_functional_test_status`.
+  - `is_play_in_editor_active` adds `is_paused` and `frames_pending`, and `status` can be `"Paused"`.
 
 ### Fixed
 
 - **`remove_undo_barrier` answered `success: true` when there was no barrier to remove.** A single pop with no
   barrier now fails, with an error that says there was none; with `all: true` and none, it still succeeds, with
   `removed: false` and a note. The other fields keep their place, so callers that read `removed` see no other
-  change. `set_undo_barrier` answers `success` from its barrier read back at the cursor.
+  change. `set_undo_barrier` answers `success` from its barrier read back at the cursor. ([#68](https://github.com/CarlxsMG/UEAgent/issues/68))
 - **`add_impulse_to_actor` answered `applied: true` when nothing moved.** An impulse moves only a body that
   simulates physics in a world that steps it, and the editor world never steps physics. `applied` now says whether
   the body simulates in such a world, and the reply adds `simulating_physics`, `world` and, when nothing was applied,
-  a note that says why and what to do. `success` stays `true`: the call ran and changed nothing. A new `world` parameter (`"pie"`,
-  `"server"`, `"client"`, `"pie:N"`) applies the impulse during Play-in-Editor, where bodies simulate.
-- The plugin's description said "more than 1,600 tools"; the catalog lists 1,549, and it says "more than 1,500".
+  a note that says why and what to do. `success` stays `true`: the call ran and changed nothing. A new `world`
+  parameter (`"pie"`, `"server"`, `"client"`, `"pie:N"`) applies the impulse during Play-in-Editor, where bodies
+  simulate. ([#68](https://github.com/CarlxsMG/UEAgent/issues/68))
+- The plugin's description said "more than 1,600 tools" while the catalog listed 1,549; it says "more than 1,500"
+  ([#68](https://github.com/CarlxsMG/UEAgent/issues/68)).
 
 ## 2.10.1 - 2026-11-05
 
