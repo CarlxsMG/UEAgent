@@ -14,6 +14,15 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
   most 4. Turn it off per call (`return_image: false`), per user (**Return images** in Editor Preferences > Plugins
   > UEAgent, with the size limits) or per client (`?images=off` in the server URL). `generate_asset_thumbnail`
   writes the thumbnail to `Saved/MCP/Thumbnails/` and returns its `file_path`; every existing field stays.
+- **Source control tools**, in a new `SourceControl` domain, through the editor's own provider (Perforce, Git...):
+  `get_source_control_file_status` and `list_source_control_changes` read file state and local changes;
+  `checkout_files`, `add_files_to_source_control` and `revert_files` (which reloads the reverted packages) change
+  it; `start_source_control_submit`, `get_source_control_submit_status` and `cancel_source_control_submit` submit
+  saved files asynchronously, one submit at a time; `get_source_control_history` reads a file's revisions. Files are
+  named by content path (`asset_paths`) or disk path (`files`). With revision control disabled the readers answer
+  `enabled: false` and the writes refuse; paths under a Read Only Content Root are refused, and `revert_files` and
+  the submit are refused during Play-in-Editor without `force`. `get_source_control_status` moves from `Export` to
+  `SourceControl`, with the same name and reply: a client that enabled `Export` to reach it enables `SourceControl`.
 - `Tools/check_tool_count.py` checks the tool counts the README, its Spanish version, the documentation and the
   plugin's description state against the catalog: a count above the tools listed, or more than one hundred below
   their number rounded down to the hundred, fails. It runs in CI with the documentation checks.

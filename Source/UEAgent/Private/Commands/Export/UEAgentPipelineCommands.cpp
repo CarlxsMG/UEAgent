@@ -6,16 +6,11 @@
 // flush_async_loading
 #include "UObject/UObjectGlobals.h"
 
-// get_source_control_status
-#include "ISourceControlModule.h"
-#include "ISourceControlProvider.h"
-
 /**
- * Pipeline / source-control commands.
+ * Pipeline commands.
  *
  * All commands are headless-safe and perform real reads/effects:
  *   - flush_async_loading      : ::FlushAsyncLoading() + async-package counts.
- *   - get_source_control_status: ISourceControlModule provider/enabled/available.
  */
 namespace UEAgentPipelineCommands
 {
@@ -45,34 +40,8 @@ TSharedPtr<FJsonObject> HandleFlushAsyncLoading(const TSharedPtr<FJsonObject>& P
     return mcp_common::MakeOkReply(Data);
 }
 
-// ---------------------------------------------------------------------------
-// get_source_control_status
-// ---------------------------------------------------------------------------
-// MCP:get_source_control_status - Report the editor revision-control connection, read-only: provider name, whether revision control is enabled and the provider available, and its status_text. Says nothing about individual files or their checkout state, and never connects or changes settings.
-//   @returns { provider, enabled, available, status_text }
-TSharedPtr<FJsonObject> HandleGetSourceControlStatus(const TSharedPtr<FJsonObject>& Params)
-{
-    ISourceControlModule& SCModule = ISourceControlModule::Get();
-
-    const bool bEnabled = SCModule.IsEnabled();
-
-    ISourceControlProvider& Provider = SCModule.GetProvider();
-    const FString ProviderName = Provider.GetName().ToString();
-    const bool bAvailable = Provider.IsAvailable();
-    const FString StatusText = Provider.GetStatusText().ToString();
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("provider"), ProviderName);
-    Data->SetBoolField(TEXT("enabled"), bEnabled);
-    Data->SetBoolField(TEXT("available"), bAvailable);
-    Data->SetStringField(TEXT("status_text"), StatusText);
-
-    return mcp_common::MakeOkReply(Data);
-}
-
 const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("flush_async_loading"), &HandleFlushAsyncLoading },
-    { TEXT("get_source_control_status"), &HandleGetSourceControlStatus },
 };
 } // namespace UEAgentPipelineCommands

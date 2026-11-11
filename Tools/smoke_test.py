@@ -22,6 +22,7 @@ script started: use a throwaway project for --launch. Checks:
     in execute_batch, and with the text alone for return_image=false and ?images=off. Without rendering (the
     default -NullRHI launch) it checks the text-alone answer and skips the image blocks; --render launches with
     -RenderOffscreen instead, which renders headless on a machine with a GPU, and adds capture_viewport.
+  - source control, with no provider enabled: the file status answers enabled=false and checkout_files refuses.
 """
 
 from __future__ import annotations
@@ -378,6 +379,17 @@ def check_images(s: Session) -> None:
                 viewport["content"][0]["text"][:300])
 
 
+def check_source_control(s: Session) -> None:
+    print("== source control, with no provider enabled")
+    is_error, status = s.call("get_source_control_file_status", {"asset_paths": ["/Game/Smoke/NoSuchAsset"]})
+    data = status.get("data", status)
+    s.check("get_source_control_file_status answers enabled=false without an error",
+            not is_error and data.get("enabled") is False and data.get("files") == [], status)
+    _, checkout = s.call("checkout_files", {"asset_paths": ["/Game/Smoke/NoSuchAsset"]})
+    s.check("checkout_files refuses and names the cause", checkout.get("success") is False
+            and "disabled" in checkout.get("error", ""), checkout)
+
+
 def check_prompts(s: Session) -> None:
     print("== prompts and resources")
     skills = sorted(p.name for p in SKILLS.iterdir() if (p / "SKILL.md").is_file())
@@ -453,6 +465,7 @@ def main() -> int:
         if editor:
             check_edits(session)
             check_images(session)
+            check_source_control(session)
         else:
             print("== edit checks skipped: they only run in an editor started with --launch")
     finally:

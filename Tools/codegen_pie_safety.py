@@ -117,6 +117,8 @@ CURATED = {
     "save_loaded_asset": "same engine guard as save_asset",
     "save_level": "same engine guard; save_level also duplicates the world and can leave it orphaned in memory",
     "save_all": "same engine guard, over every dirty package at once",
+    "revert_files": "reloads the reverted packages from disk, under the running PIE world that may reference them",
+    "start_source_control_submit": "submits the files on disk, which PIE edits do not reach and its save guard keeps unsaved",
 }
 
 # Never gated, whatever the scan says: refusing these would make the refusal
