@@ -163,7 +163,7 @@ NOT_READ_ONLY = ["delete_asset", "compile_blueprint", "compile_anim_blueprint", 
 DESTRUCTIVE = ["delete_asset", "remove_widget", "set_actor_label"]
 ADDITIVE = ["add_graph_node", "create_blueprint"]
 CODE_EXEC = ["execute_python", "execute_python_file", "execute_console_command", "call_function",
-             "run_external_project_script", "launch_dedicated_server"]
+             "run_external_project_script", "launch_dedicated_server", "start_cpp_compile"]
 OBSERVES = ["capture_viewport", "capture_high_res_screenshot", "capture_pie_screenshot", "render_widget_preview",
             "generate_asset_thumbnail"]
 

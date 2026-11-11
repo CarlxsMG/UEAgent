@@ -37,6 +37,14 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 - `Tools/check_tool_count.py` checks the tool counts the README, its Spanish version, the documentation and the
   plugin's description state against the catalog: a count above the tools listed, or more than one hundred below
   their number rounded down to the hundred, fails. It runs in CI with the documentation checks.
+- **The C++ loop, in a new `Code` domain.** `start_cpp_compile` compiles the running editor's modules with Live Coding
+  and returns at once; `get_cpp_compile_status` polls it and answers `success`, `no_changes`, `failure` or
+  `cancelled` with the compiler's `errors` and `warnings` (file, line, column, code, message). Live Coding keeps the
+  compiler's output out of the editor log, so they are read from the UnrealBuildTool log of that compile. Hot reload
+  runs only with `mode: "hot_reload"`, never on its own. `set_live_coding_enabled` turns Live Coding on for the
+  session (an editor started with `-unattended` does not start it), and `create_cpp_class` writes the header and
+  source of a new class into a project module, without regenerating project files or compiling. Both writers are
+  refused during Play-in-Editor without `force`, and `start_cpp_compile` is marked `codeExec`.
 
 ### Fixed
 

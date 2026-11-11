@@ -250,6 +250,14 @@ def check_meta_tools(s: Session, catalog: dict) -> None:
     s.check("an unknown tool names the closest ones", is_error and "spawn_actor" in unknown.get("_text", ""), unknown)
 
 
+def check_cpp_compile(s: Session) -> None:
+    print("== C++ compile status")
+    is_error, status = s.call("get_cpp_compile_status")
+    data = status.get("data", {})
+    s.check("get_cpp_compile_status with no compile started answers has_compile false and the Live Coding state",
+            not is_error and data.get("has_compile") is False and "available" in data.get("live_coding", {}), status)
+
+
 def newest_title(s: Session) -> tuple[str | None, int]:
     _, history = s.call("get_transaction_history", {"max_entries": 100})
     live = [e for e in history.get("entries", []) if not e.get("is_undone")]
@@ -596,6 +604,7 @@ def main() -> int:
         check_core_list(session, catalog)
         check_meta_tools(session, catalog)
         check_prompts(session)
+        check_cpp_compile(session)
         if editor:
             check_edits(session)
             check_images(session)

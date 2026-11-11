@@ -119,6 +119,9 @@ CURATED = {
     "save_all": "same engine guard, over every dirty package at once",
     "revert_files": "reloads the reverted packages from disk, under the running PIE world that may reference them",
     "start_source_control_submit": "submits the files on disk, which PIE edits do not reach and its save guard keeps unsaved",
+    # Not saves: a (reason, evidence) pair names its own reason.
+    "start_cpp_compile": ("patches", "a Live Coding or hot reload patch reinstances live objects of the changed classes, PIE's included"),
+    "create_cpp_class": ("patches", "writes a class into a module of the running editor, the first half of a patch"),
 }
 
 # Never gated, whatever the scan says: refusing these would make the refusal
@@ -158,7 +161,7 @@ SHARED_CALL_RE = re.compile(r'\bmcp_common::([A-Z][A-Za-z0-9_]*)\s*\(')
 SHARED_REL = "Common/McpCommonUtils.cpp"
 
 # Reason codes mirrored in the .h enum. Order = severity.
-REASON_ORDER = ["compiles", "reinstances", "creates", "saves"]
+REASON_ORDER = ["compiles", "reinstances", "creates", "saves", "patches"]
 
 
 def function_bodies(lines):
@@ -264,9 +267,9 @@ def scan():
         reason, rel, _line, func, marker = hits[0]
         verdicts[cmd] = (reason, "%s %s: %s" % (rel, func, marker))
 
-    for cmd, evidence in CURATED.items():
+    for cmd, entry in CURATED.items():
         if cmd not in NEVER_GATE:
-            verdicts[cmd] = ("saves", evidence)
+            verdicts[cmd] = entry if isinstance(entry, tuple) else ("saves", entry)
 
     return verdicts, unmapped
 
@@ -327,6 +330,8 @@ namespace McpPieSafety
         Creates,
         /** Saves: the engine guard refuses before trying, silently. */
         Saves,
+        /** Patches C++ into the running editor, which reinstances live objects. */
+        Patches,
     };
 
     struct FEntry
@@ -355,7 +360,7 @@ def emit_cpp(verdicts):
     for cmd in sorted(verdicts):
         reason, evidence = verdicts[cmd]
         enum = {"compiles": "Compiles", "reinstances": "Reinstances",
-                "creates": "Creates", "saves": "Saves"}[reason]
+                "creates": "Creates", "saves": "Saves", "patches": "Patches"}[reason]
         rows.append('    { TEXT("%s"), EReason::%s, TEXT("%s") },'
                     % (cmd, enum, c_escape(evidence)))
     body = "\n".join(rows)
@@ -416,6 +421,7 @@ const TCHAR* ReasonText(EReason Reason)
     case EReason::Reinstances: return TEXT("marks a Blueprint modified, which reinstances it");
     case EReason::Creates:     return TEXT("creates a Blueprint that cannot be persisted during PIE");
     case EReason::Saves:       return TEXT("writes an asset to disk");
+    case EReason::Patches:     return TEXT("patches C++ into the running editor, which reinstances live objects");
     default:                   return TEXT("is not safe during PIE");
     }
 }

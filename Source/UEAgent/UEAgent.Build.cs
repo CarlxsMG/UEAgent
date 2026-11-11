@@ -209,8 +209,15 @@ public class UEAgent : ModuleRules
 				"FunctionalTesting",                  // AFunctionalTest / UAutomationBlueprintFunctionLibrary (FUNCTIONALTESTING_API; Developer module, Editor + Non-Shipping)
 				"FunctionalTestingEditor",            // FunctionalTest BP factory (FUNCTIONALTESTINGEDITOR_API; Editor)
 					// (GCachedScalabilityCVars comes from Engine, already a public dependency.)
+					"GameProjectGeneration", // GameProjectUtils: the project's modules and class-name checks (create_cpp_class)
 				}
 			);
+
+			// ILiveCodingModule is used through its interface only (start_cpp_compile), as GameProjectGeneration does.
+			if (Target.bWithLiveCoding)
+			{
+				PrivateIncludePathModuleNames.Add("LiveCoding");
+			}
 		}
 
 		if (Target.Platform == UnrealTargetPlatform.Win64)

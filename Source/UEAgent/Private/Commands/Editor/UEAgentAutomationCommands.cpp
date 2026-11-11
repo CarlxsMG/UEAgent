@@ -218,6 +218,25 @@ void StopLogCapture()
     }
 }
 
+int64 GetLogCursor()
+{
+    return GMCP_LogCapture.GetLastSequenceId();
+}
+
+TArray<FCapturedLogLine> PeekLogSince(int64 SinceSequenceId, int32 MaxLines)
+{
+    TArray<FCapturedLogLine> Out;
+    for (FMcpLogEntry& E : GMCP_LogCapture.Peek(SinceSequenceId, FString(), FString(), FString(), FMath::Max(MaxLines, 1)))
+    {
+        FCapturedLogLine& Line = Out.AddDefaulted_GetRef();
+        Line.SequenceId = E.SequenceId;
+        Line.Category = E.Category;
+        Line.Verbosity = E.Verbosity;
+        Line.Message = MoveTemp(E.Message);
+    }
+    return Out;
+}
+
 namespace
 {
     /**
