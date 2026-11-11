@@ -650,6 +650,8 @@ TSharedPtr<const FMcpToolCatalog> FMcpToolCatalog::LoadFromFile(const FString& P
 			Tool.Returns.TrimStartAndEndInline();
 			(*CommandObj)->TryGetBoolField(TEXT("core"), Tool.bCore);
 			(*CommandObj)->TryGetStringField(TEXT("pack"), Tool.Pack);
+			(*CommandObj)->TryGetBoolField(TEXT("codeExec"), Tool.bCodeExec);
+			(*CommandObj)->TryGetBoolField(TEXT("observes"), Tool.bObserves);
 			const TSharedPtr<FJsonObject>* AnnotationsObj = nullptr;
 			if ((*CommandObj)->TryGetObjectField(TEXT("annotations"), AnnotationsObj) && AnnotationsObj && AnnotationsObj->IsValid())
 			{

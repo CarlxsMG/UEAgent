@@ -190,6 +190,7 @@ TSharedPtr<FJsonObject> HandleGetAssetDependenciesRecursive(const TSharedPtr<FJs
 // MCP:generate_asset_thumbnail - Render and cache an asset's thumbnail (or report the existing cached one).  When the editor can render (FApp::CanEverRender() and the RHI is initialized), this generates a fresh thumbnail via ThumbnailTools and caches it into the package's thumbnail map. When rendering is unavailable, or the object type has no thumbnail renderer, it honestly reports the existing cached thumbnail state.
 //   @param asset_path - Object path or package path of the asset.
 //   @returns { asset_path: string, object_path: string, asset_class: string, rendered: bool, has_thumbnail: bool, width: int, height: int, compressed_bytes: int, message: string }
+//   @hints observes
 
 TSharedPtr<FJsonObject> HandleGenerateAssetThumbnail(const TSharedPtr<FJsonObject>& Params)
 {

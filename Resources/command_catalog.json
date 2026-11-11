@@ -10124,7 +10124,8 @@
             "destructiveHint": false,
             "idempotentHint": false,
             "openWorldHint": false
-          }
+          },
+          "observes": true
         },
         {
           "name": "get_asset_by_name",
@@ -24342,7 +24343,8 @@
             "destructiveHint": true,
             "idempotentHint": false,
             "openWorldHint": false
-          }
+          },
+          "observes": true
         },
         {
           "name": "capture_viewport",
@@ -24388,7 +24390,8 @@
             "destructiveHint": true,
             "idempotentHint": false,
             "openWorldHint": false
-          }
+          },
+          "observes": true
         },
         {
           "name": "clear_message_log",
@@ -24909,7 +24912,8 @@
             "destructiveHint": true,
             "idempotentHint": false,
             "openWorldHint": false
-          }
+          },
+          "codeExec": true
         },
         {
           "name": "execute_python",
@@ -24955,7 +24959,8 @@
             "destructiveHint": true,
             "idempotentHint": false,
             "openWorldHint": true
-          }
+          },
+          "codeExec": true
         },
         {
           "name": "execute_python_file",
@@ -24987,7 +24992,8 @@
             "destructiveHint": true,
             "idempotentHint": false,
             "openWorldHint": true
-          }
+          },
+          "codeExec": true
         },
         {
           "name": "export_assets",
@@ -38260,7 +38266,8 @@
             "destructiveHint": true,
             "idempotentHint": false,
             "openWorldHint": false
-          }
+          },
+          "observes": true
         },
         {
           "name": "commit_level_instance",
@@ -43651,7 +43658,8 @@
             "destructiveHint": true,
             "idempotentHint": false,
             "openWorldHint": false
-          }
+          },
+          "codeExec": true
         },
         {
           "name": "scan_primary_assets",
@@ -48030,7 +48038,8 @@
             "destructiveHint": true,
             "idempotentHint": false,
             "openWorldHint": false
-          }
+          },
+          "codeExec": true
         },
         {
           "name": "set_actor_replication",
@@ -52013,7 +52022,8 @@
             "destructiveHint": true,
             "idempotentHint": false,
             "openWorldHint": false
-          }
+          },
+          "codeExec": true
         },
         {
           "name": "diff_objects",
@@ -62621,7 +62631,8 @@
             "destructiveHint": true,
             "idempotentHint": false,
             "openWorldHint": false
-          }
+          },
+          "observes": true
         },
         {
           "name": "reorder_widget_child",

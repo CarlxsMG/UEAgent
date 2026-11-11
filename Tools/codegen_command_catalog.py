@@ -1736,8 +1736,21 @@ def build(args) -> int:
             print(f"  {e}")
         print(f"FAIL: {len(hint_errors)} @hints the code contradicts or the parser does not know.")
         return 2
+    # The policy classes, from `@hints code-exec` / `@hints observes`: catalog fields of their own,
+    # written only when true, and not MCP annotations (tools/list leaves them out).
+    classes, class_errors = tool_hints.classify_classes(entries)
+    for name, entry in entries.items():
+        for field, value in classes[name].items():
+            if value:
+                entry[field] = True
+    if class_errors:
+        print(f"--- TOOL CLASSES ({len(class_errors)}) ---")
+        for e in class_errors:
+            print(f"  {e}")
+        print(f"FAIL: {len(class_errors)} @hints code-exec / observes that contradict each other.")
+        return 2
     print("--- TOOL HINTS: controls ---")
-    if not tool_hints.run_controls(hints):
+    if not tool_hints.run_controls(hints) or not tool_hints.run_class_controls(classes):
         print("FAIL: a tool_hints control is refuted; the scan cannot be trusted.")
         return 2
     print()

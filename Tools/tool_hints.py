@@ -52,6 +52,16 @@ Tokens: read-only, destructive, additive, idempotent, not-idempotent, open-world
 `read-only` on a command whose code shows a write marker is an ERROR, not an override: the
 evidence is printed and the catalog is not written.
 
+Two more tokens say what kind of write a command is, and leave the annotations alone. The catalog
+carries them as `codeExec` and `observes`, not as MCP annotations:
+
+    //   @hints code-exec    runs code or a process the caller supplies (execute_python...)
+    //   @hints observes     writes only an image under the project's Saved folder (capture_viewport...)
+
+Their lists are pinned (CODE_EXEC, OBSERVES): a tool that gains or loses one of them fails the
+generator until the list says so too, because a policy that refuses code execution or allows
+observing in read-only mode trusts them.
+
 Controls (they gate the catalog codegen)
 ----------------------------------------
 POSITIVE read-only: get_blueprint_info, list_metasound_nodes, get_graph_nodes, find_blueprint_node_references.
@@ -59,6 +69,7 @@ NOT read-only: delete_asset, compile_blueprint, compile_anim_blueprint (it compi
 audit_blueprint_health (it compiles and saves), set_actor_label.
 Destructive: delete_asset, remove_widget, set_actor_label. Additive: add_graph_node, create_blueprint.
 A scan that cannot reproduce those is refuted.
+code-exec is exactly CODE_EXEC and observes exactly OBSERVES.
 
 Usage:
   python Tools/tool_hints.py              # summary
@@ -138,7 +149,10 @@ NEGATION_RE = re.compile(r"\b(?:not|never|without|refus\w*|instead of|no|nothing
 REPLACE_PARAMS = {"overwrite", "replace", "replace_existing", "force_overwrite", "overwrite_existing", "clear_existing"}
 IDEMPOTENT_RE = re.compile(r"(?<!not )(?<!NOT )\bidempotent\b", re.I)
 
-HINT_TOKENS = {"read-only", "destructive", "additive", "idempotent", "not-idempotent", "open-world", "closed-world"}
+HINT_TOKENS = {"read-only", "destructive", "additive", "idempotent", "not-idempotent", "open-world", "closed-world",
+               "code-exec", "observes"}
+# The tokens that classify a command for the catalog's `codeExec` and `observes` fields.
+CLASS_TOKENS = {"code-exec": "codeExec", "observes": "observes"}
 # `//   @hints <tokens>` inside a command's `// MCP:` block.
 HINTS_LINE_RE = re.compile(r"^//\s{3,}@hints\s+(.+)$")
 # The block's marker, as codegen_command_catalog.ANNOTATION_MARKER_RE reads it.
@@ -148,6 +162,10 @@ POSITIVE_READ_ONLY = ["get_blueprint_info", "list_metasound_nodes", "get_graph_n
 NOT_READ_ONLY = ["delete_asset", "compile_blueprint", "compile_anim_blueprint", "audit_blueprint_health", "set_actor_label"]
 DESTRUCTIVE = ["delete_asset", "remove_widget", "set_actor_label"]
 ADDITIVE = ["add_graph_node", "create_blueprint"]
+CODE_EXEC = ["execute_python", "execute_python_file", "execute_console_command", "call_function",
+             "run_external_project_script", "launch_dedicated_server"]
+OBSERVES = ["capture_viewport", "capture_high_res_screenshot", "capture_pie_screenshot", "render_widget_preview",
+            "generate_asset_thumbnail"]
 
 STRING_RE = re.compile(r'"(?:\\.|[^"\\\n])*"')
 
@@ -301,6 +319,33 @@ def classify_catalog(commands: dict[str, dict]) -> tuple[dict[str, dict], list[s
     return out, errors
 
 
+def classify_classes(commands: dict[str, dict]) -> tuple[dict[str, dict], list[str]]:
+    """{cmd: {"codeExec": bool, "observes": bool}} for the catalog entries, from their @hints, and the errors."""
+    tags = scan_hint_tags()
+    out, errors = {}, []
+    for cmd in commands:
+        tokens = set(tags.get(cmd, []))
+        out[cmd] = {field: token in tokens for token, field in CLASS_TOKENS.items()}
+        if len(tokens & set(CLASS_TOKENS)) > 1:
+            errors.append(f"{cmd}: @hints code-exec together with observes")
+        if "read-only" in tokens and tokens & set(CLASS_TOKENS):
+            errors.append(f"{cmd}: @hints read-only together with code-exec or observes, which write")
+    return out, errors
+
+
+def run_class_controls(classes: dict[str, dict]) -> bool:
+    """code-exec is exactly CODE_EXEC and observes exactly OBSERVES."""
+    ok = True
+    for field, want in (("codeExec", CODE_EXEC), ("observes", OBSERVES)):
+        got = sorted(cmd for cmd, c in classes.items() if c[field])
+        missing, extra = sorted(set(want) - set(got)), sorted(set(got) - set(want))
+        hit = not missing and not extra
+        ok &= hit
+        detail = "OK" if hit else "REFUTED:" + (f" untagged {missing}" if missing else "") + (f" not listed {extra}" if extra else "")
+        print("  %-32s %-16s %-5s %s" % (f"{len(want)} tools", field, True, detail))
+    return ok
+
+
 def run_controls(verdicts: dict[str, dict]) -> bool:
     checks = ([(c, "readOnlyHint", True) for c in POSITIVE_READ_ONLY]
               + [(c, "readOnlyHint", False) for c in NOT_READ_ONLY]
@@ -331,14 +376,17 @@ def main() -> int:
 
     commands = _catalog_commands()
     verdicts, errors = classify_catalog(commands)
+    classes, class_errors = classify_classes(commands)
+    errors += class_errors
     if args.why:
         evidence = scan_evidence().get(args.why, [])
-        print(args.why, "verb:", verb_of(args.why), verdicts.get(args.why))
+        print(args.why, "verb:", verb_of(args.why), verdicts.get(args.why), classes.get(args.why))
         for what, where in evidence:
             print(f"  {what:38} {where}")
         return 0
     print("CONTROLS:")
     ok = run_controls(verdicts)
+    ok &= run_class_controls(classes)
     if args.controls:
         return 0 if ok else 1
     counts = Counter()
@@ -349,11 +397,14 @@ def main() -> int:
             counts["destructive" if v["destructiveHint"] else "additive"] += 1
             counts["idempotent writes"] += v["idempotentHint"]
         counts["open world"] += v["openWorldHint"]
+    for c in classes.values():
+        counts["code-exec"] += c["codeExec"]
+        counts["observes"] += c["observes"]
     print("\n%d commands: %s" % (len(verdicts), ", ".join(f"{k} {n}" for k, n in counts.items())))
     if args.list:
         for cmd in sorted(verdicts):
             v = verdicts[cmd]
-            flags = [k.replace("Hint", "") for k, val in v.items() if val]
+            flags = [k.replace("Hint", "") for k, val in {**v, **classes[cmd]}.items() if val]
             print(f"  {cmd:48} {' '.join(flags)}")
     for e in errors:
         print("ERROR:", e)

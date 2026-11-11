@@ -55,6 +55,9 @@ the synonyms (`read_`, `inspect_`, `query_`, `configure_`, `update_`...).
    line of the block, `//   @hints read-only` or `//   @hints additive idempotent`
    (`python Tools/tool_hints.py --why do_thing` shows the verdict and its evidence). A `read-only`
    that the code contradicts fails the generator.
+   `//   @hints code-exec` marks a tool that runs code or a process the caller supplies, and
+   `//   @hints observes` one that writes only an image under the project's Saved folder; the catalog
+   carries them as `codeExec` and `observes`, and `Tools/tool_hints.py` pins both lists.
 
    A long description reads better as short paragraphs: each one after the first goes on its own
    `//   @para` line, one line each. `//   @core` puts the tool in the list every client gets by default

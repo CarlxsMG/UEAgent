@@ -1249,6 +1249,7 @@ TSharedPtr<FJsonObject> HandleWaitForPieCompletion(const TSharedPtr<FJsonObject>
 //   @param output_path - File path of the PNG, absolute or relative to the editor's working directory, e.g. "D:/Shots/hud.png"; folders are created. Omit it to auto-name <Project>/Saved/MCP/PIE_<yyyyMMdd_HHmmss UTC>.png.
 //   @param include_ui - true to also write the HUD version over output_path on a later frame (PIE with rendering only, SDR only, abandoned after 8 s, e.g. with an HDR editor display); default false keeps only the scene-only PNG.
 //   @returns { saved_to_pie_active, output_path, width, height, bytes_written, includes_ui, ui_overwrite_next_frame, ui_note?, note? }
+//   @hints observes
 TSharedPtr<FJsonObject> HandleCapturePieScreenshot(const TSharedPtr<FJsonObject>& Params)
 {
     ULevelEditorSubsystem* LevelEditorSubsystem = GEditor ? GEditor->GetEditorSubsystem<ULevelEditorSubsystem>() : nullptr;

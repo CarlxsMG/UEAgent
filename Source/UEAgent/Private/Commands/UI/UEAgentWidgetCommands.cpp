@@ -5918,6 +5918,7 @@ TSharedPtr<FJsonObject> HandleApplyWidgetStylePreset(const TSharedPtr<FJsonObjec
 //   @param scale [number] - Optional draw scale applied by the renderer (default 1.0), the equivalent of DPI scaling in the Designer.
 //   @param opaque_background [bool] - Optional (default false). Force every pixel's alpha to 255 so the PNG is not transparent where the widget did not paint -- the same trick capture_viewport uses. Leave false to keep real transparency.
 //   @returns { widget_bp_path: string, rendered: bool, file_path: string, width: int, height: int, scale: number, drew_at_desired_size: bool, byte_size: int, designer_flags: string, preview_note: string, error?: string }
+//   @hints observes
 
 TSharedPtr<FJsonObject> HandleRenderWidgetPreview(const TSharedPtr<FJsonObject>& Params)
 {

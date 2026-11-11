@@ -52,6 +52,7 @@ namespace UEAgentSystemCommands
 // MCP:execute_console_command - Run a console command through the EDITOR (GEditor->Exec against the editor world): cvars, `stat` overlays, `r.*` toggles, engine commands. WARNING: it does NOT reach a running PIE session's PlayerController, so player cheats like `BugItGo` come back handled:false -- to move or cheat a PIE pawn use execute_python against the anchored PIE world. `handled` is the engine's own "some Exec claimed this string", not proof of an effect: verify with the state (get_cvar, a property read), never with this bool.
 //   @param command - Console command line, e.g. 'stat fps', 'r.ScreenPercentage 50', 'ShowFlag.Grid 0'. Editor-side only.
 //   @returns { command: string, handled: bool (an Exec handler claimed the string -- not evidence the effect happened) }
+//   @hints code-exec
 TSharedPtr<FJsonObject> HandleExecuteConsoleCommand(const TSharedPtr<FJsonObject>& Params)
 {
     FString Command;

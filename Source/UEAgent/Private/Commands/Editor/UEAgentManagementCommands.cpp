@@ -1368,6 +1368,7 @@ TSharedPtr<FJsonObject> HandleGetPluginStatus(const TSharedPtr<FJsonObject>& Par
 //   @param extra_args - Optional list of extra command-line tokens appended to the launch.
 //   @param timeout_seconds - Max seconds to wait before terminating the child (optional, default 300; clamped 30..3600).
 //   @returns { exe: string, uproject_used: string, cloned: bool, script: string, params: string, launched: bool, exit_code: int, success: bool, timed_out: bool, duration_seconds: number, stdout: string, stdout_length: int, stdout_file: string, cleaned_up: bool, message: string }
+//   @hints code-exec
 TSharedPtr<FJsonObject> HandleRunExternalProjectScript(const TSharedPtr<FJsonObject>& Params)
 {
     FString ScriptPath;

@@ -442,6 +442,7 @@ TSharedPtr<FJsonObject> HandleGetNetworkInfo(const TSharedPtr<FJsonObject>& Para
 // MCP:launch_dedicated_server - Relaunches the CURRENT editor binary with "-server -log": a real, non-rendering, network-listening game instance (GIsServer=true/GIsClient=false/GIsEditor=false -- confirmed via UE 5.8 source: StaticDedicatedServerCheck/SetIsRunningAsDedicatedServer in LaunchEngineLoop.cpp, FApp::CanEverRender()==false whenever IsRunningDedicatedServer()). This is honestly NOT a Server.Target.cs shipping build (still the full editor binary, WITH_EDITOR=1) -- it closes only the TESTABLE half of the dedicated-server gap; real server packaging is out of scope. Async, like start_package_build: returns immediately once the process is launched, poll get_dedicated_server_status for output/exit; the server never exits on its own, so call stop_dedicated_server to terminate it. Refuses to launch a second server while one is already running (honest, not silently queued/clobbered).
 //   @param extra_args - Optional raw extra command-line arguments appended verbatim after "-server -log" (e.g. "-port=8888").
 //   @returns { server_started: bool, already_running: bool, command_line: string, note: string }
+//   @hints code-exec
 TSharedPtr<FJsonObject> HandleLaunchDedicatedServer(const TSharedPtr<FJsonObject>& Params)
 {
     if (CurrentServerJob.IsValid())

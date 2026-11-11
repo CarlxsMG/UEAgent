@@ -64,6 +64,7 @@ namespace
 //   @param filename - Optional output filename (default MCP_Capture_<timestamp>.png); ".png" extension is added if missing.
 //   @param return_base64 - bool, also include image_base64 + image_format in the response (default false).
 //   @returns { file_path: string, width: int, height: int, byte_size: int, image_base64: string, image_format: string }
+//   @hints observes
 
 TSharedPtr<FJsonObject> HandleCaptureViewport(const TSharedPtr<FJsonObject>& Params)
 {
@@ -177,6 +178,7 @@ TSharedPtr<FJsonObject> HandleCaptureViewport(const TSharedPtr<FJsonObject>& Par
 //   @param resolution_multiplier - Resolution multiplier (clamped 1..16, default 2).
 //   @param filename - Optional output path; a bare name lands under <ProjectSaved>/Screenshots/, an absolute path is respected verbatim. ".png" is appended if missing. Defaults to a timestamped name.
 //   @returns { written: bool, file_path: string, resolution_multiplier: int, width: int, height: int, captured_pie: bool }
+//   @hints observes
 
 TSharedPtr<FJsonObject> HandleHighResScreenshot(const TSharedPtr<FJsonObject>& Params)
 {

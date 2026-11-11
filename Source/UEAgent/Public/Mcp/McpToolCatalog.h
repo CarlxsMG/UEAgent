@@ -99,6 +99,12 @@ public:
 		bool bCore = false;
 		/** The pack enable_toolset adds it with (`pack` in the catalog, `@pack` in the annotation); empty for none. */
 		FString Pack;
+		/** Runs code or a process the caller supplies (`codeExec` in the catalog, `@hints code-exec` in the annotation).
+		 *  Not an MCP annotation: tools/list does not carry it. */
+		bool bCodeExec = false;
+		/** Writes only an image under the project's Saved folder (`observes` in the catalog, `@hints observes` in the
+		 *  annotation). Not an MCP annotation: tools/list does not carry it. */
+		bool bObserves = false;
 
 		const FParam* FindParam(const FString& ParamName) const;
 		/** The description tools/list and describe_tool publish: Description, then "Returns: " and

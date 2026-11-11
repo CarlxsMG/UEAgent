@@ -746,6 +746,7 @@ namespace
 //   @param engine_log_level - Minimum severity of ENGINE log to return in `engine_log`: Error, Warning (default), Display, Log/All.
 //   @param engine_log_max - Max lines in `engine_log` (default 50, 0 disables, hard cap 4096).
 //   @returns { command, python_success, execution_mode, command_result, output, log_output, log_line_count, engine_log, engine_log_count, engine_log_truncated, log_cursor_before, pie_refused?, hint? }
+//   @hints code-exec
 TSharedPtr<FJsonObject> HandleExecutePython(const TSharedPtr<FJsonObject>& Params)
 {
     FString Command;
@@ -812,6 +813,7 @@ TSharedPtr<FJsonObject> HandleExecutePython(const TSharedPtr<FJsonObject>& Param
 //   @param engine_log_level - Minimum severity of ENGINE log to return in `engine_log`: Error, Warning (default), Display, Log/All.
 //   @param engine_log_max - Max lines in `engine_log` (default 50, 0 disables, hard cap 4096).
 //   @returns { file_path, python_success, command_result, output, log_output, log_line_count, engine_log, engine_log_count, engine_log_truncated, log_cursor_before, pie_refused?, hint? }
+//   @hints code-exec
 TSharedPtr<FJsonObject> HandleExecutePythonFile(const TSharedPtr<FJsonObject>& Params)
 {
     FString FilePath;
