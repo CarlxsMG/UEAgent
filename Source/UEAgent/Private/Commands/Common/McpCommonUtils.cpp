@@ -513,6 +513,40 @@ namespace mcp_common
         return UEAgentCommonImpl::BuildEnvelope(true, nullptr, Data);
     }
 
+    const TCHAR* const ImagesResultKey = TEXT("_mcp_images");
+
+    void AttachImage(const TSharedPtr<FJsonObject>& Target, const TSharedPtr<FJsonObject>& Params,
+        const FString& FilePath, const FString& Mime)
+    {
+        if (!Target.IsValid())
+        {
+            return;
+        }
+        // return_image - false keeps the image out of the reply; the file is written all the same.
+        bool bReturnImage = true;
+        if (Params.IsValid())
+        {
+            Params->TryGetBoolField(TEXT("return_image"), bReturnImage);
+        }
+        if (!bReturnImage)
+        {
+            Target->SetBoolField(TEXT("image_returned"), false);
+            Target->SetStringField(TEXT("image_note"), TEXT("return_image is false: the picture is only on disk"));
+            return;
+        }
+        TArray<TSharedPtr<FJsonValue>> Images;
+        const TArray<TSharedPtr<FJsonValue>>* Existing = nullptr;
+        if (Target->TryGetArrayField(ImagesResultKey, Existing) && Existing)
+        {
+            Images = *Existing;
+        }
+        TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+        Entry->SetStringField(TEXT("path"), FilePath);
+        Entry->SetStringField(TEXT("mime"), Mime);
+        Images.Add(MakeShared<FJsonValueObject>(Entry));
+        Target->SetArrayField(ImagesResultKey, Images);
+    }
+
     // The honest sibling of MakeOkReply (see the header): the flag comes from the
     // caller, so a payload that describes a failure is not wrapped in `success: true`.
     TSharedPtr<FJsonObject> RunSubCommand(const FString& Command, const TSharedPtr<FJsonObject>& Params)

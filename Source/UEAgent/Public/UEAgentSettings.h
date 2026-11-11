@@ -63,6 +63,23 @@ public:
 	UPROPERTY(config)
 	int64 LastUpdateCheckTicks = 0;
 
+	/**
+	 * The capture tools (capture_viewport, capture_high_res_screenshot, capture_pie_screenshot,
+	 * render_widget_preview, generate_asset_thumbnail) answer with the picture as an MCP image next to
+	 * their JSON, so the agent sees it. Off, they answer with the file path alone. A call can also say
+	 * `return_image: false`, and a client `?images=off` at the end of the server URL.
+	 */
+	UPROPERTY(config, EditAnywhere, Category = "Images", meta = (DisplayName = "Return Images"))
+	bool bReturnImages = true;
+
+	/** Longest side of the image sent to the client, in pixels. A larger capture is sent downscaled; the file on disk keeps its size. */
+	UPROPERTY(config, EditAnywhere, Category = "Images", meta = (ClampMin = "64", ClampMax = "8192"))
+	int32 ImageMaxDimension = 1568;
+
+	/** Largest encoded image sent to the client, in bytes. A larger one is sent downscaled as JPEG; the file on disk is not changed. */
+	UPROPERTY(config, EditAnywhere, Category = "Images", meta = (ClampMin = "65536", ClampMax = "20971520"))
+	int32 ImageMaxBytes = 1048576;
+
 	virtual FName GetCategoryName() const override { return TEXT("Plugins"); }
 
 	/** The port actually used: the command line wins over the settings. */

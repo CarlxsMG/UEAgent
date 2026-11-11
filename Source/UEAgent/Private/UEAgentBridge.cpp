@@ -89,6 +89,7 @@
 #include "Mcp/McpPreconditions.h"            // refusals that prevent a crash
 #include "Mcp/McpReadback.h"                 // READBACK contract
 #include "Mcp/McpPy.h"
+#include "Mcp/McpImageContent.h"           // capture tools' images as MCP image content
 #include "Policies/CondensedJsonPrintPolicy.h"
 #include "UEAgentSettings.h"               // HTTP server port / enable switch / token
 #include "Framework/Application/SlateApplication.h"
@@ -997,6 +998,21 @@ namespace McpBridgeParams
     }
 }
 
+// The capture tools' images (mcp_common::AttachImage), taken out of the result at the outermost dispatch, before the
+// offload, the readback and the Activity record read it. Game thread only.
+namespace McpImageCollect
+{
+    // Depth of DispatchSingleCommand. Images are taken at depth 1 only, so an execute_batch item's image stays in its
+    // payload until the batch's own dispatch takes them all, in item order.
+    static int32 DispatchDepth = 0;
+    // Set by EnqueueToolCall around the dispatch of the call it answers: whether the client gets images, why not, and
+    // the blocks prepared. Any other dispatch (a probe, a readback re-read) only drops the list.
+    static bool bCollecting = false;
+    static bool bWanted = true;
+    static FString NotWantedReason;
+    static TArray<McpImageContent::FBlock> Blocks;
+}
+
 // Dispatches ONE command by name on the CALLING thread (no thread hop, no queueing) and
 // returns the fully-wrapped {"status":"success"|"error", ...} envelope. It is a function of its
 // own so the `execute_batch` meta-command can call it in a loop within a single game-thread pass.
@@ -1149,6 +1165,7 @@ TSharedPtr<FJsonObject> UUEAgentBridge::DispatchSingleCommand(const FString& Req
     // Mirrors UE's own editor-scripting subsystems (UEditorAssetSubsystem, AssetTools);
     // AssetToolsImpl::CanShowDialogs() and FMessageDialog both honor this flag.
     TGuardValue<bool> UnattendedScriptGuard(GIsRunningUnattendedScript, true);
+    TGuardValue<int32> ImageDispatchDepth(McpImageCollect::DispatchDepth, McpImageCollect::DispatchDepth + 1);
 
     TSharedPtr<FJsonObject> ResponseJson = MakeShareable(new FJsonObject);
 
@@ -1491,6 +1508,19 @@ TSharedPtr<FJsonObject> UUEAgentBridge::DispatchSingleCommand(const FString& Req
             // uses (capture_pie_state / audit_*): the detail is written to Saved/MCPAudits/ and
             // the response keeps the SCALARS -- the counters, which are what is asked about
             // most of the time -- plus the length of each array moved out.
+            if (ResultJson.IsValid() && McpImageCollect::DispatchDepth == 1)
+            {
+                if (McpImageCollect::bCollecting)
+                {
+                    McpImageContent::TakeImages(CommandType, ResultJson, McpImageCollect::bWanted, McpImageCollect::NotWantedReason,
+                        McpImageContent::LimitsFromSettings(), McpImageCollect::Blocks);
+                }
+                else
+                {
+                    McpImageContent::DropImages(CommandType, ResultJson);
+                }
+            }
+
             if (ResultJson.IsValid())
             {
                 McpOversize::MaybeOffload(CommandType, ResultJson);
@@ -1519,12 +1549,12 @@ TSharedPtr<FJsonObject> UUEAgentBridge::DispatchSingleCommand(const FString& Req
 // tools/call of the native MCP server: the normal dispatch plus the READBACK contract, all in
 // the SAME game-thread pass -- the before snapshot, the command, the re-read and the offload
 // note see exactly the same state, with no race from network round trips in between.
-TFuture<FString> UUEAgentBridge::EnqueueToolCall(const FString& RequestedCommandType, const TSharedPtr<FJsonObject>& Params, const FString& SessionId)
+TFuture<FString> UUEAgentBridge::EnqueueToolCall(const FString& RequestedCommandType, const TSharedPtr<FJsonObject>& Params, const FString& SessionId, bool bReturnImages)
 {
     TPromise<FString> Promise;
     TFuture<FString> Future = Promise.GetFuture();
 
-    TUniqueFunction<void()> Work = [this, RequestedCommandType, Params, SessionId, Promise = MoveTemp(Promise)]() mutable
+    TUniqueFunction<void()> Work = [this, RequestedCommandType, Params, SessionId, bReturnImages, Promise = MoveTemp(Promise)]() mutable
     {
         // The guards, the contract and the activity log go by the name the tool runs under (a renamed tool's new name);
         // DispatchSingleCommand gets the name as called, so its reply can say the old name was used.
@@ -1555,9 +1585,19 @@ TFuture<FString> UUEAgentBridge::EnqueueToolCall(const FString& RequestedCommand
         ForwardedParams.Reset();
         ForwardCount = 0;
         TSharedPtr<FJsonObject> Envelope = CheckPIEOwnershipGuard(CommandType, Params, SessionId);
+        TArray<McpImageContent::FBlock> Images;
         if (!Envelope.IsValid())
         {
+            McpImageCollect::bCollecting = true;
+            McpImageCollect::bWanted = bReturnImages && GetDefault<UUEAgentSettings>()->bReturnImages;
+            McpImageCollect::NotWantedReason = !bReturnImages
+                ? TEXT("not returned: images are off for this client (?images=off in the server URL); the picture is only on disk")
+                : TEXT("not returned: Return Images is off (Editor Preferences > Plugins > UEAgent > Images); the picture is only on disk");
+            McpImageCollect::Blocks.Reset();
             Envelope = DispatchSingleCommand(RequestedCommandType, Params); // rewrites aliases and rotations IN PLACE
+            McpImageCollect::bCollecting = false;
+            Images = MoveTemp(McpImageCollect::Blocks);
+            McpImageCollect::Blocks.Reset();
         }
         // A tool that handed its call to another one (mcp_common::ForwardCall) is checked as that call: the forwarder's
         // own checks are written for its native path. One that forwarded several calls gets neither contract.
@@ -1585,6 +1625,7 @@ TFuture<FString> UUEAgentBridge::EnqueueToolCall(const FString& RequestedCommand
         TSharedPtr<FJsonObject> Outcome = MakeShared<FJsonObject>();
         Outcome->SetBoolField(TEXT("is_error"), bRefused);
         Outcome->SetObjectField(TEXT("result"), Result);
+        McpImageContent::WriteBlocks(*Outcome, Images);
         FString OutcomeText;
         TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
             TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&OutcomeText);

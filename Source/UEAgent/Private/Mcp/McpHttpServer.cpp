@@ -2,6 +2,7 @@
 
 #include "Mcp/McpHttpServer.h"
 
+#include "Mcp/McpImageContent.h"
 #include "Mcp/McpMetaTools.h"
 #include "Mcp/McpPrompts.h"
 #include "Mcp/McpSkills.h"
@@ -125,6 +126,8 @@ namespace McpHttpServerPrivate
 	{
 		EMcpToolsMode Mode = EMcpToolsMode::Core;
 		TSet<FString> Domains;
+		/** False with `images=off` (or false, 0, no): the capture tools answer with the text block alone. */
+		bool bImages = true;
 	};
 
 	static FToolsRequest ReadToolsRequest(const FHttpRequest& Request, EMcpToolsMode Default, const FMcpToolCatalog* Catalog)
@@ -144,6 +147,11 @@ namespace McpHttpServerPrivate
 			{
 				bool bKnown = false;
 				Out.Mode = ParseToolsMode(Value, Out.Mode, bKnown);
+			}
+			else if (Key.Equals(TEXT("images"), ESearchCase::IgnoreCase))
+			{
+				Out.bImages = !(Value.Equals(TEXT("off"), ESearchCase::IgnoreCase) || Value.Equals(TEXT("false"), ESearchCase::IgnoreCase)
+					|| Value.Equals(TEXT("0")) || Value.Equals(TEXT("no"), ESearchCase::IgnoreCase));
 			}
 			else if ((Key.Equals(TEXT("domains"), ESearchCase::IgnoreCase) || Key.Equals(TEXT("packs"), ESearchCase::IgnoreCase)) && Catalog)
 			{
@@ -233,18 +241,10 @@ namespace McpHttpServerPrivate
 		return ToJsonText(Envelope);
 	}
 
-	/** CallToolResult with a single text block. */
+	/** CallToolResult with a single text block (a tool call's images: McpImageContent::MakeToolResult). */
 	static TSharedRef<FJsonObject> MakeToolResult(const FString& Text, bool bIsError)
 	{
-		TSharedRef<FJsonObject> Block = MakeShared<FJsonObject>();
-		Block->SetStringField(TEXT("type"), TEXT("text"));
-		Block->SetStringField(TEXT("text"), Text);
-		TArray<TSharedPtr<FJsonValue>> Content;
-		Content.Add(MakeShared<FJsonValueObject>(Block));
-		TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
-		Result->SetArrayField(TEXT("content"), Content);
-		Result->SetBoolField(TEXT("isError"), bIsError);
-		return Result;
+		return McpImageContent::MakeToolResult(Text, bIsError, {});
 	}
 
 	/**
@@ -255,7 +255,7 @@ namespace McpHttpServerPrivate
 	 * reserved for calls that never ran: the refusals (`result.refused`, from the PIE guards and
 	 * the preconditions), which come back as a tool error.
 	 */
-	static TSharedRef<FJsonObject> UnwrapOutcome(const FString& OutcomeText, bool& bOutRefused)
+	static TSharedRef<FJsonObject> UnwrapOutcome(const FString& OutcomeText, bool& bOutRefused, TArray<McpImageContent::FBlock>* OutImages = nullptr)
 	{
 		bOutRefused = false;
 		TSharedPtr<FJsonObject> Outcome;
@@ -269,6 +269,10 @@ namespace McpHttpServerPrivate
 			return Error;
 		}
 		Outcome->TryGetBoolField(TEXT("is_error"), bOutRefused);
+		if (OutImages)
+		{
+			*OutImages = McpImageContent::ReadBlocks(*Outcome);
+		}
 		return Result->ToSharedRef();
 	}
 
@@ -1241,7 +1245,8 @@ bool FMcpHttpConnection::HandleToolsCall(const McpHttpServerPrivate::FHttpReques
 
 	Server->CountToolCall();
 	UE_LOG(LogUEAgentHttp, Verbose, TEXT("tools/call %s"), *ToolName);
-	TFuture<FString> Future = Server->GetBridge()->EnqueueToolCall(ToolName, Arguments, HttpSessionId);
+	const bool bImages = ReadToolsRequest(Request, Server->GetDefaultToolsMode(), nullptr).bImages;
+	TFuture<FString> Future = Server->GetBridge()->EnqueueToolCall(ToolName, Arguments, HttpSessionId, bImages);
 
 	// While it runs on the game thread: watch for the client closing and, if it asked for
 	// progress, switch to SSE and send notifications/progress -- without that, Claude Code aborts
@@ -1294,8 +1299,9 @@ bool FMcpHttpConnection::HandleToolsCall(const McpHttpServerPrivate::FHttpReques
 	}
 
 	bool bRefused = false;
-	const TSharedRef<FJsonObject> Payload = UnwrapOutcome(Future.Get(), bRefused);
-	const FString Response = MakeRpcResult(Id, MakeToolResult(ToJsonText(Payload), bRefused));
+	TArray<McpImageContent::FBlock> Images;
+	const TSharedRef<FJsonObject> Payload = UnwrapOutcome(Future.Get(), bRefused, &Images);
+	const FString Response = MakeRpcResult(Id, McpImageContent::MakeToolResult(ToJsonText(Payload), bRefused, Images));
 	if (bStreaming)
 	{
 		SendSseEvent(Response);

@@ -1248,7 +1248,8 @@ TSharedPtr<FJsonObject> HandleWaitForPieCompletion(const TSharedPtr<FJsonObject>
 // MCP:capture_pie_screenshot - Write a PNG of what the running game shows: the PIE game viewport, or the active editor viewport when there is no game viewport (with PIE not running, saved_to_pie_active=false and a note says so). It reads the pixels synchronously, so the file holds the 3D scene without the UMG/Slate HUD, and an existing file at output_path is overwritten. With include_ui=true during PIE it also queues an engine screenshot that a later frame crops to the game viewport, HUD included, and writes over the same file (ui_overwrite_next_frame=true): re-read the file after the call. Use it to SHOW a play-test result; for the editor viewport with a fresh redraw, resizing or base64 use capture_viewport, for a supersampled image capture_high_res_screenshot, and for actor state instead of pixels capture_pie_state. Start PIE with start_play_in_editor first. No viewport, a zero-size viewport or a failed write is an error. Changes nothing in the level; every call writes the file again.
 //   @param output_path - File path of the PNG, absolute or relative to the editor's working directory, e.g. "D:/Shots/hud.png"; folders are created. Omit it to auto-name <Project>/Saved/MCP/PIE_<yyyyMMdd_HHmmss UTC>.png.
 //   @param include_ui - true to also write the HUD version over output_path on a later frame (PIE with rendering only, SDR only, abandoned after 8 s, e.g. with an HDR editor display); default false keeps only the scene-only PNG.
-//   @returns { saved_to_pie_active, output_path, width, height, bytes_written, includes_ui, ui_overwrite_next_frame, ui_note?, note? }
+//   @param return_image [bool] - Also return the picture as an MCP image block next to this JSON (default true); a picture over the size limits is sent as a smaller copy.
+//   @returns { saved_to_pie_active, output_path, width, height, bytes_written, includes_ui, ui_overwrite_next_frame, ui_note?, note?, image_returned: bool, image_width?: int, image_height?: int, image_note?: string }
 //   @hints observes
 TSharedPtr<FJsonObject> HandleCapturePieScreenshot(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1317,6 +1318,8 @@ TSharedPtr<FJsonObject> HandleCapturePieScreenshot(const TSharedPtr<FJsonObject>
     R->SetNumberField(TEXT("width"), W);
     R->SetNumberField(TEXT("height"), H);
     R->SetNumberField(TEXT("bytes_written"), static_cast<int32>(PngBytes.Num()));
+    // The image is the scene-only PNG written above: the include_ui version replaces the file on a later frame.
+    mcp_common::AttachImage(R, Params, OutPath);
 
     // The ReadPixels above grabs only the scene render target — it never contains the
     // UMG/Slate HUD overlay. We can't composite a fresh frame synchronously here: this MCP

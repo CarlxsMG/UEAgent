@@ -63,7 +63,8 @@ namespace
 //   @param height - Optional target height (only used when width is also supplied).
 //   @param filename - Optional output filename (default MCP_Capture_<timestamp>.png); ".png" extension is added if missing.
 //   @param return_base64 - bool, also include image_base64 + image_format in the response (default false).
-//   @returns { file_path: string, width: int, height: int, byte_size: int, image_base64: string, image_format: string }
+//   @param return_image [bool] - Also return the picture as an MCP image block next to this JSON (default true); a picture over the size limits is sent as a smaller copy.
+//   @returns { file_path: string, width: int, height: int, byte_size: int, image_base64: string, image_format: string, image_returned: bool, image_width?: int, image_height?: int, image_note?: string }
 //   @hints observes
 
 TSharedPtr<FJsonObject> HandleCaptureViewport(const TSharedPtr<FJsonObject>& Params)
@@ -153,6 +154,7 @@ TSharedPtr<FJsonObject> HandleCaptureViewport(const TSharedPtr<FJsonObject>& Par
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("file_path"), FPaths::ConvertRelativePathToFull(FilePath));
+    mcp_common::AttachImage(Result, Params, FPaths::ConvertRelativePathToFull(FilePath));
     Result->SetNumberField(TEXT("width"), OutWidth);
     Result->SetNumberField(TEXT("height"), OutHeight);
     Result->SetNumberField(TEXT("byte_size"), PngData.Num());
@@ -177,7 +179,8 @@ TSharedPtr<FJsonObject> HandleCaptureViewport(const TSharedPtr<FJsonObject>& Par
 // MCP:capture_high_res_screenshot - Capture a high-resolution (supersampled) screenshot and write it to a PNG SYNCHRONOUSLY. Prefers the Play-In-Editor game view when PIE is active (captured_pie=true); otherwise the active editor viewport. Drives FViewport::TakeHighResScreenShot() + FViewport::Draw(), which renders at resolution_multiplier x the viewport size and blocks (via ProcessScreenShots) until the file is on disk. The "HighResShot" exec path defers the write to the next render frame, which never runs headless, so it writes nothing. Requires a real RHI (errors honestly under -nullrhi) and a live viewport. Note: the supersampled path re-renders the scene, so the UMG/Slate HUD is NOT included; use capture_pie_screenshot for a HUD-inclusive PIE shot.
 //   @param resolution_multiplier - Resolution multiplier (clamped 1..16, default 2).
 //   @param filename - Optional output path; a bare name lands under <ProjectSaved>/Screenshots/, an absolute path is respected verbatim. ".png" is appended if missing. Defaults to a timestamped name.
-//   @returns { written: bool, file_path: string, resolution_multiplier: int, width: int, height: int, captured_pie: bool }
+//   @param return_image [bool] - Also return the picture as an MCP image block next to this JSON (default true); a picture over the size limits is sent as a smaller copy.
+//   @returns { written: bool, file_path: string, resolution_multiplier: int, width: int, height: int, captured_pie: bool, image_returned: bool, image_width?: int, image_height?: int, image_note?: string }
 //   @hints observes
 
 TSharedPtr<FJsonObject> HandleHighResScreenshot(const TSharedPtr<FJsonObject>& Params)
@@ -296,6 +299,7 @@ TSharedPtr<FJsonObject> HandleHighResScreenshot(const TSharedPtr<FJsonObject>& P
     Response->SetNumberField(TEXT("width"), OutW);
     Response->SetNumberField(TEXT("height"), OutH);
     Response->SetBoolField(TEXT("captured_pie"), bCapturedPie);
+    mcp_common::AttachImage(Response, Params, FilePath);
     return mcp_common::MakeOkReply(Response);
 }
 
