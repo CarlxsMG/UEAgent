@@ -374,8 +374,7 @@ DOMAINS = {
               "housekeeping (delete, export, migrate, consolidate, redirectors, unused and duplicate assets)",
     "Engine": "Niagara systems and emitters (modules, renderers, data interfaces, events, simulation stages, user "
               "parameters), and the engine's and the editor's status",
-    "Export": "Movie Render Queue jobs, exporting assets, Blueprints and level sections, asset reports, async loading and "
-              "source control status",
+    "Export": "Movie Render Queue jobs, exporting assets, Blueprints and level sections, asset reports and async loading",
     "GameFeatures": "Game Feature plugins: their state, activating, deactivating and unloading them",
     "GameFramework": "game mode classes and overrides, player starts and spawn points",
     "GameplayAbilities": "the Gameplay Ability System: abilities, gameplay effects with their modifiers and components, "
@@ -417,6 +416,8 @@ DOMAINS = {
     "Replication": "an actor's replication settings",
     "SaveGame": "save game slots: saving, loading, listing and deleting, and serializing actor state",
     "SmartObjects": "Smart Object definitions, slots, behaviors, tags and annotations, and claiming and using them",
+    "SourceControl": "revision control through the editor's provider (Perforce, Git...): the connection, file status and "
+                     "local changes, checkout, add, revert, submit and file history",
     "StateTree": "State Trees: states, tasks, transitions and conditions, evaluators, considerations, parameters and "
                  "bindings, compiling and validating",
     "Subsystem": "engine and local player subsystem instances",

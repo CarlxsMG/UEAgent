@@ -309,6 +309,17 @@ def check_edits(s: Session) -> None:
     s.check("the buffer works after the reset", newest_title(s) == ("UEAgent: spawn_actor", 1), newest_title(s))
 
 
+def check_source_control(s: Session) -> None:
+    print("== source control, with no provider enabled")
+    is_error, status = s.call("get_source_control_file_status", {"asset_paths": ["/Game/Smoke/NoSuchAsset"]})
+    data = status.get("data", status)
+    s.check("get_source_control_file_status answers enabled=false without an error",
+            not is_error and data.get("enabled") is False and data.get("files") == [], status)
+    _, checkout = s.call("checkout_files", {"asset_paths": ["/Game/Smoke/NoSuchAsset"]})
+    s.check("checkout_files refuses and names the cause", checkout.get("success") is False
+            and "disabled" in checkout.get("error", ""), checkout)
+
+
 def check_prompts(s: Session) -> None:
     print("== prompts and resources")
     skills = sorted(p.name for p in SKILLS.iterdir() if (p / "SKILL.md").is_file())
@@ -380,6 +391,7 @@ def main() -> int:
         check_prompts(session)
         if editor:
             check_edits(session)
+            check_source_control(session)
         else:
             print("== edit checks skipped: they only run in an editor started with --launch")
     finally:
