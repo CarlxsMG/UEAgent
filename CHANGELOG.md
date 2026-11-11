@@ -17,9 +17,9 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
   `removed: false` and a note. The other fields keep their place, so callers that read `removed` see no other
   change. `set_undo_barrier` answers `success` from its barrier read back at the cursor.
 - **`add_impulse_to_actor` answered `applied: true` when nothing moved.** An impulse moves only a body that
-  simulates physics, and in the editor world nothing does unless it is turned on. `applied` now says whether the body
-  was simulating, and the reply adds `simulating_physics`, `world` and, when nothing was applied, a note that says
-  why and what to do. `success` stays `true`: the call ran and changed nothing. A new `world` parameter (`"pie"`,
+  simulates physics in a world that steps it, and the editor world never steps physics. `applied` now says whether
+  the body simulates in such a world, and the reply adds `simulating_physics`, `world` and, when nothing was applied,
+  a note that says why and what to do. `success` stays `true`: the call ran and changed nothing. A new `world` parameter (`"pie"`,
   `"server"`, `"client"`, `"pie:N"`) applies the impulse during Play-in-Editor, where bodies simulate.
 - The plugin's description said "more than 1,600 tools"; the catalog lists 1,549, and it says "more than 1,500".
 

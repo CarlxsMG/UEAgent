@@ -54,7 +54,7 @@ Append an additional StaticMesh source to an existing geometry collection, then 
 
 *Additive.*
 
-Kick a physics body: apply an impulse (or, with vel_change, a mass-independent velocity change) to an actor's primitive component, optionally at a world location for torque via AddImpulseAtLocation, or on a named skeletal bone. An impulse moves only a body that simulates physics: in the editor world nothing does unless the component has simulate_physics on, so on a resting editor actor nothing happens and the reply says applied:false with a note. For gameplay-time forces call it with world:"pie" during Play-in-Editor.
+Kick a physics body: apply an impulse (or, with vel_change, a mass-independent velocity change) to an actor's primitive component, optionally at a world location for torque via AddImpulseAtLocation, or on a named skeletal bone. An impulse moves only a body that simulates physics in a world that steps it: the editor world never steps physics, even for a component with Simulate Physics on, so there the reply says applied:false with a note. Call it with world:"pie" during Play-in-Editor on a body that simulates.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -66,7 +66,7 @@ Kick a physics body: apply an impulse (or, with vel_change, a mass-independent v
 | `vel_change` | boolean | no | Optional; if true, impulse is treated as a velocity change (mass-independent) |
 | `world` | string | no | Optional "editor" (default) \| "pie" \| "server" \| "client" \| "pie:N": the world whose actor gets the impulse |
 
-**Returns:** `{ actor_name: string, component_name: string, applied: bool (the body simulated physics, so the impulse reached it), simulating_physics: bool, world: "editor" | "pie", note?: string (when nothing was applied: why, and what to do) }`
+**Returns:** `{ actor_name: string, component_name: string, applied: bool (the body simulates physics in a world that steps it, so the impulse moves it), simulating_physics: bool (the component's own reading, true in the editor too when Simulate Physics is on), world: "editor" | "pie", note?: string (when nothing was applied: why, and what to do) }`
 
 ## `add_instanced_static_mesh_component`
 
