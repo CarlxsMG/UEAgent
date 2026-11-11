@@ -2,6 +2,7 @@
 
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Commands/Editor/UEAgentAutomationCommands.h" // load_level: refused while a test runs
 #include "Commands/Asset/AssetCommandHelpers.h"  // MapPathTooLongForExternalPackages (save_level, load_level)
 #include "Editor.h"
 #include "EditorViewportClient.h"
@@ -2058,7 +2059,7 @@ namespace
     }
 }
 
-// MCP:load_level - Open a map in the editor (by /Game or /Engine package path, or disk .umap), replacing the current world; default_template=true opens the engine's default template level instead (/Engine/Maps/Templates/Template_Default, ~45 actors: floor, PlayerStart, sky and lights), after which a save_level without `filename` would write over the ENGINE's own map (is_engine_template and warning say so). Also the repair for actors that VANISHED from a world in memory after compile_blueprint: reloading the same map brings the placed OFPA instances back with their per-instance config -- never re-place them. REFUSES up front when any other UWorld is still resident in memory, because the engine's world-leak check turns that into a Fatal error that kills the editor process and every unsaved edit with it; the refusal lists the resident worlds and the remedy. Run list_dirty_packages first: a reload discards unsaved work.
+// MCP:load_level - Open a map in the editor (by /Game or /Engine package path, or disk .umap), replacing the current world; default_template=true opens the engine's default template level instead (/Engine/Maps/Templates/Template_Default, ~45 actors: floor, PlayerStart, sky and lights), after which a save_level without `filename` would write over the ENGINE's own map (is_engine_template and warning say so). Also the repair for actors that VANISHED from a world in memory after compile_blueprint: reloading the same map brings the placed OFPA instances back with their per-instance config -- never re-place them. REFUSES up front when any other UWorld is still resident in memory, because the engine's world-leak check turns that into a Fatal error that kills the editor process and every unsaved edit with it; the refusal lists the resident worlds and the remedy. Run list_dirty_packages first: a reload discards unsaved work. Refused while a test started by run_automation_test or run_functional_test_in_pie runs.
 //   @pack levels
 //   @param filename - Disk path to a .umap, OR a long package path (e.g. /Game/Maps/Foo) resolved to the on-disk map file. Required unless default_template is true.
 //   @param default_template - Optional bool (default false): open the engine's default template level (/Engine/Maps/Templates/Template_Default) without naming it in filename; giving both is an error.
@@ -2068,6 +2069,10 @@ namespace
 
 TSharedPtr<FJsonObject> HandleLoadLevel(const TSharedPtr<FJsonObject>& Params)
 {
+    if (TSharedPtr<FJsonObject> Busy = UEAgentAutomationCommands::RefuseWhileTestRuns(TEXT("load_level")))
+    {
+        return Busy;
+    }
     // The map to open: filename, or the engine's default template level (what new_level opened).
     FString LevelFilename;
     const bool bFilenameGiven = Params->TryGetStringField(TEXT("filename"), LevelFilename);
