@@ -17,12 +17,17 @@ script started: use a throwaway project for --launch. Checks:
     listed resource readable, and the errors for an unknown prompt or resource;
   - edits: one undo step per call, an execute_batch as one step, undo/redo and the undo-state tools,
     mcp.UndoStepPerCall, undo barriers set and removed, an impulse on a body that does not simulate, and a
-    level load in the middle of a call.
+    level load in the middle of a call;
+  - images: render_widget_preview answers with a PNG image block after its text, directly, through call_tool and
+    in execute_batch, and with the text alone for return_image=false and ?images=off. Without rendering (the
+    default -NullRHI launch) it checks the text-alone answer and skips the image blocks; --render launches with
+    -RenderOffscreen instead, which renders headless on a machine with a GPU, and adds capture_viewport.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import socket
 import subprocess
@@ -308,6 +313,70 @@ def check_edits(s: Session) -> None:
     s.check("the buffer works after the reset", newest_title(s) == ("UEAgent: spawn_actor", 1), newest_title(s))
 
 
+def tool_result(s: Session, tool: str, arguments: dict, query: str = "") -> dict:
+    """The CallToolResult of one tools/call, every content block."""
+    return s.rpc("tools/call", {"name": tool, "arguments": arguments}, query=query)["result"]
+
+
+def image_blocks(result: dict) -> list[bytes]:
+    """The decoded data of each image block, after checking that the text block comes first."""
+    content = result.get("content", [])
+    if not content or content[0].get("type") != "text":
+        return []
+    return [base64.b64decode(b.get("data", "")) for b in content[1:] if b.get("type") == "image"]
+
+
+def is_png(data: bytes) -> bool:
+    return data.startswith(bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]))
+
+
+def check_images(s: Session) -> None:
+    print("== images")
+    widget = "/Game/SmokeImages/WBP_SmokeImage"
+    s.call("create_widget_blueprint", {"package_path": "/Game/SmokeImages", "name": "WBP_SmokeImage"})
+    s.call("add_widget_to_blueprint", {"widget_bp_path": widget, "widget_type": "TextBlock", "widget_name": "Label"})
+    s.call("compile_blueprint", {"blueprint_name": widget})
+    preview = {"widget_bp_path": widget, "width": 256, "height": 128, "opaque_background": True}
+    result = tool_result(s, "render_widget_preview", preview)
+    payload = json.loads(result["content"][0]["text"])
+    data = payload.get("data", {})
+    if not data.get("rendered"):
+        s.check("without rendering, render_widget_preview answers with the text alone",
+                len(result["content"]) == 1 and not result.get("isError"), result["content"][1:2])
+        print("  SKIP the image blocks: this editor cannot render (launch with --render)")
+        return
+    images = image_blocks(result)
+    s.check("render_widget_preview answers with one PNG image block after the text", len(images) == 1 and is_png(images[0])
+            and result["content"][1].get("mimeType") == "image/png", result["content"][1:2])
+    s.check("its JSON says the image was returned, with its size", data.get("image_returned") is True
+            and data.get("image_width") == 256 and data.get("image_height") == 128, data)
+    s.check("the reserved key never reaches the client", "_mcp_images" not in result["content"][0]["text"], "")
+    off = tool_result(s, "render_widget_preview", {**preview, "return_image": False})
+    s.check("return_image=false answers with the text alone", len(off["content"]) == 1
+            and json.loads(off["content"][0]["text"]).get("data", {}).get("image_returned") is False, off["content"][1:2])
+    off = tool_result(s, "render_widget_preview", preview, query="?images=off")
+    s.check("?images=off answers with the text alone", len(off["content"]) == 1, off["content"][1:2])
+    through = tool_result(s, "call_tool", {"name": "render_widget_preview", "arguments": preview})
+    s.check("call_tool returns the image too", len(image_blocks(through)) == 1, through["content"][1:2])
+    item = {"command_type": "render_widget_preview", "params": preview}
+    batch = tool_result(s, "execute_batch", {"commands": [item] * 5})
+    note = json.loads(batch["content"][0]["text"]).get("image_note", "")
+    s.check("execute_batch returns its items' images, at most 4, and names the rest",
+            len(image_blocks(batch)) == 4 and "1 image(s)" in note, note)
+    big = tool_result(s, "render_widget_preview", {**preview, "width": 3000, "height": 2000})
+    big_data = json.loads(big["content"][0]["text"]).get("data", {})
+    big_images = image_blocks(big)
+    s.check("a picture over the limits comes as a smaller JPEG, with a note", len(big_images) == 1
+            and big_images[0].startswith(bytes([0xFF, 0xD8, 0xFF])) and big_data.get("image_width", 9999) <= 1568
+            and big_data.get("image_note"), big_data)
+    viewport = tool_result(s, "capture_viewport", {})
+    if viewport.get("isError") or "No editor viewport" in viewport["content"][0]["text"]:
+        print("  SKIP capture_viewport: no editor viewport")
+    else:
+        s.check("capture_viewport answers with a PNG image block", [is_png(i) for i in image_blocks(viewport)] == [True],
+                viewport["content"][0]["text"][:300])
+
+
 def check_prompts(s: Session) -> None:
     print("== prompts and resources")
     skills = sorted(p.name for p in SKILLS.iterdir() if (p / "SKILL.md").is_file())
@@ -353,6 +422,7 @@ def main() -> int:
     parser.add_argument("--url", default="http://127.0.0.1:55561/mcp", help="The MCP endpoint")
     parser.add_argument("--launch", type=Path, help="A throwaway .uproject: start a headless editor on it")
     parser.add_argument("--engine", type=Path, help="Unreal Engine root (with --launch)")
+    parser.add_argument("--render", action="store_true", help="With --launch: render offscreen instead of -NullRHI")
     args = parser.parse_args()
     sys.stdout.reconfigure(line_buffering=True)
 
@@ -366,8 +436,10 @@ def main() -> int:
             print(f"FAIL: something already listens on {args.url}: close that editor first")
             return 1
         binary = args.engine / "Engine" / "Binaries" / "Win64" / "UnrealEditor-Cmd.exe"
+        port = args.url.split("://", 1)[1].split("/", 1)[0].partition(":")[2] or "55561"
         editor = subprocess.Popen([str(binary), str(args.launch.resolve()), "-unattended", "-nopause", "-nosplash",
-                                   "-NullRHI", "-NoSound", "-log=UEAgentSmoke.log"])
+                                   "-RenderOffscreen" if args.render else "-NullRHI", "-NoSound",
+                                   f"-McpHttpPort={port}", "-log=UEAgentSmoke.log"])
         print(f"Started a headless editor (pid {editor.pid}) on {args.launch.name}")
     try:
         if not wait_for_server(session, 600 if editor else 10):
@@ -379,6 +451,7 @@ def main() -> int:
         check_prompts(session)
         if editor:
             check_edits(session)
+            check_images(session)
         else:
             print("== edit checks skipped: they only run in an editor started with --launch")
     finally:
