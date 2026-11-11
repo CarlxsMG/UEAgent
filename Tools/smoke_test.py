@@ -15,6 +15,8 @@ script started: use a throwaway project for --launch. Checks:
     same answer as a direct call), the closest names for an unknown tool;
   - the shipped skills as prompts and resources: one prompt per skill, the tool map as ueagent://guide, every
     listed resource readable, and the errors for an unknown prompt or resource;
+  - tests and Play-in-Editor control with nothing running: pause_play_in_editor, cancel_automation_test,
+    is_play_in_editor_active's is_paused;
   - edits: one undo step per call, an execute_batch as one step, undo/redo and the undo-state tools,
     mcp.UndoStepPerCall, undo barriers set and removed, an impulse on a body that does not simulate, and a
     level load in the middle of a call.
@@ -308,6 +310,20 @@ def check_edits(s: Session) -> None:
     s.check("the buffer works after the reset", newest_title(s) == ("UEAgent: spawn_actor", 1), newest_title(s))
 
 
+def check_tests_and_pie(s: Session) -> None:
+    print("== tests and Play-in-Editor control, with nothing running")
+    _, paused = s.call("pause_play_in_editor")
+    data = paused.get("data", {})
+    s.check("pause_play_in_editor without PIE answers pie_active false", paused.get("success") is True
+            and data.get("pie_active") is False and data.get("paused") is False, paused)
+    _, canceled = s.call("cancel_automation_test")
+    data = canceled.get("data", {})
+    s.check("cancel_automation_test with no test answers was_running false", canceled.get("success") is True
+            and data.get("was_running") is False and data.get("canceled") is False, canceled)
+    _, active = s.call("is_play_in_editor_active")
+    s.check("is_play_in_editor_active reports is_paused", active.get("data", {}).get("is_paused") is False, active)
+
+
 def check_prompts(s: Session) -> None:
     print("== prompts and resources")
     skills = sorted(p.name for p in SKILLS.iterdir() if (p / "SKILL.md").is_file())
@@ -366,8 +382,10 @@ def main() -> int:
             print(f"FAIL: something already listens on {args.url}: close that editor first")
             return 1
         binary = args.engine / "Engine" / "Binaries" / "Win64" / "UnrealEditor-Cmd.exe"
+        port = args.url.split("://", 1)[1].split("/", 1)[0].partition(":")[2]
         editor = subprocess.Popen([str(binary), str(args.launch.resolve()), "-unattended", "-nopause", "-nosplash",
-                                   "-NullRHI", "-NoSound", "-log=UEAgentSmoke.log"])
+                                   "-NullRHI", "-NoSound", "-log=UEAgentSmoke.log"]
+                                  + ([f"-McpHttpPort={port}"] if port else []))
         print(f"Started a headless editor (pid {editor.pid}) on {args.launch.name}")
     try:
         if not wait_for_server(session, 600 if editor else 10):
@@ -379,6 +397,7 @@ def main() -> int:
         check_prompts(session)
         if editor:
             check_edits(session)
+            check_tests_and_pie(session)
         else:
             print("== edit checks skipped: they only run in an editor started with --launch")
     finally:

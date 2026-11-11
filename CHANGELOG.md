@@ -9,6 +9,31 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 - `Tools/check_tool_count.py` checks the tool counts the README, its Spanish version, the documentation and the
   plugin's description state against the catalog: a count above the tools listed, or more than one hundred below
   their number rounded down to the hundred, fails. It runs in CI with the documentation checks.
+- **Tests run to a verdict.** `run_automation_test` runs a test that needs several ticks (Play-in-Editor, a map load, a
+  wait) instead of skipping it, and `run_functional_test_in_pie` runs the Functional Test in a Play session instead of
+  only placing it. Both start the test and answer; `get_automation_test_results` and the new
+  `get_functional_test_status` are the polls, and the new `cancel_automation_test` stops either. A test that outlives
+  its `timeout_seconds` is stopped with `timed_out: true`. While one runs, a second test, `start_play_in_editor`,
+  `stop_play_in_editor` and `load_level` are refused with a message naming it. A latent automation test is refused
+  while the open level has unsaved changes, unless `force: true`, since a test that opens a map discards them.
+- **`pause_play_in_editor`, `resume_play_in_editor` and `step_play_in_editor_frame`** (pack `play`) pause a
+  Play-in-Editor session, resume it, and advance it a number of frames, so state can be read at a fixed frame. Like
+  `stop_play_in_editor`, they need `force: true` on a session another session started.
+
+### Changed
+
+Return shapes, all additive:
+
+- `run_automation_test` answers verdict `"running"` with `completed: false` and `running: true` for a latent test,
+  where it answered `"skipped"`. New parameters `timeout_seconds` (default 300) and `force`.
+- `get_automation_test_results` adds `running`, `elapsed_seconds` and `timed_out`, and `canceled` with verdict
+  `"canceled"` for a test `cancel_automation_test` stopped; while a test runs it answers verdict `"running"`.
+- `run_functional_test_in_pie` answers verdict `"running"` where it answered `"not_run"`, starts a Play session instead
+  of Simulate, runs the test, and by default leaves no actor in the editor level (it spawns the test into the session
+  and removes it afterwards; `keep_actor: true` places it in the level as before). It adds `keep_actor` and
+  `timeout_seconds` (default 120) to its parameters and reply; the final verdict and `test_result` come from
+  `get_functional_test_status`.
+- `is_play_in_editor_active` adds `is_paused` and `frames_pending`, and `status` can be `"Paused"`.
 
 ### Fixed
 
