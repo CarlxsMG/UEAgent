@@ -2,6 +2,7 @@
 
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Commands/Editor/UEAgentAutomationCommands.h" // RefuseWhileTestRuns: no session change while a test runs
 #include "Misc/EngineVersionComparison.h"
 #include "FileHelpers.h" // FEditorFileUtils::GetDirty{World,Content}Packages — the unsaved-work advisory on start_play_in_editor
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -122,6 +123,87 @@ TArray<AActor*> CollectActorsOfClass(UWorld* World, const FString& ClassName, in
 // ---------------------------------------------------------------------------------------------
 namespace UEAgentLevelCommandsImpl
 {
+    /** The play world is held by the editor's debug pause (pause_play_in_editor, the Pause button). */
+    bool IsPlayWorldPaused()
+    {
+        return GEditor && GEditor->PlayWorld && GEditor->PlayWorld->bDebugPauseExecution;
+    }
+
+    /** Frames step_play_in_editor_frame has still to advance, and the ticker that advances them. */
+    int32 GPieFramesPending = 0;
+    FTSTicker::FDelegateHandle GPieStepTicker;
+
+    void CancelPieFrameSteps()
+    {
+        GPieFramesPending = 0;
+        if (GPieStepTicker.IsValid())
+        {
+            FTSTicker::RemoveTicker(GPieStepTicker);
+            GPieStepTicker.Reset();
+        }
+    }
+
+    /**
+     * Lets every play world tick one frame, as the Advance Frame button does: a world with bDebugFrameStepExecution
+     * set ticks once and pauses itself again at the end of that tick (UWorld::Tick).
+     */
+    void StepPieWorldsOnce()
+    {
+        for (const FWorldContext& Context : GEditor->GetWorldContexts())
+        {
+            UWorld* World = Context.World();
+            if (World && World->IsPlayInEditor())
+            {
+                World->bDebugFrameStepExecution = true;
+                World->bDebugPauseExecution = false;
+            }
+        }
+        GEditor->PlaySessionSingleStepped();
+    }
+
+    /** Every play world has played the step it was given and paused again. */
+    bool PieWorldsStepped()
+    {
+        for (const FWorldContext& Context : GEditor->GetWorldContexts())
+        {
+            const UWorld* World = Context.World();
+            if (World && World->IsPlayInEditor() && (World->bDebugFrameStepExecution || !World->bDebugPauseExecution))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** Advances the paused session by Frames frames, one step per engine tick: a step is played on the tick after it is given. */
+    void StartPieFrameSteps(int32 Frames)
+    {
+        CancelPieFrameSteps();
+        GPieFramesPending = Frames;
+        StepPieWorldsOnce();
+        GPieStepTicker = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([](float) -> bool
+        {
+            if (!GEditor || !GEditor->PlayWorld || !GEditor->IsPlayingSessionInEditor())
+            {
+                GPieFramesPending = 0;
+                GPieStepTicker.Reset();
+                return false;
+            }
+            if (!PieWorldsStepped())
+            {
+                return true;
+            }
+            if (--GPieFramesPending > 0)
+            {
+                StepPieWorldsOnce();
+                return true;
+            }
+            GPieFramesPending = 0;
+            GPieStepTicker.Reset();
+            return false;
+        }));
+    }
+
     /**
      * The world selected by the request's `world` field, through the resolver every domain shares
      * (mcp_common::ResolveWorldSelector): two tools resolving "PIE" on their own can read two
@@ -1050,7 +1132,7 @@ namespace McpPieDirtyAdvisory
     }
 }
 
-// MCP:start_play_in_editor - Press Play: starts a real PlayInEditor session (a true play world with a spawned PlayerController, not SimulateInEditor), optionally multi-client and networked for co-op testing via number_of_clients + net_mode=ListenServer. WARNING: RequestPlaySession is ASYNC and this tool probes right after asking, so `pie_started` comes back FALSE on a start that is perfectly fine -- the oracle is a follow-up is_play_in_editor_active, never this field. With 2+ clients the worlds are UEDPIE_0 (server) and UEDPIE_1 (client), and later reads must be anchored with world='server'/'client' because PIE actor NAMES are swapped between them. Refuses if another MCP session (or a human) already owns PIE unless force=true.
+// MCP:start_play_in_editor - Press Play: starts a real PlayInEditor session (a true play world with a spawned PlayerController, not SimulateInEditor), optionally multi-client and networked for co-op testing via number_of_clients + net_mode=ListenServer. WARNING: RequestPlaySession is ASYNC and this tool probes right after asking, so `pie_started` comes back FALSE on a start that is perfectly fine -- the oracle is a follow-up is_play_in_editor_active, never this field. With 2+ clients the worlds are UEDPIE_0 (server) and UEDPIE_1 (client), and later reads must be anchored with world='server'/'client' because PIE actor NAMES are swapped between them. Refuses if another MCP session (or a human) already owns PIE unless force=true, and while a test started by run_automation_test or run_functional_test_in_pie runs.
 //   @pack play
 //   @param number_of_clients - Optional int (default 1, clamped 1-10). >1 opens additional client windows -- that is what makes a co-op reading possible at all.
 //   @param net_mode - Optional string: "Standalone"|"ListenServer"|"Client" (default "Standalone"). Any other value is a clean error, not a silent fallback. Use ListenServer for co-op.
@@ -1061,6 +1143,10 @@ namespace McpPieDirtyAdvisory
 
 TSharedPtr<FJsonObject> HandleStartPlayInEditor(const TSharedPtr<FJsonObject>& Params)
 {
+    if (TSharedPtr<FJsonObject> Busy = UEAgentAutomationCommands::RefuseWhileTestRuns(TEXT("start_play_in_editor")))
+    {
+        return Busy;
+    }
     ULevelEditorSubsystem* EditorLevels = GEditor->GetEditorSubsystem<ULevelEditorSubsystem>();
     if (EditorLevels == nullptr)
     {
@@ -1136,13 +1222,17 @@ TSharedPtr<FJsonObject> HandleStartPlayInEditor(const TSharedPtr<FJsonObject>& P
     return mcp_common::MakeOkReply(Outcome);
 }
 
-// MCP:stop_play_in_editor - Press Stop: requests the end of the Play-in-Editor session (EditorRequestEndPlay). WARNING: `pie_stopped` is HARDCODED true whenever PIE was running and teardown is async, so the only oracle is a follow-up is_play_in_editor_active. WARNING: Treat every call as an operation that CAN KILL THE EDITOR: any UWorld/UPackage handle left in an execute_python global keeps the PIE world rooted and the engine aborts with "Object ... from PIE level still referenced" -- purge the __main__ namespace and gc.collect() BEFORE calling. Refuses when another MCP session (or a human) started the PIE, and then needs force=true.
+// MCP:stop_play_in_editor - Press Stop: requests the end of the Play-in-Editor session (EditorRequestEndPlay). WARNING: `pie_stopped` is HARDCODED true whenever PIE was running and teardown is async, so the only oracle is a follow-up is_play_in_editor_active. WARNING: Treat every call as an operation that CAN KILL THE EDITOR: any UWorld/UPackage handle left in an execute_python global keeps the PIE world rooted and the engine aborts with "Object ... from PIE level still referenced" -- purge the __main__ namespace and gc.collect() BEFORE calling. Refuses when another MCP session (or a human) started the PIE, and then needs force=true; refused too while a test started by run_automation_test or run_functional_test_in_pie runs (cancel_automation_test stops it).
 //   @pack play
 //   @param force [bool] - Optional bool (default false). Override the PIE-ownership guard: stop even if another session (or a manually-started PIE) currently owns Play-in-Editor. Read by the server before the tool runs; without it, stopping a PIE your session does not own is refused with pie_owner/requester in the payload.
 //   @returns { pie_stopped: bool (hardcoded true when PIE was up -- not a measurement), was_in_pie: bool, still_in_pie: bool (read immediately, so usually still true: teardown is async), message: string }
 
 TSharedPtr<FJsonObject> HandleStopPlayInEditor(const TSharedPtr<FJsonObject>& Params)
 {
+    if (TSharedPtr<FJsonObject> Busy = UEAgentAutomationCommands::RefuseWhileTestRuns(TEXT("stop_play_in_editor")))
+    {
+        return Busy;
+    }
     ULevelEditorSubsystem* EditorLevels = GEditor->GetEditorSubsystem<ULevelEditorSubsystem>();
     if (EditorLevels == nullptr)
     {
@@ -1171,9 +1261,9 @@ TSharedPtr<FJsonObject> HandleStopPlayInEditor(const TSharedPtr<FJsonObject>& Pa
     return mcp_common::MakeOkReply(StopRequested);
 }
 
-// MCP:is_play_in_editor_active - THE oracle for "is the game running right now": asks ULevelEditorSubsystem::IsInPlayInEditor and returns is_pie_active plus status 'Playing'/'Stopped' and the current level name. Cheap, read-only, no params. Use it to confirm start_play_in_editor / stop_play_in_editor (both answer from before the async transition finishes) and as the gate before any save -- saving with PIE up is refused by the engine. WARNING: Do NOT use the pie_active field of list_dirty_packages for this: it can report false with PIE running and answering.
+// MCP:is_play_in_editor_active - THE oracle for "is the game running right now": asks ULevelEditorSubsystem::IsInPlayInEditor and returns is_pie_active plus status 'Playing'/'Stopped' and the current level name. Cheap, read-only, no params. Use it to confirm start_play_in_editor / stop_play_in_editor (both answer from before the async transition finishes) and as the gate before any save -- saving with PIE up is refused by the engine. is_paused says whether pause_play_in_editor (or the editor's Pause button) holds the play world, and frames_pending how many frames step_play_in_editor_frame has still to advance. WARNING: Do NOT use the pie_active field of list_dirty_packages for this: it can report false with PIE running and answering.
 //   @pack play
-//   @returns { is_pie_active: bool, current_level: string (the EDITOR's current level, not the PIE world), status: 'Playing'|'Stopped' }
+//   @returns { is_pie_active: bool, is_paused: bool, frames_pending: int, current_level: string (the EDITOR's current level, not the PIE world), status: 'Playing'|'Paused'|'Stopped' }
 
 TSharedPtr<FJsonObject> HandleIsPlayInEditorActive(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1188,13 +1278,108 @@ TSharedPtr<FJsonObject> HandleIsPlayInEditorActive(const TSharedPtr<FJsonObject>
     const ULevel* EditedLevel = EditorLevels->GetCurrentLevel();
 
     TSharedPtr<FJsonObject> State = MakeShared<FJsonObject>();
+    const bool bPaused = bPlaying && UEAgentLevelCommandsImpl::IsPlayWorldPaused();
     State->SetBoolField(TEXT("is_pie_active"), bPlaying);
+    State->SetBoolField(TEXT("is_paused"), bPaused);
+    State->SetNumberField(TEXT("frames_pending"), bPlaying ? UEAgentLevelCommandsImpl::GPieFramesPending : 0);
     State->SetStringField(TEXT("current_level"), EditedLevel != nullptr ? EditedLevel->GetName() : FString(TEXT("Unknown")));
-    State->SetStringField(TEXT("status"), bPlaying ? TEXT("Playing") : TEXT("Stopped"));
+    State->SetStringField(TEXT("status"), bPaused ? TEXT("Paused") : bPlaying ? TEXT("Playing") : TEXT("Stopped"));
     return mcp_common::MakeOkReply(State);
 }
 
-// MCP:wait_for_pie_completion - Block until the human closes Play-in-Editor (or the timeout fires), pumping the game thread while it polls, and report elapsed_seconds + whether it completed or timed out. Use it to hand the session to a human for a piloted run and get control back when they hit Stop; use is_play_in_editor_active for an instant, non-blocking check. Returns immediately with started_in_pie:false when PIE was not running.
+/** The reply of pause_play_in_editor and resume_play_in_editor. */
+static TSharedPtr<FJsonObject> MakePauseReply(bool bPieActive, bool bWasPaused)
+{
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetBoolField(TEXT("pie_active"), bPieActive);
+    Data->SetBoolField(TEXT("was_paused"), bWasPaused);
+    Data->SetBoolField(TEXT("paused"), bPieActive && UEAgentLevelCommandsImpl::IsPlayWorldPaused());
+    if (!bPieActive)
+    {
+        Data->SetStringField(TEXT("note"), TEXT("Play-in-Editor is not running; nothing to pause or resume."));
+    }
+    return mcp_common::MakeOkReply(Data);
+}
+
+// MCP:pause_play_in_editor - Pause the running Play-in-Editor session, as the editor's Pause button does: every play world stops ticking from its next frame, so actor state can be read at a fixed frame (get_actor_properties_by_class, capture_pie_state, execute_python). Answers paused (read back from the play world), was_paused, and pie_active false with nothing changed when no session runs; a repeated call changes nothing. Advance it with step_play_in_editor_frame, continue it with resume_play_in_editor, and check it with is_play_in_editor_active (is_paused). Pausing a session another MCP session (or a human) started needs force=true.
+//   @pack play
+//   @param force [bool] - Optional bool (default false). Override the PIE-ownership guard: pause a session another session (or a human) started. Read by the server before the tool runs.
+//   @returns { paused, was_paused, pie_active, note? }
+//   @hints idempotent
+TSharedPtr<FJsonObject> HandlePausePlayInEditor(const TSharedPtr<FJsonObject>& Params)
+{
+    if (!GEditor || !GEditor->PlayWorld || !GEditor->IsPlayingSessionInEditor())
+    {
+        return MakePauseReply(false, false);
+    }
+    const bool bWasPaused = UEAgentLevelCommandsImpl::IsPlayWorldPaused();
+    UEAgentLevelCommandsImpl::CancelPieFrameSteps();
+    GEditor->SetPIEWorldsPaused(true);
+    if (!bWasPaused)
+    {
+        GEditor->PlaySessionPaused();
+    }
+    return MakePauseReply(true, bWasPaused);
+}
+
+// MCP:resume_play_in_editor - Resume a Play-in-Editor session that pause_play_in_editor (or the editor's Pause button) paused: every play world ticks again from the next frame, and frames step_play_in_editor_frame has not advanced yet are dropped. Answers paused (read back), was_paused, and pie_active false with nothing changed when no session runs; a repeated call changes nothing. Resuming a session another MCP session (or a human) started needs force=true.
+//   @pack play
+//   @param force [bool] - Optional bool (default false). Override the PIE-ownership guard: resume a session another session (or a human) started. Read by the server before the tool runs.
+//   @returns { paused, was_paused, pie_active, note? }
+//   @hints idempotent
+TSharedPtr<FJsonObject> HandleResumePlayInEditor(const TSharedPtr<FJsonObject>& Params)
+{
+    if (!GEditor || !GEditor->PlayWorld || !GEditor->IsPlayingSessionInEditor())
+    {
+        return MakePauseReply(false, false);
+    }
+    const bool bWasPaused = UEAgentLevelCommandsImpl::IsPlayWorldPaused();
+    UEAgentLevelCommandsImpl::CancelPieFrameSteps();
+    GEditor->SetPIEWorldsPaused(false);
+    if (bWasPaused)
+    {
+        GEditor->PlaySessionResumed();
+    }
+    return MakePauseReply(true, bWasPaused);
+}
+
+// MCP:step_play_in_editor_frame - Advance a Play-in-Editor session by a number of frames and leave it paused, as the editor's Advance Frame button does; a running session is paused first. The frames are played after this reply, one per engine tick: confirm with is_play_in_editor_active, where frames_pending reaches 0 and is_paused is true, then read the state you want at that frame. Each call steps again, so it is not idempotent. Fails when no session runs. Stepping a session another MCP session (or a human) started needs force=true.
+//   @pack play
+//   @param frames - Optional int (default 1, clamped 1-1000): how many frames to advance.
+//   @param force [bool] - Optional bool (default false). Override the PIE-ownership guard: step a session another session (or a human) started. Read by the server before the tool runs.
+//   @returns { frames_requested, paused, was_paused, frame_counter_before, pie_active }
+//   @hints not-idempotent
+TSharedPtr<FJsonObject> HandleStepPlayInEditorFrame(const TSharedPtr<FJsonObject>& Params)
+{
+    if (!GEditor || !GEditor->PlayWorld || !GEditor->IsPlayingSessionInEditor())
+    {
+        return mcp_common::MakeErrorReply(TEXT("step_play_in_editor_frame: Play-in-Editor is not running. Start it with start_play_in_editor, pause it with pause_play_in_editor, then step."));
+    }
+    int32 Frames = 1;
+    double RequestedFrames = 0.0;
+    if (Params->TryGetNumberField(TEXT("frames"), RequestedFrames))
+    {
+        Frames = FMath::Clamp(static_cast<int32>(RequestedFrames), 1, 1000);
+    }
+    const bool bWasPaused = UEAgentLevelCommandsImpl::IsPlayWorldPaused();
+    const uint64 FrameCounterBefore = GFrameCounter;
+    if (!bWasPaused)
+    {
+        GEditor->SetPIEWorldsPaused(true);
+        GEditor->PlaySessionPaused();
+    }
+    UEAgentLevelCommandsImpl::StartPieFrameSteps(Frames);
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetNumberField(TEXT("frames_requested"), Frames);
+    Data->SetBoolField(TEXT("paused"), true);
+    Data->SetBoolField(TEXT("was_paused"), bWasPaused);
+    Data->SetNumberField(TEXT("frame_counter_before"), static_cast<double>(FrameCounterBefore));
+    Data->SetBoolField(TEXT("pie_active"), true);
+    return mcp_common::MakeOkReply(Data);
+}
+
+// MCP:wait_for_pie_completion - Block until the human closes Play-in-Editor (or the timeout fires), pumping the game thread while it polls, and report elapsed_seconds + whether it completed or timed out. Use it to hand the session to a human for a piloted run and get control back when they hit Stop; use is_play_in_editor_active for an instant, non-blocking check. Returns immediately with started_in_pie:false when PIE was not running. Do not call it while run_automation_test or run_functional_test_in_pie has a test running: it blocks the ticks the test needs to finish.
 //   @param timeout_seconds - Optional float (default 30). Upper bound on the wait; 0 or less means wait indefinitely.
 //   @param poll_interval_seconds - Optional float (default 0.1). Seconds between IsInPlayInEditor probes; anything below 0.01 is floored to 0.01.
 //   @returns { started_in_pie, still_active, timed_out, elapsed_seconds, completed }
@@ -2328,6 +2513,9 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("inject_key_input"), &HandleInjectKeyInput },
     { TEXT("inject_mouse_button"), &HandleInjectMouseButton },
     { TEXT("is_play_in_editor_active"), &HandleIsPlayInEditorActive },
+    { TEXT("pause_play_in_editor"), &HandlePausePlayInEditor },
+    { TEXT("resume_play_in_editor"), &HandleResumePlayInEditor },
+    { TEXT("step_play_in_editor_frame"), &HandleStepPlayInEditorFrame },
     { TEXT("possess_pawn"), &HandlePossessPawn },
     { TEXT("set_absolute_transform"), &HandleSetAbsoluteTransform },
     { TEXT("set_actor_lifetime"), &HandleSetActorLifetime },

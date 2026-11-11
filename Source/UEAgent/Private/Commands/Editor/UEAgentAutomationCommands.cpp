@@ -33,7 +33,10 @@
 #include "LevelEditor.h"  // ULevelEditorSubsystem (EditorPlaySimulate / StopPlayInEditor)
 #include "LevelEditorSubsystem.h"  // ULevelEditorSubsystem explicit (LevelEditor/Public/)
 #include "Editor.h"                 // GEditor: play-session state (IsPlayingSessionInEditor / IsPlaySessionRequestQueued / PlayWorld)
-#include "Containers/Ticker.h"      // FTSTicker: run_functional_test_in_pie ends the session it requested once it starts
+#include "Containers/Ticker.h"      // FTSTicker: drives latent automation tests and functional tests across ticks
+#include "PlayInEditorDataTypes.h"  // FRequestPlaySessionParams / EPlaySessionWorldType
+#include "IAssetViewport.h"         // IAssetViewport: the viewport a functional test's Play session runs in
+#include "Modules/ModuleManager.h"
 // MCP-DOMAIN: Editor
 
 #include "Misc/OutputDevice.h"
@@ -47,9 +50,10 @@
  * honest error instead of crashing. Automation-test listing/running uses FAutomationTestFramework
  * (Core / Misc/AutomationTest.h).
  *
- * Test execution is crash-safe: StopTest() asserts (hard check()) that the latent-command queue is
- * empty, so a multi-tick test (PIE/load-map/wait) is detected via IsLatentCommandQueueEmpty(), its
- * queue is drained with DequeueAllCommands() before StopTest(), and it is reported as completed=false.
+ * A test whose latent queue empties within the call is stopped and answered in the reply. A multi-tick test
+ * (PIE/load-map/wait) stays started: a ticker waits for its latent queue to empty, or for its timeout, and stops it
+ * into the last-result cache, which get_automation_test_results polls. StopTest() asserts (hard check()) that the
+ * latent queue is empty, so every early stop drains it with DequeueAllCommands() first.
  */
 namespace UEAgentAutomationCommands
 {
@@ -197,10 +201,93 @@ private:
 static FUEAgentLogCaptureDevice GMCP_LogCapture;
 
 // The last completed run_automation_test, so get_automation_test_results can return it without re-running.
-// bHasLastResult answers an honest "no test has been run yet" before any synchronous test has completed.
+// bHasLastResult answers an honest "no test has been run yet" before any test has completed. A test that ended on its
+// timeout or through cancel_automation_test keeps its entries here, with the flag that says how it ended.
 static FAutomationTestExecutionInfo LastTestExecutionInfo;
 static FString LastTestName;
 static bool bHasLastResult = false;
+static bool bLastTestTimedOut = false;
+static bool bLastTestCanceled = false;
+static FString LastTestNote;
+
+/**
+ * The latent test run_automation_test left running. Everything here is game-thread state: the handlers and the
+ * ticker that drives the test both run on the game thread.
+ */
+struct FRunningAutomationTest
+{
+    bool bActive = false;
+    FString TestName;
+    double StartSeconds = 0.0;
+    double TimeoutSeconds = 300.0;
+    bool bPieActiveAtStart = false;
+    FTSTicker::FDelegateHandle Ticker;
+    // Filled by the framework's OnTestEndEvent when something other than this runner stops the test.
+    bool bCapturedByEndEvent = false;
+    FAutomationTestExecutionInfo CapturedInfo;
+};
+static FRunningAutomationTest GRunningAutomationTest;
+
+/**
+ * The functional test run_functional_test_in_pie runs, and its outcome once it ended (get_functional_test_status reads
+ * both). Game-thread state, like the automation runner's.
+ */
+struct FFunctionalTestRun
+{
+    bool bHasTest = false;
+    bool bRunning = false;
+    FString TestPath;
+    TWeakObjectPtr<UClass> TestClass;
+    double StartSeconds = 0.0;
+    double TimeoutSeconds = 120.0;
+    bool bStartedSession = false;
+    bool bAutoStopPie = true;
+    bool bKeepActor = false;
+    bool bRunCalled = false;
+    bool bSpawnedInSession = false;
+    TWeakObjectPtr<class AFunctionalTest> SessionActor;
+    int64 LogCursor = 0;
+    FTSTicker::FDelegateHandle Ticker;
+    // The outcome.
+    FString Verdict = TEXT("running");
+    FString TestResult;
+    FString Message;
+    bool bTimedOut = false;
+    bool bCanceled = false;
+    bool bPieStopped = false;
+    double ElapsedSeconds = 0.0;
+};
+static FFunctionalTestRun GFunctionalTestRun;
+
+FString DescribeRunningTest()
+{
+    if (GRunningAutomationTest.bActive)
+    {
+        return FString::Printf(TEXT("the automation test '%s' (started by run_automation_test %.0f s ago)"),
+            *GRunningAutomationTest.TestName, FPlatformTime::Seconds() - GRunningAutomationTest.StartSeconds);
+    }
+    if (GFunctionalTestRun.bRunning)
+    {
+        return FString::Printf(TEXT("the functional test '%s' (started by run_functional_test_in_pie %.0f s ago)"),
+            *GFunctionalTestRun.TestPath, FPlatformTime::Seconds() - GFunctionalTestRun.StartSeconds);
+    }
+    return FString();
+}
+
+TSharedPtr<FJsonObject> RefuseWhileTestRuns(const TCHAR* Tool)
+{
+    const FString Running = DescribeRunningTest();
+    if (Running.IsEmpty())
+    {
+        return nullptr;
+    }
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetBoolField(TEXT("refused"), true);
+    Data->SetStringField(TEXT("running_test"), GRunningAutomationTest.bActive ? GRunningAutomationTest.TestName : GFunctionalTestRun.TestPath);
+    return mcp_common::MakeOutcomeReply(Data, false, FString::Printf(
+        TEXT("%s: refused while %s is running. Poll it with %s, or stop it with cancel_automation_test, then call again."),
+        Tool, *Running, GRunningAutomationTest.bActive ? TEXT("get_automation_test_results") : TEXT("get_functional_test_status")));
+}
 
 void StartLogCapture()
 {
@@ -632,23 +719,194 @@ namespace
         return Skipped;
     }
 
-    // The flow of run_automation_test, an in-process single-callback FAutomationTestFramework
-    // runner: contains-check + headless-gate + StartTestByName + ExecuteLatentCommands +
-    // IsLatentCommandQueueEmpty + StopTest + cache.
-    //
-    // OutError: nullptr on hard error (no recovery, error response filled in); non-null on skipped
-    // (test cannot run here) or on a synchronous pass/fail verdict.
-    //
-    // Cache: the helper updates LastTestName / LastTestExecutionInfo / bHasLastResult for callers
-    // that pass a valid cache (out of ref). When OutCache is nullptr (e.g. caller doesn't want the
-    // cache update), the helper still runs the test but skips the cache write.
-    struct FAutomationRunCache
+    /** True when a level of the editor world has unsaved changes, which a test that opens a map would discard. */
+    bool IsEditorLevelDirty()
     {
-        FString* LastTestName = nullptr;
-        FAutomationTestExecutionInfo* LastTestExecutionInfo = nullptr;
-        bool* bHasLastResult = nullptr;
+        UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+        if (!World)
+        {
+            return false;
+        }
+        for (const ULevel* Level : World->GetLevels())
+        {
+            if (!Level)
+            {
+                continue;
+            }
+            if (Level->GetOutermost() && Level->GetOutermost()->IsDirty())
+            {
+                return true;
+            }
+            // A map with one file per actor keeps its actors' edits in their own packages.
+            for (const UPackage* External : Level->GetLoadedExternalObjectPackages())
+            {
+                if (External && External->IsDirty())
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /** The framework's current test is the one this runner started. */
+    bool IsRunningAutomationTestCurrent()
+    {
+        const FAutomationTestBase* Current = FAutomationTestFramework::Get().GetCurrentTest();
+        return GIsAutomationTesting && Current && Current->GetTestName() == GRunningAutomationTest.TestName;
+    }
+
+    /** How a latent test this runner drives ends. */
+    enum class EAutomationTestEnd : uint8
+    {
+        Completed,   // its latent queue emptied
+        TimedOut,    // timeout_seconds passed first
+        Canceled,    // cancel_automation_test
+        Interrupted, // something else stopped it or started another test
     };
-    TSharedPtr<FJsonObject> RunAutomationTestCommon(const FString& InTestName, TSharedPtr<FJsonObject>& OutError, FAutomationRunCache* OutCache = nullptr)
+
+    /**
+     * Stops the running latent test into the last-result cache. A test stopped before its queue emptied has the queue
+     * drained first (StopTest asserts it is empty), and a Play-in-Editor session that started during the test is
+     * ended, since the test that would have ended it no longer runs.
+     */
+    void FinishRunningAutomationTest(EAutomationTestEnd End)
+    {
+        if (!GRunningAutomationTest.bActive)
+        {
+            return;
+        }
+        FAutomationTestFramework& Framework = FAutomationTestFramework::Get();
+        const double Elapsed = FPlatformTime::Seconds() - GRunningAutomationTest.StartSeconds;
+
+        FAutomationTestExecutionInfo Info;
+        bool bHaveInfo = false;
+        if (End != EAutomationTestEnd::Interrupted && IsRunningAutomationTestCurrent())
+        {
+            if (!Framework.IsLatentCommandQueueEmpty())
+            {
+                Framework.DequeueAllCommands();
+            }
+            Framework.StopTest(Info);
+            bHaveInfo = true;
+        }
+        else if (GRunningAutomationTest.bCapturedByEndEvent)
+        {
+            Info = GRunningAutomationTest.CapturedInfo;
+            Info.Duration = Elapsed;
+            bHaveInfo = true;
+        }
+
+        LastTestName = GRunningAutomationTest.TestName;
+        LastTestExecutionInfo = bHaveInfo ? Info : FAutomationTestExecutionInfo();
+        if (!bHaveInfo)
+        {
+            LastTestExecutionInfo.Duration = Elapsed;
+        }
+        bHasLastResult = true;
+        bLastTestTimedOut = End == EAutomationTestEnd::TimedOut;
+        bLastTestCanceled = End == EAutomationTestEnd::Canceled;
+        switch (End)
+        {
+        case EAutomationTestEnd::TimedOut:
+            LastTestNote = FString::Printf(TEXT("The test did not finish within timeout_seconds (%.0f s) and was stopped; its latent commands were discarded."),
+                GRunningAutomationTest.TimeoutSeconds);
+            break;
+        case EAutomationTestEnd::Canceled:
+            LastTestNote = TEXT("cancel_automation_test stopped the test before it finished; its latent commands were discarded.");
+            break;
+        case EAutomationTestEnd::Interrupted:
+            LastTestNote = bHaveInfo
+                ? TEXT("Something other than run_automation_test stopped the test (another test run, the Session Frontend or a console command); these are its entries at that point.")
+                : TEXT("Something other than run_automation_test stopped the test before it finished, and its entries were not available.");
+            break;
+        default:
+            LastTestNote.Reset();
+            break;
+        }
+
+        const bool bStoppedEarly = End != EAutomationTestEnd::Completed;
+        if (bStoppedEarly && !GRunningAutomationTest.bPieActiveAtStart && GEditor)
+        {
+            // The session may still be a queued request: served after the stop, it would outlive the test.
+            if (GEditor->IsPlaySessionRequestQueued())
+            {
+                GEditor->CancelRequestPlaySession();
+            }
+            if (GEditor->PlayWorld)
+            {
+                UE_LOG(LogTemp, Display, TEXT("run_automation_test: ending the Play-in-Editor session test '%s' started before it was stopped."),
+                    *GRunningAutomationTest.TestName);
+                GEditor->RequestEndPlayMap();
+            }
+        }
+
+        UE_LOG(LogTemp, Display, TEXT("run_automation_test: latent test '%s' ended after %.1f s (%s)."), *GRunningAutomationTest.TestName, Elapsed,
+            End == EAutomationTestEnd::Completed ? TEXT("completed") : End == EAutomationTestEnd::TimedOut ? TEXT("timed out")
+            : End == EAutomationTestEnd::Canceled ? TEXT("canceled") : TEXT("interrupted"));
+
+        if (GRunningAutomationTest.Ticker.IsValid())
+        {
+            FTSTicker::RemoveTicker(GRunningAutomationTest.Ticker);
+        }
+        GRunningAutomationTest = FRunningAutomationTest();
+    }
+
+    /**
+     * Drives the running latent test, once per engine tick. The engine's AutomationWorker module already runs the
+     * framework's latent commands every tick while GIsAutomationTesting is set; this runs them only when that module
+     * is not loaded, so no command is updated twice in one frame. It ticks after the worker in the engine loop, so it
+     * sees the queue empty in the frame the last command completes and stops the test before the worker would.
+     */
+    bool TickRunningAutomationTest(float /*DeltaTime*/)
+    {
+        if (!GRunningAutomationTest.bActive)
+        {
+            return false;
+        }
+        if (!IsRunningAutomationTestCurrent())
+        {
+            GRunningAutomationTest.Ticker.Reset();
+            FinishRunningAutomationTest(EAutomationTestEnd::Interrupted);
+            return false;
+        }
+        FAutomationTestFramework& Framework = FAutomationTestFramework::Get();
+        static const FName AutomationWorkerModule(TEXT("AutomationWorker"));
+        if (!FModuleManager::Get().IsModuleLoaded(AutomationWorkerModule))
+        {
+            Framework.ExecuteLatentCommands();
+        }
+        if (Framework.IsLatentCommandQueueEmpty())
+        {
+            GRunningAutomationTest.Ticker.Reset();
+            FinishRunningAutomationTest(EAutomationTestEnd::Completed);
+            return false;
+        }
+        if (FPlatformTime::Seconds() - GRunningAutomationTest.StartSeconds > GRunningAutomationTest.TimeoutSeconds)
+        {
+            GRunningAutomationTest.Ticker.Reset();
+            FinishRunningAutomationTest(EAutomationTestEnd::TimedOut);
+            return false;
+        }
+        return true;
+    }
+
+    /** Keeps the entries of the running test when something other than this runner stops it. */
+    void CaptureRunningTestOnEnd(FAutomationTestBase* Test)
+    {
+        if (GRunningAutomationTest.bActive && Test && Test->GetTestName() == GRunningAutomationTest.TestName)
+        {
+            Test->GetExecutionInfo(GRunningAutomationTest.CapturedInfo);
+            GRunningAutomationTest.bCapturedByEndEvent = true;
+        }
+    }
+
+    // The flow of run_automation_test: contains-check, headless gate, StartTestByName, one ExecuteLatentCommands,
+    // then StopTest into the cache when the latent queue is empty, or a ticker that drives the test to its verdict.
+    //
+    // OutError: set on a hard error or a refusal (the reply to send); otherwise the result is skipped, a synchronous
+    // pass/fail verdict, or "running".
+    TSharedPtr<FJsonObject> RunAutomationTestCommon(const FString& InTestName, double TimeoutSeconds, bool bForce, TSharedPtr<FJsonObject>& OutError)
     {
         OutError.Reset();
 
@@ -704,8 +962,17 @@ namespace
             }
         }
 
-        // Start the test. RoleIndex 0 = the local role. StartTestByName self-cleans any
-        // abandoned prior run when GIsAutomationTesting is already true.
+        // A test someone else started (Session Frontend, `Automation RunTests`) would be stopped by StartTestByName.
+        if (GIsAutomationTesting)
+        {
+            const FAutomationTestBase* Current = Framework.GetCurrentTest();
+            OutError = mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("run_automation_test: another automation test is running in this editor (%s), started outside UEAgent; starting '%s' would stop it. Wait for it to finish and call again."),
+                Current ? *Current->GetTestName() : TEXT("unknown"), *TestName));
+            return nullptr;
+        }
+
+        // Start the test. RoleIndex 0 = the local role.
         Framework.StartTestByName(TestName, 0);
 
         if (!GIsAutomationTesting)
@@ -715,39 +982,63 @@ namespace
             return nullptr;
         }
 
-        Framework.ExecuteLatentCommands();
-        if (!Framework.IsLatentCommandQueueEmpty())
+        // A latent test that opens a map discards the unsaved edits of the open level; its first latent command is
+        // usually that load, so the check comes before the first ExecuteLatentCommands.
+        if (!Framework.IsLatentCommandQueueEmpty() && !bForce && IsEditorLevelDirty())
         {
-            // Multi-tick test (PIE / load-map / wait): its head latent command returns
-            // false-until-next-frame and can NEVER drain in a single game-thread callback.
-            // Calling StopTest here would check-fail on the non-empty queue. Drain + discard
-            // StopTest to reset GIsAutomationTesting for the next command.
             Framework.DequeueAllCommands();
             FAutomationTestExecutionInfo Discarded;
             Framework.StopTest(Discarded);
+            TSharedPtr<FJsonObject> Refused = MakeShared<FJsonObject>();
+            Refused->SetStringField(TEXT("test_name"), TestName);
+            Refused->SetBoolField(TEXT("refused"), true);
+            Refused->SetBoolField(TEXT("level_dirty"), true);
+            OutError = mcp_common::MakeOutcomeReply(Refused, false, FString::Printf(
+                TEXT("run_automation_test: '%s' runs across several ticks, and such a test may open a map, which discards the unsaved changes of the open level. Save the level (save_current_level) or pass force=true to run it anyway; the test was stopped before its latent commands ran."),
+                *TestName));
+            return nullptr;
+        }
+
+        Framework.ExecuteLatentCommands();
+        if (!Framework.IsLatentCommandQueueEmpty())
+        {
+            // Multi-tick test (PIE / load-map / wait): it keeps running, driven by the ticker, and
+            // get_automation_test_results answers its state until the ticker stops it.
+            static bool bEndEventBound = false;
+            if (!bEndEventBound)
+            {
+                Framework.OnTestEndEvent.AddStatic(&CaptureRunningTestOnEnd);
+                bEndEventBound = true;
+            }
+            GRunningAutomationTest = FRunningAutomationTest();
+            GRunningAutomationTest.bActive = true;
+            GRunningAutomationTest.TestName = TestName;
+            GRunningAutomationTest.StartSeconds = FPlatformTime::Seconds();
+            GRunningAutomationTest.TimeoutSeconds = TimeoutSeconds;
+            GRunningAutomationTest.bPieActiveAtStart = GEditor && GEditor->PlayWorld;
+            GRunningAutomationTest.Ticker = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateStatic(&TickRunningAutomationTest));
 
             TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
             Result->SetStringField(TEXT("test_name"), TestName);
             Result->SetBoolField(TEXT("started"), true);
             Result->SetBoolField(TEXT("completed"), false);
-            Result->SetNumberField(TEXT("errors"), 0);
-            Result->SetNumberField(TEXT("warnings"), 0);
-            Result->SetNumberField(TEXT("duration_s"), 0.0);
-            Result->SetStringField(TEXT("verdict"), TEXT("skipped"));
+            Result->SetBoolField(TEXT("running"), true);
+            Result->SetStringField(TEXT("verdict"), TEXT("running"));
+            Result->SetNumberField(TEXT("timeout_seconds"), TimeoutSeconds);
             Result->SetStringField(TEXT("note"),
-                TEXT("test requires latent ticks (PIE/load-map/wait); single-call runner only supports synchronous tests. Use run_functional_test_in_pie + get_output_log_lines for PIE-driven multi-tick orchestration."));
+                TEXT("The test runs across ticks after this reply. Poll get_automation_test_results until running is false for its verdict and entries; cancel_automation_test stops it. Until then a second test, start_play_in_editor, stop_play_in_editor and load_level are refused."));
             return Result;
         }
 
         // Synchronous path: the queue is empty, so StopTest is safe and the execution info is final.
         FAutomationTestExecutionInfo ExecInfo;
         Framework.StopTest(ExecInfo);
-        if (OutCache && OutCache->LastTestName && OutCache->LastTestExecutionInfo && OutCache->bHasLastResult)
-        {
-            *OutCache->LastTestName = TestName;
-            *OutCache->LastTestExecutionInfo = ExecInfo;
-            *OutCache->bHasLastResult = true;
-        }
+        LastTestName = TestName;
+        LastTestExecutionInfo = ExecInfo;
+        bHasLastResult = true;
+        bLastTestTimedOut = false;
+        bLastTestCanceled = false;
+        LastTestNote.Reset();
         return SerializeExecutionInfo(TestName, ExecInfo);
     }
 }
@@ -1015,9 +1306,13 @@ TSharedPtr<FJsonObject> HandleListAutomationTests(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:run_automation_test - Run ONE registered automation test in this editor, synchronously, and return its verdict (pass, fail or skipped) with its errors, warnings and log entries. Find the name first with list_automation_tests; re-read the last result later without running anything with get_automation_test_results; run every smoke test at once with run_smoke_tests. A test that needs several ticks (PIE, a map load, a wait) cannot be run here: it is answered verdict skipped with the reason, and no tool runs it for you -- run_functional_test_in_pie does not start a test, it only reads the verdict a Functional Test actor reports in a session where something else ran it. The same skipped answer comes for a test that needs an interactive user or a real renderer in a headless editor; an editor busy with a slow task or PIE refuses the start. Marked destructive and not idempotent because the test's own code runs in the editor and can create, change or delete assets and actors as it was written to, so two runs need not do the same; this tool itself saves nothing and adds no undo step for what the test did.
+// MCP:run_automation_test - Run ONE registered automation test in this editor and return its verdict (pass, fail or skipped) with its errors, warnings and log entries; a test that needs several ticks (PIE, a map load, a wait) answers verdict running instead and goes on after the reply. Find the name first with list_automation_tests; run every smoke test at once with run_smoke_tests.
+//   @para A test whose work fits in this call answers its verdict here. A latent one keeps running across ticks: poll get_automation_test_results until running is false for its verdict and entries, or stop it with cancel_automation_test; one that outlives timeout_seconds is stopped with timed_out true. While it runs, a second test, start_play_in_editor, stop_play_in_editor and load_level are refused with a message naming it, and wait_for_pie_completion must not be called (it blocks the ticks the test needs). A latent test is refused while the open level has unsaved changes, since a test that opens a map discards them: save first, or pass force=true.
+//   @para A test that needs an interactive user, or a real renderer in a headless editor, is answered skipped with the reason; a test started outside UEAgent that is still running, or an editor busy with a slow task, refuses the start. Marked destructive and not idempotent because the test's own code runs in the editor and can create, change or delete assets and actors as it was written to; this tool itself saves nothing and adds no undo step for what the test did.
 //   @param test_name - The test's test_name or its full_test_path, exactly as list_automation_tests gives them (e.g. "UEAgent.ClaudeCode")
-//   @returns { test_name, started, completed, passed, verdict, duration_s, errors, warnings, entries:[{type,message,context,filename,line}], entry_count, note }
+//   @param timeout_seconds - Optional number (default 300): a latent test still running after this many seconds is stopped, with timed_out true in get_automation_test_results.
+//   @param force [bool] - Optional bool (default false): run a latent test even though the open level has unsaved changes, which a test that opens a map discards.
+//   @returns { test_name, started, completed, running?, passed?, verdict: "pass"|"fail"|"skipped"|"running", duration_s?, errors?, warnings?, entries?:[{type,message,context,filename,line}], entry_count?, timeout_seconds?, note? }
 TSharedPtr<FJsonObject> HandleRunAutomationTest(const TSharedPtr<FJsonObject>& Params)
 {
     FString TestName;
@@ -1026,21 +1321,34 @@ TSharedPtr<FJsonObject> HandleRunAutomationTest(const TSharedPtr<FJsonObject>& P
         return mcp_common::MakeErrorReply(
             TEXT("Missing required 'test_name' (exact registered test name from list_automation_tests)."));
     }
+    if (TSharedPtr<FJsonObject> Busy = RefuseWhileTestRuns(TEXT("run_automation_test")))
+    {
+        return Busy;
+    }
+    double TimeoutSeconds = 300.0;
+    Params->TryGetNumberField(TEXT("timeout_seconds"), TimeoutSeconds);
+    if (TimeoutSeconds <= 0.0)
+    {
+        TimeoutSeconds = 300.0;
+    }
+    bool bForce = false;
+    Params->TryGetBoolField(TEXT("force"), bForce);
 
-    // The shared flow lives in RunAutomationTestCommon. We pass our cache
-    // (members) so get_automation_test_results can still read the last result.
     TSharedPtr<FJsonObject> Error;
-    FAutomationRunCache Cache(&LastTestName, &LastTestExecutionInfo, &bHasLastResult);
-    TSharedPtr<FJsonObject> Result = RunAutomationTestCommon(TestName, Error, &Cache);
+    TSharedPtr<FJsonObject> Result = RunAutomationTestCommon(TestName, TimeoutSeconds, bForce, Error);
     if (Error.IsValid()) { return Error; }
     if (Result.IsValid()) { return mcp_common::MakeOkReply(Result); }
     return mcp_common::MakeErrorReply(TEXT("RunAutomationTestCommon returned no result (internal error)"));
 }
 
-// MCP:run_smoke_tests - Runs every registered automation test with the smoke filter, synchronously in the editor, and returns only the aggregate: ran, all_passed and a note. Under a commandlet the engine skips them, so ran and all_passed come back false. For one test with its log entries use run_automation_test.
+// MCP:run_smoke_tests - Runs every registered automation test with the smoke filter, synchronously in the editor, and returns only the aggregate: ran, all_passed and a note. Under a commandlet the engine skips them, so ran and all_passed come back false. Refused while run_automation_test or run_functional_test_in_pie has a test running. For one test with its log entries use run_automation_test.
 //   @returns { ran, all_passed, note }
 TSharedPtr<FJsonObject> HandleRunSmokeTests(const TSharedPtr<FJsonObject>& Params)
 {
+    if (TSharedPtr<FJsonObject> Busy = RefuseWhileTestRuns(TEXT("run_smoke_tests")))
+    {
+        return Busy;
+    }
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
 
     // Honest gate: RunSmokeTests() SKIPS execution (and still returns true) when running
@@ -1065,17 +1373,48 @@ TSharedPtr<FJsonObject> HandleRunSmokeTests(const TSharedPtr<FJsonObject>& Param
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:get_automation_test_results - Returns the cached result of the last synchronous test completed through run_automation_test, without running anything: test_name, passed, verdict, duration_s, errors, warnings and entries. Skipped or multi-tick tests leave the cache unchanged; fails when no test has completed this editor session.
-//   @returns { test_name, started, completed, passed, verdict, duration_s, errors, warnings, entries:[{type,message,context,filename,line}], entry_count }
+// MCP:get_automation_test_results - The state of the test run_automation_test started, without running anything: while a latent test runs, running true with verdict running and elapsed_seconds; once it ended, its verdict, duration_s, errors, warnings and entries, with timed_out or canceled when it was stopped before it finished. Poll it after run_automation_test answers verdict running. Skipped tests leave it unchanged; fails when no test has run this editor session.
+//   @returns { test_name, started, completed, running, passed?, verdict: "pass"|"fail"|"canceled"|"running", elapsed_seconds, timed_out, canceled?, duration_s?, errors?, warnings?, entries?:[{type,message,context,filename,line}], entry_count?, timeout_seconds?, note? }
 TSharedPtr<FJsonObject> HandleGetAutomationTestResults(const TSharedPtr<FJsonObject>& Params)
 {
+    if (GRunningAutomationTest.bActive)
+    {
+        TSharedPtr<FJsonObject> Running = MakeShared<FJsonObject>();
+        Running->SetStringField(TEXT("test_name"), GRunningAutomationTest.TestName);
+        Running->SetBoolField(TEXT("started"), true);
+        Running->SetBoolField(TEXT("completed"), false);
+        Running->SetBoolField(TEXT("running"), true);
+        Running->SetStringField(TEXT("verdict"), TEXT("running"));
+        Running->SetNumberField(TEXT("elapsed_seconds"), FPlatformTime::Seconds() - GRunningAutomationTest.StartSeconds);
+        Running->SetNumberField(TEXT("timeout_seconds"), GRunningAutomationTest.TimeoutSeconds);
+        Running->SetBoolField(TEXT("timed_out"), false);
+        return mcp_common::MakeOkReply(Running);
+    }
     if (!bHasLastResult)
     {
         return mcp_common::MakeErrorReply(
-            TEXT("No test has been run yet (call run_automation_test on a synchronous test first)."));
+            TEXT("No test has been run yet (call run_automation_test first)."));
     }
 
     TSharedPtr<FJsonObject> Result = SerializeExecutionInfo(LastTestName, LastTestExecutionInfo);
+    Result->SetBoolField(TEXT("running"), false);
+    Result->SetNumberField(TEXT("elapsed_seconds"), LastTestExecutionInfo.Duration);
+    Result->SetBoolField(TEXT("timed_out"), bLastTestTimedOut);
+    if (bLastTestTimedOut || bLastTestCanceled)
+    {
+        // Stopped before it finished: it did not pass, whatever its entries say so far.
+        Result->SetBoolField(TEXT("completed"), false);
+        Result->SetBoolField(TEXT("passed"), false);
+        Result->SetStringField(TEXT("verdict"), bLastTestCanceled ? TEXT("canceled") : TEXT("fail"));
+    }
+    if (bLastTestCanceled)
+    {
+        Result->SetBoolField(TEXT("canceled"), true);
+    }
+    if (!LastTestNote.IsEmpty())
+    {
+        Result->SetStringField(TEXT("note"), LastTestNote);
+    }
     return mcp_common::MakeOkReply(Result);
 }
 // ============================================================================
@@ -1087,9 +1426,10 @@ TSharedPtr<FJsonObject> HandleGetAutomationTestResults(const TSharedPtr<FJsonObj
 //   * create_functional_test    -- BP subclass of AFunctionalTest, the canonical
 //                                 UE pattern for a multiplayer-friendly,
 //                                 Blueprint-scriptable test actor.
-//   * run_functional_test_in_pie -- place the test in the level and request a
-//                                 Simulate session, or read the test actor's
-//                                 Result in a session already running.
+//   * run_functional_test_in_pie -- run the test in a Play session (one it
+//                                 requests, or the one already running) and
+//                                 report its verdict through
+//                                 get_functional_test_status.
 //
 // Gauntlet proper is a separate runtime harness (a dedicated UnrealEditor-Cmd.exe
 // -Gauntlet=<controller> subprocess) that this server does not spawn; run_automation_test
@@ -1278,53 +1618,223 @@ static UClass* ResolveFunctionalTestClass(const FString& TestPath, FString& OutE
     return nullptr;
 }
 
-/** The verdict a Functional Test actor reports: running, pass, fail, not_run (Invalid, its value before it ran) or
- *  unknown (Default: finished leaving the verdict to the automation framework's assertions). */
-static const TCHAR* FunctionalTestVerdict(const AFunctionalTest& Test)
+/** The verdict of a Functional Test actor that has finished: pass, fail (Failed, Error, or Invalid, which is what an
+ *  aborted test reports) or unknown (Default: it left the verdict to the automation framework's assertions). */
+static const TCHAR* FinishedFunctionalTestVerdict(const AFunctionalTest& Test)
 {
-    if (Test.IsRunning() || Test.Result == EFunctionalTestResult::Running)
-    {
-        return TEXT("running");
-    }
     switch (Test.Result)
     {
     case EFunctionalTestResult::Succeeded: return TEXT("pass");
     case EFunctionalTestResult::Failed:
-    case EFunctionalTestResult::Error:     return TEXT("fail");
-    case EFunctionalTestResult::Invalid:   return TEXT("not_run");
+    case EFunctionalTestResult::Error:
+    case EFunctionalTestResult::Invalid:   return TEXT("fail");
     default:                                return TEXT("unknown");
     }
 }
 
-/**
- * Ends the Simulate session a run_functional_test_in_pie call requested, on the first tick it is running. The request
- * is served on a later tick, so this is the only point where the session exists. It gives up, ending nothing, when the
- * request is dropped without a session or after TimeoutSeconds.
- */
-static void EndRequestedSessionOnceStarted(double TimeoutSeconds)
+/** The first instance of TestClass in World, or null. */
+static AFunctionalTest* FindFunctionalTestInstance(UWorld* World, const UClass* TestClass)
 {
-    const double Deadline = FPlatformTime::Seconds() + TimeoutSeconds;
-    FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([Deadline](float) -> bool
+    if (!World || !TestClass)
     {
-        if (!GEditor)
+        return nullptr;
+    }
+    for (TActorIterator<AFunctionalTest> It(World); It; ++It)
+    {
+        if (It->GetClass() == TestClass)
         {
-            return false;
+            return *It;
         }
-        if (GEditor->IsPlayingSessionInEditor())
-        {
-            UE_LOG(LogTemp, Display, TEXT("run_functional_test_in_pie: ending the Simulate session it started (auto_stop_pie)."));
-            GEditor->RequestEndPlayMap();
-            return false;
-        }
-        // Still queued: wait for the editor to serve it; dropped or too late: nothing of ours to end.
-        return GEditor->IsPlaySessionRequestQueued() && FPlatformTime::Seconds() < Deadline;
-    }));
+    }
+    return nullptr;
 }
 
-// MCP:run_functional_test_in_pie - Place one instance of a Functional Test Blueprint class in the editor level (unless one is already there) and, when no Play-in-Editor session is running or starting, request a Simulate-in-Editor session. It does not run the test (the engine's functional testing manager does, in a Play session with a player) and cannot wait for it: verdict comes from the test actor's own Result, read in the running session's world -- pass, fail, running, not_run (it has not run) or unknown (it finished with Default) -- and is not_run when no session was running at the call, since the requested one starts only after the reply (pie_requested true, pie_started usually false). With auto_stop_pie (default) the session this call requests is ended as soon as it has started; with false it keeps running until stop_play_in_editor. A session that was already running or starting is never ended. Call it again while a session runs to read the test's state; confirm the session with is_play_in_editor_active. The placed actor stays in the level, unsaved and with no undo step. Create the test first with create_functional_test; a class that is not found, is not a Functional Test, or whose name matches several loaded classes is an error.
+/**
+ * Ends the functional test run with its verdict: removes the actor it spawned into the session unless keep_actor,
+ * ends the session only when this run requested it (and auto_stop_pie), and keeps the outcome for
+ * get_functional_test_status.
+ */
+static void FinishFunctionalTestRun(const TCHAR* Verdict, const FString& Message)
+{
+    FFunctionalTestRun& Run = GFunctionalTestRun;
+    if (!Run.bRunning)
+    {
+        return;
+    }
+    Run.Verdict = Verdict;
+    Run.Message = Message;
+    if (Run.Message.IsEmpty() && Run.bRunCalled)
+    {
+        // What the test itself logged last (FinishTest's message, an assertion), when nothing more precise is known.
+        const TArray<FMcpLogEntry> Lines = GMCP_LogCapture.Peek(Run.LogCursor, FString(), FString(), TEXT("LogFunctionalTest"),
+            FUEAgentLogCaptureDevice::MaxLines);
+        if (Lines.Num() > 0)
+        {
+            Run.Message = Lines.Last().Message;
+        }
+    }
+    if (AFunctionalTest* Test = Run.SessionActor.Get())
+    {
+        Run.TestResult = LexToString(Test->Result);
+        if (Run.bSpawnedInSession && !Run.bKeepActor && IsValid(Test))
+        {
+            Test->Destroy();
+        }
+    }
+    if (Run.bStartedSession && Run.bAutoStopPie && GEditor)
+    {
+        if (GEditor->PlayWorld)
+        {
+            UE_LOG(LogTemp, Display, TEXT("run_functional_test_in_pie: ending the Play session it started (auto_stop_pie)."));
+            GEditor->RequestEndPlayMap();
+            Run.bPieStopped = true;
+        }
+        else if (GEditor->IsPlaySessionRequestQueued())
+        {
+            GEditor->CancelRequestPlaySession();
+            Run.bPieStopped = true;
+        }
+    }
+    Run.ElapsedSeconds = FPlatformTime::Seconds() - Run.StartSeconds;
+    Run.bRunning = false;
+    if (Run.Ticker.IsValid())
+    {
+        FTSTicker::RemoveTicker(Run.Ticker);
+        Run.Ticker.Reset();
+    }
+    UE_LOG(LogTemp, Display, TEXT("run_functional_test_in_pie: '%s' ended after %.1f s: %s%s."), *Run.TestPath, Run.ElapsedSeconds,
+        *Run.Verdict, Run.bTimedOut ? TEXT(" (timed out)") : TEXT(""));
+}
+
+/**
+ * Drives run_functional_test_in_pie once per engine tick: waits for the Play session to have begun play, finds the
+ * test instance in its world (or spawns one there), calls RunTest, then reads the actor until it stops running or the
+ * timeout passes.
+ */
+static bool TickFunctionalTestRun(float /*DeltaTime*/)
+{
+    FFunctionalTestRun& Run = GFunctionalTestRun;
+    if (!Run.bRunning || !GEditor)
+    {
+        Run.Ticker.Reset();
+        return false;
+    }
+    // Clearing the handle first: FinishFunctionalTestRun must not remove the ticker it is called from.
+    auto Finish = [&Run](const TCHAR* Verdict, const FString& Message) { Run.Ticker.Reset(); FinishFunctionalTestRun(Verdict, Message); };
+    const double Elapsed = FPlatformTime::Seconds() - Run.StartSeconds;
+    UWorld* PlayWorld = GEditor->PlayWorld;
+
+    if (!Run.bRunCalled)
+    {
+        if (PlayWorld && PlayWorld->HasBegunPlay())
+        {
+            // AFunctionalTest::RunTest casts the framework's current test to a functional test: with another kind of
+            // test running, that cast is wrong.
+            if (GIsAutomationTesting)
+            {
+                Finish(TEXT("not_run"), TEXT("An automation test started outside run_functional_test_in_pie is running, and a functional test cannot run beside it. Nothing ran."));
+                return false;
+            }
+            AFunctionalTest* Test = FindFunctionalTestInstance(PlayWorld, Run.TestClass.Get());
+            if (!Test && Run.TestClass.IsValid())
+            {
+                FActorSpawnParameters SpawnParams;
+                SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+                Test = PlayWorld->SpawnActor<AFunctionalTest>(Run.TestClass.Get(), FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams);
+                Run.bSpawnedInSession = Test != nullptr;
+            }
+            if (!Test)
+            {
+                Finish(TEXT("not_run"), TEXT("The test could not be placed in the Play session's world. Nothing ran."));
+                return false;
+            }
+            Run.SessionActor = Test;
+            Run.LogCursor = GMCP_LogCapture.GetLastSequenceId();
+            Run.bRunCalled = true;
+            if (!Test->RunTest())
+            {
+                Finish(TEXT("fail"), TEXT("The test refused to start (AFunctionalTest::RunTest returned false)."));
+                return false;
+            }
+            return true;
+        }
+        if (!PlayWorld && !GEditor->IsPlaySessionRequestQueued())
+        {
+            Finish(TEXT("not_run"), Run.bStartedSession
+                ? TEXT("The editor dropped the Play request without starting a session (see the output log). Nothing ran.")
+                : TEXT("The Play session ended before the test ran."));
+            return false;
+        }
+        if (Elapsed > Run.TimeoutSeconds)
+        {
+            Run.bTimedOut = true;
+            Finish(TEXT("not_run"), TEXT("The Play session did not begin play within timeout_seconds. Nothing ran."));
+            return false;
+        }
+        return true;
+    }
+
+    AFunctionalTest* Test = Run.SessionActor.Get();
+    if (!Test || !PlayWorld)
+    {
+        Finish(TEXT("fail"), TEXT("The Play session ended, or the test actor was destroyed, before the test finished."));
+        return false;
+    }
+    if (!Test->IsRunning())
+    {
+        // The test's own TimeLimit ran out: it finished itself with TimesUpResult.
+        Run.bTimedOut = Test->TimeLimit > 0.f && Test->TotalTime > Test->TimeLimit && Test->Result == Test->TimesUpResult;
+        Finish(FinishedFunctionalTestVerdict(*Test), FString());
+        return false;
+    }
+    if (Elapsed > Run.TimeoutSeconds)
+    {
+        Run.bTimedOut = true;
+        const FString Message = FString::Printf(TEXT("The test did not finish within timeout_seconds (%.0f s) and was finished as Failed."), Run.TimeoutSeconds);
+        Test->FinishTest(EFunctionalTestResult::Failed, Message);
+        Finish(TEXT("fail"), Message);
+        return false;
+    }
+    return true;
+}
+
+/** The state get_functional_test_status answers, also after the run ended. */
+static TSharedPtr<FJsonObject> FunctionalTestStatus()
+{
+    const FFunctionalTestRun& Run = GFunctionalTestRun;
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetBoolField(TEXT("has_test"), Run.bHasTest);
+    Data->SetBoolField(TEXT("running"), Run.bRunning);
+    Data->SetStringField(TEXT("test_asset_path"), Run.TestPath);
+    Data->SetStringField(TEXT("verdict"), Run.bHasTest ? Run.Verdict : FString(TEXT("not_run")));
+    FString TestResult = Run.TestResult;
+    if (Run.bRunning)
+    {
+        if (const AFunctionalTest* Test = Run.SessionActor.Get())
+        {
+            TestResult = LexToString(Test->Result);
+        }
+    }
+    Data->SetStringField(TEXT("test_result"), TestResult);
+    Data->SetStringField(TEXT("message"), Run.Message);
+    Data->SetNumberField(TEXT("elapsed_seconds"), Run.bRunning ? FPlatformTime::Seconds() - Run.StartSeconds : Run.ElapsedSeconds);
+    Data->SetNumberField(TEXT("timeout_seconds"), Run.TimeoutSeconds);
+    Data->SetBoolField(TEXT("timed_out"), Run.bTimedOut);
+    Data->SetBoolField(TEXT("canceled"), Run.bCanceled);
+    Data->SetBoolField(TEXT("session_started_by_call"), Run.bStartedSession);
+    Data->SetBoolField(TEXT("pie_stopped"), Run.bPieStopped);
+    Data->SetBoolField(TEXT("test_started"), Run.bRunCalled);
+    return Data;
+}
+
+// MCP:run_functional_test_in_pie - Run a Functional Test Blueprint in a Play-in-Editor session and report its verdict: the call starts it and answers verdict running; get_functional_test_status polls it until running is false, with verdict pass, fail, unknown (it finished with Default) or not_run, and timed_out when it outlived timeout_seconds or its own Time Limit.
+//   @para With no session running, it requests a Play session (with a player, not Simulate), and once that session has begun play it calls RunTest on the test's instance in the play world: the one copied from the editor level, or one it spawns there. A session that was already running is used as it is, with the test spawned into it, and is never ended; one this call requested is ended when the test ends unless auto_stop_pie=false. A session that is still starting is refused: call again once is_play_in_editor_active answers true.
+//   @para The actor spawned into the session is removed when the test ends, so the editor level is left as it was; keep_actor=true instead places the test in the editor level (unsaved, no undo step) before the session starts and keeps it there and in the session. While the test runs, a second test, start_play_in_editor, stop_play_in_editor and load_level are refused naming it, cancel_automation_test stops it, and wait_for_pie_completion must not be called (it blocks the ticks the test needs). Create the test first with create_functional_test; a class that is not found, is not a Functional Test, or whose name matches several loaded classes is an error.
 //   @param test_asset_path - Functional Test Blueprint, as an asset path ("/Game/Tests/BP_FT_PlayerHealth", as create_functional_test returns it), object path or generated-class path ("/Game/Tests/BP_FT_PlayerHealth.BP_FT_PlayerHealth_C"); when none loads, a loaded Functional Test class named exactly like the last path segment (with or without _C) is used.
-//   @param auto_stop_pie - Optional bool (default true): end the Simulate session this call requests as soon as it has started; false leaves it running. A session that was already running is never ended.
-//   @returns { test_asset_path, test_class, verdict: "pass"|"fail"|"running"|"not_run"|"unknown", test_result?, test_in_session, already_in_pie, pie_requested, pie_started, pie_stop_scheduled, spawned, already_in_world, note }
+//   @param auto_stop_pie - Optional bool (default true): end the Play session this call requests once the test has ended; false leaves it running. A session that was already running is never ended.
+//   @param timeout_seconds - Optional number (default 120): a test still running after this many seconds is finished as Failed, with timed_out true.
+//   @param keep_actor - Optional bool (default false): place the test in the editor level and leave it there; by default it only exists in the session.
+//   @returns { test_asset_path, test_class, verdict: "running", test_result?, test_in_session, already_in_pie, pie_requested, pie_started, pie_stop_scheduled, spawned, already_in_world, keep_actor, timeout_seconds, note }
 TSharedPtr<FJsonObject> HandleRunFunctionalTestInPie(
     const TSharedPtr<FJsonObject>& Params)
 {
@@ -1332,6 +1842,23 @@ TSharedPtr<FJsonObject> HandleRunFunctionalTestInPie(
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("test_asset_path"), TestPath)) { return Missing; }
     bool bAutoStopPie = true;
     Params->TryGetBoolField(TEXT("auto_stop_pie"), bAutoStopPie);
+    double TimeoutSeconds = 120.0;
+    Params->TryGetNumberField(TEXT("timeout_seconds"), TimeoutSeconds);
+    if (TimeoutSeconds <= 0.0)
+    {
+        TimeoutSeconds = 120.0;
+    }
+    bool bKeepActor = false;
+    Params->TryGetBoolField(TEXT("keep_actor"), bKeepActor);
+
+    if (TSharedPtr<FJsonObject> Busy = RefuseWhileTestRuns(TEXT("run_functional_test_in_pie")))
+    {
+        return Busy;
+    }
+    if (GIsAutomationTesting)
+    {
+        return mcp_common::MakeErrorReply(TEXT("run_functional_test_in_pie: an automation test started outside UEAgent is running, and a functional test cannot run beside it. Wait for it to finish and call again."));
+    }
 
     FString ResolveError;
     UClass* TestClass = ResolveFunctionalTestClass(TestPath, ResolveError);
@@ -1339,104 +1866,131 @@ TSharedPtr<FJsonObject> HandleRunFunctionalTestInPie(
     {
         return mcp_common::MakeErrorReply(ResolveError);
     }
-
-    ULevelEditorSubsystem* LevelEditorSubsystem = GEditor ? GEditor->GetEditorSubsystem<ULevelEditorSubsystem>() : nullptr;
-    if (!LevelEditorSubsystem)
+    if (!GEditor)
     {
-        return mcp_common::MakeErrorReply(TEXT("Level Editor Subsystem not found"));
+        return mcp_common::MakeErrorReply(TEXT("run_functional_test_in_pie needs the editor (GEditor is null)."));
     }
 
-    // Place one instance of the test in the current editor world. Idempotent: only spawn if no instance already
-    // exists for this class.
+    const bool bSessionRunning = GEditor->PlayWorld != nullptr;
+    if (!bSessionRunning && GEditor->IsPlaySessionRequestQueued())
+    {
+        return mcp_common::MakeErrorReply(TEXT("run_functional_test_in_pie: a Play session is starting and is not yours to change; call again once is_play_in_editor_active answers true, and the test runs in it."));
+    }
+
     UWorld* World = nullptr;
     if (TSharedPtr<FJsonObject> NoWorld = mcp_common::RequireEditorWorld(World)) { return NoWorld; }
+    const bool bAlreadyInWorld = FindFunctionalTestInstance(World, TestClass) != nullptr;
     bool bSpawned = false;
-    bool bAlreadyInWorld = false;
-    for (TActorIterator<AFunctionalTest> It(World); It; ++It)
+    if (bKeepActor && !bAlreadyInWorld)
     {
-        if (It->GetClass() == TestClass)
+        FActorSpawnParameters SpawnParams;
+        SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+        if (!World->SpawnActor<AFunctionalTest>(TestClass, FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams))
         {
-            bAlreadyInWorld = true;
-            break;
-        }
-    }
-    if (!bAlreadyInWorld)
-    {
-        FActorSpawnParameters ParamsSP;
-        ParamsSP.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-        AFunctionalTest* FT = World->SpawnActor<AFunctionalTest>(TestClass, FVector::ZeroVector, FRotator::ZeroRotator, ParamsSP);
-        if (!FT)
-        {
-            return mcp_common::MakeErrorReply(
-                TEXT("Failed to spawn AFunctionalTest instance in editor world"));
+            return mcp_common::MakeErrorReply(TEXT("Failed to spawn the Functional Test in the editor level (keep_actor)."));
         }
         bSpawned = true;
     }
 
+    bool bRequested = false;
+    if (!bSessionRunning)
+    {
+        FRequestPlaySessionParams Request;
+        Request.WorldType = EPlaySessionWorldType::PlayInEditor;
+        FLevelEditorModule& LevelEditor = FModuleManager::GetModuleChecked<FLevelEditorModule>(TEXT("LevelEditor"));
+        TSharedPtr<IAssetViewport> HostViewport = LevelEditor.GetFirstActiveViewport();
+        if (HostViewport.IsValid())
+        {
+            Request.DestinationSlateViewport = HostViewport;
+        }
+        GEditor->RequestPlaySession(Request);
+        bRequested = GEditor->IsPlaySessionRequestQueued() || GEditor->IsPlayingSessionInEditor();
+        if (!bRequested)
+        {
+            return mcp_common::MakeErrorReply(TEXT("run_functional_test_in_pie: the editor did not take the Play request; no session started and nothing ran (see the output log)."));
+        }
+    }
+
+    GFunctionalTestRun = FFunctionalTestRun();
+    FFunctionalTestRun& Run = GFunctionalTestRun;
+    Run.bHasTest = true;
+    Run.bRunning = true;
+    Run.TestPath = TestPath;
+    Run.TestClass = TestClass;
+    Run.StartSeconds = FPlatformTime::Seconds();
+    Run.TimeoutSeconds = TimeoutSeconds;
+    Run.bStartedSession = bRequested;
+    Run.bAutoStopPie = bAutoStopPie;
+    Run.bKeepActor = bKeepActor;
+    Run.Ticker = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateStatic(&TickFunctionalTestRun));
+
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("test_asset_path"), TestPath);
     Data->SetStringField(TEXT("test_class"), TestClass->GetPathName());
+    Data->SetStringField(TEXT("verdict"), TEXT("running"));
+    const AFunctionalTest* SessionTest = bSessionRunning ? FindFunctionalTestInstance(GEditor->PlayWorld, TestClass) : nullptr;
+    Data->SetBoolField(TEXT("test_in_session"), SessionTest != nullptr);
+    if (SessionTest)
+    {
+        // Its state before this run starts it again.
+        Data->SetStringField(TEXT("test_result"), LexToString(SessionTest->Result));
+    }
+    Data->SetBoolField(TEXT("already_in_pie"), bSessionRunning);
+    Data->SetBoolField(TEXT("pie_requested"), bRequested);
+    Data->SetBoolField(TEXT("pie_started"), GEditor->PlayWorld != nullptr);
+    Data->SetBoolField(TEXT("pie_stop_scheduled"), bRequested && bAutoStopPie);
     Data->SetBoolField(TEXT("spawned"), bSpawned);
     Data->SetBoolField(TEXT("already_in_world"), bAlreadyInWorld);
+    Data->SetBoolField(TEXT("keep_actor"), bKeepActor);
+    Data->SetNumberField(TEXT("timeout_seconds"), TimeoutSeconds);
+    Data->SetStringField(TEXT("note"), bRequested
+        ? TEXT("A Play session was requested; the test runs once it has begun play, after this reply. Poll get_functional_test_status until running is false.")
+        : TEXT("The test runs in the Play session already running, which this call does not end. Poll get_functional_test_status until running is false."));
+    return mcp_common::MakeOkReply(Data);
+}
 
-    // A session that is running or starting belongs to whoever started it: it is read, never started or ended here.
-    const bool bSessionRunning = GEditor->IsPlayingSessionInEditor();
-    const bool bSessionQueued = GEditor->IsPlaySessionRequestQueued();
-    Data->SetBoolField(TEXT("already_in_pie"), bSessionRunning || bSessionQueued);
-    if (bSessionRunning || bSessionQueued)
+// MCP:get_functional_test_status - The state of the functional test run_functional_test_in_pie started, without changing anything: running, then its verdict (pass, fail, unknown or not_run), the actor's test_result, the last message it logged, elapsed_seconds, timed_out, and pie_stopped when the session this run requested was ended. has_test is false when no functional test has run this editor session. Poll it after run_functional_test_in_pie.
+//   @returns { has_test, running, test_asset_path, verdict: "running"|"pass"|"fail"|"unknown"|"not_run"|"canceled", test_result, message, elapsed_seconds, timeout_seconds, timed_out, canceled, session_started_by_call, pie_stopped, test_started }
+TSharedPtr<FJsonObject> HandleGetFunctionalTestStatus(const TSharedPtr<FJsonObject>& Params)
+{
+    return mcp_common::MakeOkReply(FunctionalTestStatus());
+}
+
+// MCP:cancel_automation_test - Stop the test that run_automation_test or run_functional_test_in_pie left running: an automation test is stopped with its entries so far (get_automation_test_results answers verdict canceled), a functional test is finished as Failed and its session ended when the run requested it (get_functional_test_status answers verdict canceled). With nothing running it changes nothing and answers was_running false, so a repeated call is safe.
+//   @returns { canceled, was_running, test_name, kind: "automation"|"functional"|"" }
+//   @hints idempotent
+TSharedPtr<FJsonObject> HandleCancelAutomationTest(const TSharedPtr<FJsonObject>& Params)
+{
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    if (GRunningAutomationTest.bActive)
     {
-        const AFunctionalTest* SessionTest = nullptr;
-        if (UWorld* PlayWorld = GEditor->PlayWorld)
-        {
-            for (TActorIterator<AFunctionalTest> It(PlayWorld); It; ++It)
-            {
-                if (It->GetClass() == TestClass)
-                {
-                    SessionTest = *It;
-                    break;
-                }
-            }
-        }
-        Data->SetBoolField(TEXT("pie_requested"), false);
-        Data->SetBoolField(TEXT("pie_started"), bSessionRunning);
-        Data->SetBoolField(TEXT("pie_stop_scheduled"), false);
-        Data->SetBoolField(TEXT("test_in_session"), SessionTest != nullptr);
-        if (SessionTest)
-        {
-            Data->SetStringField(TEXT("verdict"), FunctionalTestVerdict(*SessionTest));
-            Data->SetStringField(TEXT("test_result"), LexToString(SessionTest->Result));
-            Data->SetStringField(TEXT("note"), TEXT("Read from the test actor in the running session, which was neither started nor ended by this call."));
-        }
-        else
-        {
-            Data->SetStringField(TEXT("verdict"), TEXT("not_run"));
-            Data->SetStringField(TEXT("note"), bSessionRunning
-                ? TEXT("The running session has no instance of this test (a session copies the level when it starts, so a test placed after that is not in it); it was neither started nor ended by this call.")
-                : TEXT("A session is starting; call again once is_play_in_editor_active answers true to read the test in it. It was neither started nor ended by this call."));
-        }
+        Data->SetStringField(TEXT("test_name"), GRunningAutomationTest.TestName);
+        Data->SetStringField(TEXT("kind"), TEXT("automation"));
+        FinishRunningAutomationTest(EAutomationTestEnd::Canceled);
+        Data->SetBoolField(TEXT("canceled"), true);
+        Data->SetBoolField(TEXT("was_running"), true);
         return mcp_common::MakeOkReply(Data);
     }
-
-    // No session: request one. The request is served on a later tick (and needs a level viewport to simulate in).
-    LevelEditorSubsystem->EditorPlaySimulate();
-    const bool bRequested = GEditor->IsPlaySessionRequestQueued() || GEditor->IsPlayingSessionInEditor();
-    const bool bStopScheduled = bRequested && bAutoStopPie;
-    if (bStopScheduled)
+    if (GFunctionalTestRun.bRunning)
     {
-        EndRequestedSessionOnceStarted(/*TimeoutSeconds=*/30.0);
+        Data->SetStringField(TEXT("test_name"), GFunctionalTestRun.TestPath);
+        Data->SetStringField(TEXT("kind"), TEXT("functional"));
+        const FString Message = TEXT("cancel_automation_test stopped the test before it finished.");
+        if (AFunctionalTest* Test = GFunctionalTestRun.SessionActor.Get())
+        {
+            Test->FinishTest(EFunctionalTestResult::Failed, Message);
+        }
+        GFunctionalTestRun.bCanceled = true;
+        FinishFunctionalTestRun(TEXT("canceled"), Message);
+        Data->SetBoolField(TEXT("canceled"), true);
+        Data->SetBoolField(TEXT("was_running"), true);
+        return mcp_common::MakeOkReply(Data);
     }
-    Data->SetBoolField(TEXT("pie_requested"), bRequested);
-    Data->SetBoolField(TEXT("pie_started"), GEditor->IsPlayingSessionInEditor());
-    Data->SetBoolField(TEXT("pie_stop_scheduled"), bStopScheduled);
-    Data->SetBoolField(TEXT("test_in_session"), false);
-    Data->SetStringField(TEXT("verdict"), TEXT("not_run"));
-    Data->SetStringField(TEXT("note"), bRequested
-        ? (bStopScheduled
-            ? TEXT("A Simulate session was requested; the editor serves it after this reply (confirm with is_play_in_editor_active) and it is ended as soon as it has started (auto_stop_pie). Nothing ran during this call.")
-            : TEXT("A Simulate session was requested; the editor serves it after this reply (confirm with is_play_in_editor_active) and it keeps running until stop_play_in_editor. Nothing ran during this call."))
-        : TEXT("The editor did not take the Simulate request (no active level viewport to simulate in); no session was started."));
-    return mcp_common::MakeOutcomeReply(Data, bRequested, bRequested ? FString()
-        : FString(TEXT("run_functional_test_in_pie: the editor did not take the Simulate request (no active level viewport); the test actor was placed but no session started.")));
+    Data->SetBoolField(TEXT("canceled"), false);
+    Data->SetBoolField(TEXT("was_running"), false);
+    Data->SetStringField(TEXT("test_name"), FString());
+    Data->SetStringField(TEXT("kind"), FString());
+    return mcp_common::MakeOkReply(Data);
 }
 
 // MCP:get_output_log_lines - Read the single per-editor-session log buffer UEAgent attaches to GLog (general editor output, not PIE-only -- Serialize() captures every category/verbosity that passes through GLog, regardless of PIE state; usable for PIE Functional Test / wait_for_pie_completion orchestration too). NON-DESTRUCTIVE cursor read (since_sequence_id, same idiom as poll_gameplay_messages), structured entries. Supports all three filters (message text, verbosity level, category).
@@ -1498,10 +2052,12 @@ TSharedPtr<FJsonObject> HandleGetOutputLogLines(
 
 const McpCommandFamilies::FRegistrar Registration =
 {
+    { TEXT("cancel_automation_test"), &HandleCancelAutomationTest },
     { TEXT("create_functional_test"), &HandleCreateFunctionalTest },
     { TEXT("execute_python"), &HandleExecutePython },
     { TEXT("execute_python_file"), &HandleExecutePythonFile },
     { TEXT("get_automation_test_results"), &HandleGetAutomationTestResults },
+    { TEXT("get_functional_test_status"), &HandleGetFunctionalTestStatus },
     { TEXT("get_output_log_lines"), &HandleGetOutputLogLines },
     { TEXT("get_python_status"), &HandleGetPythonStatus },
     { TEXT("list_automation_tests"), &HandleListAutomationTests },

@@ -15,6 +15,8 @@ script started: use a throwaway project for --launch. Checks:
     same answer as a direct call), the closest names for an unknown tool;
   - the shipped skills as prompts and resources: one prompt per skill, the tool map as ueagent://guide, every
     listed resource readable, and the errors for an unknown prompt or resource;
+  - tests and Play-in-Editor control with nothing running: pause_play_in_editor, cancel_automation_test,
+    is_play_in_editor_active's is_paused;
   - edits: one undo step per call, an execute_batch as one step, undo/redo and the undo-state tools,
     mcp.UndoStepPerCall, undo barriers set and removed, an impulse on a body that does not simulate, and a
     level load in the middle of a call;
@@ -512,6 +514,10 @@ def check_read_only(s: Session, catalog: dict) -> None:
     cpp = {"get_cpp_compile_status", "start_cpp_compile", "create_cpp_class", "set_live_coding_enabled"}
     s.check("of the C++ tools only get_cpp_compile_status is listed", cpp & set(full) == {"get_cpp_compile_status"},
             sorted(cpp & set(full)))
+    tests = {"get_functional_test_status", "pause_play_in_editor", "resume_play_in_editor", "step_play_in_editor_frame",
+             "cancel_automation_test"}
+    s.check("of the test and PIE control tools only get_functional_test_status is listed",
+            tests & set(full) == {"get_functional_test_status"}, sorted(tests & set(full)))
     renamed = next((old for old, new in catalog.get("renamed", {}).items() if new not in allowed), "")
     retired = next((c["name"] for d in catalog["domains"] for c in d["commands"] if c.get("retired")
                     and not (c.get("annotations") or {}).get("readOnlyHint")), "")
@@ -533,6 +539,20 @@ def check_read_only(s: Session, catalog: dict) -> None:
     s.check("a read runs", not is_error and reply.get("success") is not False, reply)
     is_error, reply = s.call("capture_viewport", {"width": 64, "height": 64})
     s.check("a capture is not refused", not refusal_of(reply), reply if refusal_of(reply) else "")
+
+
+def check_tests_and_pie(s: Session) -> None:
+    print("== tests and Play-in-Editor control, with nothing running")
+    _, paused = s.call("pause_play_in_editor")
+    data = paused.get("data", {})
+    s.check("pause_play_in_editor without PIE answers pie_active false", paused.get("success") is True
+            and data.get("pie_active") is False and data.get("paused") is False, paused)
+    _, canceled = s.call("cancel_automation_test")
+    data = canceled.get("data", {})
+    s.check("cancel_automation_test with no test answers was_running false", canceled.get("success") is True
+            and data.get("was_running") is False and data.get("canceled") is False, canceled)
+    _, active = s.call("is_play_in_editor_active")
+    s.check("is_play_in_editor_active reports is_paused", active.get("data", {}).get("is_paused") is False, active)
 
 
 def check_prompts(s: Session) -> None:
@@ -618,6 +638,7 @@ def main() -> int:
             check_edits(session)
             check_images(session)
             check_source_control(session)
+            check_tests_and_pie(session)
             check_policy(session, catalog)
             editor.kill()
             editor.wait(timeout=120)

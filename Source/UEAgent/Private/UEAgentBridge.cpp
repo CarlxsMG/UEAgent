@@ -87,6 +87,7 @@
 #include "Mcp/McpHttpServer.h"               // native MCP server (Streamable HTTP)
 #include "Mcp/McpToolCatalog.h"              // tools/list + rotation normalization
 #include "Mcp/McpPreconditions.h"            // refusals that prevent a crash
+#include "Commands/Editor/UEAgentAutomationCommands.h" // DescribeRunningTest: the test refusal comes first
 #include "Mcp/McpReadback.h"                 // READBACK contract
 #include "Mcp/McpToolPolicy.h"               // the user's tool permissions
 #include "Mcp/McpPy.h"
@@ -800,7 +801,18 @@ void UUEAgentBridge::OnEndPIE(bool /*bIsSimulating*/)
 TSharedPtr<FJsonObject> UUEAgentBridge::CheckPIEOwnershipGuard(const FString& CommandType, const TSharedPtr<FJsonObject>& Params, const FString& SessionId)
 {
     const bool bIsStart = (CommandType == TEXT("start_play_in_editor"));
-    const bool bIsStop  = (CommandType == TEXT("stop_play_in_editor"));
+    // Pausing, resuming or stepping a session changes it for whoever plays it, like stopping it.
+    const bool bIsStop  = (CommandType == TEXT("stop_play_in_editor")) || (CommandType == TEXT("pause_play_in_editor"))
+        || (CommandType == TEXT("resume_play_in_editor")) || (CommandType == TEXT("step_play_in_editor_frame"));
+    // run_functional_test_in_pie starts a session when none runs, and that session is the caller's.
+    if (CommandType == TEXT("run_functional_test_in_pie"))
+    {
+        if (GEditor && !GEditor->PlayWorld && !GEditor->IsPlaySessionRequestQueued())
+        {
+            PendingPIEOwner = SessionId;
+        }
+        return nullptr;
+    }
     if (!bIsStart && !bIsStop)
     {
         return nullptr; // not a guarded command -> proceed to normal dispatch
@@ -873,13 +885,13 @@ TSharedPtr<FJsonObject> UUEAgentBridge::CheckPIEOwnershipGuard(const FString& Co
     if (bOwnedByOther && !bForce)
     {
         return MakeRefusal(FString::Printf(
-            TEXT("The running Play-in-Editor session is owned by another session (or was started manually) [pie_owner=%s]. Refusing to stop it from [requester=%s]. Pass force=true to override."),
-            *Display(PIEOwnerSessionId), *Display(SessionId)));
+            TEXT("The running Play-in-Editor session is owned by another session (or was started manually) [pie_owner=%s]. Refusing %s from [requester=%s]. Pass force=true to override."),
+            *Display(PIEOwnerSessionId), *CommandType, *Display(SessionId)));
     }
     if (bForce && bOwnedByOther)
     {
-        UE_LOG(LogTemp, Warning, TEXT("[MCP] stop_play_in_editor force-override: session %s stopping PIE owned by %s"),
-            *Display(SessionId), *Display(PIEOwnerSessionId));
+        UE_LOG(LogTemp, Warning, TEXT("[MCP] %s force-override: session %s acting on PIE owned by %s"),
+            *CommandType, *Display(SessionId), *Display(PIEOwnerSessionId));
     }
     return nullptr; // owner (or force, or no PIE active) -> let the handler run
 }
@@ -1325,7 +1337,12 @@ TSharedPtr<FJsonObject> UUEAgentBridge::DispatchSingleCommand(const FString& Req
             TGuardValue<int32> Exempt(PolicyExemptDepth, PolicyExemptDepth + 1);
             return McpPreconditions::PayloadFromEnvelope(DispatchSingleCommand(ProbeCommand, ProbeParams));
         };
-        if (const TOptional<McpPreconditions::FRefusal> Refusal = McpPreconditions::Check(CommandType, Params, Probe))
+        // While a test runs, these handlers refuse before doing anything and name the test, which is the refusal that
+        // tells the caller what to do; a precondition would answer about the test's own Play session instead.
+        const bool bRunningTestRefuses = (CommandType == TEXT("start_play_in_editor") || CommandType == TEXT("stop_play_in_editor")
+            || CommandType == TEXT("load_level")) && !UEAgentAutomationCommands::DescribeRunningTest().IsEmpty();
+        if (const TOptional<McpPreconditions::FRefusal> Refusal = bRunningTestRefuses ? TOptional<McpPreconditions::FRefusal>()
+            : McpPreconditions::Check(CommandType, Params, Probe))
         {
             UE_LOG(LogTemp, Warning, TEXT("[MCP] '%s' refused before running (%s)"), *CommandType, *Refusal->Check);
             return McpPreconditions::MakeRefusalEnvelope(CommandType, *Refusal);
