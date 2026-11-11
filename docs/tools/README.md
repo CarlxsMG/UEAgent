@@ -2,7 +2,7 @@
 
 # Tool reference
 
-1549 tools in 55 domains. Every tool also describes itself over MCP (`tools/list`, or `describe_tool` for a tool the client does not list: see [tool lists](../clients.md#tool-lists)); this reference is the same catalog, readable.
+1558 tools in 56 domains. Every tool also describes itself over MCP (`tools/list`, or `describe_tool` for a tool the client does not list: see [tool lists](../clients.md#tool-lists)); this reference is the same catalog, readable.
 
 The 11 core tools, which every client lists by default: `add_graph_node`, `compile_blueprint`, `connect_pins`, `execute_python`, `find_assets_by_name`, `get_graph_nodes`, `get_object_info`, `save_asset`, `set_pin_default_value`, `set_properties`, `undo`.
 
@@ -34,7 +34,7 @@ The packs, which `enable_toolset` adds by name:
 | [Documentation](Documentation.md) | 3 | Documentation generated for an asset, a Blueprint or the whole project |
 | [Editor](Editor.md) | 96 | The editor itself: actors (spawn, select, copy, transform, delete), levels, saving, undo and transactions, Python, console commands and CVars, tests, enums and structs, screenshots, logs, media, and asset housekeeping (delete, export, migrate, consolidate, redirectors, unused and duplicate assets) |
 | [Engine](Engine.md) | 50 | Niagara systems and emitters (modules, renderers, data interfaces, events, simulation stages, user parameters), and the engine's and the editor's status |
-| [Export](Export.md) | 12 | Movie Render Queue jobs, exporting assets, Blueprints and level sections, asset reports, async loading and source control status |
+| [Export](Export.md) | 11 | Movie Render Queue jobs, exporting assets, Blueprints and level sections, asset reports and async loading |
 | [GameFeatures](GameFeatures.md) | 5 | Game Feature plugins: their state, activating, deactivating and unloading them |
 | [GameFramework](GameFramework.md) | 5 | Game mode classes and overrides, player starts and spawn points |
 | [GameplayAbilities](GameplayAbilities.md) | 44 | The Gameplay Ability System: abilities, gameplay effects with their modifiers and components, attribute sets, gameplay cues, ability system components and gameplay events |
@@ -64,6 +64,7 @@ The packs, which `enable_toolset` adds by name:
 | [Replication](Replication.md) | 1 | An actor's replication settings |
 | [SaveGame](SaveGame.md) | 9 | Save game slots: saving, loading, listing and deleting, and serializing actor state |
 | [SmartObjects](SmartObjects.md) | 26 | Smart Object definitions, slots, behaviors, tags and annotations, and claiming and using them |
+| [SourceControl](SourceControl.md) | 10 | Revision control through the editor's provider (Perforce, Git...): the connection, file status and local changes, checkout, add, revert, submit and file history |
 | [StateTree](StateTree.md) | 57 | State Trees: states, tasks, transitions and conditions, evaluators, considerations, parameters and bindings, compiling and validating |
 | [Subsystem](Subsystem.md) | 2 | Engine and local player subsystem instances |
 | [SubsystemAuthoring](SubsystemAuthoring.md) | 3 | External subsystems: listing, activating and deactivating them |

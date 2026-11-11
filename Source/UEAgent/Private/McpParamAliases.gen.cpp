@@ -347,6 +347,9 @@ static const TCHAR* const GRows[] =
     TEXT("list_scripted_action_utilities"),
         TEXT("asset_path"), TEXT("path"),
         nullptr,
+    TEXT("list_source_control_changes"),
+        TEXT("asset_path"), TEXT("path"),
+        nullptr,
     TEXT("list_structs"),
         TEXT("pattern"), TEXT("name_pattern"),
         nullptr,
@@ -657,7 +660,7 @@ static const TMap<FName, TArray<FAlias>>& GetMap()
     static const TMap<FName, TArray<FAlias>> Map = []
     {
         TMap<FName, TArray<FAlias>> Out;
-        Out.Reserve(206);
+        Out.Reserve(207);
         const TCHAR* const* Cursor = GRows;
         while (*Cursor)
         {
@@ -694,4 +697,4 @@ TConstArrayView<FAlias> For(FName CommandName)
 
 } // namespace McpParamAliases
 
-// 206 commands / 229 pairs.
+// 207 commands / 230 pairs.

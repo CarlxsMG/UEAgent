@@ -127,6 +127,7 @@ static const FRow GRows[] =
     { TEXT("reorder_widget_child"), EReason::Compiles, TEXT("UI/UEAgentWidgetCommands.cpp SaveWidgetBlueprint: FKismetEditorUtilities::CompileBlueprint") },
     { TEXT("reparent_blueprint"), EReason::Compiles, TEXT("Blueprint/UEAgentReparentCommands.cpp ApplyReparentCore: FKismetEditorUtilities::CompileBlueprint") },
     { TEXT("reparent_widget"), EReason::Compiles, TEXT("UI/UEAgentWidgetCommands.cpp SaveWidgetBlueprint: FKismetEditorUtilities::CompileBlueprint") },
+    { TEXT("revert_files"), EReason::Saves, TEXT("reloads the reverted packages from disk, under the running PIE world that may reference them") },
     { TEXT("save_all"), EReason::Saves, TEXT("same engine guard, over every dirty package at once") },
     { TEXT("save_asset"), EReason::Saves, TEXT("Editor.AllowSavingAssetsDuringPIE=0 refuses before trying; saved:false came back as status:success") },
     { TEXT("save_level"), EReason::Saves, TEXT("same engine guard; save_level also duplicates the world and can leave it orphaned in memory") },
@@ -170,6 +171,7 @@ static const FRow GRows[] =
     { TEXT("set_widget_property"), EReason::Compiles, TEXT("UI/UEAgentWidgetCommands.cpp SaveWidgetBlueprint: FKismetEditorUtilities::CompileBlueprint") },
     { TEXT("set_widget_slot_properties"), EReason::Compiles, TEXT("UI/UEAgentWidgetCommands.cpp SaveWidgetBlueprint: FKismetEditorUtilities::CompileBlueprint") },
     { TEXT("split_blueprint_pin"), EReason::Reinstances, TEXT("Blueprint/UEAgentGraphCommands.cpp HandleSplitBlueprintPin: FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified") },
+    { TEXT("start_source_control_submit"), EReason::Saves, TEXT("submits the files on disk, which PIE edits do not reach and its save guard keeps unsaved") },
     { TEXT("unbind_widget_from_viewmodel"), EReason::Compiles, TEXT("UI/UEAgentUMGMVVMCommands.cpp SaveWidgetBlueprint: FKismetEditorUtilities::CompileBlueprint") },
     { TEXT("verify_reparent_success"), EReason::Compiles, TEXT("Analysis/UEAgentAnalysisCommands.cpp HandleVerifyReparentSuccess: FKismetEditorUtilities::CompileBlueprint") },
 };

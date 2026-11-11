@@ -14,7 +14,7 @@
 // that says to stop PIE. `force: true` in the params bypasses it -- the same valve
 // the bridge's PIE ownership guard already uses.
 //
-// Coverage: 147 commands (143 derived from the C++, 4 curated).
+// Coverage: 149 commands (143 derived from the C++, 6 curated).
 #pragma once
 
 #include "CoreMinimal.h"

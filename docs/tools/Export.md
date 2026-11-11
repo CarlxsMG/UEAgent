@@ -2,7 +2,7 @@
 
 # Export
 
-12 tools for Movie Render Queue jobs, exporting assets, Blueprints and level sections, asset reports, async loading and source control status.
+11 tools for Movie Render Queue jobs, exporting assets, Blueprints and level sections, asset reports and async loading.
 
 Back to the [index](README.md).
 
@@ -118,16 +118,6 @@ List the jobs in the editor's Movie Render Queue right now (the queue of this ed
 No parameters.
 
 **Returns:** `{ jobs: [{ job_name: string, sequence: string, map: string, enabled: bool, setting_count: number }], queue_job_count: number }`
-
-## `get_source_control_status`
-
-*Read-only.*
-
-Report the editor revision-control connection, read-only: provider name, whether revision control is enabled and the provider available, and its status_text. Says nothing about individual files or their checkout state, and never connects or changes settings.
-
-No parameters.
-
-**Returns:** `{ provider, enabled, available, status_text }`
 
 ## `render_sequence_to_movie`
 

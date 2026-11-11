@@ -55,7 +55,7 @@ static const TCHAR* const GProtocolKeys[] =
 // names and a nullptr terminator; one extra nullptr closes the array. Walked
 // exactly ONCE (see GetTable) into a static map -- nothing is rebuilt per call,
 // and one array of literals is far cheaper object code than one Add() per
-// command (1791 of them).
+// command (1800 of them).
 //
 // A command with an EMPTY param set is still in the table (name + terminator):
 // "this command takes no params" is a real answer, and different from "I do not
@@ -288,6 +288,9 @@ static const TCHAR* const GFlatCommandParams[] =
         TEXT("interior_value"), TEXT("magnitude"), TEXT("mask_condition"), TEXT("max_range"),
         TEXT("min_range"), TEXT("node_type"), TEXT("period"), TEXT("position"), TEXT("radius"),
         TEXT("target"), TEXT("wave_function"), TEXT("wavelength"),
+    nullptr,
+    TEXT("add_files_to_source_control"),
+        TEXT("asset_paths"), TEXT("files"),
     nullptr,
     TEXT("add_foliage_instances"),
         TEXT("foliage_type_path"), TEXT("transforms"),
@@ -903,6 +906,8 @@ static const TCHAR* const GFlatCommandParams[] =
     TEXT("cancel_render_job"),
         TEXT("job_name"),
     nullptr,
+    TEXT("cancel_source_control_submit"),
+    nullptr,
     TEXT("cancel_transaction"),
     nullptr,
     TEXT("capture_high_res_screenshot"),
@@ -930,6 +935,9 @@ static const TCHAR* const GFlatCommandParams[] =
     nullptr,
     TEXT("check_blueprint_errors"),
         TEXT("blueprint_path"),
+    nullptr,
+    TEXT("checkout_files"),
+        TEXT("asset_paths"), TEXT("files"),
     nullptr,
     TEXT("claim_smart_object"),
         TEXT("actor_label"), TEXT("definition_path"),
@@ -2786,7 +2794,15 @@ static const TCHAR* const GFlatCommandParams[] =
     TEXT("get_soundfield_submix_info"),
         TEXT("submix_path"),
     nullptr,
+    TEXT("get_source_control_file_status"),
+        TEXT("asset_paths"), TEXT("files"), TEXT("force_update"),
+    nullptr,
+    TEXT("get_source_control_history"),
+        TEXT("asset_path"), TEXT("file"), TEXT("max_results"),
+    nullptr,
     TEXT("get_source_control_status"),
+    nullptr,
+    TEXT("get_source_control_submit_status"),
     nullptr,
     TEXT("get_spline_points"),
         TEXT("actor_name"),
@@ -3110,6 +3126,9 @@ static const TCHAR* const GFlatCommandParams[] =
     nullptr,
     TEXT("list_scripted_action_utilities"),
         TEXT("path"),
+    nullptr,
+    TEXT("list_source_control_changes"),
+        TEXT("max_results"), TEXT("path"),
     nullptr,
     TEXT("list_state_tree_bindings"),
         TEXT("tree_path"),
@@ -4016,6 +4035,9 @@ static const TCHAR* const GFlatCommandParams[] =
     nullptr,
     TEXT("resume_level_sequence_runtime"),
         TEXT("player_key"),
+    nullptr,
+    TEXT("revert_files"),
+        TEXT("asset_paths"), TEXT("files"), TEXT("reload"),
     nullptr,
     TEXT("rotate_mesh_uvs"),
         TEXT("actor_name"), TEXT("rotation_angle_deg"), TEXT("rotation_origin_u"),
@@ -5875,6 +5897,9 @@ static const TCHAR* const GFlatCommandParams[] =
     TEXT("start_play_in_editor"),
         TEXT("force"), TEXT("net_mode"), TEXT("number_of_clients"), TEXT("run_under_one_process"),
     nullptr,
+    TEXT("start_source_control_submit"),
+        TEXT("asset_paths"), TEXT("description"), TEXT("files"), TEXT("keep_checked_out"),
+    nullptr,
     TEXT("start_timing_region"),
         TEXT("name"),
     nullptr,
@@ -5992,8 +6017,8 @@ static const TCHAR* const GFlatCommandParams[] =
     nullptr
 };
 
-static constexpr int32 GNumCommands = 1791;
-static constexpr int32 GNumParamNames = 6065;
+static constexpr int32 GNumCommands = 1800;
+static constexpr int32 GNumParamNames = 6084;
 
 // Built ONCE, on first use (function-local static => thread-safe init). The
 // dispatcher is game-thread only, so there is no contention after that.

@@ -96,7 +96,7 @@ The core tools: `add_graph_node`, `compile_blueprint`, `connect_pins`, `execute_
 | Documentation | 3 | Documentation generated for an asset, a Blueprint or the whole project |
 | Editor | 96 | The editor itself: actors (spawn, select, copy, transform, delete), levels, saving, undo and transactions, Python, console commands and CVars, tests, enums and structs, screenshots, logs, media, and asset housekeeping (delete, export, migrate, consolidate, redirectors, unused and duplicate assets) |
 | Engine | 50 | Niagara systems and emitters (modules, renderers, data interfaces, events, simulation stages, user parameters), and the engine's and the editor's status |
-| Export | 12 | Movie Render Queue jobs, exporting assets, Blueprints and level sections, asset reports, async loading and source control status |
+| Export | 11 | Movie Render Queue jobs, exporting assets, Blueprints and level sections, asset reports and async loading |
 | GameFeatures | 5 | Game Feature plugins: their state, activating, deactivating and unloading them |
 | GameFramework | 5 | Game mode classes and overrides, player starts and spawn points |
 | GameplayAbilities | 44 | The Gameplay Ability System: abilities, gameplay effects with their modifiers and components, attribute sets, gameplay cues, ability system components and gameplay events |
@@ -126,6 +126,7 @@ The core tools: `add_graph_node`, `compile_blueprint`, `connect_pins`, `execute_
 | Replication | 1 | An actor's replication settings |
 | SaveGame | 9 | Save game slots: saving, loading, listing and deleting, and serializing actor state |
 | SmartObjects | 26 | Smart Object definitions, slots, behaviors, tags and annotations, and claiming and using them |
+| SourceControl | 10 | Revision control through the editor's provider (Perforce, Git...): the connection, file status and local changes, checkout, add, revert, submit and file history |
 | StateTree | 57 | State Trees: states, tasks, transitions and conditions, evaluators, considerations, parameters and bindings, compiling and validating |
 | Subsystem | 2 | Engine and local player subsystem instances |
 | SubsystemAuthoring | 3 | External subsystems: listing, activating and deactivating them |
