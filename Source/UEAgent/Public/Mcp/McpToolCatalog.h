@@ -3,8 +3,10 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "HAL/CriticalSection.h"
 
 class FJsonObject;
+class FMcpToolPolicy;
 
 /**
  * The tool catalog served by the native MCP server (FMcpHttpServer).
@@ -166,6 +168,13 @@ public:
 	 * order: what tools/list carries for a connection that enabled them. The core list itself when Toolsets is empty.
 	 */
 	TArray<uint8> BuildCoreToolsListUtf8(const TSet<FString>& Toolsets) const;
+	/**
+	 * The full or core list (with Toolsets) without the tools Policy turns off (FMcpToolPolicy::IsAllowed): what tools/list
+	 * sends. The unfiltered lists when Policy turns nothing off; the lists without Toolsets are cached per policy generation.
+	 * Any thread.
+	 */
+	TArray<uint8> BuildFullToolsListUtf8(const FMcpToolPolicy& Policy) const;
+	TArray<uint8> BuildCoreToolsListUtf8(const TSet<FString>& Toolsets, const FMcpToolPolicy& Policy) const;
 	/** Whether the core list with Toolsets enabled carries Tool: a core tool, or one of a domain or pack in Toolsets. */
 	static bool IsInCoreList(const FTool& Tool, const TSet<FString>& Toolsets);
 	int32 NumCoreTools() const { return NumCore; }
@@ -267,6 +276,13 @@ private:
 	TArray<TArray<uint8>> ToolJsonUtf8;
 	/** The meta-tools the core list ends with, each as its JSON in UTF-8. */
 	TArray<TArray<uint8>> CoreMetaToolJsonUtf8;
+	/** The lists of one policy generation without Toolsets (BuildFullToolsListUtf8, BuildCoreToolsListUtf8). */
+	mutable FCriticalSection FilteredLock;
+	mutable uint32 FilteredGeneration = 0;
+	mutable TArray<uint8> FilteredFull;
+	mutable TArray<uint8> FilteredCore;
+	/** The listed tools Policy allows (of the core list with Toolsets when bCore, then the core meta-tools), as a list. */
+	TArray<uint8> BuildFiltered(const FMcpToolPolicy& Policy, bool bCore, const TSet<FString>& Toolsets) const;
 	TArray<FString> Domains;
 	/** Domain -> what it covers. */
 	TMap<FString, FString> DomainDescriptions;

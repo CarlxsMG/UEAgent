@@ -3,6 +3,7 @@
 #include "Mcp/McpToolCatalog.h"
 
 #include "Mcp/McpMetaTools.h"
+#include "Mcp/McpToolPolicy.h"
 
 #include "McpPieSafety.gen.h"
 #include "McpParamAliases.gen.h"
@@ -915,6 +916,64 @@ TArray<uint8> FMcpToolCatalog::BuildCoreToolsListUtf8(const TSet<FString>& Tools
 	TArray<uint8> Bytes;
 	McpToolCatalogPrivate::AppendToolsList(Bytes, Fragments);
 	return Bytes;
+}
+
+TArray<uint8> FMcpToolCatalog::BuildFiltered(const FMcpToolPolicy& Policy, bool bCore, const TSet<FString>& Toolsets) const
+{
+	TArray<const TArray<uint8>*> Fragments;
+	for (int32 Index = 0; Index < Tools.Num(); ++Index)
+	{
+		if ((!bCore || IsInCoreList(Tools[Index], Toolsets)) && Policy.IsAllowed(Tools[Index]))
+		{
+			Fragments.Add(&ToolJsonUtf8[Index]);
+		}
+	}
+	if (bCore)
+	{
+		for (const TArray<uint8>& MetaTool : CoreMetaToolJsonUtf8)
+		{
+			Fragments.Add(&MetaTool);
+		}
+	}
+	TArray<uint8> Bytes;
+	McpToolCatalogPrivate::AppendToolsList(Bytes, Fragments);
+	return Bytes;
+}
+
+TArray<uint8> FMcpToolCatalog::BuildFullToolsListUtf8(const FMcpToolPolicy& Policy) const
+{
+	if (!Policy.IsRestrictive())
+	{
+		return ToolsListUtf8;
+	}
+	FScopeLock Lock(&FilteredLock);
+	if (FilteredGeneration != Policy.GetGeneration())
+	{
+		FilteredGeneration = Policy.GetGeneration();
+		FilteredFull = BuildFiltered(Policy, /*bCore*/ false, TSet<FString>());
+		FilteredCore = BuildFiltered(Policy, /*bCore*/ true, TSet<FString>());
+	}
+	return FilteredFull;
+}
+
+TArray<uint8> FMcpToolCatalog::BuildCoreToolsListUtf8(const TSet<FString>& Toolsets, const FMcpToolPolicy& Policy) const
+{
+	if (!Policy.IsRestrictive())
+	{
+		return Toolsets.Num() > 0 ? BuildCoreToolsListUtf8(Toolsets) : CoreToolsListUtf8;
+	}
+	if (Toolsets.Num() > 0)
+	{
+		return BuildFiltered(Policy, /*bCore*/ true, Toolsets);
+	}
+	FScopeLock Lock(&FilteredLock);
+	if (FilteredGeneration != Policy.GetGeneration())
+	{
+		FilteredGeneration = Policy.GetGeneration();
+		FilteredFull = BuildFiltered(Policy, /*bCore*/ false, TSet<FString>());
+		FilteredCore = BuildFiltered(Policy, /*bCore*/ true, TSet<FString>());
+	}
+	return FilteredCore;
 }
 
 FString FMcpToolCatalog::GetDomainDescription(const FString& Domain) const
