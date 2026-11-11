@@ -173,6 +173,8 @@ bool FMcpToolPolicyTest::RunTest(const FString& Parameters)
 		Args->SetStringField(TEXT("domain"), TEXT("Beta"));
 		McpMetaTools::Answer(*Catalog, McpMetaTools::FindTools, Args, bIsError);
 		TestTrue(TEXT("find_tools on a domain turned off is an error"), bIsError);
+		TestTrue(TEXT("the other tools are still suggested"), McpMetaTools::SuggestNames(*Catalog, TEXT("set_thin")).Contains(TEXT("set_thing")));
+		FMcpToolPolicy::SetCurrent(ReadOnlyPolicy);
 		TSharedRef<FJsonObject> Describe = MakeShared<FJsonObject>();
 		Describe->SetStringField(TEXT("name"), TEXT("set_thing"));
 		const TSharedPtr<FJsonObject> Described = McpMetaTools::Answer(*Catalog, McpMetaTools::DescribeTool, Describe, bIsError);
