@@ -17,7 +17,13 @@ script started: use a throwaway project for --launch. Checks:
     listed resource readable, and the errors for an unknown prompt or resource;
   - edits: one undo step per call, an execute_batch as one step, undo/redo and the undo-state tools,
     mcp.UndoStepPerCall, undo barriers set and removed, an impulse on a body that does not simulate, and a
-    level load in the middle of a call.
+    level load in the middle of a call;
+  - the tool permissions (--launch only): a domain and a tool turned off (not listed, not found, refused directly,
+    through call_tool and as an execute_batch item, the readback still re-reading with a tool turned off), the
+    list_changed notice and the list restored, code execution off; then a second editor started with -McpReadOnly:
+    the three lists, and a write refused by every way in while a read and a capture run.
+
+The launched editor serves on the port of --url (-McpHttpPort).
 """
 
 from __future__ import annotations
@@ -147,8 +153,8 @@ def check_core_list(s: Session, catalog: dict) -> None:
     listed = [t["name"] for t in s.rpc("tools/list", query="?domains=Water")["result"]["tools"]]
     s.check("?domains=Water adds the Water tools", set(listed) == set(core + meta + water), len(listed))
     all_headers, all_body = s.raw("initialize", {"protocolVersion": "2025-06-18"}, query="?tools=all")
-    s.check("?tools=all opens no session and does not announce listChanged",
-            "mcp-session-id" not in all_headers and not json.loads(all_body)["result"]["capabilities"]["tools"]["listChanged"], all_headers)
+    s.check("?tools=all opens a session and announces listChanged too (the tool permissions can change any list)",
+            "mcp-session-id" in all_headers and json.loads(all_body)["result"]["capabilities"]["tools"]["listChanged"] is True, all_headers)
 
     params = {"name": "enable_toolset", "arguments": {"domains": ["water"]}}
     headers, body = s.raw("tools/call", params, headers={"Mcp-Session-Id": session})
@@ -308,6 +314,128 @@ def check_edits(s: Session) -> None:
     s.check("the buffer works after the reset", newest_title(s) == ("UEAgent: spawn_actor", 1), newest_title(s))
 
 
+POLICY_KEYS = ("bReadOnlyMode", "bAllowCodeExecution", "DisabledDomains", "DisabledTools")
+CODE_EXEC = ["execute_python", "execute_python_file", "execute_console_command", "call_function",
+             "run_external_project_script", "launch_dedicated_server"]
+
+
+def reset_policy_settings(project: Path) -> None:
+    """Drops the tool permissions a previous run saved in the throwaway project's user settings."""
+    for ini in (project.parent / "Saved" / "Config").glob("*/EditorPerProjectUserSettings.ini"):
+        lines = ini.read_text(encoding="utf-8", errors="replace").splitlines()
+        kept = [line for line in lines if line.lstrip("+-.!").split("=", 1)[0].strip() not in POLICY_KEYS]
+        if kept != lines:
+            ini.write_text("\n".join(kept) + "\n", encoding="utf-8")
+
+
+def refusal_of(payload: dict) -> dict:
+    """The policy refusal a tool answered, or {}."""
+    result = payload.get("result")
+    return result if isinstance(result, dict) and result.get("refused_by") == "policy" else {}
+
+
+def console(s: Session, command: str) -> None:
+    is_error, reply = s.call("execute_console_command", {"command": command})
+    s.check(f"console: {command}", not is_error and reply.get("success") is not False, reply)
+
+
+def check_policy(s: Session, catalog: dict) -> None:
+    print("== tool permissions: a domain and a tool turned off")
+    listed = [c for d in catalog["domains"] for c in d["commands"] if not c.get("retired")]
+    water = [c["name"] for d in catalog["domains"] if d["domain"] == "Water" for c in d["commands"] if not c.get("retired")]
+    headers, _ = s.raw("initialize", {"protocolVersion": "2025-06-18"}, query="?tools=all")
+    session = headers.get("mcp-session-id", "")
+    s.check("?tools=all opens a session too", bool(session), headers)
+    _, light = s.call("spawn_actor", {"type": "PointLight", "name": "SmokePolicy"})
+    light_name = light.get("data", light).get("name", "SmokePolicy")
+    console(s, "mcp.policy tools=spawn_actor,get_properties domains=Water")
+
+    headers, body = s.raw("ping", headers={"Mcp-Session-Id": session})
+    messages = sse_messages(body) if "text/event-stream" in headers.get("content-type", "") else []
+    s.check("the session's next request hears notifications/tools/list_changed, then its answer",
+            [m.get("method") for m in messages] == ["notifications/tools/list_changed", None] and messages[-1].get("result") == {}, body[:300])
+    headers, body = s.raw("ping", headers={"Mcp-Session-Id": session})
+    s.check("only once", "application/json" in headers.get("content-type", ""), headers)
+    full = [t["name"] for t in s.rpc("tools/list", query="?tools=all")["result"]["tools"]]
+    s.check("the full list leaves them out", "spawn_actor" not in full and "get_properties" not in full
+            and not set(water) & set(full) and len(full) == len(listed) - len(water) - 2, len(full))
+    _, found = s.call("find_tools", {"query": "spawn actor"})
+    s.check("find_tools does not find a tool turned off", "spawn_actor" not in [t["name"] for t in found.get("tools", [])], found)
+    is_error, found = s.call("find_tools", {"domain": "Water"})
+    s.check("find_tools on a domain turned off says so", is_error and "turned off" in found.get("error", ""), found)
+    is_error, described = s.call("describe_tool", {"name": "spawn_actor"})
+    s.check("describe_tool answers the refusal", is_error and refusal_of(described).get("policy") == "disabled_tool", described)
+    is_error, reply = s.call("spawn_actor", {"type": "PointLight", "name": "SmokeRefused"})
+    s.check("a direct call is refused (disabled_tool)", is_error and refusal_of(reply).get("policy") == "disabled_tool"
+            and "do not retry" in reply.get("error", ""), reply)
+    is_error, reply = s.call("call_tool", {"name": "spawn_actor", "arguments": {"type": "PointLight"}})
+    s.check("call_tool is refused", is_error and refusal_of(reply).get("policy") == "disabled_tool", reply)
+    is_error, reply = s.call(water[0] if water else "get_water_body_info", {})
+    s.check("a tool of the domain is refused (disabled_domain)", is_error and refusal_of(reply).get("policy") == "disabled_domain", reply)
+    _, batch = s.call("execute_batch", {"commands": [{"command_type": "get_project_info"},
+                                                     {"command_type": "spawn_actor", "params": {"type": "PointLight"}}]})
+    items = batch.get("results", batch.get("data", {}).get("results", []))
+    s.check("an execute_batch item is refused, the others run", [i.get("ok") for i in items] == [True, False]
+            and "REFUSED" in (items[1].get("error", "") if len(items) > 1 else ""), batch)
+    _, written = s.call("set_properties", {"object_path": light_name, "property_name": "bHidden", "value": True})
+    readback = written.get("readback", {})
+    s.check("the readback still re-reads with get_properties turned off", written.get("success") is not False
+            and readback.get("checked") is True, written)
+    console(s, "mcp.policy tools= domains=")
+    headers, body = s.raw("ping", headers={"Mcp-Session-Id": session})
+    messages = sse_messages(body) if "text/event-stream" in headers.get("content-type", "") else []
+    s.check("turning them back on announces it too", [m.get("method") for m in messages][:1] == ["notifications/tools/list_changed"], body[:300])
+    full = [t["name"] for t in s.rpc("tools/list", query="?tools=all")["result"]["tools"]]
+    s.check("and restores the list", len(full) == len(listed), len(full))
+
+    print("== tool permissions: code execution off")
+    console(s, "mcp.policy codeexec=0")
+    full = [t["name"] for t in s.rpc("tools/list", query="?tools=all")["result"]["tools"]]
+    s.check("the six code-execution tools leave the list, nothing else", len(full) == len(listed) - 6
+            and not set(CODE_EXEC) & set(full), sorted(set(CODE_EXEC) & set(full)))
+    is_error, reply = s.call("execute_python", {"code": "print(1)"})
+    s.check("execute_python is refused (code_execution)", is_error and refusal_of(reply).get("policy") == "code_execution", reply)
+    is_error, reply = s.call("spawn_actor", {"type": "PointLight", "name": "SmokeStillWrites"})
+    s.check("a write still runs", not is_error and reply.get("success") is not False, reply)
+
+
+def check_read_only(s: Session, catalog: dict) -> None:
+    print("== read-only mode (-McpReadOnly)")
+    listed = [c for d in catalog["domains"] for c in d["commands"] if not c.get("retired")]
+    allowed = {c["name"] for c in listed if c.get("observes") or c["name"] == "execute_batch"
+               or (not c.get("codeExec") and (c.get("annotations") or {}).get("readOnlyHint"))}
+    meta = ["find_tools", "describe_tool", "call_tool", "enable_toolset"]
+    init = s.rpc("initialize", {"protocolVersion": "2025-06-18"})["result"]
+    s.check("initialize says read-only mode is on", "READ-ONLY" in init.get("instructions", ""), init.get("instructions", "")[:200])
+    full = [t["name"] for t in s.rpc("tools/list", query="?tools=all")["result"]["tools"]]
+    s.check(f"the full list carries the {len(allowed)} reading and observing tools", set(full) == allowed, sorted(set(full) ^ allowed)[:10])
+    core = [t["name"] for t in s.rpc("tools/list")["result"]["tools"]]
+    s.check("the core list carries the core reads and the meta-tools", set(core) - set(meta) <= allowed and core[-4:] == meta, core)
+    compact = [t["name"] for t in s.rpc("tools/list", query="?tools=compact")["result"]["tools"]]
+    s.check("the compact list carries the meta-tools", compact == meta[:3], compact)
+    renamed = next((old for old, new in catalog.get("renamed", {}).items() if new not in allowed), "")
+    retired = next((c["name"] for d in catalog["domains"] for c in d["commands"] if c.get("retired")
+                    and not (c.get("annotations") or {}).get("readOnlyHint")), "")
+    for how, (tool, args) in {
+        "directly": ("spawn_actor", {"type": "PointLight"}),
+        "through call_tool": ("call_tool", {"name": "spawn_actor", "arguments": {"type": "PointLight"}}),
+        f"by a renamed name ({renamed})": (renamed, {}),
+        f"by a retired name ({retired})": (retired, {}),
+        "as undo": ("undo", {}),
+    }.items():
+        is_error, reply = s.call(tool, args)
+        s.check(f"a write is refused {how}", is_error and refusal_of(reply).get("policy") == "read_only", reply)
+    _, batch = s.call("execute_batch", {"commands": [{"command_type": "get_project_info"},
+                                                     {"command_type": "spawn_actor", "params": {"type": "PointLight"}}]})
+    items = batch.get("results", batch.get("data", {}).get("results", []))
+    s.check("as an execute_batch item", [i.get("ok") for i in items] == [True, False]
+            and "read-only" in (items[1].get("error", "") if len(items) > 1 else ""), batch)
+    is_error, reply = s.call("get_project_info")
+    s.check("a read runs", not is_error and reply.get("success") is not False, reply)
+    is_error, reply = s.call("capture_viewport", {"width": 64, "height": 64})
+    s.check("a capture is not refused", not refusal_of(reply), reply if refusal_of(reply) else "")
+
+
 def check_prompts(s: Session) -> None:
     print("== prompts and resources")
     skills = sorted(p.name for p in SKILLS.iterdir() if (p / "SKILL.md").is_file())
@@ -348,6 +476,14 @@ def check_prompts(s: Session) -> None:
     s.check("resources/templates/list is empty", templates == {"resourceTemplates": []}, templates)
 
 
+def launch(args: argparse.Namespace, *extra: str) -> subprocess.Popen:
+    """A headless editor on --launch, serving on the port of --url."""
+    port = args.url.split("://", 1)[1].split("/", 1)[0].partition(":")[2] or "80"
+    binary = args.engine / "Engine" / "Binaries" / "Win64" / "UnrealEditor-Cmd.exe"
+    return subprocess.Popen([str(binary), str(args.launch.resolve()), "-unattended", "-nopause", "-nosplash",
+                             "-NullRHI", "-NoSound", "-log=UEAgentSmoke.log", f"-McpHttpPort={port}", *extra])
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--url", default="http://127.0.0.1:55561/mcp", help="The MCP endpoint")
@@ -365,9 +501,8 @@ def main() -> int:
         if port_is_open(args.url):
             print(f"FAIL: something already listens on {args.url}: close that editor first")
             return 1
-        binary = args.engine / "Engine" / "Binaries" / "Win64" / "UnrealEditor-Cmd.exe"
-        editor = subprocess.Popen([str(binary), str(args.launch.resolve()), "-unattended", "-nopause", "-nosplash",
-                                   "-NullRHI", "-NoSound", "-log=UEAgentSmoke.log"])
+        reset_policy_settings(args.launch.resolve())
+        editor = launch(args)
         print(f"Started a headless editor (pid {editor.pid}) on {args.launch.name}")
     try:
         if not wait_for_server(session, 600 if editor else 10):
@@ -379,12 +514,23 @@ def main() -> int:
         check_prompts(session)
         if editor:
             check_edits(session)
+            check_policy(session, catalog)
+            editor.kill()
+            editor.wait(timeout=120)
+            reset_policy_settings(args.launch.resolve())
+            editor = launch(args, "-McpReadOnly")
+            print(f"Started a headless editor in read-only mode (pid {editor.pid})")
+            if wait_for_server(session, 600):
+                check_read_only(session, catalog)
+            else:
+                session.check("the read-only editor answers", False, args.url)
         else:
-            print("== edit checks skipped: they only run in an editor started with --launch")
+            print("== edit and permission checks skipped: they only run in an editor started with --launch")
     finally:
         if editor:
             editor.kill()
             editor.wait(timeout=120)
+            reset_policy_settings(args.launch.resolve())
     print(f"\n{session.passed} passed, {session.failed} failed")
     return 1 if session.failed else 0
 

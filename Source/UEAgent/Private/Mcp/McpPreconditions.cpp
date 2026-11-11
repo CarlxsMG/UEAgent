@@ -1,6 +1,7 @@
 // Copyright (c) 2026 CarlxsMG.
 
 #include "Mcp/McpPreconditions.h"
+#include "Mcp/McpToolPolicy.h"
 
 #include "Mcp/McpPythonScan.h"
 #include "Mcp/McpPy.h"
@@ -1201,6 +1202,74 @@ FString McpPreconditions::RunSelfTest(const FString& VectorsPath, FString& OutRe
 					Failure->SetStringField(TEXT("case"), CaseId);
 					Failure->SetStringField(TEXT("expected_message"), ExpectMessage);
 					Failure->SetStringField(TEXT("got_message"), Got);
+					Failures.Add(MakeShared<FJsonValueObject>(Failure));
+				}
+				++StepIndex;
+				continue;
+			}
+
+			// The user's tool permissions (FMcpToolPolicy) on the real catalog: the step's `settings` over the file's, and
+			// the verdict a call to `command` gets. Nothing runs and the current permissions are not touched.
+			if (Op == TEXT("policy"))
+			{
+				FMcpToolPolicy::FSettings PolicySettings;
+				auto ReadPolicySettings = [&PolicySettings](const TSharedPtr<FJsonObject>& Block)
+				{
+					if (!Block.IsValid())
+					{
+						return;
+					}
+					auto ReadNames = [&Block](const TCHAR* Field, TArray<FString>& Out)
+					{
+						const TArray<TSharedPtr<FJsonValue>>* Values = nullptr;
+						if (Block->TryGetArrayField(Field, Values) && Values)
+						{
+							Out.Reset();
+							for (const TSharedPtr<FJsonValue>& Value : *Values)
+							{
+								Out.Add(Value->AsString());
+							}
+						}
+					};
+					if (Block->TryGetBoolField(TEXT("read_only"), PolicySettings.bReadOnly) && PolicySettings.bReadOnly)
+					{
+						PolicySettings.ReadOnlySource = TEXT("settings");
+					}
+					Block->TryGetBoolField(TEXT("allow_code_execution"), PolicySettings.bAllowCodeExecution);
+					ReadNames(TEXT("disabled_domains"), PolicySettings.DisabledDomains);
+					ReadNames(TEXT("disabled_tools"), PolicySettings.DisabledTools);
+				};
+				ReadPolicySettings(VectorSettings ? *VectorSettings : nullptr);
+				const TSharedPtr<FJsonObject>* StepSettings = nullptr;
+				Step->TryGetObjectField(TEXT("settings"), StepSettings);
+				ReadPolicySettings(StepSettings ? *StepSettings : nullptr);
+
+				TSharedPtr<const FMcpToolCatalog> PolicyCatalog = FMcpToolCatalog::GetCurrent();
+				if (!PolicyCatalog.IsValid())
+				{
+					FString CatalogError;
+					PolicyCatalog = FMcpToolCatalog::LoadFromFile(FMcpToolCatalog::DefaultCatalogPath(), CatalogError);
+				}
+				const TSharedRef<const FMcpToolPolicy> Policy = FMcpToolPolicy::Make(PolicySettings);
+				const FString Got = FMcpToolPolicy::VerdictName(Policy->EvaluateName(PolicyCatalog.Get(), Command));
+				const TSharedPtr<FJsonObject> Expect = Step->GetObjectField(TEXT("expect"));
+				FString ExpectPolicy;
+				Expect->TryGetStringField(TEXT("policy"), ExpectPolicy);
+				const bool bExpectRefused = Expect->GetBoolField(TEXT("refused"));
+				++TotalChecks;
+				if (PolicyCatalog.IsValid() && bExpectRefused == !Got.IsEmpty() && Got == ExpectPolicy)
+				{
+					++Passed;
+				}
+				else
+				{
+					TSharedPtr<FJsonObject> Failure = MakeShared<FJsonObject>();
+					Failure->SetStringField(TEXT("case"), CaseId);
+					Failure->SetNumberField(TEXT("step"), StepIndex);
+					Failure->SetStringField(TEXT("command"), Command);
+					Failure->SetBoolField(TEXT("expected_refused"), bExpectRefused);
+					Failure->SetStringField(TEXT("expected_policy"), ExpectPolicy);
+					Failure->SetStringField(TEXT("got_policy"), PolicyCatalog.IsValid() ? Got : FString(TEXT("<no catalog>")));
 					Failures.Add(MakeShared<FJsonValueObject>(Failure));
 				}
 				++StepIndex;
