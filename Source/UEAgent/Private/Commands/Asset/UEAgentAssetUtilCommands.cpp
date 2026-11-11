@@ -16,6 +16,8 @@
 #include "UObject/Package.h"                  // UPackage
 #include "ObjectTools.h"                      // ThumbnailTools::* (UnrealEd)
 #include "Misc/ObjectThumbnail.h"             // FObjectThumbnail
+#include "ImageCore.h"                        // FImage / FImageCore::SetAlphaOpaque (thumbnail PNG)
+#include "ImageUtils.h"                       // FImageUtils::SaveImageByExtension
 
 #include "Curves/CurveFloat.h"                // UCurveFloat::GetFloatValue
 #include "Curves/CurveVector.h"               // UCurveVector::GetVectorValue
@@ -187,9 +189,10 @@ TSharedPtr<FJsonObject> HandleGetAssetDependenciesRecursive(const TSharedPtr<FJs
 // -------------------------------------------------------------------------- //
 // generate_asset_thumbnail
 // -------------------------------------------------------------------------- //
-// MCP:generate_asset_thumbnail - Render and cache an asset's thumbnail (or report the existing cached one).  When the editor can render (FApp::CanEverRender() and the RHI is initialized), this generates a fresh thumbnail via ThumbnailTools and caches it into the package's thumbnail map. When rendering is unavailable, or the object type has no thumbnail renderer, it honestly reports the existing cached thumbnail state.
+// MCP:generate_asset_thumbnail - Render and cache an asset's thumbnail (or report the existing cached one), and write it to a PNG under <Project>/Saved/MCP/Thumbnails/.  When the editor can render (FApp::CanEverRender() and the RHI is initialized), this generates a fresh thumbnail via ThumbnailTools and caches it into the package's thumbnail map. When rendering is unavailable, or the object type has no thumbnail renderer, it honestly reports the existing cached thumbnail state. file_path is set only when there is a thumbnail to write.
 //   @param asset_path - Object path or package path of the asset.
-//   @returns { asset_path: string, object_path: string, asset_class: string, rendered: bool, has_thumbnail: bool, width: int, height: int, compressed_bytes: int, message: string }
+//   @param return_image [bool] - Also return the thumbnail as an MCP image block next to this JSON (default true).
+//   @returns { asset_path: string, object_path: string, asset_class: string, rendered: bool, has_thumbnail: bool, width: int, height: int, compressed_bytes: int, message: string, file_path?: string, image_returned?: bool, image_width?: int, image_height?: int, image_note?: string }
 //   @hints observes
 
 TSharedPtr<FJsonObject> HandleGenerateAssetThumbnail(const TSharedPtr<FJsonObject>& Params)
@@ -216,6 +219,29 @@ TSharedPtr<FJsonObject> HandleGenerateAssetThumbnail(const TSharedPtr<FJsonObjec
     // mirror those preconditions and otherwise honestly report the cached state.
     const bool bCanRender = FApp::CanEverRender() && GIsRHIInitialized;
 
+    // The thumbnail as a PNG the agent can open, and its image block.
+    auto WriteThumbnailFile = [&Params, &Result, Asset](const FObjectThumbnail& Thumbnail)
+    {
+        const int32 Width = Thumbnail.GetImageWidth();
+        const int32 Height = Thumbnail.GetImageHeight();
+        const TArray<uint8>& Pixels = Thumbnail.GetUncompressedImageData();
+        if (Width <= 0 || Height <= 0 || Pixels.Num() < static_cast<int64>(Width) * Height * 4)
+        {
+            return;
+        }
+        FImage Image(Width, Height, ERawImageFormat::BGRA8, EGammaSpace::sRGB);
+        FMemory::Memcpy(Image.RawData.GetData(), Pixels.GetData(), static_cast<int64>(Width) * Height * 4);
+        FImageCore::SetAlphaOpaque(Image);
+        const FString FilePath = FPaths::ConvertRelativePathToFull(
+            FPaths::ProjectSavedDir() / TEXT("MCP") / TEXT("Thumbnails") / (Asset->GetName() + TEXT(".png")));
+        IFileManager::Get().MakeDirectory(*FPaths::GetPath(FilePath), /*Tree=*/true);
+        if (FImageUtils::SaveImageByExtension(*FilePath, Image))
+        {
+            Result->SetStringField(TEXT("file_path"), FilePath);
+            mcp_common::AttachImage(Result, Params, FilePath);
+        }
+    };
+
     if (bCanRender)
     {
         // Generates a fresh thumbnail (GPU render) and caches it into the package's
@@ -230,6 +256,7 @@ TSharedPtr<FJsonObject> HandleGenerateAssetThumbnail(const TSharedPtr<FJsonObjec
             Result->SetNumberField(TEXT("height"), Generated->GetImageHeight());
             Result->SetNumberField(TEXT("compressed_bytes"), Generated->GetCompressedDataSize());
             Result->SetStringField(TEXT("message"), TEXT("Thumbnail rendered and cached into package thumbnail map"));
+            WriteThumbnailFile(*Generated);
             return mcp_common::MakeOkReply(Result);
         }
 
@@ -255,6 +282,7 @@ TSharedPtr<FJsonObject> HandleGenerateAssetThumbnail(const TSharedPtr<FJsonObjec
         Result->SetNumberField(TEXT("width"), Existing->GetImageWidth());
         Result->SetNumberField(TEXT("height"), Existing->GetImageHeight());
         Result->SetNumberField(TEXT("compressed_bytes"), Existing->GetCompressedDataSize());
+        WriteThumbnailFile(*Existing);
     }
     else
     {

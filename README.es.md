@@ -206,6 +206,8 @@ Launcher. Después de actualizar, vuelve a conectar tu cliente para que liste de
 | HTTP keep-alive | activado | desactivado: cada respuesta cierra su conexión, para un proxy, antivirus o VPN que retiene la respuesta hasta entonces (ver [A client connects but times out](docs/troubleshooting.md#a-client-connects-but-times-out)); `-McpHttpNoKeepAlive` en la línea de comandos lo desactiva |
 | Show connect hint | activado | al arrancar, ofrece conectar Claude Code si el proyecto no lo está |
 | Check for updates at startup | desactivado | preguntar a GitHub como mucho una vez al día si hay una versión nueva (ver [Actualizar](#actualizar)) |
+| Return images | activado | las herramientas de captura responden con la imagen como bloque MCP `image` junto a su JSON (ver [Answers and refusals](docs/responses.md#images)); `?images=off` en la URL lo desactiva para un cliente |
+| Image max dimension / bytes | 1568 / 1048576 | una imagen mayor se envía como copia JPEG más pequeña; el archivo en disco conserva su resolución |
 
 **Project Settings > Plugins > UEAgent** (compartido, se guarda en `Config/DefaultEditor.ini`):
 

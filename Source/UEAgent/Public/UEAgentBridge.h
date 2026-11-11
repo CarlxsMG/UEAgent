@@ -56,8 +56,9 @@ public:
 	// Running a command
 	// tools/call of the native MCP server: the dispatch plus the READBACK contract (before
 	// snapshot, re-read, offload note) in the SAME game-thread pass. The future carries
-	// {"is_error": bool, "result": <what the model sees>}.
-	TFuture<FString> EnqueueToolCall(const FString& RequestedCommandType, const TSharedPtr<FJsonObject>& Params, const FString& SessionId);
+	// {"is_error": bool, "result": <what the model sees>, "images"?: [{data, mimeType}]}. bReturnImages false (the
+	// client's ?images=off) keeps the capture tools' images out of it.
+	TFuture<FString> EnqueueToolCall(const FString& RequestedCommandType, const TSharedPtr<FJsonObject>& Params, const FString& SessionId, bool bReturnImages = true);
 
 	// Dispatches ONE command by name on the CALLING thread (no thread hop, no queueing) and
 	// returns the {"status":"success"|"error", ...} envelope. Game thread only: it runs from a

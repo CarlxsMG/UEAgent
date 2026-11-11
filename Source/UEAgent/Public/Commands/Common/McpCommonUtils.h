@@ -295,6 +295,20 @@ namespace mcp_common
      */
     UEAGENT_API TSharedPtr<FJsonObject> MakeOkReply(const TSharedPtr<FJsonObject>& Data = nullptr);
 
+    /** The result key under which AttachImage lists the images of a reply. The bridge takes it out of the result
+     *  before anything else reads it, so no client ever sees it. */
+    UEAGENT_API extern const TCHAR* const ImagesResultKey;
+
+    /**
+     * Ask for the image file at FilePath to go back to the client as an MCP image content block. Target is the
+     * object of the reply that holds the file's path: the bridge reads the file once the handler returns, and writes
+     * image_returned, image_width, image_height and, when the picture was shrunk or left out, image_note into
+     * Target. The file is never changed. With the call's `return_image: false` nothing is attached and Target says
+     * image_returned=false. Mime is the file's type as written ("image/png").
+     */
+    UEAGENT_API void AttachImage(const TSharedPtr<FJsonObject>& Target, const TSharedPtr<FJsonObject>& Params,
+        const FString& FilePath, const FString& Mime = TEXT("image/png"));
+
     /** One call of a tool made of other tools (RunSubCommands). */
     struct FSubCommand
     {

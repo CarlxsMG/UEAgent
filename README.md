@@ -203,6 +203,8 @@ After an update, reconnect your client so it lists the tools again.
 | HTTP keep-alive | on | off: each response closes its connection, for a proxy, antivirus or VPN that holds a response until then (see [A client connects but times out](docs/troubleshooting.md#a-client-connects-but-times-out)); `-McpHttpNoKeepAlive` on the command line turns it off |
 | Show connect hint | on | at startup, offer to connect Claude Code if the project is not |
 | Check for updates at startup | off | ask GitHub at most once a day whether a newer release is out (see [How do I update it?](docs/faq.md#how-do-i-update-it)) |
+| Return images | on | the capture tools answer with the picture as an MCP image next to their JSON (see [Answers and refusals](docs/responses.md#images)); `?images=off` in the URL turns it off for one client |
+| Image max dimension / bytes | 1568 / 1048576 | a larger picture is sent as a smaller JPEG copy; the file on disk keeps its full resolution |
 
 **Project Settings > Plugins > UEAgent** (shared, saved to `Config/DefaultEditor.ini`):
 

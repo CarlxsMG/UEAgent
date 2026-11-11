@@ -5917,7 +5917,8 @@ TSharedPtr<FJsonObject> HandleApplyWidgetStylePreset(const TSharedPtr<FJsonObjec
 //   @param height [int] - Optional render height in pixels. Omit BOTH width and height to render at the widget's own desired size.
 //   @param scale [number] - Optional draw scale applied by the renderer (default 1.0), the equivalent of DPI scaling in the Designer.
 //   @param opaque_background [bool] - Optional (default false). Force every pixel's alpha to 255 so the PNG is not transparent where the widget did not paint -- the same trick capture_viewport uses. Leave false to keep real transparency.
-//   @returns { widget_bp_path: string, rendered: bool, file_path: string, width: int, height: int, scale: number, drew_at_desired_size: bool, byte_size: int, designer_flags: string, preview_note: string, error?: string }
+//   @param return_image [bool] - Also return the picture as an MCP image block next to this JSON (default true); a picture over the size limits is sent as a smaller copy.
+//   @returns { widget_bp_path: string, rendered: bool, file_path: string, width: int, height: int, scale: number, drew_at_desired_size: bool, byte_size: int, designer_flags: string, preview_note: string, error?: string, image_returned: bool, image_width?: int, image_height?: int, image_note?: string }
 //   @hints observes
 
 TSharedPtr<FJsonObject> HandleRenderWidgetPreview(const TSharedPtr<FJsonObject>& Params)
@@ -6106,6 +6107,10 @@ TSharedPtr<FJsonObject> HandleRenderWidgetPreview(const TSharedPtr<FJsonObject>&
     if (!SizeNote.IsEmpty())
     {
         Resp->SetStringField(TEXT("size_note"), SizeNote);
+    }
+    if (bWritten)
+    {
+        mcp_common::AttachImage(Resp, Params, OutputPath);
     }
     if (!bWritten)
     {
