@@ -285,14 +285,15 @@ def check_edits(s: Session) -> None:
     s.call("remove_undo_barrier", {"all": True})
     _, none = s.call("remove_undo_barrier")
     s.check("removing a barrier that is not there fails", none.get("success") is False
-            and none.get("data", {}).get("removed") is False, none)
-    s.call("set_undo_barrier")
+            and none.get("result", {}).get("removed") is False, none)
+    _, placed = s.call("set_undo_barrier")
+    s.check("set_undo_barrier reads its barrier back", placed.get("success") is True and placed.get("undo_barrier", -1) >= 0, placed)
     _, popped = s.call("remove_undo_barrier")
     s.check("removing a barrier that is there succeeds", popped.get("success") is True
-            and popped.get("data", {}).get("removed") is True, popped)
+            and popped.get("removed") is True, popped)
     _, cleared = s.call("remove_undo_barrier", {"all": True})
     s.check("all=true with none succeeds with a note", cleared.get("success") is True
-            and cleared.get("data", {}).get("removed") is False and cleared.get("data", {}).get("note"), cleared)
+            and cleared.get("removed") is False and cleared.get("note"), cleared)
 
     print("== an impulse on a body that does not simulate")
     s.call("spawn_actor", {"type": "StaticMeshActor", "name": "SmokeImpulse"})

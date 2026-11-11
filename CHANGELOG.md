@@ -14,8 +14,8 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 - **`remove_undo_barrier` answered `success: true` when there was no barrier to remove.** A single pop with no
   barrier now fails, with an error that says there was none; with `all: true` and none, it still succeeds, with
-  `removed: false` and a note. Its fields, and those of `set_undo_barrier`, are now under `data` like other tools',
-  and `set_undo_barrier` succeeds when it reads its barrier back at the cursor.
+  `removed: false` and a note. The other fields keep their place, so callers that read `removed` see no other
+  change. `set_undo_barrier` answers `success` from its barrier read back at the cursor.
 - **`add_impulse_to_actor` answered `applied: true` when nothing moved.** An impulse moves only a body that
   simulates physics, and in the editor world nothing does unless it is turned on. `applied` now says whether the body
   was simulating, and the reply adds `simulating_physics`, `world` and, when nothing was applied, a note that says

@@ -948,7 +948,7 @@ Lift the most recent undo barrier so undo can step past it again -- the counterp
 |---|---|---|---|
 | `all` | boolean | no | Optional bool (default false). true clears ALL undo barriers instead of popping the most recent one. |
 
-**Returns:** `{ removed: bool (false = there was no barrier), all: bool (echo), undo_barrier: int now in force (-1 = none), undo_count: int, queue_length: int, note?: string }`
+**Returns:** `{ success: bool (false for a single pop with no barrier), removed: bool (false = there was no barrier), all: bool (echo), undo_barrier: int now in force (-1 = none), undo_count: int, queue_length: int, note?: string }`
 
 ## `rename_enum_entry`
 
@@ -1219,7 +1219,7 @@ Drop a floor in the undo stack at the current position so no later undo can cros
 
 No parameters.
 
-**Returns:** `{ already_existed: bool (true = nothing new was pushed), undo_barrier: int (cursor it sits at), undo_count: int, queue_length: int }`
+**Returns:** `{ success: bool (a barrier sits at the cursor after the call), already_existed: bool (true = nothing new was pushed), undo_barrier: int (cursor it sits at), undo_count: int, queue_length: int }`
 
 ## `set_viewport_settings`
 

@@ -10,7 +10,8 @@ hardcoded):
   verified              the handler derives the outcome from a measured boolean:
                         `mcp_common::MakeOutcomeReply(Data, bOk, Err)` / `MakeSavedReply(...)` /
                         `MakeVerifiedReply(...)` / `AddVerificationEvidence(...)`,
-                        or publishes a computed `*verified` field.
+                        publishes a computed `*verified` field, or sets a flat
+                        reply's `success` from a computed boolean.
   declared_unverifiable the handler ADMITS the limit in the response:
                         `EMcpVerification::NotVerifiable/NotAttempted`, a `note`/
                         `verification` field, a `*verified` set to `false`, or
@@ -123,6 +124,10 @@ HONEST_PATTERNS = [
     # which is the honest admission and falls under DECLARED).
     ("verified-field",
      re.compile(r'Set(?:Bool|String)Field\s*\(\s*TEXT\("\w*verif\w*"\)\s*,\s*(?!false\s*\))')),
+    # A flat reply's `success` set from a COMPUTED boolean: the bridge (WrapHandlerResult) turns a false
+    # one into a failure, so it is the measured outcome, as MakeOutcomeReply's flag is.
+    ("success-field-computed",
+     re.compile(r'SetBoolField\s*\(\s*TEXT\("success"\)\s*,(?!\s*(?:true|false)\s*\))\s*[^;\s]')),
 ]
 # Calling the honest helper with a constant is NOT honesty: it is detected separately
 # and downgrades the class to hardcoded_success.

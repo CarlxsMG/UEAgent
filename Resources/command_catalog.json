@@ -26068,7 +26068,7 @@
               "description": "Optional bool (default false). true clears ALL undo barriers instead of popping the most recent one."
             }
           ],
-          "returns": "{ removed: bool (false = there was no barrier), all: bool (echo), undo_barrier: int now in force (-1 = none), undo_count: int, queue_length: int, note?: string }",
+          "returns": "{ success: bool (false for a single pop with no barrier), removed: bool (false = there was no barrier), all: bool (echo), undo_barrier: int now in force (-1 = none), undo_count: int, queue_length: int, note?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -26790,7 +26790,7 @@
           "name": "set_undo_barrier",
           "description": "Drop a floor in the undo stack at the current position so no later undo can cross it -- the way to protect everything done SO FAR (yours or the human's) before starting a risky batch that you may want to unwind. Idempotent: a barrier already sitting at the cursor is not pushed twice (already_existed:true). Lift it with remove_undo_barrier (all=true lifts every barrier).",
           "params": [],
-          "returns": "{ already_existed: bool (true = nothing new was pushed), undo_barrier: int (cursor it sits at), undo_count: int, queue_length: int }",
+          "returns": "{ success: bool (a barrier sits at the cursor after the call), already_existed: bool (true = nothing new was pushed), undo_barrier: int (cursor it sits at), undo_count: int, queue_length: int }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,

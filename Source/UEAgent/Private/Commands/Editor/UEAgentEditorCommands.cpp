@@ -3395,7 +3395,7 @@ TSharedPtr<FJsonObject> HandleResetTransactionBuffer(const TSharedPtr<FJsonObjec
 }
 
 // MCP:set_undo_barrier - Drop a floor in the undo stack at the current position so no later undo can cross it -- the way to protect everything done SO FAR (yours or the human's) before starting a risky batch that you may want to unwind. Idempotent: a barrier already sitting at the cursor is not pushed twice (already_existed:true). Lift it with remove_undo_barrier (all=true lifts every barrier).
-//   @returns { already_existed: bool (true = nothing new was pushed), undo_barrier: int (cursor it sits at), undo_count: int, queue_length: int }
+//   @returns { success: bool (a barrier sits at the cursor after the call), already_existed: bool (true = nothing new was pushed), undo_barrier: int (cursor it sits at), undo_count: int, queue_length: int }
 TSharedPtr<FJsonObject> HandleSetUndoBarrier(const TSharedPtr<FJsonObject>& Params)
 {
     UTransBuffer* TransBuffer = Cast<UTransBuffer>(GetEditorTransactor());
@@ -3411,18 +3411,24 @@ TSharedPtr<FJsonObject> HandleSetUndoBarrier(const TSharedPtr<FJsonObject>& Para
     // Success is the barrier read back at the cursor, pushed now or already there.
     const bool bInForce = (TransBuffer->GetCurrentUndoBarrier() == Cursor);
 
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
-    Data->SetNumberField(TEXT("undo_barrier"), TransBuffer->GetCurrentUndoBarrier());
-    Data->SetNumberField(TEXT("undo_count"), UEAgentEditorCommandsImpl::UndoableCount(TransBuffer));
-    Data->SetNumberField(TEXT("queue_length"), TransBuffer->GetQueueLength());
-    return mcp_common::MakeOutcomeReply(Data, bInForce, FString::Printf(
-        TEXT("set_undo_barrier: no barrier sits at the cursor (%d) after the call; undo_barrier is the one in force"), Cursor));
+    // A flat reply, as callers before the honest `success` read it.
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetBoolField(TEXT("success"), bInForce);
+    if (!bInForce)
+    {
+        ResultObj->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("set_undo_barrier: no barrier sits at the cursor (%d) after the call; undo_barrier is the one in force"), Cursor));
+    }
+    ResultObj->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
+    ResultObj->SetNumberField(TEXT("undo_barrier"), TransBuffer->GetCurrentUndoBarrier());
+    ResultObj->SetNumberField(TEXT("undo_count"), UEAgentEditorCommandsImpl::UndoableCount(TransBuffer));
+    ResultObj->SetNumberField(TEXT("queue_length"), TransBuffer->GetQueueLength());
+    return ResultObj;
 }
 
 // MCP:remove_undo_barrier - Lift the most recent undo barrier so undo can step past it again -- the counterpart of set_undo_barrier, for when the protected batch is finished -- or, with all=true, every barrier at once (including ones another session or the human placed to protect their work). Nothing is undone; it only lifts the floor. A single pop with no barrier to lift fails; all=true with none succeeds with removed:false and a note, since clearing nothing is not a failure.
 //   @param all - Optional bool (default false). true clears ALL undo barriers instead of popping the most recent one.
-//   @returns { removed: bool (false = there was no barrier), all: bool (echo), undo_barrier: int now in force (-1 = none), undo_count: int, queue_length: int, note?: string }
+//   @returns { success: bool (false for a single pop with no barrier), removed: bool (false = there was no barrier), all: bool (echo), undo_barrier: int now in force (-1 = none), undo_count: int, queue_length: int, note?: string }
 TSharedPtr<FJsonObject> HandleRemoveUndoBarrier(const TSharedPtr<FJsonObject>& Params)
 {
     bool bAll = false;
@@ -3442,19 +3448,26 @@ TSharedPtr<FJsonObject> HandleRemoveUndoBarrier(const TSharedPtr<FJsonObject>& P
     }
     const bool bRemoved = (Before != INDEX_NONE);
 
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetBoolField(TEXT("removed"), bRemoved);
-    Data->SetBoolField(TEXT("all"), bAll);
-    Data->SetNumberField(TEXT("undo_barrier"), TransBuffer->GetCurrentUndoBarrier());
-    Data->SetNumberField(TEXT("undo_count"), UEAgentEditorCommandsImpl::UndoableCount(TransBuffer));
-    Data->SetNumberField(TEXT("queue_length"), TransBuffer->GetQueueLength());
+    // A single pop asks for one barrier, so finding none fails it; all=true asks for none to remain, which holds.
+    const bool bSucceeded = bRemoved || bAll;
+
+    // A flat reply, as callers before the honest `success` read it.
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetBoolField(TEXT("success"), bSucceeded);
+    if (!bSucceeded)
+    {
+        ResultObj->SetStringField(TEXT("error"), TEXT("remove_undo_barrier: there was no undo barrier to remove (set_undo_barrier places one)"));
+    }
+    ResultObj->SetBoolField(TEXT("removed"), bRemoved);
+    ResultObj->SetBoolField(TEXT("all"), bAll);
+    ResultObj->SetNumberField(TEXT("undo_barrier"), TransBuffer->GetCurrentUndoBarrier());
+    ResultObj->SetNumberField(TEXT("undo_count"), UEAgentEditorCommandsImpl::UndoableCount(TransBuffer));
+    ResultObj->SetNumberField(TEXT("queue_length"), TransBuffer->GetQueueLength());
     if (bAll && !bRemoved)
     {
-        Data->SetStringField(TEXT("note"), TEXT("There was no undo barrier to clear; clearing none is not a failure."));
+        ResultObj->SetStringField(TEXT("note"), TEXT("There was no undo barrier to clear; clearing none is not a failure."));
     }
-    // A single pop asks for one barrier, so finding none fails it; all=true asks for none to remain, which holds.
-    return mcp_common::MakeOutcomeReply(Data, bRemoved || bAll,
-        TEXT("remove_undo_barrier: there was no undo barrier to remove (set_undo_barrier places one)"));
+    return ResultObj;
 }
 
 // ========================================================================== //
