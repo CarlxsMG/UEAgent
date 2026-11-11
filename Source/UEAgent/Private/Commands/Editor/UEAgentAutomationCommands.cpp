@@ -710,9 +710,21 @@ namespace
         }
         for (const ULevel* Level : World->GetLevels())
         {
-            if (Level && Level->GetOutermost() && Level->GetOutermost()->IsDirty())
+            if (!Level)
+            {
+                continue;
+            }
+            if (Level->GetOutermost() && Level->GetOutermost()->IsDirty())
             {
                 return true;
+            }
+            // A map with one file per actor keeps its actors' edits in their own packages.
+            for (const UPackage* External : Level->GetLoadedExternalObjectPackages())
+            {
+                if (External && External->IsDirty())
+                {
+                    return true;
+                }
             }
         }
         return false;
@@ -795,11 +807,19 @@ namespace
         }
 
         const bool bStoppedEarly = End != EAutomationTestEnd::Completed;
-        if (bStoppedEarly && !GRunningAutomationTest.bPieActiveAtStart && GEditor && GEditor->PlayWorld)
+        if (bStoppedEarly && !GRunningAutomationTest.bPieActiveAtStart && GEditor)
         {
-            UE_LOG(LogTemp, Display, TEXT("run_automation_test: ending the Play-in-Editor session test '%s' started before it was stopped."),
-                *GRunningAutomationTest.TestName);
-            GEditor->RequestEndPlayMap();
+            // The session may still be a queued request: served after the stop, it would outlive the test.
+            if (GEditor->IsPlaySessionRequestQueued())
+            {
+                GEditor->CancelRequestPlaySession();
+            }
+            if (GEditor->PlayWorld)
+            {
+                UE_LOG(LogTemp, Display, TEXT("run_automation_test: ending the Play-in-Editor session test '%s' started before it was stopped."),
+                    *GRunningAutomationTest.TestName);
+                GEditor->RequestEndPlayMap();
+            }
         }
 
         UE_LOG(LogTemp, Display, TEXT("run_automation_test: latent test '%s' ended after %.1f s (%s)."), *GRunningAutomationTest.TestName, Elapsed,
