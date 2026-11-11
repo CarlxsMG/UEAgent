@@ -3,6 +3,7 @@
 #include "Mcp/McpMetaTools.h"
 
 #include "Mcp/McpToolCatalog.h"
+#include "Mcp/McpToolPolicy.h"
 
 #include "Algo/LevenshteinDistance.h"
 #include "Dom/JsonObject.h"
@@ -29,12 +30,17 @@ namespace McpMetaToolsPrivate
 		int32 NumTools = 0;
 	};
 
-	/** The catalog's domains, in catalog order, with how many tools each one has. */
-	static TArray<FDomainCount> CountDomains(const FMcpToolCatalog& Catalog)
+	/** The catalog's domains, in catalog order, with how many tools each one has; with Policy, only the tools it allows
+	 *  count, and a domain with none is left out. */
+	static TArray<FDomainCount> CountDomains(const FMcpToolCatalog& Catalog, const FMcpToolPolicy* Policy = nullptr)
 	{
 		TArray<FDomainCount> Domains;
 		for (const FMcpToolCatalog::FTool& Tool : Catalog.GetTools())
 		{
+			if (Policy && !Policy->IsAllowed(Tool))
+			{
+				continue;
+			}
 			FDomainCount* Domain = Domains.FindByPredicate([&Tool](const FDomainCount& D) { return D.Name == Tool.Domain; });
 			if (!Domain)
 			{
@@ -173,6 +179,8 @@ namespace McpMetaToolsPrivate
 	 */
 	static TArray<FHit> Search(const FMcpToolCatalog& Catalog, const TArray<FString>& Words, const FString& Domain)
 	{
+		// A tool the user's permissions turn off is not found: it would only be refused.
+		const TSharedRef<const FMcpToolPolicy> Policy = FMcpToolPolicy::GetCurrent();
 		TArray<TArray<FString>> FormsPerWord;
 		for (const FString& Word : Words)
 		{
@@ -183,7 +191,7 @@ namespace McpMetaToolsPrivate
 		TArray<FHit> Hits;
 		for (const FMcpToolCatalog::FTool& Tool : Catalog.GetTools())
 		{
-			if (!Domain.IsEmpty() && !Tool.Domain.Equals(Domain, ESearchCase::IgnoreCase))
+			if ((!Domain.IsEmpty() && !Tool.Domain.Equals(Domain, ESearchCase::IgnoreCase)) || !Policy->IsAllowed(Tool))
 			{
 				continue;
 			}
@@ -299,11 +307,19 @@ namespace McpMetaToolsPrivate
 		}
 		const int32 MaxTools = FMath::Clamp(FMath::FloorToInt32(Limit), 1, MaxLimit);
 
-		const TArray<FDomainCount> Domains = CountDomains(Catalog);
+		const TSharedRef<const FMcpToolPolicy> Policy = FMcpToolPolicy::GetCurrent();
+		const TArray<FDomainCount> Domains = CountDomains(Catalog, &Policy.Get());
 		Domain.TrimStartAndEndInline();
 		if (!Domain.IsEmpty())
 		{
 			const FDomainCount* Known = Domains.FindByPredicate([&Domain](const FDomainCount& D) { return D.Name.Equals(Domain, ESearchCase::IgnoreCase); });
+			const FString CatalogDomain = Catalog.FindDomain(Domain);
+			if (!Known && !CatalogDomain.IsEmpty())
+			{
+				bOutIsError = true;
+				return Failure(FString::Printf(TEXT("Every tool of the %s domain is turned off in UEAgent's settings (Editor Preferences > Plugins > UEAgent > Permissions): ")
+					TEXT("do not work around it; ask the user if you need it."), *CatalogDomain));
+			}
 			if (!Known)
 			{
 				TArray<FString> Names;
@@ -336,15 +352,38 @@ namespace McpMetaToolsPrivate
 				DomainsJson.Add(MakeShared<FJsonValueObject>(Entry));
 			}
 			TArray<TSharedPtr<FJsonValue>> PacksJson;
+			int32 TotalTools = 0;
+			for (const FDomainCount& D : Domains)
+			{
+				TotalTools += D.NumTools;
+			}
 			for (const FMcpToolCatalog::FPack& Pack : Catalog.GetPacks())
 			{
+				TArray<FString> PackTools;
+				for (const FString& Name : Pack.ToolNames)
+				{
+					const FMcpToolCatalog::FTool* Tool = Catalog.FindTool(Name);
+					if (Tool && Policy->IsAllowed(*Tool))
+					{
+						PackTools.Add(Name);
+					}
+				}
+				if (PackTools.Num() == 0)
+				{
+					continue;
+				}
 				TSharedRef<FJsonObject> Entry = MakeShared<FJsonObject>();
 				Entry->SetStringField(TEXT("pack"), Pack.Name);
 				Entry->SetStringField(TEXT("description"), Pack.Description);
-				Entry->SetArrayField(TEXT("tools"), ToJsonStrings(Pack.ToolNames));
+				Entry->SetArrayField(TEXT("tools"), ToJsonStrings(PackTools));
 				PacksJson.Add(MakeShared<FJsonValueObject>(Entry));
 			}
-			Result->SetNumberField(TEXT("total_tools"), Catalog.NumTools());
+			Result->SetNumberField(TEXT("total_tools"), TotalTools);
+			if (Policy->IsRestrictive())
+			{
+				Result->SetStringField(TEXT("permissions"), FString::Printf(TEXT("%s: %d tools are turned off and not counted here."),
+					*Policy->Describe(), Policy->CountOff(Catalog)));
+			}
 			Result->SetArrayField(TEXT("domains"), DomainsJson);
 			if (PacksJson.Num() > 0)
 			{
@@ -405,6 +444,14 @@ namespace McpMetaToolsPrivate
 			TSharedRef<FJsonObject> Result = Failure(FString::Printf(TEXT("Unknown tool: %s"), *Name));
 			Result->SetArrayField(TEXT("closest"), ToJsonStrings(McpMetaTools::SuggestNames(Catalog, Name)));
 			return Result;
+		}
+		// A tool that is off answers with the refusal a call would get.
+		const TSharedRef<const FMcpToolPolicy> Policy = FMcpToolPolicy::GetCurrent();
+		const FMcpToolPolicy::EVerdict Verdict = Policy->Evaluate(*Tool, Name);
+		if (Verdict != FMcpToolPolicy::EVerdict::Allowed)
+		{
+			bOutIsError = true;
+			return Policy->MakeRefusalPayload(Verdict, Tool->Name, Tool->Domain);
 		}
 		TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
 		Result->SetBoolField(TEXT("success"), true);
@@ -702,6 +749,7 @@ TSharedRef<FJsonObject> McpMetaTools::ToolsetReply(const FMcpToolCatalog& Catalo
 {
 	using namespace McpMetaToolsPrivate;
 
+	const TSharedRef<const FMcpToolPolicy> Policy = FMcpToolPolicy::GetCurrent();
 	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
 	Result->SetBoolField(TEXT("success"), true);
 	TArray<TSharedPtr<FJsonValue>> PacksJson;
@@ -712,7 +760,7 @@ TSharedRef<FJsonObject> McpMetaTools::ToolsetReply(const FMcpToolCatalog& Catalo
 		TArray<FString> Names;
 		for (const FMcpToolCatalog::FTool& Tool : Catalog.GetTools())
 		{
-			if (!Tool.bCore && (Pack ? Tool.Pack == Pack->Name : Tool.Domain == Toolset))
+			if (!Tool.bCore && (Pack ? Tool.Pack == Pack->Name : Tool.Domain == Toolset) && Policy->IsAllowed(Tool))
 			{
 				Names.Add(Tool.Name);
 			}
@@ -740,7 +788,7 @@ TSharedRef<FJsonObject> McpMetaTools::ToolsetReply(const FMcpToolCatalog& Catalo
 	int32 Added = 0;
 	for (const FMcpToolCatalog::FTool& Tool : Catalog.GetTools())
 	{
-		Added += FMcpToolCatalog::IsInCoreList(Tool, EnabledAfter) && !FMcpToolCatalog::IsInCoreList(Tool, EnabledBefore) ? 1 : 0;
+		Added += FMcpToolCatalog::IsInCoreList(Tool, EnabledAfter) && !FMcpToolCatalog::IsInCoreList(Tool, EnabledBefore) && Policy->IsAllowed(Tool) ? 1 : 0;
 	}
 	Result->SetNumberField(TEXT("tools_added"), bHasSession ? Added : 0);
 	Result->SetBoolField(TEXT("list_changed"), bHasSession && Added > 0);
@@ -834,12 +882,13 @@ TArray<FString> McpMetaTools::SuggestNames(const FMcpToolCatalog& Catalog, const
 		return Names;
 	}
 
-	// Near spellings first: a typo or a wrong separator is a few edits away.
+	// Near spellings first: a typo or a wrong separator is a few edits away. A tool that is off is never suggested.
+	const TSharedRef<const FMcpToolPolicy> Policy = FMcpToolPolicy::GetCurrent();
 	const int32 MaxEdits = FMath::Clamp(Wanted.Len() / 4, 1, 3);
 	TArray<TPair<int32, const FString*>> Near;
 	for (const FMcpToolCatalog::FTool& Tool : Catalog.GetTools())
 	{
-		if (FMath::Abs(Tool.Name.Len() - Wanted.Len()) > MaxEdits)
+		if (FMath::Abs(Tool.Name.Len() - Wanted.Len()) > MaxEdits || !Policy->IsAllowed(Tool))
 		{
 			continue;
 		}

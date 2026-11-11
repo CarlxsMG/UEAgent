@@ -81,8 +81,9 @@ public:
 	void CountToolCall() { NumToolCalls.Increment(); }
 
 	/**
-	 * Sessions: `initialize` on the core list opens one and answers its id in Mcp-Session-Id, which the client sends
-	 * back on every request; the session remembers the packs and domains enable_toolset added to that client's list. The server
+	 * Sessions: `initialize` opens one and answers its id in Mcp-Session-Id, which the client sends back on every request;
+	 * the session remembers the packs and domains enable_toolset added to that client's list (core list), and the tool
+	 * permissions' generation (FMcpToolPolicy) its list was last read under, so a change is announced once. The server
 	 * requires no session: a request without one, or with one it does not know (the editor restarted), gets the list
 	 * its URL asks for. At most MaxSessions are kept, the least recently used dropped first. Any thread.
 	 */
@@ -91,6 +92,11 @@ public:
 	bool GetSessionDomains(const FString& Session, TSet<FString>& OutDomains);
 	/** Adds Domains to Session's list, opening it under that id if the server does not know it. */
 	void AddSessionDomains(const FString& Session, const TArray<FString>& Domains);
+	/** Session read its list under the current tool permissions. */
+	void NoteSessionListed(const FString& Session);
+	/** Whether the tool permissions changed since Session last read its list, noting that it is told now; false for an
+	 *  unknown session. */
+	bool TakeSessionListChanged(const FString& Session);
 
 	static constexpr int32 MaxSessions = 256;
 
@@ -101,6 +107,8 @@ private:
 	{
 		TSet<FString> Domains;
 		double LastUsed = 0.0;
+		/** The FMcpToolPolicy generation of its last list (or of the announcement that it changed). */
+		uint32 ListedGeneration = 0;
 	};
 	/** Drops the least recently used sessions above MaxSessions. SessionsLock held. */
 	void TrimSessions();

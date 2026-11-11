@@ -44,6 +44,8 @@ TSharedPtr<FJsonObject> HandleBatch(const TSharedPtr<FJsonObject>& Params)
     {
         TSharedPtr<FJsonObject> BeginParams = MakeShared<FJsonObject>();
         BeginParams->SetStringField(TEXT("description"), TEXT("MCP batch"));
+        // The batch's own transaction, not a call of the agent's: the tool permissions judge the items, not this.
+        TGuardValue<int32> Exempt(Bridge->PolicyExemptDepth, Bridge->PolicyExemptDepth + 1);
         Bridge->DispatchSingleCommand(TEXT("begin_transaction"), BeginParams);
     }
 
@@ -131,6 +133,7 @@ TSharedPtr<FJsonObject> HandleBatch(const TSharedPtr<FJsonObject>& Params)
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     if (bTransaction)
     {
+        TGuardValue<int32> Exempt(Bridge->PolicyExemptDepth, Bridge->PolicyExemptDepth + 1);
         TSharedPtr<FJsonObject> EmptyParams = MakeShared<FJsonObject>();
         if (bStoppedEarly && bAnyError)
         {

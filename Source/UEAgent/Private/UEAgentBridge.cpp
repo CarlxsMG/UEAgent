@@ -88,6 +88,7 @@
 #include "Mcp/McpToolCatalog.h"              // tools/list + rotation normalization
 #include "Mcp/McpPreconditions.h"            // refusals that prevent a crash
 #include "Mcp/McpReadback.h"                 // READBACK contract
+#include "Mcp/McpToolPolicy.h"               // the user's tool permissions
 #include "Mcp/McpPy.h"
 #include "Policies/CondensedJsonPrintPolicy.h"
 #include "UEAgentSettings.h"               // HTTP server port / enable switch / token
@@ -555,6 +556,7 @@ bool UUEAgentBridge::StartHttpServer()
     const FString CatalogPath = FMcpToolCatalog::DefaultCatalogPath();
     TSharedPtr<const FMcpToolCatalog> Catalog = FMcpToolCatalog::LoadFromFile(CatalogPath, CatalogError);
     FMcpToolCatalog::SetCurrent(Catalog);
+    FMcpToolPolicy::Rebuild();
     if (!Catalog.IsValid())
     {
         UE_LOG(LogTemp, Error, TEXT("UEAgentBridge: %s -- the MCP HTTP server will expose no tools"), *CatalogError);
@@ -605,15 +607,19 @@ FString UUEAgentBridge::DescribeHttpStatus() const
     const FString CatalogText = Catalog.IsValid()
         ? FString::Printf(TEXT("%d tools (%s)"), Catalog->NumTools(), *Catalog->GetSourcePath())
         : FString(TEXT("NO catalog"));
+    const TSharedRef<const FMcpToolPolicy> Policy = FMcpToolPolicy::GetCurrent();
+    const FString PolicyText = Policy->IsRestrictive() && Catalog.IsValid()
+        ? FString::Printf(TEXT(" | permissions: %s (%d tools off)"), *Policy->Describe(), Policy->CountOff(*Catalog))
+        : FString::Printf(TEXT(" | permissions: %s"), *Policy->Describe());
     if (!IsHttpRunning())
     {
-        return FString::Printf(TEXT("MCP HTTP: stopped | %s"), *CatalogText);
+        return FString::Printf(TEXT("MCP HTTP: stopped | %s%s"), *CatalogText, *PolicyText);
     }
-    return FString::Printf(TEXT("MCP HTTP: http://127.0.0.1:%d/mcp | %d connections | %lld requests | %lld tools/call | %s%s%s"),
+    return FString::Printf(TEXT("MCP HTTP: http://127.0.0.1:%d/mcp | %d connections | %lld requests | %lld tools/call | %s%s%s%s"),
         HttpServer->GetPort(), HttpServer->GetNumConnections(), HttpServer->GetNumRequests(), HttpServer->GetNumToolCalls(), *CatalogText,
         HttpServer->GetDefaultToolsMode() == EMcpToolsMode::All ? TEXT(" | every tool listed")
         : HttpServer->GetDefaultToolsMode() == EMcpToolsMode::Compact ? TEXT(" | compact tool list") : TEXT(" | core tool list"),
-        HttpServer->GetKeepAlive() ? TEXT("") : TEXT(" | keep-alive off"));
+        HttpServer->GetKeepAlive() ? TEXT("") : TEXT(" | keep-alive off"), *PolicyText);
 }
 
 uint16 UUEAgentBridge::GetHttpPort() const
@@ -669,6 +675,73 @@ namespace McpHttpConsole
             {
                 UE_LOG(LogTemp, Display, TEXT("%s"), *Bridge->DescribeHttpStatus());
             }
+        }));
+
+    static FAutoConsoleCommand ReadOnlyCommand(
+        TEXT("mcp.readonly"),
+        TEXT("Read-only mode of the MCP tools: mcp.readonly 1 turns it on, 0 off (saved in the settings); with no argument, prints it."),
+        FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
+        {
+            UUEAgentSettings* Settings = GetMutableDefault<UUEAgentSettings>();
+            if (Args.Num() > 0)
+            {
+                Settings->SetReadOnlyMode(Args[0] == TEXT("1") || Args[0].Equals(TEXT("on"), ESearchCase::IgnoreCase) || Args[0].Equals(TEXT("true"), ESearchCase::IgnoreCase));
+            }
+            FString Source;
+            if (!Settings->bReadOnlyMode && UUEAgentSettings::IsReadOnlyForcedByLaunch(&Source))
+            {
+                UE_LOG(LogTemp, Warning, TEXT("[MCP] read-only mode stays on: %s turns it on for this editor session"), *Source);
+            }
+            UE_LOG(LogTemp, Display, TEXT("[MCP] permissions: %s"), *FMcpToolPolicy::GetCurrent()->Describe());
+        }));
+
+    static FAutoConsoleCommand PolicyCommand(
+        TEXT("mcp.policy"),
+        TEXT("The MCP tool permissions (saved in the settings): mcp.policy [readonly=0|1] [codeexec=0|1] [domains=A,B] [tools=a,b]. An empty list (domains=) turns every one back on; with no argument, prints them."),
+        FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
+        {
+            UUEAgentSettings* Settings = GetMutableDefault<UUEAgentSettings>();
+            bool bChanged = false;
+            for (const FString& Arg : Args)
+            {
+                FString Key, Value;
+                if (!Arg.Split(TEXT("="), &Key, &Value))
+                {
+                    UE_LOG(LogTemp, Warning, TEXT("[MCP] mcp.policy: '%s' is not key=value"), *Arg);
+                    continue;
+                }
+                const bool bOn = Value == TEXT("1") || Value.Equals(TEXT("on"), ESearchCase::IgnoreCase) || Value.Equals(TEXT("true"), ESearchCase::IgnoreCase);
+                TArray<FString> Names;
+                Value.ParseIntoArray(Names, TEXT(","));
+                if (Key.Equals(TEXT("readonly"), ESearchCase::IgnoreCase))
+                {
+                    Settings->bReadOnlyMode = bOn;
+                }
+                else if (Key.Equals(TEXT("codeexec"), ESearchCase::IgnoreCase))
+                {
+                    Settings->bAllowCodeExecution = bOn;
+                }
+                else if (Key.Equals(TEXT("domains"), ESearchCase::IgnoreCase))
+                {
+                    Settings->DisabledDomains = Names;
+                }
+                else if (Key.Equals(TEXT("tools"), ESearchCase::IgnoreCase))
+                {
+                    Settings->DisabledTools = Names;
+                }
+                else
+                {
+                    UE_LOG(LogTemp, Warning, TEXT("[MCP] mcp.policy: unknown key '%s' (readonly, codeexec, domains, tools)"), *Key);
+                    continue;
+                }
+                bChanged = true;
+            }
+            if (bChanged)
+            {
+                Settings->SaveConfig();
+                FMcpToolPolicy::Rebuild();
+            }
+            UE_LOG(LogTemp, Display, TEXT("[MCP] permissions: %s"), *FMcpToolPolicy::GetCurrent()->Describe());
         }));
 
     static FAutoConsoleCommand RestartCommand(
@@ -1122,12 +1195,41 @@ namespace McpUndoStep
     }
 }
 
+TSharedPtr<FJsonObject> UUEAgentBridge::CheckToolPolicy(const FString& RequestedCommandType, const FString& CommandType) const
+{
+    if (SubCommandDepth > 0 || PolicyExemptDepth > 0)
+    {
+        return nullptr;
+    }
+    const TSharedRef<const FMcpToolPolicy> Policy = FMcpToolPolicy::GetCurrent();
+    if (!Policy->IsRestrictive())
+    {
+        return nullptr;
+    }
+    const TSharedPtr<const FMcpToolCatalog> Catalog = FMcpToolCatalog::GetCurrent();
+    const FMcpToolPolicy::EVerdict Verdict = Policy->EvaluateName(Catalog.Get(), RequestedCommandType);
+    if (Verdict == FMcpToolPolicy::EVerdict::Allowed)
+    {
+        return nullptr;
+    }
+    const FMcpToolCatalog::FTool* Tool = Catalog.IsValid() ? Catalog->FindTool(CommandType) : nullptr;
+    UE_LOG(LogTemp, Display, TEXT("[MCP] '%s' refused by the tool permissions (%s)"), *CommandType, FMcpToolPolicy::VerdictName(Verdict));
+    return Policy->MakeRefusalEnvelope(Verdict, CommandType, Tool ? Tool->Domain : FString());
+}
+
 TSharedPtr<FJsonObject> UUEAgentBridge::DispatchSingleCommand(const FString& RequestedCommandType, const TSharedPtr<FJsonObject>& Params)
 {
     // A renamed tool's old name runs the new one, and the reply says so (data.retired_name), as it does for a retired
     // tool. Everything below, the tables keyed by command included, sees the name the tool runs under.
     FString RetiredNameNote;
     const FString CommandType = FMcpToolCatalog::ResolveCallName(RequestedCommandType, SubCommandDepth > 0 ? nullptr : &RetiredNameNote);
+
+    // The user's tool permissions (FMcpToolPolicy). Here, so every way in is judged: tools/call, call_tool, each
+    // execute_batch item, an old or retired name. The bridge's own probes and a tool's sub-commands are not.
+    if (TSharedPtr<FJsonObject> PolicyRefusal = CheckToolPolicy(RequestedCommandType, CommandType))
+    {
+        return PolicyRefusal;
+    }
 
     // PIE-safety gate. It goes HERE and not in the queued work item -- where the PIE OWNERSHIP
     // guard lives -- because `execute_batch` calls DispatchSingleCommand DIRECTLY: any batch would skip a
@@ -1203,6 +1305,7 @@ TSharedPtr<FJsonObject> UUEAgentBridge::DispatchSingleCommand(const FString& Req
                     return FromRegistry;
                 }
             }
+            TGuardValue<int32> Exempt(PolicyExemptDepth, PolicyExemptDepth + 1);
             return McpPreconditions::PayloadFromEnvelope(DispatchSingleCommand(ProbeCommand, ProbeParams));
         };
         if (const TOptional<McpPreconditions::FRefusal> Refusal = McpPreconditions::Check(CommandType, Params, Probe))
@@ -1536,6 +1639,7 @@ TFuture<FString> UUEAgentBridge::EnqueueToolCall(const FString& RequestedCommand
         const McpReadback::FSend Send = [this](const FString& ProbeCommand, const TSharedPtr<FJsonObject>& ProbeParams) -> TSharedPtr<FJsonObject>
         {
             bool bIgnoredRefusal = false;
+            TGuardValue<int32> Exempt(PolicyExemptDepth, PolicyExemptDepth + 1);
             return McpReadback::Unwrap(DispatchSingleCommand(ProbeCommand, ProbeParams), bIgnoredRefusal);
         };
 
@@ -1545,7 +1649,7 @@ TFuture<FString> UUEAgentBridge::EnqueueToolCall(const FString& RequestedCommand
 
         // The before snapshot is the ONE part of the contract that cannot be taken after the write.
         TSharedPtr<FJsonValue> Before;
-        if (McpReadback::Tables().Before.Contains(CommandType))
+        if (McpReadback::Tables().Before.Contains(CommandType) && !CheckToolPolicy(RequestedCommandType, CommandType).IsValid())
         {
             Before = McpReadback::TakeBefore(CommandType, ContractParams, Send);
         }
@@ -1573,7 +1677,9 @@ TFuture<FString> UUEAgentBridge::EnqueueToolCall(const FString& RequestedCommand
         // readback). The PIE guards' refusals do go through: ON_FAILURE explains why their
         // stated reason is not the real one.
         const TSharedPtr<FJsonObject> RefusalInfo = McpPy::AsDict(McpPy::Get(Result, TEXT("result")));
-        const bool bPrecondition = bRefused && McpPy::TextOf(McpPy::Get(RefusalInfo, TEXT("refused_by"))) == TEXT("precondition");
+        const FString RefusedBy = bRefused ? McpPy::TextOf(McpPy::Get(RefusalInfo, TEXT("refused_by"))) : FString();
+        // A policy refusal never ran either.
+        const bool bPrecondition = RefusedBy == TEXT("precondition") || RefusedBy == TEXT("policy");
         if (!bPrecondition && !(bForwarded && ForwardCount > 1) && McpReadback::HasContract(ContractCommand))
         {
             // The before snapshot was taken for the tool as called, so a forwarded call has none.
