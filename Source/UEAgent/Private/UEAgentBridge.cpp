@@ -87,6 +87,7 @@
 #include "Mcp/McpHttpServer.h"               // native MCP server (Streamable HTTP)
 #include "Mcp/McpToolCatalog.h"              // tools/list + rotation normalization
 #include "Mcp/McpPreconditions.h"            // refusals that prevent a crash
+#include "Commands/Editor/UEAgentAutomationCommands.h" // DescribeRunningTest: the test refusal comes first
 #include "Mcp/McpReadback.h"                 // READBACK contract
 #include "Mcp/McpPy.h"
 #include "Policies/CondensedJsonPrintPolicy.h"
@@ -1216,7 +1217,12 @@ TSharedPtr<FJsonObject> UUEAgentBridge::DispatchSingleCommand(const FString& Req
             }
             return McpPreconditions::PayloadFromEnvelope(DispatchSingleCommand(ProbeCommand, ProbeParams));
         };
-        if (const TOptional<McpPreconditions::FRefusal> Refusal = McpPreconditions::Check(CommandType, Params, Probe))
+        // While a test runs, these handlers refuse before doing anything and name the test, which is the refusal that
+        // tells the caller what to do; a precondition would answer about the test's own Play session instead.
+        const bool bRunningTestRefuses = (CommandType == TEXT("start_play_in_editor") || CommandType == TEXT("stop_play_in_editor")
+            || CommandType == TEXT("load_level")) && !UEAgentAutomationCommands::DescribeRunningTest().IsEmpty();
+        if (const TOptional<McpPreconditions::FRefusal> Refusal = bRunningTestRefuses ? TOptional<McpPreconditions::FRefusal>()
+            : McpPreconditions::Check(CommandType, Params, Probe))
         {
             UE_LOG(LogTemp, Warning, TEXT("[MCP] '%s' refused before running (%s)"), *CommandType, *Refusal->Check);
             return McpPreconditions::MakeRefusalEnvelope(CommandType, *Refusal);
