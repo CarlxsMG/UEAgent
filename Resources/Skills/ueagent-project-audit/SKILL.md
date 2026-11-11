@@ -47,3 +47,5 @@ Give each finding its asset path, what is wrong and the fix.
 - `find_erroring_blueprints` reads `path`: another parameter name is ignored, and the scan covers the
   whole of `/Game`.
 - `run_map_check` checks the level open in the editor, not every level in the project.
+- A refusal with `refused_by: "policy"` is the user's choice (read-only mode, code execution off, or a
+  domain or tool turned off): stop, do not retry it another way, and ask the user.

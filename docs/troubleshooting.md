@@ -94,6 +94,15 @@ Stop PIE and retry. `force: true` runs the call anyway, at your own risk.
 The call is one known to crash or freeze the editor in that situation. The refusal says why, and
 what to do instead.
 
+## A call is refused by the tool permissions
+
+The refusal says `refused_by: "policy"`: a setting in **Editor Preferences > Plugins > UEAgent > Permissions**
+turns that tool off (read-only mode, code execution off, or a domain or tool turned off). Change the setting, or
+use the **Read-only mode** toggle in the status bar's **MCP** menu; `mcp.http.status` prints what is off. When
+read-only mode cannot be turned off, the editor was started with `-McpReadOnly` or `UEAGENT_READONLY=1`. The
+client re-reads its tool list on its next request that accepts SSE; one that does not, or that has no session,
+sees refusals until it lists the tools again (reconnect it).
+
 ## "Unknown tool"
 
 The client called a tool this server does not have, often from a tool list it cached from another

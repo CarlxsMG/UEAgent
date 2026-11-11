@@ -43,7 +43,8 @@ for steps that do not depend on each other's answers, and keep `execute_python` 
 Run the sequence once, on a test target the user agrees to (a test level, a scratch folder), and
 read every answer:
 
-- `success: false`, or a refusal (`isError`): follow what the message says to do instead.
+- `success: false`, or a refusal (`isError`): follow what the message says to do instead. A refusal with
+  `refused_by: "policy"` is the user's settings: stop and ask the user.
 - A `readback` whose `verdict` is not `ok`: the call did not do what it reported; its `note` says why.
 - `unknown_params`: a parameter the tool ignored, so its name is wrong.
 

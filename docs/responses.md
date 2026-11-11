@@ -67,7 +67,7 @@ Here `set_blueprint_variable_default` answered `success: true`, but the default 
 ## Refusals
 
 A refusal comes before the call runs, so nothing changed. It arrives as a tool error (`isError: true` in
-the MCP result) with `success: false`, the message in `error` and the details in `result`. Two checks
+the MCP result) with `success: false`, the message in `error` and the details in `result`. Three checks
 refuse a call:
 
 - **Preconditions** refuse a call known to crash or freeze the editor in that situation, including the
@@ -79,6 +79,12 @@ refuse a call:
   `result.evidence` quotes the C++ line that classifies it. Stop PIE and retry; `force: true` runs the
   call anyway, at your own risk. Starting or stopping a PIE session that someone else started needs
   `force: true` too.
+- **The tool permissions** refuse a tool the user turned off (Editor Preferences > Plugins > UEAgent >
+  Permissions): `result.refused_by` is `policy`, `result.policy` says which setting (`read_only`,
+  `code_execution`, `disabled_domain`, `disabled_tool`), with `result.command` and `result.domain`. The message
+  tells the agent not to retry and to ask the user. Such a tool is also left out of `tools/list` and `find_tools`,
+  and `describe_tool` answers the refusal. It applies however the tool is called: directly, through `call_tool`,
+  as an `execute_batch` item, or by an old or retired name.
 
 A Python script cannot be classified before it runs, so the Python tools check it as it runs. While
 Play-in-Editor runs, a call the script makes that compiles a Blueprint or saves does not run: the script
@@ -98,6 +104,23 @@ A precondition refusal, as the agent reads it:
     "command": "create_material_expression",
     "check": "set_material_attributes",
     "hint": "Nothing was executed: the call never reached the editor. The message names the way that DOES work."
+  }
+}
+```
+
+A policy refusal, in read-only mode:
+
+```json
+{
+  "success": false,
+  "error": "REFUSED: UEAgent is in read-only mode (settings): only tools that read, or that only capture an image, can run, and spawn_actor changes the project or runs code. Nothing ran. The user chose this (Editor Preferences > Plugins > UEAgent > Permissions): do not retry it, through call_tool, execute_batch or Python either; tell the user what you need and ask them to allow it.",
+  "result": {
+    "refused": true,
+    "refused_by": "policy",
+    "policy": "read_only",
+    "command": "spawn_actor",
+    "domain": "Actor",
+    "hint": "The user's settings turn this tool off. Do not retry; ask the user to allow it."
   }
 }
 ```

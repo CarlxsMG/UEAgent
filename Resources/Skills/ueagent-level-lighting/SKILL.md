@@ -43,6 +43,8 @@ one through `call_tool`, or add its pack or domain to your list with `enable_too
 - `spawn_actor`'s `rotation` as an array is `[pitch, yaw, roll]`: its third value is the roll, not the
   yaw. The object form avoids that mistake.
 - Nothing is saved: `save_level` writes the level when the user is happy with it.
+- A refusal with `refused_by: "policy"` is the user's choice (read-only mode, code execution off, or a
+  domain or tool turned off): stop, do not retry it another way, and ask the user.
 
 ## Undo
 

@@ -206,6 +206,9 @@ Launcher. Después de actualizar, vuelve a conectar tu cliente para que liste de
 | HTTP keep-alive | activado | desactivado: cada respuesta cierra su conexión, para un proxy, antivirus o VPN que retiene la respuesta hasta entonces (ver [A client connects but times out](docs/troubleshooting.md#a-client-connects-but-times-out)); `-McpHttpNoKeepAlive` en la línea de comandos lo desactiva |
 | Show connect hint | activado | al arrancar, ofrece conectar Claude Code si el proyecto no lo está |
 | Check for updates at startup | desactivado | preguntar a GitHub como mucho una vez al día si hay una versión nueva (ver [Actualizar](#actualizar)) |
+| Read-only mode | desactivado | **Permissions**: solo se listan y se ejecutan las herramientas que leen o que solo capturan una imagen en `Saved`; `-McpReadOnly` en la línea de comandos o `UEAGENT_READONLY=1` lo activan. También en el menú **MCP** de la barra de estado |
+| Allow code execution | activado | **Permissions**: desactivado, las seis herramientas que ejecutan código o un proceso (`execute_python`, `execute_python_file`, `execute_console_command`, `call_function`, `run_external_project_script`, `launch_dedicated_server`) no se listan y se rechazan |
+| Disabled domains / Disabled tools | vacío | **Permissions**: las herramientas de esos dominios, y esas herramientas por nombre, no se listan y se rechazan |
 
 **Project Settings > Plugins > UEAgent** (compartido, se guarda en `Config/DefaultEditor.ini`):
 
@@ -219,7 +222,8 @@ Launcher. Después de actualizar, vuelve a conectar tu cliente para que liste de
 
 | Comando | |
 |---|---|
-| `mcp.http.status` / `mcp.http.restart` | estado del servidor; reiniciarlo (también recarga el catálogo de herramientas) |
+| `mcp.http.status` / `mcp.http.restart` | estado del servidor, con los permisos de las herramientas; reiniciarlo (también recarga el catálogo de herramientas) |
+| `mcp.readonly [0\|1]` / `mcp.policy [readonly=0\|1] [codeexec=0\|1] [domains=A,B] [tools=a,b]` | el modo de solo lectura; los permisos de las herramientas (se guardan en los ajustes; sin argumentos, los muestra) |
 | `mcp.claude.status [ruta]` / `mcp.claude.connect [ruta]` | inspeccionar / escribir la entrada de `.mcp.json` |
 | `mcp.clients.status` / `mcp.clients.connect cursor\|vscode\|antigravity\|opencode [ruta]` | lo mismo para los ficheros de los otros clientes |
 | `mcp.skills.status` / `mcp.skills.install` / `mcp.skills.remove` `[claude\|agents\|all]` | las skills de UEAgent en el proyecto (ver [Skills](docs/skills.md)) |
@@ -239,6 +243,13 @@ Launcher. Después de actualizar, vuelve a conectar tu cliente para que liste de
   guardan, renombran y borran assets, editan ficheros `.ini` y lanzan procesos (un empaquetado, un
   servidor dedicado). Conectar un agente es darle el editor. **Read Only Content Roots** impide que
   las herramientas guarden, renombren, muevan o borren nada bajo las raíces que indiques.
+- Los **Permissions** (Editor Preferences > Plugins > UEAgent) lo limitan: **Read-only mode** deja al agente solo
+  leer y capturar imágenes, **Allow code execution** desactivado rechaza las herramientas que ejecutan código o un
+  proceso, y **Disabled domains** y **Disabled tools** apagan herramientas. Una herramienta apagada no se lista y se
+  rechaza la llame como la llame (directamente, con `call_tool` o `execute_batch`, por un nombre antiguo), con
+  `refused_by: "policy"`. Con la ejecución de código activada, un agente puede cambiar estos ajustes él mismo (con
+  Python o un comando de consola): para un límite que no pueda levantar, usa el modo de solo lectura o desactiva la
+  ejecución de código.
 
 Para informar de una vulnerabilidad, consulta [SECURITY.md](SECURITY.md).
 
