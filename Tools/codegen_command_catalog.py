@@ -364,6 +364,7 @@ DOMAINS = {
                  "replication settings and reparenting",
     "Camera": "camera and spring arm components, Gameplay Camera assets and rigs, and camera shakes",
     "Chooser": "Chooser tables: their columns, rows, cells and outcomes, and evaluating one",
+    "Code": "the project's C++: compiling the editor's modules with Live Coding, the compiler's errors, and adding a class",
     "Config": "project settings and the default map, collision channels and profiles, config diffs, and re-running "
               "construction scripts",
     "DataAsset": "data tables and their rows, curve tables and curves, data assets, data registries, string tables, CSV "
