@@ -2,7 +2,7 @@
 
 # Tool reference
 
-1558 tools in 56 domains. Every tool also describes itself over MCP (`tools/list`, or `describe_tool` for a tool the client does not list: see [tool lists](../clients.md#tool-lists)); this reference is the same catalog, readable.
+1562 tools in 57 domains. Every tool also describes itself over MCP (`tools/list`, or `describe_tool` for a tool the client does not list: see [tool lists](../clients.md#tool-lists)); this reference is the same catalog, readable.
 
 The 11 core tools, which every client lists by default: `add_graph_node`, `compile_blueprint`, `connect_pins`, `execute_python`, `find_assets_by_name`, `get_graph_nodes`, `get_object_info`, `save_asset`, `set_pin_default_value`, `set_properties`, `undo`.
 
@@ -29,6 +29,7 @@ The packs, which `enable_toolset` adds by name:
 | [Blueprint](Blueprint.md) | 89 | Blueprint authoring: Blueprints, macros and Editor Utility Blueprints, variables, functions and their parameters, event dispatchers, interfaces, components, timelines, graph nodes and pins, compiling, replication settings and reparenting |
 | [Camera](Camera.md) | 16 | Camera and spring arm components, Gameplay Camera assets and rigs, and camera shakes |
 | [Chooser](Chooser.md) | 14 | Chooser tables: their columns, rows, cells and outcomes, and evaluating one |
+| [Code](Code.md) | 4 | The project's C++: compiling the editor's modules with Live Coding, the compiler's errors, and adding a class |
 | [Config](Config.md) | 15 | Project settings and the default map, collision channels and profiles, config diffs, and re-running construction scripts |
 | [DataAsset](DataAsset.md) | 51 | Data tables and their rows, curve tables and curves, data assets, data registries, string tables, CSV and JSON import and export, and localization |
 | [Documentation](Documentation.md) | 3 | Documentation generated for an asset, a Blueprint or the whole project |

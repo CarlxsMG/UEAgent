@@ -14,7 +14,7 @@
 // that says to stop PIE. `force: true` in the params bypasses it -- the same valve
 // the bridge's PIE ownership guard already uses.
 //
-// Coverage: 149 commands (143 derived from the C++, 6 curated).
+// Coverage: 151 commands (143 derived from the C++, 8 curated).
 #pragma once
 
 #include "CoreMinimal.h"
@@ -32,6 +32,8 @@ namespace McpPieSafety
         Creates,
         /** Saves: the engine guard refuses before trying, silently. */
         Saves,
+        /** Patches C++ into the running editor, which reinstances live objects. */
+        Patches,
     };
 
     struct FEntry

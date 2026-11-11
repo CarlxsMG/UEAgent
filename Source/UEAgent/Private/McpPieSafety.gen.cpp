@@ -82,6 +82,7 @@ static const FRow GRows[] =
     { TEXT("create_camera_shake_blueprint"), EReason::Compiles, TEXT("Common/McpCommonUtils.cpp CreateOrLoadBlueprint: FKismetEditorUtilities::CompileBlueprint") },
     { TEXT("create_common_ui_stack"), EReason::Compiles, TEXT("UI/UEAgentUMGMVVMCommands.cpp SaveWidgetBlueprint: FKismetEditorUtilities::CompileBlueprint") },
     { TEXT("create_control_rig_blueprint"), EReason::Compiles, TEXT("Gameplay/UEAgentControlRigCommands.cpp HandleCreateControlRigBlueprint: FKismetEditorUtilities::CompileBlueprint") },
+    { TEXT("create_cpp_class"), EReason::Patches, TEXT("writes a class into a module of the running editor, the first half of a patch") },
     { TEXT("create_editor_utility_blueprint"), EReason::Compiles, TEXT("Blueprint/UEAgentEditorUtilityCommands.cpp SaveBlueprintAsset: FKismetEditorUtilities::CompileBlueprint") },
     { TEXT("create_editor_utility_widget_blueprint"), EReason::Compiles, TEXT("Blueprint/UEAgentEditorUtilityCommands.cpp SaveBlueprintAsset: FKismetEditorUtilities::CompileBlueprint") },
     { TEXT("create_functional_test"), EReason::Creates, TEXT("Editor/UEAgentAutomationCommands.cpp HandleCreateFunctionalTest: FKismetEditorUtilities::CreateBlueprint") },
@@ -171,6 +172,7 @@ static const FRow GRows[] =
     { TEXT("set_widget_property"), EReason::Compiles, TEXT("UI/UEAgentWidgetCommands.cpp SaveWidgetBlueprint: FKismetEditorUtilities::CompileBlueprint") },
     { TEXT("set_widget_slot_properties"), EReason::Compiles, TEXT("UI/UEAgentWidgetCommands.cpp SaveWidgetBlueprint: FKismetEditorUtilities::CompileBlueprint") },
     { TEXT("split_blueprint_pin"), EReason::Reinstances, TEXT("Blueprint/UEAgentGraphCommands.cpp HandleSplitBlueprintPin: FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified") },
+    { TEXT("start_cpp_compile"), EReason::Patches, TEXT("a Live Coding or hot reload patch reinstances live objects of the changed classes, PIE's included") },
     { TEXT("start_source_control_submit"), EReason::Saves, TEXT("submits the files on disk, which PIE edits do not reach and its save guard keeps unsaved") },
     { TEXT("unbind_widget_from_viewmodel"), EReason::Compiles, TEXT("UI/UEAgentUMGMVVMCommands.cpp SaveWidgetBlueprint: FKismetEditorUtilities::CompileBlueprint") },
     { TEXT("verify_reparent_success"), EReason::Compiles, TEXT("Analysis/UEAgentAnalysisCommands.cpp HandleVerifyReparentSuccess: FKismetEditorUtilities::CompileBlueprint") },
@@ -207,6 +209,7 @@ const TCHAR* ReasonText(EReason Reason)
     case EReason::Reinstances: return TEXT("marks a Blueprint modified, which reinstances it");
     case EReason::Creates:     return TEXT("creates a Blueprint that cannot be persisted during PIE");
     case EReason::Saves:       return TEXT("writes an asset to disk");
+    case EReason::Patches:     return TEXT("patches C++ into the running editor, which reinstances live objects");
     default:                   return TEXT("is not safe during PIE");
     }
 }

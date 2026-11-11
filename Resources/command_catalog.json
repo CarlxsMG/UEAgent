@@ -21842,6 +21842,118 @@
       ]
     },
     {
+      "domain": "Code",
+      "description": "the project's C++: compiling the editor's modules with Live Coding, the compiler's errors, and adding a class",
+      "commands": [
+        {
+          "name": "create_cpp_class",
+          "description": "Write the header and source of a new UCLASS into one of the project's C++ modules, derived from a native class (default Object). It writes the two files and nothing else: no project-file regeneration, no compile, no reload.\n\nRefuses a class name already in use (in memory or as a header of the module), an unknown module, a parent that is unknown, a Blueprint class, an interface or not exported to other modules, and a project without a C++ module (a Blueprint-only project gets its first module from the editor's New C++ Class). Refused during Play-in-Editor without force.\n\nThe class is usable only once the module is built: needs_restart is true because a new UCLASS patched in by Live Coding is not reliable. Close the editor, build the editor target, and reopen it.",
+          "params": [
+            {
+              "name": "class_name",
+              "jsonType": "string",
+              "required": true,
+              "nameLike": true,
+              "description": "Required. The class name without its U or A prefix, e.g. \"MyActor\"."
+            },
+            {
+              "name": "parent_class",
+              "jsonType": "string",
+              "required": false,
+              "nameLike": true,
+              "description": "Optional native parent class: \"Object\", \"Actor\", \"ActorComponent\", \"AActor\", or a path like \"/Script/Engine.Actor\". Default \"Object\"."
+            },
+            {
+              "name": "module_name",
+              "jsonType": "string",
+              "required": false,
+              "nameLike": true,
+              "description": "Optional project module to add the class to. Default the primary game module (the one named after the project)."
+            },
+            {
+              "name": "class_location",
+              "jsonType": "string",
+              "required": false,
+              "description": "Optional \"public\" (header under Public, exported with MODULE_API) | \"private\" (both files under Private). Default \"public\". A module without Public and Private folders keeps both files in its folder."
+            },
+            {
+              "name": "sub_path",
+              "jsonType": "string",
+              "required": false,
+              "nameLike": true,
+              "description": "Optional folder under Public/Private (or the module folder), e.g. \"Gameplay/Items\"."
+            }
+          ],
+          "returns": "{ created: bool, class_name: string, parent_class: string, module_name: string, header_path: string, source_path: string, needs_compile: bool, needs_restart: bool, note: string }",
+          "annotations": {
+            "readOnlyHint": false,
+            "destructiveHint": false,
+            "idempotentHint": false,
+            "openWorldHint": false
+          }
+        },
+        {
+          "name": "get_cpp_compile_status",
+          "description": "The state of the last compile start_cpp_compile requested in this editor session: running or finished, the result, and the compiler's errors and warnings with file, line and column, plus the state of Live Coding. With no compile started it answers has_compile false and still reports live_coding.\n\nresult is \"success\", \"no_changes\", \"failure\" or \"cancelled\" once finished. errors and warnings come from the UnrealBuildTool log of that compile (Live Coding's console keeps the compiler output out of the editor log), or from hot reload's output; output_tail holds what they were read from, and ubt_log_path the file, for the lines the parser does not know.",
+          "params": [
+            {
+              "name": "max_results",
+              "jsonType": "number",
+              "required": false,
+              "description": "Optional cap on the entries of errors and of warnings. Default 100."
+            }
+          ],
+          "returns": "{ has_compile: bool, running?: bool, finished?: bool, result?: string, mode?: string, errors?: [{file, line, column, code, message}], warnings?: [{file, line, column, code, message}], error_count?: int, warning_count?: int, elapsed_seconds?: number, output_tail?: string, ubt_log_path?: string, log_cursor_before?: int, note?: string, live_coding: {available, enabled, started, compiling, enabled_by_default?, reason?} }",
+          "annotations": {
+            "readOnlyHint": true,
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false
+          }
+        },
+        {
+          "name": "set_live_coding_enabled",
+          "description": "Turn Live Coding on or off for this editor session, as the Live Coding toggle does; on starts its console the first time, which start_cpp_compile needs. The project's default (Editor Preferences) is not changed.",
+          "params": [
+            {
+              "name": "enabled",
+              "jsonType": "boolean",
+              "required": true,
+              "description": "Required. true to enable Live Coding for this session, false to disable it."
+            }
+          ],
+          "returns": "{ enabled: bool, started: bool, note: string }",
+          "annotations": {
+            "readOnlyHint": false,
+            "destructiveHint": true,
+            "idempotentHint": true,
+            "openWorldHint": false
+          }
+        },
+        {
+          "name": "start_cpp_compile",
+          "description": "Compile the C++ modules of the running editor and patch them in, as the editor's Live Coding compile button does; returns as soon as the compile is requested, so poll get_cpp_compile_status for the result and the compiler's errors.\n\nOne compile at a time: a call while one runs answers already_running true and starts nothing. Live Coding has no cancel. A patch reinstances live objects of the changed classes, so it is refused during Play-in-Editor without force.\n\nmode \"auto\" (default) uses Live Coding when it has started in this session and refuses otherwise with the reason; \"live_coding\" also starts Live Coding first, like the button; \"hot_reload\" compiles without Live Coding, only when Live Coding has not started, and can corrupt the defaults of Blueprints built on the reloaded classes, so auto never picks it.",
+          "params": [
+            {
+              "name": "mode",
+              "jsonType": "string",
+              "required": false,
+              "nameLike": true,
+              "description": "Optional \"auto\" | \"live_coding\" | \"hot_reload\". Default \"auto\"."
+            }
+          ],
+          "returns": "{ compile_started: bool, already_running: bool, mode: string, log_cursor_before?: int, note: string }",
+          "annotations": {
+            "readOnlyHint": false,
+            "destructiveHint": true,
+            "idempotentHint": false,
+            "openWorldHint": false
+          },
+          "codeExec": true
+        }
+      ]
+    },
+    {
       "domain": "Config",
       "description": "project settings and the default map, collision channels and profiles, config diffs, and re-running construction scripts",
       "commands": [

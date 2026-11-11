@@ -93,6 +93,7 @@ The core tools: `add_graph_node`, `compile_blueprint`, `connect_pins`, `execute_
 | Blueprint | 89 | Blueprint authoring: Blueprints, macros and Editor Utility Blueprints, variables, functions and their parameters, event dispatchers, interfaces, components, timelines, graph nodes and pins, compiling, replication settings and reparenting |
 | Camera | 16 | Camera and spring arm components, Gameplay Camera assets and rigs, and camera shakes |
 | Chooser | 14 | Chooser tables: their columns, rows, cells and outcomes, and evaluating one |
+| Code | 4 | The project's C++: compiling the editor's modules with Live Coding, the compiler's errors, and adding a class |
 | Config | 15 | Project settings and the default map, collision channels and profiles, config diffs, and re-running construction scripts |
 | DataAsset | 51 | Data tables and their rows, curve tables and curves, data assets, data registries, string tables, CSV and JSON import and export, and localization |
 | Documentation | 3 | Documentation generated for an asset, a Blueprint or the whole project |

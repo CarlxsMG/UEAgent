@@ -55,7 +55,7 @@ static const TCHAR* const GProtocolKeys[] =
 // names and a nullptr terminator; one extra nullptr closes the array. Walked
 // exactly ONCE (see GetTable) into a static map -- nothing is rebuilt per call,
 // and one array of literals is far cheaper object code than one Add() per
-// command (1800 of them).
+// command (1804 of them).
 //
 // A command with an EMPTY param set is still in the table (name + terminator):
 // "this command takes no params" is a real answer, and different from "I do not
@@ -1195,6 +1195,10 @@ static const TCHAR* const GFlatCommandParams[] =
     TEXT("create_control_rig_blueprint"),
         TEXT("name"), TEXT("package_path"),
     nullptr,
+    TEXT("create_cpp_class"),
+        TEXT("class_location"), TEXT("class_name"), TEXT("module_name"), TEXT("parent_class"),
+        TEXT("sub_path"),
+    nullptr,
     TEXT("create_curve_asset"),
         TEXT("curve_type"), TEXT("name"), TEXT("package_path"),
     nullptr,
@@ -2199,6 +2203,9 @@ static const TCHAR* const GFlatCommandParams[] =
     nullptr,
     TEXT("get_control_bus_mix_info"),
         TEXT("mix_path"),
+    nullptr,
+    TEXT("get_cpp_compile_status"),
+        TEXT("max_results"),
     nullptr,
     TEXT("get_culture_info"),
         TEXT("culture_name"),
@@ -4812,6 +4819,9 @@ static const TCHAR* const GFlatCommandParams[] =
     TEXT("set_light_shadow_quality"),
         TEXT("light_name"), TEXT("shadow_settings"),
     nullptr,
+    TEXT("set_live_coding_enabled"),
+        TEXT("enabled"),
+    nullptr,
     TEXT("set_lumen_gi_quality"),
         TEXT("method"), TEXT("quality"),
     nullptr,
@@ -5891,6 +5901,9 @@ static const TCHAR* const GFlatCommandParams[] =
     TEXT("split_blueprint_pin"),
         TEXT("blueprint_name"), TEXT("graph_name"), TEXT("node_id"), TEXT("pin_name"),
     nullptr,
+    TEXT("start_cpp_compile"),
+        TEXT("mode"),
+    nullptr,
     TEXT("start_package_build"),
         TEXT("archive_directory"), TEXT("configuration"), TEXT("extra_args"), TEXT("platform"),
     nullptr,
@@ -6017,8 +6030,8 @@ static const TCHAR* const GFlatCommandParams[] =
     nullptr
 };
 
-static constexpr int32 GNumCommands = 1800;
-static constexpr int32 GNumParamNames = 6084;
+static constexpr int32 GNumCommands = 1804;
+static constexpr int32 GNumParamNames = 6092;
 
 // Built ONCE, on first use (function-local static => thread-safe init). The
 // dispatcher is game-thread only, so there is no contention after that.
