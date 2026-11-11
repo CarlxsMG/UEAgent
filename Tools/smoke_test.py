@@ -405,8 +405,11 @@ def check_source_control(s: Session) -> None:
 
 
 POLICY_KEYS = ("bReadOnlyMode", "bAllowCodeExecution", "DisabledDomains", "DisabledTools")
-CODE_EXEC = ["execute_python", "execute_python_file", "execute_console_command", "call_function",
-             "run_external_project_script", "launch_dedicated_server"]
+
+
+def code_exec_tools(catalog: dict) -> list[str]:
+    """The listed tools the catalog marks codeExec (tool_hints.py pins them)."""
+    return [c["name"] for d in catalog["domains"] for c in d["commands"] if c.get("codeExec") and not c.get("retired")]
 
 
 def reset_policy_settings(project: Path) -> None:
@@ -480,11 +483,14 @@ def check_policy(s: Session, catalog: dict) -> None:
 
     print("== tool permissions: code execution off")
     console(s, "mcp.policy codeexec=0")
+    code_exec = code_exec_tools(catalog)
     full = [t["name"] for t in s.rpc("tools/list", query="?tools=all")["result"]["tools"]]
-    s.check("the six code-execution tools leave the list, nothing else", len(full) == len(listed) - 6
-            and not set(CODE_EXEC) & set(full), sorted(set(CODE_EXEC) & set(full)))
+    s.check(f"the {len(code_exec)} code-execution tools leave the list, nothing else", len(full) == len(listed) - len(code_exec)
+            and not set(code_exec) & set(full), sorted(set(code_exec) & set(full)))
     is_error, reply = s.call("execute_python", {"code": "print(1)"})
     s.check("execute_python is refused (code_execution)", is_error and refusal_of(reply).get("policy") == "code_execution", reply)
+    is_error, reply = s.call("start_cpp_compile", {})
+    s.check("start_cpp_compile is refused (code_execution)", is_error and refusal_of(reply).get("policy") == "code_execution", reply)
     is_error, reply = s.call("spawn_actor", {"type": "PointLight", "name": "SmokeStillWrites"})
     s.check("a write still runs", not is_error and reply.get("success") is not False, reply)
 
@@ -503,6 +509,9 @@ def check_read_only(s: Session, catalog: dict) -> None:
     s.check("the core list carries the core reads and the meta-tools", set(core) - set(meta) <= allowed and core[-4:] == meta, core)
     compact = [t["name"] for t in s.rpc("tools/list", query="?tools=compact")["result"]["tools"]]
     s.check("the compact list carries the meta-tools", compact == meta[:3], compact)
+    cpp = {"get_cpp_compile_status", "start_cpp_compile", "create_cpp_class", "set_live_coding_enabled"}
+    s.check("of the C++ tools only get_cpp_compile_status is listed", cpp & set(full) == {"get_cpp_compile_status"},
+            sorted(cpp & set(full)))
     renamed = next((old for old, new in catalog.get("renamed", {}).items() if new not in allowed), "")
     retired = next((c["name"] for d in catalog["domains"] for c in d["commands"] if c.get("retired")
                     and not (c.get("annotations") or {}).get("readOnlyHint")), "")

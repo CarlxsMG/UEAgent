@@ -3757,6 +3757,38 @@
    ]
   },
   {
+   "id": "policy-read-only-cpp-status",
+   "steps": [
+    {
+     "op": "policy",
+     "command": "get_cpp_compile_status",
+     "settings": {
+      "read_only": true
+     },
+     "expect": {
+      "refused": false,
+      "policy": ""
+     }
+    }
+   ]
+  },
+  {
+   "id": "policy-read-only-cpp-compile",
+   "steps": [
+    {
+     "op": "policy",
+     "command": "start_cpp_compile",
+     "settings": {
+      "read_only": true
+     },
+     "expect": {
+      "refused": true,
+      "policy": "read_only"
+     }
+    }
+   ]
+  },
+  {
    "id": "policy-read-only-batch-container",
    "steps": [
     {
@@ -3986,6 +4018,22 @@
     {
      "op": "policy",
      "command": "launch_dedicated_server",
+     "settings": {
+      "allow_code_execution": false
+     },
+     "expect": {
+      "refused": true,
+      "policy": "code_execution"
+     }
+    }
+   ]
+  },
+  {
+   "id": "policy-no-code-cpp-compile",
+   "steps": [
+    {
+     "op": "policy",
+     "command": "start_cpp_compile",
      "settings": {
       "allow_code_execution": false
      },

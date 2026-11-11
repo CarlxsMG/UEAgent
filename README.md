@@ -206,7 +206,7 @@ After an update, reconnect your client so it lists the tools again.
 | Return images | on | the capture tools answer with the picture as an MCP image next to their JSON (see [Answers and refusals](docs/responses.md#images)); `?images=off` in the URL turns it off for one client |
 | Image max dimension / bytes | 1568 / 1048576 | a larger picture is sent as a smaller JPEG copy; the file on disk keeps its full resolution |
 | Read-only mode | off | **Permissions**: only the tools that read, or that only capture an image under `Saved`, are listed and run; `-McpReadOnly` on the command line or `UEAGENT_READONLY=1` turns it on. Also in the status bar's **MCP** menu |
-| Allow code execution | on | **Permissions**: off, the six tools that run code or a process (`execute_python`, `execute_python_file`, `execute_console_command`, `call_function`, `run_external_project_script`, `launch_dedicated_server`) are not listed and are refused |
+| Allow code execution | on | **Permissions**: off, the seven tools that run code or a process (`execute_python`, `execute_python_file`, `execute_console_command`, `call_function`, `run_external_project_script`, `launch_dedicated_server`, `start_cpp_compile`) are not listed and are refused |
 | Disabled domains / Disabled tools | empty | **Permissions**: these domains' tools, and these tools by name, are not listed and are refused |
 
 **Project Settings > Plugins > UEAgent** (shared, saved to `Config/DefaultEditor.ini`):

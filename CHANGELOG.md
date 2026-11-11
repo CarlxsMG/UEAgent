@@ -26,7 +26,7 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 - **Read-only mode, and turning off tools, domains and code execution** (Editor Preferences > Plugins > UEAgent >
   Permissions, per user). Read-only mode lets an agent run only the tools that read, or that only capture an image
   under `Saved`; `-McpReadOnly` on the command line or `UEAGENT_READONLY=1` turns it on, and the status bar shows it
-  (`MCP · 55561 · read-only`) with a toggle in its menu. **Allow code execution** off refuses the six tools that run
+  (`MCP · 55561 · read-only`) with a toggle in its menu. **Allow code execution** off refuses the seven tools that run
   code or a process, and **Disabled domains** and **Disabled tools** turn tools off by domain or name. A tool that is
   off is left out of `tools/list` (core, full and compact) and `find_tools`, and is refused with
   `refused_by: "policy"` however it is called: directly, through `call_tool`, as an `execute_batch` item, or by an
@@ -44,7 +44,8 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
   runs only with `mode: "hot_reload"`, never on its own. `set_live_coding_enabled` turns Live Coding on for the
   session (an editor started with `-unattended` does not start it), and `create_cpp_class` writes the header and
   source of a new class into a project module, without regenerating project files or compiling. Both writers are
-  refused during Play-in-Editor without `force`, and `start_cpp_compile` is marked `codeExec`.
+  refused during Play-in-Editor without `force`, and `start_cpp_compile` runs code: with code
+  execution off it is refused.
 
 ### Fixed
 

@@ -209,7 +209,7 @@ Launcher. Después de actualizar, vuelve a conectar tu cliente para que liste de
 | Return images | activado | las herramientas de captura responden con la imagen como bloque MCP `image` junto a su JSON (ver [Answers and refusals](docs/responses.md#images)); `?images=off` en la URL lo desactiva para un cliente |
 | Image max dimension / bytes | 1568 / 1048576 | una imagen mayor se envía como copia JPEG más pequeña; el archivo en disco conserva su resolución |
 | Read-only mode | desactivado | **Permissions**: solo se listan y se ejecutan las herramientas que leen o que solo capturan una imagen en `Saved`; `-McpReadOnly` en la línea de comandos o `UEAGENT_READONLY=1` lo activan. También en el menú **MCP** de la barra de estado |
-| Allow code execution | activado | **Permissions**: desactivado, las seis herramientas que ejecutan código o un proceso (`execute_python`, `execute_python_file`, `execute_console_command`, `call_function`, `run_external_project_script`, `launch_dedicated_server`) no se listan y se rechazan |
+| Allow code execution | activado | **Permissions**: desactivado, las siete herramientas que ejecutan código o un proceso (`execute_python`, `execute_python_file`, `execute_console_command`, `call_function`, `run_external_project_script`, `launch_dedicated_server`, `start_cpp_compile`) no se listan y se rechazan |
 | Disabled domains / Disabled tools | vacío | **Permissions**: las herramientas de esos dominios, y esas herramientas por nombre, no se listan y se rechazan |
 
 **Project Settings > Plugins > UEAgent** (compartido, se guarda en `Config/DefaultEditor.ini`):

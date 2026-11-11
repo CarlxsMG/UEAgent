@@ -54,8 +54,8 @@ public:
 
 	/**
 	 * Off, the tools that run code or a process the caller supplies (execute_python, execute_python_file,
-	 * execute_console_command, call_function, run_external_project_script, launch_dedicated_server) are not listed
-	 * and are refused. With it on, execute_python has the editor's own rights.
+	 * execute_console_command, call_function, run_external_project_script, launch_dedicated_server, start_cpp_compile)
+	 * are not listed and are refused. With it on, execute_python has the editor's own rights.
 	 */
 	UPROPERTY(config, EditAnywhere, Category = "Permissions")
 	bool bAllowCodeExecution = true;

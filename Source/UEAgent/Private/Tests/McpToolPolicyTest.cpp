@@ -183,24 +183,35 @@ bool FMcpToolPolicyTest::RunTest(const FString& Parameters)
 	}
 	FMcpToolPolicy::SetCurrent(Saved);
 
-	// 5. The shipped catalog: code execution off takes out exactly the six, read-only mode keeps the five captures.
+	// 5. The shipped catalog: code execution off takes out exactly the tools it marks codeExec, read-only mode keeps the
+	// five captures.
 	const TSharedPtr<const FMcpToolCatalog> Shipped = FMcpToolCatalog::LoadFromFile(FMcpToolCatalog::DefaultCatalogPath(), Error);
 	if (TestTrue(FString::Printf(TEXT("the shipped catalog loads (%s)"), *Error), Shipped.IsValid()))
 	{
 		const TArray<FString> NoCodeList = ListedNames(Shipped->BuildFullToolsListUtf8(*NoCodePolicy));
-		TestEqual(TEXT("code execution off lists all but the six"), NoCodeList.Num(), Shipped->NumTools() - 6);
-		for (const TCHAR* Name : { TEXT("execute_python"), TEXT("execute_python_file"), TEXT("execute_console_command"), TEXT("call_function"),
-			TEXT("run_external_project_script"), TEXT("launch_dedicated_server") })
+		TArray<FString> CodeExec;
+		for (const FMcpToolCatalog::FTool& Tool : Shipped->GetTools())
 		{
-			TestFalse(FString::Printf(TEXT("%s is not listed with code execution off"), Name), NoCodeList.Contains(Name));
+			if (Tool.bCodeExec)
+			{
+				CodeExec.Add(Tool.Name);
+			}
+		}
+		TestTrue(TEXT("the catalog marks execute_python and start_cpp_compile codeExec"),
+			CodeExec.Contains(TEXT("execute_python")) && CodeExec.Contains(TEXT("start_cpp_compile")));
+		TestEqual(TEXT("code execution off lists all but the codeExec tools"), NoCodeList.Num(), Shipped->NumTools() - CodeExec.Num());
+		for (const FString& Name : CodeExec)
+		{
+			TestFalse(FString::Printf(TEXT("%s is not listed with code execution off"), *Name), NoCodeList.Contains(Name));
 		}
 		const TArray<FString> ReadOnlyList = ListedNames(Shipped->BuildFullToolsListUtf8(*ReadOnlyPolicy));
 		for (const TCHAR* Name : { TEXT("capture_viewport"), TEXT("capture_high_res_screenshot"), TEXT("capture_pie_screenshot"),
-			TEXT("render_widget_preview"), TEXT("generate_asset_thumbnail"), TEXT("get_project_info") })
+			TEXT("render_widget_preview"), TEXT("generate_asset_thumbnail"), TEXT("get_project_info"), TEXT("get_cpp_compile_status") })
 		{
 			TestTrue(FString::Printf(TEXT("%s is listed in read-only mode"), Name), ReadOnlyList.Contains(Name));
 		}
-		for (const TCHAR* Name : { TEXT("spawn_actor"), TEXT("undo"), TEXT("redo"), TEXT("begin_transaction"), TEXT("execute_python"), TEXT("save_asset") })
+		for (const TCHAR* Name : { TEXT("spawn_actor"), TEXT("undo"), TEXT("redo"), TEXT("begin_transaction"), TEXT("execute_python"), TEXT("save_asset"),
+			TEXT("start_cpp_compile"), TEXT("create_cpp_class"), TEXT("set_live_coding_enabled") })
 		{
 			TestFalse(FString::Printf(TEXT("%s is not listed in read-only mode"), Name), ReadOnlyList.Contains(Name));
 		}
