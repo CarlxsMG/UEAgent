@@ -208,6 +208,14 @@ changed, and a client that supports `tools/list_changed` reads it again. To list
 from the start, name it in the URL: `?packs=actors,play` or `?domains=Material,Animation` (either
 takes both).
 
+### Images
+
+The capture tools (`capture_viewport`, `capture_high_res_screenshot`, `capture_pie_screenshot`,
+`render_widget_preview`, `generate_asset_thumbnail`) answer with the picture as an MCP image block next
+to their JSON. For a client that shows images badly or not at all, add `?images=off` to the URL: those
+tools then answer with the file path alone. It combines with the other parameters:
+`?tools=all&images=off`.
+
 ### Every client at once
 
 `UEAGENT_TOOLS=all` or `UEAGENT_TOOLS=compact` in the environment the editor starts in changes the

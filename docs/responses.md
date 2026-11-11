@@ -24,6 +24,25 @@ A call answers with one text block that holds a JSON object. Most tools answer w
 A call that ran and failed answers `success: false` with its `error`. It is not a tool error: the agent
 reads `success` itself.
 
+## Images
+
+The capture tools (`capture_viewport`, `capture_high_res_screenshot`, `capture_pie_screenshot`,
+`render_widget_preview`, `generate_asset_thumbnail`) write a PNG and answer with the JSON text block and
+then an `image` block (`data` in base64, `mimeType`) with the picture. The JSON says what was sent, next
+to the file's path:
+
+| Field | |
+|---|---|
+| `image_returned` | Whether the image block is in the answer |
+| `image_width`, `image_height` | The size of the image sent |
+| `image_note` | Why the image was shrunk or left out |
+
+A picture over the limits (1568 px on its longest side, about 1 MB encoded: **Image max dimension** and
+**Image max bytes** in Editor Preferences > Plugins > UEAgent) is sent as a smaller JPEG copy; the file on
+disk keeps its full resolution. `execute_batch` answers with its items' images in item order, at most 4;
+a note names the rest. `return_image: false` on a call, **Return images** off, or `?images=off` at the
+end of the server URL leave the image out: the answer is the text block alone.
+
 ## Readback
 
 After the call, in the same pass on the game thread, readback re-reads the state the call changed. When

@@ -6,6 +6,14 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 ### Added
 
+- **The capture tools return the picture they take.** `capture_viewport`, `capture_high_res_screenshot`,
+  `capture_pie_screenshot`, `render_widget_preview` and `generate_asset_thumbnail` answer with an MCP `image` block
+  after the JSON text block, so an agent sees the picture without reading files. A picture over 1568 px or about
+  1 MB is sent as a smaller JPEG copy and the file keeps its full resolution; the JSON says what happened
+  (`image_returned`, `image_width`, `image_height`, `image_note`). `execute_batch` returns its items' images, at
+  most 4. Turn it off per call (`return_image: false`), per user (**Return images** in Editor Preferences > Plugins
+  > UEAgent, with the size limits) or per client (`?images=off` in the server URL). `generate_asset_thumbnail`
+  writes the thumbnail to `Saved/MCP/Thumbnails/` and returns its `file_path`; every existing field stays.
 - `Tools/check_tool_count.py` checks the tool counts the README, its Spanish version, the documentation and the
   plugin's description state against the catalog: a count above the tools listed, or more than one hundred below
   their number rounded down to the hundred, fails. It runs in CI with the documentation checks.
