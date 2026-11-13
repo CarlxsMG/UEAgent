@@ -4,6 +4,8 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 ## Unreleased
 
+## 2.11.1 - 2026-11-13
+
 ### Fixed
 
 - **A full unity build compiles again.** In a unity blob that also includes the Windows headers, the `TokenSource`
