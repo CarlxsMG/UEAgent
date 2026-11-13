@@ -4,6 +4,12 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 ## Unreleased
 
+### Fixed
+
+- **A full unity build compiles again.** In a unity blob that also includes the Windows headers, the `TokenSource`
+  helper of `McpAgentClients.cpp` collided with `winnt.h`'s `TokenSource` enumerator (C2872). It is now
+  `ClientTokenSource`. This shows up when building from a git clone with adaptive unity off. ([#70](https://github.com/CarlxsMG/UEAgent/issues/70))
+
 ## 2.11.0 - 2026-11-11
 
 The capture tools return their picture to the agent, new tools drive source control, the C++ compile and tests to a

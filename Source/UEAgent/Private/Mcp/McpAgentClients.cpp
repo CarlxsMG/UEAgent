@@ -53,7 +53,7 @@ namespace McpAgentClientsPrivate
 	static const TCHAR* const VSCodeTokenInput = TEXT("ueagent-token");
 
 	// Where each client reads the token from, so that the file never holds it.
-	static FString TokenSource(EClient Client)
+	static FString ClientTokenSource(EClient Client)
 	{
 		switch (Client)
 		{
@@ -65,7 +65,7 @@ namespace McpAgentClientsPrivate
 
 	static FString AuthHeaderValue(EClient Client)
 	{
-		return TEXT("Bearer ") + TokenSource(Client);
+		return TEXT("Bearer ") + ClientTokenSource(Client);
 	}
 
 	static bool PointsHere(EClient Client, const TSharedPtr<FJsonObject>& Entry, const FString& Url)
@@ -406,7 +406,7 @@ bool McpAgentClients::Connect(EClient Client, const FString& Path, uint16 Port, 
 		Headers->SetStringField(TEXT("Authorization"), AuthHeaderValue(Client));
 		Changes.Add(Client == EClient::VSCode
 			? FString::Printf(TEXT("Authorization header from the \"%s\" input"), VSCodeTokenInput)
-			: FString::Printf(TEXT("Authorization header from %s"), *TokenSource(Client)));
+			: FString::Printf(TEXT("Authorization header from %s"), *ClientTokenSource(Client)));
 		// OpenCode answers a 401 by starting an OAuth flow; this server takes a token, not OAuth.
 		if (Client == EClient::OpenCode && !Entry->HasField(TEXT("oauth")))
 		{
