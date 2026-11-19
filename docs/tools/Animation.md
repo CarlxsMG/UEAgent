@@ -2227,7 +2227,7 @@ Set the automatic rule of one transition (source_state to target_state) in a sta
 
 *Destructive, idempotent.*
 
-Make a bool variable the rule of an existing transition (source_state to target_state) of an Animation Blueprint state machine: every rule-graph node but the result sink is removed, then a getter of variable_name is wired to the sink's bCanEnterTransition, so the transition passes while the variable is true (there is no invert option). A missing blueprint, machine, transition or variable, or one that is not a single bool, is an error before anything changes; a variable not compiled yet (variable_kind new_blueprint) is checked against its declared type. Repeat calls rebuild the same rule (idempotent). Marks the blueprint structurally modified and saves without compiling (compile_anim_blueprint). Float test: set_anim_transition_rule_from_comparison; time-based: set_anim_transition_rule_automatic; empty rule: clear_anim_transition_rule; new transition: add_anim_transition. Refused while PIE runs unless force=true; a failed save is an error, the change kept in memory.
+Make a bool variable the rule of an existing transition (source_state to target_state) of an Animation Blueprint state machine: every rule-graph node but the result sink is removed, then a getter of variable_name is wired to the sink's bCanEnterTransition, so the transition passes while the variable is true, or while it is false with negate=true (a Not node goes between them). A missing blueprint, machine, transition or variable, or one that is not a single bool, is an error before anything changes; a variable not compiled yet (variable_kind new_blueprint) is checked against its declared type. Repeat calls rebuild the same rule (idempotent). Marks the blueprint structurally modified and saves without compiling (compile_anim_blueprint). Float test: set_anim_transition_rule_from_comparison; time-based: set_anim_transition_rule_automatic; empty rule: clear_anim_transition_rule; new transition: add_anim_transition. Refused while PIE runs unless force=true; a failed save is an error, the change kept in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2235,9 +2235,10 @@ Make a bool variable the rule of an existing transition (source_state to target_
 | `machine_name` | string | yes | Name of the state machine that owns the transition, matched without case |
 | `source_state` | string | yes | Name of the source state or conduit (transition origin) |
 | `target_state` | string | yes | Name of the target state or conduit (transition destination) |
-| `variable_name` | string | yes | Name of an existing bool variable on the AnimBP (or its parent C++ class); the rule reads it as is, true lets the transition pass |
+| `variable_name` | string | yes | Name of an existing bool variable on the AnimBP (or its parent C++ class); true lets the transition pass, unless negate |
+| `negate` | boolean | no | Optional bool (default false): pass the transition while the variable is false, through a Not (UKismetMathLibrary::Not_PreBool) node |
 
-**Returns:** `{ anim_blueprint_path, machine_name, source_state, target_state, variable_name, variable_kind, rule_set, sink_present, contributor_count, contributor_node_class, saved, save_error? }`
+**Returns:** `{ anim_blueprint_path, machine_name, source_state, target_state, variable_name, negate, variable_kind, rule_set, sink_present, contributor_count, contributor_node_class, saved, save_error? }`
 
 ## `set_anim_transition_rule_from_comparison`
 

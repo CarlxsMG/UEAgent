@@ -406,7 +406,7 @@ Level the terrain under a footprint: snap every heightmap vertex inside a world-
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `landscape_actor_name` | string | no | Optional landscape actor name, defaults to first found |
-| `target_height` | number | no | Optional uint16 heightmap value 0 to 65535 |
+| `target_height` | number | no | Optional uint16 heightmap value 0 to 65535; with neither it nor target_z the box flattens to 32768, the landscape's local Z 0 |
 | `target_z` | number | no | Optional target world Z, converted to uint16 using landscape scale |
 | `box_min` | array | no | Optional [x, y, z] world-space box minimum |
 | `box_max` | array | no | Optional [x, y, z] world-space box maximum |
@@ -1341,8 +1341,8 @@ Raise or lower terrain: add delta_z world units to every heightmap vertex inside
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `delta_z` | number | yes | Required world Z delta to apply to every vertex in the region (negative lowers) |
 | `landscape_actor_name` | string | no | Optional landscape actor name, defaults to first found |
-| `delta_z` | number | no | World Z delta to apply to every vertex in the region |
 | `box_min` | array | no | Optional [x, y, z] world-space box minimum |
 | `box_max` | array | no | Optional [x, y, z] world-space box maximum |
 | `center` | array | no | Optional [x, y, z] box center (alternative to box_min/box_max) |
@@ -1483,7 +1483,7 @@ Soften terrain: run a 3x3 box blur over the heightmap inside a world-space box, 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `landscape_actor_name` | string | no | Optional landscape actor name, defaults to first found |
-| `iterations` | number | no | Number of smoothing iterations 1 to 5 |
+| `iterations` | number | no | Optional number of smoothing iterations 1 to 5, default 1 |
 | `box_min` | array | no | Optional [x, y, z] world-space box minimum |
 | `box_max` | array | no | Optional [x, y, z] world-space box maximum |
 | `center` | array | no | Optional [x, y, z] box center (alternative to box_min/box_max) |

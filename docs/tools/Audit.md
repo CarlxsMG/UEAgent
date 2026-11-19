@@ -2,9 +2,28 @@
 
 # Audit
 
-9 tools for health audits of asset references, Blueprints, collision profiles, replication and widgets, and a capture of the PIE state.
+13 tools for health audits of asset references, Blueprints, collision profiles, replication and widgets, and a capture of the PIE state.
 
 Back to the [index](README.md).
+
+## `audit_asset_naming`
+
+*Read-only.*
+
+Sweep the assets under folder_path for naming-convention problems: a name without the prefix its class takes (BP_, BPI_, WBP_, ABP_, M_, MI_, MF_, T_, SM_, SK_, SKEL_, AS_, AM_, NS_, S_, SC_, DT_, IA_, IMC_... after Epic's recommended conventions), spaces, and characters other than letters, digits and underscore. Asset Registry only: nothing is loaded. Classes with no prefix rule (levels, data assets of project classes...) are counted in unchecked_count, not reported. Each finding carries a suggested_name. Returns findings inline, paged with offset/limit; the summary counts every finding. Read-only: it renames nothing (rename_asset does).
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `folder_path` | string | no | Content folder to scan. Defaults to "/Game". |
+| `recursive` | boolean | no | Recurse into subfolders. Defaults to true. |
+| `prefixes` | object | no | Prefix rules by class short name, merged over the defaults: {"StaticMesh": "SM_", "Texture2D": ["T_", "TX_"], "World": "L_", "Blueprint": ""}. A string or an array of accepted prefixes (case-sensitive); "" or [] turns the class's rule off. Blueprints are keyed Blueprint, BlueprintInterface, BlueprintFunctionLibrary and BlueprintMacroLibrary. |
+| `replace_default_prefixes` | boolean | no | Use only the prefixes param, without the defaults. Defaults to false. |
+| `rules` | array | no | Rule ids to run, default all: naming_prefix, naming_space, naming_invalid_char. An unknown id is an error. |
+| `max_results` | number | no | Cap on assets examined (1-100000). Defaults to 50000. |
+| `offset` | number | no | Index of the first finding returned. Defaults to 0. |
+| `limit` | number | no | Findings returned per call (1-5000). Defaults to 200. |
+
+**Returns:** `{ folder_path, scanned: int, scan_truncated: bool, unchecked_count: int, prefix_rules: {class: [string]}, rules: [string], summary: { finding_count, by_severity: {error, warning, info}, by_rule: {rule: int} }, findings: [{ severity, rule, asset, asset_class, message, suggested_fix, suggested_name, expected_prefixes? }], offset, limit, returned, next_offset: int|null }`
 
 ## `audit_asset_references`
 
@@ -45,6 +64,23 @@ No parameters.
 
 **Returns:** `{ path: string, summary: { profile_count: int, channel_count: int, custom_channels_in_use: int } }`
 
+## `audit_level_actors`
+
+*Read-only.*
+
+Sweep the actors of a world for placement problems: actors with no components, bare AActor instances with nothing visible, duplicates stacked at the same transform with the same meshes, mesh components with no mesh or with empty material slots, actors far from the origin or below the world's KillZ, and meshes hidden in game that still collide. Defaults to the editor world; pass world to audit a PIE world. In a World Partition map only the loaded actors are seen. Returns findings inline, paged with offset/limit; the summary counts every finding. Read-only.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `world` | string | no | Optional world selector: absent/'editor' (default) \| 'pie' (ambiguous: PlayWorld, else the first PIE context) \| 'server' (the PIE world with authority) \| 'client' \| 'pie:N' \| 'game' (alias of 'pie'). |
+| `max_distance` | number | no | Distance from the origin, in cm, beyond which an actor is reported. Defaults to 1048576 (the classic half world size, about 10.5 km). |
+| `rules` | array | no | Rule ids to run, default all: actor_no_components, actor_no_visual, actor_duplicate, actor_missing_mesh, actor_missing_material, actor_out_of_bounds, actor_below_kill_z, actor_hidden_collidable. An unknown id is an error. |
+| `max_results` | number | no | Cap on actors examined (1-100000). Defaults to 50000. |
+| `offset` | number | no | Index of the first finding returned. Defaults to 0. |
+| `limit` | number | no | Findings returned per call (1-5000). Defaults to 200. |
+
+**Returns:** `{ world: string, world_name, world_package, world_type, net_mode, pie_instance, scanned: int, scan_truncated: bool, rules: [string], summary: { finding_count, by_severity: {error, warning, info}, by_rule: {rule: int} }, findings: [{ severity, rule, actor, actor_name, actor_class, message, suggested_fix, component?, location?, duplicate_of? }], offset, limit, returned, next_offset: int|null }`
+
 ## `audit_replication`
 
 *Destructive.*
@@ -58,6 +94,46 @@ Project-wide replication audit: for every Blueprint under folder_path, which var
 | `max_results` | number | no | Cap on Blueprints processed (1-100000). Defaults to 1000. |
 
 **Returns:** `{ path: string, summary: { blueprint_count: int, replicated_class_count: int, replicated_variable_count: int, rpc_count: int } }`
+
+## `audit_static_meshes`
+
+*Read-only.*
+
+Sweep the StaticMesh assets under folder_path for: no simple collision (and not complex-as-simple, and not set to NoCollision), a high triangle count with no LODs and no Nanite, a missing lightmap UV channel when the project allows static lighting, too many material slots, and degenerate bounds (empty mesh, zero size on two axes, or absurdly large). Reads Asset Registry tags, so nothing is loaded; a mesh whose package predates those tags is loaded to read them, up to max_loads. Returns findings inline, paged with offset/limit; the summary counts every finding. Read-only.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `folder_path` | string | no | Content folder to scan. Defaults to "/Game". |
+| `recursive` | boolean | no | Recurse into subfolders. Defaults to true. |
+| `max_triangles_without_lod` | number | no | LOD0 triangle count from which a mesh with a single LOD and no Nanite is reported. Defaults to 10000. |
+| `max_material_slots` | number | no | Largest acceptable number of material slots. Defaults to 8. |
+| `max_bounds_size` | number | no | Largest acceptable bounds size on any axis, in cm. Defaults to 1000000 (10 km). |
+| `rules` | array | no | Rule ids to run, default all: mesh_no_collision, mesh_high_tris_no_lod, mesh_missing_lightmap_uv, mesh_too_many_materials, mesh_degenerate_bounds. An unknown id is an error. |
+| `max_results` | number | no | Cap on meshes examined (1-100000). Defaults to 20000. |
+| `max_loads` | number | no | Cap on meshes loaded because their tags are missing (0-5000; 0 never loads). Defaults to 200. |
+| `offset` | number | no | Index of the first finding returned. Defaults to 0. |
+| `limit` | number | no | Findings returned per call (1-5000). Defaults to 200. |
+
+**Returns:** `{ folder_path, scanned: int, scan_truncated: bool, loaded_count: int, skipped_no_tags: int, static_lighting_allowed: bool, rules: [string], summary: { finding_count, by_severity: {error, warning, info}, by_rule: {rule: int} }, findings: [{ severity, rule, asset, message, suggested_fix, triangles?, lods?, nanite?, size?: [x,y,z] }], offset, limit, returned, next_offset: int|null }`
+
+## `audit_textures`
+
+*Read-only.*
+
+Sweep the Texture2D assets under folder_path for the settings that cost memory or look wrong: non-power-of-two size, oversized versus a threshold, no mips, normal maps without Normalmap compression or with sRGB on, sRGB on mask textures (ORM/roughness/AO...), a normal map or UI texture left in a generic texture group, and streaming disabled. Reads Asset Registry tags, so nothing is loaded; a texture whose package predates those tags is loaded to read them, up to max_loads. Returns findings inline, paged with offset/limit; the summary counts every finding. Read-only.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `folder_path` | string | no | Content folder to scan. Defaults to "/Game". |
+| `recursive` | boolean | no | Recurse into subfolders. Defaults to true. |
+| `max_texture_size` | number | no | Largest acceptable dimension in pixels after Maximum Texture Size is applied. Defaults to 4096. |
+| `rules` | array | no | Rule ids to run, default all: texture_non_power_of_two, texture_oversized, texture_no_mips, texture_normal_compression, texture_normal_srgb, texture_mask_srgb, texture_lod_group, texture_streaming_disabled. An unknown id is an error. |
+| `max_results` | number | no | Cap on textures examined (1-100000). Defaults to 20000. |
+| `max_loads` | number | no | Cap on textures loaded because their tags are missing (0-5000; 0 never loads). Defaults to 200. |
+| `offset` | number | no | Index of the first finding returned. Defaults to 0. |
+| `limit` | number | no | Findings returned per call (1-5000). Defaults to 200. |
+
+**Returns:** `{ folder_path, scanned: int, scan_truncated: bool, loaded_count: int, skipped_no_tags: int, rules: [string], summary: { finding_count, by_severity: {error, warning, info}, by_rule: {rule: int} }, findings: [{ severity, rule, asset, message, suggested_fix, width?, height?, compression?, lod_group? }], offset, limit, returned, next_offset: int|null }`
 
 ## `audit_widget_accessibility`
 

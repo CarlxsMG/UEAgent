@@ -2,7 +2,7 @@
 
 # Tool reference
 
-1567 tools in 57 domains. Every tool also describes itself over MCP (`tools/list`, or `describe_tool` for a tool the client does not list: see [tool lists](../clients.md#tool-lists)); this reference is the same catalog, readable.
+1585 tools in 57 domains. Every tool also describes itself over MCP (`tools/list`, or `describe_tool` for a tool the client does not list: see [tool lists](../clients.md#tool-lists)); this reference is the same catalog, readable.
 
 The 11 core tools, which every client lists by default: `add_graph_node`, `compile_blueprint`, `connect_pins`, `execute_python`, `find_assets_by_name`, `get_graph_nodes`, `get_object_info`, `save_asset`, `set_pin_default_value`, `set_properties`, `undo`.
 
@@ -24,7 +24,7 @@ The packs, which `enable_toolset` adds by name:
 | [Animation](Animation.md) | 202 | Animation Blueprints and state machines, sequences, montages, composites, blend spaces, notifies and curves, skeletons, bones and sockets, skeletal meshes and LODs, morph targets, IK rigs and retargeters, Control Rig, pose search and motion warping |
 | [Asset](Asset.md) | 56 | Finding assets by name, type, tag or folder, collections, metadata tags, thumbnails, importing textures and sounds, render targets, and static meshes (sockets, collision, Nanite, lightmaps, material slots) |
 | [Audio](Audio.md) | 69 | Sound cues, MetaSounds, sound classes, mixes and submixes with their effects, attenuation, concurrency, modulation, audio buses, dialogue and subtitles, and playing sounds |
-| [Audit](Audit.md) | 9 | Health audits of asset references, Blueprints, collision profiles, replication and widgets, and a capture of the PIE state |
+| [Audit](Audit.md) | 13 | Health audits of asset references, Blueprints, collision profiles, replication and widgets, and a capture of the PIE state |
 | [BehaviorTree](BehaviorTree.md) | 23 | Behavior trees with their children, decorators and services, blackboards and their keys, and running a tree in PIE |
 | [Blueprint](Blueprint.md) | 89 | Blueprint authoring: Blueprints, macros and Editor Utility Blueprints, variables, functions and their parameters, event dispatchers, interfaces, components, timelines, graph nodes and pins, compiling, replication settings and reparenting |
 | [Camera](Camera.md) | 16 | Camera and spring arm components, Gameplay Camera assets and rigs, and camera shakes |
@@ -33,7 +33,7 @@ The packs, which `enable_toolset` adds by name:
 | [Config](Config.md) | 15 | Project settings and the default map, collision channels and profiles, config diffs, and re-running construction scripts |
 | [DataAsset](DataAsset.md) | 51 | Data tables and their rows, curve tables and curves, data assets, data registries, string tables, CSV and JSON import and export, and localization |
 | [Documentation](Documentation.md) | 3 | Documentation generated for an asset, a Blueprint or the whole project |
-| [Editor](Editor.md) | 98 | The editor itself: actors (spawn, select, copy, transform, delete), levels, saving, undo and transactions, Python, console commands and CVars, tests, enums and structs, screenshots, logs, media, and asset housekeeping (delete, export, migrate, consolidate, redirectors, unused and duplicate assets) |
+| [Editor](Editor.md) | 108 | The editor itself: actors (spawn, select, copy, transform, delete), levels, saving, undo and transactions, Python, console commands and CVars, tests, enums and structs, screenshots, logs, media, and asset housekeeping (delete, export, migrate, consolidate, redirectors, unused and duplicate assets) |
 | [Engine](Engine.md) | 50 | Niagara systems and emitters (modules, renderers, data interfaces, events, simulation stages, user parameters), and the engine's and the editor's status |
 | [Export](Export.md) | 11 | Movie Render Queue jobs, exporting assets, Blueprints and level sections, asset reports and async loading |
 | [GameFeatures](GameFeatures.md) | 5 | Game Feature plugins: their state, activating, deactivating and unloading them |
@@ -49,12 +49,12 @@ The packs, which `enable_toolset` adds by name:
 | [Interchange](Interchange.md) | 16 | Interchange imports: pipelines, translators and factories, importing and reimporting, and resetting imported actors and levels |
 | [Level](Level.md) | 114 | The open level and Play-in-Editor: actors by class or radius, transforms, attaching, labels and folders, landscapes (sculpting, painting, layers, splines, heightmaps), foliage, splines, data layers, World Partition, streaming levels, level instances, world settings, lighting builds, and starting, stopping and driving PIE |
 | [Lighting](Lighting.md) | 4 | Lighting quality, rendering settings, shader info and reflection captures |
-| [Management](Management.md) | 19 | Assets as files (rename, move, duplicate, delete), primary assets, their rules and bundles, plugin status, and class purity audits |
+| [Management](Management.md) | 20 | Assets as files (rename, move, duplicate, delete), primary assets, their rules and bundles, plugin status, and class purity audits |
 | [Mass](Mass.md) | 19 | Mass entities: entity configs and traits, spawners, tags, signals and archetypes |
 | [Material](Material.md) | 54 | Materials, material instances (constant and dynamic), material functions and layers, parameter collections, post-process materials, Substrate, compiling and stats |
 | [Mesh](Mesh.md) | 11 | Procedural mesh components: sections, vertices, materials and slicing |
 | [Meta](Meta.md) | 1 | Execute_batch, several tool calls in one |
-| [Navigation](Navigation.md) | 17 | The navigation mesh, and Environment Query System queries with their generators, tests and options |
+| [Navigation](Navigation.md) | 20 | The navigation mesh, and Environment Query System queries with their generators, tests and options |
 | [Networking](Networking.md) | 5 | Dedicated servers and network info |
 | [Optimization](Optimization.md) | 10 | Asset performance, memory, compression, LOD and streaming settings, and optimization suggestions |
 | [Packaging](Packaging.md) | 3 | Packaged builds: starting, following and cancelling one |

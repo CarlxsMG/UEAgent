@@ -6927,7 +6927,7 @@
         },
         {
           "name": "set_anim_transition_rule_from_bool",
-          "description": "Make a bool variable the rule of an existing transition (source_state to target_state) of an Animation Blueprint state machine: every rule-graph node but the result sink is removed, then a getter of variable_name is wired to the sink's bCanEnterTransition, so the transition passes while the variable is true (there is no invert option). A missing blueprint, machine, transition or variable, or one that is not a single bool, is an error before anything changes; a variable not compiled yet (variable_kind new_blueprint) is checked against its declared type. Repeat calls rebuild the same rule (idempotent). Marks the blueprint structurally modified and saves without compiling (compile_anim_blueprint). Float test: set_anim_transition_rule_from_comparison; time-based: set_anim_transition_rule_automatic; empty rule: clear_anim_transition_rule; new transition: add_anim_transition. Refused while PIE runs unless force=true; a failed save is an error, the change kept in memory.",
+          "description": "Make a bool variable the rule of an existing transition (source_state to target_state) of an Animation Blueprint state machine: every rule-graph node but the result sink is removed, then a getter of variable_name is wired to the sink's bCanEnterTransition, so the transition passes while the variable is true, or while it is false with negate=true (a Not node goes between them). A missing blueprint, machine, transition or variable, or one that is not a single bool, is an error before anything changes; a variable not compiled yet (variable_kind new_blueprint) is checked against its declared type. Repeat calls rebuild the same rule (idempotent). Marks the blueprint structurally modified and saves without compiling (compile_anim_blueprint). Float test: set_anim_transition_rule_from_comparison; time-based: set_anim_transition_rule_automatic; empty rule: clear_anim_transition_rule; new transition: add_anim_transition. Refused while PIE runs unless force=true; a failed save is an error, the change kept in memory.",
           "params": [
             {
               "name": "anim_blueprint_path",
@@ -6962,10 +6962,16 @@
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "description": "Name of an existing bool variable on the AnimBP (or its parent C++ class); the rule reads it as is, true lets the transition pass"
+              "description": "Name of an existing bool variable on the AnimBP (or its parent C++ class); true lets the transition pass, unless negate"
+            },
+            {
+              "name": "negate",
+              "jsonType": "boolean",
+              "required": false,
+              "description": "Optional bool (default false): pass the transition while the variable is false, through a Not (UKismetMathLibrary::Not_PreBool) node"
             }
           ],
-          "returns": "{ anim_blueprint_path, machine_name, source_state, target_state, variable_name, variable_kind, rule_set, sink_present, contributor_count, contributor_node_class, saved, save_error? }",
+          "returns": "{ anim_blueprint_path, machine_name, source_state, target_state, variable_name, negate, variable_kind, rule_set, sink_present, contributor_count, contributor_node_class, saved, save_error? }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -14803,6 +14809,68 @@
       "description": "health audits of asset references, Blueprints, collision profiles, replication and widgets, and a capture of the PIE state",
       "commands": [
         {
+          "name": "audit_asset_naming",
+          "description": "Sweep the assets under folder_path for naming-convention problems: a name without the prefix its class takes (BP_, BPI_, WBP_, ABP_, M_, MI_, MF_, T_, SM_, SK_, SKEL_, AS_, AM_, NS_, S_, SC_, DT_, IA_, IMC_... after Epic's recommended conventions), spaces, and characters other than letters, digits and underscore. Asset Registry only: nothing is loaded. Classes with no prefix rule (levels, data assets of project classes...) are counted in unchecked_count, not reported. Each finding carries a suggested_name. Returns findings inline, paged with offset/limit; the summary counts every finding. Read-only: it renames nothing (rename_asset does).",
+          "params": [
+            {
+              "name": "folder_path",
+              "jsonType": "string",
+              "required": false,
+              "nameLike": true,
+              "description": "Content folder to scan. Defaults to \"/Game\"."
+            },
+            {
+              "name": "recursive",
+              "jsonType": "boolean",
+              "required": false,
+              "description": "Recurse into subfolders. Defaults to true."
+            },
+            {
+              "name": "prefixes",
+              "jsonType": "object",
+              "required": false,
+              "description": "Prefix rules by class short name, merged over the defaults: {\"StaticMesh\": \"SM_\", \"Texture2D\": [\"T_\", \"TX_\"], \"World\": \"L_\", \"Blueprint\": \"\"}. A string or an array of accepted prefixes (case-sensitive); \"\" or [] turns the class's rule off. Blueprints are keyed Blueprint, BlueprintInterface, BlueprintFunctionLibrary and BlueprintMacroLibrary."
+            },
+            {
+              "name": "replace_default_prefixes",
+              "jsonType": "boolean",
+              "required": false,
+              "description": "Use only the prefixes param, without the defaults. Defaults to false."
+            },
+            {
+              "name": "rules",
+              "jsonType": "array",
+              "required": false,
+              "description": "Rule ids to run, default all: naming_prefix, naming_space, naming_invalid_char. An unknown id is an error."
+            },
+            {
+              "name": "max_results",
+              "jsonType": "number",
+              "required": false,
+              "description": "Cap on assets examined (1-100000). Defaults to 50000."
+            },
+            {
+              "name": "offset",
+              "jsonType": "number",
+              "required": false,
+              "description": "Index of the first finding returned. Defaults to 0."
+            },
+            {
+              "name": "limit",
+              "jsonType": "number",
+              "required": false,
+              "description": "Findings returned per call (1-5000). Defaults to 200."
+            }
+          ],
+          "returns": "{ folder_path, scanned: int, scan_truncated: bool, unchecked_count: int, prefix_rules: {class: [string]}, rules: [string], summary: { finding_count, by_severity: {error, warning, info}, by_rule: {rule: int} }, findings: [{ severity, rule, asset, asset_class, message, suggested_fix, suggested_name, expected_prefixes? }], offset, limit, returned, next_offset: int|null }",
+          "annotations": {
+            "readOnlyHint": true,
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false
+          }
+        },
+        {
           "name": "audit_asset_references",
           "description": "Sweeps the assets under folder_path for two reference problems: orphans (assets no package references, by Asset Registry metadata) and broken references (a dependency on a package that is no longer on disk; /Script/ C++ modules are skipped). Metadata-only: it never loads, changes or saves an asset, so it scales to large projects. Not read-only, though: the full lists go to a new JSON report under <Project>/Saved/MCPAudits/ (a call within the same second replaces the previous one), and the reply carries only the counts and the report path; read the lists with get_mcp_audit_report. Orphans are candidates, not proof: levels and assets loaded by name or from config have no referencers either. For one asset use get_asset_referencers or get_asset_dependencies; for unused assets only, find_unused_assets; delete with delete_asset and clean redirectors with fixup_redirectors.",
           "params": [
@@ -14886,6 +14954,56 @@
           }
         },
         {
+          "name": "audit_level_actors",
+          "description": "Sweep the actors of a world for placement problems: actors with no components, bare AActor instances with nothing visible, duplicates stacked at the same transform with the same meshes, mesh components with no mesh or with empty material slots, actors far from the origin or below the world's KillZ, and meshes hidden in game that still collide. Defaults to the editor world; pass world to audit a PIE world. In a World Partition map only the loaded actors are seen. Returns findings inline, paged with offset/limit; the summary counts every finding. Read-only.",
+          "params": [
+            {
+              "name": "world",
+              "jsonType": "string",
+              "required": false,
+              "nameLike": true,
+              "description": "Optional world selector: absent/'editor' (default) | 'pie' (ambiguous: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie')."
+            },
+            {
+              "name": "max_distance",
+              "jsonType": "number",
+              "required": false,
+              "description": "Distance from the origin, in cm, beyond which an actor is reported. Defaults to 1048576 (the classic half world size, about 10.5 km)."
+            },
+            {
+              "name": "rules",
+              "jsonType": "array",
+              "required": false,
+              "description": "Rule ids to run, default all: actor_no_components, actor_no_visual, actor_duplicate, actor_missing_mesh, actor_missing_material, actor_out_of_bounds, actor_below_kill_z, actor_hidden_collidable. An unknown id is an error."
+            },
+            {
+              "name": "max_results",
+              "jsonType": "number",
+              "required": false,
+              "description": "Cap on actors examined (1-100000). Defaults to 50000."
+            },
+            {
+              "name": "offset",
+              "jsonType": "number",
+              "required": false,
+              "description": "Index of the first finding returned. Defaults to 0."
+            },
+            {
+              "name": "limit",
+              "jsonType": "number",
+              "required": false,
+              "description": "Findings returned per call (1-5000). Defaults to 200."
+            }
+          ],
+          "returns": "{ world: string, world_name, world_package, world_type, net_mode, pie_instance, scanned: int, scan_truncated: bool, rules: [string], summary: { finding_count, by_severity: {error, warning, info}, by_rule: {rule: int} }, findings: [{ severity, rule, actor, actor_name, actor_class, message, suggested_fix, component?, location?, duplicate_of? }], offset, limit, returned, next_offset: int|null }",
+          "annotations": {
+            "readOnlyHint": true,
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false
+          }
+        },
+        {
           "name": "audit_replication",
           "description": "Project-wide replication audit: for every Blueprint under folder_path, which variables are Replicated (CPF_Net), whether the class itself replicates (AActor::GetIsReplicated on the GeneratedClass CDO), and which UFUNCTIONs are RPCs (FUNC_NetFuncFlags). It returns only a SUMMARY plus a report path -- the full per-Blueprint detail is written to Saved/MCPAudits/ and must be read back with get_mcp_audit_report. For one actor rather than a sweep, use get_actor_replication_info.",
           "params": [
@@ -14914,6 +15032,142 @@
             "readOnlyHint": false,
             "destructiveHint": true,
             "idempotentHint": false,
+            "openWorldHint": false
+          }
+        },
+        {
+          "name": "audit_static_meshes",
+          "description": "Sweep the StaticMesh assets under folder_path for: no simple collision (and not complex-as-simple, and not set to NoCollision), a high triangle count with no LODs and no Nanite, a missing lightmap UV channel when the project allows static lighting, too many material slots, and degenerate bounds (empty mesh, zero size on two axes, or absurdly large). Reads Asset Registry tags, so nothing is loaded; a mesh whose package predates those tags is loaded to read them, up to max_loads. Returns findings inline, paged with offset/limit; the summary counts every finding. Read-only.",
+          "params": [
+            {
+              "name": "folder_path",
+              "jsonType": "string",
+              "required": false,
+              "nameLike": true,
+              "description": "Content folder to scan. Defaults to \"/Game\"."
+            },
+            {
+              "name": "recursive",
+              "jsonType": "boolean",
+              "required": false,
+              "description": "Recurse into subfolders. Defaults to true."
+            },
+            {
+              "name": "max_triangles_without_lod",
+              "jsonType": "number",
+              "required": false,
+              "description": "LOD0 triangle count from which a mesh with a single LOD and no Nanite is reported. Defaults to 10000."
+            },
+            {
+              "name": "max_material_slots",
+              "jsonType": "number",
+              "required": false,
+              "description": "Largest acceptable number of material slots. Defaults to 8."
+            },
+            {
+              "name": "max_bounds_size",
+              "jsonType": "number",
+              "required": false,
+              "description": "Largest acceptable bounds size on any axis, in cm. Defaults to 1000000 (10 km)."
+            },
+            {
+              "name": "rules",
+              "jsonType": "array",
+              "required": false,
+              "description": "Rule ids to run, default all: mesh_no_collision, mesh_high_tris_no_lod, mesh_missing_lightmap_uv, mesh_too_many_materials, mesh_degenerate_bounds. An unknown id is an error."
+            },
+            {
+              "name": "max_results",
+              "jsonType": "number",
+              "required": false,
+              "description": "Cap on meshes examined (1-100000). Defaults to 20000."
+            },
+            {
+              "name": "max_loads",
+              "jsonType": "number",
+              "required": false,
+              "description": "Cap on meshes loaded because their tags are missing (0-5000; 0 never loads). Defaults to 200."
+            },
+            {
+              "name": "offset",
+              "jsonType": "number",
+              "required": false,
+              "description": "Index of the first finding returned. Defaults to 0."
+            },
+            {
+              "name": "limit",
+              "jsonType": "number",
+              "required": false,
+              "description": "Findings returned per call (1-5000). Defaults to 200."
+            }
+          ],
+          "returns": "{ folder_path, scanned: int, scan_truncated: bool, loaded_count: int, skipped_no_tags: int, static_lighting_allowed: bool, rules: [string], summary: { finding_count, by_severity: {error, warning, info}, by_rule: {rule: int} }, findings: [{ severity, rule, asset, message, suggested_fix, triangles?, lods?, nanite?, size?: [x,y,z] }], offset, limit, returned, next_offset: int|null }",
+          "annotations": {
+            "readOnlyHint": true,
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false
+          }
+        },
+        {
+          "name": "audit_textures",
+          "description": "Sweep the Texture2D assets under folder_path for the settings that cost memory or look wrong: non-power-of-two size, oversized versus a threshold, no mips, normal maps without Normalmap compression or with sRGB on, sRGB on mask textures (ORM/roughness/AO...), a normal map or UI texture left in a generic texture group, and streaming disabled. Reads Asset Registry tags, so nothing is loaded; a texture whose package predates those tags is loaded to read them, up to max_loads. Returns findings inline, paged with offset/limit; the summary counts every finding. Read-only.",
+          "params": [
+            {
+              "name": "folder_path",
+              "jsonType": "string",
+              "required": false,
+              "nameLike": true,
+              "description": "Content folder to scan. Defaults to \"/Game\"."
+            },
+            {
+              "name": "recursive",
+              "jsonType": "boolean",
+              "required": false,
+              "description": "Recurse into subfolders. Defaults to true."
+            },
+            {
+              "name": "max_texture_size",
+              "jsonType": "number",
+              "required": false,
+              "description": "Largest acceptable dimension in pixels after Maximum Texture Size is applied. Defaults to 4096."
+            },
+            {
+              "name": "rules",
+              "jsonType": "array",
+              "required": false,
+              "description": "Rule ids to run, default all: texture_non_power_of_two, texture_oversized, texture_no_mips, texture_normal_compression, texture_normal_srgb, texture_mask_srgb, texture_lod_group, texture_streaming_disabled. An unknown id is an error."
+            },
+            {
+              "name": "max_results",
+              "jsonType": "number",
+              "required": false,
+              "description": "Cap on textures examined (1-100000). Defaults to 20000."
+            },
+            {
+              "name": "max_loads",
+              "jsonType": "number",
+              "required": false,
+              "description": "Cap on textures loaded because their tags are missing (0-5000; 0 never loads). Defaults to 200."
+            },
+            {
+              "name": "offset",
+              "jsonType": "number",
+              "required": false,
+              "description": "Index of the first finding returned. Defaults to 0."
+            },
+            {
+              "name": "limit",
+              "jsonType": "number",
+              "required": false,
+              "description": "Findings returned per call (1-5000). Defaults to 200."
+            }
+          ],
+          "returns": "{ folder_path, scanned: int, scan_truncated: bool, loaded_count: int, skipped_no_tags: int, rules: [string], summary: { finding_count, by_severity: {error, warning, info}, by_rule: {rule: int} }, findings: [{ severity, rule, asset, message, suggested_fix, width?, height?, compression?, lod_group? }], offset, limit, returned, next_offset: int|null }",
+          "annotations": {
+            "readOnlyHint": true,
+            "destructiveHint": false,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },
@@ -24536,6 +24790,32 @@
           "observes": true
         },
         {
+          "name": "clear_debug_shapes",
+          "description": "Remove debug shapes from the editor world (default) or a PIE world: by default only what draw_debug_shapes drew (its lines, points and text), with all=true every persistent debug line, point and string in that world, the engine's and other tools' included. Reports how many were there before and after.",
+          "params": [
+            {
+              "name": "all",
+              "jsonType": "boolean",
+              "required": false,
+              "description": "Optional bool (default false): also clear the debug lines and strings that something other than draw_debug_shapes drew."
+            },
+            {
+              "name": "world",
+              "jsonType": "string",
+              "required": false,
+              "nameLike": true,
+              "description": "Optional world selector: absent/'editor' (default) | 'pie' (ambiguous: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie')."
+            }
+          ],
+          "returns": "{ cleared_lines: int, cleared_texts: int, remaining_lines: int, remaining_texts: int, requested?: object, world_name, world_package, world_type, net_mode, pie_instance }",
+          "annotations": {
+            "readOnlyHint": false,
+            "destructiveHint": true,
+            "idempotentHint": true,
+            "openWorldHint": false
+          }
+        },
+        {
           "name": "clear_message_log",
           "description": "Clear all messages from a named engine Message Log listing.",
           "params": [
@@ -24551,6 +24831,32 @@
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
+            "idempotentHint": true,
+            "openWorldHint": false
+          }
+        },
+        {
+          "name": "close_asset_editor",
+          "description": "Close every editor open on one asset (asset_path), or every asset editor (close_all=true). Unsaved changes are not lost and not saved: the asset stays modified in memory (the dirty flag in the reply), so save_asset it if you mean to keep them. An asset that is not loaded, or has no editor open, is a no-op success with closed_count 0. The outcome is read back: success only when no editor is left open on what was asked.",
+          "params": [
+            {
+              "name": "asset_path",
+              "jsonType": "string",
+              "required": false,
+              "nameLike": true,
+              "description": "Object path, package path or unambiguous bare asset name of the asset whose editors to close. Required unless close_all is true."
+            },
+            {
+              "name": "close_all",
+              "jsonType": "boolean",
+              "required": false,
+              "description": "Optional bool (default false): close every open asset editor; asset_path is then ignored."
+            }
+          ],
+          "returns": "{ closed_count: int, still_open_count: int, closed_assets: [{ asset_path: string, asset_class: string, dirty: bool }], close_all: bool }",
+          "annotations": {
+            "readOnlyHint": false,
+            "destructiveHint": false,
             "idempotentHint": true,
             "openWorldHint": false
           }
@@ -25006,6 +25312,62 @@
           }
         },
         {
+          "name": "draw_debug_shapes",
+          "description": "Draw debug lines, boxes, spheres, arrows, points and text into the editor world (default) or a PIE world, to show a location, a bound, a path or a trace in the viewport. Each shape lasts duration seconds, or until clear_debug_shapes with persistent=true; nothing is saved, selectable or undoable.\n\nshapes is a list of objects with a type and its fields, positions in world units: line {start, end}; arrow {start, end, size = head size, default 20}; box {center, extent = half size, default [50,50,50], rotation = {pitch, yaw, roll} degrees}; sphere {center, radius (default 50), segments (4..64, default 16)}; point {location, size in pixels (default 10)}; text {location, text, size = font scale (default 1)}. Any shape may carry its own color and thickness. Text goes to the HUD of each local player, so it is drawn only in a PIE world with a HUD; in the editor world it is skipped and the reply says so. An invalid shape is an error and nothing is drawn.",
+          "params": [
+            {
+              "name": "shapes",
+              "jsonType": "array",
+              "required": true,
+              "description": "Required list of shape objects as described above, at most 2000."
+            },
+            {
+              "name": "color",
+              "jsonType": "array",
+              "required": false,
+              "description": "Optional default color [R, G, B] or [R, G, B, A] in 0..1 (default green [0, 1, 0, 1]); a shape's own color wins."
+            },
+            {
+              "name": "thickness",
+              "jsonType": "number",
+              "required": false,
+              "description": "Optional default line thickness in world units (default 0 = one pixel, clamped 0..1000); a shape's own thickness wins."
+            },
+            {
+              "name": "duration",
+              "jsonType": "number",
+              "required": false,
+              "description": "Optional seconds the shapes stay (default 10, clamped 0.01..86400); ignored when persistent is true. The editor world counts them down while the editor ticks."
+            },
+            {
+              "name": "persistent",
+              "jsonType": "boolean",
+              "required": false,
+              "description": "Optional bool (default false): keep the shapes until clear_debug_shapes."
+            },
+            {
+              "name": "foreground",
+              "jsonType": "boolean",
+              "required": false,
+              "description": "Optional bool (default false): draw lines and points over the scene instead of depth-tested in it."
+            },
+            {
+              "name": "world",
+              "jsonType": "string",
+              "required": false,
+              "nameLike": true,
+              "description": "Optional world selector: absent/'editor' (default) | 'pie' (ambiguous: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie')."
+            }
+          ],
+          "returns": "{ shapes_requested: int, drawn: int, lines_added: int, texts_added: int, skipped: [{ index: int, type: string, reason: string }], by_type: { line?: int, box?: int, sphere?: int, arrow?: int, point?: int, text?: int }, lifetime_seconds: float (-1 = until cleared), batcher: string, requested?: object, world_name, world_package, world_type, net_mode, pie_instance }",
+          "annotations": {
+            "readOnlyHint": false,
+            "destructiveHint": false,
+            "idempotentHint": false,
+            "openWorldHint": false
+          }
+        },
+        {
           "name": "duplicate_actor",
           "description": "Copy one editor-world actor in place through the editor's duplicate path, keeping its component overrides, and return both the new actor's JSON and the original's. Undoable; it changes the editor SELECTION as a side effect. Matches the INTERNAL name only (no editor labels). The clone exists in memory until save_level writes the .umap -- and a save that answers success while `git status` stays clean means the .umap is read-only (e.g. a Git LFS `lockable` file you have not locked), not that the duplicate failed.",
           "params": [
@@ -25372,10 +25734,53 @@
           }
         },
         {
+          "name": "get_asset_compilation_status",
+          "description": "What the editor is still compiling in the background, per kind: shaders, textures, static_meshes, skeletal_meshes, sound_waves and every other asset compiling manager the engine registers (mesh distance fields, mesh cards, animation sequences, Niagara systems...), with the count left for each and, on request, which assets. A count of 0 everywhere means rendering, cooking and measurements see final data; wait_for_asset_compilation blocks until it is so.",
+          "params": [
+            {
+              "name": "kinds",
+              "jsonType": "array",
+              "required": false,
+              "description": "Optional list of kinds to report, by kind (\"textures\") or engine type name (\"UE-Texture\"), case-insensitive; default all. An unknown kind is an error that lists the kinds there are."
+            },
+            {
+              "name": "include_assets",
+              "jsonType": "boolean",
+              "required": false,
+              "description": "Optional bool (default false): also list the object paths still compiling for textures, static_meshes, skeletal_meshes and sound_waves (the other kinds only have a count)."
+            },
+            {
+              "name": "max_assets",
+              "jsonType": "number",
+              "required": false,
+              "description": "Optional int (default 50, clamped 1..1000): most paths listed per kind; assets_total still counts them all."
+            }
+          ],
+          "returns": "{ compiling: bool, total_remaining: int, kinds: [{ kind: string, type_name: string, remaining: int, assets_listable: bool, assets?: [string], assets_total?: int, assets_truncated?: bool }], shader_jobs?: { outstanding: int, pending: int, remaining: int, compiling: bool } }",
+          "annotations": {
+            "readOnlyHint": true,
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false
+          }
+        },
+        {
           "name": "get_automation_test_results",
           "description": "The state of the test run_automation_test started, without running anything: while a latent test runs, running true with verdict running and elapsed_seconds; once it ended, its verdict, duration_s, errors, warnings and entries, with timed_out or canceled when it was stopped before it finished. Poll it after run_automation_test answers verdict running. Skipped tests leave it unchanged; fails when no test has run this editor session.",
           "params": [],
           "returns": "{ test_name, started, completed, running, passed?, verdict: \"pass\"|\"fail\"|\"canceled\"|\"running\", elapsed_seconds, timed_out, canceled?, duration_s?, errors?, warnings?, entries?:[{type,message,context,filename,line}], entry_count?, timeout_seconds?, note? }",
+          "annotations": {
+            "readOnlyHint": true,
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false
+          }
+        },
+        {
+          "name": "get_content_browser_path",
+          "description": "Read the folder the primary Content Browser is showing: its content path ('/Game/Maps', what the asset tools take) and its virtual path as the browser displays it ('/All/Game/Maps'). Use it to create or import assets \"where the user is looking\". path is empty when the browser shows a virtual folder with no content path behind it, or when there is no Content Browser (has_content_browser false).",
+          "params": [],
+          "returns": "{ path: string, virtual_path: string, has_internal_path: bool, has_content_browser: bool }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -25611,6 +26016,25 @@
           "description": "Read what is selected in the editor viewport/outliner right now: each actor's JSON plus the count and the world it belongs to. Use it to act on \"what the user just clicked\" without asking for names, and as the read-back for select_actors / deselect_actors. Editor world only, and remember that delete_actor, duplicate_actor, copy_actors and move_actors_to_level all MUTATE the selection as a side effect -- read it before those, not after.",
           "params": [],
           "returns": "{ selected_actors: [actor JSON], selected_count: int, world_name: string }",
+          "annotations": {
+            "readOnlyHint": true,
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false
+          }
+        },
+        {
+          "name": "get_selected_assets",
+          "description": "Read what is selected in the primary Content Browser right now: each asset's path, package, name and class, plus the selected folders. Use it to act on \"the assets the user just clicked\" without asking for paths, and as the read-back for sync_content_browser_to_assets. Nothing is loaded. Without a Content Browser (headless editor, or every browser tab closed) the lists are empty and has_content_browser is false.",
+          "params": [
+            {
+              "name": "include_folders",
+              "jsonType": "boolean",
+              "required": false,
+              "description": "Optional bool (default true): also report the selected folders of the asset view and of the path tree."
+            }
+          ],
+          "returns": "{ assets: [{ asset_path: string, package_name: string, asset_name: string, asset_class: string }], count: int, folders: [string], path_view_folders: [string], has_content_browser: bool }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -25871,6 +26295,18 @@
           }
         },
         {
+          "name": "list_open_asset_editors",
+          "description": "List the asset editors open right now and the assets each one edits, with whether each asset has unsaved changes. Use it to see what the user is working on, or to find editors to close with close_asset_editor. Read-only; nothing is loaded.",
+          "params": [],
+          "returns": "{ editors: [{ editor_name: string, is_primary_editor: bool, assets: [string] }], editor_count: int, assets: [{ asset_path: string, asset_class: string, dirty: bool, editor_names: [string] }], asset_count: int }",
+          "annotations": {
+            "readOnlyHint": true,
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false
+          }
+        },
+        {
           "name": "load_level",
           "description": "Open a map in the editor (by /Game or /Engine package path, or disk .umap), replacing the current world; default_template=true opens the engine's default template level instead (/Engine/Maps/Templates/Template_Default, ~45 actors: floor, PlayerStart, sky and lights), after which a save_level without `filename` would write over the ENGINE's own map (is_engine_template and warning say so). Also the repair for actors that VANISHED from a world in memory after compile_blueprint: reloading the same map brings the placed OFPA instances back with their per-instance config -- never re-place them. REFUSES up front when any other UWorld is still resident in memory, because the engine's world-leak check turns that into a Fatal error that kills the editor process and every unsaved edit with it; the refusal lists the resident worlds and the remedy. Run list_dirty_packages first: a reload discards unsaved work. Refused while a test started by run_automation_test or run_functional_test_in_pie runs.",
           "params": [
@@ -25969,6 +26405,32 @@
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
+            "idempotentHint": true,
+            "openWorldHint": false
+          }
+        },
+        {
+          "name": "open_asset_editor",
+          "description": "Open the editor for an asset (Blueprint, material, data table...) the way a double-click in the Content Browser does, loading the asset if needed, or bring its editor to the front when it is already open. The outcome is read back: success only when an editor for the asset is open after the call. Maps are refused (opening one loads it as the level: use load_level), and so is a headless editor, which cannot show an editor window.",
+          "params": [
+            {
+              "name": "asset_path",
+              "jsonType": "string",
+              "required": true,
+              "nameLike": true,
+              "description": "Required: object path ('/Game/A/B.B'), package path ('/Game/A/B') or an unambiguous bare asset name."
+            },
+            {
+              "name": "focus",
+              "jsonType": "boolean",
+              "required": false,
+              "description": "Optional bool (default true): bring the editor to the front when it is already open."
+            }
+          ],
+          "returns": "{ asset_path: string, asset_class: string, opened: bool, already_open: bool, editor_name: string, is_primary_editor: bool }",
+          "annotations": {
+            "readOnlyHint": false,
+            "destructiveHint": false,
             "idempotentHint": true,
             "openWorldHint": false
           }
@@ -27412,6 +27874,38 @@
           }
         },
         {
+          "name": "sync_content_browser_to_assets",
+          "description": "Point the Content Browser at assets: it navigates to their folder and selects them, the way \"Browse to Asset\" does, so the user sees what you mean. Nothing is loaded or changed on disk. Paths that name no asset are reported in not_found and the rest are still synced; a call where none resolves fails. The browser applies the selection on its next ticks, so the reply cannot read it back: call get_selected_assets afterwards to confirm. Refused in a headless editor with no Content Browser.",
+          "params": [
+            {
+              "name": "asset_paths",
+              "jsonType": "array",
+              "required": true,
+              "nameLike": true,
+              "description": "Required array of asset paths: object paths ('/Game/A/B.B'), package paths ('/Game/A/B') or unambiguous bare asset names."
+            },
+            {
+              "name": "focus",
+              "jsonType": "boolean",
+              "required": false,
+              "description": "Optional bool (default true): bring the Content Browser tab to the front."
+            },
+            {
+              "name": "allow_locked_browsers",
+              "jsonType": "boolean",
+              "required": false,
+              "description": "Optional bool (default false): also sync a Content Browser the user has locked."
+            }
+          ],
+          "returns": "{ synced: [{ asset_path: string, package_name: string, asset_name: string, asset_class: string }], synced_count: int, not_found: [{ path: string, error: string }], has_content_browser: bool, focus: bool }",
+          "annotations": {
+            "readOnlyHint": false,
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false
+          }
+        },
+        {
           "name": "undo",
           "description": "Step the editor's undo stack back by one transaction, or by `count` of them, as Ctrl+Z does, and report what is now on top.\n\nUse it to revert an edit made in the editor, by a tool or by a person: the stack is shared, so read get_undo_state first to see the label you are about to revert. One tool call that changed something is usually one transaction; begin_transaction and end_transaction make several edits one. Undo reverts objects in memory, not files: an edit already saved stays on disk until the next save.\n\nExample: {\"count\": 3} undoes the last three transactions. It stops early at the bottom of the stack or at an undo barrier (set_undo_barrier), and actually_undone then falls short of requested. `success` is true even with nothing to undo: read `applied`, and re-read what you changed to confirm it.",
           "params": [
@@ -27432,6 +27926,49 @@
             "readOnlyHint": false,
             "destructiveHint": true,
             "idempotentHint": false,
+            "openWorldHint": false
+          }
+        },
+        {
+          "name": "wait_for_asset_compilation",
+          "description": "Block until the editor has finished compiling the chosen kinds of assets (shaders, textures, static_meshes, skeletal_meshes... as get_asset_compilation_status names them), or until timeout_seconds, and report what finished and what remains per kind. success is false when it timed out with work left; the data still says how far it got.\n\nWhile it waits it does what the engine's tick would: it pumps every asset compiling manager (all kinds, since shaders wait on textures) and the game thread's task queue between short sleeps. The editor does not redraw and no other MCP call runs meanwhile, so keep the timeout short and call it again rather than asking for minutes; do not call it while run_automation_test or run_functional_test_in_pie has a test running, since it blocks the ticks the test needs.",
+          "params": [
+            {
+              "name": "timeout_seconds",
+              "jsonType": "number",
+              "required": false,
+              "description": "Optional float (default 60, clamped 0..600): upper bound on the wait. 0 pumps once and reports."
+            },
+            {
+              "name": "kinds",
+              "jsonType": "array",
+              "required": false,
+              "description": "Optional list of kinds to wait for, by kind (\"shaders\") or engine type name (\"UE-Shader\"), case-insensitive; default all. An unknown kind is an error that lists the kinds there are."
+            },
+            {
+              "name": "poll_interval_seconds",
+              "jsonType": "number",
+              "required": false,
+              "description": "Optional float (default 0.05, clamped 0.01..1): sleep between pumps."
+            },
+            {
+              "name": "include_assets",
+              "jsonType": "boolean",
+              "required": false,
+              "description": "Optional bool (default false): list the object paths still compiling after the wait, for textures, static_meshes, skeletal_meshes and sound_waves."
+            },
+            {
+              "name": "max_assets",
+              "jsonType": "number",
+              "required": false,
+              "description": "Optional int (default 50, clamped 1..1000): most paths listed per kind."
+            }
+          ],
+          "returns": "{ completed: bool, timed_out: bool, elapsed_seconds: float, pumps: int, remaining_before: int, remaining_after: int, kinds: [{ kind: string, type_name: string, remaining_before: int, remaining_after: int, finished: bool, assets?: [string], assets_total?: int, assets_truncated?: bool }], shader_jobs?: { outstanding: int, pending: int, remaining: int, compiling: bool } }",
+          "annotations": {
+            "readOnlyHint": true,
+            "destructiveHint": false,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         }
@@ -38872,7 +39409,7 @@
               "name": "target_height",
               "jsonType": "number",
               "required": false,
-              "description": "Optional uint16 heightmap value 0 to 65535"
+              "description": "Optional uint16 heightmap value 0 to 65535; with neither it nor target_z the box flattens to 32768, the landscape's local Z 0"
             },
             {
               "name": "target_z",
@@ -41074,17 +41611,17 @@
           "description": "Raise or lower terrain: add delta_z world units to every heightmap vertex inside a world-space box (give box_min/box_max, or center/extent). A RELATIVE edit -- to force a region to one absolute height use flatten_landscape_in_box, and to soften the seams afterwards use smooth_landscape_in_box. Check vertices_modified in the reply: a zero means the box missed the terrain, which is what a wrongly-signed world coordinate looks like.",
           "params": [
             {
+              "name": "delta_z",
+              "jsonType": "number",
+              "required": true,
+              "description": "Required world Z delta to apply to every vertex in the region (negative lowers)"
+            },
+            {
               "name": "landscape_actor_name",
               "jsonType": "string",
               "required": false,
               "nameLike": true,
               "description": "Optional landscape actor name, defaults to first found"
-            },
-            {
-              "name": "delta_z",
-              "jsonType": "number",
-              "required": false,
-              "description": "World Z delta to apply to every vertex in the region"
             },
             {
               "name": "box_min",
@@ -41411,7 +41948,11 @@
               "name": "iterations",
               "jsonType": "number",
               "required": false,
-              "description": "Number of smoothing iterations 1 to 5"
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
+              "description": "Optional number of smoothing iterations 1 to 5, default 1"
             },
             {
               "name": "box_min",
@@ -43667,7 +44208,7 @@
         },
         {
           "name": "get_plugin_status",
-          "description": "Read one plugin by name, read-only: Enabled or Disabled, version, author, category, base dir, .uplugin file, dependencies and modules. An unknown name returns plugin_status \"Not Found\" with \"N/A\" fields, not an error. plugin_loaded only mirrors plugin_enabled, and plugin_created_date holds the CreatedByURL.",
+          "description": "Read one plugin by name, read-only: Enabled or Disabled, version, author, category, base dir, .uplugin file, dependencies and modules. An unknown name returns plugin_status \"Not Found\" with \"N/A\" fields, not an error. plugin_loaded only mirrors plugin_enabled. The .uplugin has no creation date: plugin_created_date is the creation time of the .uplugin file on disk (ISO 8601, empty when unknown), which is when it was installed or copied, and plugin_created_by_url holds the descriptor's CreatedByURL. To list every plugin use list_plugins.",
           "params": [
             {
               "name": "plugin_name",
@@ -43677,7 +44218,7 @@
               "description": "Name of the plugin to query, as its .uplugin file is named (e.g. \"UEAgent\")"
             }
           ],
-          "returns": "{ plugin_name: string, plugin_status: string, plugin_version: string, plugin_description: string, plugin_author: string, plugin_created_date: string, plugin_category: string, plugin_loaded: bool, plugin_enabled: bool, plugin_path: string, plugin_file: string, plugin_dependencies: [{ name: string, enabled: bool, optional: bool, version: string }], plugin_modules: [{ name: string, type: string, loading_phase: bool }], plugin_message: string, plugin_manager_version: string, plugin_search_paths: string, plugin_status_timestamp: string }",
+          "returns": "{ plugin_name: string, plugin_status: string, plugin_version: string, plugin_description: string, plugin_author: string, plugin_created_date: string, plugin_created_by_url: string, plugin_category: string, plugin_loaded: bool, plugin_enabled: bool, plugin_path: string, plugin_file: string, plugin_dependencies: [{ name: string, enabled: bool, optional: bool, version: string }], plugin_modules: [{ name: string, type: string, loading_phase: bool }], plugin_message: string, plugin_manager_version: string, plugin_search_paths: string, plugin_status_timestamp: string }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -43744,6 +44285,50 @@
             }
           ],
           "returns": "{ types: [{ type, base_class, has_blueprint_classes, is_editor_only, directories: [string], num_specific_assets, cook_rule, priority, chunk_id, apply_recursively }], type_count, primary_asset_type? }",
+          "annotations": {
+            "readOnlyHint": true,
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false
+          }
+        },
+        {
+          "name": "list_plugins",
+          "description": "List the plugins this editor has discovered, enabled or not, sorted by name: whether each is enabled and mounted, whether it comes from the engine or the project, its version, category and folder. Filters combine (all must match). Read-only. Use get_plugin_status for one plugin's dependencies and modules, and set_plugin_enabled to turn one on or off.",
+          "params": [
+            {
+              "name": "enabled",
+              "jsonType": "boolean",
+              "required": false,
+              "description": "Optional bool: true lists only enabled plugins, false only disabled ones; omitted lists both."
+            },
+            {
+              "name": "type",
+              "jsonType": "string",
+              "required": false,
+              "nameLike": true,
+              "description": "Optional: \"project\" (plugins the project loads from its own folders), \"engine\" (the engine's), or \"all\" (default)."
+            },
+            {
+              "name": "name_filter",
+              "jsonType": "string",
+              "required": false,
+              "description": "Optional case-insensitive substring of the plugin's name or friendly name."
+            },
+            {
+              "name": "category",
+              "jsonType": "string",
+              "required": false,
+              "description": "Optional case-insensitive substring of the plugin's category (e.g. \"Editor\", \"Rendering\")."
+            },
+            {
+              "name": "include_hidden",
+              "jsonType": "boolean",
+              "required": false,
+              "description": "Optional bool (default true): include plugins the Plugins window hides."
+            }
+          ],
+          "returns": "{ plugins: [{ name: string, friendly_name: string, enabled: bool, mounted: bool, type: \"engine\"|\"project\", plugin_type: \"engine\"|\"enterprise\"|\"project\"|\"external\"|\"mod\", version: string, version_number: int, category: string, path: string, descriptor_file: string, can_contain_content: bool, is_beta: bool, is_experimental: bool, hidden: bool }], count: int, total_discovered: int }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -47731,6 +48316,73 @@
           }
         },
         {
+          "name": "find_nav_path",
+          "description": "Find a navigation path between two world points on the navmesh, synchronously (UNavigationSystemV1::FindPathSync), and return whether one was found, whether it is partial (ends at the reachable point nearest to end), its length and cost, and its points from start to end. Use it to prove an AI can walk from A to B, or why it cannot, after rebuild_navigation; a straight-line obstacle check is raycast_scene. Read-only and idempotent. The world param picks the world (editor by default; in PIE pass \"server\", the navmesh being server-authoritative); agent or nav_data picks the navigation data, filter_class the query filter. No path is not an error: found=false, with the engine's query result and a note. No navigation data, a navmesh with no built tile, an unknown agent, nav_data or filter_class, or a malformed point is an error. Snap a point onto the navmesh first with project_point_to_navmesh; random destinations: get_random_reachable_point.",
+          "params": [
+            {
+              "name": "start",
+              "jsonType": "array",
+              "required": true,
+              "description": "World-space [x, y, z] (or {x, y, z}) where the path starts; it should be on or just above the navmesh (required)"
+            },
+            {
+              "name": "end",
+              "jsonType": "array",
+              "required": true,
+              "description": "World-space [x, y, z] (or {x, y, z}) where the path should end (required)"
+            },
+            {
+              "name": "allow_partial",
+              "jsonType": "boolean",
+              "required": false,
+              "description": "Accept a path that stops at the reachable point nearest to end when end itself cannot be reached; default true (is_partial says which it was). false: such a query is found=false"
+            },
+            {
+              "name": "agent",
+              "jsonType": "string",
+              "required": false,
+              "description": "Optional supported agent name (as diagnose_navmesh lists supported_agents) whose navigation data to query; omitted: the default navigation data. Not with nav_data"
+            },
+            {
+              "name": "nav_data",
+              "jsonType": "string",
+              "required": false,
+              "description": "Optional name of the navigation data actor to query, e.g. \"RecastNavMesh-Default\"; omitted: the default navigation data. Not with agent"
+            },
+            {
+              "name": "filter_class",
+              "jsonType": "string",
+              "required": false,
+              "nameLike": true,
+              "description": "Optional UNavigationQueryFilter subclass: a native class name (e.g. \"NavFilter_AIControllerDefault\") or a Blueprint filter's path or _C name; omitted: the navigation data's default filter. One that does not resolve is an error"
+            },
+            {
+              "name": "max_points",
+              "jsonType": "number",
+              "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
+              "description": "Optional cap on how many path points are serialized, a whole number (default 500; below 1 counts as 1); point_count still counts all"
+            },
+            {
+              "name": "world",
+              "jsonType": "string",
+              "required": false,
+              "nameLike": true,
+              "description": "Which world to query: absent/\"editor\" (default) | \"server\" (the PIE world with authority: the one with the navmesh in PIE) | \"client\" (has no navigation; an error) | \"pie:N\" | \"pie\" (ambiguous: PlayWorld, else the first PIE context) | \"game\" (alias of \"pie\")"
+            }
+          ],
+          "returns": "{ found: bool, is_partial: bool, query_result: \"Success\"|\"Fail\"|\"Error\"|\"Invalid\", length: number, cost: number, straight_line_distance: number, point_count: int, points:[{x,y,z}], start:{x,y,z}, end:{x,y,z}, allow_partial: bool, nav_data, agent, filter_class, note?, world, world_name, world_package, world_type, net_mode, pie_instance }",
+          "annotations": {
+            "readOnlyHint": true,
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false
+          }
+        },
+        {
           "name": "get_eqs_query_info",
           "description": "Reports the composition of an Environment Query (UEnvQuery) asset without running it: each option with its index, its generator class (absent when the option has none) and its tests in order, each with index and class. Read-only: loads the asset, changes and saves nothing; an asset that does not load as a UEnvQuery is an error, and a query without options returns option_count 0. Use it to get the option_index and test_index that add_eqs_generator, add_eqs_test, set_eqs_test_scoring, set_eqs_generator_properties, remove_eqs_test and remove_eqs_option take, and to check their result. To see what the query actually selects in the level, run it with run_eqs_query; the classes to add come from list_eqs_generator_types and list_eqs_test_types.",
           "params": [
@@ -47743,6 +48395,67 @@
             }
           ],
           "returns": "{ query_path, option_count, options:[{index, generator_class?, generator_path?, test_count, tests:[{index, class, path}]}] }",
+          "annotations": {
+            "readOnlyHint": true,
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false
+          }
+        },
+        {
+          "name": "get_random_reachable_point",
+          "description": "Pick random navmesh locations reachable by path from origin within radius (UNavigationSystemV1::GetRandomReachablePointInRadius), count of them (default 1), each with its straight-line distance from origin. Use it for patrol or spawn destinations an AI can actually walk to, or to sample how far the navmesh connected to origin extends. Read-only (each call draws new points). The world param picks the world (editor by default; in PIE pass \"server\"); agent or nav_data picks the navigation data, filter_class the query filter. origin must be on or near the navmesh: origin_on_navmesh says whether it projects with the default query extent, and with none found found=false and a note, not an error. No navigation data, a navmesh with no built tile, an unknown agent, nav_data or filter_class, a malformed origin or a radius of 0 or less is an error.",
+          "params": [
+            {
+              "name": "origin",
+              "jsonType": "array",
+              "required": true,
+              "description": "World-space [x, y, z] (or {x, y, z}) the points must be reachable from (required)"
+            },
+            {
+              "name": "radius",
+              "jsonType": "number",
+              "required": true,
+              "description": "Search radius around origin in cm, above 0 (required)"
+            },
+            {
+              "name": "count",
+              "jsonType": "number",
+              "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
+              "description": "Optional number of points to draw, a whole number from 1 to 100 (default 1; clamped); points may repeat"
+            },
+            {
+              "name": "agent",
+              "jsonType": "string",
+              "required": false,
+              "description": "Optional supported agent name (as diagnose_navmesh lists supported_agents) whose navigation data to query; omitted: the default navigation data. Not with nav_data"
+            },
+            {
+              "name": "nav_data",
+              "jsonType": "string",
+              "required": false,
+              "description": "Optional name of the navigation data actor to query, e.g. \"RecastNavMesh-Default\"; omitted: the default navigation data. Not with agent"
+            },
+            {
+              "name": "filter_class",
+              "jsonType": "string",
+              "required": false,
+              "nameLike": true,
+              "description": "Optional UNavigationQueryFilter subclass: a native class name or a Blueprint filter's path or _C name; omitted: the navigation data's default filter. One that does not resolve is an error"
+            },
+            {
+              "name": "world",
+              "jsonType": "string",
+              "required": false,
+              "nameLike": true,
+              "description": "Which world to query: absent/\"editor\" (default) | \"server\" (the PIE world with authority: the one with the navmesh in PIE) | \"client\" (has no navigation; an error) | \"pie:N\" | \"pie\" (ambiguous: PlayWorld, else the first PIE context) | \"game\" (alias of \"pie\")"
+            }
+          ],
+          "returns": "{ found: bool, origin:{x,y,z}, radius: number, origin_on_navmesh: bool, requested_count: int, found_count: int, points:[{location:{x,y,z}, distance}], nav_data, agent, filter_class, note?, world, world_name, world_package, world_type, net_mode, pie_instance }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -47795,6 +48508,57 @@
           "description": "Lists all concrete UEnvQueryTest subclasses usable as EQS tests. Read-only reflection (GetDerivedClasses).",
           "params": [],
           "returns": "{ base_class, count, types:[{name, path}] }",
+          "annotations": {
+            "readOnlyHint": true,
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false
+          }
+        },
+        {
+          "name": "project_point_to_navmesh",
+          "description": "Project a world point onto the navmesh (UNavigationSystemV1::ProjectPointToNavigation): the nearest navigable location within a query box of half-extent extent around point, or found=false when the box reaches no navmesh. Use it to check that a spawn point, patrol point or path start is on the navmesh, and to snap it there before find_nav_path. Read-only and idempotent. The world param picks the world (editor by default; in PIE pass \"server\"); agent or nav_data picks the navigation data, filter_class the query filter. Not found is not an error. No navigation data, a navmesh with no built tile, an unknown agent, nav_data or filter_class, a malformed point or an extent axis of 0 or less is an error.",
+          "params": [
+            {
+              "name": "point",
+              "jsonType": "array",
+              "required": true,
+              "description": "World-space [x, y, z] (or {x, y, z}) to project (required)"
+            },
+            {
+              "name": "extent",
+              "jsonType": "any",
+              "required": false,
+              "description": "Optional half-extent [x, y, z] of the box searched around point, in cm, each axis above 0; default the navigation data's DefaultQueryExtent (50, 50, 250 unless the project changed it)"
+            },
+            {
+              "name": "agent",
+              "jsonType": "string",
+              "required": false,
+              "description": "Optional supported agent name (as diagnose_navmesh lists supported_agents) whose navigation data to query; omitted: the default navigation data. Not with nav_data"
+            },
+            {
+              "name": "nav_data",
+              "jsonType": "string",
+              "required": false,
+              "description": "Optional name of the navigation data actor to query, e.g. \"RecastNavMesh-Default\"; omitted: the default navigation data. Not with agent"
+            },
+            {
+              "name": "filter_class",
+              "jsonType": "string",
+              "required": false,
+              "nameLike": true,
+              "description": "Optional UNavigationQueryFilter subclass: a native class name or a Blueprint filter's path or _C name; omitted: the navigation data's default filter. One that does not resolve is an error"
+            },
+            {
+              "name": "world",
+              "jsonType": "string",
+              "required": false,
+              "nameLike": true,
+              "description": "Which world to query: absent/\"editor\" (default) | \"server\" (the PIE world with authority: the one with the navmesh in PIE) | \"client\" (has no navigation; an error) | \"pie:N\" | \"pie\" (ambiguous: PlayWorld, else the first PIE context) | \"game\" (alias of \"pie\")"
+            }
+          ],
+          "returns": "{ found: bool, point:{x,y,z}, projected_point?:{x,y,z}, distance?: number, vertical_offset?: number, extent:{x,y,z}, nav_data, agent, filter_class, note?, world, world_name, world_package, world_type, net_mode, pie_instance }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -62540,7 +63304,7 @@
         },
         {
           "name": "list_pie_widgets",
-          "description": "Read LIVE UMG from the running PIE session (game thread): enumerate the active UUserWidgets added to the viewport and walk each widget tree, emitting name/class plus optional visibility/hover/text/value/geometry as a parent/child tree.  Reads only game-thread-safe widget-tree state (never the render thread). Errors clearly if no Play-In-Editor session is running.  DESCENDS INTO NESTED WIDGET BLUEPRINTS: an AAA screen is a Widget Blueprint composed of Widget Blueprints, so everything interesting sits one level below the first. Cycles are handled with a visited set plus max_depth, and a subtree that IS cut says so in subtree_omitted instead of looking like a leaf. Rich text is read too (URichTextBlock does not derive from UTextBlock). Not implemented: include_bindings, which is accepted and flagged in bindings_note.",
+          "description": "Read LIVE UMG from the running PIE session (game thread): enumerate the active UUserWidgets added to the viewport and walk each widget tree, emitting name/class plus optional visibility/hover/text/value/geometry as a parent/child tree.  Reads only game-thread-safe widget-tree state (never the render thread). Errors clearly if no Play-In-Editor session is running.  DESCENDS INTO NESTED WIDGET BLUEPRINTS: an AAA screen is a Widget Blueprint composed of Widget Blueprints, so everything interesting sits one level below the first. Cycles are handled with a visited set plus max_depth, and a subtree that IS cut says so in subtree_omitted instead of looking like a leaf. Rich text is read too (URichTextBlock does not derive from UTextBlock). include_bindings adds, on every UserWidget (top-level and nested), the property/event bindings its Widget Blueprint compiled and whether each is bound live.",
           "params": [
             {
               "name": "root_filter",
@@ -62564,7 +63328,7 @@
               "name": "include_bindings",
               "jsonType": "boolean",
               "required": false,
-              "description": "Optional bool (default false): NOT implemented in this subset; sets bindings_note when true."
+              "description": "Optional bool (default false): on each UserWidget, bindings: [{ widget_name, property, source, kind, defined_in, target_found, is_bound }] from its Widget Blueprint's compiled bindings."
             },
             {
               "name": "include_values",
@@ -62592,7 +63356,7 @@
               "description": "Optional world selector: absent/'pie' (default: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie'). In a 2-player PIE session EVERY client has its OWN widgets, so the default may well read the other player's HUD."
             }
           ],
-          "returns": "{ widgets: [{ widget_name, class, is_any_animation_playing, visibility?, is_hovered?, children: [{ widget_name, class, visibility?, is_hovered?, text?, is_enabled?, value?, percent?, is_checked?, selected_option?, geometry?, children: [...] }] }], widget_count: int, scanned_viewport_widgets: int, include_text: bool, include_visibility: bool, include_bindings: bool, include_values: bool, include_geometry: bool, bindings_note?: string, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }",
+          "returns": "{ widgets: [{ widget_name, class, is_any_animation_playing, visibility?, is_hovered?, bindings?, children: [{ widget_name, class, visibility?, is_hovered?, text?, is_enabled?, value?, percent?, is_checked?, selected_option?, geometry?, children: [...] }] }], widget_count: int, scanned_viewport_widgets: int, include_text: bool, include_visibility: bool, include_bindings: bool, include_values: bool, include_geometry: bool, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,

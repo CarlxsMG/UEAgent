@@ -2,7 +2,7 @@
 
 # Navigation
 
-17 tools for the navigation mesh, and Environment Query System queries with their generators, tests and options.
+20 tools for the navigation mesh, and Environment Query System queries with their generators, tests and options.
 
 Back to the [index](README.md).
 
@@ -83,6 +83,25 @@ Aligns this project's custom collision channels with another project's config BY
 
 **Returns:** `{ other_ini_path, other_ini_found, aligned_by, this_channel_count, other_channel_count, shifted_count, matched:[{name, is_trace_type, channel_this, channel_other, channel_shifted, query_this, query_other, query_shifted}], only_in_this:[{name, channel, query_type}], only_in_other:[{name, channel, query_type}], success }`
 
+## `find_nav_path`
+
+*Read-only.*
+
+Find a navigation path between two world points on the navmesh, synchronously (UNavigationSystemV1::FindPathSync), and return whether one was found, whether it is partial (ends at the reachable point nearest to end), its length and cost, and its points from start to end. Use it to prove an AI can walk from A to B, or why it cannot, after rebuild_navigation; a straight-line obstacle check is raycast_scene. Read-only and idempotent. The world param picks the world (editor by default; in PIE pass "server", the navmesh being server-authoritative); agent or nav_data picks the navigation data, filter_class the query filter. No path is not an error: found=false, with the engine's query result and a note. No navigation data, a navmesh with no built tile, an unknown agent, nav_data or filter_class, or a malformed point is an error. Snap a point onto the navmesh first with project_point_to_navmesh; random destinations: get_random_reachable_point.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `start` | array | yes | World-space [x, y, z] (or {x, y, z}) where the path starts; it should be on or just above the navmesh (required) |
+| `end` | array | yes | World-space [x, y, z] (or {x, y, z}) where the path should end (required) |
+| `allow_partial` | boolean | no | Accept a path that stops at the reachable point nearest to end when end itself cannot be reached; default true (is_partial says which it was). false: such a query is found=false |
+| `agent` | string | no | Optional supported agent name (as diagnose_navmesh lists supported_agents) whose navigation data to query; omitted: the default navigation data. Not with nav_data |
+| `nav_data` | string | no | Optional name of the navigation data actor to query, e.g. "RecastNavMesh-Default"; omitted: the default navigation data. Not with agent |
+| `filter_class` | string | no | Optional UNavigationQueryFilter subclass: a native class name (e.g. "NavFilter_AIControllerDefault") or a Blueprint filter's path or _C name; omitted: the navigation data's default filter. One that does not resolve is an error |
+| `max_points` | number | no | Optional cap on how many path points are serialized, a whole number (default 500; below 1 counts as 1); point_count still counts all |
+| `world` | string | no | Which world to query: absent/"editor" (default) \| "server" (the PIE world with authority: the one with the navmesh in PIE) \| "client" (has no navigation; an error) \| "pie:N" \| "pie" (ambiguous: PlayWorld, else the first PIE context) \| "game" (alias of "pie") |
+
+**Returns:** `{ found: bool, is_partial: bool, query_result: "Success"|"Fail"|"Error"|"Invalid", length: number, cost: number, straight_line_distance: number, point_count: int, points:[{x,y,z}], start:{x,y,z}, end:{x,y,z}, allow_partial: bool, nav_data, agent, filter_class, note?, world, world_name, world_package, world_type, net_mode, pie_instance }`
+
 ## `get_eqs_query_info`
 
 *Read-only.*
@@ -94,6 +113,24 @@ Reports the composition of an Environment Query (UEnvQuery) asset without runnin
 | `query_path` | string | yes | Asset path of the UEnvQuery (required), e.g. "/Game/EQS/EQ_FindCover" (the ".EQ_FindCover" object suffix is optional), as create_eqs_query or find_assets_by_name gives it. |
 
 **Returns:** `{ query_path, option_count, options:[{index, generator_class?, generator_path?, test_count, tests:[{index, class, path}]}] }`
+
+## `get_random_reachable_point`
+
+*Read-only.*
+
+Pick random navmesh locations reachable by path from origin within radius (UNavigationSystemV1::GetRandomReachablePointInRadius), count of them (default 1), each with its straight-line distance from origin. Use it for patrol or spawn destinations an AI can actually walk to, or to sample how far the navmesh connected to origin extends. Read-only (each call draws new points). The world param picks the world (editor by default; in PIE pass "server"); agent or nav_data picks the navigation data, filter_class the query filter. origin must be on or near the navmesh: origin_on_navmesh says whether it projects with the default query extent, and with none found found=false and a note, not an error. No navigation data, a navmesh with no built tile, an unknown agent, nav_data or filter_class, a malformed origin or a radius of 0 or less is an error.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `origin` | array | yes | World-space [x, y, z] (or {x, y, z}) the points must be reachable from (required) |
+| `radius` | number | yes | Search radius around origin in cm, above 0 (required) |
+| `count` | number | no | Optional number of points to draw, a whole number from 1 to 100 (default 1; clamped); points may repeat |
+| `agent` | string | no | Optional supported agent name (as diagnose_navmesh lists supported_agents) whose navigation data to query; omitted: the default navigation data. Not with nav_data |
+| `nav_data` | string | no | Optional name of the navigation data actor to query, e.g. "RecastNavMesh-Default"; omitted: the default navigation data. Not with agent |
+| `filter_class` | string | no | Optional UNavigationQueryFilter subclass: a native class name or a Blueprint filter's path or _C name; omitted: the navigation data's default filter. One that does not resolve is an error |
+| `world` | string | no | Which world to query: absent/"editor" (default) \| "server" (the PIE world with authority: the one with the navmesh in PIE) \| "client" (has no navigation; an error) \| "pie:N" \| "pie" (ambiguous: PlayWorld, else the first PIE context) \| "game" (alias of "pie") |
+
+**Returns:** `{ found: bool, origin:{x,y,z}, radius: number, origin_on_navmesh: bool, requested_count: int, found_count: int, points:[{location:{x,y,z}, distance}], nav_data, agent, filter_class, note?, world, world_name, world_package, world_type, net_mode, pie_instance }`
 
 ## `list_eqs_context_types`
 
@@ -124,6 +161,23 @@ Lists all concrete UEnvQueryTest subclasses usable as EQS tests. Read-only refle
 No parameters.
 
 **Returns:** `{ base_class, count, types:[{name, path}] }`
+
+## `project_point_to_navmesh`
+
+*Read-only.*
+
+Project a world point onto the navmesh (UNavigationSystemV1::ProjectPointToNavigation): the nearest navigable location within a query box of half-extent extent around point, or found=false when the box reaches no navmesh. Use it to check that a spawn point, patrol point or path start is on the navmesh, and to snap it there before find_nav_path. Read-only and idempotent. The world param picks the world (editor by default; in PIE pass "server"); agent or nav_data picks the navigation data, filter_class the query filter. Not found is not an error. No navigation data, a navmesh with no built tile, an unknown agent, nav_data or filter_class, a malformed point or an extent axis of 0 or less is an error.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `point` | array | yes | World-space [x, y, z] (or {x, y, z}) to project (required) |
+| `extent` | any | no | Optional half-extent [x, y, z] of the box searched around point, in cm, each axis above 0; default the navigation data's DefaultQueryExtent (50, 50, 250 unless the project changed it) |
+| `agent` | string | no | Optional supported agent name (as diagnose_navmesh lists supported_agents) whose navigation data to query; omitted: the default navigation data. Not with nav_data |
+| `nav_data` | string | no | Optional name of the navigation data actor to query, e.g. "RecastNavMesh-Default"; omitted: the default navigation data. Not with agent |
+| `filter_class` | string | no | Optional UNavigationQueryFilter subclass: a native class name or a Blueprint filter's path or _C name; omitted: the navigation data's default filter. One that does not resolve is an error |
+| `world` | string | no | Which world to query: absent/"editor" (default) \| "server" (the PIE world with authority: the one with the navmesh in PIE) \| "client" (has no navigation; an error) \| "pie:N" \| "pie" (ambiguous: PlayWorld, else the first PIE context) \| "game" (alias of "pie") |
+
+**Returns:** `{ found: bool, point:{x,y,z}, projected_point?:{x,y,z}, distance?: number, vertical_offset?: number, extent:{x,y,z}, nav_data, agent, filter_class, note?, world, world_name, world_package, world_type, net_mode, pie_instance }`
 
 ## `rebuild_navigation`
 

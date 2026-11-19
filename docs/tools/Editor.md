@@ -2,7 +2,7 @@
 
 # Editor
 
-98 tools for the editor itself: actors (spawn, select, copy, transform, delete), levels, saving, undo and transactions, Python, console commands and CVars, tests, enums and structs, screenshots, logs, media, and asset housekeeping (delete, export, migrate, consolidate, redirectors, unused and duplicate assets).
+108 tools for the editor itself: actors (spawn, select, copy, transform, delete), levels, saving, undo and transactions, Python, console commands and CVars, tests, enums and structs, screenshots, logs, media, and asset housekeeping (delete, export, migrate, consolidate, redirectors, unused and duplicate assets).
 
 Back to the [index](README.md).
 
@@ -156,6 +156,19 @@ Screenshot the active editor viewport to a PNG (forcing a fresh draw first), opt
 
 **Returns:** `{ file_path: string, width: int, height: int, byte_size: int, image_base64: string, image_format: string, image_returned: bool, image_width?: int, image_height?: int, image_note?: string }`
 
+## `clear_debug_shapes`
+
+*Destructive, idempotent.*
+
+Remove debug shapes from the editor world (default) or a PIE world: by default only what draw_debug_shapes drew (its lines, points and text), with all=true every persistent debug line, point and string in that world, the engine's and other tools' included. Reports how many were there before and after.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `all` | boolean | no | Optional bool (default false): also clear the debug lines and strings that something other than draw_debug_shapes drew. |
+| `world` | string | no | Optional world selector: absent/'editor' (default) \| 'pie' (ambiguous: PlayWorld, else the first PIE context) \| 'server' (the PIE world with authority) \| 'client' \| 'pie:N' \| 'game' (alias of 'pie'). |
+
+**Returns:** `{ cleared_lines: int, cleared_texts: int, remaining_lines: int, remaining_texts: int, requested?: object, world_name, world_package, world_type, net_mode, pie_instance }`
+
 ## `clear_message_log`
 
 *Destructive, idempotent.*
@@ -167,6 +180,19 @@ Clear all messages from a named engine Message Log listing.
 | `log_name` | string | yes | The message log listing name (e.g. "PIE", "MapCheck", or a custom name). |
 
 **Returns:** `{ cleared: bool, log_name: string, cleared_count: int, messages_after: int }`
+
+## `close_asset_editor`
+
+*Additive, idempotent.*
+
+Close every editor open on one asset (asset_path), or every asset editor (close_all=true). Unsaved changes are not lost and not saved: the asset stays modified in memory (the dirty flag in the reply), so save_asset it if you mean to keep them. An asset that is not loaded, or has no editor open, is a no-op success with closed_count 0. The outcome is read back: success only when no editor is left open on what was asked.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `asset_path` | string | no | Object path, package path or unambiguous bare asset name of the asset whose editors to close. Required unless close_all is true. |
+| `close_all` | boolean | no | Optional bool (default false): close every open asset editor; asset_path is then ignored. |
+
+**Returns:** `{ closed_count: int, still_open_count: int, closed_assets: [{ asset_path: string, asset_class: string, dirty: bool }], close_all: bool }`
 
 ## `consolidate_assets`
 
@@ -373,6 +399,26 @@ Drop specific actors from the editor selection, or clear it entirely with desele
 
 **Returns:** `{ deselected_all: bool, deselected_count: int }`
 
+## `draw_debug_shapes`
+
+*Additive.*
+
+Draw debug lines, boxes, spheres, arrows, points and text into the editor world (default) or a PIE world, to show a location, a bound, a path or a trace in the viewport. Each shape lasts duration seconds, or until clear_debug_shapes with persistent=true; nothing is saved, selectable or undoable.
+
+shapes is a list of objects with a type and its fields, positions in world units: line {start, end}; arrow {start, end, size = head size, default 20}; box {center, extent = half size, default [50,50,50], rotation = {pitch, yaw, roll} degrees}; sphere {center, radius (default 50), segments (4..64, default 16)}; point {location, size in pixels (default 10)}; text {location, text, size = font scale (default 1)}. Any shape may carry its own color and thickness. Text goes to the HUD of each local player, so it is drawn only in a PIE world with a HUD; in the editor world it is skipped and the reply says so. An invalid shape is an error and nothing is drawn.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `shapes` | array | yes | Required list of shape objects as described above, at most 2000. |
+| `color` | array | no | Optional default color [R, G, B] or [R, G, B, A] in 0..1 (default green [0, 1, 0, 1]); a shape's own color wins. |
+| `thickness` | number | no | Optional default line thickness in world units (default 0 = one pixel, clamped 0..1000); a shape's own thickness wins. |
+| `duration` | number | no | Optional seconds the shapes stay (default 10, clamped 0.01..86400); ignored when persistent is true. The editor world counts them down while the editor ticks. |
+| `persistent` | boolean | no | Optional bool (default false): keep the shapes until clear_debug_shapes. |
+| `foreground` | boolean | no | Optional bool (default false): draw lines and points over the scene instead of depth-tested in it. |
+| `world` | string | no | Optional world selector: absent/'editor' (default) \| 'pie' (ambiguous: PlayWorld, else the first PIE context) \| 'server' (the PIE world with authority) \| 'client' \| 'pie:N' \| 'game' (alias of 'pie'). |
+
+**Returns:** `{ shapes_requested: int, drawn: int, lines_added: int, texts_added: int, skipped: [{ index: int, type: string, reason: string }], by_type: { line?: int, box?: int, sphere?: int, arrow?: int, point?: int, text?: int }, lifetime_seconds: float (-1 = until cleared), batcher: string, requested?: object, world_name, world_package, world_type, net_mode, pie_instance }`
+
 ## `duplicate_actor`
 
 *Additive.*
@@ -540,6 +586,20 @@ Dump EVERY actor of a world (name, class, transform), capped by max_results at 5
 
 **Returns:** `{ actors: [actor JSON], actors_count: int, total_actors_in_level: int, results_truncated: bool, max_results: int, world: string (the normalized selector that resolved), world_name: string, world_package: string (in World Partition the UEDPIE_N prefix lives HERE, not in world_name), world_type: string, net_mode: string, pie_instance: int }`
 
+## `get_asset_compilation_status`
+
+*Read-only.*
+
+What the editor is still compiling in the background, per kind: shaders, textures, static_meshes, skeletal_meshes, sound_waves and every other asset compiling manager the engine registers (mesh distance fields, mesh cards, animation sequences, Niagara systems...), with the count left for each and, on request, which assets. A count of 0 everywhere means rendering, cooking and measurements see final data; wait_for_asset_compilation blocks until it is so.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `kinds` | array | no | Optional list of kinds to report, by kind ("textures") or engine type name ("UE-Texture"), case-insensitive; default all. An unknown kind is an error that lists the kinds there are. |
+| `include_assets` | boolean | no | Optional bool (default false): also list the object paths still compiling for textures, static_meshes, skeletal_meshes and sound_waves (the other kinds only have a count). |
+| `max_assets` | number | no | Optional int (default 50, clamped 1..1000): most paths listed per kind; assets_total still counts them all. |
+
+**Returns:** `{ compiling: bool, total_remaining: int, kinds: [{ kind: string, type_name: string, remaining: int, assets_listable: bool, assets?: [string], assets_total?: int, assets_truncated?: bool }], shader_jobs?: { outstanding: int, pending: int, remaining: int, compiling: bool } }`
+
 ## `get_automation_test_results`
 
 *Read-only.*
@@ -549,6 +609,16 @@ The state of the test run_automation_test started, without running anything: whi
 No parameters.
 
 **Returns:** `{ test_name, started, completed, running, passed?, verdict: "pass"|"fail"|"canceled"|"running", elapsed_seconds, timed_out, canceled?, duration_s?, errors?, warnings?, entries?:[{type,message,context,filename,line}], entry_count?, timeout_seconds?, note? }`
+
+## `get_content_browser_path`
+
+*Read-only.*
+
+Read the folder the primary Content Browser is showing: its content path ('/Game/Maps', what the asset tools take) and its virtual path as the browser displays it ('/All/Game/Maps'). Use it to create or import assets "where the user is looking". path is empty when the browser shows a virtual folder with no content path behind it, or when there is no Content Browser (has_content_browser false).
+
+No parameters.
+
+**Returns:** `{ path: string, virtual_path: string, has_internal_path: bool, has_content_browser: bool }`
 
 ## `get_current_level`
 
@@ -684,6 +754,18 @@ No parameters.
 
 **Returns:** `{ selected_actors: [actor JSON], selected_count: int, world_name: string }`
 
+## `get_selected_assets`
+
+*Read-only.*
+
+Read what is selected in the primary Content Browser right now: each asset's path, package, name and class, plus the selected folders. Use it to act on "the assets the user just clicked" without asking for paths, and as the read-back for sync_content_browser_to_assets. Nothing is loaded. Without a Content Browser (headless editor, or every browser tab closed) the lists are empty and has_content_browser is false.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `include_folders` | boolean | no | Optional bool (default true): also report the selected folders of the asset view and of the path tree. |
+
+**Returns:** `{ assets: [{ asset_path: string, package_name: string, asset_name: string, asset_class: string }], count: int, folders: [string], path_view_folders: [string], has_content_browser: bool }`
+
 ## `get_struct_members`
 
 *Read-only.*
@@ -813,6 +895,16 @@ List the section names of one INI (Engine, Game, Input, Editor, Scalability...) 
 
 **Returns:** `{ count, sections: [string], found: bool, include_base: bool, config_file, file_path, files_read?: [string] }`
 
+## `list_open_asset_editors`
+
+*Read-only.*
+
+List the asset editors open right now and the assets each one edits, with whether each asset has unsaved changes. Use it to see what the user is working on, or to find editors to close with close_asset_editor. Read-only; nothing is loaded.
+
+No parameters.
+
+**Returns:** `{ editors: [{ editor_name: string, is_primary_editor: bool, assets: [string] }], editor_count: int, assets: [{ asset_path: string, asset_class: string, dirty: bool, editor_names: [string] }], asset_count: int }`
+
 ## `load_level`
 
 *Destructive.*
@@ -857,6 +949,19 @@ Relocate existing editor-world actors into another sub-level (persistent or a lo
 | `move_all_or_fail` | boolean | no | When true, fail the whole move if any actor cannot be moved; defaults to false |
 
 **Returns:** `{ requested: int, moved_count: int, already_in_level: [string], target_level: string, success: bool, note: string }`
+
+## `open_asset_editor`
+
+*Additive, idempotent.*
+
+Open the editor for an asset (Blueprint, material, data table...) the way a double-click in the Content Browser does, loading the asset if needed, or bring its editor to the front when it is already open. The outcome is read back: success only when an editor for the asset is open after the call. Maps are refused (opening one loads it as the level: use load_level), and so is a headless editor, which cannot show an editor window.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `asset_path` | string | yes | Required: object path ('/Game/A/B.B'), package path ('/Game/A/B') or an unambiguous bare asset name. |
+| `focus` | boolean | no | Optional bool (default true): bring the editor to the front when it is already open. |
+
+**Returns:** `{ asset_path: string, asset_class: string, opened: bool, already_open: bool, editor_name: string, is_primary_editor: bool }`
 
 ## `open_message_log`
 
@@ -1346,6 +1451,20 @@ Place an actor of ANY placeable class -- a built-in short name (StaticMeshActor,
 
 **Returns:** `{ actor JSON via DescribeActorObject: name, class, location, rotation, scale, plus world: string (the normalized selector that resolved), world_name: string, world_package: string (the UEDPIE_N prefix lives HERE), world_type: string, net_mode: string, pie_instance: int, has_authority: bool, local_role: string, light_intensity?: number (light types: the intensity now on the component), light_color?: [r, g, b] (light types: the color now on the component), properties_set?: [string], properties_failed?: [{property, error}] (with properties) }`
 
+## `sync_content_browser_to_assets`
+
+*Additive, idempotent.*
+
+Point the Content Browser at assets: it navigates to their folder and selects them, the way "Browse to Asset" does, so the user sees what you mean. Nothing is loaded or changed on disk. Paths that name no asset are reported in not_found and the rest are still synced; a call where none resolves fails. The browser applies the selection on its next ticks, so the reply cannot read it back: call get_selected_assets afterwards to confirm. Refused in a headless editor with no Content Browser.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `asset_paths` | array | yes | Required array of asset paths: object paths ('/Game/A/B.B'), package paths ('/Game/A/B') or unambiguous bare asset names. |
+| `focus` | boolean | no | Optional bool (default true): bring the Content Browser tab to the front. |
+| `allow_locked_browsers` | boolean | no | Optional bool (default false): also sync a Content Browser the user has locked. |
+
+**Returns:** `{ synced: [{ asset_path: string, package_name: string, asset_name: string, asset_class: string }], synced_count: int, not_found: [{ path: string, error: string }], has_content_browser: bool, focus: bool }`
+
 ## `undo`
 
 *Destructive.*
@@ -1363,3 +1482,21 @@ Example: {"count": 3} undoes the last three transactions. It stops early at the 
 | `count` | number | no | Optional. How many transactions to undo, at least 1 (default 1); stops early when the stack runs out or reaches an undo barrier. Below 1 is refused. |
 
 **Returns:** `{ applied: bool, requested: int, actually_undone: int, undo_count: int, can_undo: bool, next_undo: string }`
+
+## `wait_for_asset_compilation`
+
+*Read-only.*
+
+Block until the editor has finished compiling the chosen kinds of assets (shaders, textures, static_meshes, skeletal_meshes... as get_asset_compilation_status names them), or until timeout_seconds, and report what finished and what remains per kind. success is false when it timed out with work left; the data still says how far it got.
+
+While it waits it does what the engine's tick would: it pumps every asset compiling manager (all kinds, since shaders wait on textures) and the game thread's task queue between short sleeps. The editor does not redraw and no other MCP call runs meanwhile, so keep the timeout short and call it again rather than asking for minutes; do not call it while run_automation_test or run_functional_test_in_pie has a test running, since it blocks the ticks the test needs.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `timeout_seconds` | number | no | Optional float (default 60, clamped 0..600): upper bound on the wait. 0 pumps once and reports. |
+| `kinds` | array | no | Optional list of kinds to wait for, by kind ("shaders") or engine type name ("UE-Shader"), case-insensitive; default all. An unknown kind is an error that lists the kinds there are. |
+| `poll_interval_seconds` | number | no | Optional float (default 0.05, clamped 0.01..1): sleep between pumps. |
+| `include_assets` | boolean | no | Optional bool (default false): list the object paths still compiling after the wait, for textures, static_meshes, skeletal_meshes and sound_waves. |
+| `max_assets` | number | no | Optional int (default 50, clamped 1..1000): most paths listed per kind. |
+
+**Returns:** `{ completed: bool, timed_out: bool, elapsed_seconds: float, pumps: int, remaining_before: int, remaining_after: int, kinds: [{ kind: string, type_name: string, remaining_before: int, remaining_after: int, finished: bool, assets?: [string], assets_total?: int, assets_truncated?: bool }], shader_jobs?: { outstanding: int, pending: int, remaining: int, compiling: bool } }`

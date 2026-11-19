@@ -2,7 +2,7 @@
 
 # Management
 
-19 tools for assets as files (rename, move, duplicate, delete), primary assets, their rules and bundles, plugin status, and class purity audits.
+20 tools for assets as files (rename, move, duplicate, delete), primary assets, their rules and bundles, plugin status, and class purity audits.
 
 Back to the [index](README.md).
 
@@ -143,13 +143,13 @@ Read one named asset bundle of a primary asset from the running Asset Manager's 
 
 *Read-only.*
 
-Read one plugin by name, read-only: Enabled or Disabled, version, author, category, base dir, .uplugin file, dependencies and modules. An unknown name returns plugin_status "Not Found" with "N/A" fields, not an error. plugin_loaded only mirrors plugin_enabled, and plugin_created_date holds the CreatedByURL.
+Read one plugin by name, read-only: Enabled or Disabled, version, author, category, base dir, .uplugin file, dependencies and modules. An unknown name returns plugin_status "Not Found" with "N/A" fields, not an error. plugin_loaded only mirrors plugin_enabled. The .uplugin has no creation date: plugin_created_date is the creation time of the .uplugin file on disk (ISO 8601, empty when unknown), which is when it was installed or copied, and plugin_created_by_url holds the descriptor's CreatedByURL. To list every plugin use list_plugins.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `plugin_name` | string | yes | Name of the plugin to query, as its .uplugin file is named (e.g. "UEAgent") |
 
-**Returns:** `{ plugin_name: string, plugin_status: string, plugin_version: string, plugin_description: string, plugin_author: string, plugin_created_date: string, plugin_category: string, plugin_loaded: bool, plugin_enabled: bool, plugin_path: string, plugin_file: string, plugin_dependencies: [{ name: string, enabled: bool, optional: bool, version: string }], plugin_modules: [{ name: string, type: string, loading_phase: bool }], plugin_message: string, plugin_manager_version: string, plugin_search_paths: string, plugin_status_timestamp: string }`
+**Returns:** `{ plugin_name: string, plugin_status: string, plugin_version: string, plugin_description: string, plugin_author: string, plugin_created_date: string, plugin_created_by_url: string, plugin_category: string, plugin_loaded: bool, plugin_enabled: bool, plugin_path: string, plugin_file: string, plugin_dependencies: [{ name: string, enabled: bool, optional: bool, version: string }], plugin_modules: [{ name: string, type: string, loading_phase: bool }], plugin_message: string, plugin_manager_version: string, plugin_search_paths: string, plugin_status_timestamp: string }`
 
 ## `get_primary_asset_id`
 
@@ -187,6 +187,22 @@ Read the PrimaryAssetTypesToScan rules configured in the Asset Manager project s
 | `primary_asset_type` | string | no | Optional type name (e.g. "Item", matched without case): list only the rules of that type; a type with no configured rule is an error. |
 
 **Returns:** `{ types: [{ type, base_class, has_blueprint_classes, is_editor_only, directories: [string], num_specific_assets, cook_rule, priority, chunk_id, apply_recursively }], type_count, primary_asset_type? }`
+
+## `list_plugins`
+
+*Read-only.*
+
+List the plugins this editor has discovered, enabled or not, sorted by name: whether each is enabled and mounted, whether it comes from the engine or the project, its version, category and folder. Filters combine (all must match). Read-only. Use get_plugin_status for one plugin's dependencies and modules, and set_plugin_enabled to turn one on or off.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | boolean | no | Optional bool: true lists only enabled plugins, false only disabled ones; omitted lists both. |
+| `type` | string | no | Optional: "project" (plugins the project loads from its own folders), "engine" (the engine's), or "all" (default). |
+| `name_filter` | string | no | Optional case-insensitive substring of the plugin's name or friendly name. |
+| `category` | string | no | Optional case-insensitive substring of the plugin's category (e.g. "Editor", "Rendering"). |
+| `include_hidden` | boolean | no | Optional bool (default true): include plugins the Plugins window hides. |
+
+**Returns:** `{ plugins: [{ name: string, friendly_name: string, enabled: bool, mounted: bool, type: "engine"|"project", plugin_type: "engine"|"enterprise"|"project"|"external"|"mod", version: string, version_number: int, category: string, path: string, descriptor_file: string, can_contain_content: bool, is_beta: bool, is_experimental: bool, hidden: bool }], count: int, total_discovered: int }`
 
 ## `move_asset`
 
