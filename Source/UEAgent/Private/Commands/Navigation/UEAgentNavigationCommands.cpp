@@ -2050,10 +2050,17 @@ namespace
         return false;
     }
 
-    // Whether the RecastNavMesh holds at least one tile with data; the same test diagnose_navmesh uses for
-    // active_tile_count on 5.7, stopping at the first tile found.
-    bool NavQuery_HasBuiltTile(const ARecastNavMesh* Recast)
+    // Whether the RecastNavMesh holds at least one tile with data, counted as diagnose_navmesh counts
+    // active_tile_count on each engine version. Without a generator (a static navmesh in a PIE or game world)
+    // neither count sees the tiles, so the navmesh is taken as built and the query itself answers.
+    bool NavQuery_HasBuiltTile(ARecastNavMesh* Recast)
     {
+        if (!Recast->GetGenerator())
+        {
+            return true;
+        }
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+        // 5.7 has no GetNumActiveTiles(): a tile holds data when it has a header, read through the public tile refs.
         TArray<FNavTileRef> TileRefs;
         Recast->GetAllNavMeshTiles(TileRefs);
         for (const FNavTileRef& TileRef : TileRefs)
@@ -2065,6 +2072,9 @@ namespace
             }
         }
         return false;
+#else
+        return Recast->GetNumActiveTiles() > 0;
+#endif
     }
 
     FString NavQuery_AgentNames(const UNavigationSystemV1* NavSys)
@@ -2161,7 +2171,7 @@ namespace
             }
         }
 
-        if (const ARecastNavMesh* Recast = Cast<ARecastNavMesh>(Ctx.NavData))
+        if (ARecastNavMesh* Recast = Cast<ARecastNavMesh>(Ctx.NavData))
         {
             if (!NavQuery_HasBuiltTile(Recast))
             {
