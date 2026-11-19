@@ -556,6 +556,55 @@ namespace
                                        bool bIncludeValues, bool bIncludeGeometry);
 
     /**
+     * Node["bindings"]: the property and event bindings the live UserWidget's class compiled, gathered over its
+     * Widget Blueprint class hierarchy as UWidgetBlueprintGeneratedClass::InitializeWidget gathers them. Each entry
+     * says which widget and property it targets, the function or property it reads, and whether the target
+     * widget's delegate is bound right now (false: the target is missing or the binding did not take).
+     */
+    void AddPieWidgetBindings(const TSharedPtr<FJsonObject>& Node, UUserWidget* UserWidget)
+    {
+        TArray<TSharedPtr<FJsonValue>> BindingsOut;
+        for (UClass* Class = UserWidget ? UserWidget->GetClass() : nullptr; Class; Class = Class->GetSuperClass())
+        {
+            const UWidgetBlueprintGeneratedClass* WBPGC = Cast<UWidgetBlueprintGeneratedClass>(Class);
+            if (!WBPGC)
+            {
+                break;
+            }
+            for (const FDelegateRuntimeBinding& Binding : WBPGC->Bindings)
+            {
+                TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+                Entry->SetStringField(TEXT("widget_name"), Binding.ObjectName);
+                Entry->SetStringField(TEXT("property"), Binding.PropertyName.ToString());
+                Entry->SetStringField(TEXT("source"), Binding.FunctionName.ToString());
+                Entry->SetStringField(TEXT("kind"), Binding.Kind == EBindingKind::Function ? TEXT("function") : TEXT("property"));
+                Entry->SetStringField(TEXT("defined_in"), WBPGC->GetName());
+
+                bool bBound = false;
+                UWidget* Target = UserWidget->WidgetTree ? UserWidget->WidgetTree->FindWidget(FName(*Binding.ObjectName)) : nullptr;
+                if (Target)
+                {
+                    const FDelegateProperty* DelegateProperty = FindFProperty<FDelegateProperty>(
+                        Target->GetClass(), FName(*(Binding.PropertyName.ToString() + TEXT("Delegate"))));
+                    if (!DelegateProperty)
+                    {
+                        DelegateProperty = FindFProperty<FDelegateProperty>(Target->GetClass(), Binding.PropertyName);
+                    }
+                    if (DelegateProperty)
+                    {
+                        const FScriptDelegate* Delegate = DelegateProperty->GetPropertyValuePtr_InContainer(Target);
+                        bBound = Delegate && Delegate->IsBound();
+                    }
+                }
+                Entry->SetBoolField(TEXT("target_found"), Target != nullptr);
+                Entry->SetBoolField(TEXT("is_bound"), bBound);
+                BindingsOut.Add(MakeShared<FJsonValueObject>(Entry));
+            }
+        }
+        Node->SetArrayField(TEXT("bindings"), BindingsOut);
+    }
+
+    /**
      * Serializes a live UWidget and its children. Only reads game-thread state
      * (name/class/visibility/hover/text); never touches the render thread.
      *
@@ -568,7 +617,8 @@ namespace
      */
     TSharedPtr<FJsonObject> BuildPieWidgetNode(UWidget* Widget, bool bIncludeText, bool bIncludeVisibility,
                                                 bool bIncludeValues, bool bIncludeGeometry,
-                                                TSet<const UWidget*>& Visited, int32 Depth, int32 MaxDepth)
+                                                TSet<const UWidget*>& Visited, int32 Depth, int32 MaxDepth,
+                                                bool bIncludeBindings)
     {
         TSharedPtr<FJsonObject> Node = MakeShared<FJsonObject>();
         if (!Widget)
@@ -638,7 +688,7 @@ namespace
                     {
                         Children.Add(MakeShared<FJsonValueObject>(BuildPieWidgetNode(
                             Child, bIncludeText, bIncludeVisibility, bIncludeValues, bIncludeGeometry,
-                            Visited, Depth + 1, MaxDepth)));
+                            Visited, Depth + 1, MaxDepth, bIncludeBindings)));
                     }
                 }
             }
@@ -646,6 +696,10 @@ namespace
         // (b) Nested WBP: its own tree hangs off its WidgetTree, not off GetChildAt.
         else if (UUserWidget* AsUserWidget = Cast<UUserWidget>(Widget))
         {
+            if (bIncludeBindings)
+            {
+                AddPieWidgetBindings(Node, AsUserWidget);
+            }
             UWidget* InnerRoot = AsUserWidget->WidgetTree ? AsUserWidget->WidgetTree->RootWidget : nullptr;
             if (InnerRoot)
             {
@@ -659,7 +713,7 @@ namespace
                     Node->SetBoolField(TEXT("is_nested_user_widget"), true);
                     Children.Add(MakeShared<FJsonValueObject>(BuildPieWidgetNode(
                         InnerRoot, bIncludeText, bIncludeVisibility, bIncludeValues, bIncludeGeometry,
-                        Visited, Depth + 1, MaxDepth)));
+                        Visited, Depth + 1, MaxDepth, bIncludeBindings)));
                 }
             }
         }
@@ -671,11 +725,11 @@ namespace
     /** Wrapper with the default values, so the visited set is not repeated at every call site. */
     TSharedPtr<FJsonObject> BuildPieWidgetNode(UWidget* Widget, bool bIncludeText, bool bIncludeVisibility,
                                                 bool bIncludeValues = false, bool bIncludeGeometry = false,
-                                                int32 MaxDepth = -1)
+                                                int32 MaxDepth = -1, bool bIncludeBindings = false)
     {
         TSet<const UWidget*> Visited;
         return BuildPieWidgetNode(Widget, bIncludeText, bIncludeVisibility, bIncludeValues, bIncludeGeometry,
-                                  Visited, /*Depth=*/ 0, MaxDepth);
+                                  Visited, /*Depth=*/ 0, MaxDepth, bIncludeBindings);
     }
 
     // click_pie_widget helper: recursively search a resolved widget's subtree (panel children)
@@ -3173,20 +3227,20 @@ TSharedPtr<FJsonObject> HandleSetGridSlotProperties(const TSharedPtr<FJsonObject
 // Limitations:
 //   - Only UTextBlock text is captured; other text-bearing widgets are reported by
 //     class only.
-//   - include_bindings is accepted but not implemented (runtime property/delegate
-//     binding introspection is omitted); a top-level note flags this when requested.
+//   - include_bindings lists the bindings each UserWidget's class compiled (UMG's Bind
+//     dropdown), not bindings made at runtime by code such as AddDynamic on a widget event.
 // ---------------------------------------------------------------------------
-// MCP:list_pie_widgets - Read LIVE UMG from the running PIE session (game thread): enumerate the active UUserWidgets added to the viewport and walk each widget tree, emitting name/class plus optional visibility/hover/text/value/geometry as a parent/child tree.  Reads only game-thread-safe widget-tree state (never the render thread). Errors clearly if no Play-In-Editor session is running.  DESCENDS INTO NESTED WIDGET BLUEPRINTS: an AAA screen is a Widget Blueprint composed of Widget Blueprints, so everything interesting sits one level below the first. Cycles are handled with a visited set plus max_depth, and a subtree that IS cut says so in subtree_omitted instead of looking like a leaf. Rich text is read too (URichTextBlock does not derive from UTextBlock). Not implemented: include_bindings, which is accepted and flagged in bindings_note.
+// MCP:list_pie_widgets - Read LIVE UMG from the running PIE session (game thread): enumerate the active UUserWidgets added to the viewport and walk each widget tree, emitting name/class plus optional visibility/hover/text/value/geometry as a parent/child tree.  Reads only game-thread-safe widget-tree state (never the render thread). Errors clearly if no Play-In-Editor session is running.  DESCENDS INTO NESTED WIDGET BLUEPRINTS: an AAA screen is a Widget Blueprint composed of Widget Blueprints, so everything interesting sits one level below the first. Cycles are handled with a visited set plus max_depth, and a subtree that IS cut says so in subtree_omitted instead of looking like a leaf. Rich text is read too (URichTextBlock does not derive from UTextBlock). include_bindings adds, on every UserWidget (top-level and nested), the property/event bindings its Widget Blueprint compiled and whether each is bound live.
 //   @renamed-from read_pie_widgets
 //   @param root_filter - Optional case-sensitive substring; only top-level UserWidgets whose object name contains it are returned.
 //   @param include_text - Optional bool (default true): include UTextBlock text.
 //   @param include_visibility - Optional bool (default true): include visibility, is_hovered and has_keyboard_focus per widget. has_keyboard_focus is what tells you whether a navigation key will do anything at all: with nothing focused every key is a no-op, which reads exactly like broken navigation.
-//   @param include_bindings - Optional bool (default false): NOT implemented in this subset; sets bindings_note when true.
+//   @param include_bindings - Optional bool (default false): on each UserWidget, bindings: [{ widget_name, property, source, kind, defined_in, target_found, is_bound }] from its Widget Blueprint's compiled bindings.
 //   @param include_values - Optional bool (default false): include is_enabled + widget-type-specific value (Slider.value / ProgressBar.percent / CheckBox.is_checked / ComboBoxString.selected_option).
 //   @param include_geometry - Optional bool (default false): include GetCachedGeometry()-derived absolute_position/absolute_size, render_opacity, and render_transform.
 //   @param max_depth - Optional recursion limit (-1 = unlimited, the default). Counts every level including the descent into a nested Widget Blueprint's own tree. A subtree cut by the limit reports subtree_omitted rather than passing for a leaf.
 //   @param world - Optional world selector: absent/'pie' (default: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie'). In a 2-player PIE session EVERY client has its OWN widgets, so the default may well read the other player's HUD.
-//   @returns { widgets: [{ widget_name, class, is_any_animation_playing, visibility?, is_hovered?, children: [{ widget_name, class, visibility?, is_hovered?, text?, is_enabled?, value?, percent?, is_checked?, selected_option?, geometry?, children: [...] }] }], widget_count: int, scanned_viewport_widgets: int, include_text: bool, include_visibility: bool, include_bindings: bool, include_values: bool, include_geometry: bool, bindings_note?: string, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }
+//   @returns { widgets: [{ widget_name, class, is_any_animation_playing, visibility?, is_hovered?, bindings?, children: [{ widget_name, class, visibility?, is_hovered?, text?, is_enabled?, value?, percent?, is_checked?, selected_option?, geometry?, children: [...] }] }], widget_count: int, scanned_viewport_widgets: int, include_text: bool, include_visibility: bool, include_bindings: bool, include_values: bool, include_geometry: bool, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }
 
 TSharedPtr<FJsonObject> HandleReadPieWidgets(const TSharedPtr<FJsonObject>& Params)
 {
@@ -3242,6 +3296,10 @@ TSharedPtr<FJsonObject> HandleReadPieWidgets(const TSharedPtr<FJsonObject>& Para
             Node->SetBoolField(TEXT("is_hovered"), UserWidget->IsHovered());
         }
         AddPieWidgetValueAndGeometry(Node, UserWidget, bIncludeValues, bIncludeGeometry);
+        if (bIncludeBindings)
+        {
+            AddPieWidgetBindings(Node, UserWidget);
+        }
 
         // The reader for "is an animation running" (play/stop_widget_animation only write). Without
         // it, waiting for a transition to finish before asserting is a guessed sleep.
@@ -3253,7 +3311,7 @@ TSharedPtr<FJsonObject> HandleReadPieWidgets(const TSharedPtr<FJsonObject>& Para
         {
             Children.Add(MakeShared<FJsonValueObject>(
                 BuildPieWidgetNode(UserWidget->WidgetTree->RootWidget, bIncludeText, bIncludeVisibility,
-                    bIncludeValues, bIncludeGeometry, MaxDepth)));
+                    bIncludeValues, bIncludeGeometry, MaxDepth, bIncludeBindings)));
         }
         Node->SetArrayField(TEXT("children"), Children);
 
@@ -3273,12 +3331,6 @@ TSharedPtr<FJsonObject> HandleReadPieWidgets(const TSharedPtr<FJsonObject>& Para
     Resp->SetBoolField(TEXT("include_bindings"), bIncludeBindings);
     Resp->SetBoolField(TEXT("include_values"), bIncludeValues);
     Resp->SetBoolField(TEXT("include_geometry"), bIncludeGeometry);
-    if (bIncludeBindings)
-    {
-        Resp->SetStringField(TEXT("bindings_note"),
-            TEXT("include_bindings is not supported in this subset; runtime property/delegate "
-                 "binding introspection is omitted."));
-    }
     return mcp_common::MakeOkReply(Resp);
 }
 
@@ -3714,6 +3766,13 @@ namespace
             return false;
         }
 
+        // A Blueprint whose parent class failed to load has none; the BindWidget lookup below needs it.
+        if (!WidgetBlueprint->ParentClass)
+        {
+            OutErrorMessage = NSLOCTEXT("UEAgent", "WidgetBlueprintNoParentClass", "The Widget Blueprint has no parent class");
+            return false;
+        }
+
         // Slug the new name down to a valid object name
         const FName NewNameSlug = SanitizeWidgetName_Widget(NewNameString, TemplateWidget->GetFName());
 
@@ -3803,7 +3862,10 @@ namespace
         const FName OldObjectName = Widget->GetFName();
 
         UClass* ParentClass = WidgetBlueprint->ParentClass;
-        check(ParentClass);
+        if (!ParentClass)
+        {
+            return false;
+        }
 
         bool bRenamed = false;
 
@@ -4149,7 +4211,11 @@ namespace
         {
             NewSlot = NewParent->AddChild(Widget);
         }
-        check(NewSlot);
+        if (!NewSlot)
+        {
+            OutErrorMessage = NSLOCTEXT("UEAgent", "MoveWidgetAddChildFailed", "The new parent refused the widget as a child.");
+            return false;
+        }
 
         if (OriginalBP != nullptr && OriginalBP != WidgetBlueprint)
         {
@@ -4213,6 +4279,13 @@ TSharedPtr<FJsonObject> HandleRenameWidget(const TSharedPtr<FJsonObject>& Params
         Resp->SetBoolField(TEXT("saved"), false);
         Resp->SetStringField(TEXT("note"), TEXT("new_name is the current name: nothing was renamed or saved"));
         return mcp_common::MakeOkReply(Resp);
+    }
+
+    // The engine's rename dereferences the parent class, which a Blueprint whose parent failed to load lacks.
+    if (!WidgetBP->ParentClass)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Cannot rename '%s': the Widget Blueprint has no parent class; nothing was changed"), *OldName));
     }
 
     FText VerifyError;
@@ -4573,6 +4646,13 @@ TSharedPtr<FJsonObject> HandleDuplicateWidget(const TSharedPtr<FJsonObject>& Par
                 TEXT("Widget '%s' has no parent (it is the root widget) -- specify target_parent_name to place the duplicate"),
                 *WidgetName));
         }
+    }
+
+    // The engine's rename dereferences the parent class, which a Blueprint whose parent failed to load lacks.
+    if (!WidgetBP->ParentClass)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Cannot duplicate '%s': the Widget Blueprint has no parent class; nothing was changed"), *WidgetName));
     }
 
     // Duplicate with an auto-unique name (NAME_None), then rename via the vetted rename_widget
