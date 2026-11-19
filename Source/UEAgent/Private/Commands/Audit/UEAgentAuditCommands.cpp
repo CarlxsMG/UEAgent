@@ -37,6 +37,23 @@
 #include "Engine/DataAsset.h"
 #include "Styling/SlateColor.h"   // IsColorSpecified: an FSlateColor may carry no color of its own
 
+// Content and level audits: texture and mesh settings read from tags (or the loaded asset), and placed actors.
+#include "AssetRegistry/ARFilter.h"
+#include "Engine/Texture2D.h"
+#include "Engine/StaticMesh.h"
+#include "PhysicsEngine/BodySetup.h"
+#include "RenderUtils.h"                                  // IsStaticLightingAllowed
+#include "UObject/ObjectRedirector.h"
+#include "GameFramework/Info.h"
+#include "GameFramework/Controller.h"
+#include "GameFramework/WorldSettings.h"
+#include "Engine/LevelScriptActor.h"
+#include "Engine/StaticMeshActor.h"
+#include "Animation/SkeletalMeshActor.h"
+#include "Components/MeshComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SkinnedMeshComponent.h"
+
 #include "UObject/UnrealType.h"
 #include "UObject/Script.h"
 // UClass::TryFindTypeSlow (Class.h) + FindFirstObject/LoadObject/EFindFirstObjectOptions
@@ -1485,12 +1502,1167 @@ TSharedPtr<FJsonObject> HandleAuditWidgetAccessibility(const TSharedPtr<FJsonObj
     return Result;
 }
 
+// ---------------------------------------------------------------------------
+// CONTENT AND LEVEL AUDITS -- textures, static meshes, asset names and placed actors.
+//
+// These four answer inline with one shape: findings [{severity, rule, asset|actor, message,
+// suggested_fix, ...}], a summary counted over every finding (not only the returned page), and
+// offset/limit paging. The asset audits read Asset Registry tags, so they scale without loading;
+// an asset is loaded only when the tags a rule needs are missing (a package saved before the
+// engine wrote them), and max_loads caps that.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+    enum class EAU_Severity : uint8 { Error, Warning, Info };
+
+    const TCHAR* AU_SeverityName(EAU_Severity Severity)
+    {
+        switch (Severity)
+        {
+            case EAU_Severity::Error:   return TEXT("error");
+            case EAU_Severity::Warning: return TEXT("warning");
+            default:                    return TEXT("info");
+        }
+    }
+
+    struct FAU_Finding
+    {
+        EAU_Severity Severity = EAU_Severity::Info;
+        FString SortKey;
+        FString Rule;
+        TSharedPtr<FJsonObject> Json;
+    };
+
+    /**
+     * The findings of one audit call: which rules run, every finding, and the counts. Rules are
+     * checked against the audit's own list so that a misspelled rule is an error instead of a
+     * silently empty report.
+     */
+    class FAU_FindingSet
+    {
+    public:
+        // Reads the optional "rules" array against KnownRules. Returns the error reply when a rule is unknown.
+        TSharedPtr<FJsonObject> Init(const TSharedPtr<FJsonObject>& Params, const TArray<FString>& KnownRules)
+        {
+            Known = KnownRules;
+            const TArray<TSharedPtr<FJsonValue>>* RulesArr = nullptr;
+            if (Params->TryGetArrayField(TEXT("rules"), RulesArr) && RulesArr)
+            {
+                for (const TSharedPtr<FJsonValue>& Value : *RulesArr)
+                {
+                    FString Rule;
+                    if (!Value.IsValid() || !Value->TryGetString(Rule) || Rule.IsEmpty()) { continue; }
+                    if (!Known.Contains(Rule))
+                    {
+                        return mcp_common::MakeErrorReply(FString::Printf(
+                            TEXT("Unknown rule '%s'. Known rules: %s"), *Rule, *FString::Join(Known, TEXT(", "))));
+                    }
+                    Enabled.Add(Rule);
+                }
+            }
+            return nullptr;
+        }
+
+        bool IsEnabled(const TCHAR* Rule) const
+        {
+            return Enabled.Num() == 0 || Enabled.Contains(Rule);
+        }
+
+        TArray<FString> EnabledRules() const
+        {
+            TArray<FString> Out;
+            for (const FString& Rule : Known)
+            {
+                if (IsEnabled(*Rule)) { Out.Add(Rule); }
+            }
+            return Out;
+        }
+
+        // Adds a finding on TargetField (e.g. "asset" or "actor") and returns its object, for extra detail fields.
+        TSharedPtr<FJsonObject> Add(EAU_Severity Severity, const TCHAR* Rule, const TCHAR* TargetField,
+                                    const FString& Target, const FString& Message, const FString& SuggestedFix)
+        {
+            TSharedPtr<FJsonObject> Json = MakeShared<FJsonObject>();
+            Json->SetStringField(TEXT("severity"), AU_SeverityName(Severity));
+            Json->SetStringField(TEXT("rule"), Rule);
+            Json->SetStringField(TargetField, Target);
+            Json->SetStringField(TEXT("message"), Message);
+            Json->SetStringField(TEXT("suggested_fix"), SuggestedFix);
+
+            FAU_Finding& Finding = Items.AddDefaulted_GetRef();
+            Finding.Severity = Severity;
+            Finding.SortKey = Target;
+            Finding.Rule = Rule;
+            Finding.Json = Json;
+            return Json;
+        }
+
+        // Sorts (severity first, then target and rule, so a page is stable across calls) and writes
+        // summary, findings and paging into Result.
+        void WriteTo(const TSharedPtr<FJsonObject>& Result, int32 Offset, int32 Limit)
+        {
+            Items.StableSort([](const FAU_Finding& A, const FAU_Finding& B)
+            {
+                if (A.Severity != B.Severity) { return static_cast<uint8>(A.Severity) < static_cast<uint8>(B.Severity); }
+                const int32 ByTarget = A.SortKey.Compare(B.SortKey, ESearchCase::IgnoreCase);
+                if (ByTarget != 0) { return ByTarget < 0; }
+                return A.Rule < B.Rule;
+            });
+
+            int32 Errors = 0, Warnings = 0, Infos = 0;
+            TSharedPtr<FJsonObject> ByRule = MakeShared<FJsonObject>();
+            for (const FString& Rule : EnabledRules()) { ByRule->SetNumberField(Rule, 0); }
+            TMap<FString, int32> RuleCounts;
+            for (const FAU_Finding& Finding : Items)
+            {
+                if (Finding.Severity == EAU_Severity::Error) { ++Errors; }
+                else if (Finding.Severity == EAU_Severity::Warning) { ++Warnings; }
+                else { ++Infos; }
+                ++RuleCounts.FindOrAdd(Finding.Rule);
+            }
+            for (const TPair<FString, int32>& Pair : RuleCounts) { ByRule->SetNumberField(Pair.Key, Pair.Value); }
+
+            TSharedPtr<FJsonObject> BySeverity = MakeShared<FJsonObject>();
+            BySeverity->SetNumberField(TEXT("error"), Errors);
+            BySeverity->SetNumberField(TEXT("warning"), Warnings);
+            BySeverity->SetNumberField(TEXT("info"), Infos);
+
+            TSharedPtr<FJsonObject> Summary = MakeShared<FJsonObject>();
+            Summary->SetNumberField(TEXT("finding_count"), Items.Num());
+            Summary->SetObjectField(TEXT("by_severity"), BySeverity);
+            Summary->SetObjectField(TEXT("by_rule"), ByRule);
+            Result->SetObjectField(TEXT("summary"), Summary);
+            Result->SetArrayField(TEXT("rules"), mcp_common::StringsToJson(EnabledRules()));
+
+            TArray<TSharedPtr<FJsonValue>> Page;
+            const int32 End = FMath::Min(Items.Num(), Offset + Limit);
+            for (int32 i = Offset; i < End; ++i)
+            {
+                Page.Add(MakeShared<FJsonValueObject>(Items[i].Json));
+            }
+            Result->SetArrayField(TEXT("findings"), Page);
+            Result->SetNumberField(TEXT("offset"), Offset);
+            Result->SetNumberField(TEXT("limit"), Limit);
+            Result->SetNumberField(TEXT("returned"), Page.Num());
+            if (End < Items.Num())
+            {
+                Result->SetNumberField(TEXT("next_offset"), End);
+            }
+            else
+            {
+                Result->SetField(TEXT("next_offset"), MakeShared<FJsonValueNull>());
+            }
+        }
+
+    private:
+        TArray<FString> Known;
+        TSet<FString> Enabled;
+        TArray<FAU_Finding> Items;
+    };
+
+    // offset (default 0, at least 0) and limit (default 200, clamped 1-5000) of the findings page.
+    void AU_GetPaging(const TSharedPtr<FJsonObject>& Params, int32& OutOffset, int32& OutLimit)
+    {
+        double OffsetD = 0.0, LimitD = 200.0;
+        Params->TryGetNumberField(TEXT("offset"), OffsetD);
+        Params->TryGetNumberField(TEXT("limit"), LimitD);
+        OutOffset = FMath::Max(0, static_cast<int32>(OffsetD));
+        OutLimit = FMath::Clamp(static_cast<int32>(LimitD), 1, 5000);
+    }
+
+    int32 AU_GetIntParam(const TSharedPtr<FJsonObject>& Params, const TCHAR* Key, int32 DefaultValue, int32 Min, int32 Max)
+    {
+        double D = DefaultValue;
+        Params->TryGetNumberField(Key, D);
+        return FMath::Clamp(static_cast<int32>(D), Min, Max);
+    }
+
+    double AU_GetDoubleParam(const TSharedPtr<FJsonObject>& Params, const TCHAR* Key, double DefaultValue)
+    {
+        double D = DefaultValue;
+        Params->TryGetNumberField(Key, D);
+        return D;
+    }
+
+    // folder_path must be a mounted content path ("/Game/...", "/MyPlugin/..."): anything else would
+    // silently match nothing and read as a clean project.
+    TSharedPtr<FJsonObject> AU_ValidateFolderPath(const FString& FolderPath)
+    {
+        if (!FolderPath.StartsWith(TEXT("/")) || FolderPath.Contains(TEXT("\\")))
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("folder_path '%s' must be a content path such as /Game or /Game/Props"), *FolderPath));
+        }
+        return nullptr;
+    }
+
+    // The assets of exactly ClassPath (subclasses excluded) under FolderPath, sorted by package name
+    // so that paging is stable. bOutTruncated is set when more than MaxAssets matched.
+    TArray<FAssetData> AU_CollectAssetsOfClass(const FString& FolderPath, bool bRecursive,
+                                               const FTopLevelAssetPath& ClassPath, int32 MaxAssets, bool& bOutTruncated)
+    {
+        FARFilter Filter;
+        Filter.PackagePaths.Add(FName(*FolderPath));
+        Filter.bRecursivePaths = bRecursive;
+        if (!ClassPath.IsNull())
+        {
+            Filter.ClassPaths.Add(ClassPath);
+        }
+        Filter.bRecursiveClasses = false;
+
+        TArray<FAssetData> Assets;
+        mcp_common::AssetRegistry().GetAssets(Filter, Assets);
+        // World Partition's one-file-per-actor packages are not authored assets.
+        Assets.RemoveAll([](const FAssetData& AD)
+        {
+            return AD.PackagePath.ToString().Contains(TEXT("/__External"));
+        });
+        Assets.Sort([](const FAssetData& A, const FAssetData& B) { return A.PackageName.Compare(B.PackageName) < 0; });
+
+        bOutTruncated = Assets.Num() > MaxAssets;
+        if (bOutTruncated)
+        {
+            Assets.SetNum(MaxAssets);
+        }
+        return Assets;
+    }
+
+    // "TC_Normalmap", "TextureCompressionSettings::TC_Normalmap" and "tc_normalmap" all compare equal.
+    bool AU_EnumIs(const FString& Value, const TCHAR* Name)
+    {
+        int32 Sep = INDEX_NONE;
+        FString Short = Value;
+        if (Value.FindLastChar(TEXT(':'), Sep))
+        {
+            Short = Value.Mid(Sep + 1);
+        }
+        return Short.Equals(Name, ESearchCase::IgnoreCase);
+    }
+
+    bool AU_TagBool(const FAssetData& AD, const TCHAR* Tag, bool& OutValue)
+    {
+        FString Value;
+        if (!AD.GetTagValue(FName(Tag), Value) || Value.IsEmpty()) { return false; }
+        OutValue = Value.Equals(TEXT("True"), ESearchCase::IgnoreCase) || Value == TEXT("1");
+        return true;
+    }
+
+    bool AU_TagInt(const FAssetData& AD, const TCHAR* Tag, int64& OutValue)
+    {
+        FString Value;
+        if (!AD.GetTagValue(FName(Tag), Value) || Value.IsEmpty() || !Value.IsNumeric()) { return false; }
+        OutValue = FCString::Atoi64(*Value);
+        return true;
+    }
+
+    // The last "_" token of an asset name, which carries the texture's role by convention (T_Rock_N, T_Rock_ORM).
+    FString AU_NameSuffix(const FString& AssetName)
+    {
+        int32 Sep = INDEX_NONE;
+        return AssetName.FindLastChar(TEXT('_'), Sep) ? AssetName.Mid(Sep + 1) : FString();
+    }
+
+    bool AU_SuffixIn(const FString& Suffix, std::initializer_list<const TCHAR*> Candidates)
+    {
+        for (const TCHAR* Candidate : Candidates)
+        {
+            if (Suffix.Equals(Candidate, ESearchCase::IgnoreCase)) { return true; }
+        }
+        return false;
+    }
+
+    /** What audit_textures reads of one texture, from tags or, when they are missing, from the loaded texture. */
+    struct FAU_TextureInfo
+    {
+        int32 Width = 0;
+        int32 Height = 0;
+        FString Compression;
+        FString LODGroup;
+        FString MipGen;        // editor-only data: empty when neither tag nor object has it
+        FString PowerOfTwo;
+        int32 MaxTextureSize = 0;
+        bool bSRGB = false;
+        bool bNeverStream = false;
+        bool bVirtualTexture = false;
+        bool bComplete = false;
+    };
+
+    FAU_TextureInfo AU_TextureInfoFromTags(const FAssetData& AD)
+    {
+        FAU_TextureInfo Info;
+        FString Dimensions;
+        bool bHasDims = false;
+        if (AD.GetTagValue(FName(TEXT("Dimensions")), Dimensions))
+        {
+            FString W, H;
+            if (Dimensions.Split(TEXT("x"), &W, &H))
+            {
+                Info.Width = FCString::Atoi(*W);
+                Info.Height = FCString::Atoi(*H);
+                bHasDims = Info.Width > 0 && Info.Height > 0;
+            }
+        }
+        const bool bHasCompression = AD.GetTagValue(FName(TEXT("CompressionSettings")), Info.Compression) && !Info.Compression.IsEmpty();
+        const bool bHasGroup = AD.GetTagValue(FName(TEXT("LODGroup")), Info.LODGroup) && !Info.LODGroup.IsEmpty();
+        const bool bHasSRGB = AU_TagBool(AD, TEXT("SRGB"), Info.bSRGB);
+        AD.GetTagValue(FName(TEXT("MipGenSettings")), Info.MipGen);
+        AD.GetTagValue(FName(TEXT("PowerOfTwoMode")), Info.PowerOfTwo);
+        int64 MaxSize = 0;
+        if (AU_TagInt(AD, TEXT("MaxTextureSize"), MaxSize)) { Info.MaxTextureSize = static_cast<int32>(MaxSize); }
+        const bool bHasNeverStream = AU_TagBool(AD, TEXT("NeverStream"), Info.bNeverStream);
+        AU_TagBool(AD, TEXT("VirtualTextureStreaming"), Info.bVirtualTexture);
+        Info.bComplete = bHasDims && bHasCompression && bHasGroup && bHasSRGB && bHasNeverStream;
+        return Info;
+    }
+
+    FAU_TextureInfo AU_TextureInfoFromObject(const UTexture2D* Tex)
+    {
+        FAU_TextureInfo Info;
+        const FIntPoint Size = Tex->GetImportedSize();
+        Info.Width = Size.X;
+        Info.Height = Size.Y;
+        Info.Compression = StaticEnum<TextureCompressionSettings>()->GetNameStringByValue(static_cast<int64>(Tex->CompressionSettings.GetValue()));
+        Info.LODGroup = StaticEnum<TextureGroup>()->GetNameStringByValue(static_cast<int64>(Tex->LODGroup.GetValue()));
+#if WITH_EDITORONLY_DATA
+        Info.MipGen = StaticEnum<TextureMipGenSettings>()->GetNameStringByValue(static_cast<int64>(Tex->MipGenSettings.GetValue()));
+        Info.PowerOfTwo = StaticEnum<ETexturePowerOfTwoSetting::Type>()->GetNameStringByValue(static_cast<int64>(Tex->PowerOfTwoMode.GetValue()));
+        Info.MaxTextureSize = Tex->MaxTextureSize;
+#endif
+        Info.bSRGB = Tex->SRGB != 0;
+        Info.bNeverStream = Tex->NeverStream != 0;
+        Info.bVirtualTexture = Tex->VirtualTextureStreaming != 0;
+        Info.bComplete = Info.Width > 0 && Info.Height > 0;
+        return Info;
+    }
+
+    /** What audit_static_meshes reads of one mesh, from tags or, when they are missing, from the loaded mesh. */
+    struct FAU_MeshInfo
+    {
+        int64 Triangles = 0;
+        int64 LODs = 0;
+        int64 CollisionPrims = 0;
+        int64 Materials = 0;
+        int64 UVChannels = 0;
+        int32 LightMapCoordinateIndex = INDEX_NONE;   // only known when the mesh was loaded
+        bool bNanite = false;
+        FString CollisionComplexity;
+        FString DefaultCollision;
+        FVector Size = FVector::ZeroVector;
+        bool bComplete = false;
+    };
+
+    FAU_MeshInfo AU_MeshInfoFromTags(const FAssetData& AD)
+    {
+        FAU_MeshInfo Info;
+        const bool bTris = AU_TagInt(AD, TEXT("Triangles"), Info.Triangles);
+        const bool bLODs = AU_TagInt(AD, TEXT("LODs"), Info.LODs);
+        const bool bPrims = AU_TagInt(AD, TEXT("CollisionPrims"), Info.CollisionPrims);
+        const bool bMats = AU_TagInt(AD, TEXT("Materials"), Info.Materials);
+        const bool bUVs = AU_TagInt(AD, TEXT("UVChannels"), Info.UVChannels);
+        AU_TagBool(AD, TEXT("NaniteEnabled"), Info.bNanite);
+        AD.GetTagValue(FName(TEXT("CollisionComplexity")), Info.CollisionComplexity);
+        AD.GetTagValue(FName(TEXT("DefaultCollision")), Info.DefaultCollision);
+
+        bool bSize = false;
+        FString Approx;
+        if (AD.GetTagValue(FName(TEXT("ApproxSize")), Approx))
+        {
+            TArray<FString> Parts;
+            Approx.ParseIntoArray(Parts, TEXT("x"));
+            if (Parts.Num() == 3)
+            {
+                Info.Size = FVector(FCString::Atod(*Parts[0]), FCString::Atod(*Parts[1]), FCString::Atod(*Parts[2]));
+                bSize = true;
+            }
+        }
+        Info.bComplete = bTris && bLODs && bPrims && bMats && bUVs && bSize;
+        return Info;
+    }
+
+    FAU_MeshInfo AU_MeshInfoFromObject(const UStaticMesh* Mesh)
+    {
+        FAU_MeshInfo Info;
+        Info.LODs = Mesh->GetNumLODs();
+        Info.Triangles = Info.LODs > 0 ? Mesh->GetNumTriangles(0) : 0;
+        Info.UVChannels = Info.LODs > 0 ? Mesh->GetNumUVChannels(0) : 0;
+        Info.LightMapCoordinateIndex = Mesh->GetLightMapCoordinateIndex();
+        Info.bNanite = Mesh->IsNaniteEnabled();
+        Info.Materials = Mesh->GetStaticMaterials().Num();
+        if (const UBodySetup* Body = Mesh->GetBodySetup())
+        {
+            Info.CollisionPrims = Body->AggGeom.GetElementCount();
+            Info.CollisionComplexity = LexToString(Body->GetCollisionTraceFlag().GetValue());
+            Info.DefaultCollision = Body->DefaultInstance.GetCollisionProfileName().ToString();
+        }
+        Info.Size = Mesh->GetBounds().BoxExtent * 2.0;
+        Info.bComplete = true;
+        return Info;
+    }
+}
+
+// MCP:audit_textures - Sweep the Texture2D assets under folder_path for the settings that cost memory or look wrong: non-power-of-two size, oversized versus a threshold, no mips, normal maps without Normalmap compression or with sRGB on, sRGB on mask textures (ORM/roughness/AO...), a normal map or UI texture left in a generic texture group, and streaming disabled. Reads Asset Registry tags, so nothing is loaded; a texture whose package predates those tags is loaded to read them, up to max_loads. Returns findings inline, paged with offset/limit; the summary counts every finding. Read-only.
+//   @param folder_path [string] - Content folder to scan. Defaults to "/Game".
+//   @param recursive [bool] - Recurse into subfolders. Defaults to true.
+//   @param max_texture_size [number] - Largest acceptable dimension in pixels after Maximum Texture Size is applied. Defaults to 4096.
+//   @param rules [array] - Rule ids to run, default all: texture_non_power_of_two, texture_oversized, texture_no_mips, texture_normal_compression, texture_normal_srgb, texture_mask_srgb, texture_lod_group, texture_streaming_disabled. An unknown id is an error.
+//   @param max_results [number] - Cap on textures examined (1-100000). Defaults to 20000.
+//   @param max_loads [number] - Cap on textures loaded because their tags are missing (0-5000; 0 never loads). Defaults to 200.
+//   @param offset [number] - Index of the first finding returned. Defaults to 0.
+//   @param limit [number] - Findings returned per call (1-5000). Defaults to 200.
+//   @returns { folder_path, scanned: int, scan_truncated: bool, loaded_count: int, skipped_no_tags: int, rules: [string], summary: { finding_count, by_severity: {error, warning, info}, by_rule: {rule: int} }, findings: [{ severity, rule, asset, message, suggested_fix, width?, height?, compression?, lod_group? }], offset, limit, returned, next_offset: int|null }
+//   Normal/mask roles come from the name's last "_" token (N, Normal, NRM / M, Mask, ORM, ARM, R, AO...) and from CompressionSettings.
+TSharedPtr<FJsonObject> HandleAuditTextures(const TSharedPtr<FJsonObject>& Params)
+{
+    const FString FolderPath = AU_GetFolderPath(Params);
+    if (TSharedPtr<FJsonObject> Bad = AU_ValidateFolderPath(FolderPath)) { return Bad; }
+    const bool bRecursive = AU_GetRecursive(Params);
+    const int32 MaxResults = AU_GetMaxResults(Params, 20000);
+    const int32 MaxLoads = AU_GetIntParam(Params, TEXT("max_loads"), 200, 0, 5000);
+    const int32 MaxTextureSize = AU_GetIntParam(Params, TEXT("max_texture_size"), 4096, 1, 1 << 16);
+    int32 Offset = 0, Limit = 200;
+    AU_GetPaging(Params, Offset, Limit);
+
+    FAU_FindingSet Findings;
+    if (TSharedPtr<FJsonObject> Bad = Findings.Init(Params, {
+            TEXT("texture_non_power_of_two"), TEXT("texture_oversized"), TEXT("texture_no_mips"),
+            TEXT("texture_normal_compression"), TEXT("texture_normal_srgb"), TEXT("texture_mask_srgb"),
+            TEXT("texture_lod_group"), TEXT("texture_streaming_disabled") }))
+    {
+        return Bad;
+    }
+
+    bool bTruncated = false;
+    const TArray<FAssetData> Assets = AU_CollectAssetsOfClass(FolderPath, bRecursive,
+        UTexture2D::StaticClass()->GetClassPathName(), MaxResults, bTruncated);
+
+    int32 LoadedCount = 0, SkippedNoTags = 0;
+    for (const FAssetData& AD : Assets)
+    {
+        FAU_TextureInfo Info = AU_TextureInfoFromTags(AD);
+        if (!Info.bComplete)
+        {
+            UTexture2D* Tex = nullptr;
+            if (LoadedCount < MaxLoads)
+            {
+                Tex = Cast<UTexture2D>(AD.GetAsset());
+                ++LoadedCount;
+            }
+            if (!Tex) { ++SkippedNoTags; continue; }
+            Info = AU_TextureInfoFromObject(Tex);
+            if (!Info.bComplete) { ++SkippedNoTags; continue; }
+        }
+
+        const FString Asset = AD.GetSoftObjectPath().ToString();
+        const FString Suffix = AU_NameSuffix(AD.AssetName.ToString());
+        const bool bUIGroup = AU_EnumIs(Info.LODGroup, TEXT("TEXTUREGROUP_UI")) || AU_EnumIs(Info.LODGroup, TEXT("TEXTUREGROUP_Pixels2D"));
+        const bool bUICompression = AU_EnumIs(Info.Compression, TEXT("TC_EditorIcon"));
+        const bool bLookupTable = AU_EnumIs(Info.LODGroup, TEXT("TEXTUREGROUP_ColorLookupTable"));
+        const bool bNormalCompression = AU_EnumIs(Info.Compression, TEXT("TC_Normalmap"));
+        const bool bMaskCompression = AU_EnumIs(Info.Compression, TEXT("TC_Masks"));
+        const bool bNormalByName = AU_SuffixIn(Suffix, { TEXT("N"), TEXT("NRM"), TEXT("Normal"), TEXT("Normals"), TEXT("Norm"), TEXT("NM") });
+        const bool bMaskByName = AU_SuffixIn(Suffix, { TEXT("M"), TEXT("Mask"), TEXT("ORM"), TEXT("ARM"), TEXT("RMA"), TEXT("MRA"),
+            TEXT("AO"), TEXT("R"), TEXT("Rough"), TEXT("Roughness"), TEXT("Metal"), TEXT("Metallic"), TEXT("H"), TEXT("Height") });
+        const int32 MaxDim = FMath::Max(Info.Width, Info.Height);
+
+        auto AddTex = [&](EAU_Severity Severity, const TCHAR* Rule, const FString& Message, const FString& Fix)
+        {
+            TSharedPtr<FJsonObject> F = Findings.Add(Severity, Rule, TEXT("asset"), Asset, Message, Fix);
+            F->SetNumberField(TEXT("width"), Info.Width);
+            F->SetNumberField(TEXT("height"), Info.Height);
+            F->SetStringField(TEXT("compression"), Info.Compression);
+            F->SetStringField(TEXT("lod_group"), Info.LODGroup);
+            return F;
+        };
+
+        if (Findings.IsEnabled(TEXT("texture_non_power_of_two"))
+            && (!FMath::IsPowerOfTwo(Info.Width) || !FMath::IsPowerOfTwo(Info.Height))
+            && (Info.PowerOfTwo.IsEmpty() || AU_EnumIs(Info.PowerOfTwo, TEXT("None"))))
+        {
+            AddTex(bUIGroup || bUICompression ? EAU_Severity::Info : EAU_Severity::Warning, TEXT("texture_non_power_of_two"),
+                FString::Printf(TEXT("%dx%d is not a power of two: it gets no mips and does not stream"), Info.Width, Info.Height),
+                TEXT("Resize the source to power-of-two dimensions, or set Power Of Two Mode to Pad To Power Of Two"));
+        }
+
+        const int32 EffectiveDim = (Info.MaxTextureSize > 0) ? FMath::Min(MaxDim, Info.MaxTextureSize) : MaxDim;
+        if (Findings.IsEnabled(TEXT("texture_oversized")) && EffectiveDim > MaxTextureSize)
+        {
+            AddTex(EAU_Severity::Warning, TEXT("texture_oversized"),
+                FString::Printf(TEXT("%d px exceeds the %d px threshold"), EffectiveDim, MaxTextureSize),
+                FString::Printf(TEXT("Set Maximum Texture Size to %d (or raise LOD Bias), or downscale the source"), MaxTextureSize));
+        }
+
+        if (Findings.IsEnabled(TEXT("texture_no_mips")) && AU_EnumIs(Info.MipGen, TEXT("TMGS_NoMipmaps"))
+            && !bUIGroup && !bUICompression && !bLookupTable)
+        {
+            AddTex(EAU_Severity::Warning, TEXT("texture_no_mips"),
+                TEXT("Mip Gen Settings is NoMipmaps on a world texture: it aliases at distance and keeps full resolution resident"),
+                TEXT("Set Mip Gen Settings to FromTextureGroup"));
+        }
+
+        if (Findings.IsEnabled(TEXT("texture_normal_compression")) && bNormalByName && !bNormalCompression)
+        {
+            AddTex(EAU_Severity::Error, TEXT("texture_normal_compression"),
+                FString::Printf(TEXT("named as a normal map but compressed as %s%s"), *Info.Compression, Info.bSRGB ? TEXT(" with sRGB on") : TEXT("")),
+                TEXT("Set Compression Settings to Normalmap (this also turns sRGB off)"));
+        }
+
+        if (Findings.IsEnabled(TEXT("texture_normal_srgb")) && bNormalCompression && Info.bSRGB)
+        {
+            AddTex(EAU_Severity::Error, TEXT("texture_normal_srgb"),
+                TEXT("Normalmap compression with sRGB on: the vectors are gamma-decoded and the shading is wrong"),
+                TEXT("Turn sRGB off and resave the texture"));
+        }
+
+        if (Findings.IsEnabled(TEXT("texture_mask_srgb")) && Info.bSRGB && !bNormalCompression && (bMaskByName || bMaskCompression))
+        {
+            AddTex(EAU_Severity::Warning, TEXT("texture_mask_srgb"),
+                FString::Printf(TEXT("mask/data texture (suffix '%s', %s) is sampled as sRGB: its linear values are distorted"), *Suffix, *Info.Compression),
+                TEXT("Set Compression Settings to Masks, or turn sRGB off"));
+        }
+
+        if (Findings.IsEnabled(TEXT("texture_lod_group")))
+        {
+            if (bNormalCompression && !Info.LODGroup.Contains(TEXT("NormalMap")))
+            {
+                AddTex(EAU_Severity::Info, TEXT("texture_lod_group"),
+                    FString::Printf(TEXT("normal map in texture group %s"), *Info.LODGroup),
+                    TEXT("Set Texture Group to WorldNormalMap (or the matching Character/Weapon/Vehicle NormalMap group)"));
+            }
+            else if (bUICompression && !bUIGroup)
+            {
+                AddTex(EAU_Severity::Info, TEXT("texture_lod_group"),
+                    FString::Printf(TEXT("UserInterface2D texture in texture group %s"), *Info.LODGroup),
+                    TEXT("Set Texture Group to UI"));
+            }
+        }
+
+        if (Findings.IsEnabled(TEXT("texture_streaming_disabled")) && Info.bNeverStream && !Info.bVirtualTexture
+            && !bUIGroup && !bUICompression && !bLookupTable && MaxDim > 256)
+        {
+            AddTex(EAU_Severity::Warning, TEXT("texture_streaming_disabled"),
+                FString::Printf(TEXT("Never Stream is on for a %d px world texture: every mip stays resident"), MaxDim),
+                TEXT("Turn Never Stream off unless the texture must always be fully resident"));
+        }
+    }
+
+    TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+    Result->SetStringField(TEXT("folder_path"), FolderPath);
+    Result->SetNumberField(TEXT("scanned"), Assets.Num());
+    Result->SetBoolField(TEXT("scan_truncated"), bTruncated);
+    Result->SetNumberField(TEXT("loaded_count"), LoadedCount);
+    Result->SetNumberField(TEXT("skipped_no_tags"), SkippedNoTags);
+    Findings.WriteTo(Result, Offset, Limit);
+    return mcp_common::MakeOkReply(Result);
+}
+
+// MCP:audit_static_meshes - Sweep the StaticMesh assets under folder_path for: no simple collision (and not complex-as-simple, and not set to NoCollision), a high triangle count with no LODs and no Nanite, a missing lightmap UV channel when the project allows static lighting, too many material slots, and degenerate bounds (empty mesh, zero size on two axes, or absurdly large). Reads Asset Registry tags, so nothing is loaded; a mesh whose package predates those tags is loaded to read them, up to max_loads. Returns findings inline, paged with offset/limit; the summary counts every finding. Read-only.
+//   @param folder_path [string] - Content folder to scan. Defaults to "/Game".
+//   @param recursive [bool] - Recurse into subfolders. Defaults to true.
+//   @param max_triangles_without_lod [number] - LOD0 triangle count from which a mesh with a single LOD and no Nanite is reported. Defaults to 10000.
+//   @param max_material_slots [number] - Largest acceptable number of material slots. Defaults to 8.
+//   @param max_bounds_size [number] - Largest acceptable bounds size on any axis, in cm. Defaults to 1000000 (10 km).
+//   @param rules [array] - Rule ids to run, default all: mesh_no_collision, mesh_high_tris_no_lod, mesh_missing_lightmap_uv, mesh_too_many_materials, mesh_degenerate_bounds. An unknown id is an error.
+//   @param max_results [number] - Cap on meshes examined (1-100000). Defaults to 20000.
+//   @param max_loads [number] - Cap on meshes loaded because their tags are missing (0-5000; 0 never loads). Defaults to 200.
+//   @param offset [number] - Index of the first finding returned. Defaults to 0.
+//   @param limit [number] - Findings returned per call (1-5000). Defaults to 200.
+//   @returns { folder_path, scanned: int, scan_truncated: bool, loaded_count: int, skipped_no_tags: int, static_lighting_allowed: bool, rules: [string], summary: { finding_count, by_severity: {error, warning, info}, by_rule: {rule: int} }, findings: [{ severity, rule, asset, message, suggested_fix, triangles?, lods?, nanite?, size?: [x,y,z] }], offset, limit, returned, next_offset: int|null }
+//   The ApproxSize tag is rounded to whole cm, so a mesh thinner than 0.5 cm reads as 0 on that axis.
+TSharedPtr<FJsonObject> HandleAuditStaticMeshes(const TSharedPtr<FJsonObject>& Params)
+{
+    const FString FolderPath = AU_GetFolderPath(Params);
+    if (TSharedPtr<FJsonObject> Bad = AU_ValidateFolderPath(FolderPath)) { return Bad; }
+    const bool bRecursive = AU_GetRecursive(Params);
+    const int32 MaxResults = AU_GetMaxResults(Params, 20000);
+    const int32 MaxLoads = AU_GetIntParam(Params, TEXT("max_loads"), 200, 0, 5000);
+    const int32 MaxTrisNoLod = AU_GetIntParam(Params, TEXT("max_triangles_without_lod"), 10000, 1, MAX_int32);
+    const int32 MaxMaterialSlots = AU_GetIntParam(Params, TEXT("max_material_slots"), 8, 1, 1000);
+    const double MaxBoundsSize = FMath::Max(1.0, AU_GetDoubleParam(Params, TEXT("max_bounds_size"), 1000000.0));
+    int32 Offset = 0, Limit = 200;
+    AU_GetPaging(Params, Offset, Limit);
+
+    FAU_FindingSet Findings;
+    if (TSharedPtr<FJsonObject> Bad = Findings.Init(Params, {
+            TEXT("mesh_no_collision"), TEXT("mesh_high_tris_no_lod"), TEXT("mesh_missing_lightmap_uv"),
+            TEXT("mesh_too_many_materials"), TEXT("mesh_degenerate_bounds") }))
+    {
+        return Bad;
+    }
+
+    const bool bStaticLighting = IsStaticLightingAllowed();
+
+    bool bTruncated = false;
+    const TArray<FAssetData> Assets = AU_CollectAssetsOfClass(FolderPath, bRecursive,
+        UStaticMesh::StaticClass()->GetClassPathName(), MaxResults, bTruncated);
+
+    int32 LoadedCount = 0, SkippedNoTags = 0;
+    for (const FAssetData& AD : Assets)
+    {
+        FAU_MeshInfo Info = AU_MeshInfoFromTags(AD);
+        if (!Info.bComplete)
+        {
+            UStaticMesh* Mesh = nullptr;
+            if (LoadedCount < MaxLoads)
+            {
+                Mesh = Cast<UStaticMesh>(AD.GetAsset());
+                ++LoadedCount;
+            }
+            if (!Mesh) { ++SkippedNoTags; continue; }
+            Info = AU_MeshInfoFromObject(Mesh);
+        }
+
+        const FString Asset = AD.GetSoftObjectPath().ToString();
+        auto AddMesh = [&](EAU_Severity Severity, const TCHAR* Rule, const FString& Message, const FString& Fix)
+        {
+            TSharedPtr<FJsonObject> F = Findings.Add(Severity, Rule, TEXT("asset"), Asset, Message, Fix);
+            F->SetNumberField(TEXT("triangles"), static_cast<double>(Info.Triangles));
+            F->SetNumberField(TEXT("lods"), static_cast<double>(Info.LODs));
+            F->SetBoolField(TEXT("nanite"), Info.bNanite);
+            F->SetArrayField(TEXT("size"), mcp_common::VectorToJsonArray(Info.Size));
+            return F;
+        };
+
+        const bool bComplexAsSimple = Info.CollisionComplexity.Equals(TEXT("CTF_UseComplexAsSimple"), ESearchCase::IgnoreCase);
+        const bool bNoCollisionProfile = Info.DefaultCollision.Equals(TEXT("NoCollision"), ESearchCase::IgnoreCase);
+        if (Findings.IsEnabled(TEXT("mesh_no_collision")) && Info.CollisionPrims == 0 && !bComplexAsSimple && !bNoCollisionProfile)
+        {
+            AddMesh(EAU_Severity::Warning, TEXT("mesh_no_collision"),
+                TEXT("no simple collision primitives and not Use Complex As Simple: placed instances block nothing"),
+                TEXT("Add simple collision (Static Mesh Editor > Collision, or add_static_mesh_simple_collision), or set the collision preset to NoCollision if that is intended"));
+        }
+
+        if (Findings.IsEnabled(TEXT("mesh_high_tris_no_lod")) && Info.Triangles >= MaxTrisNoLod && Info.LODs <= 1 && !Info.bNanite)
+        {
+            AddMesh(EAU_Severity::Warning, TEXT("mesh_high_tris_no_lod"),
+                FString::Printf(TEXT("%lld triangles with a single LOD and Nanite off"), Info.Triangles),
+                TEXT("Enable Nanite, or generate LODs (LOD Group or Number of LODs in the Static Mesh Editor)"));
+        }
+
+        if (Findings.IsEnabled(TEXT("mesh_missing_lightmap_uv")) && bStaticLighting)
+        {
+            if (Info.LightMapCoordinateIndex != INDEX_NONE && Info.LightMapCoordinateIndex >= Info.UVChannels)
+            {
+                AddMesh(EAU_Severity::Error, TEXT("mesh_missing_lightmap_uv"),
+                    FString::Printf(TEXT("Light Map Coordinate Index %d points past the %lld UV channel(s)"), Info.LightMapCoordinateIndex, Info.UVChannels),
+                    TEXT("Enable Generate Lightmap UVs in the LOD0 build settings, or set Light Map Coordinate Index to an existing channel"));
+            }
+            else if (Info.UVChannels < 2)
+            {
+                AddMesh(EAU_Severity::Warning, TEXT("mesh_missing_lightmap_uv"),
+                    FString::Printf(TEXT("%lld UV channel(s) while static lighting is allowed: lightmaps share UV0, which usually overlaps"), Info.UVChannels),
+                    TEXT("Enable Generate Lightmap UVs in the LOD0 build settings, or author a non-overlapping UV1"));
+            }
+        }
+
+        if (Findings.IsEnabled(TEXT("mesh_too_many_materials")) && Info.Materials > MaxMaterialSlots)
+        {
+            TSharedPtr<FJsonObject> F = AddMesh(EAU_Severity::Warning, TEXT("mesh_too_many_materials"),
+                FString::Printf(TEXT("%lld material slots exceed %d: each slot is a separate draw call"), Info.Materials, MaxMaterialSlots),
+                TEXT("Merge material slots (atlas the textures or combine sections in the DCC tool)"));
+            F->SetNumberField(TEXT("material_slots"), static_cast<double>(Info.Materials));
+        }
+
+        if (Findings.IsEnabled(TEXT("mesh_degenerate_bounds")))
+        {
+            const int32 ZeroAxes = (Info.Size.X <= 0.0 ? 1 : 0) + (Info.Size.Y <= 0.0 ? 1 : 0) + (Info.Size.Z <= 0.0 ? 1 : 0);
+            if (Info.Triangles == 0)
+            {
+                AddMesh(EAU_Severity::Error, TEXT("mesh_degenerate_bounds"), TEXT("the mesh has no triangles"),
+                    TEXT("Reimport the source or delete the asset"));
+            }
+            else if (ZeroAxes >= 2)
+            {
+                AddMesh(EAU_Severity::Error, TEXT("mesh_degenerate_bounds"),
+                    FString::Printf(TEXT("bounds %.0fx%.0fx%.0f cm are zero on %d axes"), Info.Size.X, Info.Size.Y, Info.Size.Z, ZeroAxes),
+                    TEXT("Check the import scale and the source geometry, then reimport"));
+            }
+            else if (Info.Size.GetMax() > MaxBoundsSize)
+            {
+                AddMesh(EAU_Severity::Warning, TEXT("mesh_degenerate_bounds"),
+                    FString::Printf(TEXT("bounds %.0fx%.0fx%.0f cm exceed %.0f cm on an axis"), Info.Size.X, Info.Size.Y, Info.Size.Z, MaxBoundsSize),
+                    TEXT("Check the import scale (a units mismatch multiplies size by 100) or stray vertices far from the mesh"));
+            }
+        }
+    }
+
+    TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+    Result->SetStringField(TEXT("folder_path"), FolderPath);
+    Result->SetNumberField(TEXT("scanned"), Assets.Num());
+    Result->SetBoolField(TEXT("scan_truncated"), bTruncated);
+    Result->SetNumberField(TEXT("loaded_count"), LoadedCount);
+    Result->SetNumberField(TEXT("skipped_no_tags"), SkippedNoTags);
+    Result->SetBoolField(TEXT("static_lighting_allowed"), bStaticLighting);
+    Findings.WriteTo(Result, Offset, Limit);
+    return mcp_common::MakeOkReply(Result);
+}
+
+namespace
+{
+    // The prefixes a class's assets should start with, keyed by the class's short name. Blueprints are
+    // split by their BlueprintType tag into Blueprint, BlueprintInterface, BlueprintFunctionLibrary and
+    // BlueprintMacroLibrary. Taken from Epic's recommended asset naming conventions; a second entry is
+    // a widespread alternative.
+    TMap<FString, TArray<FString>> AU_DefaultNamingPrefixes()
+    {
+        TMap<FString, TArray<FString>> Map;
+        auto P = [&Map](const TCHAR* ClassName, std::initializer_list<const TCHAR*> Accepted)
+        {
+            TArray<FString>& List = Map.Add(ClassName);
+            for (const TCHAR* Prefix : Accepted) { List.Add(Prefix); }
+        };
+        P(TEXT("Blueprint"), { TEXT("BP_") });
+        P(TEXT("BlueprintInterface"), { TEXT("BPI_") });
+        P(TEXT("BlueprintFunctionLibrary"), { TEXT("BPFL_") });
+        P(TEXT("BlueprintMacroLibrary"), { TEXT("BPML_") });
+        P(TEXT("WidgetBlueprint"), { TEXT("WBP_"), TEXT("W_") });
+        P(TEXT("EditorUtilityWidgetBlueprint"), { TEXT("EUW_") });
+        P(TEXT("AnimBlueprint"), { TEXT("ABP_") });
+        P(TEXT("ControlRigBlueprint"), { TEXT("CR_") });
+        P(TEXT("Material"), { TEXT("M_") });
+        P(TEXT("MaterialInstanceConstant"), { TEXT("MI_") });
+        P(TEXT("MaterialFunction"), { TEXT("MF_") });
+        P(TEXT("MaterialParameterCollection"), { TEXT("MPC_") });
+        P(TEXT("PhysicalMaterial"), { TEXT("PM_") });
+        P(TEXT("Texture2D"), { TEXT("T_") });
+        P(TEXT("TextureCube"), { TEXT("T_"), TEXT("HDR_") });
+        P(TEXT("TextureRenderTarget2D"), { TEXT("RT_") });
+        P(TEXT("StaticMesh"), { TEXT("SM_") });
+        P(TEXT("SkeletalMesh"), { TEXT("SK_"), TEXT("SKM_") });
+        P(TEXT("Skeleton"), { TEXT("SKEL_") });
+        P(TEXT("PhysicsAsset"), { TEXT("PHYS_"), TEXT("PA_") });
+        P(TEXT("AnimSequence"), { TEXT("AS_"), TEXT("A_") });
+        P(TEXT("AnimMontage"), { TEXT("AM_") });
+        P(TEXT("BlendSpace"), { TEXT("BS_") });
+        P(TEXT("BlendSpace1D"), { TEXT("BS_") });
+        P(TEXT("AimOffsetBlendSpace"), { TEXT("AO_") });
+        P(TEXT("IKRigDefinition"), { TEXT("IK_") });
+        P(TEXT("IKRetargeter"), { TEXT("RTG_") });
+        P(TEXT("NiagaraSystem"), { TEXT("NS_") });
+        P(TEXT("NiagaraEmitter"), { TEXT("NE_") });
+        P(TEXT("ParticleSystem"), { TEXT("P_"), TEXT("PS_") });
+        P(TEXT("SoundWave"), { TEXT("S_"), TEXT("SW_") });
+        P(TEXT("SoundCue"), { TEXT("SC_") });
+        P(TEXT("SoundAttenuation"), { TEXT("ATT_") });
+        P(TEXT("SoundConcurrency"), { TEXT("SCON_") });
+        P(TEXT("MetaSoundSource"), { TEXT("MS_") });
+        P(TEXT("MetaSoundPatch"), { TEXT("MSP_") });
+        P(TEXT("DataTable"), { TEXT("DT_") });
+        P(TEXT("CurveTable"), { TEXT("CT_") });
+        P(TEXT("CurveFloat"), { TEXT("Curve_"), TEXT("C_") });
+        P(TEXT("CurveVector"), { TEXT("Curve_"), TEXT("C_") });
+        P(TEXT("CurveLinearColor"), { TEXT("Curve_"), TEXT("C_") });
+        P(TEXT("UserDefinedEnum"), { TEXT("E_"), TEXT("E") });
+        P(TEXT("UserDefinedStruct"), { TEXT("F_"), TEXT("S_") });
+        P(TEXT("StringTable"), { TEXT("ST_") });
+        P(TEXT("LevelSequence"), { TEXT("LS_") });
+        P(TEXT("BehaviorTree"), { TEXT("BT_") });
+        P(TEXT("BlackboardData"), { TEXT("BB_") });
+        P(TEXT("EnvQuery"), { TEXT("EQS_") });
+        P(TEXT("InputAction"), { TEXT("IA_") });
+        P(TEXT("InputMappingContext"), { TEXT("IMC_") });
+        return Map;
+    }
+
+    // The class key an asset's prefix is looked up by: its class's short name, with Blueprints split by type.
+    FString AU_NamingClassKey(const FAssetData& AD)
+    {
+        const FString ClassName = AD.AssetClassPath.GetAssetName().ToString();
+        if (ClassName == TEXT("Blueprint"))
+        {
+            FString BlueprintType;
+            if (AD.GetTagValue(FName(TEXT("BlueprintType")), BlueprintType))
+            {
+                if (AU_EnumIs(BlueprintType, TEXT("BPTYPE_Interface"))) { return TEXT("BlueprintInterface"); }
+                if (AU_EnumIs(BlueprintType, TEXT("BPTYPE_FunctionLibrary"))) { return TEXT("BlueprintFunctionLibrary"); }
+                if (AU_EnumIs(BlueprintType, TEXT("BPTYPE_MacroLibrary"))) { return TEXT("BlueprintMacroLibrary"); }
+            }
+        }
+        return ClassName;
+    }
+
+    bool AU_IsNameChar(TCHAR C)
+    {
+        return (C >= TEXT('A') && C <= TEXT('Z')) || (C >= TEXT('a') && C <= TEXT('z'))
+            || (C >= TEXT('0') && C <= TEXT('9')) || C == TEXT('_');
+    }
+}
+
+// MCP:audit_asset_naming - Sweep the assets under folder_path for naming-convention problems: a name without the prefix its class takes (BP_, BPI_, WBP_, ABP_, M_, MI_, MF_, T_, SM_, SK_, SKEL_, AS_, AM_, NS_, S_, SC_, DT_, IA_, IMC_... after Epic's recommended conventions), spaces, and characters other than letters, digits and underscore. Asset Registry only: nothing is loaded. Classes with no prefix rule (levels, data assets of project classes...) are counted in unchecked_count, not reported. Each finding carries a suggested_name. Returns findings inline, paged with offset/limit; the summary counts every finding. Read-only: it renames nothing (rename_asset does).
+//   @param folder_path [string] - Content folder to scan. Defaults to "/Game".
+//   @param recursive [bool] - Recurse into subfolders. Defaults to true.
+//   @param prefixes [object] - Prefix rules by class short name, merged over the defaults: {"StaticMesh": "SM_", "Texture2D": ["T_", "TX_"], "World": "L_", "Blueprint": ""}. A string or an array of accepted prefixes (case-sensitive); "" or [] turns the class's rule off. Blueprints are keyed Blueprint, BlueprintInterface, BlueprintFunctionLibrary and BlueprintMacroLibrary.
+//   @param replace_default_prefixes [bool] - Use only the prefixes param, without the defaults. Defaults to false.
+//   @param rules [array] - Rule ids to run, default all: naming_prefix, naming_space, naming_invalid_char. An unknown id is an error.
+//   @param max_results [number] - Cap on assets examined (1-100000). Defaults to 50000.
+//   @param offset [number] - Index of the first finding returned. Defaults to 0.
+//   @param limit [number] - Findings returned per call (1-5000). Defaults to 200.
+//   @returns { folder_path, scanned: int, scan_truncated: bool, unchecked_count: int, prefix_rules: {class: [string]}, rules: [string], summary: { finding_count, by_severity: {error, warning, info}, by_rule: {rule: int} }, findings: [{ severity, rule, asset, asset_class, message, suggested_fix, suggested_name, expected_prefixes? }], offset, limit, returned, next_offset: int|null }
+TSharedPtr<FJsonObject> HandleAuditAssetNaming(const TSharedPtr<FJsonObject>& Params)
+{
+    const FString FolderPath = AU_GetFolderPath(Params);
+    if (TSharedPtr<FJsonObject> Bad = AU_ValidateFolderPath(FolderPath)) { return Bad; }
+    const bool bRecursive = AU_GetRecursive(Params);
+    const int32 MaxResults = AU_GetMaxResults(Params, 50000);
+    int32 Offset = 0, Limit = 200;
+    AU_GetPaging(Params, Offset, Limit);
+
+    FAU_FindingSet Findings;
+    if (TSharedPtr<FJsonObject> Bad = Findings.Init(Params, { TEXT("naming_prefix"), TEXT("naming_space"), TEXT("naming_invalid_char") }))
+    {
+        return Bad;
+    }
+
+    bool bReplaceDefaults = false;
+    Params->TryGetBoolField(TEXT("replace_default_prefixes"), bReplaceDefaults);
+    TMap<FString, TArray<FString>> Prefixes = bReplaceDefaults ? TMap<FString, TArray<FString>>() : AU_DefaultNamingPrefixes();
+
+    const TSharedPtr<FJsonObject>* Overrides = nullptr;
+    if (Params->TryGetObjectField(TEXT("prefixes"), Overrides) && Overrides && Overrides->IsValid())
+    {
+        for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : (*Overrides)->Values)
+        {
+            TArray<FString> Accepted;
+            FString Single;
+            const TArray<TSharedPtr<FJsonValue>>* Many = nullptr;
+            if (Pair.Value.IsValid() && Pair.Value->TryGetString(Single))
+            {
+                if (!Single.IsEmpty()) { Accepted.Add(Single); }
+            }
+            else if (Pair.Value.IsValid() && Pair.Value->TryGetArray(Many) && Many)
+            {
+                for (const TSharedPtr<FJsonValue>& V : *Many)
+                {
+                    FString S;
+                    if (V.IsValid() && V->TryGetString(S) && !S.IsEmpty()) { Accepted.Add(S); }
+                }
+            }
+            else
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(
+                    TEXT("prefixes.%s must be a string or an array of strings"), *Pair.Key));
+            }
+            Prefixes.Add(Pair.Key, Accepted);
+        }
+    }
+
+    // Every prefix in use, longest first, to strip a wrong one when suggesting a name (T_Rock as a material -> M_Rock).
+    TArray<FString> AllPrefixes;
+    for (const TPair<FString, TArray<FString>>& Pair : Prefixes)
+    {
+        for (const FString& P : Pair.Value) { AllPrefixes.AddUnique(P); }
+    }
+    AllPrefixes.Sort([](const FString& A, const FString& B) { return A.Len() > B.Len(); });
+
+    bool bTruncated = false;
+    TArray<FAssetData> Assets = AU_CollectAssetsOfClass(FolderPath, bRecursive, FTopLevelAssetPath(), MaxResults, bTruncated);
+    const FTopLevelAssetPath RedirectorPath = UObjectRedirector::StaticClass()->GetClassPathName();
+
+    int32 Scanned = 0, Unchecked = 0;
+    for (const FAssetData& AD : Assets)
+    {
+        if (AD.AssetClassPath == RedirectorPath) { continue; }
+        ++Scanned;
+
+        const FString Name = AD.AssetName.ToString();
+        const FString Asset = AD.GetSoftObjectPath().ToString();
+        const FString ClassKey = AU_NamingClassKey(AD);
+
+        // The name with spaces turned into underscores and other characters dropped.
+        FString CleanName;
+        bool bHasSpace = false;
+        TArray<TCHAR> BadChars;
+        for (TCHAR C : Name)
+        {
+            if (C == TEXT(' ')) { bHasSpace = true; CleanName.AppendChar(TEXT('_')); }
+            else if (AU_IsNameChar(C)) { CleanName.AppendChar(C); }
+            else { BadChars.AddUnique(C); }
+        }
+
+        const TArray<FString>* Expected = Prefixes.Find(ClassKey);
+        const bool bHasRule = Expected && Expected->Num() > 0;
+        if (!bHasRule) { ++Unchecked; }
+        bool bPrefixOk = !bHasRule;
+        if (bHasRule)
+        {
+            for (const FString& P : *Expected)
+            {
+                if (Name.StartsWith(P, ESearchCase::CaseSensitive)) { bPrefixOk = true; break; }
+            }
+        }
+
+        FString SuggestedName = CleanName;
+        if (!bPrefixOk)
+        {
+            FString Stem = CleanName;
+            for (const FString& P : AllPrefixes)
+            {
+                if (Stem.StartsWith(P, ESearchCase::CaseSensitive) && Stem.Len() > P.Len())
+                {
+                    Stem.RightChopInline(P.Len());
+                    break;
+                }
+            }
+            SuggestedName = (*Expected)[0] + Stem;
+        }
+
+        auto AddName = [&](EAU_Severity Severity, const TCHAR* Rule, const FString& Message, const FString& Fix)
+        {
+            TSharedPtr<FJsonObject> F = Findings.Add(Severity, Rule, TEXT("asset"), Asset, Message, Fix);
+            F->SetStringField(TEXT("asset_class"), ClassKey);
+            F->SetStringField(TEXT("suggested_name"), SuggestedName);
+            return F;
+        };
+
+        if (Findings.IsEnabled(TEXT("naming_prefix")) && !bPrefixOk)
+        {
+            TSharedPtr<FJsonObject> F = AddName(EAU_Severity::Warning, TEXT("naming_prefix"),
+                FString::Printf(TEXT("%s '%s' does not start with %s"), *ClassKey, *Name, *FString::Join(*Expected, TEXT(" or "))),
+                FString::Printf(TEXT("Rename to %s (rename_asset fixes up referencers)"), *SuggestedName));
+            F->SetArrayField(TEXT("expected_prefixes"), mcp_common::StringsToJson(*Expected));
+        }
+
+        if (Findings.IsEnabled(TEXT("naming_space")) && bHasSpace)
+        {
+            AddName(EAU_Severity::Error, TEXT("naming_space"),
+                FString::Printf(TEXT("'%s' contains spaces, which break console commands, command-line paths and some source-control tools"), *Name),
+                FString::Printf(TEXT("Rename to %s"), *SuggestedName));
+        }
+
+        if (Findings.IsEnabled(TEXT("naming_invalid_char")) && BadChars.Num() > 0)
+        {
+            FString Chars;
+            for (TCHAR C : BadChars) { Chars.AppendChar(C); }
+            AddName(EAU_Severity::Warning, TEXT("naming_invalid_char"),
+                FString::Printf(TEXT("'%s' contains characters other than letters, digits and underscore: \"%s\""), *Name, *Chars),
+                FString::Printf(TEXT("Rename to %s"), *SuggestedName));
+        }
+    }
+
+    TSharedPtr<FJsonObject> Rules = MakeShared<FJsonObject>();
+    for (const TPair<FString, TArray<FString>>& Pair : Prefixes)
+    {
+        if (Pair.Value.Num() > 0) { Rules->SetArrayField(Pair.Key, mcp_common::StringsToJson(Pair.Value)); }
+    }
+
+    TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+    Result->SetStringField(TEXT("folder_path"), FolderPath);
+    Result->SetNumberField(TEXT("scanned"), Scanned);
+    Result->SetBoolField(TEXT("scan_truncated"), bTruncated);
+    Result->SetNumberField(TEXT("unchecked_count"), Unchecked);
+    Result->SetObjectField(TEXT("prefix_rules"), Rules);
+    Findings.WriteTo(Result, Offset, Limit);
+    return mcp_common::MakeOkReply(Result);
+}
+
+// MCP:audit_level_actors - Sweep the actors of a world for placement problems: actors with no components, bare AActor instances with nothing visible, duplicates stacked at the same transform with the same meshes, mesh components with no mesh or with empty material slots, actors far from the origin or below the world's KillZ, and meshes hidden in game that still collide. Defaults to the editor world; pass world to audit a PIE world. In a World Partition map only the loaded actors are seen. Returns findings inline, paged with offset/limit; the summary counts every finding. Read-only.
+//   @param world - Optional world selector: absent/'editor' (default) | 'pie' (ambiguous: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie').
+//   @param max_distance [number] - Distance from the origin, in cm, beyond which an actor is reported. Defaults to 1048576 (the classic half world size, about 10.5 km).
+//   @param rules [array] - Rule ids to run, default all: actor_no_components, actor_no_visual, actor_duplicate, actor_missing_mesh, actor_missing_material, actor_out_of_bounds, actor_below_kill_z, actor_hidden_collidable. An unknown id is an error.
+//   @param max_results [number] - Cap on actors examined (1-100000). Defaults to 50000.
+//   @param offset [number] - Index of the first finding returned. Defaults to 0.
+//   @param limit [number] - Findings returned per call (1-5000). Defaults to 200.
+//   @returns { world: string, world_name, world_package, world_type, net_mode, pie_instance, scanned: int, scan_truncated: bool, rules: [string], summary: { finding_count, by_severity: {error, warning, info}, by_rule: {rule: int} }, findings: [{ severity, rule, actor, actor_name, actor_class, message, suggested_fix, component?, location?, duplicate_of? }], offset, limit, returned, next_offset: int|null }
+TSharedPtr<FJsonObject> HandleAuditLevelActors(const TSharedPtr<FJsonObject>& Params)
+{
+    FString WorldSelector, WorldError;
+    UWorld* World = mcp_common::ResolveWorldSelector(Params, TEXT("editor"), WorldSelector, WorldError);
+    if (!World)
+    {
+        return mcp_common::MakeErrorReply(WorldError.IsEmpty() ? TEXT("No world could be resolved for audit_level_actors") : WorldError);
+    }
+
+    const int32 MaxResults = AU_GetMaxResults(Params, 50000);
+    const double MaxDistance = FMath::Max(1.0, AU_GetDoubleParam(Params, TEXT("max_distance"), 1048576.0));
+    int32 Offset = 0, Limit = 200;
+    AU_GetPaging(Params, Offset, Limit);
+
+    FAU_FindingSet Findings;
+    if (TSharedPtr<FJsonObject> Bad = Findings.Init(Params, {
+            TEXT("actor_no_components"), TEXT("actor_no_visual"), TEXT("actor_duplicate"), TEXT("actor_missing_mesh"),
+            TEXT("actor_missing_material"), TEXT("actor_out_of_bounds"), TEXT("actor_below_kill_z"), TEXT("actor_hidden_collidable") }))
+    {
+        return Bad;
+    }
+
+    const AWorldSettings* Settings = World->GetWorldSettings();
+    const bool bKillZ = Settings && Settings->AreWorldBoundsChecksEnabled();
+    const double KillZ = Settings ? static_cast<double>(Settings->KillZ) : 0.0;
+
+    // Key -> label of the first actor seen with it, for actor_duplicate.
+    TMap<FString, FString> SeenTransforms;
+    int32 Scanned = 0;
+    bool bTruncated = false;
+
+    for (TActorIterator<AActor> It(World); It; ++It)
+    {
+        AActor* Actor = *It;
+        if (!IsValid(Actor) || Actor->IsTemplate()) { continue; }
+        if (Scanned >= MaxResults) { bTruncated = true; break; }
+        ++Scanned;
+
+        // Infos (world settings, game mode, game state...), controllers and the level script hold logic, not placement.
+        const bool bLogicActor = Actor->IsA<AInfo>() || Actor->IsA<AController>() || Actor->IsA<ALevelScriptActor>();
+        const FString Label = Actor->GetActorLabel();
+        const FString Target = Label.IsEmpty() ? Actor->GetName() : Label;
+
+        auto AddActor = [&](EAU_Severity Severity, const TCHAR* Rule, const FString& Message, const FString& Fix)
+        {
+            TSharedPtr<FJsonObject> F = Findings.Add(Severity, Rule, TEXT("actor"), Target, Message, Fix);
+            F->SetStringField(TEXT("actor_name"), Actor->GetName());
+            F->SetStringField(TEXT("actor_class"), Actor->GetClass()->GetName());
+            return F;
+        };
+
+        TInlineComponentArray<UActorComponent*> Components(Actor);
+        if (Findings.IsEnabled(TEXT("actor_no_components")) && Components.Num() == 0 && !bLogicActor)
+        {
+            AddActor(EAU_Severity::Info, TEXT("actor_no_components"),
+                TEXT("the actor has no components: it has no transform and draws nothing"),
+                TEXT("Delete it if it is a leftover (delete_actor), or give it a root component"));
+        }
+
+        TInlineComponentArray<UPrimitiveComponent*> Primitives(Actor);
+        if (Findings.IsEnabled(TEXT("actor_no_visual")) && Components.Num() > 0 && Primitives.Num() == 0
+            && Actor->GetClass() == AActor::StaticClass())
+        {
+            bool bOnlySceneComponents = true;
+            for (const UActorComponent* C : Components)
+            {
+                if (C && !C->IsA<USceneComponent>()) { bOnlySceneComponents = false; break; }
+            }
+            if (bOnlySceneComponents)
+            {
+                AddActor(EAU_Severity::Info, TEXT("actor_no_visual"),
+                    TEXT("a bare Actor holding only scene components: nothing is drawn and nothing collides"),
+                    TEXT("Delete it if it is a leftover, or keep it only as an intentional pivot/marker"));
+            }
+        }
+
+        const FVector Location = Actor->GetActorLocation();
+        if (Findings.IsEnabled(TEXT("actor_out_of_bounds")) && Actor->GetRootComponent() && Location.Size() > MaxDistance)
+        {
+            TSharedPtr<FJsonObject> F = AddActor(EAU_Severity::Warning, TEXT("actor_out_of_bounds"),
+                FString::Printf(TEXT("%.0f cm from the origin, beyond %.0f cm"), Location.Size(), MaxDistance),
+                TEXT("Move it back into the playable area or delete it"));
+            F->SetArrayField(TEXT("location"), mcp_common::VectorToJsonArray(Location));
+        }
+        if (Findings.IsEnabled(TEXT("actor_below_kill_z")) && bKillZ && Actor->GetRootComponent() && !bLogicActor && Location.Z < KillZ)
+        {
+            TSharedPtr<FJsonObject> F = AddActor(EAU_Severity::Warning, TEXT("actor_below_kill_z"),
+                FString::Printf(TEXT("Z %.0f is below the world's KillZ %.0f: the actor is destroyed when play starts if it can fall out of the world"), Location.Z, KillZ),
+                TEXT("Move it above KillZ, or lower KillZ in World Settings"));
+            F->SetArrayField(TEXT("location"), mcp_common::VectorToJsonArray(Location));
+        }
+
+        TArray<FString> MeshPaths;
+        for (UPrimitiveComponent* Prim : Primitives)
+        {
+            if (!Prim) { continue; }
+            UMeshComponent* MeshComp = Cast<UMeshComponent>(Prim);
+            if (!MeshComp) { continue; }
+
+            bool bHasMesh = true;
+            if (UStaticMeshComponent* SMC = Cast<UStaticMeshComponent>(MeshComp))
+            {
+                if (UStaticMesh* Mesh = SMC->GetStaticMesh()) { MeshPaths.Add(Mesh->GetPathName()); }
+                else { bHasMesh = false; }
+            }
+            else if (USkinnedMeshComponent* SkC = Cast<USkinnedMeshComponent>(MeshComp))
+            {
+                bHasMesh = SkC->GetSkinnedAsset() != nullptr;
+            }
+            else
+            {
+                continue;   // procedural, spline, dynamic... meshes have no asset to be missing
+            }
+
+            if (!bHasMesh)
+            {
+                if (Findings.IsEnabled(TEXT("actor_missing_mesh")))
+                {
+                    // A placed mesh actor with no mesh is certainly broken; a Blueprint component may be filled at runtime.
+                    const bool bMeshActor = Actor->IsA<AStaticMeshActor>() || Actor->IsA<ASkeletalMeshActor>();
+                    TSharedPtr<FJsonObject> F = AddActor(bMeshActor ? EAU_Severity::Error : EAU_Severity::Warning, TEXT("actor_missing_mesh"),
+                        FString::Printf(TEXT("component %s has no mesh assigned"), *MeshComp->GetName()),
+                        TEXT("Assign a mesh (set_component_property on a placed actor, set_static_mesh_properties on a Blueprint component) or delete the component or actor"));
+                    F->SetStringField(TEXT("component"), MeshComp->GetName());
+                }
+                continue;
+            }
+
+            if (Findings.IsEnabled(TEXT("actor_missing_material")))
+            {
+                TArray<FString> EmptySlots;
+                for (int32 Slot = 0; Slot < MeshComp->GetNumMaterials(); ++Slot)
+                {
+                    if (!MeshComp->GetMaterial(Slot)) { EmptySlots.Add(FString::FromInt(Slot)); }
+                }
+                if (EmptySlots.Num() > 0)
+                {
+                    TSharedPtr<FJsonObject> F = AddActor(EAU_Severity::Warning, TEXT("actor_missing_material"),
+                        FString::Printf(TEXT("component %s has no material in slot(s) %s: it renders with the default material"),
+                            *MeshComp->GetName(), *FString::Join(EmptySlots, TEXT(", "))),
+                        TEXT("Assign materials on the mesh asset or as overrides on the component"));
+                    F->SetStringField(TEXT("component"), MeshComp->GetName());
+                }
+            }
+
+            const bool bHiddenInGame = Actor->IsHidden() || MeshComp->bHiddenInGame;
+            if (Findings.IsEnabled(TEXT("actor_hidden_collidable")) && bHiddenInGame && MeshComp->IsCollisionEnabled())
+            {
+                TSharedPtr<FJsonObject> F = AddActor(EAU_Severity::Warning, TEXT("actor_hidden_collidable"),
+                    FString::Printf(TEXT("mesh component %s is hidden in game but its collision is %s: players hit something invisible"),
+                        *MeshComp->GetName(), *StaticEnum<ECollisionEnabled::Type>()->GetNameStringByValue(static_cast<int64>(MeshComp->GetCollisionEnabled()))),
+                    TEXT("Set its collision to NoCollision, or replace it with a Blocking Volume if the invisible wall is intended"));
+                F->SetStringField(TEXT("component"), MeshComp->GetName());
+            }
+        }
+
+        if (Findings.IsEnabled(TEXT("actor_duplicate")) && MeshPaths.Num() > 0 && Actor->GetRootComponent())
+        {
+            MeshPaths.Sort();
+            const FTransform& T = Actor->GetActorTransform();
+            const FVector L = T.GetLocation();
+            const FRotator R = T.Rotator().GetNormalized();
+            const FVector S = T.GetScale3D();
+            const FString Key = FString::Printf(TEXT("%s|%.1f,%.1f,%.1f|%.2f,%.2f,%.2f|%.3f,%.3f,%.3f|%s"),
+                *Actor->GetClass()->GetPathName(), L.X, L.Y, L.Z, R.Pitch, R.Yaw, R.Roll, S.X, S.Y, S.Z,
+                *FString::Join(MeshPaths, TEXT(";")));
+            if (const FString* First = SeenTransforms.Find(Key))
+            {
+                TSharedPtr<FJsonObject> F = AddActor(EAU_Severity::Warning, TEXT("actor_duplicate"),
+                    FString::Printf(TEXT("same class, meshes and transform as %s: a stacked duplicate (double draw cost, z-fighting)"), **First),
+                    TEXT("Delete the duplicate (delete_actor)"));
+                F->SetStringField(TEXT("duplicate_of"), *First);
+                F->SetArrayField(TEXT("location"), mcp_common::VectorToJsonArray(L));
+            }
+            else
+            {
+                SeenTransforms.Add(Key, Target);
+            }
+        }
+    }
+
+    TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+    Result->SetStringField(TEXT("world"), WorldSelector);
+    mcp_common::AddWorldEvidence(Result, World);
+    Result->SetNumberField(TEXT("scanned"), Scanned);
+    Result->SetBoolField(TEXT("scan_truncated"), bTruncated);
+    Findings.WriteTo(Result, Offset, Limit);
+    return mcp_common::MakeOkReply(Result);
+}
+
 const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("audit_asset_references"), &HandleAuditAssetReferences },
+    { TEXT("audit_asset_naming"), &HandleAuditAssetNaming },
     { TEXT("audit_blueprint_health"), &HandleAuditBlueprintHealth },
     { TEXT("audit_collision_profiles"), &HandleAuditCollisionProfiles },
+    { TEXT("audit_level_actors"), &HandleAuditLevelActors },
     { TEXT("audit_replication"), &HandleAuditReplication },
+    { TEXT("audit_static_meshes"), &HandleAuditStaticMeshes },
+    { TEXT("audit_textures"), &HandleAuditTextures },
     { TEXT("audit_widget_accessibility"), &HandleAuditWidgetAccessibility },
     { TEXT("audit_widget_style"), &HandleAuditWidgetStyle },
     { TEXT("audit_widget_text"), &HandleAuditWidgetText },
