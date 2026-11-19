@@ -37,6 +37,7 @@
 #include "NavAreas/NavArea.h"                  // UNavArea
 #include "NavigationSystem.h"                  // UNavigationSystemV1
 #include "NavigationData.h"                    // ANavigationData
+#include "NavFilters/NavigationQueryFilter.h" // UNavigationQueryFilter (filter_class of the navmesh queries)
 #include "NavMesh/RecastNavMesh.h"             // ARecastNavMesh + ENavigationDataResolution accessors
 #include "AI/Navigation/NavigationTypes.h"     // FNavDataConfig (Engine module)
 
@@ -1987,6 +1988,460 @@ TSharedPtr<FJsonObject> HandleDiagnoseNavmesh(const TSharedPtr<FJsonObject>& Par
 }
 
 // ----------------------------------------------------------------------------
+// Navmesh queries: find_nav_path, project_point_to_navmesh, get_random_reachable_point.
+// All three resolve the same context (world selector, navigation system, navigation data,
+// query filter) through NavQuery_ResolveContext and refuse with an error, rather than
+// answering found=false, when the world has no navigation data or its navmesh holds no
+// built tile: a "no path" from an unbuilt navmesh would read as a level-design fault.
+// ----------------------------------------------------------------------------
+namespace
+{
+    struct FNavQueryContext
+    {
+        UWorld* World = nullptr;
+        FString WorldKind;
+        UNavigationSystemV1* NavSys = nullptr;
+        ANavigationData* NavData = nullptr;
+        FSharedConstNavQueryFilter Filter;
+        FString FilterClassName;
+    };
+
+    // A vector param as [x, y, z] or {x, y, z}. False with OutError when it is present but malformed,
+    // or absent and bRequired; an absent optional param leaves Out untouched.
+    bool NavQuery_ReadVector(const TSharedPtr<FJsonObject>& Params, const TCHAR* Key, bool bRequired, FVector& Out, FString& OutError)
+    {
+        const TSharedPtr<FJsonValue> Value = Params->TryGetField(Key);
+        if (!Value.IsValid() || Value->IsNull())
+        {
+            if (bRequired)
+            {
+                OutError = FString::Printf(TEXT("Missing required parameter: %s ([x, y, z])"), Key);
+                return false;
+            }
+            return true;
+        }
+
+        const TArray<TSharedPtr<FJsonValue>>* Items = nullptr;
+        const TSharedPtr<FJsonObject>* Object = nullptr;
+        if (Value->TryGetArray(Items) && Items && Items->Num() >= 3)
+        {
+            double Axes[3] = { 0.0, 0.0, 0.0 };
+            for (int32 i = 0; i < 3; ++i)
+            {
+                if (!(*Items)[i].IsValid() || !(*Items)[i]->TryGetNumber(Axes[i]))
+                {
+                    OutError = FString::Printf(TEXT("%s must be [x, y, z] numbers; element %d is not a number"), Key, i);
+                    return false;
+                }
+            }
+            Out = FVector(Axes[0], Axes[1], Axes[2]);
+            return true;
+        }
+        if (Value->TryGetObject(Object) && Object && Object->IsValid())
+        {
+            double X = 0.0, Y = 0.0, Z = 0.0;
+            if ((*Object)->TryGetNumberField(TEXT("x"), X) && (*Object)->TryGetNumberField(TEXT("y"), Y) && (*Object)->TryGetNumberField(TEXT("z"), Z))
+            {
+                Out = FVector(X, Y, Z);
+                return true;
+            }
+        }
+        OutError = FString::Printf(TEXT("%s must be [x, y, z] or {\"x\", \"y\", \"z\"} numbers"), Key);
+        return false;
+    }
+
+    // Whether the RecastNavMesh holds at least one tile with data; the same test diagnose_navmesh uses for
+    // active_tile_count on 5.7, stopping at the first tile found.
+    bool NavQuery_HasBuiltTile(const ARecastNavMesh* Recast)
+    {
+        TArray<FNavTileRef> TileRefs;
+        Recast->GetAllNavMeshTiles(TileRefs);
+        for (const FNavTileRef& TileRef : TileRefs)
+        {
+            int32 TileX = 0, TileY = 0, TileLayer = 0;
+            if (Recast->GetNavMeshTileXY(TileRef, TileX, TileY, TileLayer))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    FString NavQuery_AgentNames(const UNavigationSystemV1* NavSys)
+    {
+        TArray<FString> Names;
+        for (const FNavDataConfig& Agent : NavSys->GetSupportedAgents())
+        {
+            Names.Add(Agent.Name.ToString());
+        }
+        return Names.Num() > 0 ? FString::Join(Names, TEXT(", ")) : FString(TEXT("(none)"));
+    }
+
+    FString NavQuery_NavDataNames(const UNavigationSystemV1* NavSys)
+    {
+        TArray<FString> Names;
+        for (ANavigationData* NavData : NavSys->NavDataSet)
+        {
+            if (NavData)
+            {
+                Names.Add(NavData->GetName());
+            }
+        }
+        return Names.Num() > 0 ? FString::Join(Names, TEXT(", ")) : FString(TEXT("(none)"));
+    }
+
+    // World, navigation system, navigation data (nav_data, else agent, else the default) and query filter
+    // (filter_class, else the navigation data's default). Null on success, else the error reply.
+    TSharedPtr<FJsonObject> NavQuery_ResolveContext(const TSharedPtr<FJsonObject>& Params, FNavQueryContext& Ctx)
+    {
+        FString WorldErr;
+        Ctx.World = mcp_common::ResolveWorldSelector(Params, TEXT("editor"), Ctx.WorldKind, WorldErr);
+        if (!Ctx.World)
+        {
+            return mcp_common::MakeErrorReply(WorldErr.IsEmpty() ? TEXT("World not available") : WorldErr);
+        }
+
+        Ctx.NavSys = UNavigationSystemV1::GetCurrent(Ctx.World);
+        if (!Ctx.NavSys)
+        {
+            if (Ctx.World->GetNetMode() == NM_Client)
+            {
+                return mcp_common::MakeErrorReply(TEXT("This is a client world: navigation is server-authoritative, so it has no navigation system. Pass world=\"server\"."));
+            }
+            return mcp_common::MakeErrorReply(TEXT("The world has no navigation system, so there is no navmesh to query. Add a NavMeshBoundsVolume (spawn_box_volume with volume_class=NavMeshBoundsVolume), then rebuild_navigation; check with diagnose_navmesh."));
+        }
+
+        FString NavDataName;
+        FString AgentName;
+        Params->TryGetStringField(TEXT("nav_data"), NavDataName);
+        Params->TryGetStringField(TEXT("agent"), AgentName);
+        NavDataName.TrimStartAndEndInline();
+        AgentName.TrimStartAndEndInline();
+        if (!NavDataName.IsEmpty() && !AgentName.IsEmpty())
+        {
+            return mcp_common::MakeErrorReply(TEXT("Pass nav_data or agent, not both: each picks the navigation data to query."));
+        }
+
+        if (!NavDataName.IsEmpty())
+        {
+            for (ANavigationData* Candidate : Ctx.NavSys->NavDataSet)
+            {
+                if (Candidate && (Candidate->GetName().Equals(NavDataName, ESearchCase::IgnoreCase)
+                    || Candidate->GetActorNameOrLabel().Equals(NavDataName, ESearchCase::IgnoreCase)))
+                {
+                    Ctx.NavData = Candidate;
+                    break;
+                }
+            }
+            if (!Ctx.NavData)
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(TEXT("nav_data '%s' is not a navigation data of this world. Registered: %s"), *NavDataName, *NavQuery_NavDataNames(Ctx.NavSys)));
+            }
+        }
+        else if (!AgentName.IsEmpty())
+        {
+            const FNavDataConfig* Agent = Ctx.NavSys->GetSupportedAgents().FindByPredicate(
+                [&AgentName](const FNavDataConfig& Config) { return Config.Name.ToString().Equals(AgentName, ESearchCase::IgnoreCase); });
+            if (!Agent)
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(TEXT("agent '%s' is not a supported agent of the navigation system. Supported: %s"), *AgentName, *NavQuery_AgentNames(Ctx.NavSys)));
+            }
+            Ctx.NavData = Ctx.NavSys->GetNavDataForProps(*Agent);
+            if (!Ctx.NavData)
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(TEXT("agent '%s' has no navigation data in this world: its navmesh is not built. Run rebuild_navigation; check with diagnose_navmesh."), *AgentName));
+            }
+        }
+        else
+        {
+            Ctx.NavData = Ctx.NavSys->GetDefaultNavDataInstance(FNavigationSystem::DontCreate);
+            if (!Ctx.NavData)
+            {
+                return mcp_common::MakeErrorReply(TEXT("The world has no navigation data: no navmesh is built. Add a NavMeshBoundsVolume (spawn_box_volume with volume_class=NavMeshBoundsVolume), then rebuild_navigation; check with diagnose_navmesh."));
+            }
+        }
+
+        if (const ARecastNavMesh* Recast = Cast<ARecastNavMesh>(Ctx.NavData))
+        {
+            if (!NavQuery_HasBuiltTile(Recast))
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(TEXT("The navmesh %s has no built tile, so nothing can be queried. Check its bounds with diagnose_navmesh, then rebuild_navigation (in PIE, query world=\"server\")."), *Recast->GetName()));
+            }
+        }
+
+        FString FilterName;
+        Params->TryGetStringField(TEXT("filter_class"), FilterName);
+        FilterName.TrimStartAndEndInline();
+        if (!FilterName.IsEmpty())
+        {
+            UClass* FilterClass = nullptr;
+            if (FilterName.Contains(TEXT("/")))
+            {
+                FilterClass = LoadObject<UClass>(nullptr, *FilterName);
+                if (!FilterClass && !FilterName.EndsWith(TEXT("_C")))
+                {
+                    const FString ObjectName = FPackageName::ObjectPathToObjectName(FilterName);
+                    FilterClass = LoadObject<UClass>(nullptr, *FString::Printf(TEXT("%s.%s_C"), *FPackageName::ObjectPathToPackageName(FilterName), *ObjectName));
+                }
+            }
+            else
+            {
+                FilterClass = UClass::TryFindTypeSlow<UClass>(FilterName);
+                if (!FilterClass)
+                {
+                    FilterClass = FindFirstObject<UClass>(*FilterName);
+                }
+            }
+            if (!FilterClass || !FilterClass->IsChildOf(UNavigationQueryFilter::StaticClass()))
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(TEXT("filter_class '%s' does not resolve to a loaded UNavigationQueryFilter subclass (a native class by name, a Blueprint filter by its path or _C name)."), *FilterName));
+            }
+            Ctx.Filter = UNavigationQueryFilter::GetQueryFilter(*Ctx.NavData, TSubclassOf<UNavigationQueryFilter>(FilterClass));
+            if (!Ctx.Filter.IsValid())
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(TEXT("filter_class '%s' gave no query filter for %s."), *FilterName, *Ctx.NavData->GetName()));
+            }
+            Ctx.FilterClassName = FilterClass->GetName();
+        }
+        else
+        {
+            Ctx.Filter = Ctx.NavData->GetDefaultQueryFilter();
+        }
+        return nullptr;
+    }
+
+    // The fields every navmesh query reply starts with: which world, navigation data, agent and filter answered.
+    TSharedPtr<FJsonObject> NavQuery_StartReply(const FNavQueryContext& Ctx)
+    {
+        TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+        Result->SetStringField(TEXT("world"), Ctx.WorldKind);
+        mcp_common::AddWorldEvidence(Result, Ctx.World);
+        Result->SetStringField(TEXT("nav_data"), Ctx.NavData->GetName());
+        Result->SetStringField(TEXT("agent"), Ctx.NavData->GetConfig().Name.ToString());
+        Result->SetStringField(TEXT("filter_class"), Ctx.FilterClassName.IsEmpty() ? FString(TEXT("default")) : Ctx.FilterClassName);
+        return Result;
+    }
+
+    const TCHAR* NavQuery_ResultName(ENavigationQueryResult::Type Result)
+    {
+        switch (Result)
+        {
+        case ENavigationQueryResult::Success: return TEXT("Success");
+        case ENavigationQueryResult::Fail: return TEXT("Fail");
+        case ENavigationQueryResult::Error: return TEXT("Error");
+        default: return TEXT("Invalid");
+        }
+    }
+}
+
+// MCP:find_nav_path - Find a navigation path between two world points on the navmesh, synchronously (UNavigationSystemV1::FindPathSync), and return whether one was found, whether it is partial (ends at the reachable point nearest to end), its length and cost, and its points from start to end. Use it to prove an AI can walk from A to B, or why it cannot, after rebuild_navigation; a straight-line obstacle check is raycast_scene. Read-only and idempotent. The world param picks the world (editor by default; in PIE pass "server", the navmesh being server-authoritative); agent or nav_data picks the navigation data, filter_class the query filter. No path is not an error: found=false, with the engine's query result and a note. No navigation data, a navmesh with no built tile, an unknown agent, nav_data or filter_class, or a malformed point is an error. Snap a point onto the navmesh first with project_point_to_navmesh; random destinations: get_random_reachable_point.
+//   @param start [array!] - World-space [x, y, z] (or {x, y, z}) where the path starts; it should be on or just above the navmesh (required)
+//   @param end [array!] - World-space [x, y, z] (or {x, y, z}) where the path should end (required)
+//   @param allow_partial [bool] - Accept a path that stops at the reachable point nearest to end when end itself cannot be reached; default true (is_partial says which it was). false: such a query is found=false
+//   @param agent [string] - Optional supported agent name (as diagnose_navmesh lists supported_agents) whose navigation data to query; omitted: the default navigation data. Not with nav_data
+//   @param nav_data [string] - Optional name of the navigation data actor to query, e.g. "RecastNavMesh-Default"; omitted: the default navigation data. Not with agent
+//   @param filter_class [string] - Optional UNavigationQueryFilter subclass: a native class name (e.g. "NavFilter_AIControllerDefault") or a Blueprint filter's path or _C name; omitted: the navigation data's default filter. One that does not resolve is an error
+//   @param max_points [number] - Optional cap on how many path points are serialized, a whole number (default 500; below 1 counts as 1); point_count still counts all
+//   @param world [string] - Which world to query: absent/"editor" (default) | "server" (the PIE world with authority: the one with the navmesh in PIE) | "client" (has no navigation; an error) | "pie:N" | "pie" (ambiguous: PlayWorld, else the first PIE context) | "game" (alias of "pie")
+//   @returns { found: bool, is_partial: bool, query_result: "Success"|"Fail"|"Error"|"Invalid", length: number, cost: number, straight_line_distance: number, point_count: int, points:[{x,y,z}], start:{x,y,z}, end:{x,y,z}, allow_partial: bool, nav_data, agent, filter_class, note?, world, world_name, world_package, world_type, net_mode, pie_instance }
+//   @hints read-only
+TSharedPtr<FJsonObject> HandleFindNavPath(const TSharedPtr<FJsonObject>& Params)
+{
+    FVector Start = FVector::ZeroVector;
+    FVector End = FVector::ZeroVector;
+    FString VectorError;
+    if (!NavQuery_ReadVector(Params, TEXT("start"), true, Start, VectorError) || !NavQuery_ReadVector(Params, TEXT("end"), true, End, VectorError))
+    {
+        return mcp_common::MakeErrorReply(VectorError);
+    }
+
+    bool bAllowPartial = true;
+    Params->TryGetBoolField(TEXT("allow_partial"), bAllowPartial);
+    int32 MaxPoints = 500;
+    Params->TryGetNumberField(TEXT("max_points"), MaxPoints);
+    MaxPoints = FMath::Max(1, MaxPoints);
+
+    FNavQueryContext Ctx;
+    if (TSharedPtr<FJsonObject> Failure = NavQuery_ResolveContext(Params, Ctx))
+    {
+        return Failure;
+    }
+
+    FPathFindingQuery Query(static_cast<const UObject*>(nullptr), *Ctx.NavData, Start, End, Ctx.Filter);
+    Query.SetAllowPartialPaths(bAllowPartial);
+    const FPathFindingResult PathResult = Ctx.NavSys->FindPathSync(Query, EPathFindingMode::Regular);
+
+    const bool bFound = PathResult.IsSuccessful() && PathResult.Path.IsValid() && PathResult.Path->GetPathPoints().Num() > 0;
+    const bool bPartial = bFound && PathResult.IsPartial();
+
+    TSharedPtr<FJsonObject> Result = NavQuery_StartReply(Ctx);
+    Result->SetBoolField(TEXT("found"), bFound);
+    Result->SetBoolField(TEXT("is_partial"), bPartial);
+    Result->SetStringField(TEXT("query_result"), NavQuery_ResultName(PathResult.Result));
+    Result->SetObjectField(TEXT("start"), mcp_common::VectorToJsonObject(Start));
+    Result->SetObjectField(TEXT("end"), mcp_common::VectorToJsonObject(End));
+    Result->SetBoolField(TEXT("allow_partial"), bAllowPartial);
+    Result->SetNumberField(TEXT("straight_line_distance"), FVector::Dist(Start, End));
+
+    TArray<TSharedPtr<FJsonValue>> Points;
+    int32 PointCount = 0;
+    if (bFound)
+    {
+        const TArray<FNavPathPoint>& PathPoints = PathResult.Path->GetPathPoints();
+        PointCount = PathPoints.Num();
+        for (int32 i = 0; i < PointCount && i < MaxPoints; ++i)
+        {
+            Points.Add(MakeShared<FJsonValueObject>(mcp_common::VectorToJsonObject(PathPoints[i].Location)));
+        }
+        Result->SetNumberField(TEXT("length"), PathResult.Path->GetLength());
+        Result->SetNumberField(TEXT("cost"), PathResult.Path->GetCost());
+    }
+    else
+    {
+        Result->SetNumberField(TEXT("length"), 0.0);
+        Result->SetNumberField(TEXT("cost"), 0.0);
+        Result->SetStringField(TEXT("note"), bAllowPartial
+            ? TEXT("No path: start is likely off the navmesh, or on an island with no link toward end. Snap it with project_point_to_navmesh, or inspect the navmesh with diagnose_navmesh.")
+            : TEXT("No complete path. With allow_partial=true the query returns the path to the reachable point nearest to end, if start is on the navmesh."));
+    }
+    Result->SetNumberField(TEXT("point_count"), PointCount);
+    Result->SetArrayField(TEXT("points"), Points);
+
+    if (PathResult.Result == ENavigationQueryResult::Error || PathResult.Result == ENavigationQueryResult::Invalid)
+    {
+        return mcp_common::MakeOutcomeReply(Result, false, FString::Printf(TEXT("find_nav_path: the path query came back %s (the navigation data refused it); see query_result."), NavQuery_ResultName(PathResult.Result)));
+    }
+    return mcp_common::MakeOkReply(Result);
+}
+
+// MCP:project_point_to_navmesh - Project a world point onto the navmesh (UNavigationSystemV1::ProjectPointToNavigation): the nearest navigable location within a query box of half-extent extent around point, or found=false when the box reaches no navmesh. Use it to check that a spawn point, patrol point or path start is on the navmesh, and to snap it there before find_nav_path. Read-only and idempotent. The world param picks the world (editor by default; in PIE pass "server"); agent or nav_data picks the navigation data, filter_class the query filter. Not found is not an error. No navigation data, a navmesh with no built tile, an unknown agent, nav_data or filter_class, a malformed point or an extent axis of 0 or less is an error.
+//   @param point [array!] - World-space [x, y, z] (or {x, y, z}) to project (required)
+//   @param extent [array] - Optional half-extent [x, y, z] of the box searched around point, in cm, each axis above 0; default the navigation data's DefaultQueryExtent (50, 50, 250 unless the project changed it)
+//   @param agent [string] - Optional supported agent name (as diagnose_navmesh lists supported_agents) whose navigation data to query; omitted: the default navigation data. Not with nav_data
+//   @param nav_data [string] - Optional name of the navigation data actor to query, e.g. "RecastNavMesh-Default"; omitted: the default navigation data. Not with agent
+//   @param filter_class [string] - Optional UNavigationQueryFilter subclass: a native class name or a Blueprint filter's path or _C name; omitted: the navigation data's default filter. One that does not resolve is an error
+//   @param world [string] - Which world to query: absent/"editor" (default) | "server" (the PIE world with authority: the one with the navmesh in PIE) | "client" (has no navigation; an error) | "pie:N" | "pie" (ambiguous: PlayWorld, else the first PIE context) | "game" (alias of "pie")
+//   @returns { found: bool, point:{x,y,z}, projected_point?:{x,y,z}, distance?: number, vertical_offset?: number, extent:{x,y,z}, nav_data, agent, filter_class, note?, world, world_name, world_package, world_type, net_mode, pie_instance }
+//   @hints read-only
+TSharedPtr<FJsonObject> HandleProjectPointToNavmesh(const TSharedPtr<FJsonObject>& Params)
+{
+    FVector Point = FVector::ZeroVector;
+    FString VectorError;
+    if (!NavQuery_ReadVector(Params, TEXT("point"), true, Point, VectorError))
+    {
+        return mcp_common::MakeErrorReply(VectorError);
+    }
+    const TSharedPtr<FJsonValue> ExtentValue = Params->TryGetField(TEXT("extent"));
+    const bool bExtentGiven = ExtentValue.IsValid() && !ExtentValue->IsNull();
+    FVector Extent = FVector::ZeroVector;
+    if (!NavQuery_ReadVector(Params, TEXT("extent"), false, Extent, VectorError))
+    {
+        return mcp_common::MakeErrorReply(VectorError);
+    }
+    if (bExtentGiven && (Extent.X <= 0.0 || Extent.Y <= 0.0 || Extent.Z <= 0.0))
+    {
+        return mcp_common::MakeErrorReply(TEXT("extent must be above 0 on every axis (a half-extent in cm); omit it for the navigation data's default query extent."));
+    }
+
+    FNavQueryContext Ctx;
+    if (TSharedPtr<FJsonObject> Failure = NavQuery_ResolveContext(Params, Ctx))
+    {
+        return Failure;
+    }
+    if (!bExtentGiven)
+    {
+        Extent = Ctx.NavData->GetConfig().DefaultQueryExtent;
+    }
+
+    FNavLocation Projected;
+    const bool bProjected = Ctx.NavSys->ProjectPointToNavigation(Point, Projected, Extent, Ctx.NavData, Ctx.Filter);
+    const bool bFound = bProjected && Projected.HasNodeRef();
+
+    TSharedPtr<FJsonObject> Result = NavQuery_StartReply(Ctx);
+    Result->SetBoolField(TEXT("found"), bFound);
+    Result->SetObjectField(TEXT("point"), mcp_common::VectorToJsonObject(Point));
+    Result->SetObjectField(TEXT("extent"), mcp_common::VectorToJsonObject(Extent));
+    if (bFound)
+    {
+        Result->SetObjectField(TEXT("projected_point"), mcp_common::VectorToJsonObject(Projected.Location));
+        Result->SetNumberField(TEXT("distance"), FVector::Dist(Point, Projected.Location));
+        Result->SetNumberField(TEXT("vertical_offset"), Projected.Location.Z - Point.Z);
+    }
+    else
+    {
+        Result->SetStringField(TEXT("note"), TEXT("No navmesh within extent of point. Widen extent (Z first, for a point above the ground), or check the navmesh covers that area with diagnose_navmesh."));
+    }
+    return mcp_common::MakeOkReply(Result);
+}
+
+// MCP:get_random_reachable_point - Pick random navmesh locations reachable by path from origin within radius (UNavigationSystemV1::GetRandomReachablePointInRadius), count of them (default 1), each with its straight-line distance from origin. Use it for patrol or spawn destinations an AI can actually walk to, or to sample how far the navmesh connected to origin extends. Read-only (each call draws new points). The world param picks the world (editor by default; in PIE pass "server"); agent or nav_data picks the navigation data, filter_class the query filter. origin must be on or near the navmesh: origin_on_navmesh says whether it projects with the default query extent, and with none found found=false and a note, not an error. No navigation data, a navmesh with no built tile, an unknown agent, nav_data or filter_class, a malformed origin or a radius of 0 or less is an error.
+//   @param origin [array!] - World-space [x, y, z] (or {x, y, z}) the points must be reachable from (required)
+//   @param radius [number!] - Search radius around origin in cm, above 0 (required)
+//   @param count [number] - Optional number of points to draw, a whole number from 1 to 100 (default 1; clamped); points may repeat
+//   @param agent [string] - Optional supported agent name (as diagnose_navmesh lists supported_agents) whose navigation data to query; omitted: the default navigation data. Not with nav_data
+//   @param nav_data [string] - Optional name of the navigation data actor to query, e.g. "RecastNavMesh-Default"; omitted: the default navigation data. Not with agent
+//   @param filter_class [string] - Optional UNavigationQueryFilter subclass: a native class name or a Blueprint filter's path or _C name; omitted: the navigation data's default filter. One that does not resolve is an error
+//   @param world [string] - Which world to query: absent/"editor" (default) | "server" (the PIE world with authority: the one with the navmesh in PIE) | "client" (has no navigation; an error) | "pie:N" | "pie" (ambiguous: PlayWorld, else the first PIE context) | "game" (alias of "pie")
+//   @returns { found: bool, origin:{x,y,z}, radius: number, origin_on_navmesh: bool, requested_count: int, found_count: int, points:[{location:{x,y,z}, distance}], nav_data, agent, filter_class, note?, world, world_name, world_package, world_type, net_mode, pie_instance }
+//   @hints read-only
+TSharedPtr<FJsonObject> HandleGetRandomReachablePoint(const TSharedPtr<FJsonObject>& Params)
+{
+    FVector Origin = FVector::ZeroVector;
+    FString VectorError;
+    if (!NavQuery_ReadVector(Params, TEXT("origin"), true, Origin, VectorError))
+    {
+        return mcp_common::MakeErrorReply(VectorError);
+    }
+    double Radius = 0.0;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("radius"), Radius)) { return Missing; }
+    if (!(Radius > 0.0))
+    {
+        return mcp_common::MakeErrorReply(TEXT("radius must be above 0 (cm)."));
+    }
+    int32 Count = 1;
+    Params->TryGetNumberField(TEXT("count"), Count);
+    Count = FMath::Clamp(Count, 1, 100);
+
+    FNavQueryContext Ctx;
+    if (TSharedPtr<FJsonObject> Failure = NavQuery_ResolveContext(Params, Ctx))
+    {
+        return Failure;
+    }
+
+    FNavLocation OriginOnNav;
+    const bool bOriginOnNav = Ctx.NavSys->ProjectPointToNavigation(Origin, OriginOnNav, INVALID_NAVEXTENT, Ctx.NavData, Ctx.Filter);
+
+    TArray<TSharedPtr<FJsonValue>> Points;
+    for (int32 i = 0; i < Count; ++i)
+    {
+        FNavLocation Picked;
+        if (Ctx.NavSys->GetRandomReachablePointInRadius(Origin, static_cast<float>(Radius), Picked, Ctx.NavData, Ctx.Filter) && Picked.HasNodeRef())
+        {
+            TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+            Entry->SetObjectField(TEXT("location"), mcp_common::VectorToJsonObject(Picked.Location));
+            Entry->SetNumberField(TEXT("distance"), FVector::Dist(Origin, Picked.Location));
+            Points.Add(MakeShared<FJsonValueObject>(Entry));
+        }
+    }
+
+    TSharedPtr<FJsonObject> Result = NavQuery_StartReply(Ctx);
+    Result->SetBoolField(TEXT("found"), Points.Num() > 0);
+    Result->SetObjectField(TEXT("origin"), mcp_common::VectorToJsonObject(Origin));
+    Result->SetNumberField(TEXT("radius"), Radius);
+    Result->SetBoolField(TEXT("origin_on_navmesh"), bOriginOnNav);
+    Result->SetNumberField(TEXT("requested_count"), Count);
+    Result->SetNumberField(TEXT("found_count"), Points.Num());
+    Result->SetArrayField(TEXT("points"), Points);
+    if (Points.Num() == 0)
+    {
+        Result->SetStringField(TEXT("note"), bOriginOnNav
+            ? TEXT("origin is on the navmesh but no reachable point was drawn within radius; widen radius or check filter_class.")
+            : TEXT("origin is not on the navmesh within the default query extent: snap it with project_point_to_navmesh first."));
+    }
+    return mcp_common::MakeOkReply(Result);
+}
+
+// ----------------------------------------------------------------------------
 // dump_collision_channels
 // Maps every custom collision channel (ECC_GameTraceChannelN / object channels)
 // to its friendly name from config, plus its TraceTypeQueryN / ObjectTypeQueryN
@@ -2154,11 +2609,14 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("diagnose_navmesh"), &HandleDiagnoseNavmesh },
     { TEXT("diff_collision_channels"), &HandleDiffCollisionChannels },
     { TEXT("dump_collision_channels"), &HandleDumpCollisionChannels },
+    { TEXT("find_nav_path"), &HandleFindNavPath },
     { TEXT("get_eqs_query_info"), &HandleGetEQSQueryInfo },
+    { TEXT("get_random_reachable_point"), &HandleGetRandomReachablePoint },
     { TEXT("get_recast_navmesh_settings"), &HandleGetRecastNavMeshSettings },
     { TEXT("list_eqs_context_types"), &HandleListEQSContextTypes },
     { TEXT("list_eqs_generator_types"), &HandleListEQSGeneratorTypes },
     { TEXT("list_eqs_test_types"), &HandleListEQSTestTypes },
+    { TEXT("project_point_to_navmesh"), &HandleProjectPointToNavmesh },
     { TEXT("rebuild_navigation"), &HandleRebuildNavigation },
     { TEXT("remove_eqs_generator"), &HandleRemoveEQSGenerator },
     { TEXT("remove_eqs_option"), &HandleRemoveEQSOption },
