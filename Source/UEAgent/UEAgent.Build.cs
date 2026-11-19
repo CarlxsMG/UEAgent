@@ -154,6 +154,7 @@ public class UEAgent : ModuleRules
 					"ApplicationCore",     // IPlatformInputDeviceMapper (inject_key_input / inject_analog_input / inject_mouse_button)
 					"Localization",        // ULocalizationSettings/ULocalizationTarget (list/gather/compile_text_for_target)
 					"AssetTools",          // For IAssetTools (import_texture_file, fixup_redirectors)
+					"ContentBrowser", "ContentBrowserData", // IContentBrowserSingleton and FContentBrowserItemPath (get_selected_assets, get_content_browser_path, sync_content_browser_to_assets)
 					"GameplayTagsEditor",  // For IGameplayTagsEditorModule (create_gameplay_tag -> AddNewGameplayTagToINI)
 					"UMGEditor",           // UWidgetBlueprint / UWidgetBlueprintFactory
 					"DataValidation",      // UEditorValidatorSubsystem
