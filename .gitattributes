@@ -1,0 +1,5 @@
+# The generators and checks (Tools/codegen_*.py --check, Tools/check_skills.py) compare files byte for byte
+# with output they write with LF, so text files are checked out with LF whatever core.autocrlf says.
+* text=auto eol=lf
+
+*.png binary

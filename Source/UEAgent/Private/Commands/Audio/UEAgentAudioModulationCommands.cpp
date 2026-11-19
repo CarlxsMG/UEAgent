@@ -1146,7 +1146,13 @@ TSharedPtr<FJsonObject> HandleCreateModulationGenerator(
 
 	if (bHasLFOFields)
 	{
-		USoundModulationGeneratorLFO* LFO = CastChecked<USoundModulationGeneratorLFO>(Gen);
+		USoundModulationGeneratorLFO* LFO = Cast<USoundModulationGeneratorLFO>(Gen);
+		if (!LFO)
+		{
+			return mcp_common::MakeErrorReply(FString::Printf(
+				TEXT("%s is a %s, not an LFO: waveform, frequency, amplitude, offset and phase cannot be written to it"),
+				*GeneratorPath, *Gen->GetClass()->GetName()));
+		}
 		LFO->Modify();
 		if (bHasWaveform)
 		{

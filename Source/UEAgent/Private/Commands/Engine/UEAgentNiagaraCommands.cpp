@@ -7324,7 +7324,13 @@ TSharedPtr<FJsonObject> HandleReorderNiagaraModules(const TSharedPtr<FJsonObject
             TEXT("Module '%s' not found on the %s stack of emitter '%s' (list_niagara_modules lists that stack); nothing was changed"),
             *ModuleName, *ScriptGroup, *EmitterName));
     }
-    UNiagaraNodeFunctionCall* Target = CastChecked<UNiagaraNodeFunctionCall>(Groups[OldIndex + 1].EndNode);
+    UNiagaraNodeFunctionCall* Target = Cast<UNiagaraNodeFunctionCall>(Groups[OldIndex + 1].EndNode);
+    if (!Target)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Module '%s' on the %s stack of emitter '%s' is not a function-call node; nothing was changed"),
+            *ModuleName, *ScriptGroup, *EmitterName));
+    }
     const int32 ClampedTargetIndex = FMath::Clamp(TargetIndex, 0, ModuleCount - 1);
 
     TSharedPtr<FJsonObject> Data = Niagara_StartEmitterReply(System, EmitterName);

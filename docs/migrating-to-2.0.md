@@ -3,7 +3,8 @@
 UEAgent 2.0 has 1742 tools instead of 2097. Near-duplicate tools were folded into one canonical tool, tools that
 could never do anything were removed, and every name now starts with its verb and spells its words out. Nothing
 a removed tool did is lost unless the table says so: call the tool in the second column the way the third
-column says. The old names are gone, with no aliases.
+column says. The old names are gone, with no aliases. Some tools of the second column were retired later in
+favour of a generic tool; they still run, and [the retired tools](tools/retired.md) say what to call instead.
 
 ## Folded into another tool
 
