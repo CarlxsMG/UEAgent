@@ -1493,19 +1493,21 @@ TSharedPtr<FJsonObject> HandleSetAnimTransitionRuleAutomatic(const TSharedPtr<FJ
 // ---------------------------------------------------------------------------
 // set_anim_transition_rule_from_bool
 // ---------------------------------------------------------------------------
-// MCP:set_anim_transition_rule_from_bool - Make a bool variable the rule of an existing transition (source_state to target_state) of an Animation Blueprint state machine: every rule-graph node but the result sink is removed, then a getter of variable_name is wired to the sink's bCanEnterTransition, so the transition passes while the variable is true (there is no invert option). A missing blueprint, machine, transition or variable, or one that is not a single bool, is an error before anything changes; a variable not compiled yet (variable_kind new_blueprint) is checked against its declared type. Repeat calls rebuild the same rule (idempotent). Marks the blueprint structurally modified and saves without compiling (compile_anim_blueprint). Float test: set_anim_transition_rule_from_comparison; time-based: set_anim_transition_rule_automatic; empty rule: clear_anim_transition_rule; new transition: add_anim_transition. Refused while PIE runs unless force=true; a failed save is an error, the change kept in memory.
+// MCP:set_anim_transition_rule_from_bool - Make a bool variable the rule of an existing transition (source_state to target_state) of an Animation Blueprint state machine: every rule-graph node but the result sink is removed, then a getter of variable_name is wired to the sink's bCanEnterTransition, so the transition passes while the variable is true, or while it is false with negate=true (a Not node goes between them). A missing blueprint, machine, transition or variable, or one that is not a single bool, is an error before anything changes; a variable not compiled yet (variable_kind new_blueprint) is checked against its declared type. Repeat calls rebuild the same rule (idempotent). Marks the blueprint structurally modified and saves without compiling (compile_anim_blueprint). Float test: set_anim_transition_rule_from_comparison; time-based: set_anim_transition_rule_automatic; empty rule: clear_anim_transition_rule; new transition: add_anim_transition. Refused while PIE runs unless force=true; a failed save is an error, the change kept in memory.
 //   @param anim_blueprint_path - Asset path of the UAnimBlueprint
 //   @param machine_name - Name of the state machine that owns the transition, matched without case
 //   @param source_state - Name of the source state or conduit (transition origin)
 //   @param target_state - Name of the target state or conduit (transition destination)
-//   @param variable_name - Name of an existing bool variable on the AnimBP (or its parent C++ class); the rule reads it as is, true lets the transition pass
-//   @returns { anim_blueprint_path, machine_name, source_state, target_state, variable_name, variable_kind, rule_set, sink_present, contributor_count, contributor_node_class, saved, save_error? }
+//   @param variable_name - Name of an existing bool variable on the AnimBP (or its parent C++ class); true lets the transition pass, unless negate
+//   @param negate - Optional bool (default false): pass the transition while the variable is false, through a Not (UKismetMathLibrary::Not_PreBool) node
+//   @returns { anim_blueprint_path, machine_name, source_state, target_state, variable_name, negate, variable_kind, rule_set, sink_present, contributor_count, contributor_node_class, saved, save_error? }
 //
 // Behavior: clears any existing contributor nodes from the transition's rule graph (preserving
 // the UAnimGraphNode_TransitionResult sink), then creates a UK2Node_VariableGet for the named
 // bool and wires its value pin to the sink's `bCanEnterTransition` input. The transition is
-// then evaluated at runtime as `(variable == true)`. To invert, declare a `!Foo` shadow bool
-// in the AnimBP and pass its name (negating via the graph is not implemented).
+// then evaluated at runtime as `(variable == true)`. With negate, a Not_PreBool call node sits
+// between the getter and the sink, and the transition evaluates as `(variable == false)`.
+// contributor_node_class names the last non-sink node, so with negate it is K2Node_CallFunction.
 //
 // `variable_kind` reports "generated" for parent-class C++ properties, "new_blueprint" for vars
 // declared on the AnimBP itself but not yet compiled into the generated class, or "missing"
@@ -1516,6 +1518,8 @@ TSharedPtr<FJsonObject> HandleSetAnimTransitionRuleFromBool(const TSharedPtr<FJs
     if (TSharedPtr<FJsonObject> Missing = AnimBp_ReadTransitionParams(Params, AnimBPPath, MachineName, SourceName, TargetName))
         return Missing;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("variable_name"), VariableName)) { return Missing; }
+    bool bNegate = false;
+    Params->TryGetBoolField(TEXT("negate"), bNegate);
 
     UAnimBlueprint* AnimBP = nullptr;
     UAnimationStateMachineGraph* SMGraph = nullptr;
@@ -1535,6 +1539,19 @@ TSharedPtr<FJsonObject> HandleSetAnimTransitionRuleFromBool(const TSharedPtr<FJs
     {
         return mcp_common::MakeErrorReply(
             TEXT("UAnimGraphNode_TransitionResult has no 'bCanEnterTransition' input pin"));
+    }
+
+    // The negation is a call of UKismetMathLibrary::Not_PreBool, found before the graph changes.
+    UFunction* NotFunc = nullptr;
+    if (bNegate)
+    {
+        const FName NotFuncName = GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, Not_PreBool);
+        NotFunc = UKismetMathLibrary::StaticClass()->FindFunctionByName(NotFuncName);
+        if (!NotFunc)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("UKismetMathLibrary::%s not found in engine source; nothing was changed"), *NotFuncName.ToString()));
+        }
     }
 
     // --- Validate the variable exists on the AnimBP (or its parent) AND is a single bool. ---
@@ -1576,10 +1593,25 @@ TSharedPtr<FJsonObject> HandleSetAnimTransitionRuleFromBool(const TSharedPtr<FJs
 
     // MakeLinkTo is the low-level connector — both pins are bool-typed (the variable was
     // validated as bool above; the sink pin is FAnimNode_TransitionResult::bCanEnterTransition
-    // which is itself a bool), so the schema accepts the connection. We bypass
-    // TryCreateConnection (which can be picky about exec-pin purity rules inherited from the
-    // UAnimationTransitionSchema) for this single explicit pin pair.
-    ValuePin->MakeLinkTo(SinkInputPin);
+    // which is itself a bool, as are Not_PreBool's A and ReturnValue), so the schema accepts the
+    // connection. We bypass TryCreateConnection (which can be picky about exec-pin purity rules
+    // inherited from the UAnimationTransitionSchema) for these explicit pin pairs.
+    UEdGraphPin* RuleOutPin = ValuePin;
+    if (bNegate)
+    {
+        VariableGetNode->NodePosX = -600;
+        UK2Node_CallFunction* NotNode = mcp_common::CreateFunctionCallNode(RuleGraph, NotFunc, FVector2D(-300.0f, 0.0f));
+        UEdGraphPin* NotInPin = NotNode ? NotNode->FindPin(TEXT("A")) : nullptr;
+        UEdGraphPin* NotOutPin = NotNode ? NotNode->FindPin(TEXT("ReturnValue")) : nullptr;
+        if (!NotInPin || !NotOutPin)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("Not_PreBool node for '%s' has no A/ReturnValue pin -- engine API mismatch (post-clear rule graph dirty)"), *VariableName));
+        }
+        ValuePin->MakeLinkTo(NotInPin);
+        RuleOutPin = NotOutPin;
+    }
+    RuleOutPin->MakeLinkTo(SinkInputPin);
 
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(AnimBP);
 
@@ -1600,8 +1632,9 @@ TSharedPtr<FJsonObject> HandleSetAnimTransitionRuleFromBool(const TSharedPtr<FJs
 
     TSharedPtr<FJsonObject> Resp = AnimBp_TransitionReply(AnimBP, SMGraph, SourceName, TargetName);
     Resp->SetStringField(TEXT("variable_name"), VariableName);
+    Resp->SetBoolField(TEXT("negate"), bNegate);
     Resp->SetStringField(TEXT("variable_kind"), VariableKind);
-    Resp->SetBoolField(TEXT("rule_set"), ValuePin->LinkedTo.Num() > 0 && SinkInputPin->LinkedTo.Num() > 0);
+    Resp->SetBoolField(TEXT("rule_set"), ValuePin->LinkedTo.Num() > 0 && RuleOutPin->LinkedTo.Contains(SinkInputPin));
     Resp->SetBoolField(TEXT("sink_present"), HasTransitionResultSink(RuleGraph));
     Resp->SetNumberField(TEXT("contributor_count"), ContributorCount);
     if (!ContributorClass.IsEmpty())
