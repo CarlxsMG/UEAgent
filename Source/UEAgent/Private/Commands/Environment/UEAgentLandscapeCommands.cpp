@@ -2531,7 +2531,7 @@ namespace
 
 // MCP:set_landscape_height_in_box - Raise or lower terrain: add delta_z world units to every heightmap vertex inside a world-space box (give box_min/box_max, or center/extent). A RELATIVE edit -- to force a region to one absolute height use flatten_landscape_in_box, and to soften the seams afterwards use smooth_landscape_in_box. Check vertices_modified in the reply: a zero means the box missed the terrain, which is what a wrongly-signed world coordinate looks like.
 //   @param landscape_actor_name - Optional landscape actor name, defaults to first found
-//   @param delta_z - World Z delta to apply to every vertex in the region
+//   @param delta_z - Required world Z delta to apply to every vertex in the region (negative lowers)
 //   @param box_min - Optional [x, y, z] world-space box minimum
 //   @param box_max - Optional [x, y, z] world-space box maximum
 //   @param center - Optional [x, y, z] box center (alternative to box_min/box_max)
@@ -2539,7 +2539,7 @@ namespace
 //   @returns { landscape_actor_name: string, delta_z: number, delta_steps: int, applied: bool, vertices_modified: int, region_width: int, region_height: int, region: [int] }
 // MCP:flatten_landscape_in_box - Level the terrain under a footprint: snap every heightmap vertex inside a world-space box to ONE absolute height, so a base, road or building pad sits flat. Give the height either as target_z in world units (converted using the landscape scale) or as a raw uint16 target_height (0..65535, where 32768 is the midpoint). Absolute, unlike set_landscape_height_in_box which adds a delta; follow with smooth_landscape_in_box to blend the hard rim it leaves. vertices_modified = 0 means the box never touched the terrain.
 //   @param landscape_actor_name - Optional landscape actor name, defaults to first found
-//   @param target_height - Optional uint16 heightmap value 0 to 65535
+//   @param target_height - Optional uint16 heightmap value 0 to 65535; with neither it nor target_z the box flattens to 32768, the landscape's local Z 0
 //   @param target_z - Optional target world Z, converted to uint16 using landscape scale
 //   @param box_min - Optional [x, y, z] world-space box minimum
 //   @param box_max - Optional [x, y, z] world-space box maximum
@@ -2548,7 +2548,7 @@ namespace
 //   @returns { landscape_actor_name: string, target_height: int, applied: bool, vertices_modified: int, region_width: int, region_height: int, region: [int] }
 // MCP:smooth_landscape_in_box - Soften terrain: run a 3x3 box blur over the heightmap inside a world-space box, 1 to 5 iterations. The finisher for the other two sculpt tools -- flatten_landscape_in_box and set_landscape_height_in_box leave a hard rim, and a couple of iterations here blends it. It only averages what is there; it cannot add relief.
 //   @param landscape_actor_name - Optional landscape actor name, defaults to first found
-//   @param iterations - Number of smoothing iterations 1 to 5
+//   @param iterations - Optional number of smoothing iterations 1 to 5, default 1
 //   @param box_min - Optional [x, y, z] world-space box minimum
 //   @param box_max - Optional [x, y, z] world-space box maximum
 //   @param center - Optional [x, y, z] box center (alternative to box_min/box_max)
@@ -2585,7 +2585,11 @@ TSharedPtr<FJsonObject> HandleSetLandscapeHeightInBox(const TSharedPtr<FJsonObje
         return Error;
     }
 
-    const double DeltaZ = static_cast<double>(Params->GetNumberField(TEXT("delta_z")));
+    double DeltaZ = 0.0;
+    if (TSharedPtr<FJsonObject> Error = mcp_common::ReadRequiredNumber(Params, TEXT("delta_z"), DeltaZ))
+    {
+        return Error;
+    }
     int32 DeltaSteps = 0;
     if (DeltaZ != 0.0 && !WorldZDeltaToUint16Step(Landscape, DeltaZ, DeltaSteps))
     {
@@ -2648,11 +2652,15 @@ TSharedPtr<FJsonObject> HandleFlattenLandscapeInBox(const TSharedPtr<FJsonObject
         return Error;
     }
 
-    // Default target: the landscape midpoint (32768 == Z = 0). Callers can
+    // Default target: the landscape midpoint (32768 == local Z 0). Callers can
     // pass target_z in WORLD units (the same scale that create_landscape
     // reports on `height` as a uint16 step; we convert here for clarity).
-    uint16 TargetH = static_cast<uint16>(FMath::Clamp(
-        static_cast<int32>(Params->GetNumberField(TEXT("target_height"))), 0, 65535));
+    uint16 TargetH = 32768;
+    double TargetHeight = 0.0;
+    if (Params->TryGetNumberField(TEXT("target_height"), TargetHeight))
+    {
+        TargetH = static_cast<uint16>(FMath::Clamp(FMath::RoundToInt(TargetHeight), 0, 65535));
+    }
     if (Params->HasField(TEXT("target_z")))
     {
         const double TargetZ = static_cast<double>(Params->GetNumberField(TEXT("target_z")));
@@ -2695,8 +2703,9 @@ TSharedPtr<FJsonObject> HandleSmoothLandscapeInBox(const TSharedPtr<FJsonObject>
     }
 
     // Iterations 1..5. 1 = single 3x3 box-blur, 5 = strong smoothing.
-    const int32 Iterations = FMath::Clamp(
-        static_cast<int32>(Params->GetNumberField(TEXT("iterations"))), 1, 5);
+    int32 Iterations = 1;
+    Params->TryGetNumberField(TEXT("iterations"), Iterations);
+    Iterations = FMath::Clamp(Iterations, 1, 5);
 
     FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SmoothLandscapeInBox", "Smooth Landscape In Box (MCP)"));
     Landscape->Modify();
