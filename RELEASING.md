@@ -8,6 +8,9 @@ changing the catalog's shape.
 
 - In `UEAgent.uplugin`, raise `Version` (an integer, one more per release) and set `VersionName`
   (`x.y.z`).
+- In `server.json`, set `version` to `x.y.z`. The `MCP Registry` workflow writes the tag's version
+  into the file it publishes, but the committed file is the one MCP directories and readers of the
+  repository see.
 - In `CHANGELOG.md`, rename `## Unreleased` to `## x.y.z - YYYY-MM-DD`, and start a new, empty
   `## Unreleased` above it.
 - Commit, push, and wait for the CI to pass.

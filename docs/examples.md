@@ -32,7 +32,7 @@ itself: the lists only show what each task touches. Every tool is described in t
 |---|---|
 | "Create AM_Attack with the sections Windup, Strike and Recover." | `create_anim_montage`, `add_montage_section` |
 | "Add a Footstep notify to AS_Run at 0.4 and 0.9 seconds." | `add_anim_notify` |
-| "Create NS_Sparks from a template emitter and place it at the forge." | `create_niagara_system`, `add_niagara_emitter_from_template`, `spawn_niagara_component` |
+| "Create NS_Sparks from a template emitter and place it at the forge." | `create_niagara_system`, `add_niagara_emitter_from_template`, `spawn_actor` |
 
 ## Gameplay and AI
 

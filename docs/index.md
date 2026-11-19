@@ -98,7 +98,8 @@ Two answers an agent gets, as the contract tests in `Resources/ContractTests` re
 
 === "A call that would crash the editor"
 
-    `create_material_expression` with a `SetMaterialAttributes` node trips an assertion in the engine.
+    `add_graph_node` with a `SetMaterialAttributes` node on a material trips an assertion in the engine.
+    It runs as `create_material_expression`, the name the refusal carries.
     The call never reaches the editor; the agent gets a tool error that names what works instead
     (message shortened here):
 

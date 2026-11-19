@@ -11,7 +11,7 @@ nothing is changed:
 - `apply_adaptive_remesh` (Geometry Script's adaptive remesh is new in 5.8);
 - `add_field_node` with `node_type` RotatedRadialVector;
 - `add_chooser_column` with `column_type` Name or OutputName;
-- `set_modulation_parameter_settings` with `clamp_to_normalized_range`;
+- `set_properties` writing `bClampToNormalizedRange` in the `Settings` of a modulation parameter;
 - `set_audio_section_properties` with `play_until_finished`.
 
 ## Which platforms?
