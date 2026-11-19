@@ -464,14 +464,27 @@ namespace
 		}
 	}
 
-	/** Reflects into UCollisionProfile's private DefaultChannelResponses TArray<FCustomChannelSetup>. */
-	FScriptArrayHelper ProjSettingsGetChannelArrayHelper(UCollisionProfile* Profile, FArrayProperty*& OutArrProp)
+	/**
+	 * Reflects into one of UCollisionProfile's private array properties. The property is found by name, so an
+	 * engine that renamed it gets an error reply instead of an assert.
+	 */
+	TSharedPtr<FJsonObject> ProjSettingsGetArrayHelper(UCollisionProfile* Profile, const TCHAR* PropertyName,
+		TOptional<FScriptArrayHelper>& OutHelper)
 	{
-		OutArrProp = CastField<FArrayProperty>(
-			UCollisionProfile::StaticClass()->FindPropertyByName(TEXT("DefaultChannelResponses")));
-		check(OutArrProp);
-		void* ArrPtr = OutArrProp->ContainerPtrToValuePtr<void>(Profile);
-		return FScriptArrayHelper(OutArrProp, ArrPtr);
+		FArrayProperty* ArrProp = CastField<FArrayProperty>(UCollisionProfile::StaticClass()->FindPropertyByName(PropertyName));
+		if (!ArrProp)
+		{
+			return mcp_common::MakeErrorReply(FString::Printf(
+				TEXT("UCollisionProfile has no array property '%s' in this engine version; nothing was changed"), PropertyName));
+		}
+		OutHelper.Emplace(ArrProp, ArrProp->ContainerPtrToValuePtr<void>(Profile));
+		return nullptr;
+	}
+
+	/** UCollisionProfile::DefaultChannelResponses (TArray<FCustomChannelSetup>), reflected (it is private). */
+	TSharedPtr<FJsonObject> ProjSettingsGetChannelArrayHelper(UCollisionProfile* Profile, TOptional<FScriptArrayHelper>& OutHelper)
+	{
+		return ProjSettingsGetArrayHelper(Profile, TEXT("DefaultChannelResponses"), OutHelper);
 	}
 
 	bool ProjSettingsParseCollisionEnabled(const FString& In, ECollisionEnabled::Type& Out)
@@ -925,8 +938,9 @@ TSharedPtr<FJsonObject> HandleAddCollisionChannel(
 	UCollisionProfile* Profile = nullptr;
 	if (TSharedPtr<FJsonObject> Error = ProjSettingsGetCollisionProfile(Profile)) { return Error; }
 
-	FArrayProperty* ArrProp = nullptr;
-	FScriptArrayHelper Helper = ProjSettingsGetChannelArrayHelper(Profile, ArrProp);
+	TOptional<FScriptArrayHelper> HelperOpt;
+	if (TSharedPtr<FJsonObject> Error = ProjSettingsGetChannelArrayHelper(Profile, HelperOpt)) { return Error; }
+	FScriptArrayHelper& Helper = HelperOpt.GetValue();
 
 	const FName ChannelFName(*ChannelName);
 	for (int32 i = 0; i < Helper.Num(); ++i)
@@ -1204,11 +1218,9 @@ TSharedPtr<FJsonObject> HandleAddCollisionProfile(
 namespace
 {
 	/** UCollisionProfile::Profiles, reflected (it is private). */
-	FScriptArrayHelper ProjSettingsGetProfilesHelper(UCollisionProfile* Profile, FArrayProperty*& OutArrProp)
+	TSharedPtr<FJsonObject> ProjSettingsGetProfilesHelper(UCollisionProfile* Profile, TOptional<FScriptArrayHelper>& OutHelper)
 	{
-		OutArrProp = CastField<FArrayProperty>(UCollisionProfile::StaticClass()->FindPropertyByName(TEXT("Profiles")));
-		check(OutArrProp);
-		return FScriptArrayHelper(OutArrProp, OutArrProp->ContainerPtrToValuePtr<void>(Profile));
+		return ProjSettingsGetArrayHelper(Profile, TEXT("Profiles"), OutHelper);
 	}
 }
 
@@ -1225,8 +1237,9 @@ TSharedPtr<FJsonObject> HandleRemoveCollisionChannel(
 	UCollisionProfile* Profile = nullptr;
 	if (TSharedPtr<FJsonObject> Error = ProjSettingsGetCollisionProfile(Profile)) { return Error; }
 
-	FArrayProperty* ChannelsProp = nullptr;
-	FScriptArrayHelper Channels = ProjSettingsGetChannelArrayHelper(Profile, ChannelsProp);
+	TOptional<FScriptArrayHelper> ChannelsOpt;
+	if (TSharedPtr<FJsonObject> Error = ProjSettingsGetChannelArrayHelper(Profile, ChannelsOpt)) { return Error; }
+	FScriptArrayHelper& Channels = ChannelsOpt.GetValue();
 	int32 ChannelIndex = INDEX_NONE;
 	FString ChannelSlot;
 	for (int32 i = 0; i < Channels.Num(); ++i)
@@ -1252,8 +1265,9 @@ TSharedPtr<FJsonObject> HandleRemoveCollisionChannel(
 	}
 
 	// A profile whose object type IS this channel would be left pointing at nothing: refused, as the panel warns.
-	FArrayProperty* ProfilesProp = nullptr;
-	FScriptArrayHelper Profiles = ProjSettingsGetProfilesHelper(Profile, ProfilesProp);
+	TOptional<FScriptArrayHelper> ProfilesOpt;
+	if (TSharedPtr<FJsonObject> Error = ProjSettingsGetProfilesHelper(Profile, ProfilesOpt)) { return Error; }
+	FScriptArrayHelper& Profiles = ProfilesOpt.GetValue();
 	TArray<FString> Users;
 	for (int32 i = 0; i < Profiles.Num(); ++i)
 	{
@@ -1303,7 +1317,9 @@ TSharedPtr<FJsonObject> HandleRemoveCollisionChannel(
 	Profile->TryUpdateDefaultConfigFile();
 
 	// The re-read: no custom channel carries the name any more.
-	FScriptArrayHelper ChannelsAfter = ProjSettingsGetChannelArrayHelper(Profile, ChannelsProp);
+	TOptional<FScriptArrayHelper> ChannelsAfterOpt;
+	if (TSharedPtr<FJsonObject> Error = ProjSettingsGetChannelArrayHelper(Profile, ChannelsAfterOpt)) { return Error; }
+	FScriptArrayHelper& ChannelsAfter = ChannelsAfterOpt.GetValue();
 	for (int32 i = 0; i < ChannelsAfter.Num(); ++i)
 	{
 		if (reinterpret_cast<const FCustomChannelSetup*>(ChannelsAfter.GetRawPtr(i))->Name == ChannelFName)
@@ -1332,8 +1348,9 @@ TSharedPtr<FJsonObject> HandleRemoveCollisionProfile(
 	UCollisionProfile* Profile = nullptr;
 	if (TSharedPtr<FJsonObject> Error = ProjSettingsGetCollisionProfile(Profile)) { return Error; }
 
-	FArrayProperty* ProfilesProp = nullptr;
-	FScriptArrayHelper Profiles = ProjSettingsGetProfilesHelper(Profile, ProfilesProp);
+	TOptional<FScriptArrayHelper> ProfilesOpt;
+	if (TSharedPtr<FJsonObject> Error = ProjSettingsGetProfilesHelper(Profile, ProfilesOpt)) { return Error; }
+	FScriptArrayHelper& Profiles = ProfilesOpt.GetValue();
 	int32 Index = INDEX_NONE;
 	for (int32 i = 0; i < Profiles.Num(); ++i)
 	{
