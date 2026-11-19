@@ -4,6 +4,47 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 ## Unreleased
 
+## 2.12.0 - 2026-11-19
+
+New tools read and drive the Content Browser and the asset editors, query the navmesh, draw debug shapes, wait for
+asset compilation and audit textures, meshes, asset names and level actors.
+
+### Added
+
+- **Content Browser and asset editor tools** (domain `Editor`): `get_selected_assets` and `get_content_browser_path`
+  read what the Content Browser shows, `sync_content_browser_to_assets` points it at assets, and
+  `open_asset_editor`, `close_asset_editor` and `list_open_asset_editors` open, close and list the asset editors.
+- **`list_plugins`** lists the plugins the editor discovered, with whether each is enabled and mounted, its type,
+  version, category and path, and filters on them.
+- **`get_asset_compilation_status` and `wait_for_asset_compilation`** read and wait on the editor's asynchronous
+  compilation (shaders, textures, meshes, sounds...), so a capture or a readback does not catch it half done.
+- **`draw_debug_shapes` and `clear_debug_shapes`** draw lines, arrows, boxes, spheres, points and text into the
+  editor world or a Play-in-Editor world, for a duration or until cleared, to show a location, a bound or a path.
+- **Navmesh queries** (domain `Navigation`): `find_nav_path` finds a path between two points,
+  `project_point_to_navmesh` projects a point onto the navmesh, and `get_random_reachable_point` picks a point
+  reachable from another.
+- **Audits** (domain `Audit`): `audit_textures`, `audit_static_meshes`, `audit_asset_naming` and
+  `audit_level_actors` answer findings, each with a severity and a suggested fix, a page at a time.
+- `list_pie_widgets` takes `include_bindings`: it lists, on each widget, the bindings its Widget Blueprint compiled
+  and whether the target's delegate is bound. The parameter was accepted and ignored.
+- `set_anim_transition_rule_from_bool` takes `negate`: with `true` the transition passes while the bool is false.
+
+### Changed
+
+- `set_landscape_height_in_box` requires `delta_z`. A call without it succeeded and changed nothing.
+- `get_plugin_status` answers the `.uplugin` file's creation time in `plugin_created_date`, where it answered the
+  descriptor's URL; the URL moves to `plugin_created_by_url`.
+
+### Fixed
+
+- `flatten_landscape_in_box` without a target height flattens to the 32768 midpoint, as documented, not to 0.
+- `reorder_niagara_modules`, the modulation generator (LFO) write, the collision channel and profile tools,
+  `rename_widget`, `duplicate_widget` and `reparent_widget` answer an error where they asserted and stopped the
+  editor.
+- A Windows clone passes the generators' `--check` and `Tools/check_skills.py`: `.gitattributes` checks text files
+  out with LF whatever `core.autocrlf` says.
+- The documentation names live tools where it named retired ones.
+
 ## 2.11.1 - 2026-11-13
 
 ### Fixed
