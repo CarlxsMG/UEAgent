@@ -418,6 +418,38 @@ namespace UEAgentManagementCommandsImpl
         Result->SetStringField(TEXT("plugin_file"), Plugin.GetDescriptorFileName());
     }
 
+    // Creation time of the plugin's .uplugin file, ISO 8601, or empty when the file system does not
+    // report one. The descriptor itself carries no date.
+    FString PluginFileCreationTime(const IPlugin& Plugin)
+    {
+        const FFileStatData Stat = IFileManager::Get().GetStatData(*Plugin.GetDescriptorFileName());
+        if (!Stat.bIsValid || Stat.CreationTime == FDateTime::MinValue())
+        {
+            return FString();
+        }
+        return Stat.CreationTime.ToIso8601();
+    }
+
+    // Where a plugin comes from, as list_plugins reports it: EPluginLoadedFrom ("engine" or "project").
+    const TCHAR* PluginLoadedFromLabel(EPluginLoadedFrom LoadedFrom)
+    {
+        return LoadedFrom == EPluginLoadedFrom::Project ? TEXT("project") : TEXT("engine");
+    }
+
+    // The finer EPluginType, lower case.
+    const TCHAR* PluginTypeLabel(EPluginType Type)
+    {
+        switch (Type)
+        {
+        case EPluginType::Engine:     return TEXT("engine");
+        case EPluginType::Enterprise: return TEXT("enterprise");
+        case EPluginType::Project:    return TEXT("project");
+        case EPluginType::External:   return TEXT("external");
+        case EPluginType::Mod:        return TEXT("mod");
+        default:                      return TEXT("other");
+        }
+    }
+
     // Plugins this one references. The reference descriptor carries no version, so every
     // entry reports "Unknown".
     TArray<TSharedPtr<FJsonValue>> DescribePluginReferences(const FPluginDescriptor& Descriptor)
@@ -1310,9 +1342,9 @@ TSharedPtr<FJsonObject> HandleDeleteAsset(const TSharedPtr<FJsonObject>& Params)
 
 // Plugin status
 
-// MCP:get_plugin_status - Read one plugin by name, read-only: Enabled or Disabled, version, author, category, base dir, .uplugin file, dependencies and modules. An unknown name returns plugin_status "Not Found" with "N/A" fields, not an error. plugin_loaded only mirrors plugin_enabled, and plugin_created_date holds the CreatedByURL.
+// MCP:get_plugin_status - Read one plugin by name, read-only: Enabled or Disabled, version, author, category, base dir, .uplugin file, dependencies and modules. An unknown name returns plugin_status "Not Found" with "N/A" fields, not an error. plugin_loaded only mirrors plugin_enabled. The .uplugin has no creation date: plugin_created_date is the creation time of the .uplugin file on disk (ISO 8601, empty when unknown), which is when it was installed or copied, and plugin_created_by_url holds the descriptor's CreatedByURL. To list every plugin use list_plugins.
 //   @param plugin_name - Name of the plugin to query, as its .uplugin file is named (e.g. "UEAgent")
-//   @returns { plugin_name: string, plugin_status: string, plugin_version: string, plugin_description: string, plugin_author: string, plugin_created_date: string, plugin_category: string, plugin_loaded: bool, plugin_enabled: bool, plugin_path: string, plugin_file: string, plugin_dependencies: [{ name: string, enabled: bool, optional: bool, version: string }], plugin_modules: [{ name: string, type: string, loading_phase: bool }], plugin_message: string, plugin_manager_version: string, plugin_search_paths: string, plugin_status_timestamp: string }
+//   @returns { plugin_name: string, plugin_status: string, plugin_version: string, plugin_description: string, plugin_author: string, plugin_created_date: string, plugin_created_by_url: string, plugin_category: string, plugin_loaded: bool, plugin_enabled: bool, plugin_path: string, plugin_file: string, plugin_dependencies: [{ name: string, enabled: bool, optional: bool, version: string }], plugin_modules: [{ name: string, type: string, loading_phase: bool }], plugin_message: string, plugin_manager_version: string, plugin_search_paths: string, plugin_status_timestamp: string }
 
 TSharedPtr<FJsonObject> HandleGetPluginStatus(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1327,8 +1359,8 @@ TSharedPtr<FJsonObject> HandleGetPluginStatus(const TSharedPtr<FJsonObject>& Par
     {
         const FPluginDescriptor& Descriptor = Plugin->GetDescriptor();
         UEAgentManagementCommandsImpl::AddPluginIdentity(Status, *Plugin);
-        // Kept under this key for compatibility: the descriptor's CreatedByURL.
-        Status->SetStringField(TEXT("plugin_created_date"), Descriptor.CreatedByURL);
+        Status->SetStringField(TEXT("plugin_created_date"), UEAgentManagementCommandsImpl::PluginFileCreationTime(*Plugin));
+        Status->SetStringField(TEXT("plugin_created_by_url"), Descriptor.CreatedByURL);
         Status->SetArrayField(TEXT("plugin_dependencies"), UEAgentManagementCommandsImpl::DescribePluginReferences(Descriptor));
         Status->SetArrayField(TEXT("plugin_modules"), UEAgentManagementCommandsImpl::DescribePluginModules(Descriptor));
         Status->SetStringField(TEXT("plugin_message"), TEXT("Plugin status retrieved successfully"));
@@ -1339,7 +1371,7 @@ TSharedPtr<FJsonObject> HandleGetPluginStatus(const TSharedPtr<FJsonObject>& Par
         Status->SetStringField(TEXT("plugin_status"), TEXT("Not Found"));
         static const TCHAR* const UnknownTextFields[] = {
             TEXT("plugin_version"), TEXT("plugin_description"), TEXT("plugin_author"),
-            TEXT("plugin_created_date"), TEXT("plugin_category"), TEXT("plugin_path"), TEXT("plugin_file"),
+            TEXT("plugin_created_date"), TEXT("plugin_created_by_url"), TEXT("plugin_category"), TEXT("plugin_path"), TEXT("plugin_file"),
         };
         for (const TCHAR* Field : UnknownTextFields)
         {
@@ -1354,6 +1386,97 @@ TSharedPtr<FJsonObject> HandleGetPluginStatus(const TSharedPtr<FJsonObject>& Par
     Status->SetStringField(TEXT("plugin_search_paths"), FPaths::ProjectPluginsDir());
     Status->SetStringField(TEXT("plugin_status_timestamp"), FDateTime::Now().ToString());
     return Status;
+}
+
+// MCP:list_plugins - List the plugins this editor has discovered, enabled or not, sorted by name: whether each is enabled and mounted, whether it comes from the engine or the project, its version, category and folder. Filters combine (all must match). Read-only. Use get_plugin_status for one plugin's dependencies and modules, and set_plugin_enabled to turn one on or off.
+//   @param enabled - Optional bool: true lists only enabled plugins, false only disabled ones; omitted lists both.
+//   @param type - Optional: "project" (plugins the project loads from its own folders), "engine" (the engine's), or "all" (default).
+//   @param name_filter - Optional case-insensitive substring of the plugin's name or friendly name.
+//   @param category - Optional case-insensitive substring of the plugin's category (e.g. "Editor", "Rendering").
+//   @param include_hidden - Optional bool (default true): include plugins the Plugins window hides.
+//   @returns { plugins: [{ name: string, friendly_name: string, enabled: bool, mounted: bool, type: "engine"|"project", plugin_type: "engine"|"enterprise"|"project"|"external"|"mod", version: string, version_number: int, category: string, path: string, descriptor_file: string, can_contain_content: bool, is_beta: bool, is_experimental: bool, hidden: bool }], count: int, total_discovered: int }
+
+TSharedPtr<FJsonObject> HandleListPlugins(const TSharedPtr<FJsonObject>& Params)
+{
+    bool bEnabledWanted = false;
+    const bool bFilterEnabled = Params->TryGetBoolField(TEXT("enabled"), bEnabledWanted);
+    FString TypeFilter = TEXT("all");
+    Params->TryGetStringField(TEXT("type"), TypeFilter);
+    TypeFilter = TypeFilter.TrimStartAndEnd().ToLower();
+    if (TypeFilter.IsEmpty())
+    {
+        TypeFilter = TEXT("all");
+    }
+    if (TypeFilter != TEXT("all") && TypeFilter != TEXT("project") && TypeFilter != TEXT("engine"))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Invalid type '%s': use project, engine or all"), *TypeFilter));
+    }
+    FString NameFilter;
+    Params->TryGetStringField(TEXT("name_filter"), NameFilter);
+    NameFilter.TrimStartAndEndInline();
+    FString CategoryFilter;
+    Params->TryGetStringField(TEXT("category"), CategoryFilter);
+    CategoryFilter.TrimStartAndEndInline();
+    bool bIncludeHidden = true;
+    Params->TryGetBoolField(TEXT("include_hidden"), bIncludeHidden);
+
+    TArray<TSharedRef<IPlugin>> Discovered = IPluginManager::Get().GetDiscoveredPlugins();
+    Discovered.Sort([](const TSharedRef<IPlugin>& A, const TSharedRef<IPlugin>& B)
+    {
+        return A->GetName() < B->GetName();
+    });
+
+    TArray<TSharedPtr<FJsonValue>> Rows;
+    for (const TSharedRef<IPlugin>& Plugin : Discovered)
+    {
+        const FPluginDescriptor& Descriptor = Plugin->GetDescriptor();
+        const bool bEnabled = Plugin->IsEnabled();
+        const FString LoadedFrom = UEAgentManagementCommandsImpl::PluginLoadedFromLabel(Plugin->GetLoadedFrom());
+        if (bFilterEnabled && bEnabled != bEnabledWanted)
+        {
+            continue;
+        }
+        if (TypeFilter != TEXT("all") && TypeFilter != LoadedFrom)
+        {
+            continue;
+        }
+        if (!bIncludeHidden && Plugin->IsHidden())
+        {
+            continue;
+        }
+        if (!NameFilter.IsEmpty() && !Plugin->GetName().Contains(NameFilter) && !Plugin->GetFriendlyName().Contains(NameFilter))
+        {
+            continue;
+        }
+        if (!CategoryFilter.IsEmpty() && !Descriptor.Category.Contains(CategoryFilter))
+        {
+            continue;
+        }
+
+        TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
+        Row->SetStringField(TEXT("name"), Plugin->GetName());
+        Row->SetStringField(TEXT("friendly_name"), Plugin->GetFriendlyName());
+        Row->SetBoolField(TEXT("enabled"), bEnabled);
+        Row->SetBoolField(TEXT("mounted"), Plugin->IsMounted());
+        Row->SetStringField(TEXT("type"), LoadedFrom);
+        Row->SetStringField(TEXT("plugin_type"), UEAgentManagementCommandsImpl::PluginTypeLabel(Plugin->GetType()));
+        Row->SetStringField(TEXT("version"), Descriptor.VersionName);
+        Row->SetNumberField(TEXT("version_number"), Descriptor.Version);
+        Row->SetStringField(TEXT("category"), Descriptor.Category);
+        Row->SetStringField(TEXT("path"), Plugin->GetBaseDir());
+        Row->SetStringField(TEXT("descriptor_file"), Plugin->GetDescriptorFileName());
+        Row->SetBoolField(TEXT("can_contain_content"), Plugin->CanContainContent());
+        Row->SetBoolField(TEXT("is_beta"), Descriptor.bIsBetaVersion);
+        Row->SetBoolField(TEXT("is_experimental"), Descriptor.bIsExperimentalVersion);
+        Row->SetBoolField(TEXT("hidden"), Plugin->IsHidden());
+        Rows.Add(MakeShared<FJsonValueObject>(Row));
+    }
+
+    TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
+    Reply->SetArrayField(TEXT("plugins"), Rows);
+    Reply->SetNumberField(TEXT("count"), Rows.Num());
+    Reply->SetNumberField(TEXT("total_discovered"), Discovered.Num());
+    return mcp_common::MakeOkReply(Reply);
 }
 
 // ==========================================================================
@@ -2017,6 +2140,7 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("duplicate_asset"), &HandleDuplicateAsset },
     { TEXT("duplicate_directory"), &HandleDuplicateDirectory },
     { TEXT("get_plugin_status"), &HandleGetPluginStatus },
+    { TEXT("list_plugins"), &HandleListPlugins },
     { TEXT("move_asset"), &HandleMoveAsset },
     { TEXT("rename_asset"), &HandleRenameAsset },
     { TEXT("run_external_project_script"), &HandleRunExternalProjectScript },
