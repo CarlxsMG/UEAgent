@@ -259,7 +259,9 @@ TSharedPtr<FJsonObject> HandleDeactivateExternalSubsystem(
 // MCP:list_subsystem_instances - Enumerate the USubsystem instances live right now, with each one's class path and lifetime (class default objects are skipped); with class_name it answers the yes/no question for ONE class instead -- active is whether that class (or a subclass) has any live instance, across every lifetime. A LocalPlayer subsystem only exists while a PIE session has a local player, so a headless editor lists Engine / Editor / GameInstance / World ones; list_local_player_subsystems reads a PIE player's.
 //   @param lifetime - Optional filter: "Engine"|"Editor"|"GameInstance"|"World"|"LocalPlayer" (case-insensitive)
 //   @param class_name - Optional USubsystem class (short name or /Script/ path): keep only the instances of that class or a subclass. A name that does not resolve to a USubsystem class is an error.
-//   @returns { total: int, instance_count: int, active: bool, lifetime_filter?, class_name?, lifetime?, instances:[{ class_name, class_path, lifetime, instance_name, instance_path }] } -- total and instance_count are the same number and active is total > 0; class_name and lifetime (the class's own lifetime category) appear when class_name was given.
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { total: int, instance_count: int, active: bool, lifetime_filter?, class_name?, lifetime?, instances:[{ class_name, class_path, lifetime, instance_name, instance_path }] (sorted by instance_path, paged with offset/limit), offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null } -- total and instance_count are the same number, every match before the page cut, and active is total > 0; class_name and lifetime (the class's own lifetime category) appear when class_name was given.
 
 TSharedPtr<FJsonObject> HandleListSubsystemInstances(
 	const TSharedPtr<FJsonObject>& Params)
@@ -308,9 +310,12 @@ TSharedPtr<FJsonObject> HandleListSubsystemInstances(
 	}
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetNumberField(TEXT("total"), Entries.Num());
-	Data->SetNumberField(TEXT("instance_count"), Entries.Num());
-	Data->SetBoolField(TEXT("active"), Entries.Num() > 0);
+	mcp_common::SortJsonItems(Entries, TEXT("instance_path"));
+	const int32 MatchCount = Entries.Num();
+	mcp_common::ApplyListPage(Entries, mcp_common::ReadListPage(Params), Data);
+	Data->SetNumberField(TEXT("total"), MatchCount);
+	Data->SetNumberField(TEXT("instance_count"), MatchCount);
+	Data->SetBoolField(TEXT("active"), MatchCount > 0);
 	if (!LifetimeFilter.IsEmpty())
 	{
 		Data->SetStringField(TEXT("lifetime_filter"), LifetimeFilter);

@@ -2332,7 +2332,9 @@ namespace
 // MCP:list_all_input_mappings - Which keys are already TAKEN, and which ones CONFLICT: aggregates every key-to-action binding across ALL Enhanced Input mapping context assets plus the legacy InputSettings action/axis mappings, and flags any key bound to more than one distinct action. Run it BEFORE claiming a new key -- a keybinding collision does not fail to compile, it surfaces weeks later inside another system. This is the aggregate you can trust: the Python route (InputMappingContext.mappings) is deprecated and returns an EMPTY list, which reads as "every key is free" even when every letter is taken. Use find_free_input_key for the complement (what is still unbound), get_input_mapping_context for one context.
 //   @param filter - Optional case-insensitive substring on the key name to narrow the returned key_bindings.
 //   @param conflicts_only - When true, return only keys flagged as conflicts (more than one distinct action on the same key). Default false.
-//   @returns { contexts:[{context_path,context_name,mapping_count}], context_count, key_bindings:[{key,display_name,bindings:[{action,source,context_path}],binding_count,distinct_action_count,conflict}], bound_key_count, conflicts:[...], conflict_count, legacy_action_mapping_count, legacy_axis_mapping_count }
+//   @param offset [integer] - Index of the first key_bindings entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { contexts:[{context_path,context_name,mapping_count}], context_count, key_bindings:[{key,display_name,bindings:[{action,source,context_path}],binding_count,distinct_action_count,conflict}] (sorted by key, paged with offset/limit), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null, bound_key_count, conflicts:[...], conflict_count, legacy_action_mapping_count, legacy_axis_mapping_count }
 TSharedPtr<FJsonObject> HandleListAllInputMappings(const TSharedPtr<FJsonObject>& Params)
 {
     FInputBindingCensus_InputCmds Census = BuildInputBindingMap_InputCmds();
@@ -2402,6 +2404,7 @@ TSharedPtr<FJsonObject> HandleListAllInputMappings(const TSharedPtr<FJsonObject>
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetArrayField(TEXT("contexts"), Census.Contexts);
     Data->SetNumberField(TEXT("context_count"), Census.ContextCount);
+    mcp_common::ApplyListPage(KeyBindingsJson, mcp_common::ReadListPage(Params), Data);
     Data->SetArrayField(TEXT("key_bindings"), KeyBindingsJson);
     Data->SetNumberField(TEXT("bound_key_count"), Census.KeyToBindings.Num());
     Data->SetArrayField(TEXT("conflicts"), ConflictsJson);
@@ -2411,11 +2414,13 @@ TSharedPtr<FJsonObject> HandleListAllInputMappings(const TSharedPtr<FJsonObject>
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:find_free_input_key - Which keys are still FREE: lists every input key not bound by any Enhanced Input mapping context or legacy mapping, filterable by category (keyboard / gamepad / mouse / touch) and substring, plus the matching keys that are already bound. The complement of list_all_input_mappings and the tool to run before binding a new keyboard shortcut, since a collision compiles silently and only shows up in play. Also the spelling lookup for any key the engine defines: with bindable_only=false and no category, free_keys + bound_keys together are the full engine key list, each with its exact FKey name ("SpaceBar", "Gamepad_FaceButton_Bottom") and its display name. Trustworthy where the Python route is not: InputMappingContext.mappings is deprecated and returns empty, which makes every taken key look available.
+// MCP:find_free_input_key - Which keys are still FREE: lists every input key not bound by any Enhanced Input mapping context or legacy mapping, filterable by category (keyboard / gamepad / mouse / touch) and substring, plus the matching keys that are already bound. The complement of list_all_input_mappings and the tool to run before binding a new keyboard shortcut, since a collision compiles silently and only shows up in play. Also the spelling lookup for any key the engine defines: with bindable_only=false and no category, free_keys (paged with offset/limit) + bound_keys together are the full engine key list, each with its exact FKey name ("SpaceBar", "Gamepad_FaceButton_Bottom") and its display name. Trustworthy where the Python route is not: InputMappingContext.mappings is deprecated and returns empty, which makes every taken key look available.
 //   @param filter - Optional case-insensitive substring matched against the key name or display name.
 //   @param category - Optional key category filter: one of 'keyboard', 'gamepad', 'mouse', 'touch'. Absent = all categories.
 //   @param bindable_only - When true (default), only keys where FKey::IsBindableInBlueprints() is true are considered (skips AnyKey/gestures/etc.). false lists every valid key the engine defines.
-//   @returns { free_keys:[{name (the FKey name binding calls take), key (same), display_name, is_gamepad, is_mouse, is_analog}], free_key_count, bound_keys:[...same shape], bound_key_count (keys bound anywhere, unfiltered), key_count (free_keys + bound_keys listed) }
+//   @param offset [integer] - Index of the first free_keys entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { free_keys:[{name (the FKey name binding calls take), key (same), display_name, is_gamepad, is_mouse, is_analog}] (sorted by name, paged with offset/limit), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null, free_key_count, bound_keys:[...same shape], bound_key_count (keys bound anywhere, unfiltered), key_count (free_keys + bound_keys listed) }
 TSharedPtr<FJsonObject> HandleFindFreeInputKey(const TSharedPtr<FJsonObject>& Params)
 {
     const FInputBindingCensus_InputCmds Census = BuildInputBindingMap_InputCmds();
@@ -2486,6 +2491,8 @@ TSharedPtr<FJsonObject> HandleFindFreeInputKey(const TSharedPtr<FJsonObject>& Pa
     }
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    mcp_common::SortJsonItems(FreeKeys, TEXT("name"));
+    mcp_common::ApplyListPage(FreeKeys, mcp_common::ReadListPage(Params), Data);
     Data->SetArrayField(TEXT("free_keys"), FreeKeys);
     Data->SetNumberField(TEXT("free_key_count"), FreeCount);
     Data->SetNumberField(TEXT("bound_key_count"), Census.KeyToBindings.Num());

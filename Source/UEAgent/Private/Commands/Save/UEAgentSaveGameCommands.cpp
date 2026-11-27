@@ -262,7 +262,9 @@ TSharedPtr<FJsonObject> HandleDeleteSaveGame(const TSharedPtr<FJsonObject>& Para
 
 // MCP:list_save_games - List the save slots the platform's save system knows for a user index: on desktop, the .sav files at the root of Saved/SaveGames, each with slot_name and, when that file exists, file_path and file_size. Use it to find slot names for load_game, get_save_game_slot_info (one slot, with its modified time) or delete_save_game; save_game writes a slot. A save system can also keep a slot as a FOLDER of .sav files, which is not a slot here: those folders are reported apart in slot_folders (count does not include them), so an empty list is only proof of no save when slot_folders is empty too. Read-only and idempotent; no PIE needed. No saves at all gives count 0, not an error.
 //   @param user_index - Optional user index, default 0. Passed to the platform's save system; the generic desktop one keeps every user's slots in one folder, so there it changes nothing.
-//   @returns { user_index: int, save_directory: string, save_games: [{ slot_name, file_path?, file_size? }], count: int, slot_folders: [{ folder, sav_files }] (subfolders of save_directory holding .sav files, searched recursively) }
+//   @param offset [integer] - Index of the first save_games entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { user_index: int, save_directory: string, save_games: [{ slot_name, file_path?, file_size? }] (sorted by slot_name, paged with offset/limit), count: int (entries in this page), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null, slot_folders: [{ folder, sav_files }] (subfolders of save_directory holding .sav files, searched recursively) }
 TSharedPtr<FJsonObject> HandleListSaveGames(const TSharedPtr<FJsonObject>& Params)
 {
     int32 User = 0;
@@ -311,6 +313,8 @@ TSharedPtr<FJsonObject> HandleListSaveGames(const TSharedPtr<FJsonObject>& Param
     }
 
     TSharedPtr<FJsonObject> Listing = MakeShared<FJsonObject>();
+    mcp_common::SortJsonItems(Found, TEXT("slot_name"));
+    mcp_common::ApplyListPage(Found, mcp_common::ReadListPage(Params), Listing);
     Listing->SetNumberField(TEXT("user_index"), User);
     Listing->SetStringField(TEXT("save_directory"), Folder);
     Listing->SetNumberField(TEXT("count"), Found.Num());

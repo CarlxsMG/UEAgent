@@ -725,8 +725,10 @@ TSharedPtr<FJsonObject> HandleRegionEnd(const TSharedPtr<FJsonObject>& Params)
     return mcp_common::MakeOkReply(Resp);
 }
 
-// MCP:list_traces - Enumerate .utrace files in <ProjectDir>/Saved/Profiling/, returning their path, size and modification time.
-//   @returns { directory: string, count: int, traces: [{ path, name, size_bytes, modified_iso }] } -- directory is the resolved profiling folder; only its own files are listed, not subfolders.
+// MCP:list_traces - Enumerate .utrace files in <ProjectDir>/Saved/Profiling/, returning their path, size and modification time, sorted by name and paged with offset/limit.
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { directory: string, count: int (entries in this page), traces: [{ path, name, size_bytes, modified_iso }], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null } -- directory is the resolved profiling folder; only its own files are listed, not subfolders.
 TSharedPtr<FJsonObject> HandleListTraces(const TSharedPtr<FJsonObject>& Params)
 {
     const FString    ProfilingDir = FPaths::ProfilingDir();
@@ -751,8 +753,10 @@ TSharedPtr<FJsonObject> HandleListTraces(const TSharedPtr<FJsonObject>& Params)
     }
 
     TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+    mcp_common::SortJsonItems(TracesJson, TEXT("name"));
+    mcp_common::ApplyListPage(TracesJson, mcp_common::ReadListPage(Params), Resp);
     Resp->SetStringField(TEXT("directory"), ProfilingDir);
-    Resp->SetNumberField(TEXT("count"),     Files.Num());
+    Resp->SetNumberField(TEXT("count"),     TracesJson.Num());
     Resp->SetArrayField (TEXT("traces"),    TracesJson);
     return mcp_common::MakeOkReply(Resp);
 }
