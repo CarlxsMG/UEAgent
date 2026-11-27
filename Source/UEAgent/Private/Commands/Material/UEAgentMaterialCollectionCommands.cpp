@@ -1244,11 +1244,13 @@ TSharedPtr<FJsonObject> HandleClearMpciParameterOverrides(const TSharedPtr<FJson
     Result->SetNumberField(TEXT("vector_count"), Collection->VectorParameters.Num());
     Result->SetNumberField(TEXT("scalars_reset_to_default"), ScalarsReadback);
     Result->SetNumberField(TEXT("vectors_reset_to_default"), VectorsReadback);
-    Result->SetBoolField(TEXT("cleared"), true);
+    const bool bCleared = ScalarsReadback == Collection->ScalarParameters.Num() && VectorsReadback == Collection->VectorParameters.Num();
+    Result->SetBoolField(TEXT("cleared"), bCleared);
     Result->SetBoolField(TEXT("is_valid"), Instance->IsCollectionValid());
     Result->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
     Result->SetBoolField(TEXT("created"), !bAlreadyExisted);
-    return mcp_common::MakeOkReply(Result);
+    return mcp_common::MakeOutcomeReply(Result, bCleared,
+        mcp_common::MeasuredOutcomeError(TEXT("reset_material_parameter_collection_instance"), TEXT("cleared")));
 }
 
 const McpCommandFamilies::FRegistrar Registration =

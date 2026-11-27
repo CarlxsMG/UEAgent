@@ -345,8 +345,12 @@ TSharedPtr<FJsonObject> HandleSetMaterialInstanceParent(const TSharedPtr<FJsonOb
 	Data->SetStringField(TEXT("old_parent"), OldParentName);
 	Data->SetStringField(TEXT("new_parent"), NewParentRead);
 	Data->SetBoolField(TEXT("changed"), !OldParentName.Equals(NewParentRead));
+	const bool bParentSet = MIC->Parent == NewParent;
+	Data->SetBoolField(TEXT("parent_set"), bParentSet);
 
-	return mcp_common::MakeOkReply(Data);
+	return mcp_common::MakeOutcomeReply(Data, bParentSet, FString::Printf(
+		TEXT("set_material_instance_parent: the instance's parent reads back as %s, not %s (a parent that would make a cycle is refused)"),
+		*NewParentRead, *NewParent->GetName()));
 }
 
 // MCP:copy_material_instance_parameters - Bulk-copy every scalar, vector and texture OVERRIDE from one material instance to another -- the way to clone a calibration onto a sibling instance instead of re-setting parameters one by one. Copies overrides only, so anything the source inherited untouched is not carried, and STATIC SWITCHES are not copied at all (set those with set_material_instance_parameter). Read the copied counts in the reply and verify with get_material_parameters; diff_material_instances shows what still differs.
@@ -370,32 +374,44 @@ TSharedPtr<FJsonObject> HandleCopyMaterialInstanceParams(const TSharedPtr<FJsonO
 
 	DestMIC->Modify();
 
-	int32 ScalarsCopied = 0;
-	int32 VectorsCopied = 0;
-	int32 TexturesCopied = 0;
-
-	// Copy scalar parameters
 	for (const FScalarParameterValue& SPV : SourceMIC->ScalarParameterValues)
 	{
 		DestMIC->SetScalarParameterValueEditorOnly(SPV.ParameterInfo, SPV.ParameterValue);
-		ScalarsCopied++;
 	}
-
-	// Copy vector parameters
 	for (const FVectorParameterValue& VPV : SourceMIC->VectorParameterValues)
 	{
 		DestMIC->SetVectorParameterValueEditorOnly(VPV.ParameterInfo, VPV.ParameterValue);
-		VectorsCopied++;
 	}
-
-	// Copy texture parameters
 	for (const FTextureParameterValue& TPV : SourceMIC->TextureParameterValues)
 	{
 		DestMIC->SetTextureParameterValueEditorOnly(TPV.ParameterInfo, TPV.ParameterValue);
-		TexturesCopied++;
 	}
 
 	if (TSharedPtr<FJsonObject> SaveFailed = UEAgentMaterialInstanceImpl::CommitInstance(DestMIC)) { return SaveFailed; }
+
+	// The re-read: a source override counts as copied when the destination now stores the same value for it.
+	auto CountCopied = [](const auto& SourceValues, const auto& DestValues)
+	{
+		int32 Copied = 0;
+		for (const auto& SourceValue : SourceValues)
+		{
+			for (const auto& DestValue : DestValues)
+			{
+				if (DestValue.ParameterInfo == SourceValue.ParameterInfo && DestValue.ParameterValue == SourceValue.ParameterValue)
+				{
+					++Copied;
+					break;
+				}
+			}
+		}
+		return Copied;
+	};
+	const int32 ScalarsCopied = CountCopied(SourceMIC->ScalarParameterValues, DestMIC->ScalarParameterValues);
+	const int32 VectorsCopied = CountCopied(SourceMIC->VectorParameterValues, DestMIC->VectorParameterValues);
+	const int32 TexturesCopied = CountCopied(SourceMIC->TextureParameterValues, DestMIC->TextureParameterValues);
+	const bool bAllCopied = ScalarsCopied == SourceMIC->ScalarParameterValues.Num()
+		&& VectorsCopied == SourceMIC->VectorParameterValues.Num()
+		&& TexturesCopied == SourceMIC->TextureParameterValues.Num();
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("source_path"), SourcePath);
@@ -403,8 +419,12 @@ TSharedPtr<FJsonObject> HandleCopyMaterialInstanceParams(const TSharedPtr<FJsonO
 	Data->SetNumberField(TEXT("scalars_copied"), ScalarsCopied);
 	Data->SetNumberField(TEXT("vectors_copied"), VectorsCopied);
 	Data->SetNumberField(TEXT("textures_copied"), TexturesCopied);
+	Data->SetBoolField(TEXT("all_copied"), bAllCopied);
 
-	return mcp_common::MakeOkReply(Data);
+	return mcp_common::MakeOutcomeReply(Data, bAllCopied, FString::Printf(
+		TEXT("copy_material_instance_parameters: the destination does not hold every source override (scalars %d/%d, vectors %d/%d, textures %d/%d)"),
+		ScalarsCopied, SourceMIC->ScalarParameterValues.Num(), VectorsCopied, SourceMIC->VectorParameterValues.Num(),
+		TexturesCopied, SourceMIC->TextureParameterValues.Num()));
 }
 
 // ============================================================================
@@ -433,6 +453,40 @@ namespace
 		case EMaterialParameterAssociation::BlendParameter:   return TEXT("Blend");
 		default:                                              return TEXT("Unknown");
 		}
+	}
+}
+
+namespace
+{
+	/** The value Values stores for Info (an override of the instance itself), or nullptr. */
+	template <typename ValueType>
+	const ValueType* FindStoredParameter(const TArray<ValueType>& Values, const FMaterialParameterInfo& Info)
+	{
+		return Values.FindByPredicate([&Info](const ValueType& Value) { return Value.ParameterInfo == Info; });
+	}
+
+	/** The scalar, vector and texture overrides MIC stores for layer LayerIndex, as sorted "kind:name=value" text. */
+	FString LayerOverridesFingerprint(const UMaterialInstanceConstant* MIC, int32 LayerIndex)
+	{
+		TArray<FString> Entries;
+		auto IsLayer = [LayerIndex](const FMaterialParameterInfo& Info)
+		{
+			return Info.Association == EMaterialParameterAssociation::LayerParameter && Info.Index == LayerIndex;
+		};
+		for (const FScalarParameterValue& Value : MIC->ScalarParameterValues)
+		{
+			if (IsLayer(Value.ParameterInfo)) { Entries.Add(FString::Printf(TEXT("s:%s=%g"), *Value.ParameterInfo.Name.ToString(), Value.ParameterValue)); }
+		}
+		for (const FVectorParameterValue& Value : MIC->VectorParameterValues)
+		{
+			if (IsLayer(Value.ParameterInfo)) { Entries.Add(FString::Printf(TEXT("v:%s=%s"), *Value.ParameterInfo.Name.ToString(), *Value.ParameterValue.ToString())); }
+		}
+		for (const FTextureParameterValue& Value : MIC->TextureParameterValues)
+		{
+			if (IsLayer(Value.ParameterInfo)) { Entries.Add(FString::Printf(TEXT("t:%s=%s"), *Value.ParameterInfo.Name.ToString(), *GetPathNameSafe(Value.ParameterValue))); }
+		}
+		Entries.Sort();
+		return FString::Join(Entries, TEXT(";"));
 	}
 }
 
@@ -467,12 +521,19 @@ TSharedPtr<FJsonObject> HandleSetMaterialLayerParameter(
 
 	MIC->Modify();
 
+	// What the instance must store for ParamInfo once the write is committed, checked after the save.
+	TFunction<bool()> ReadsBack;
 	if (ParamType.Equals(TEXT("scalar"), ESearchCase::IgnoreCase))
 	{
 		float Value = 0.0f;
 		if (!Params->TryGetNumberField(TEXT("value"), Value))
 			return mcp_common::MakeErrorReply(TEXT("Missing required parameter: value (number) for scalar type"));
 		MIC->SetScalarParameterValueEditorOnly(ParamInfo, Value);
+		ReadsBack = [MIC, ParamInfo, Value]()
+		{
+			const FScalarParameterValue* Stored = FindStoredParameter(MIC->ScalarParameterValues, ParamInfo);
+			return Stored != nullptr && Stored->ParameterValue == Value;
+		};
 	}
 	else if (ParamType.Equals(TEXT("vector"), ESearchCase::IgnoreCase))
 	{
@@ -485,6 +546,11 @@ TSharedPtr<FJsonObject> HandleSetMaterialLayerParameter(
 		(*VecObj)->TryGetNumberField(TEXT("b"), Color.B);
 		(*VecObj)->TryGetNumberField(TEXT("a"), Color.A);
 		MIC->SetVectorParameterValueEditorOnly(ParamInfo, Color);
+		ReadsBack = [MIC, ParamInfo, Color]()
+		{
+			const FVectorParameterValue* Stored = FindStoredParameter(MIC->VectorParameterValues, ParamInfo);
+			return Stored != nullptr && Stored->ParameterValue == Color;
+		};
 	}
 	else if (ParamType.Equals(TEXT("texture"), ESearchCase::IgnoreCase))
 	{
@@ -495,6 +561,11 @@ TSharedPtr<FJsonObject> HandleSetMaterialLayerParameter(
 		if (!Tex)
 			return mcp_common::MakeErrorReply(FString::Printf(TEXT("Texture not found: %s"), *TexturePath));
 		MIC->SetTextureParameterValueEditorOnly(ParamInfo, Tex);
+		ReadsBack = [MIC, ParamInfo, Tex]()
+		{
+			const FTextureParameterValue* Stored = FindStoredParameter(MIC->TextureParameterValues, ParamInfo);
+			return Stored != nullptr && Stored->ParameterValue == Tex;
+		};
 	}
 	else
 	{
@@ -507,8 +578,12 @@ TSharedPtr<FJsonObject> HandleSetMaterialLayerParameter(
 	TSharedPtr<FJsonObject> Data = UEAgentMaterialInstanceImpl::NewPayload(MIPath);
 	Data->SetStringField(TEXT("parameter_name"), ParamName);
 	Data->SetNumberField(TEXT("layer_index"), LayerIndex);
-	Data->SetBoolField(TEXT("success"), true);
-	return mcp_common::MakeOkReply(Data);
+	const bool bStored = ReadsBack();
+	Data->SetBoolField(TEXT("stored"), bStored);
+	Data->SetBoolField(TEXT("success"), bStored);
+	return mcp_common::MakeOutcomeReply(Data, bStored, FString::Printf(
+		TEXT("set_material_layer_parameter: the instance does not store the written %s value for '%s' on layer %d"),
+		*ParamType, *ParamName, LayerIndex));
 }
 
 namespace UEAgentMaterialInstanceImpl
@@ -595,8 +670,14 @@ TSharedPtr<FJsonObject> HandleSetMaterialLayerStack(
 	TSharedPtr<FJsonObject> Data = UEAgentMaterialInstanceImpl::NewPayload(MIPath);
 	Data->SetNumberField(TEXT("layer_count"), LayersFunctions.Layers.Num());
 	Data->SetNumberField(TEXT("blend_count"), LayersFunctions.Blends.Num());
-	Data->SetBoolField(TEXT("success"), true);
-	return mcp_common::MakeOkReply(Data);
+
+	// The re-read: the instance's stack holds the requested layer and blend functions, in order.
+	FMaterialLayersFunctions ReadStack;
+	MIC->GetMaterialLayers(ReadStack);
+	const bool bStackSet = ReadStack.Layers == LayersFunctions.Layers && ReadStack.Blends == LayersFunctions.Blends;
+	Data->SetBoolField(TEXT("success"), bStackSet);
+	return mcp_common::MakeOutcomeReply(Data, bStackSet,
+		TEXT("set_material_layer_stack: the instance's layer stack does not read back as the requested layers and blends"));
 }
 
 // ---------------------------------------------------------------------------
@@ -687,15 +768,23 @@ TSharedPtr<FJsonObject> HandleSwapMaterialLayerParameters(
 				"(requested original_index=%d, new_index=%d)"), NumLayers, OriginalIndex, NewIndex));
 	}
 
+	const FString OriginalBefore = LayerOverridesFingerprint(MIC, OriginalIndex);
+	const FString NewBefore = LayerOverridesFingerprint(MIC, NewIndex);
 	MIC->Modify();
 	MIC->SwapLayerParameterIndices(OriginalIndex, NewIndex);
 	if (TSharedPtr<FJsonObject> SaveFailed = UEAgentMaterialInstanceImpl::CommitInstance(MIC)) { return SaveFailed; }
 
+	// The re-read: the per-layer overrides of the two slots traded places.
+	const bool bSwapped = LayerOverridesFingerprint(MIC, OriginalIndex) == NewBefore
+		&& LayerOverridesFingerprint(MIC, NewIndex) == OriginalBefore;
+
 	TSharedPtr<FJsonObject> Data = UEAgentMaterialInstanceImpl::NewPayload(MIPath);
 	Data->SetNumberField(TEXT("original_index"), OriginalIndex);
 	Data->SetNumberField(TEXT("new_index"), NewIndex);
-	Data->SetBoolField(TEXT("success"), true);
-	return mcp_common::MakeOkReply(Data);
+	Data->SetBoolField(TEXT("success"), bSwapped);
+	return mcp_common::MakeOutcomeReply(Data, bSwapped, FString::Printf(
+		TEXT("swap_material_layer_parameters: the scalar/vector/texture overrides of layers %d and %d did not trade places"),
+		OriginalIndex, NewIndex));
 }
 
 // ============================================================================

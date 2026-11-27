@@ -31,11 +31,11 @@
 #include "Misc/App.h"                  // FApp::CanEverRender (honest no-RHI gate)
 #include "Templates/Function.h"        // TFunctionRef (graph node visitor)
 #include "Misc/EngineVersionComparison.h"
+#include "MaterialGraph/MaterialGraphNode.h"          // GetShortenPinName (input lookup by name)
+#include "Materials/MaterialExpressionMaterialFunctionCall.h"
 #if UE_VERSION_OLDER_THAN(5, 8, 0)
 #include "IMaterialEditor.h"                          // NotifyExternalMaterialChange (5.7 disconnect)
 #include "Subsystems/AssetEditorSubsystem.h"
-#include "MaterialGraph/MaterialGraphNode.h"          // GetShortenPinName (5.7 disconnect)
-#include "Materials/MaterialExpressionMaterialFunctionCall.h"
 #include "Particles/ParticleSystemComponent.h"        // 5.7 usage-flag recompile
 #include "EditorSupportDelegates.h"
 #endif
@@ -431,6 +431,38 @@ namespace UEAgentMaterialCommandsImpl
         }
     }
 
+    /** The input of Expression named InputName, matched as the engine's connect/disconnect match it (first input
+     *  when empty; a function call's pin without its type postfix, any other pin by its shortened name), or nullptr. */
+    FExpressionInput* FindExpressionInput(UMaterialExpression* Expression, const FString& InputNameString)
+    {
+        if (Expression == nullptr)
+        {
+            return nullptr;
+        }
+        const FName InputName(*InputNameString);
+        if (InputName.IsNone())
+        {
+            return Expression->GetInput(0);
+        }
+        for (FExpressionInputIterator It{ Expression }; It; ++It)
+        {
+            FName TestName;
+            if (UMaterialExpressionMaterialFunctionCall* FuncCall = Cast<UMaterialExpressionMaterialFunctionCall>(Expression))
+            {
+                TestName = FuncCall->GetInputNameWithType(It.Index, false);
+            }
+            else
+            {
+                TestName = UMaterialGraphNode::GetShortenPinName(Expression->GetInputName(It.Index));
+            }
+            if (TestName == InputName)
+            {
+                return It.Input;
+            }
+        }
+        return nullptr;
+    }
+
 #if UE_VERSION_OLDER_THAN(5, 8, 0)
     // UE 5.7: UMaterialEditingLibrary::DisconnectMaterialExpressions and ::SetBaseMaterialUsage arrived in 5.8. These
     // do the same work with what 5.7 exposes (5.8's bodies, their file-private helpers written out).
@@ -456,33 +488,7 @@ namespace UEAgentMaterialCommandsImpl
         {
             return false;
         }
-        const FName InputName(*ToInputName);
-        FExpressionInput* Input = nullptr;
-        if (InputName.IsNone())
-        {
-            Input = ToExpression->GetInput(0);
-        }
-        else
-        {
-            for (FExpressionInputIterator It{ ToExpression }; It; ++It)
-            {
-                // A function call's pin is compared without its type postfix; any other pin by its shortened name.
-                FName TestName;
-                if (UMaterialExpressionMaterialFunctionCall* FuncCall = Cast<UMaterialExpressionMaterialFunctionCall>(ToExpression))
-                {
-                    TestName = FuncCall->GetInputNameWithType(It.Index, false);
-                }
-                else
-                {
-                    TestName = UMaterialGraphNode::GetShortenPinName(ToExpression->GetInputName(It.Index));
-                }
-                if (TestName == InputName)
-                {
-                    Input = It.Input;
-                    break;
-                }
-            }
-        }
+        FExpressionInput* Input = FindExpressionInput(ToExpression, ToInputName);
         if (Input == nullptr || !Input->IsConnected())
         {
             return false;
@@ -621,11 +627,19 @@ TSharedPtr<FJsonObject> HandleCreateMaterial(const TSharedPtr<FJsonObject>& Para
     }
     NewMaterial->MarkPackageDirty();
 
+    // The re-read: the new material is what its reported object path resolves to.
+    const bool bFound = FindObject<UMaterial>(nullptr, *ReportedPath) == NewMaterial;
+
     TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
     Reply->SetStringField(TEXT("material_path"), ReportedPath);
     Reply->SetStringField(TEXT("material_name"), AssetName);
     Reply->SetStringField(TEXT("package_path"), FolderPath);
-    Reply->SetBoolField(TEXT("success"), true);
+    Reply->SetBoolField(TEXT("success"), bFound);
+    if (!bFound)
+    {
+        Reply->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("create_material: the created material is not found at %s"), *ReportedPath));
+    }
     return Reply;
 }
 
@@ -877,7 +891,17 @@ TSharedPtr<FJsonObject> HandleCreateMaterialExpression(const TSharedPtr<FJsonObj
     Reply->SetStringField(TEXT("expression_name"), NewNode->GetName());
     Reply->SetNumberField(TEXT("node_pos_x"), GraphX);
     Reply->SetNumberField(TEXT("node_pos_y"), GraphY);
-    Reply->SetBoolField(TEXT("success"), true);
+
+    // The re-read: the new node is one of the graph owner's nodes under its reported name.
+    const bool bInGraph = FunctionGraph != nullptr
+        ? UEAgentMaterialCommandsImpl::FindFunctionNode(FunctionGraph, NewNode->GetName()) == NewNode
+        : UEAgentMaterialCommandsImpl::FindGraphNode(Graph, NewNode->GetName()) == NewNode;
+    Reply->SetBoolField(TEXT("success"), bInGraph);
+    if (!bInGraph)
+    {
+        Reply->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("create_material_expression: %s was created but is not among the graph's nodes"), *NewNode->GetName()));
+    }
     return Reply;
 }
 
@@ -929,9 +953,10 @@ TSharedPtr<FJsonObject> HandleDeleteMaterialExpression(const TSharedPtr<FJsonObj
         Reply->SetStringField(TEXT("material_path"), GraphPath);
         Reply->SetStringField(TEXT("material_function_path"), FunctionGraph->GetPathName());
         Reply->SetStringField(TEXT("expression_name"), NodeName);
-        Reply->SetBoolField(TEXT("deleted"), true);
+        const bool bGone = UEAgentMaterialCommandsImpl::FindFunctionNode(FunctionGraph, NodeName) == nullptr;
+        Reply->SetBoolField(TEXT("deleted"), bGone);
         Reply->SetNumberField(TEXT("expression_count"), FunctionGraph->GetExpressions().Num());
-        Reply->SetBoolField(TEXT("success"), true);
+        Reply->SetBoolField(TEXT("success"), bGone);
         return Reply;
     }
 
@@ -946,10 +971,29 @@ TSharedPtr<FJsonObject> HandleDeleteMaterialExpression(const TSharedPtr<FJsonObj
     UMaterialEditingLibrary::DeleteMaterialExpression(Graph, Doomed);
     Graph->MarkPackageDirty();
 
+    // The engine call's return is unreliable (false after doing the work), so the graph is re-read: the deleted
+    // node must have left the material's expression collection.
+    bool bGone = true;
+    for (const TObjectPtr<UMaterialExpression>& Node : Graph->GetExpressions())
+    {
+        if (Node == Doomed)
+        {
+            bGone = false;
+            break;
+        }
+    }
+
     TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
     Reply->SetStringField(TEXT("material_path"), GraphPath);
     Reply->SetStringField(TEXT("expression_name"), NodeName);
-    Reply->SetBoolField(TEXT("success"), true);
+    Reply->SetBoolField(TEXT("deleted"), bGone);
+    Reply->SetNumberField(TEXT("expression_count"), Graph->GetExpressions().Num());
+    Reply->SetBoolField(TEXT("success"), bGone);
+    if (!bGone)
+    {
+        Reply->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("delete_material_expression: %s is still among the material's expressions"), *NodeName));
+    }
     return Reply;
 }
 
@@ -1017,7 +1061,18 @@ TSharedPtr<FJsonObject> HandleConnectMaterialExpressions(const TSharedPtr<FJsonO
     Reply->SetStringField(TEXT("from_output_name"), SourcePin);
     Reply->SetStringField(TEXT("to_expression_name"), TargetNodeName);
     Reply->SetStringField(TEXT("to_input_name"), TargetPin);
-    Reply->SetBoolField(TEXT("success"), true);
+
+    // The re-read: the named input of the destination now points at the source node.
+    const FExpressionInput* LinkedInput = UEAgentMaterialCommandsImpl::FindExpressionInput(TargetNode, TargetPin);
+    const bool bConnected = LinkedInput != nullptr && LinkedInput->Expression == SourceNode;
+    Reply->SetBoolField(TEXT("connected"), bConnected);
+    Reply->SetBoolField(TEXT("success"), bConnected);
+    if (!bConnected)
+    {
+        Reply->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("connect_material_expressions: input '%s' of %s does not point at %s after connecting"),
+            *TargetPin, *TargetNodeName, *SourceNodeName));
+    }
     return Reply;
 }
 
@@ -1083,7 +1138,17 @@ TSharedPtr<FJsonObject> HandleDisconnectMaterialExpressions(const TSharedPtr<FJs
     Reply->SetStringField(TEXT("to_input_name"), TargetPin);
     Reply->SetBoolField(TEXT("disconnected"), bLinkBroken);
     Reply->SetBoolField(TEXT("already_disconnected"), !bLinkBroken);
-    Reply->SetBoolField(TEXT("success"), true);
+
+    // The re-read: the named input exists and holds no link. A name that matches no input of the node is an error.
+    const FExpressionInput* ReadInput = UEAgentMaterialCommandsImpl::FindExpressionInput(TargetNode, TargetPin);
+    const bool bUnlinked = ReadInput != nullptr && !ReadInput->IsConnected();
+    Reply->SetBoolField(TEXT("success"), bUnlinked);
+    if (!bUnlinked)
+    {
+        Reply->SetStringField(TEXT("error"), ReadInput == nullptr
+            ? FString::Printf(TEXT("disconnect_material_expressions: %s has no input named '%s'"), *TargetNodeName, *TargetPin)
+            : FString::Printf(TEXT("disconnect_material_expressions: input '%s' of %s is still connected"), *TargetPin, *TargetNodeName));
+    }
     return Reply;
 }
 
@@ -1130,7 +1195,17 @@ TSharedPtr<FJsonObject> HandleSetMaterialPhysicalMaterial(const TSharedPtr<FJson
     Reply->SetStringField(TEXT("physical_material_path"), Material->PhysMaterial ? Material->PhysMaterial->GetPathName() : FString());
     Reply->SetBoolField(TEXT("already_set"), bAlreadySet);
     mcp_common::AddSaveOutcome(Reply, bSaved, SaveError);
-    Reply->SetBoolField(TEXT("success"), true);
+    const bool bLinked = Material->PhysMaterial == Surface;
+    Reply->SetBoolField(TEXT("success"), bLinked && bSaved);
+    if (!bLinked)
+    {
+        Reply->SetStringField(TEXT("error"), TEXT("set_material_physical_material: the material's physical material does not read back as requested"));
+    }
+    else if (!bSaved)
+    {
+        Reply->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("set_material_physical_material: linked in memory but NOT saved to disk: %s"), *SaveError));
+    }
     return Reply;
 }
 

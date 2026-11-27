@@ -119,7 +119,8 @@ namespace
     //  - Numbers go through LexTryParseString: ImportText_Direct cannot fail on a float
     //    property ("abc" imports as 0 and returns a non-null cursor).
     //  - Every other type goes through ImportText_Direct, whose null return means rejected.
-    bool ImportExpressionProperty(UMaterialExpression* Expression, FProperty* Property, const FString& Text, FString& OutError)
+    // OutWrittenText is the parsed value exported as text, to compare the node's value against.
+    bool ImportExpressionProperty(UMaterialExpression* Expression, FProperty* Property, const FString& Text, FString& OutWrittenText, FString& OutError)
     {
         void* Dest = Property->ContainerPtrToValuePtr<void>(Expression);
         void* Scratch = Property->AllocateAndInitializeValue();
@@ -177,6 +178,7 @@ namespace
 
         if (bParsed)
         {
+            Property->ExportText_Direct(OutWrittenText, Scratch, nullptr, Expression, PPF_None);
             Expression->Modify();
             Property->CopyCompleteValue(Dest, Scratch);
         }
@@ -298,11 +300,21 @@ TSharedPtr<FJsonObject> HandleConnectToMaterialOutput(const TSharedPtr<FJsonObje
         return mcp_common::MakeErrorReply(TEXT("ConnectMaterialProperty failed (incompatible output or property)"));
     Material->MarkPackageDirty();
 
+    // The re-read: the material input now points at the source node.
+    const FExpressionInput* PropertyInput = Material->GetExpressionInputForProperty(Property);
+    const bool bLinked = PropertyInput != nullptr && PropertyInput->Expression == FromExpression;
+
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("material"), Material->GetName());
     Result->SetStringField(TEXT("from_node_id"), FromNodeId);
     Result->SetStringField(TEXT("output_property"), OutputProperty);
-    Result->SetBoolField(TEXT("connected"), true);
+    Result->SetBoolField(TEXT("connected"), bLinked);
+    Result->SetBoolField(TEXT("success"), bLinked);
+    if (!bLinked)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("connect_to_material_output: %s does not point at %s after connecting"), *OutputProperty, *FromNodeId));
+    }
     return Result;
 }
 
@@ -341,6 +353,16 @@ TSharedPtr<FJsonObject> HandleDisconnectToMaterialOutput(const TSharedPtr<FJsonO
     Result->SetStringField(TEXT("output_property"), OutputProperty);
     Result->SetBoolField(TEXT("disconnected"), bDisconnected);
     Result->SetBoolField(TEXT("already_disconnected"), !bDisconnected);
+
+    // The re-read: the material input holds no link.
+    const FExpressionInput* PropertyInput = Material->GetExpressionInputForProperty(Property);
+    const bool bUnlinked = PropertyInput != nullptr && !PropertyInput->IsConnected();
+    Result->SetBoolField(TEXT("success"), bUnlinked);
+    if (!bUnlinked)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("disconnect_to_material_output: %s is still connected"), *OutputProperty));
+    }
     return Result;
 }
 
@@ -368,6 +390,8 @@ TSharedPtr<FJsonObject> HandleSetMaterialNodeParam(const TSharedPtr<FJsonObject>
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("Expression not found: %s"), *NodeId));
 
     FString ValueAfter;
+    FString ValueWritten;
+    FProperty* WrittenProperty = nullptr;
     if (ParamName.Equals(TEXT("ParameterName"), ESearchCase::IgnoreCase) && Expr->HasAParameterName())
     {
         // SetParameterName is the node's own way to rename its parameter. An empty name would
@@ -378,7 +402,7 @@ TSharedPtr<FJsonObject> HandleSetMaterialNodeParam(const TSharedPtr<FJsonObject>
         Material->Modify();
         Expr->Modify();
         Expr->SetParameterName(FName(*NewName));
-        ValueAfter = Expr->GetParameterName().ToString();
+        ValueWritten = FName(*NewName).ToString();
     }
     else
     {
@@ -391,16 +415,27 @@ TSharedPtr<FJsonObject> HandleSetMaterialNodeParam(const TSharedPtr<FJsonObject>
 
         // Parse first, write after: a value the property rejects leaves the node untouched.
         FString ImportError;
-        if (!ImportExpressionProperty(Expr, Property, Value, ImportError))
+        if (!ImportExpressionProperty(Expr, Property, Value, ValueWritten, ImportError))
             return mcp_common::MakeErrorReply(FString::Printf(TEXT("Could not set '%s' on expression %s: %s"),
                 *ParamName, *NodeId, *ImportError));
         Material->Modify();
-        Property->ExportText_Direct(ValueAfter, Property->ContainerPtrToValuePtr<void>(Expr), nullptr, Expr, PPF_None);
+        WrittenProperty = Property;
     }
 
     Expr->PostEditChange();
     Material->PostEditChange();
     Material->MarkPackageDirty();
+
+    // The re-read, after PostEditChange (which may clamp or reset a value): the node holds what was written.
+    if (WrittenProperty != nullptr)
+    {
+        WrittenProperty->ExportText_Direct(ValueAfter, WrittenProperty->ContainerPtrToValuePtr<void>(Expr), nullptr, Expr, PPF_None);
+    }
+    else
+    {
+        ValueAfter = Expr->GetParameterName().ToString();
+    }
+    const bool bMatches = ValueAfter == ValueWritten;
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("material"), Material->GetName());
@@ -408,6 +443,13 @@ TSharedPtr<FJsonObject> HandleSetMaterialNodeParam(const TSharedPtr<FJsonObject>
     Result->SetStringField(TEXT("param_name"), ParamName);
     Result->SetStringField(TEXT("value"), Value);
     Result->SetStringField(TEXT("value_after"), ValueAfter);
+    Result->SetBoolField(TEXT("success"), bMatches);
+    if (!bMatches)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("set_material_expression_property: '%s' on %s reads back as '%s', not the written '%s'"),
+            *ParamName, *NodeId, *ValueAfter, *ValueWritten));
+    }
     return Result;
 }
 
@@ -851,6 +893,10 @@ TSharedPtr<FJsonObject> HandleCompileMaterial(const TSharedPtr<FJsonObject>& Par
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("material"), Material->GetName());
     Result->SetBoolField(TEXT("recompiled"), true);
+    // RecompileMaterial returns nothing and compiles shaders asynchronously, so the outcome cannot be read here.
+    mcp_common::AddVerificationEvidence(Result, mcp_common::EMcpVerification::NotVerifiable,
+        TEXT("RecompileMaterial returns void"),
+        TEXT("recompiled only says the recompile was requested; read compile_errors and stats_valid with get_material_stats"));
     return Result;
 }
 
@@ -981,6 +1027,28 @@ namespace
             if ((*PV)->TryGetNumberField(TEXT("w"), C)) { V.W = static_cast<float>(C); }
             In->PreviewValue = V;
         }
+    }
+
+    // The optional props of Params that In does not hold after ApplyOptionalInputProps, by param name.
+    TArray<FString> OptionalInputPropsMismatches(const UMaterialExpressionFunctionInput* In, const TSharedPtr<FJsonObject>& Params)
+    {
+        TArray<FString> Mismatches;
+        FString Desc; double Num; bool bVal;
+        if (Params->TryGetStringField(TEXT("description"), Desc) && In->Description != Desc)                          { Mismatches.Add(TEXT("description")); }
+        if (Params->TryGetNumberField(TEXT("sort_priority"), Num) && In->SortPriority != static_cast<int32>(Num))   { Mismatches.Add(TEXT("sort_priority")); }
+        if (Params->TryGetBoolField(TEXT("use_preview_value_as_default"), bVal) && (In->bUsePreviewValueAsDefault != 0) != bVal) { Mismatches.Add(TEXT("use_preview_value_as_default")); }
+        const TSharedPtr<FJsonObject>* PV = nullptr;
+        if (Params->TryGetObjectField(TEXT("preview_value"), PV) && PV && *PV)
+        {
+            double C;
+            const bool bOff =
+                ((*PV)->TryGetNumberField(TEXT("x"), C) && In->PreviewValue.X != static_cast<float>(C)) ||
+                ((*PV)->TryGetNumberField(TEXT("y"), C) && In->PreviewValue.Y != static_cast<float>(C)) ||
+                ((*PV)->TryGetNumberField(TEXT("z"), C) && In->PreviewValue.Z != static_cast<float>(C)) ||
+                ((*PV)->TryGetNumberField(TEXT("w"), C) && In->PreviewValue.W != static_cast<float>(C));
+            if (bOff) { Mismatches.Add(TEXT("preview_value")); }
+        }
+        return Mismatches;
     }
 
     // Map a string domain name to EMaterialDomain. Returns false if unknown.
@@ -1364,7 +1432,24 @@ TSharedPtr<FJsonObject> HandleAddMaterialFunctionInput(const TSharedPtr<FJsonObj
     Result->SetStringField(TEXT("input_type"), FunctionInputTypeToString(InputType));
     Result->SetStringField(TEXT("node_id"), InputExpr->GetName());
     Result->SetNumberField(TEXT("num_inputs"), AfterInputs);
-    Result->SetBoolField(TEXT("added"), AfterInputs == BeforeInputs + 1);
+    const bool bAdded = AfterInputs == BeforeInputs + 1;
+    Result->SetBoolField(TEXT("added"), bAdded);
+
+    // The re-read of the new node: name, type and every optional prop sent.
+    TArray<FString> Mismatches = OptionalInputPropsMismatches(InputExpr, Params);
+    if (InputExpr->InputName != FName(*InputName)) { Mismatches.Add(TEXT("input_name")); }
+    if (InputExpr->InputType != InputType)         { Mismatches.Add(TEXT("input_type")); }
+    Result->SetBoolField(TEXT("success"), bAdded && Mismatches.Num() == 0);
+    if (!bAdded)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("add_material_function_input: the function has %d inputs, not %d"), AfterInputs, BeforeInputs + 1));
+    }
+    else if (Mismatches.Num() > 0)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("add_material_function_input: the new input does not read back these props as sent: %s"), *FString::Join(Mismatches, TEXT(", "))));
+    }
     return Result;
 }
 
@@ -1405,7 +1490,15 @@ TSharedPtr<FJsonObject> HandleAddMaterialFunctionOutput(const TSharedPtr<FJsonOb
     Result->SetStringField(TEXT("output_name"), OutputName);
     Result->SetStringField(TEXT("node_id"), OutputExpr->GetName());
     Result->SetNumberField(TEXT("num_outputs"), AfterOutputs);
-    Result->SetBoolField(TEXT("added"), AfterOutputs == BeforeOutputs + 1);
+    const bool bAdded = AfterOutputs == BeforeOutputs + 1 && OutputExpr->OutputName == FName(*OutputName);
+    Result->SetBoolField(TEXT("added"), bAdded);
+    Result->SetBoolField(TEXT("success"), bAdded);
+    if (!bAdded)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("add_material_function_output: the function has %d outputs (expected %d) and the new node is named '%s'"),
+            AfterOutputs, BeforeOutputs + 1, *OutputExpr->OutputName.ToString()));
+    }
     return Result;
 }
 
@@ -1436,15 +1529,17 @@ TSharedPtr<FJsonObject> HandleSetMaterialFunctionInputProps(const TSharedPtr<FJs
 
     // input_type (optional) via the shared parser — honest error on an unknown name.
     FString InputTypeStr;
+    bool bTypeSent = false;
+    EFunctionInputType InputType = FunctionInput_Scalar;
     if (Params->TryGetStringField(TEXT("input_type"), InputTypeStr))
     {
-        EFunctionInputType InputType = FunctionInput_Scalar;
         if (!ParseFunctionInputType(InputTypeStr, InputType))
             return mcp_common::MakeErrorReply(FString::Printf(
                 TEXT("Unknown input_type: %s (Scalar/Vector2/Vector3/Vector4/Texture2D/TextureCube/"
                      "Texture2DArray/VolumeTexture/StaticBool/MaterialAttributes/TextureExternal/Bool/Substrate)"),
                 *InputTypeStr));
         In->InputType = InputType;
+        bTypeSent = true;
     }
 
     // input_name (optional) -> must re-validate uniqueness.
@@ -1466,7 +1561,19 @@ TSharedPtr<FJsonObject> HandleSetMaterialFunctionInputProps(const TSharedPtr<FJs
     Result->SetStringField(TEXT("node_id"), In->GetName());
     Result->SetStringField(TEXT("input_name"), In->InputName.ToString());
     Result->SetStringField(TEXT("input_type"), FunctionInputTypeToString(In->InputType));
-    Result->SetBoolField(TEXT("applied"), true);
+
+    // The re-read: every field sent is what the node now holds.
+    TArray<FString> Mismatches = OptionalInputPropsMismatches(In, Params);
+    if (bNameChanged && In->InputName != FName(*NewName)) { Mismatches.Add(TEXT("input_name")); }
+    if (bTypeSent && In->InputType != InputType)          { Mismatches.Add(TEXT("input_type")); }
+    const bool bApplied = Mismatches.Num() == 0;
+    Result->SetBoolField(TEXT("applied"), bApplied);
+    Result->SetBoolField(TEXT("success"), bApplied);
+    if (!bApplied)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("set_material_function_input_props: these props do not read back as sent: %s"), *FString::Join(Mismatches, TEXT(", "))));
+    }
     return Result;
 }
 
@@ -1494,10 +1601,12 @@ TSharedPtr<FJsonObject> HandleSetMaterialFunctionOutputProps(const TSharedPtr<FJ
 
     bool bNameChanged = false;
     FString NewName, Desc;
-    double Num;
+    double Num = 0.0;
+    const bool bDescSent = Params->TryGetStringField(TEXT("description"), Desc);
+    const bool bSortSent = Params->TryGetNumberField(TEXT("sort_priority"), Num);
     if (Params->TryGetStringField(TEXT("output_name"), NewName)) { Out->OutputName = FName(*NewName); bNameChanged = true; }
-    if (Params->TryGetStringField(TEXT("description"), Desc))    { Out->Description = Desc; }
-    if (Params->TryGetNumberField(TEXT("sort_priority"), Num))   { Out->SortPriority = static_cast<int32>(Num); }
+    if (bDescSent) { Out->Description = Desc; }
+    if (bSortSent) { Out->SortPriority = static_cast<int32>(Num); }
 
     if (bNameChanged) { Out->ValidateName(); }
     UEAgentMaterialExtraImpl::CommitNodeEdit(Function, Out);
@@ -1506,7 +1615,20 @@ TSharedPtr<FJsonObject> HandleSetMaterialFunctionOutputProps(const TSharedPtr<FJ
     Result->SetStringField(TEXT("function_path"), Function->GetPathName());
     Result->SetStringField(TEXT("node_id"), Out->GetName());
     Result->SetStringField(TEXT("output_name"), Out->OutputName.ToString());
-    Result->SetBoolField(TEXT("applied"), true);
+
+    // The re-read: every field sent is what the node now holds.
+    TArray<FString> Mismatches;
+    if (bNameChanged && Out->OutputName != FName(*NewName))            { Mismatches.Add(TEXT("output_name")); }
+    if (bDescSent && Out->Description != Desc)                          { Mismatches.Add(TEXT("description")); }
+    if (bSortSent && Out->SortPriority != static_cast<int32>(Num))      { Mismatches.Add(TEXT("sort_priority")); }
+    const bool bApplied = Mismatches.Num() == 0;
+    Result->SetBoolField(TEXT("applied"), bApplied);
+    Result->SetBoolField(TEXT("success"), bApplied);
+    if (!bApplied)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("set_material_function_output_props: these props do not read back as sent: %s"), *FString::Join(Mismatches, TEXT(", "))));
+    }
     return Result;
 }
 
@@ -1640,7 +1762,15 @@ TSharedPtr<FJsonObject> HandleSetMaterialDomain(const TSharedPtr<FJsonObject>& P
     Result->SetStringField(TEXT("previous_domain"), MaterialDomainToString(Previous));
     Result->SetStringField(TEXT("requested_domain"), DomainStr);
     Result->SetStringField(TEXT("domain"), MaterialDomainToString(ReadBack));
-    Result->SetBoolField(TEXT("domain_set"), ReadBack == Domain);
+    const bool bDomainSet = ReadBack == Domain;
+    Result->SetBoolField(TEXT("domain_set"), bDomainSet);
+    Result->SetBoolField(TEXT("success"), bDomainSet);
+    if (!bDomainSet)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("set_material_domain: the material's domain reads back as %s, not %s"),
+            MaterialDomainToString(ReadBack), MaterialDomainToString(Domain)));
+    }
     return Result;
 }
 
@@ -1710,6 +1840,16 @@ TSharedPtr<FJsonObject> HandleAddMaterialFunctionCall(const TSharedPtr<FJsonObje
     Result->SetStringField(TEXT("node_name"), NewNode->GetName());
     Result->SetStringField(TEXT("node_class"), NewNode->GetClass()->GetName());
     Result->SetNumberField(TEXT("expression_count"), Material->GetExpressions().Num());
+
+    // The re-read: the node is one of the material's expressions and still calls the function.
+    const bool bInGraph = Material->GetExpressions().Contains(NewNode) && NewNode->MaterialFunction == Function;
+    Result->SetBoolField(TEXT("success"), bInGraph);
+    if (!bInGraph)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("add_material_function_call: %s is not among the material's expressions bound to %s after the recompile"),
+            *NewNode->GetName(), *Function->GetPathName()));
+    }
     return Result;
 }
 
@@ -1763,6 +1903,15 @@ TSharedPtr<FJsonObject> HandleDuplicateMaterialExpression(const TSharedPtr<FJson
     Result->SetStringField(TEXT("duplicate_node"), Dup->GetName());
     Result->SetStringField(TEXT("duplicate_class"), Dup->GetClass()->GetName());
     Result->SetNumberField(TEXT("expression_count"), Material->GetExpressions().Num());
+
+    // The re-read: the copy is one of the material's expressions.
+    const bool bInGraph = Material->GetExpressions().Contains(Dup);
+    Result->SetBoolField(TEXT("success"), bInGraph);
+    if (!bInGraph)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("duplicate_material_expression: the copy %s is not among the material's expressions"), *Dup->GetName()));
+    }
     return Result;
 }
 
@@ -2292,10 +2441,19 @@ TSharedPtr<FJsonObject> HandleDeleteMaterialFunctionInput(const TSharedPtr<FJson
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("function_path"), Function->GetPathName());
     Result->SetStringField(TEXT("node_id"), NodeId);
-    Result->SetBoolField(TEXT("deleted"), AfterInputs == BeforeInputs - 1);
+    // The re-read: the count dropped by one and the node id no longer resolves in the function.
+    const bool bDeleted = AfterInputs == BeforeInputs - 1 && FindFunctionExpressionByNodeId(Function, NodeId) == nullptr;
+    Result->SetBoolField(TEXT("deleted"), bDeleted);
     Result->SetBoolField(TEXT("already_absent"), false);
     Result->SetNumberField(TEXT("num_inputs"), AfterInputs);
     Result->SetNumberField(TEXT("num_outputs"), AfterOutputs);
+    Result->SetBoolField(TEXT("success"), bDeleted);
+    if (!bDeleted)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("remove_material_function_input: '%s' is still in the function (%d inputs, was %d)"),
+            *NodeId, AfterInputs, BeforeInputs));
+    }
     return Result;
 }
 
@@ -2347,10 +2505,19 @@ TSharedPtr<FJsonObject> HandleDeleteMaterialFunctionOutput(const TSharedPtr<FJso
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("function_path"), Function->GetPathName());
     Result->SetStringField(TEXT("node_id"), NodeId);
-    Result->SetBoolField(TEXT("deleted"), AfterOutputs == BeforeOutputs - 1);
+    // The re-read: the count dropped by one and the node id no longer resolves in the function.
+    const bool bDeleted = AfterOutputs == BeforeOutputs - 1 && FindFunctionExpressionByNodeId(Function, NodeId) == nullptr;
+    Result->SetBoolField(TEXT("deleted"), bDeleted);
     Result->SetBoolField(TEXT("already_absent"), false);
     Result->SetNumberField(TEXT("num_inputs"), AfterInputs);
     Result->SetNumberField(TEXT("num_outputs"), AfterOutputs);
+    Result->SetBoolField(TEXT("success"), bDeleted);
+    if (!bDeleted)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("remove_material_function_output: '%s' is still in the function (%d outputs, was %d)"),
+            *NodeId, AfterOutputs, BeforeOutputs));
+    }
     return Result;
 }
 

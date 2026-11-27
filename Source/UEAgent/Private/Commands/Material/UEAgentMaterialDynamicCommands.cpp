@@ -278,8 +278,11 @@ TSharedPtr<FJsonObject> HandleCreateMaterialInstanceDynamic(
 	Data->SetStringField(TEXT("mid_name"), MID->GetName());
 	Data->SetStringField(TEXT("parent_material_path"), ParentMat->GetPathName());
 	Data->SetStringField(TEXT("parent_material_name"), ParentMat->GetName());
-	Data->SetBoolField(TEXT("created"), true);
-	return mcp_common::MakeOkReply(Data);
+	// The re-read: the new MID derives from the requested parent.
+	const bool bCreated = MID->Parent == ParentMat;
+	Data->SetBoolField(TEXT("created"), bCreated);
+	return mcp_common::MakeOutcomeReply(Data, bCreated,
+		mcp_common::MeasuredOutcomeError(TEXT("create_material_instance_dynamic"), TEXT("created")));
 }
 
 // ---------------------------------------------------------------------------
