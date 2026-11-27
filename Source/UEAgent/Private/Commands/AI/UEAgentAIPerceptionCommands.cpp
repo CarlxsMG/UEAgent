@@ -121,7 +121,7 @@ TSharedPtr<FJsonObject> HandleAddAiStimuliSource(const TSharedPtr<FJsonObject>& 
 
 // create_ai_controller_blueprint
 // ---------------------------------------------------------------------------- //
-// MCP:create_ai_controller_blueprint - Create a Blueprint asset parented to AAIController, compile and save it.  Idempotent: if the asset already exists it is loaded and returned.
+// MCP:create_ai_controller_blueprint - Create a Blueprint asset parented to AAIController, compile and save it.  Idempotent: if the asset already exists it is loaded and returned, created=false; an asset there that is not an AIController Blueprint makes success false (is_ai_controller=false).
 //   @param name - Asset name (e.g. BP_EnemyAIController)
 //   @param package_path - Target /Game package path (optional, default "/Game/Blueprints")
 //   @returns { name: string, asset_path: string, parent_class: string, generated_class: string, is_ai_controller: bool, already_existed: bool, created: bool }
@@ -151,8 +151,11 @@ TSharedPtr<FJsonObject> HandleCreateAIControllerBlueprint(const TSharedPtr<FJson
     Result->SetStringField(TEXT("generated_class"), Blueprint->GeneratedClass ? Blueprint->GeneratedClass->GetName() : FString());
     Result->SetBoolField(TEXT("is_ai_controller"), bIsAIController);
     Result->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
-    Result->SetBoolField(TEXT("created"), true);
-    return mcp_common::MakeOkReply(Result);
+    Result->SetBoolField(TEXT("created"), !bAlreadyExisted);
+    // An asset already at the path is returned as it is: one that is not an AIController Blueprint is not what was asked.
+    return mcp_common::MakeOutcomeReply(Result, bIsAIController, bIsAIController ? FString() : FString::Printf(
+        TEXT("%s/%s already exists and is not an AIController Blueprint (generated_class: %s); nothing was created"),
+        *PackagePath, *Name, Blueprint->GeneratedClass ? *Blueprint->GeneratedClass->GetName() : TEXT("none")));
 }
 
 // Runtime AI perception introspection and configuration.
@@ -316,7 +319,7 @@ namespace
 // MCP:set_actor_team - Set the native team id (FGenericTeamId) of an actor in the editor world through IGenericTeamAgentInterface, falling back to its Controller when the actor does not implement it (an ACharacter possessed by an AAIController, the only implementer in vanilla UE 5.8), then refresh that agent's AI Perception listeners so Sight, Hearing and Touch affiliation filtering sees the new team at once. The previous team is overwritten in memory only: no undo step, nothing dirtied or saved, and on an AAIController it is gone when the level reloads. The same id again gives the same result. Read it with get_actor_team; set_native_team_attitude decides whether two teams are friendly, neutral or hostile. An unknown actor, a team_id outside 0-254, or no team interface on the actor or its controller is an error and nothing changes.
 //   @param actor_name - Object name or label of the actor in the editor world (a pawn, or the AIController itself), e.g. 'BP_Guard_C_0'.
 //   @param team_id - Team number, an integer in [0, 254], e.g. 1; 255 is the engine-reserved NoTeam id and is refused.
-//   @returns { actor_name, team_id, applied, resolved_on: "actor"|"controller", perception_listeners_refreshed }
+//   @returns { actor_name, team_id (read back from the agent), applied (the read-back id equals team_id; false makes success false), resolved_on: "actor"|"controller", perception_listeners_refreshed, requested: { team_id } }
 TSharedPtr<FJsonObject> HandleSetActorTeam(const TSharedPtr<FJsonObject>& Params)
 {
     FString ActorName;
@@ -364,13 +367,21 @@ TSharedPtr<FJsonObject> HandleSetActorTeam(const TSharedPtr<FJsonObject>& Params
         }
     }
 
+    // IGenericTeamAgentInterface::SetGenericTeamId is an empty default: an implementer that only overrides the
+    // getter takes the call and keeps its team, so the id is read back from the agent.
+    const FGenericTeamId ReadBack = TeamAgent->GetGenericTeamId();
+    const bool bApplied = ReadBack == NewTeamId;
+
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("actor_name"), ActorName);
-    Result->SetNumberField(TEXT("team_id"), NewTeamId.GetId());
-    Result->SetBoolField(TEXT("applied"), true);
+    Result->SetNumberField(TEXT("team_id"), ReadBack.GetId());
+    Result->SetBoolField(TEXT("applied"), bApplied);
     Result->SetStringField(TEXT("resolved_on"), ResolvedOn);
     Result->SetNumberField(TEXT("perception_listeners_refreshed"), RefreshedListeners);
-    return mcp_common::MakeOkReply(Result);
+    mcp_common::AddRequestedEcho(Result, Params, { TEXT("team_id") });
+    return mcp_common::MakeOutcomeReply(Result, bApplied, bApplied ? FString() : FString::Printf(
+        TEXT("set_actor_team: the %s of '%s' still reports team %d after SetGenericTeamId(%d); its SetGenericTeamId does not store the id"),
+        *ResolvedOn, *ActorName, (int32)ReadBack.GetId(), TeamIdInt));
 }
 
 // MCP:get_actor_team - Reads the native team id (FGenericTeamId) of an actor in the editor world, the team AI Perception uses to tell friend from foe: from the actor itself when it implements IGenericTeamAgentInterface, otherwise from its AAIController when it is a pawn possessed by one; resolved_on says which. When neither implements the interface the call still succeeds, with the engine-reserved NoTeam id 255, is_no_team true and resolved_on "none". Read-only: changes nothing. Editor world only, never a PIE session, so teams assigned at runtime are not seen. An unknown actor is an error. Use it to check set_actor_team, which writes the id; set_native_team_attitude decides whether two team ids are friendly, neutral or hostile; get_ai_perception_senses lists which senses a Blueprint's perception has.
