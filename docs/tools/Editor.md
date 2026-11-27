@@ -360,7 +360,7 @@ Delete several editor-world actors at once through the editor's own delete path,
 
 *Destructive.*
 
-GUARDED batch asset deletion. ***dry_run DEFAULTS TO TRUE*** (deliberate: it is the most destructive command in the plugin, `delete_assets(["/Game/VendorPack"], recursive=true)` would be a valid unconfirmed call, and agent allowlists may run mutating tools with no prompt). Four independent gates REFUSE per item instead of skipping silently: readonly_roots (default: the project's Read Only Content Roots), protect_paths (wildcards -- the only gate that saves a zero-referencer asset), the currently-open editor world, and the OPT-IN require_zero_referencers gate whose referencer count EXCLUDES referencers that are themselves in this batch (so a self-contained dead subgraph can still be deleted whole). Deletion is a single ObjectTools::ForceDeleteObjects over the whole eligible batch -- resolving each object here via StaticFindObject/StaticLoadObject rather than through UEditorAssetSubsystem::DeleteAsset, whose UE::EditorAssetUtils::LoadAssetFromPath/EnsureAssetsLoaded preamble is a known crash site ("Array index out of bounds", deterministic on corrupted leftovers). deleted_count counts ONLY items that passed BOTH post-delete probes -- the package file is gone (FPackageName::DoesPackageExist) AND the object no longer resolves at its original path (StaticFindObject) -- never the API's own return value. Both are required because for a never-saved, registry-visible asset the disk probe is vacuously true (it was never on disk), so residency is the only real evidence; each failure names which probe still sees the item.
+GUARDED batch asset deletion; dry_run DEFAULTS TO TRUE, so pass dry_run=false to delete. Four gates REFUSE per item rather than skip silently: readonly_roots (default: the project's Read Only Content Roots), protect_paths (wildcards), the currently open editor world, and the opt-in require_zero_referencers, whose count EXCLUDES referencers in the same batch (a self-contained dead subgraph can go whole). The eligible batch is force-deleted in one pass. deleted_count counts ONLY items whose package file is gone AND whose object no longer resolves at its path; each failure names the probe that still sees it.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -461,15 +461,15 @@ Run a console command through the EDITOR (GEditor->Exec against the editor world
 
 Run Python in the running Unreal Editor, with Unreal's `unreal` API, for what no tool does: search find_tools first, since most tools are not in a client's list. A script that raises fails the call, with the traceback in command_result.
 
-`mode` picks how `command` runs: ExecuteFile (the default) runs a script of any length, ExecuteStatement runs one statement and prints its result, and EvaluateStatement returns one expression's value in command_result, as in {"command": "len(unreal.get_editor_subsystem(unreal.EditorActorSubsystem).get_all_level_actors())", "mode": "EvaluateStatement"}. Scripts share the editor console's globals, so a variable one call defines is there for the next.
+`mode`: ExecuteFile runs a script of any length, ExecuteStatement runs one statement and prints its result, EvaluateStatement returns one expression's value in command_result. Scripts share the editor console's globals across calls.
 
-`output` and `log_output` hold what the script prints and logs through unreal.log; what the engine itself logs during the call is only in `engine_log`, warnings and errors by default. When a call reports success and nothing happened, read engine_log first, widen it with engine_log_level=Log, or pass log_cursor_before to get_output_log_lines for the unfiltered rest.
+`output` and `log_output` hold what the script prints and logs; the engine's own log during the call is only in `engine_log`. When a call succeeds and nothing happened, read engine_log, widen it with engine_log_level=Log, or pass log_cursor_before to get_output_log_lines.
 
-"Object has no attribute" is the commonest error, and the field usually exists elsewhere: HitResult's impact_point is only in to_dict(), while Transform.translation is an attribute. Ask the object (dir(x), x.to_dict(), x.get_editor_property(...)) instead of guessing.
+On "Object has no attribute", ask the object (dir(x), x.to_dict(), x.get_editor_property(...)) instead of guessing.
 
-During Play-in-Editor, a call in the script that compiles a Blueprint or saves (compile_blueprint, save_asset, save_loaded_asset, save_packages, save_current_level...) does not run: the script gets a RuntimeError there, and the call fails with pie_refused even if the script catches it. The guard does not see a Blueprint edited without a compile, so stop PIE before editing one. Reading the live world during PIE is safe.
+During Play-in-Editor a compile or save in the script (compile_blueprint, save_asset, save_packages, save_current_level...) raises RuntimeError and the call fails with pie_refused, even if caught; an uncompiled Blueprint edit is not caught, so stop PIE before editing one. Reading the live world is safe.
 
-One call often answers what a loop would: get_actors_by_class for the actors of a class, get_actor_properties_by_class for their properties with the world that answered, get_properties for one object, get_actor_components, raycast_scene, and watch_pie_property for a value over a PIE session. A script that only enumerates actors gets a `hint` naming the tool. Python stays the right answer for several classes in one round trip, values correlated in one tick, or anything that mutates.
+Prefer a tool over an actor loop: get_actors_by_class, get_actor_properties_by_class, get_properties, get_actor_components, raycast_scene, watch_pie_property; a script that only enumerates actors gets a `hint` naming the tool.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1153,11 +1153,11 @@ A test that needs an interactive user, or a real renderer in a headless editor, 
 
 *Destructive.*
 
-Run a Functional Test Blueprint in a Play-in-Editor session and report its verdict: the call starts it and answers verdict running; get_functional_test_status polls it until running is false, with verdict pass, fail, unknown (it finished with Default) or not_run, and timed_out when it outlived timeout_seconds or its own Time Limit.
+Run a Functional Test Blueprint in a Play-in-Editor session: the call answers verdict running; poll get_functional_test_status until running is false, for verdict pass, fail, unknown (finished with Default) or not_run, and timed_out past timeout_seconds or the test's Time Limit.
 
-With no session running, it requests a Play session (with a player, not Simulate), and once that session has begun play it calls RunTest on the test's instance in the play world: the one copied from the editor level, or one it spawns there. A session that was already running is used as it is, with the test spawned into it, and is never ended; one this call requested is ended when the test ends unless auto_stop_pie=false. A session that is still starting is refused: call again once is_play_in_editor_active answers true.
+With no session, it starts one (with a player) and calls RunTest on the test's instance in the play world, copied from the editor level or spawned there; this session is ended when the test ends unless auto_stop_pie=false. A running session is used and never ended; one still starting is refused (retry once is_play_in_editor_active is true).
 
-The actor spawned into the session is removed when the test ends, so the editor level is left as it was; keep_actor=true instead places the test in the editor level (unsaved, no undo step) before the session starts and keeps it there and in the session. While the test runs, a second test, start_play_in_editor, stop_play_in_editor and load_level are refused naming it, cancel_automation_test stops it, and wait_for_pie_completion must not be called (it blocks the ticks the test needs). Create the test first with create_functional_test; a class that is not found, is not a Functional Test, or whose name matches several loaded classes is an error.
+A spawned actor is removed when the test ends; keep_actor=true places it in the editor level instead (unsaved, no undo). While the test runs, a second test, start_play_in_editor, stop_play_in_editor and load_level are refused, cancel_automation_test stops it, and wait_for_pie_completion must not be called (it blocks the ticks the test needs). A class not found, not a Functional Test, or matching several loaded classes is an error (create_functional_test makes one).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
