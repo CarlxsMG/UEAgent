@@ -461,7 +461,9 @@ TSharedPtr<FJsonObject> HandleSetWidgetVisibility(const TSharedPtr<FJsonObject>&
 
 // MCP:list_level_widget_components - CALL THIS FIRST to discover valid widget_name values instead of guessing: it enumerates ALL UWidgetComponents on ALL actors of the current EDITOR level, which is the EXACT population that get_level_widget_properties / set_level_widget_visibility search by widget_name (remove_widget searches it too). It reads GEditor's world and never a running PIE session (use list_pie_widgets for that), and it lists every widget component on an actor, not just the first. WARNING: THIS POPULATION IS NOT WIDGET BLUEPRINTS, and that is the trap the name does not warn you about: these are world-space UWidgetComponents hosted on actors. To author the CONTENT of a Widget Blueprint asset -- its tree, styles or layout -- you want get_widget_blueprint_tree / set_widget_property / set_slot_properties instead. In particular ANCHORS live on a UCanvasPanelSlot inside a Widget Blueprint's tree and have no meaning at all on a level UWidgetComponent: set them with set_slot_properties(widget_bp_path, widget_name, anchors=[min_x,min_y,max_x,max_y]).
 //   @param actor_name_filter - Optional substring filter on the owning actor's name (Contains match)
-//   @returns { components: [{ actor_name: string, widget_component_name: string, widget_name: string|null, widget_class: string|null }], component_count: number, actor_name_filter: string|null }
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { components: [{ actor_name: string, widget_component_name: string, widget_name: string|null, widget_class: string|null }], component_count: number (entries in this page), actor_name_filter: string|null, total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }
 
 TSharedPtr<FJsonObject> HandleListLevelWidgetComponents(const TSharedPtr<FJsonObject>& Params)
 {
@@ -485,6 +487,8 @@ TSharedPtr<FJsonObject> HandleListLevelWidgetComponents(const TSharedPtr<FJsonOb
     }
 
     TSharedPtr<FJsonObject> Listing = MakeShared<FJsonObject>();
+    mcp_common::SortJsonItems(Rows, TEXT("actor_name"));
+    mcp_common::ApplyListPage(Rows, mcp_common::ReadListPage(Params), Listing);
     Listing->SetArrayField(TEXT("components"), Rows);
     Listing->SetNumberField(TEXT("component_count"), Rows.Num());
     if (bFiltered)

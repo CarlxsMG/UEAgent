@@ -757,7 +757,7 @@ TSharedPtr<FJsonObject> HandleBulkDeleteAssets(
 // ---------------------------------------------------------------------------
 // 3. find_unused_assets
 // ---------------------------------------------------------------------------
-// MCP:find_unused_assets - Find assets in a folder with zero referencers, and annotate each survivor with the reasons it should be KEPT anyway. "Zero referencers" is not the same as "safe to delete": there are three common ways an asset stays alive with an empty referencer set -- it is explicitly protected, a Config/Default*.ini names it, or it is a fork descending from a vendored base library. Each becomes a keep_reason string on the entry; deletion_candidates lists only the entries with NO keep_reason. Nothing is ever removed from unused_assets by these flags (hiding a genuinely unreferenced asset would be the same lie in the other direction). NOTE: there is deliberately no `is_world` -- it is already visible in class_name ("World").
+// MCP:find_unused_assets - Find assets in a folder with zero referencers, and annotate each survivor with the reasons it should be KEPT anyway. "Zero referencers" is not the same as "safe to delete": there are three common ways an asset stays alive with an empty referencer set -- it is explicitly protected, a Config/Default*.ini names it, or it is a fork descending from a vendored base library. Each becomes a keep_reason string on the entry; deletion_candidates lists only the entries of this page with NO keep_reason (deletion_candidate_count counts all of them). unused_assets come sorted by path, a page at a time (offset/limit). Nothing is ever removed from unused_assets by these flags (hiding a genuinely unreferenced asset would be the same lie in the other direction). NOTE: there is deliberately no `is_world` -- it is already visible in class_name ("World").
 //   @param folder_path - Content folder to scan, e.g. /Game/Unused
 //   @param recursive - If true, scan subfolders, default true
 //   @param exclude_classes - Optional list of class name fragments to skip
@@ -765,7 +765,9 @@ TSharedPtr<FJsonObject> HandleBulkDeleteAssets(
 //   @param protect_paths [array] - Wildcard patterns (FString::MatchesWildcard, case-insensitive, `*` spans '/') matched against the package name and the object path. Default [] . A match adds keep_reason "protected_path".
 //   @param include_lineage_reasons - Default FALSE because it LOADS every candidate Blueprint. When true, a Blueprint whose super chain reaches a class owned by one of base_libraries gets keep_reason "descends_from_base_library" -- the only signal that saves a fork carrying no fork-origin tag (project setting Fork Origin Tag).
 //   @param base_libraries [array] - Vendored-library content roots for the lineage check. Default: the project's Read Only Content Roots (same default as audit_class_purity).
-//   @returns { folder_path, folder_exists, recursive, dependency_type, protect_paths: [string], include_lineage_reasons, base_libraries: [string], unused_assets: [{path, class_name, size_kb, keep_reasons: [string], keep_reason_detail: {...}}], unused_count, total_scanned, deletion_candidates: [string], deletion_candidate_count, assets_with_keep_reason, keep_reason_counts: {protected_path, referenced_by_config, descends_from_base_library}, config_scan: {files_scanned: int, files: [string]}, lineage_scan: {attempted, blueprints_loaded, skipped_non_blueprint, load_failures} }
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { folder_path, folder_exists, recursive, dependency_type, protect_paths: [string], include_lineage_reasons, base_libraries: [string], unused_assets: [{path, class_name, size_kb, keep_reasons: [string], keep_reason_detail: {...}}], unused_count (entries in this page), total_scanned, deletion_candidates: [string], deletion_candidate_count, assets_with_keep_reason, keep_reason_counts: {protected_path, referenced_by_config, descends_from_base_library}, config_scan: {files_scanned: int, files: [string]}, lineage_scan: {attempted, blueprints_loaded, skipped_non_blueprint, load_failures}, total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }
 TSharedPtr<FJsonObject> HandleFindUnusedAssets(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -838,7 +840,7 @@ TSharedPtr<FJsonObject> HandleFindUnusedAssets(
 	const FTopLevelAssetPath BlueprintClassPath = UBlueprint::StaticClass()->GetClassPathName();
 
 	TArray<TSharedPtr<FJsonValue>> UnusedEntries;
-	TArray<TSharedPtr<FJsonValue>> DeletionCandidates;
+	int32 DeletionCandidateCount = 0;
 	int32 ProtectedCount = 0, ConfigCount = 0, LineageCount = 0, AssetsWithKeepReason = 0;
 	int32 LineageBlueprintsLoaded = 0, LineageSkippedNonBlueprint = 0, LineageLoadFailures = 0;
 
@@ -935,7 +937,7 @@ TSharedPtr<FJsonObject> HandleFindUnusedAssets(
 		}
 		else
 		{
-			DeletionCandidates.Add(MakeShared<FJsonValueString>(AssetPath));
+			++DeletionCandidateCount;
 		}
 
 		TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
@@ -967,6 +969,18 @@ TSharedPtr<FJsonObject> HandleFindUnusedAssets(
 	LineageScan->SetNumberField(TEXT("load_failures"), LineageLoadFailures);
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	mcp_common::SortJsonItems(UnusedEntries, TEXT("path"));
+	mcp_common::ApplyListPage(UnusedEntries, mcp_common::ReadListPage(Params), Data);
+	// The deletion candidates of this page: its entries with no keep reason.
+	TArray<TSharedPtr<FJsonValue>> DeletionCandidates;
+	for (const TSharedPtr<FJsonValue>& Value : UnusedEntries)
+	{
+		const TSharedPtr<FJsonObject> Entry = Value->AsObject();
+		if (Entry.IsValid() && Entry->GetArrayField(TEXT("keep_reasons")).Num() == 0)
+		{
+			DeletionCandidates.Add(MakeShared<FJsonValueString>(Entry->GetStringField(TEXT("path"))));
+		}
+	}
 	Data->SetStringField(TEXT("folder_path"), FolderPath);
 	Data->SetBoolField(TEXT("folder_exists"), bFolderExists);
 	Data->SetBoolField(TEXT("recursive"), bRecursive);
@@ -978,7 +992,7 @@ TSharedPtr<FJsonObject> HandleFindUnusedAssets(
 	Data->SetNumberField(TEXT("unused_count"), UnusedEntries.Num());
 	Data->SetNumberField(TEXT("total_scanned"), AllAssets.Num());
 	Data->SetArrayField(TEXT("deletion_candidates"), DeletionCandidates);
-	Data->SetNumberField(TEXT("deletion_candidate_count"), DeletionCandidates.Num());
+	Data->SetNumberField(TEXT("deletion_candidate_count"), DeletionCandidateCount);
 	Data->SetNumberField(TEXT("assets_with_keep_reason"), AssetsWithKeepReason);
 	Data->SetObjectField(TEXT("keep_reason_counts"), KeepReasonCounts);
 	Data->SetObjectField(TEXT("config_scan"), ConfigScan);

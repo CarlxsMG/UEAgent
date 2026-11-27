@@ -1394,7 +1394,9 @@ TSharedPtr<FJsonObject> HandleGetPluginStatus(const TSharedPtr<FJsonObject>& Par
 //   @param name_filter - Optional case-insensitive substring of the plugin's name or friendly name.
 //   @param category - Optional case-insensitive substring of the plugin's category (e.g. "Editor", "Rendering").
 //   @param include_hidden - Optional bool (default true): include plugins the Plugins window hides.
-//   @returns { plugins: [{ name: string, friendly_name: string, enabled: bool, mounted: bool, type: "engine"|"project", plugin_type: "engine"|"enterprise"|"project"|"external"|"mod", version: string, version_number: int, category: string, path: string, descriptor_file: string, can_contain_content: bool, is_beta: bool, is_experimental: bool, hidden: bool }], count: int, total_discovered: int }
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { plugins: [{ name: string, friendly_name: string, enabled: bool, mounted: bool, type: "engine"|"project", plugin_type: "engine"|"enterprise"|"project"|"external"|"mod", version: string, version_number: int, category: string, path: string, descriptor_file: string, can_contain_content: bool, is_beta: bool, is_experimental: bool, hidden: bool }], count: int (entries in this page), total_discovered: int, total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }
 
 TSharedPtr<FJsonObject> HandleListPlugins(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1473,6 +1475,7 @@ TSharedPtr<FJsonObject> HandleListPlugins(const TSharedPtr<FJsonObject>& Params)
     }
 
     TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
+    mcp_common::ApplyListPage(Rows, mcp_common::ReadListPage(Params), Reply);
     Reply->SetArrayField(TEXT("plugins"), Rows);
     Reply->SetNumberField(TEXT("count"), Rows.Num());
     Reply->SetNumberField(TEXT("total_discovered"), Discovered.Num());

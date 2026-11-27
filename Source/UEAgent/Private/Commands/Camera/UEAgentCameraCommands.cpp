@@ -470,13 +470,17 @@ namespace
     }
 }
 
-// MCP:list_camera_node_types - Lists all concrete UCameraNode subclasses usable in a camera rig. Read-only reflection (GetDerivedClasses).
-//   @returns { base_class, count, types:[{name, path}] }
+// MCP:list_camera_node_types - Lists the concrete UCameraNode subclasses usable in a camera rig, sorted by name and paged with offset/limit. Read-only reflection (GetDerivedClasses).
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { base_class, count (entries in this page), types:[{name, path}], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }
 TSharedPtr<FJsonObject> HandleListCameraNodeTypes(const TSharedPtr<FJsonObject>& Params)
 {
-    const TArray<TSharedPtr<FJsonValue>> Types = mcp_common::ConcreteSubclassesToJson(UCameraNode::StaticClass());
+    TArray<TSharedPtr<FJsonValue>> Types = mcp_common::ConcreteSubclassesToJson(UCameraNode::StaticClass());
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    mcp_common::SortJsonItems(Types, TEXT("name"));
+    mcp_common::ApplyListPage(Types, mcp_common::ReadListPage(Params), Data);
     Data->SetStringField(TEXT("base_class"), TEXT("CameraNode"));
     Data->SetNumberField(TEXT("count"), Types.Num());
     Data->SetArrayField(TEXT("types"), Types);

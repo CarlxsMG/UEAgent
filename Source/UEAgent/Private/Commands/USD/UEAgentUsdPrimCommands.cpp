@@ -530,7 +530,9 @@ TSharedPtr<FJsonObject> HandleGetUsdPrimMetadata(const TSharedPtr<FJsonObject>& 
 //   @param stage_name [string!] - Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier.
 //   @param prim_path_prefix [string] - Absolute SdfPath of the prim whose children are listed, e.g. "/World"; it must exist (it is a parent path, not a text prefix). Default "/" (the pseudo root).
 //   @param recursive [bool] - false (default) lists the direct children only; true lists every descendant, each parent before its children.
-//   @returns { prims: [{ prim_path, type_name, active }], count: number }
+//   @param offset [integer] - Index of the first prim returned, in the order above, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { prims: [{ prim_path, type_name, active }], count: number (entries in this page), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }
 TSharedPtr<FJsonObject> HandleListUsdPrims(const TSharedPtr<FJsonObject>& Params)
 {
 	UE::FUsdStage Stage;
@@ -581,6 +583,7 @@ TSharedPtr<FJsonObject> HandleListUsdPrims(const TSharedPtr<FJsonObject>& Params
 	}
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	mcp_common::ApplyListPage(Out, mcp_common::ReadListPage(Params), Data);
 	Data->SetArrayField(TEXT("prims"), Out);
 	Data->SetNumberField(TEXT("count"), Out.Num());
 	return mcp_common::MakeOkReply(Data);

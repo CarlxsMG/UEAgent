@@ -628,7 +628,9 @@ TSharedPtr<FJsonObject> HandleSetCVarsFromJson(const TSharedPtr<FJsonObject>& Pa
 // MCP:list_engine_ini_sections - List the section names of one INI (Engine, Game, Input, Editor, Scalability...) without changing anything: by default as the running editor holds it in GConfig, the in-memory merge of every config layer (the engine's Base ini included); with include_base=false only the sections the project itself defines, read from disk in its Config/Default<name>.ini and its saved Saved/Config/<Platform>/<name>.ini (files_read lists the ones that exist). An INI GConfig does not know (a misspelt name, say) is a success with found=false. Use it to discover a section before reading one key with get_engine_ini_value or writing one with set_engine_ini_value; for UDeveloperSettings classes use get_project_settings_value. file_path is the saved-config path Saved/Config/<Platform>/<name>.ini built from the name.
 //   @param config_file - INI base name, e.g. "Engine" (default), "Game", "Input", "Editor", "Scalability"; a trailing ".ini" is dropped.
 //   @param include_base - true (default) lists the whole in-memory merge, engine Base ini layers included; false lists only the sections in the project's Config/Default<name>.ini and Saved/Config/<Platform>/<name>.ini, as they are on disk.
-//   @returns { count, sections: [string], found: bool, include_base: bool, config_file, file_path, files_read?: [string] }
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { count (entries in this page), sections: [string] (sorted by name), found: bool, include_base: bool, config_file, file_path, files_read?: [string], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }
 TSharedPtr<FJsonObject> HandleListEngineIniSections(const TSharedPtr<FJsonObject>& Params)
 {
     FString ConfigFile = TEXT("Engine");
@@ -683,12 +685,15 @@ TSharedPtr<FJsonObject> HandleListEngineIniSections(const TSharedPtr<FJsonObject
         Data->SetArrayField(TEXT("files_read"), mcp_common::StringsToJson(FilesRead));
     }
 
-    Data->SetNumberField(TEXT("count"), SectionNames.Num());
+    TArray<TSharedPtr<FJsonValue>> Sections = mcp_common::StringsToJson(SectionNames);
+    mcp_common::SortJsonItems(Sections, nullptr);
+    mcp_common::ApplyListPage(Sections, mcp_common::ReadListPage(Params), Data);
+    Data->SetNumberField(TEXT("count"), Sections.Num());
     Data->SetBoolField(TEXT("found"), bFound);
     Data->SetBoolField(TEXT("include_base"), bIncludeBase);
     Data->SetStringField(TEXT("config_file"), ConfigFile);
     Data->SetStringField(TEXT("file_path"), FilePath);
-    Data->SetArrayField(TEXT("sections"), mcp_common::StringsToJson(SectionNames));
+    Data->SetArrayField(TEXT("sections"), Sections);
     return mcp_common::MakeOkReply(Data);
 }
 

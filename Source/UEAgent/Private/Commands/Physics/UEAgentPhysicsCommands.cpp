@@ -1283,7 +1283,9 @@ TSharedPtr<FJsonObject> HandleRaycastScene(const TSharedPtr<FJsonObject>& Params
 //   @param trace_channel [string] - Collision channel, canonical ("ECC_Visibility") or friendly ("Visibility"). Defaults to "Visibility".
 //   @param ignore_actors [array] - Actor names/labels to exclude from the overlap.
 //   @param world [string] - Which world to query: absent/"editor" (default) | "server" (the PIE world with authority) | "client" | "pie:N" | "pie" (ambiguous) | "game" (alias of "pie"). Pass a live world to hit World-Partition/OFPA actor collision (only cooked in the PIE physics scene).
-//   @returns { overlaps: [{actor_path, actor_name, component_name, item_index, blocking}], count: int, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { overlaps: [{actor_path, actor_name, component_name, item_index, blocking}] (sorted by actor_path, paged with offset/limit), count: int (entries in this page), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }
 //   @hints read-only
 TSharedPtr<FJsonObject> HandleOverlapScene(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1373,9 +1375,11 @@ TSharedPtr<FJsonObject> HandleOverlapScene(const TSharedPtr<FJsonObject>& Params
     }
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+    mcp_common::SortJsonItems(OverlapArr, TEXT("actor_path"));
+    mcp_common::ApplyListPage(OverlapArr, mcp_common::ReadListPage(Params), Result);
     Result->SetArrayField(TEXT("overlaps"), OverlapArr);
     Result->SetNumberField(TEXT("count"), OverlapArr.Num());
-    // A "count: 0" is only interpretable if you know WHICH world was queried.
+    // A "total: 0" is only interpretable if you know WHICH world was queried.
     Result->SetStringField(TEXT("world"), WorldMode);
     mcp_common::AddWorldEvidence(Result, World);
     return mcp_common::MakeOkReply(Result);

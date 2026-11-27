@@ -838,51 +838,59 @@ Read-only lint of a Blueprint's graphs for four authoring bugs that COMPILE CLEA
 
 *Read-only.*
 
-List the Editor Utility Widget Blueprint assets under a content folder and its subfolders, read from the Asset Registry without loading them. Returns search_path, count and widgets [{name, asset_path, package_name, package_path}]; open one as an editor tab with run_editor_utility_widget.
+List the Editor Utility Widget Blueprint assets under a content folder and its subfolders, read from the Asset Registry without loading them. Returns search_path, count and widgets [{name, asset_path, package_name, package_path}], sorted by asset_path and paged with offset/limit; open one as an editor tab with run_editor_utility_widget.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `path` | string | no | Content folder to search recursively, without a trailing slash, e.g. "/Game/EditorUtilities" (default /Game). |
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ name, asset_path, package_name, package_path, search_path, count, widgets }`
+**Returns:** `{ name, asset_path, package_name, package_path, search_path, count (entries in this page), widgets, total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }`
 
 ## `list_overridable_functions`
 
 *Read-only.*
 
-Enumerate the functions/events that a Blueprint deriving from a class could override. Works on an EXISTING Blueprint (blueprint_name) or on ANY class (class_name) so the override surface can be inspected BEFORE the child exists. Gated with UEdGraphSchema_K2::CanKismetOverrideFunction -- the same predicate add_blueprint_function(override=true) enforces -- so discovery and authoring agree (a bare NativeEvent||FUNC_BlueprintEvent filter lets a parent Blueprint's *__DelegateSignature through as "overridable"). Each entry reports where the member is DECLARED and where it is last IMPLEMENTED, with is_stub, which is what distinguishes a concrete ancestor from its `_Abstract` sibling.
+Enumerate the functions/events that a Blueprint deriving from a class could override. Works on an EXISTING Blueprint (blueprint_name) or on ANY class (class_name) so the override surface can be inspected BEFORE the child exists. Gated with UEdGraphSchema_K2::CanKismetOverrideFunction -- the same predicate add_blueprint_function(override=true) enforces -- so discovery and authoring agree (a bare NativeEvent||FUNC_BlueprintEvent filter lets a parent Blueprint's *__DelegateSignature through as "overridable"). Each entry reports where the member is DECLARED and where it is last IMPLEMENTED, with is_stub, which is what distinguishes a concrete ancestor from its `_Abstract` sibling. Entries come in class-chain then interface order, a page at a time (offset/limit).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `blueprint_name` | string | no | Name/path of an existing Blueprint. Its ParentClass is the override surface. |
 | `class_name` | string | no | Alternative to blueprint_name: any class ("Actor", "/Script/Engine.Pawn", "/Game/.../BP_X.BP_X_C", or a Blueprint asset path). The override surface is THAT class, i.e. what a new child would get. Ignored when blueprint_name is given. |
 | `include_non_overridable` | boolean | no | Optional bool (default false). true also lists the entries a NativeEvent\|\|FUNC_BlueprintEvent filter passes but CanKismetOverrideFunction rejects (delegate signatures, BlueprintInternalUseOnly, deprecated), each flagged can_kismet_override=false. Nothing is lost silently. |
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ blueprint_name?, class_name?, source_mode, resolved_class, base_class, ancestors: [string], count, functions: [{ function_name, display_name, declaring_class, is_native_event, is_event, is_interface, interface_name?, kind, can_kismet_override, has_override_graph, has_user_logic, is_implemented, parent_impl_kind, parent_impl_owner_class, parent_impl_graph, parent_impl_node_count, is_stub, is_stub_basis }] }`
+**Returns:** `{ blueprint_name?, class_name?, source_mode, resolved_class, base_class, ancestors: [string], count (entries in this page), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null, functions: [{ function_name, display_name, declaring_class, is_native_event, is_event, is_interface, interface_name?, kind, can_kismet_override, has_override_graph, has_user_logic, is_implemented, parent_impl_kind, parent_impl_owner_class, parent_impl_graph, parent_impl_node_count, is_stub, is_stub_basis }] }`
 
 ## `list_scripted_action_utilities`
 
 *Read-only.*
 
-List the Editor Utility Blueprints under a content folder (subfolders included) whose class derives from UAssetActionUtility (kind asset: Content Browser right-click actions) or UActorActionUtility (kind actor: level actor actions). Each Editor Utility Blueprint found is LOADED to test its class, so a large folder is slow; plain Blueprints and Editor Utility Widgets are not listed. Read-only; a folder with none, or one that does not exist, is an empty list, not an error. Run one with run_asset_action_utility, which also lists its CallInEditor actions; create one with create_editor_utility_blueprint (parent_class "AssetActionUtility" or "ActorActionUtility"); Editor Utility Widgets: list_editor_utility_widgets.
+List the Editor Utility Blueprints under a content folder (subfolders included) whose class derives from UAssetActionUtility (kind asset: Content Browser right-click actions) or UActorActionUtility (kind actor: level actor actions). Each Editor Utility Blueprint found is LOADED to test its class, so a large folder is slow; plain Blueprints and Editor Utility Widgets are not listed. Sorted by path, a page at a time (offset/limit). Read-only; a folder with none, or one that does not exist, is an empty list, not an error. Run one with run_asset_action_utility, which also lists its CallInEditor actions; create one with create_editor_utility_blueprint (parent_class "AssetActionUtility" or "ActorActionUtility"); Editor Utility Widgets: list_editor_utility_widgets.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `path` | string | no | Content folder to search, subfolders included, e.g. "/Game/EditorTools", without a trailing slash (default /Game). |
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ search_path: string, count: int, utilities: [{ name: string, path: string, package_name: string, kind: string, parent_class: string }] }`
+**Returns:** `{ search_path: string, count: int (entries in this page), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null, utilities: [{ name: string, path: string, package_name: string, kind: string, parent_class: string }] }`
 
 ## `list_widget_bound_events`
 
 *Read-only.*
 
-List every event-dispatcher BINDING wired in a Blueprint, across the three node kinds that make one in practice: UK2Node_AddDelegate (from add_object_bound_event / add_graph_node node_type="add_delegate"), UK2Node_ComponentBoundEvent (from add_component_bound_event -- a component's dispatcher OR a UMG widget's, e.g. a Button's OnClicked) and UK2Node_ActorBoundEvent (a level actor's, bound from the Level Blueprint). Each entry reports which kind it is (binding_kind), what it is bound ON (bound_to: the component/widget variable, or the actor), the delegate's owner class and name, and the handler on the other end. Despite the name it works on ANY Blueprint -- but it only walks Ubergraph pages and FunctionGraphs, so a binding inside a macro or interface graph is out of scope. Run it BEFORE add_object_bound_event / add_component_bound_event: double-binding one delegate to two handlers compiles fine and silently runs BOTH. A reader that cannot see what the writer wrote is worse than no reader: a 0 reads as "not wired" and sends you to re-wire what is already there.
+List the event-dispatcher BINDINGS wired in a Blueprint, in graph order and a page at a time (offset/limit; kind_counts and total count them all), across the three node kinds that make one in practice: UK2Node_AddDelegate (from add_object_bound_event / add_graph_node node_type="add_delegate"), UK2Node_ComponentBoundEvent (from add_component_bound_event -- a component's dispatcher OR a UMG widget's, e.g. a Button's OnClicked) and UK2Node_ActorBoundEvent (a level actor's, bound from the Level Blueprint). Each entry reports which kind it is (binding_kind), what it is bound ON (bound_to: the component/widget variable, or the actor), the delegate's owner class and name, and the handler on the other end. Despite the name it works on ANY Blueprint -- but it only walks Ubergraph pages and FunctionGraphs, so a binding inside a macro or interface graph is out of scope. Run it BEFORE add_object_bound_event / add_component_bound_event: double-binding one delegate to two handlers compiles fine and silently runs BOTH. A reader that cannot see what the writer wrote is worse than no reader: a 0 reads as "not wired" and sends you to re-wire what is already there.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `blueprint_name` | string | yes | Blueprint asset name or path (Actor Blueprint, Widget Blueprint or Level Blueprint). |
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ blueprint_name, bindings:[{ graph_name, node_id, binding_kind, bound_to, delegate_owner_class, delegate_name, delegate_resolved, wired, custom_event_name, custom_event_node_id }], binding_count, kind_counts:{add_delegate,component_bound_event,actor_bound_event} } -- binding_kind names the node class behind the entry. bound_to is the component/widget variable name (component_bound_event), the actor name (actor_bound_event), or empty for add_delegate, whose target pin is left unconnected by design. delegate_resolved=false means the delegate no longer resolves live (renamed/removed). wired=false is a DANGLING add_delegate bind (its Delegate pin has no handler); the two *BoundEvent kinds ARE their own handler, so they are always wired and custom_event_name is the generated BndEvt__ function.`
+**Returns:** `{ blueprint_name, bindings:[{ graph_name, node_id, binding_kind, bound_to, delegate_owner_class, delegate_name, delegate_resolved, wired, custom_event_name, custom_event_node_id }], binding_count (entries in this page), kind_counts:{add_delegate,component_bound_event,actor_bound_event}, total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null } -- binding_kind names the node class behind the entry. bound_to is the component/widget variable name (component_bound_event), the actor name (actor_bound_event), or empty for add_delegate, whose target pin is left unconnected by design. delegate_resolved=false means the delegate no longer resolves live (renamed/removed). wired=false is a DANGLING add_delegate bind (its Delegate pin has no handler); the two *BoundEvent kinds ARE their own handler, so they are always wired and custom_event_name is the generated BndEvt__ function.`
 
 ## `move_node`
 

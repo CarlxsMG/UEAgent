@@ -545,7 +545,7 @@ Find groups of assets that share the same asset name under a content folder tree
 
 *Read-only.*
 
-Find assets in a folder with zero referencers, and annotate each survivor with the reasons it should be KEPT anyway. "Zero referencers" is not the same as "safe to delete": there are three common ways an asset stays alive with an empty referencer set -- it is explicitly protected, a Config/Default*.ini names it, or it is a fork descending from a vendored base library. Each becomes a keep_reason string on the entry; deletion_candidates lists only the entries with NO keep_reason. Nothing is ever removed from unused_assets by these flags (hiding a genuinely unreferenced asset would be the same lie in the other direction). NOTE: there is deliberately no `is_world` -- it is already visible in class_name ("World").
+Find assets in a folder with zero referencers, and annotate each survivor with the reasons it should be KEPT anyway. "Zero referencers" is not the same as "safe to delete": there are three common ways an asset stays alive with an empty referencer set -- it is explicitly protected, a Config/Default*.ini names it, or it is a fork descending from a vendored base library. Each becomes a keep_reason string on the entry; deletion_candidates lists only the entries of this page with NO keep_reason (deletion_candidate_count counts all of them). unused_assets come sorted by path, a page at a time (offset/limit). Nothing is ever removed from unused_assets by these flags (hiding a genuinely unreferenced asset would be the same lie in the other direction). NOTE: there is deliberately no `is_world` -- it is already visible in class_name ("World").
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -556,8 +556,10 @@ Find assets in a folder with zero referencers, and annotate each survivor with t
 | `protect_paths` | array | no | Wildcard patterns (FString::MatchesWildcard, case-insensitive, `*` spans '/') matched against the package name and the object path. Default [] . A match adds keep_reason "protected_path". |
 | `include_lineage_reasons` | boolean | no | Default FALSE because it LOADS every candidate Blueprint. When true, a Blueprint whose super chain reaches a class owned by one of base_libraries gets keep_reason "descends_from_base_library" -- the only signal that saves a fork carrying no fork-origin tag (project setting Fork Origin Tag). |
 | `base_libraries` | array | no | Vendored-library content roots for the lineage check. Default: the project's Read Only Content Roots (same default as audit_class_purity). |
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ folder_path, folder_exists, recursive, dependency_type, protect_paths: [string], include_lineage_reasons, base_libraries: [string], unused_assets: [{path, class_name, size_kb, keep_reasons: [string], keep_reason_detail: {...}}], unused_count, total_scanned, deletion_candidates: [string], deletion_candidate_count, assets_with_keep_reason, keep_reason_counts: {protected_path, referenced_by_config, descends_from_base_library}, config_scan: {files_scanned: int, files: [string]}, lineage_scan: {attempted, blueprints_loaded, skipped_non_blueprint, load_failures} }`
+**Returns:** `{ folder_path, folder_exists, recursive, dependency_type, protect_paths: [string], include_lineage_reasons, base_libraries: [string], unused_assets: [{path, class_name, size_kb, keep_reasons: [string], keep_reason_detail: {...}}], unused_count (entries in this page), total_scanned, deletion_candidates: [string], deletion_candidate_count, assets_with_keep_reason, keep_reason_counts: {protected_path, referenced_by_config, descends_from_base_library}, config_scan: {files_scanned: int, files: [string]}, lineage_scan: {attempted, blueprints_loaded, skipped_non_blueprint, load_failures}, total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }`
 
 ## `fixup_redirectors`
 
@@ -879,8 +881,10 @@ What is UNSAVED in the editor right now: every dirty package with its disk path,
 | `readonly_roots` | array | no | Optional array of long-path prefixes treated as vendored/upstream (default: the project's Read Only Content Roots). Only used to CLASSIFY (under_readonly_root / readonly_dirty_count); nothing is ever written. Pass [] to switch the classification off. |
 | `path_prefix` | string | no | Optional long-path prefix filter, e.g. /Game/VendorPack, to ask "is anything of THEIRS dirty". Empty (default) lists everything; what it excluded is counted in filtered_out. |
 | `include_objects` | boolean | no | Optional bool (default false). Also list every object carried by each dirty package. One object-hash walk per package -- a dirty map can hold thousands, so leave it off unless you need the contents. |
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ dirty_count: int, readonly_dirty_count: int, map_dirty_count: int, external_dirty_count: int, asset_dirty_count: int, filtered_out: int, pie_active: bool, current_world_package: string, path_prefix: string, readonly_roots: [string], readonly_roots_defaulted: bool, packages: [{ package_name: string, file_path: string, exists_on_disk: bool, kind: string, contains_map: bool, newly_created: bool, actor_label: string, actor_name: string, asset_name: string, asset_class: string, under_readonly_root: bool, objects?: [string] }], message: string, note: string }`
+**Returns:** `{ dirty_count: int (every dirty package, not only this page), readonly_dirty_count: int, map_dirty_count: int, external_dirty_count: int, asset_dirty_count: int, filtered_out: int, pie_active: bool, current_world_package: string, path_prefix: string, readonly_roots: [string], readonly_roots_defaulted: bool, packages: [{ package_name: string, file_path: string, exists_on_disk: bool, kind: string, contains_map: bool, newly_created: bool, actor_label: string, actor_name: string, asset_name: string, asset_class: string, under_readonly_root: bool, objects?: [string] }] (sorted by package_name), message: string, note: string, total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }`
 
 ## `list_engine_ini_sections`
 
@@ -892,8 +896,10 @@ List the section names of one INI (Engine, Game, Input, Editor, Scalability...) 
 |---|---|---|---|
 | `config_file` | string | no | INI base name, e.g. "Engine" (default), "Game", "Input", "Editor", "Scalability"; a trailing ".ini" is dropped. |
 | `include_base` | boolean | no | true (default) lists the whole in-memory merge, engine Base ini layers included; false lists only the sections in the project's Config/Default&lt;name>.ini and Saved/Config/&lt;Platform>/&lt;name>.ini, as they are on disk. |
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ count, sections: [string], found: bool, include_base: bool, config_file, file_path, files_read?: [string] }`
+**Returns:** `{ count (entries in this page), sections: [string] (sorted by name), found: bool, include_base: bool, config_file, file_path, files_read?: [string], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }`
 
 ## `list_open_asset_editors`
 

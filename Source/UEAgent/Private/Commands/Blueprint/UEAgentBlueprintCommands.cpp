@@ -4256,11 +4256,13 @@ namespace
     }
 }
 
-// MCP:list_overridable_functions - Enumerate the functions/events that a Blueprint deriving from a class could override. Works on an EXISTING Blueprint (blueprint_name) or on ANY class (class_name) so the override surface can be inspected BEFORE the child exists. Gated with UEdGraphSchema_K2::CanKismetOverrideFunction -- the same predicate add_blueprint_function(override=true) enforces -- so discovery and authoring agree (a bare NativeEvent||FUNC_BlueprintEvent filter lets a parent Blueprint's *__DelegateSignature through as "overridable"). Each entry reports where the member is DECLARED and where it is last IMPLEMENTED, with is_stub, which is what distinguishes a concrete ancestor from its `_Abstract` sibling.
+// MCP:list_overridable_functions - Enumerate the functions/events that a Blueprint deriving from a class could override. Works on an EXISTING Blueprint (blueprint_name) or on ANY class (class_name) so the override surface can be inspected BEFORE the child exists. Gated with UEdGraphSchema_K2::CanKismetOverrideFunction -- the same predicate add_blueprint_function(override=true) enforces -- so discovery and authoring agree (a bare NativeEvent||FUNC_BlueprintEvent filter lets a parent Blueprint's *__DelegateSignature through as "overridable"). Each entry reports where the member is DECLARED and where it is last IMPLEMENTED, with is_stub, which is what distinguishes a concrete ancestor from its `_Abstract` sibling. Entries come in class-chain then interface order, a page at a time (offset/limit).
 //   @param blueprint_name - Name/path of an existing Blueprint. Its ParentClass is the override surface.
 //   @param class_name - Alternative to blueprint_name: any class ("Actor", "/Script/Engine.Pawn", "/Game/.../BP_X.BP_X_C", or a Blueprint asset path). The override surface is THAT class, i.e. what a new child would get. Ignored when blueprint_name is given.
 //   @param include_non_overridable - Optional bool (default false). true also lists the entries a NativeEvent||FUNC_BlueprintEvent filter passes but CanKismetOverrideFunction rejects (delegate signatures, BlueprintInternalUseOnly, deprecated), each flagged can_kismet_override=false. Nothing is lost silently.
-//   @returns { blueprint_name?, class_name?, source_mode, resolved_class, base_class, ancestors: [string], count, functions: [{ function_name, display_name, declaring_class, is_native_event, is_event, is_interface, interface_name?, kind, can_kismet_override, has_override_graph, has_user_logic, is_implemented, parent_impl_kind, parent_impl_owner_class, parent_impl_graph, parent_impl_node_count, is_stub, is_stub_basis }] }
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { blueprint_name?, class_name?, source_mode, resolved_class, base_class, ancestors: [string], count (entries in this page), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null, functions: [{ function_name, display_name, declaring_class, is_native_event, is_event, is_interface, interface_name?, kind, can_kismet_override, has_override_graph, has_user_logic, is_implemented, parent_impl_kind, parent_impl_owner_class, parent_impl_graph, parent_impl_node_count, is_stub, is_stub_basis }] }
 TSharedPtr<FJsonObject> HandleListOverridableFunctions(const TSharedPtr<FJsonObject>& Params)
 {
     FString BlueprintName;
@@ -4486,6 +4488,7 @@ TSharedPtr<FJsonObject> HandleListOverridableFunctions(const TSharedPtr<FJsonObj
     Data->SetStringField(TEXT("resolved_class"), ResolvedClassPath);
     Data->SetStringField(TEXT("base_class"), BaseClass->GetPathName());
     Data->SetArrayField(TEXT("ancestors"), AncestorsJson);
+    mcp_common::ApplyListPage(Funcs, mcp_common::ReadListPage(Params), Data);
     Data->SetNumberField(TEXT("count"), Funcs.Num());
     // How many bLegacyMatch entries the real gate rejects. A non-zero value here is the
     // measurement of the discovery-vs-authoring mismatch, not a hidden loss.

@@ -569,13 +569,15 @@ List the MetaSound node classes the editor's MetaSound search engine knows, with
 
 *Read-only.*
 
-List every cue of a subtitles asset (USubtitleAssetUserData, the engine's list of timed subtitle cues) in stored order, without changing anything: per cue its 0-based index, text, start_offset and duration in seconds, duration_type (use_sound_duration or use_duration_property), priority, subtitle_type (subtitle, closed_caption or audio_description) and comment, plus count and max_duration (GetMaximumDuration, the latest end time). Use it to find the cue_index that set_subtitle_cue and remove_subtitle_cue take, or to check add_subtitle_cue's result; create the asset with create_subtitles_asset. An asset with no cues is a success with count 0; a path that does not load as a USubtitleAssetUserData is an error.
+List the cues of a subtitles asset (USubtitleAssetUserData, the engine's list of timed subtitle cues) in stored order, a page at a time (offset/limit), without changing anything: per cue its 0-based index, text, start_offset and duration in seconds, duration_type (use_sound_duration or use_duration_property), priority, subtitle_type (subtitle, closed_caption or audio_description) and comment, plus count and max_duration (GetMaximumDuration, the latest end time). Use it to find the cue_index that set_subtitle_cue and remove_subtitle_cue take, or to check add_subtitle_cue's result; create the asset with create_subtitles_asset. An asset with no cues is a success with count 0; a path that does not load as a USubtitleAssetUserData is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `asset_path` | string | yes | Subtitles asset as a package or object path, e.g. "/Game/Audio/Subs/SUB_Intro" or "/Game/Audio/Subs/SUB_Intro.SUB_Intro". |
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ asset_path: string, success: bool, count: int, max_duration: float, cues: [{index, text, start_offset, duration, duration_type, priority, subtitle_type, comment}] }`
+**Returns:** `{ asset_path: string, success: bool, count: int (entries in this page), max_duration: float, total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null, cues: [{index, text, start_offset, duration, duration_type, priority, subtitle_type, comment}] }`
 
 ## `play_sound`
 

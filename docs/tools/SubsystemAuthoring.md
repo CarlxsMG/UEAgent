@@ -40,5 +40,7 @@ Enumerate the USubsystem instances live right now, with each one's class path an
 |---|---|---|---|
 | `lifetime` | string | no | Optional filter: "Engine"\|"Editor"\|"GameInstance"\|"World"\|"LocalPlayer" (case-insensitive) |
 | `class_name` | string | no | Optional USubsystem class (short name or /Script/ path): keep only the instances of that class or a subclass. A name that does not resolve to a USubsystem class is an error. |
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ total: int, instance_count: int, active: bool, lifetime_filter?, class_name?, lifetime?, instances:[{ class_name, class_path, lifetime, instance_name, instance_path }] } -- total and instance_count are the same number and active is total > 0; class_name and lifetime (the class's own lifetime category) appear when class_name was given.`
+**Returns:** `{ total: int, instance_count: int, active: bool, lifetime_filter?, class_name?, lifetime?, instances:[{ class_name, class_path, lifetime, instance_name, instance_path }] (sorted by instance_path, paged with offset/limit), offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null } -- total and instance_count are the same number, every match before the page cut, and active is total > 0; class_name and lifetime (the class's own lifetime category) appear when class_name was given.`

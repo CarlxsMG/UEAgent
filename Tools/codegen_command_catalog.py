@@ -954,6 +954,8 @@ _LITERAL_FIELD_READERS = frozenset({
     "ReadJsonVector", "ReadJsonVector2D", "ReadJsonRotator", "ReadJsonLinearColor", "ReadJsonFloatArray", "ReadRequiredString",
     "ReadRequiredNumber", "ReadRequiredBool", "ResolveWorldSelector", "ResolveWorldFromParams", "ExtractStringPath",
     "AddRequestedEcho",
+    # mcp_common::ReadListPage reads the `offset` and `limit` fields, documented by each list tool's @param lines.
+    "ReadListPage",
     # McpGraphRouter::Route (Commands/Common/McpGraphRouter.cpp) hands a graph tool's call on another graph asset to
     # that asset's tool: it reads node_position as [x, y], as the handler's own ReadPosition does, and the other params
     # it reads are declared with @param type hints. So the shapes the handler's own reads give still hold.

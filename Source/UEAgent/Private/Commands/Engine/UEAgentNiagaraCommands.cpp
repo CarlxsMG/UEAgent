@@ -8291,12 +8291,20 @@ TSharedPtr<FJsonObject> HandleListNiagaraRendererClasses(
     return mcp_common::MakeOkReply(Niagara_ListConcreteSubclasses(UNiagaraRendererProperties::StaticClass()));
 }
 
-// MCP:list_niagara_data_interface_classes - Enumerate every concrete UNiagaraDataInterface subclass registered in this process via TObjectIterator. Skips Abstract (those are base classes only). Used to discover what data-interface class strings are valid for add_niagara_data_interface.
-//   @returns { count: int, classes: [{class_name, class_path, display_name, abstract, class_flags}] }
+// MCP:list_niagara_data_interface_classes - Enumerate every concrete UNiagaraDataInterface subclass registered in this process via TObjectIterator. Skips Abstract (those are base classes only). Used to discover what data-interface class strings are valid for add_niagara_data_interface. The classes come sorted by class_path, a page at a time (offset/limit).
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { count: int (entries in this page), classes: [{class_name, class_path, display_name, abstract, class_flags}], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }
 TSharedPtr<FJsonObject> HandleListNiagaraDataInterfaceClasses(
     const TSharedPtr<FJsonObject>& Params)
 {
-    return mcp_common::MakeOkReply(Niagara_ListConcreteSubclasses(UNiagaraDataInterface::StaticClass()));
+    TSharedPtr<FJsonObject> Data = Niagara_ListConcreteSubclasses(UNiagaraDataInterface::StaticClass());
+    TArray<TSharedPtr<FJsonValue>> Classes = Data->GetArrayField(TEXT("classes"));
+    mcp_common::SortJsonItems(Classes, TEXT("class_path"));
+    mcp_common::ApplyListPage(Classes, mcp_common::ReadListPage(Params), Data);
+    Data->SetNumberField(TEXT("count"), Classes.Num());
+    Data->SetArrayField(TEXT("classes"), Classes);
+    return mcp_common::MakeOkReply(Data);
 }
 
 // MCP:get_niagara_renderer_info - Dump the full property set of a specific renderer instance owned by a system emitter. Resolves the system via path, the emitter via name (or handle_index), and the renderer via index — then runs FJsonObjectConverter::UStructToJsonObject on the renderer to produce a flat property map. get_niagara_emitter_renderers lists every renderer; this cmd returns the full UPROPERTY surface of one renderer.

@@ -2078,10 +2078,12 @@ TSharedPtr<FJsonObject> HandleListMetaSoundNodeTypes(
 // ---------------------------------------------------------------------------
 // list_metasound_nodes — enumerate nodes in a MetaSound graph
 // ---------------------------------------------------------------------------
-// MCP:list_metasound_nodes - List every node in the default graph of a MetaSound Source asset with its GUID id, name, class name and input/output counts, plus count. Read-only; pass the id to get_metasound_node_info and the other node tools.
+// MCP:list_metasound_nodes - List the nodes in the default graph of a MetaSound Source asset, in document order and a page at a time (offset/limit), with their GUID id, name, class name and input/output counts. Read-only; pass the id to get_metasound_node_info and the other node tools.
 //   @retired get_graph_nodes - asset_path=<MetaSound Source>; the same nodes, each with node_id (its GUID), plus the graph's connections
 //   @param metasound_path - MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain"; MetaSound Patches are not accepted.
-//   @returns { metasound_path, count, nodes: [{ id, name, class_name, input_count, output_count }] }
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { metasound_path, count (entries in this page), nodes: [{ id, name, class_name, input_count, output_count }], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }
 TSharedPtr<FJsonObject> HandleListMetaSoundNodes(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -2121,8 +2123,9 @@ TSharedPtr<FJsonObject> HandleListMetaSoundNodes(
 	}
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	mcp_common::ApplyListPage(NodesJson, mcp_common::ReadListPage(Params), Data);
 	Data->SetStringField(TEXT("metasound_path"), MetaSoundPath);
-	Data->SetNumberField(TEXT("count"),          Nodes.Num());
+	Data->SetNumberField(TEXT("count"),          NodesJson.Num());
 	Data->SetArrayField (TEXT("nodes"),          NodesJson);
 	return mcp_common::MakeOkReply(Data);
 }
@@ -2682,10 +2685,12 @@ TSharedPtr<FJsonObject> HandleDisconnectMetaSoundNodeInput(const TSharedPtr<FJso
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("disconnect_metasound_nodes"), SaveErr);
 }
 
-// MCP:list_metasound_connections - List every edge of the default graph of a MetaSound Source: from which node and output pin to which node and input pin, with each node's name and class (a graph input or output node is named after the input or output), plus count. Read-only. It reads what connect_metasound_nodes, connect_metasound_graph_input_to_node, connect_metasound_graph_input_to_output and connect_metasound_node_to_graph_output write; node ids are those of list_metasound_nodes, and an input's edge is dropped with disconnect_metasound_nodes. Patches are refused.
+// MCP:list_metasound_connections - List the edges of the default graph of a MetaSound Source, in document order and a page at a time (offset/limit): from which node and output pin to which node and input pin, with each node's name and class (a graph input or output node is named after the input or output), plus count. Read-only. It reads what connect_metasound_nodes, connect_metasound_graph_input_to_node, connect_metasound_graph_input_to_output and connect_metasound_node_to_graph_output write; node ids are those of list_metasound_nodes, and an input's edge is dropped with disconnect_metasound_nodes. Patches are refused.
 //   @retired get_graph_nodes - asset_path=<MetaSound Source>; its connections field holds the same edges
 //   @param metasound_path - MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain".
-//   @returns { metasound_path: string, count: int, connections: [{ from_node_id, from_node_name, from_node_class, from_output_name, to_node_id, to_node_name, to_node_class, to_input_name, data_type }] }
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { metasound_path: string, count: int (entries in this page), connections: [{ from_node_id, from_node_name, from_node_class, from_output_name, to_node_id, to_node_name, to_node_class, to_input_name, data_type }], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }
 
 TSharedPtr<FJsonObject> HandleListMetaSoundConnections(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2744,6 +2749,7 @@ TSharedPtr<FJsonObject> HandleListMetaSoundConnections(const TSharedPtr<FJsonObj
     }
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    mcp_common::ApplyListPage(EdgesJson, mcp_common::ReadListPage(Params), Data);
     Data->SetStringField(TEXT("metasound_path"), MetaSoundPath);
     Data->SetNumberField(TEXT("count"), EdgesJson.Num());
     Data->SetArrayField(TEXT("connections"), EdgesJson);

@@ -121,8 +121,10 @@ Lists the Chooser Table assets under a content folder and all its sub-folders, f
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `package_path` | string | no | Optional content folder to scan, sub-folders included (default "/Game"; an empty string also means /Game), e.g. "/Game/Animation/Choosers"; plugin content lives under its mount point, such as "/MyPlugin". |
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ package_path, total, tables:[{ asset_name, asset_path, asset_class, row_count, column_count }] }`
+**Returns:** `{ package_path, tables:[{ asset_name, asset_path, asset_class, row_count, column_count }], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }`
 
 ## `remove_chooser_column`
 

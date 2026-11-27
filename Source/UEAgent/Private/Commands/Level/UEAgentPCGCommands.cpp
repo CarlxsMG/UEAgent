@@ -1268,13 +1268,16 @@ namespace
 
 // Graph parameters, node-type discovery, generated-data inspection.
 
-// MCP:list_pcg_node_types - Enumerate every PCG node type available in this build (all concrete PCGSettings subclasses, including plugin- and project-added ones), with class names and paths. Run it before add_graph_node so you pass a class that exists instead of guessing a name from documentation that may not match this engine version. Read-only reflection.
-//   @returns { base_class, count, types:[{name, path}] }
+// MCP:list_pcg_node_types - Enumerate every PCG node type available in this build (all concrete PCGSettings subclasses, including plugin- and project-added ones), with class names and paths, sorted by name and paged with offset/limit. Run it before add_graph_node so you pass a class that exists instead of guessing a name from documentation that may not match this engine version. Read-only reflection.
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { base_class, count (entries in this page), types:[{name, path}], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }
 TSharedPtr<FJsonObject> HandleListPCGNodeTypes(const TSharedPtr<FJsonObject>& Params)
 {
-    const TArray<TSharedPtr<FJsonValue>> Types = mcp_common::ConcreteSubclassesToJson(UPCGSettings::StaticClass());
+    TArray<TSharedPtr<FJsonValue>> Types = mcp_common::ConcreteSubclassesToJson(UPCGSettings::StaticClass());
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    mcp_common::ApplyListPage(Types, mcp_common::ReadListPage(Params), Data);
     Data->SetStringField(TEXT("base_class"), TEXT("PCGSettings"));
     Data->SetNumberField(TEXT("count"), Types.Num());
     Data->SetArrayField(TEXT("types"), Types);

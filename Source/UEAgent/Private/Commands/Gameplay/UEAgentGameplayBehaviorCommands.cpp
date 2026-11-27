@@ -636,9 +636,11 @@ TSharedPtr<FJsonObject> HandleRemoveBehaviorConfig(
         TEXT("the Output Log names which)"), *ConfigPath));
 }
 
-// MCP:list_behavior_configs - List the UGameplayBehaviorConfig assets under package_path, recursively, from the Asset Registry, without changing them: each config path and name with the name of its BehaviorClass (empty when unset), plus total. Each match is loaded to read that protected field, so a big folder costs one load per config. Only assets whose class is exactly UGameplayBehaviorConfig are listed: subclass configs such as GameplayBehaviorConfig_Animation or GameplayBehaviorConfig_BehaviorTree, and Blueprint subclasses, are skipped. There is no paging, and no match is total 0, not an error. One config in detail: get_behavior_config_info; create one: create_behavior_config; set its class: set_behavior_class; delete one: remove_behavior_config.
+// MCP:list_behavior_configs - List the UGameplayBehaviorConfig assets under package_path, recursively, from the Asset Registry, without changing them: each config path and name with the name of its BehaviorClass (empty when unset), plus total. Each match is loaded to read that protected field, so a big folder costs one load per config. Only assets whose class is exactly UGameplayBehaviorConfig are listed: subclass configs such as GameplayBehaviorConfig_Animation or GameplayBehaviorConfig_BehaviorTree, and Blueprint subclasses, are skipped. The configs come sorted by config_path, a page at a time (offset/limit); no match is total 0, not an error. One config in detail: get_behavior_config_info; create one: create_behavior_config; set its class: set_behavior_class; delete one: remove_behavior_config.
 //   @param package_path - Optional content folder searched recursively (default "/Game"); an empty string also means /Game, so another mount point needs its own path
-//   @returns { package_path, total, configs:[{ config_path, config_name, behavior_class }] }
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { package_path, configs:[{ config_path, config_name, behavior_class }], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }
 
 TSharedPtr<FJsonObject> HandleListBehaviorConfigs(
     const TSharedPtr<FJsonObject>& Params)
@@ -672,7 +674,8 @@ TSharedPtr<FJsonObject> HandleListBehaviorConfigs(
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("package_path"), PackagePath);
-    Data->SetNumberField(TEXT("total"), Entries.Num());
+    mcp_common::SortJsonItems(Entries, TEXT("config_path"));
+    mcp_common::ApplyListPage(Entries, mcp_common::ReadListPage(Params), Data);
     Data->SetArrayField(TEXT("configs"), Entries);
     return mcp_common::MakeOkReply(Data);
 }

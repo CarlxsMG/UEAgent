@@ -189,11 +189,14 @@ List the camera actors (ACameraActor or CineCameraActor) in the editor world wit
 
 *Read-only.*
 
-Lists all concrete UCameraNode subclasses usable in a camera rig. Read-only reflection (GetDerivedClasses).
+Lists the concrete UCameraNode subclasses usable in a camera rig, sorted by name and paged with offset/limit. Read-only reflection (GetDerivedClasses).
 
-No parameters.
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ base_class, count, types:[{name, path}] }`
+**Returns:** `{ base_class, count (entries in this page), types:[{name, path}], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }`
 
 ## `remove_camera_node_child`
 

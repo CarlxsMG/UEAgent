@@ -1294,7 +1294,9 @@ namespace
 // MCP:list_orphaned_ofpa_actors - Finds __ExternalActors__ (OFPA) packages with no registered World Partition descriptor -- actors invisible to get_actors_by_class/list_world_partition_actors because their package fell out of sync with the level's registered actor set (e.g. after a bad delete+save). Three enumeration layers, most-to-least authoritative: (1) raw filesystem scan of the level's external-actors folder (catches AssetRegistry blind spots); (2) AssetRegistry GetAssetsByPath (bIncludeOnlyOnDiskAssets=true, zero-load class info via AssetClassPath); (3) IF map_path is the CURRENTLY OPEN editor world with an initialized World Partition, a live cross-check against the real descriptor set. When map_path is a DIFFERENT map (the recommended procedure: clean up orphans with the editor on another map), layer 3 is skipped and disk-and-registry-both-present candidates are reported as candidate_unconfirmed rather than a false-confident confirmed_orphan. Read-only: never loads a package, never opens/swaps to map_path.
 //   @param map_path - Long package name of the level to inspect (e.g. /Game/MyGame/Maps/MainMap); does NOT need to be the open editor world (that only enables the stronger layer-3 cross-check).
 //   @param filter_generated_class - Optional substring (case-insensitive) matched against each candidate's generated_class_name (the AssetClassPath, resolved with zero loading); also tried as a UClass IsChildOf when the string resolves to a real class.
-//   @returns { map_path, external_actors_path, disk_count, asset_registry_count, live_registered_count (nullable), live_cross_check_available, confirmed_orphan_count, candidate_unconfirmed_count, candidates: [{ path, generated_class_name, is_loaded, on_disk, in_asset_registry, classification }], note }
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { map_path, external_actors_path, disk_count, asset_registry_count, live_registered_count (nullable), live_cross_check_available, confirmed_orphan_count, candidate_unconfirmed_count, candidates: [{ path, generated_class_name, is_loaded, on_disk, in_asset_registry, classification }] (sorted by path, paged with offset/limit; the two counts cover every candidate), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null, note }
 TSharedPtr<FJsonObject> HandleListOrphanedOfpaActors(const TSharedPtr<FJsonObject>& Params)
 {
     FString MapPath;
@@ -1381,6 +1383,8 @@ TSharedPtr<FJsonObject> HandleListOrphanedOfpaActors(const TSharedPtr<FJsonObjec
     ResultObj->SetBoolField(TEXT("live_cross_check_available"), Scan.bLiveCrossCheckAvailable);
     ResultObj->SetNumberField(TEXT("confirmed_orphan_count"), ConfirmedOrphanCount);
     ResultObj->SetNumberField(TEXT("candidate_unconfirmed_count"), CandidateUnconfirmedCount);
+    mcp_common::SortJsonItems(Candidates, TEXT("path"));
+    mcp_common::ApplyListPage(Candidates, mcp_common::ReadListPage(Params), ResultObj);
     ResultObj->SetArrayField(TEXT("candidates"), Candidates);
     ResultObj->SetBoolField(TEXT("success"), true);
     ResultObj->SetStringField(TEXT("note"), Scan.bLiveCrossCheckAvailable
