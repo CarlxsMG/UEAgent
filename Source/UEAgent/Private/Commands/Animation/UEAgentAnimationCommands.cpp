@@ -252,7 +252,7 @@ namespace UEAgentAnimationImpl
 //   @param component_name - Object name of the USkeletalMeshComponent, e.g. "CharacterMesh0", case-insensitive; the first actor in the world that has one with that name wins. get_actor_components lists an actor's component names
 //   @param event_settings - Tick mode, any case: 'enable' (tick on, not while paused), 'disable' (tick off) or 'custom' (tick on, paused setting kept)
 //   @param world - Optional world selector: absent/'editor' (default) | 'pie' (ambiguous: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie').
-//   @returns { component_name: string, requested_settings: string, events_configured: bool, previous_tick_enabled: bool, previous_tick_when_paused: bool, current_tick_enabled: bool, current_tick_when_paused: bool, component_valid: bool, component_class: string, anim_instance_class: string?, has_anim_instance: bool, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }
+//   @returns { component_name: string, requested_settings: string, events_configured: bool (read back: the component holds the flags the mode asks for; false makes success false), success: bool, error?: string, previous_tick_enabled: bool, previous_tick_when_paused: bool, current_tick_enabled: bool, current_tick_when_paused: bool, component_valid: bool, component_class: string, anim_instance_class: string?, has_anim_instance: bool, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }
 
 TSharedPtr<FJsonObject> HandleConfigureAnimationEvents(const TSharedPtr<FJsonObject>& Params)
 {
@@ -296,14 +296,25 @@ TSharedPtr<FJsonObject> HandleConfigureAnimationEvents(const TSharedPtr<FJsonObj
         Mesh->SetTickableWhenPaused(false);
     }
 
+    // Read back: the flags the mode asks for are the ones the component now holds.
+    const bool bTickIsOn = Mesh->IsComponentTickEnabled();
+    const bool bPausedTickIsOn = Mesh->PrimaryComponentTick.bTickEvenWhenPaused;
+    const bool bConfigured = bTickIsOn == !bModeDisable && (!bModeEnable || !bPausedTickIsOn);
+
     TSharedPtr<FJsonObject> Report = MakeShared<FJsonObject>();
     Report->SetStringField(TEXT("component_name"), TargetName);
     Report->SetStringField(TEXT("requested_settings"), Mode);
-    Report->SetBoolField(TEXT("events_configured"), true);
+    Report->SetBoolField(TEXT("events_configured"), bConfigured);
+    Report->SetBoolField(TEXT("success"), bConfigured);
+    if (!bConfigured)
+    {
+        Report->SetStringField(TEXT("error"),
+            mcp_common::MeasuredOutcomeError(TEXT("set_skeletal_mesh_component_tick"), TEXT("events_configured")));
+    }
     Report->SetBoolField(TEXT("previous_tick_enabled"), bTickWasOn);
     Report->SetBoolField(TEXT("previous_tick_when_paused"), bPausedTickWasOn);
-    Report->SetBoolField(TEXT("current_tick_enabled"), Mesh->IsComponentTickEnabled());
-    Report->SetBoolField(TEXT("current_tick_when_paused"), Mesh->PrimaryComponentTick.bTickEvenWhenPaused);
+    Report->SetBoolField(TEXT("current_tick_enabled"), bTickIsOn);
+    Report->SetBoolField(TEXT("current_tick_when_paused"), bPausedTickIsOn);
     UEAgentAnimationImpl::AddMeshFacts(Report, Mesh, /*bWithInstanceValidity=*/false);
     UEAgentAnimationImpl::AddWorldFields(Report, Lookup);
     return Report;
@@ -490,7 +501,7 @@ TSharedPtr<FJsonObject> HandlePlayAnimation(const TSharedPtr<FJsonObject>& Param
 //   @param component_name - Object name of the USkeletalMeshComponent, e.g. "CharacterMesh0", case-insensitive; the first actor in the world that has one with that name wins
 //   @param montage_path - Full asset path of a specific AnimMontage to stop; if omitted, stops all montages (optional)
 //   @param world - Optional world selector: absent/'editor' (default) | 'pie' (ambiguous: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie').
-//   @returns { component_name: string, was_playing: bool, playing: bool, success: bool, montage_path: string?, montage_name: string?, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }
+//   @returns { component_name: string, was_playing: bool, playing: bool (true while a stopped montage blends out), stopped: bool (read back: the montage, or every montage, is no longer active; false makes success false), success: bool, error?: string, montage_path: string?, montage_name: string?, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }
 
 TSharedPtr<FJsonObject> HandleStopAnimation(const TSharedPtr<FJsonObject>& Params)
 {
@@ -524,11 +535,20 @@ TSharedPtr<FJsonObject> HandleStopAnimation(const TSharedPtr<FJsonObject>& Param
     const bool bAnyWasPlaying = Instance->IsAnyMontagePlaying();
     Instance->Montage_Stop(0.25f, OnlyThis);
 
+    // Read back: Montage_Stop starts a blend-out, so a stopped montage still counts as playing until it ends,
+    // but it is no longer active (its blend target is 0) from this call on.
+    const bool bStopped = !Instance->Montage_IsActive(OnlyThis);
+
     TSharedPtr<FJsonObject> Report = MakeShared<FJsonObject>();
     Report->SetStringField(TEXT("component_name"), TargetName);
     Report->SetBoolField(TEXT("was_playing"), bAnyWasPlaying);
     Report->SetBoolField(TEXT("playing"), Instance->IsAnyMontagePlaying());
-    Report->SetBoolField(TEXT("success"), true);
+    Report->SetBoolField(TEXT("stopped"), bStopped);
+    Report->SetBoolField(TEXT("success"), bStopped);
+    if (!bStopped)
+    {
+        Report->SetStringField(TEXT("error"), mcp_common::MeasuredOutcomeError(TEXT("stop_animation"), TEXT("stopped")));
+    }
     if (OnlyThis != nullptr)
     {
         Report->SetStringField(TEXT("montage_path"), AssetPath);
