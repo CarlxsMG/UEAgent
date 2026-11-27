@@ -2123,7 +2123,7 @@ static AWorldSettings* GetEditorWorldSettings(FString& OutError)
 //   @param gravity_z - Custom gravity along Z in cm/s^2 (negative = downward; Earth is about -980). Required unless preset is given; sending both is refused.
 //   @param preset - Optional preset NAME instead of gravity_z, in any capitalisation: 'Earth' (-980), 'Moon' (-163), 'Mars' (-371), 'Zero' (0), 'Low' (-490), 'High' (-1960), 'Enabled' (-980), 'Disabled' (an override of 0). An unknown name is refused and nothing is written.
 //   @param enable_override - Optional bool (default true). True makes the world use the gravity; false disables the override so the project default applies again.
-//   @returns { applied_gravity_z: number (what landed in GlobalGravityZ), enable_override: bool, gravity_z: number (re-read GetGravityZ, the effective value), previous_gravity_z: number (effective gravity before the write), previous_override: bool (Override World Gravity before the write), preset?: string (echo), world_name: string, world_physics_component_count: int (actors with a primitive component), world_simulate_physics_component_count: int, world_dynamic_physics_component_count: int (Movable), gravity_impact: number, gravity_impact_rating: string, gravity_recommendations: [string], success: bool (hardcoded) }
+//   @returns { applied_gravity_z: number (what landed in GlobalGravityZ), enable_override: bool, gravity_z: number (re-read GetGravityZ, the effective value), previous_gravity_z: number (effective gravity before the write), previous_override: bool (Override World Gravity before the write), preset?: string (echo), world_name: string, world_physics_component_count: int (actors with a primitive component), world_simulate_physics_component_count: int, world_dynamic_physics_component_count: int (Movable), gravity_impact: number, gravity_impact_rating: string, gravity_recommendations: [string], success: bool (true only when GlobalGravityZ and the override flag re-read as asked; otherwise the call fails) }
 
 TSharedPtr<FJsonObject> HandleSetWorldGravity(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2233,7 +2233,7 @@ TSharedPtr<FJsonObject> HandleSetWorldGravity(const TSharedPtr<FJsonObject>& Par
 // MCP:set_kill_z - Set the KillZ death plane on the EDITOR world's WorldSettings: any actor falling below this world Z is destroyed, provided the world's bounds checks are enabled (read that flag with get_world_settings, enable_world_bounds_checks -- with it off, KillZ does nothing and the fall looks like a bug). Optionally sets the damage type applied on the kill. Values come back RE-READ off WorldSettings, not echoed. Undoable, but it dirties the MAP: save_level to keep it.
 //   @param kill_z - World-space Z height (cm) below which actors get destroyed. Put it under the lowest playable geometry, not at 0.
 //   @param kill_z_damage_type - Optional UDamageType class name or full path (e.g. 'DamageType' or '/Script/Engine.DamageType'). Resolved BEFORE anything is written, so a bad name is a clean error and KillZ is left untouched.
-//   @returns { applied_kill_z: number, kill_z: number (both re-read off WorldSettings), kill_z_damage_type: string ('None' if unset), success: bool (hardcoded) }
+//   @returns { applied_kill_z: number, kill_z: number (both re-read off WorldSettings), kill_z_damage_type: string ('None' if unset), success: bool (true only when KillZ and the damage type re-read as asked; otherwise the call fails) }
 
 TSharedPtr<FJsonObject> HandleSetKillZ(const TSharedPtr<FJsonObject>& Params)
 {

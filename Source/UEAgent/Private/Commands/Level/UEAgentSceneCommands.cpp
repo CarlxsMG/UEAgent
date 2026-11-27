@@ -72,7 +72,7 @@ namespace UEAgentSceneCommandsImpl
     }
 }
 
-// MCP:set_actor_label - Set the outliner label of an editor-world actor found by internal name or current label (first match). The engine trims it and keeps the old label when the new one is invalid, for example empty, so check label in the reply. Marks the level dirty without an undo entry.
+// MCP:set_actor_label - Set the outliner label of an editor-world actor found by internal name or current label (first match). The engine trims it and keeps the old label when the new one is invalid, for example empty: then the call fails, and label in the reply is the one the actor kept. Marks the level dirty without an undo entry.
 //   @param actor_name - Current actor name or label in the world outliner
 //   @param new_label - Display label to set, e.g. "Lamp_Kitchen"; leading and trailing spaces are trimmed.
 //   @returns { actor_name: string, label: string }

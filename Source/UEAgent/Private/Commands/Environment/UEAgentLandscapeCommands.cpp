@@ -1629,12 +1629,12 @@ TSharedPtr<FJsonObject> HandleRemoveLandscapeLayer(const TSharedPtr<FJsonObject>
         !bHasLayer ? FString() : mcp_common::MeasuredOutcomeError(TEXT("remove_landscape_layer"), TEXT("layer_removed")));
 }
 
-// MCP:paint_landscape_layer - Paint terrain texture layers headless: write ONE uniform weight (0-255) into a landscape weightmap over a vertex region, or the whole terrain if you omit region. Blunt by design -- it fills a rectangle, it does not brush or blend, so build variety by painting several layers over different rectangles. The layer must already be registered with add_landscape_layer or nothing is stored. Region coordinates are VERTICES, not world units: get the ranges from get_landscape_info. Check vertices_painted and paint_warning rather than the success flag.
+// MCP:paint_landscape_layer - Paint terrain texture layers headless: write ONE uniform weight (0-255) into a landscape weightmap over a vertex region, or the whole terrain if you omit region. Blunt by design -- it fills a rectangle, it does not brush or blend, so build variety by painting several layers over different rectangles. The layer must already be registered with add_landscape_layer or nothing is stored. Region coordinates are VERTICES, not world units: get the ranges from get_landscape_info. success follows a read-back of the weightmap: every vertex must hold weight (one step of slack) or, on a weight-blended layer that the engine renormalises, have moved toward it; mismatched_vertices counts the rest.
 //   @param layer_info_path - Full path of the ULandscapeLayerInfoObject asset
 //   @param landscape_actor_name - Optional landscape actor name, defaults to first found
 //   @param weight - 0 to 255 weight value, default 255
 //   @param region - Optional [minX, minY, maxX, maxY] vertex region, defaults to the whole landscape
-//   @returns { landscape_actor_name: string, layer_info_path: string, layer_name: string, weight: int, painted: bool, vertices_painted: number, region: [int], paint_warning: string }
+//   @returns { landscape_actor_name: string, layer_info_path: string, layer_name: string, weight: int, painted: bool, vertices_painted: number, mismatched_vertices: int, region: [int], paint_warning: string }
 TSharedPtr<FJsonObject> HandlePaintLandscapeLayer(const TSharedPtr<FJsonObject>& Params)
 {
     FString LayerInfoPath;
@@ -1729,6 +1729,16 @@ TSharedPtr<FJsonObject> HandlePaintLandscapeLayer(const TSharedPtr<FJsonObject>&
     bool bPainted = false;
     FString PaintError;
     const FGuid EditLayerGuid = GetBaseEditLayerGuid(Landscape);
+    // A weight-blended layer shares each vertex's weight with the other blended layers, so the engine may
+    // renormalise what was written: there the read-back only has to move toward Weight, not equal it.
+    const bool bWeightBlended = LayerInfo->GetBlendMethod() != ELandscapeTargetLayerBlendMethod::None;
+    TArray<uint8> Before;
+    Before.SetNumZeroed(WeightData.Num());
+    {
+        FScopedSetLandscapeEditingLayer LayerScope(Landscape, EditLayerGuid);
+        TAlphamapAccessor<false> BeforeAccessor(Info, LayerInfo);
+        BeforeAccessor.GetDataFast(MinX, MinY, MaxX, MaxY, Before.GetData());
+    }
     {
         FScopedSetLandscapeEditingLayer LayerScope(Landscape, EditLayerGuid);
         TAlphamapAccessor<false> AlphaAccessor(Info, LayerInfo);
@@ -1736,7 +1746,8 @@ TSharedPtr<FJsonObject> HandlePaintLandscapeLayer(const TSharedPtr<FJsonObject>&
             ELandscapeLayerPaintingRestriction::None);
         AlphaAccessor.Flush();
     }
-    // Read the weight back from the same edit layer: the vertices that do not hold Weight (one step of slack).
+    // Read the weight back from the same edit layer. A vertex fails when it is more than one step off Weight
+    // and, on a weight-blended layer, also did not move toward Weight from its value before the write.
     int32 MismatchedVertices = 0;
     {
         TArray<uint8> Actual;
@@ -1744,19 +1755,33 @@ TSharedPtr<FJsonObject> HandlePaintLandscapeLayer(const TSharedPtr<FJsonObject>&
         FScopedSetLandscapeEditingLayer LayerScope(Landscape, EditLayerGuid);
         TAlphamapAccessor<false> ReadAccessor(Info, LayerInfo);
         ReadAccessor.GetDataFast(MinX, MinY, MaxX, MaxY, Actual.GetData());
-        for (const uint8 Value : Actual)
+        for (int32 i = 0; i < Actual.Num(); ++i)
         {
-            if (FMath::Abs(static_cast<int32>(Value) - WeightI) > 1)
+            const int32 Now = Actual[i];
+            if (FMath::Abs(Now - WeightI) <= 1)
             {
-                ++MismatchedVertices;
+                continue;
             }
+            if (bWeightBlended)
+            {
+                const int32 Was = Before[i];
+                const bool bMovedToward = (WeightI > Was) ? (Now > Was) : (Now < Was);
+                if (bMovedToward)
+                {
+                    continue;
+                }
+            }
+            ++MismatchedVertices;
         }
     }
     bPainted = MismatchedVertices == 0;
     if (!bPainted)
     {
-        PaintError = FString::Printf(TEXT("%d of %lld vertices do not hold weight %d after the write"),
-            MismatchedVertices, NumVerts, WeightI);
+        PaintError = bWeightBlended
+            ? FString::Printf(TEXT("%d of %lld vertices neither hold weight %d nor moved toward it after the write (weight-blended layer)"),
+                MismatchedVertices, NumVerts, WeightI)
+            : FString::Printf(TEXT("%d of %lld vertices do not hold weight %d after the write"),
+                MismatchedVertices, NumVerts, WeightI);
     }
     // Recompose the final weightmap from the edit layers so a read-back / the
     // landscape material reflects the paint (only when we wrote to a valid layer).
@@ -2011,7 +2036,7 @@ TSharedPtr<FJsonObject> HandleAddLandscapeSplineControlPoint(const TSharedPtr<FJ
         bAdded ? FString() : mcp_common::MeasuredOutcomeError(TEXT("add_landscape_spline_control_point"), TEXT("added")));
 }
 
-// MCP:set_landscape_spline_control_point - Move, rotate or re-width one existing landscape spline control point by index -- how you adjust a road or river route without rebuilding the spline. Only the fields you pass change (applied_count reports how many landed). Location is LANDSCAPE-LOCAL, not world, and width is a HALF-width. Read the current values first with get_landscape_spline_control_point.
+// MCP:set_landscape_spline_control_point - Move, rotate or re-width one existing landscape spline control point by index -- how you adjust a road or river route without rebuilding the spline. Only the fields you pass change (applied_count reports how many landed); passing none is an error, and a field that does not re-read as given fails the call. Location is LANDSCAPE-LOCAL, not world, and width is a HALF-width. Read the current values first with get_landscape_spline_control_point.
 //   @param landscape_name - Optional landscape actor name, defaults to first found
 //   @param control_point_index [integer!] - Index into the splines component's ControlPoints
 //   @param location - Optional [x, y, z] in landscape-local space; only applied if provided
@@ -2719,11 +2744,11 @@ namespace
 //   @param source_region - Required [minX, minY, maxX, maxY] in source vertex coords
 //   @param dest_region - Required [minX, minY, maxX, maxY] in destination vertex coords
 //   @returns { source_landscape_actor_name: string, dest_landscape_actor_name: string, applied: bool, resampled: bool, source_width: int, source_height: int, dest_width: int, dest_height: int, source_region: [int], dest_region: [int] }
-// MCP:import_landscape_heightmap - Load a PNG or 16-bit .r16 heightmap file from disk and stamp it onto an existing landscape: this is the reliable route to terrain relief, and the reason to prefer it over the editor's Import from File dialog, which can fill only part of the components and drop the peak with no warning at all. It does not negotiate resolution -- create the landscape at the file's own vertex size first (create_landscape) so resampled comes back false. success/applied is an acknowledgement, not proof: the oracle is export_landscape_heightmap plus an array compare against the source file, or get_landscape_height_at probes.
+// MCP:import_landscape_heightmap - Load a PNG or 16-bit .r16 heightmap file from disk and stamp it onto an existing landscape: this is the reliable route to terrain relief, and the reason to prefer it over the editor's Import from File dialog, which can fill only part of the components and drop the peak with no warning at all. It does not negotiate resolution -- create the landscape at the file's own vertex size first (create_landscape) so resampled comes back false. success/applied come from re-reading the written rect from the base edit layer (mismatched_vertices counts the vertices off by more than one step), so they prove the write landed there; whether it matches the source file is export_landscape_heightmap plus an array compare.
 //   @param landscape_actor_name - Optional landscape actor name, defaults to first found
 //   @param file_path - Absolute filesystem path or /Game asset path of the heightmap
 //   @param flip_y - Optional, flip the Y axis on import
-//   @returns { landscape_actor_name: string, file_path: string, source_width: int, source_height: int, dest_width: int, dest_height: int, resampled: bool, applied: bool }
+//   @returns { landscape_actor_name: string, file_path: string, source_width: int, source_height: int, dest_width: int, dest_height: int, resampled: bool, applied: bool, mismatched_vertices: int, verification_method: string }
 // MCP:export_landscape_heightmap - Dump the landscape heightmap (or a vertex sub-region) to a PNG or 16-bit .r16 file on disk -- THE oracle for any question about the whole terrain: whether an import really landed, where the real min/max heights are, whether a region is unfilled. Prefer it over sampling points with get_landscape_height_at when the question covers the whole surface: a handful of probes has repeatedly suggested flips and offsets that did not exist, while comparing the exported array against the source closes it in one step. An .r16 is exactly width*height*2 bytes, so a short file is itself a failure signal. Use get_landscape_height_at instead for a single world XY.
 //   @param landscape_actor_name - Optional landscape actor name, defaults to first found
 //   @param file_path - Absolute filesystem path for the exported heightmap
