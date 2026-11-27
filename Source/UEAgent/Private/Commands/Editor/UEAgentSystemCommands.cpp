@@ -899,7 +899,9 @@ namespace
 //   @param readonly_roots - Optional array of long-path prefixes treated as vendored/upstream (default: the project's Read Only Content Roots). Only used to CLASSIFY (under_readonly_root / readonly_dirty_count); nothing is ever written. Pass [] to switch the classification off.
 //   @param path_prefix - Optional long-path prefix filter, e.g. /Game/VendorPack, to ask "is anything of THEIRS dirty". Empty (default) lists everything; what it excluded is counted in filtered_out.
 //   @param include_objects - Optional bool (default false). Also list every object carried by each dirty package. One object-hash walk per package -- a dirty map can hold thousands, so leave it off unless you need the contents.
-//   @returns { dirty_count: int, readonly_dirty_count: int, map_dirty_count: int, external_dirty_count: int, asset_dirty_count: int, filtered_out: int, pie_active: bool, current_world_package: string, path_prefix: string, readonly_roots: [string], readonly_roots_defaulted: bool, packages: [{ package_name: string, file_path: string, exists_on_disk: bool, kind: string, contains_map: bool, newly_created: bool, actor_label: string, actor_name: string, asset_name: string, asset_class: string, under_readonly_root: bool, objects?: [string] }], message: string, note: string }
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { dirty_count: int (every dirty package, not only this page), readonly_dirty_count: int, map_dirty_count: int, external_dirty_count: int, asset_dirty_count: int, filtered_out: int, pie_active: bool, current_world_package: string, path_prefix: string, readonly_roots: [string], readonly_roots_defaulted: bool, packages: [{ package_name: string, file_path: string, exists_on_disk: bool, kind: string, contains_map: bool, newly_created: bool, actor_label: string, actor_name: string, asset_name: string, asset_class: string, under_readonly_root: bool, objects?: [string] }] (sorted by package_name), message: string, note: string, total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }
 //
 // WHY THIS EXISTS AND WHAT IT IS NOT.
 // Compiling a project Blueprint can dirty -- and a later bulk save then REWRITE --
@@ -1064,6 +1066,8 @@ TSharedPtr<FJsonObject> HandleListDirtyPackages(const TSharedPtr<FJsonObject>& P
     Data->SetStringField(TEXT("path_prefix"), PathPrefix);
     Data->SetBoolField(TEXT("readonly_roots_defaulted"), !bReadOnlyRootsProvided);
     Data->SetArrayField(TEXT("readonly_roots"), mcp_common::StringsToJson(ReadOnlyRoots));
+    mcp_common::SortJsonItems(PackagesJson, TEXT("package_name"));
+    mcp_common::ApplyListPage(PackagesJson, mcp_common::ReadListPage(Params), Data);
     Data->SetArrayField(TEXT("packages"), PackagesJson);
 
     FString Message = FString::Printf(
