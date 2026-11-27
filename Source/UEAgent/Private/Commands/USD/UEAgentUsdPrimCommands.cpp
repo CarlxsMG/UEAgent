@@ -226,10 +226,10 @@ TSharedPtr<FJsonObject> HandleDefineUsdPrim(const TSharedPtr<FJsonObject>& Param
 	return mcp_common::MakeOutcomeReply(Data, SpecSetOk, mcp_common::MeasuredOutcomeError(TEXT("define_usd_prim"), TEXT("specifier_set_ok")));
 }
 
-// MCP:override_usd_prim - Author an over (specifier over, no type) at prim_path on a registered USD stage, at its current edit target, with overs for missing ancestors, to add opinions to a prim without defining it. A prim that already exists there is returned untouched (already_existed true, no specifier reported, since nothing was authored); specifier Over comes back only for an over this call authored. is_valid=false means USD refused; a missing stage or a bad path is an error. In memory only: save_usd_stage writes it. define_usd_prim creates a typed def; set_usd_prim_specifier changes the specifier of an existing prim.
+// MCP:override_usd_prim - Author an over (specifier over, no type) at prim_path on a registered USD stage, at its current edit target, with overs for missing ancestors, to add opinions to a prim without defining it. A prim that already exists there is returned untouched (already_existed true, no specifier reported, since nothing was authored); specifier Over comes back only for an over this call authored. is_valid or present (the prim re-read afterwards) false means USD refused, and the call fails; a missing stage or a bad path is an error. In memory only: save_usd_stage writes it. define_usd_prim creates a typed def; set_usd_prim_specifier changes the specifier of an existing prim.
 //   @param stage_name [string!] - Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier.
 //   @param prim_path [string!] - Absolute SdfPath to author the over at, e.g. "/World/Cube"
-//   @returns { prim_path: string, is_valid: bool, already_existed: bool, specifier?: string }
+//   @returns { prim_path: string, is_valid: bool, already_existed: bool, specifier?: string, present: bool }
 //   @hints additive idempotent
 TSharedPtr<FJsonObject> HandleOverrideUsdPrim(const TSharedPtr<FJsonObject>& Params)
 {
@@ -255,13 +255,17 @@ TSharedPtr<FJsonObject> HandleOverrideUsdPrim(const TSharedPtr<FJsonObject>& Par
 	{
 		Data->SetStringField(TEXT("specifier"), TEXT("Over"));
 	}
-	return mcp_common::MakeOkReply(Data);
+	// The re-read: the stage resolves a prim at the path now.
+	const bool bPresent = Stage.GetPrimAtPath(Path).IsValid();
+	Data->SetBoolField(TEXT("present"), bPresent);
+	return mcp_common::MakeOutcomeReply(Data, Prim.IsValid() && bPresent, FString::Printf(
+		TEXT("override_usd_prim: USD authored no over at '%s' on stage '%s' (is_valid/present read false)"), *PrimPath, *StageName));
 }
 
-// MCP:remove_usd_prim - Remove a prim and its subtree from the current edit target layer of a registered USD stage, returning removed. Opinions in other layers or references can keep it composed; set_usd_prim_metadata with key "active" and value false is the reversible way to hide a prim. Not saved to disk.
+// MCP:remove_usd_prim - Remove a prim and its subtree from the current edit target layer of a registered USD stage, returning removed. A prim that was not there is a no-op (was_present false); one RemovePrim did not remove fails the call, and still_composed says whether opinions elsewhere keep it. Opinions in other layers or references can keep it composed; set_usd_prim_metadata with key "active" and value false is the reversible way to hide a prim. Not saved to disk.
 //   @param stage_name [string!] - Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier.
 //   @param prim_path [string!] - Absolute SdfPath of the prim to remove, e.g. "/World/Cube"; its descendants go with it.
-//   @returns { removed: bool, prim_path: string }
+//   @returns { removed: bool, prim_path: string, was_present: bool, still_composed: bool }
 TSharedPtr<FJsonObject> HandleRemoveUsdPrim(const TSharedPtr<FJsonObject>& Params)
 {
 	UE::FUsdStage Stage;
@@ -273,12 +277,19 @@ TSharedPtr<FJsonObject> HandleRemoveUsdPrim(const TSharedPtr<FJsonObject>& Param
 	}
 
 	const UE::FSdfPath Path(*PrimPath);
+	const bool bWasComposed = Stage.GetPrimAtPath(Path).IsValid();
 	const bool Removed = Stage.RemovePrim(Path);
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("prim_path"), PrimPath);
 	Data->SetBoolField(TEXT("removed"), Removed);
-	return mcp_common::MakeOkReply(Data);
+	// Opinions on other layers can keep the prim composed, so whether it still resolves is reported, not required.
+	Data->SetBoolField(TEXT("still_composed"), Stage.GetPrimAtPath(Path).IsValid());
+	Data->SetBoolField(TEXT("was_present"), bWasComposed);
+	// A prim that was not there is an honest no-op; one that was and that RemovePrim did not remove is a failure.
+	return mcp_common::MakeOutcomeReply(Data, Removed || !bWasComposed, FString::Printf(
+		TEXT("remove_usd_prim: RemovePrim returned false for '%s' on stage '%s': the current edit target layer holds no spec of it to remove"),
+		*PrimPath, *StageName));
 }
 
 // MCP:set_usd_prim_specifier - Change the specifier of an existing prim on a registered USD stage to Def (a concrete prim), Over (opinions that define nothing on their own) or Class (an abstract template that does not render), authored on the stage's current edit target layer (pick it with set_usd_edit_target). Use it to convert a prim in place; to create one use define_usd_prim, and to add an over where nothing is defined yet override_usd_prim. The edit stays in memory until save_usd_stage, with no undo step. An unknown specifier, an unregistered stage_name or a prim that does not exist is an error and nothing is authored; a write USD refuses fails the call with set=false. specifier is reported only after a successful write (there is no getter to read it back); inspect the prim with get_usd_prim_info. Setting the same specifier again writes it again (idempotent). A prim made Class, or Over with no def on any layer, no longer appears in list_usd_prims, which lists defined, non-abstract prims only.
@@ -651,7 +662,7 @@ TSharedPtr<FJsonObject> HandleGetUsdPrimInfo(const TSharedPtr<FJsonObject>& Para
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:apply_usd_prim_schema - Apply a USD API schema (e.g. "MaterialBindingAPI") to an existing prim of a registered USD stage, on the current edit target. Checks CanApplyAPI first: a schema that cannot apply returns applied=false with the USD reason in why_not instead of an error. Not saved to disk.
+// MCP:apply_usd_prim_schema - Apply a USD API schema (e.g. "MaterialBindingAPI") to an existing prim of a registered USD stage, on the current edit target. Checks CanApplyAPI first: a schema that cannot apply returns applied=false with the USD reason in why_not instead of an error. Not saved to disk. When ApplyAPI fails, or the prim does not then report the schema (HasAPI), applied=false fails the call.
 //   @param stage_name [string!] - Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier.
 //   @param prim_path [string!] - Absolute SdfPath of an existing prim, e.g. "/World/Cube".
 //   @param schema_name [string!] - Schema identifier (not the C++ class name), e.g. "MaterialBindingAPI", "GeomModelAPI"
@@ -690,23 +701,27 @@ TSharedPtr<FJsonObject> HandleApplyUsdPrimSchema(const TSharedPtr<FJsonObject>& 
 		return mcp_common::MakeOkReply(Data);
 	}
 
-	const bool Applied = Prim.ApplyAPI(FName(*SchemaName));
+	const bool bApplyOk = Prim.ApplyAPI(FName(*SchemaName));
+	// The re-read: the prim lists the schema among its applied API schemas.
+	const bool Applied = bApplyOk && Prim.HasAPI(FName(*SchemaName));
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("schema_name"), SchemaName);
 	Data->SetBoolField(TEXT("applied"), Applied);
 	if (!Applied)
 	{
-		Data->SetStringField(TEXT("why_not"), TEXT("ApplyAPI returned false after CanApplyAPI succeeded (race or schema-registry mismatch)"));
+		Data->SetStringField(TEXT("why_not"), bApplyOk
+			? TEXT("ApplyAPI returned true but the prim does not report the schema with HasAPI")
+			: TEXT("ApplyAPI returned false after CanApplyAPI succeeded (race or schema-registry mismatch)"));
 	}
-	return mcp_common::MakeOkReply(Data);
+	return mcp_common::MakeOutcomeReply(Data, Applied, mcp_common::MeasuredOutcomeError(TEXT("apply_usd_prim_schema"), TEXT("applied")));
 }
 
-// MCP:remove_usd_prim_schema - Remove an applied API schema (e.g. "MaterialBindingAPI") from an existing prim of a registered USD stage, on the current edit target. A schema the prim does not have returns removed=false and was_applied=false instead of an error. Not saved to disk; inverse of apply_usd_prim_schema.
+// MCP:remove_usd_prim_schema - Remove an applied API schema (e.g. "MaterialBindingAPI") from an existing prim of a registered USD stage, on the current edit target. A schema the prim does not have returns removed=false and was_applied=false instead of an error. Not saved to disk; inverse of apply_usd_prim_schema. An applied schema the prim still reports afterwards (still_applied) fails the call.
 //   @param stage_name [string!] - Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier.
 //   @param prim_path [string!] - Absolute SdfPath of an existing prim, e.g. "/World/Cube".
 //   @param schema_name [string!] - Schema identifier as listed in applied_schemas by get_usd_prim_info, e.g. "MaterialBindingAPI".
-//   @returns { removed: bool, schema_name: string }
+//   @returns { removed: bool, schema_name: string, was_applied: bool, still_applied: bool }
 TSharedPtr<FJsonObject> HandleRemoveUsdPrimSchema(const TSharedPtr<FJsonObject>& Params)
 {
 	UE::FUsdStage Stage;
@@ -730,13 +745,19 @@ TSharedPtr<FJsonObject> HandleRemoveUsdPrimSchema(const TSharedPtr<FJsonObject>&
 	// which case RemoveAPI would no-op anyway. We surface removed=false with
 	// the same shape as a successful remove so callers can gate on it.
 	const bool HadIt = Prim.HasAPI(FName(*SchemaName));
-	const bool Removed = HadIt ? Prim.RemoveAPI(FName(*SchemaName)) : false;
+	const bool bRemoveOk = HadIt ? Prim.RemoveAPI(FName(*SchemaName)) : false;
+	// The re-read: the composed prim no longer reports the schema.
+	const bool bStillApplied = Prim.HasAPI(FName(*SchemaName));
+	const bool Removed = bRemoveOk && !bStillApplied;
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("schema_name"), SchemaName);
 	Data->SetBoolField(TEXT("removed"), Removed);
 	Data->SetBoolField(TEXT("was_applied"), HadIt);
-	return mcp_common::MakeOkReply(Data);
+	Data->SetBoolField(TEXT("still_applied"), bStillApplied);
+	return mcp_common::MakeOutcomeReply(Data, !HadIt || Removed, FString::Printf(
+		TEXT("remove_usd_prim_schema: '%s' is still applied to the prim after RemoveAPI (RemoveAPI returned %s)"),
+		*SchemaName, bRemoveOk ? TEXT("true") : TEXT("false")));
 }
 
 const McpCommandFamilies::FRegistrar Registration =

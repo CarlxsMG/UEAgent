@@ -226,7 +226,7 @@ namespace
 // ---------------------------------------------------------------------------
 // create_material_instance_dynamic
 // ---------------------------------------------------------------------------
-// MCP:create_material_instance_dynamic - Create a Material Instance Dynamic (MID) of a parent material in the transient package: a runtime-only object that is never saved, belongs to no actor and has no undo step. The plugin keeps a reference to every MID it makes this way, so garbage collection does not free it; no tool releases one, so each lives until the editor closes. Set its parameters with set_material_instance_dynamic_parameter, which takes its mid_object_path, or use create_dynamic_material_on_actor to have a mesh component own a MID it renders. A name another MID holds gets a numbered suffix, so keep mid_name and mid_object_path from the reply; each call creates another MID. A parent that cannot be loaded, or a name held by an object of another class, is an error. Read its values with get_material_parameters (material_instance_path = its mid_object_path); a saved, reusable instance asset: create_material_instance.
+// MCP:create_material_instance_dynamic - Create a Material Instance Dynamic (MID) of a parent material in the transient package: a runtime-only object that is never saved, belongs to no actor and has no undo step. The plugin keeps a reference to every MID it makes this way, so garbage collection does not free it; no tool releases one, so each lives until the editor closes. Set its parameters with set_material_instance_dynamic_parameter, which takes its mid_object_path, or use create_dynamic_material_on_actor to have a mesh component own a MID it renders. A name another MID holds gets a numbered suffix, so keep mid_name and mid_object_path from the reply; each call creates another MID. A parent that cannot be loaded, or a name held by an object of another class, is an error. Read its values with get_material_parameters (material_instance_path = its mid_object_path); a saved, reusable instance asset: create_material_instance. created is the new MID's parent read back as the parent material; false fails the call.
 //   @param parent_material_path - Content path to the parent material (e.g. /Game/MyGame/M_Example.M_Example); a material or a material instance
 //   @param name - Optional name for the MID (default auto-generated from MID_ and the parent's name)
 //   @returns { mid_object_path, mid_name, parent_material_path, parent_material_name, created }
@@ -278,8 +278,11 @@ TSharedPtr<FJsonObject> HandleCreateMaterialInstanceDynamic(
 	Data->SetStringField(TEXT("mid_name"), MID->GetName());
 	Data->SetStringField(TEXT("parent_material_path"), ParentMat->GetPathName());
 	Data->SetStringField(TEXT("parent_material_name"), ParentMat->GetName());
-	Data->SetBoolField(TEXT("created"), true);
-	return mcp_common::MakeOkReply(Data);
+	// The re-read: the new MID derives from the requested parent.
+	const bool bCreated = MID->Parent == ParentMat;
+	Data->SetBoolField(TEXT("created"), bCreated);
+	return mcp_common::MakeOutcomeReply(Data, bCreated,
+		mcp_common::MeasuredOutcomeError(TEXT("create_material_instance_dynamic"), TEXT("created")));
 }
 
 // ---------------------------------------------------------------------------

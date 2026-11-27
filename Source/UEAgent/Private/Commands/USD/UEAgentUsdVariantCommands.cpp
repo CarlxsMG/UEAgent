@@ -232,7 +232,7 @@ TSharedPtr<FJsonObject> HandleListUsdVariantSets(const TSharedPtr<FJsonObject>& 
 // ---------------------------------------------------------------------------
 // add_usd_variant_set
 // ---------------------------------------------------------------------------
-// MCP:add_usd_variant_set - Author a new (empty) variant set on a prim at the requested list position; idempotent (returns already_existed:true when the set is already present). Inverse: remove_usd_variant_set.
+// MCP:add_usd_variant_set - Author a new (empty) variant set on a prim at the requested list position; idempotent (returns already_existed:true when the set is already present). Inverse: remove_usd_variant_set. created is the prim re-read (HasVariantSet); false fails the call.
 //   @param stage_name [string!] - Stage cache key
 //   @param prim_path [string!] - SdfPath of the prim that will author the variant set
 //   @param variant_set_name [string!] - Name of the variant set to create
@@ -284,15 +284,17 @@ TSharedPtr<FJsonObject> HandleAddUsdVariantSet(const TSharedPtr<FJsonObject>& Pa
 	UsdVariant_TargetStrongestPrimLayer(Stage, Prim);
 
 	UE::FUsdVariantSet NewSet = VSets.AddVariantSet(VariantSetName, Position);
-	Data->SetBoolField(TEXT("created"), NewSet.IsValid());
+	// The re-read: the prim now has a variant set of that name.
+	const bool bCreated = NewSet.IsValid() && Prim.GetVariantSets().HasVariantSet(VariantSetName);
+	Data->SetBoolField(TEXT("created"), bCreated);
 	Data->SetBoolField(TEXT("already_existed"), false);
-	return mcp_common::MakeOkReply(Data);
+	return mcp_common::MakeOutcomeReply(Data, bCreated, mcp_common::MeasuredOutcomeError(TEXT("add_usd_variant_set"), TEXT("created")));
 }
 
 // ---------------------------------------------------------------------------
 // add_usd_variant
 // ---------------------------------------------------------------------------
-// MCP:add_usd_variant - Add a new variant to an existing variant set at the requested list position; idempotent (returns already_existed:true when the variant is already present). Inverse: remove_usd_variant.
+// MCP:add_usd_variant - Add a new variant to an existing variant set at the requested list position; idempotent (returns already_existed:true when the variant is already present). Inverse: remove_usd_variant. added is the set re-read (HasAuthoredVariant); false fails the call.
 //   @param stage_name [string!] - Stage cache key
 //   @param prim_path [string!] - SdfPath of the prim that authors the variant set
 //   @param variant_set_name [string!] - Variant set that will receive the new variant
@@ -351,21 +353,23 @@ TSharedPtr<FJsonObject> HandleAddUsdVariant(const TSharedPtr<FJsonObject>& Param
 
 	UsdVariant_TargetStrongestPrimLayer(Stage, Prim);
 
-	const bool Added = VSet.AddVariant(VariantName, Position);
+	const bool bAddOk = VSet.AddVariant(VariantName, Position);
+	// The re-read: the variant set, fetched again from the prim, has the variant authored.
+	const bool Added = bAddOk && Prim.GetVariantSets().GetVariantSet(VariantSetName).HasAuthoredVariant(VariantName);
 	Data->SetBoolField(TEXT("added"), Added);
 	Data->SetBoolField(TEXT("already_existed"), false);
-	return mcp_common::MakeOkReply(Data);
+	return mcp_common::MakeOutcomeReply(Data, Added, mcp_common::MeasuredOutcomeError(TEXT("add_usd_variant"), TEXT("added")));
 }
 
 // ---------------------------------------------------------------------------
 // set_usd_variant_selection
 // ---------------------------------------------------------------------------
-// MCP:set_usd_variant_selection - Select the active variant of one variant set on a prim of a cached USD stage, so the prim composes that variant's opinions; set is the engine's answer. Read the sets, their variants and current selections with list_usd_variant_sets first; create them with add_usd_variant_set and add_usd_variant; clear_usd_variant_selection removes the selection instead. The selection is authored on the stage's current edit target layer (set_usd_edit_target) and stays in memory until save_usd_stage; no undo step. Idempotent: selecting the selected variant again changes nothing. The variant name is not checked against the set's variants, so name one list_usd_variant_sets reports. An unknown stage, a prim that does not exist, or a variant set the prim does not author is an error, checked before anything is written (the guard also keeps the engine's variant-set handle from going invalid).
+// MCP:set_usd_variant_selection - Select the active variant of one variant set on a prim of a cached USD stage, so the prim composes that variant's opinions; set is the engine's answer and selection the composed selection re-read: the call fails when set is false or a stronger layer's selection wins. Read the sets, their variants and current selections with list_usd_variant_sets first; create them with add_usd_variant_set and add_usd_variant; clear_usd_variant_selection removes the selection instead. The selection is authored on the stage's current edit target layer (set_usd_edit_target) and stays in memory until save_usd_stage; no undo step. Idempotent: selecting the selected variant again changes nothing. The variant name is not checked against the set's variants, so name one list_usd_variant_sets reports. An unknown stage, a prim that does not exist, or a variant set the prim does not author is an error, checked before anything is written (the guard also keeps the engine's variant-set handle from going invalid).
 //   @param stage_name [string!] - Name the stage was registered under by open_usd_stage or create_usd_stage (list_usd_stages shows it), or the end of a cached stage's root layer identifier, case-insensitive, e.g. "Shot010"
 //   @param prim_path [string!] - Absolute SdfPath of the existing prim that authors the variant set, e.g. "/World/Car"
 //   @param variant_set_name [string!] - Variant set to select a variant from, as list_usd_variant_sets reports it, e.g. "color"
 //   @param variant_name [string!] - Variant to activate, e.g. "red" (must already be present — use add_usd_variant first)
-//   @returns { prim_path: string, variant_set_name: string, variant_name: string, set: bool }
+//   @returns { prim_path: string, variant_set_name: string, variant_name: string, set: bool, selection: string }
 
 TSharedPtr<FJsonObject> HandleSetUsdVariantSelection(const TSharedPtr<FJsonObject>& Params)
 {
@@ -408,17 +412,26 @@ TSharedPtr<FJsonObject> HandleSetUsdVariantSelection(const TSharedPtr<FJsonObjec
 	Data->SetStringField(TEXT("variant_set_name"), VariantSetName);
 	Data->SetStringField(TEXT("variant_name"), VariantName);
 	Data->SetBoolField(TEXT("set"), Set);
-	return mcp_common::MakeOkReply(Data);
+	// The re-read: the composed selection. A stronger layer's selection wins over the one authored here.
+	const FString Selection = Prim.GetVariantSets().GetVariantSelection(VariantSetName);
+	Data->SetStringField(TEXT("selection"), Selection);
+	if (!Set)
+	{
+		return mcp_common::MakeOutcomeReply(Data, false, mcp_common::MeasuredOutcomeError(TEXT("set_usd_variant_selection"), TEXT("set")));
+	}
+	return mcp_common::MakeOutcomeReply(Data, Selection == VariantName, FString::Printf(
+		TEXT("set_usd_variant_selection: the selection was authored, but '%s' composes as '%s' (a stronger layer selects it; set_usd_edit_target picks the layer)"),
+		*VariantSetName, *Selection));
 }
 
 // ---------------------------------------------------------------------------
 // clear_usd_variant_selection
 // ---------------------------------------------------------------------------
-// MCP:clear_usd_variant_selection - Clear the selected variant of one variant set on a prim of a cached USD stage, so no variant of that set is selected there; the set and its variants stay. It first moves the stage's edit target to the strongest layer that defines the prim and clears the selection on that layer, so a selection authored on another layer can still apply: check with list_usd_variant_sets. The edit stays in memory until save_usd_stage and has no undo step. A repeat call changes nothing more; cleared is the engine's answer. An unknown stage, an invalid or missing prim, or a variant set the prim does not have is an error and nothing is written. To pick another variant instead use set_usd_variant_selection; to delete the set itself, remove_usd_variant_set.
+// MCP:clear_usd_variant_selection - Clear the selected variant of one variant set on a prim of a cached USD stage, so no variant of that set is selected there; the set and its variants stay. It first moves the stage's edit target to the strongest layer that defines the prim and clears the selection on that layer, so a selection authored on another layer can still apply: check with list_usd_variant_sets. The edit stays in memory until save_usd_stage and has no undo step. A repeat call changes nothing more; cleared is the engine's answer, and false fails the call; selection is the composed selection re-read. An unknown stage, an invalid or missing prim, or a variant set the prim does not have is an error and nothing is written. To pick another variant instead use set_usd_variant_selection; to delete the set itself, remove_usd_variant_set.
 //   @param stage_name [string!] - Name the stage was registered under by open_usd_stage or create_usd_stage (list_usd_stages shows it), or the end of a cached stage's root layer identifier, case-insensitive, e.g. "Shot010"
 //   @param prim_path [string!] - Absolute SdfPath of the existing prim that has the variant set, e.g. "/World/Car"
 //   @param variant_set_name [string!] - Variant set whose selection is cleared, as list_usd_variant_sets reports it, e.g. "color"
-//   @returns { prim_path: string, variant_set_name: string, cleared: bool }
+//   @returns { prim_path: string, variant_set_name: string, cleared: bool, selection: string }
 
 TSharedPtr<FJsonObject> HandleClearUsdVariantSelection(const TSharedPtr<FJsonObject>& Params)
 {
@@ -458,7 +471,9 @@ TSharedPtr<FJsonObject> HandleClearUsdVariantSelection(const TSharedPtr<FJsonObj
 	Data->SetStringField(TEXT("prim_path"), PrimPath);
 	Data->SetStringField(TEXT("variant_set_name"), VariantSetName);
 	Data->SetBoolField(TEXT("cleared"), Cleared);
-	return mcp_common::MakeOkReply(Data);
+	// A selection authored on another layer can still apply, so the composed selection is reported, not required.
+	Data->SetStringField(TEXT("selection"), Prim.GetVariantSets().GetVariantSelection(VariantSetName));
+	return mcp_common::MakeOutcomeReply(Data, Cleared, mcp_common::MeasuredOutcomeError(TEXT("clear_usd_variant_selection"), TEXT("cleared")));
 }
 
 // ---------------------------------------------------------------------------

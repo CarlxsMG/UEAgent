@@ -31,11 +31,11 @@
 #include "Misc/App.h"                  // FApp::CanEverRender (honest no-RHI gate)
 #include "Templates/Function.h"        // TFunctionRef (graph node visitor)
 #include "Misc/EngineVersionComparison.h"
+#include "MaterialGraph/MaterialGraphNode.h"          // GetShortenPinName (input lookup by name)
+#include "Materials/MaterialExpressionMaterialFunctionCall.h"
 #if UE_VERSION_OLDER_THAN(5, 8, 0)
 #include "IMaterialEditor.h"                          // NotifyExternalMaterialChange (5.7 disconnect)
 #include "Subsystems/AssetEditorSubsystem.h"
-#include "MaterialGraph/MaterialGraphNode.h"          // GetShortenPinName (5.7 disconnect)
-#include "Materials/MaterialExpressionMaterialFunctionCall.h"
 #include "Particles/ParticleSystemComponent.h"        // 5.7 usage-flag recompile
 #include "EditorSupportDelegates.h"
 #endif
@@ -431,6 +431,38 @@ namespace UEAgentMaterialCommandsImpl
         }
     }
 
+    /** The input of Expression named InputName, matched as the engine's connect/disconnect match it (first input
+     *  when empty; a function call's pin without its type postfix, any other pin by its shortened name), or nullptr. */
+    FExpressionInput* FindExpressionInput(UMaterialExpression* Expression, const FString& InputNameString)
+    {
+        if (Expression == nullptr)
+        {
+            return nullptr;
+        }
+        const FName InputName(*InputNameString);
+        if (InputName.IsNone())
+        {
+            return Expression->GetInput(0);
+        }
+        for (FExpressionInputIterator It{ Expression }; It; ++It)
+        {
+            FName TestName;
+            if (UMaterialExpressionMaterialFunctionCall* FuncCall = Cast<UMaterialExpressionMaterialFunctionCall>(Expression))
+            {
+                TestName = FuncCall->GetInputNameWithType(It.Index, false);
+            }
+            else
+            {
+                TestName = UMaterialGraphNode::GetShortenPinName(Expression->GetInputName(It.Index));
+            }
+            if (TestName == InputName)
+            {
+                return It.Input;
+            }
+        }
+        return nullptr;
+    }
+
 #if UE_VERSION_OLDER_THAN(5, 8, 0)
     // UE 5.7: UMaterialEditingLibrary::DisconnectMaterialExpressions and ::SetBaseMaterialUsage arrived in 5.8. These
     // do the same work with what 5.7 exposes (5.8's bodies, their file-private helpers written out).
@@ -456,33 +488,7 @@ namespace UEAgentMaterialCommandsImpl
         {
             return false;
         }
-        const FName InputName(*ToInputName);
-        FExpressionInput* Input = nullptr;
-        if (InputName.IsNone())
-        {
-            Input = ToExpression->GetInput(0);
-        }
-        else
-        {
-            for (FExpressionInputIterator It{ ToExpression }; It; ++It)
-            {
-                // A function call's pin is compared without its type postfix; any other pin by its shortened name.
-                FName TestName;
-                if (UMaterialExpressionMaterialFunctionCall* FuncCall = Cast<UMaterialExpressionMaterialFunctionCall>(ToExpression))
-                {
-                    TestName = FuncCall->GetInputNameWithType(It.Index, false);
-                }
-                else
-                {
-                    TestName = UMaterialGraphNode::GetShortenPinName(ToExpression->GetInputName(It.Index));
-                }
-                if (TestName == InputName)
-                {
-                    Input = It.Input;
-                    break;
-                }
-            }
-        }
+        FExpressionInput* Input = FindExpressionInput(ToExpression, ToInputName);
         if (Input == nullptr || !Input->IsConnected())
         {
             return false;
@@ -571,10 +577,10 @@ namespace UEAgentMaterialCommandsImpl
 #endif
 }
 
-// MCP:create_material - Create a new base material asset (UMaterial) -- the graph-owning master whose parameters and static switches every instance of it inherits. Prefer create_material_instance when you only need a re-skin of something that exists: an instance costs no new shader permutations and leaves the original updatable. After creating, build the graph with add_graph_node + connect_pins, then verify with get_material_stats (compile_errors empty and stats_valid true) -- compile_material only acknowledges, it does not report errors, and a landscape material that fails to compile silently falls back to the default material.
+// MCP:create_material - Create a new base material asset (UMaterial) -- the graph-owning master whose parameters and static switches every instance of it inherits. Prefer create_material_instance when you only need a re-skin of something that exists: an instance costs no new shader permutations and leaves the original updatable. After creating, build the graph with add_graph_node + connect_pins, then verify with get_material_stats (compile_errors empty and stats_valid true) -- compile_material only acknowledges, it does not report errors, and a landscape material that fails to compile silently falls back to the default material. success is the new material found again at material_path.
 //   @param material_path - Content FOLDER the material is created in (e.g., '/Game/Materials')
 //   @param material_name - Name of the material asset to create
-//   @returns { material_path: string (object path of the new material, '/Game/Materials/M_X.M_X'), material_name: string, package_path: string, success: bool } -- an existing asset of that name is an error, never overwritten
+//   @returns { material_path: string (object path of the new material, '/Game/Materials/M_X.M_X'), material_name: string, package_path: string, success: bool, error?: string } -- an existing asset of that name is an error, never overwritten
 
 TSharedPtr<FJsonObject> HandleCreateMaterial(const TSharedPtr<FJsonObject>& Params)
 {
@@ -621,11 +627,19 @@ TSharedPtr<FJsonObject> HandleCreateMaterial(const TSharedPtr<FJsonObject>& Para
     }
     NewMaterial->MarkPackageDirty();
 
+    // The re-read: the new material is what its reported object path resolves to.
+    const bool bFound = FindObject<UMaterial>(nullptr, *ReportedPath) == NewMaterial;
+
     TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
     Reply->SetStringField(TEXT("material_path"), ReportedPath);
     Reply->SetStringField(TEXT("material_name"), AssetName);
     Reply->SetStringField(TEXT("package_path"), FolderPath);
-    Reply->SetBoolField(TEXT("success"), true);
+    Reply->SetBoolField(TEXT("success"), bFound);
+    if (!bFound)
+    {
+        Reply->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("create_material: the created material is not found at %s"), *ReportedPath));
+    }
     return Reply;
 }
 
@@ -780,14 +794,14 @@ TSharedPtr<FJsonObject> HandleCreateMaterialInstance(const TSharedPtr<FJsonObjec
     return Reply;
 }
 
-// MCP:create_material_expression - Add ONE node to a material graph -- or to a material function's internal graph -- by expression class path (e.g. /Script/Engine.MaterialExpressionConstant, ...TextureSample, ...ScalarParameter), at a graph position. The building block of headless material authoring: create the nodes, then wire them with connect_material_expressions and connect_to_material_output (inside a function: connect_material_function_pins, then recompile_material_function). The node arrives UNCONNECTED, so nothing renders differently until it is wired -- verify with get_material_graph_info and get_material_stats, not with the success flag. Inverse: delete_material_expression (with material_function_path inside a function).
+// MCP:create_material_expression - Add ONE node to a material graph -- or to a material function's internal graph -- by expression class path (e.g. /Script/Engine.MaterialExpressionConstant, ...TextureSample, ...ScalarParameter), at a graph position. The building block of headless material authoring: create the nodes, then wire them with connect_material_expressions and connect_to_material_output (inside a function: connect_material_function_pins, then recompile_material_function). The node arrives UNCONNECTED, so nothing renders differently until it is wired -- verify with get_material_graph_info and get_material_stats, not with the success flag, which only says the node is in the graph. Inverse: delete_material_expression (with material_function_path inside a function).
 //   @retired add_graph_node - asset_path=<material or material function>, node_type=<expression class path, e.g. /Script/Engine.MaterialExpressionConstant>, position_x=<x>, position_y=<y>; the reply's node_id is the expression name
 //   @param material_path - Full path to the material (e.g., '/Game/Materials/MyMaterial.MyMaterial'); a UMaterialFunction path is accepted too and creates the node inside that function
 //   @param material_function_path - Alias of material_path that addresses a UMaterialFunction (or material layer): the node is created inside the function's graph
 //   @param expression_class_name - Material expression class name (e.g., '/Script/Engine.MaterialExpressionConstant')
 //   @param node_pos_x - Optional graph editor X position; defaults to 0
 //   @param node_pos_y - Optional graph editor Y position; defaults to 0
-//   @returns { material_path: string, material_function_path?: string (the function's object path, when the node went into a function), expression_class_name: string, expression_name: string, node_pos_x: int, node_pos_y: int, success: bool }
+//   @returns { material_path: string, material_function_path?: string (the function's object path, when the node went into a function), expression_class_name: string, expression_name: string, node_pos_x: int, node_pos_y: int, success: bool, error?: string }
 
 TSharedPtr<FJsonObject> HandleCreateMaterialExpression(const TSharedPtr<FJsonObject>& Params)
 {
@@ -877,16 +891,26 @@ TSharedPtr<FJsonObject> HandleCreateMaterialExpression(const TSharedPtr<FJsonObj
     Reply->SetStringField(TEXT("expression_name"), NewNode->GetName());
     Reply->SetNumberField(TEXT("node_pos_x"), GraphX);
     Reply->SetNumberField(TEXT("node_pos_y"), GraphY);
-    Reply->SetBoolField(TEXT("success"), true);
+
+    // The re-read: the new node is one of the graph owner's nodes under its reported name.
+    const bool bInGraph = FunctionGraph != nullptr
+        ? UEAgentMaterialCommandsImpl::FindFunctionNode(FunctionGraph, NewNode->GetName()) == NewNode
+        : UEAgentMaterialCommandsImpl::FindGraphNode(Graph, NewNode->GetName()) == NewNode;
+    Reply->SetBoolField(TEXT("success"), bInGraph);
+    if (!bInGraph)
+    {
+        Reply->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("create_material_expression: %s was created but is not among the graph's nodes"), *NewNode->GetName()));
+    }
     return Reply;
 }
 
-// MCP:delete_material_expression - Delete ONE node from a material graph -- or from a material function's internal graph -- by name. Deliberately one at a time, and that is the safe way to empty a graph: the engine's bulk delete_all_material_expressions can leave half the nodes behind with no error, and a rebuild on top then produces duplicate parameter names that no parameter listing reveals (duplicates collapse by name). Loop this instead, re-reading get_material_graph_info until its expression_count reaches 0. The underlying engine call also returns false while having done the work, so count the nodes rather than trusting the flag. Inside a function (material_function_path, or a function path in material_path) the links into the node are broken, the node leaves the function's expressions and the reply re-reads them (deleted, expression_count); the change stays in memory until recompile_material_function saves it. Inverse of create_material_expression; a node that is not there is an error and nothing changes.
+// MCP:delete_material_expression - Delete ONE node from a material graph -- or from a material function's internal graph -- by name. Deliberately one at a time, and that is the safe way to empty a graph: the engine's bulk delete_all_material_expressions can leave half the nodes behind with no error, and a rebuild on top then produces duplicate parameter names that no parameter listing reveals (duplicates collapse by name). Loop this instead, re-reading get_material_graph_info until its expression_count reaches 0. The underlying engine call returns false even after doing the work, so the reply re-reads the graph instead: deleted and expression_count, with success false when the node is still there. Inside a function (material_function_path, or a function path in material_path) the links into the node are broken, the node leaves the function's expressions and the reply re-reads them; the change stays in memory until recompile_material_function saves it. Inverse of create_material_expression; a node that is not there is an error and nothing changes.
 //   @retired remove_graph_node - asset_path=<material or material function>, node_id=<expression name>
 //   @param material_path - Full path to the material (e.g., '/Game/Materials/MyMaterial.MyMaterial'); a UMaterialFunction path is accepted too and deletes the node inside that function
 //   @param material_function_path - Alias of material_path that addresses a UMaterialFunction (or material layer): the node is deleted from the function's graph
 //   @param expression_name - Name of the material expression to delete
-//   @returns { material_path: string, material_function_path?: string, expression_name: string, deleted?: bool, expression_count?: int, success: bool }
+//   @returns { material_path: string, material_function_path?: string, expression_name: string, deleted: bool, expression_count: int, success: bool, error?: string }
 
 TSharedPtr<FJsonObject> HandleDeleteMaterialExpression(const TSharedPtr<FJsonObject>& Params)
 {
@@ -929,9 +953,10 @@ TSharedPtr<FJsonObject> HandleDeleteMaterialExpression(const TSharedPtr<FJsonObj
         Reply->SetStringField(TEXT("material_path"), GraphPath);
         Reply->SetStringField(TEXT("material_function_path"), FunctionGraph->GetPathName());
         Reply->SetStringField(TEXT("expression_name"), NodeName);
-        Reply->SetBoolField(TEXT("deleted"), true);
+        const bool bGone = UEAgentMaterialCommandsImpl::FindFunctionNode(FunctionGraph, NodeName) == nullptr;
+        Reply->SetBoolField(TEXT("deleted"), bGone);
         Reply->SetNumberField(TEXT("expression_count"), FunctionGraph->GetExpressions().Num());
-        Reply->SetBoolField(TEXT("success"), true);
+        Reply->SetBoolField(TEXT("success"), bGone);
         return Reply;
     }
 
@@ -946,21 +971,40 @@ TSharedPtr<FJsonObject> HandleDeleteMaterialExpression(const TSharedPtr<FJsonObj
     UMaterialEditingLibrary::DeleteMaterialExpression(Graph, Doomed);
     Graph->MarkPackageDirty();
 
+    // The engine call's return is unreliable (false after doing the work), so the graph is re-read: the deleted
+    // node must have left the material's expression collection.
+    bool bGone = true;
+    for (const TObjectPtr<UMaterialExpression>& Node : Graph->GetExpressions())
+    {
+        if (Node == Doomed)
+        {
+            bGone = false;
+            break;
+        }
+    }
+
     TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
     Reply->SetStringField(TEXT("material_path"), GraphPath);
     Reply->SetStringField(TEXT("expression_name"), NodeName);
-    Reply->SetBoolField(TEXT("success"), true);
+    Reply->SetBoolField(TEXT("deleted"), bGone);
+    Reply->SetNumberField(TEXT("expression_count"), Graph->GetExpressions().Num());
+    Reply->SetBoolField(TEXT("success"), bGone);
+    if (!bGone)
+    {
+        Reply->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("delete_material_expression: %s is still among the material's expressions"), *NodeName));
+    }
     return Reply;
 }
 
-// MCP:connect_material_expressions - Wire one material node's output pin into another node's input pin -- the call that turns loose expressions into a working graph, and the only headless route to some pins. Input names go WITHOUT spaces (BaseColor and AmbientOcclusion work, "Base Color" does not), and MakeMaterialAttributes accepts named pins the graph walker reports as unnamed, including Displacement. A true return only means the pin NAME resolved: confirm the connection landed by re-reading get_material_graph_info, then compile and check get_material_stats.
+// MCP:connect_material_expressions - Wire one material node's output pin into another node's input pin -- the call that turns loose expressions into a working graph, and the only headless route to some pins. Input names go WITHOUT spaces (BaseColor and AmbientOcclusion work, "Base Color" does not), and MakeMaterialAttributes accepts named pins the graph walker reports as unnamed, including Displacement. connected is the destination input re-read, and the call fails when it does not point at the source node; then compile and check get_material_stats.
 //   @retired connect_pins - asset_path=<material>, source_node_id=<from expression name>, source_pin=<output name, "" for the first>, target_node_id=<to expression name>, target_pin=<input name without spaces>
 //   @param material_path - Full path to the material (e.g., '/Game/Materials/MyMaterial.MyMaterial')
 //   @param from_expression_name - Name of the source material expression
 //   @param from_output_name - Name of the output pin on the source expression
 //   @param to_expression_name - Name of the destination material expression
 //   @param to_input_name - Name of the input pin on the destination expression
-//   @returns { material_path: string, from_expression_name: string, from_output_name: string, to_expression_name: string, to_input_name: string, success: bool }
+//   @returns { material_path: string, from_expression_name: string, from_output_name: string, to_expression_name: string, to_input_name: string, connected: bool, success: bool, error?: string }
 
 TSharedPtr<FJsonObject> HandleConnectMaterialExpressions(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1017,17 +1061,28 @@ TSharedPtr<FJsonObject> HandleConnectMaterialExpressions(const TSharedPtr<FJsonO
     Reply->SetStringField(TEXT("from_output_name"), SourcePin);
     Reply->SetStringField(TEXT("to_expression_name"), TargetNodeName);
     Reply->SetStringField(TEXT("to_input_name"), TargetPin);
-    Reply->SetBoolField(TEXT("success"), true);
+
+    // The re-read: the named input of the destination now points at the source node.
+    const FExpressionInput* LinkedInput = UEAgentMaterialCommandsImpl::FindExpressionInput(TargetNode, TargetPin);
+    const bool bConnected = LinkedInput != nullptr && LinkedInput->Expression == SourceNode;
+    Reply->SetBoolField(TEXT("connected"), bConnected);
+    Reply->SetBoolField(TEXT("success"), bConnected);
+    if (!bConnected)
+    {
+        Reply->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("connect_material_expressions: input '%s' of %s does not point at %s after connecting"),
+            *TargetPin, *TargetNodeName, *SourceNodeName));
+    }
     return Reply;
 }
 
-// MCP:disconnect_material_expressions - Disconnect an input of a material expression (inverse of connect_material_expressions) -- in a material, or inside a material function's graph (inverse of connect_material_function_pins) when material_function_path, or a function path in material_path, is given.  Idempotent: an input that is already disconnected returns already_disconnected=true (still success — the expression exists, there simply was no connection to break). Inside a function the change stays in memory until recompile_material_function saves it.
+// MCP:disconnect_material_expressions - Disconnect an input of a material expression (inverse of connect_material_expressions) -- in a material, or inside a material function's graph (inverse of connect_material_function_pins) when material_function_path, or a function path in material_path, is given.  Idempotent: an input that is already disconnected returns already_disconnected=true (still success — the expression exists, there simply was no connection to break). Inside a function the change stays in memory until recompile_material_function saves it. An input name the node does not have is an error, and so is an input that still reads connected afterwards.
 //   @retired disconnect_pin - asset_path=<material or material function>, node_id=<to expression name>, pin_name=<input name>
 //   @param material_path - Full path to the material (e.g., '/Game/Materials/MyMaterial.MyMaterial'); a UMaterialFunction path is accepted too and disconnects inside that function
 //   @param material_function_path - Alias of material_path that addresses a UMaterialFunction (or material layer): the input is disconnected inside the function's graph
 //   @param to_expression_name - Name of the destination material expression whose input is disconnected
 //   @param to_input_name - Name of the input pin to disconnect (empty = first input)
-//   @returns { material_path: string, material_function_path?: string, to_expression_name: string, to_input_name: string, disconnected: bool, already_disconnected: bool, success: bool }
+//   @returns { material_path: string, material_function_path?: string, to_expression_name: string, to_input_name: string, disconnected: bool, already_disconnected: bool, success: bool, error?: string }
 
 TSharedPtr<FJsonObject> HandleDisconnectMaterialExpressions(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1083,14 +1138,24 @@ TSharedPtr<FJsonObject> HandleDisconnectMaterialExpressions(const TSharedPtr<FJs
     Reply->SetStringField(TEXT("to_input_name"), TargetPin);
     Reply->SetBoolField(TEXT("disconnected"), bLinkBroken);
     Reply->SetBoolField(TEXT("already_disconnected"), !bLinkBroken);
-    Reply->SetBoolField(TEXT("success"), true);
+
+    // The re-read: the named input exists and holds no link. A name that matches no input of the node is an error.
+    const FExpressionInput* ReadInput = UEAgentMaterialCommandsImpl::FindExpressionInput(TargetNode, TargetPin);
+    const bool bUnlinked = ReadInput != nullptr && !ReadInput->IsConnected();
+    Reply->SetBoolField(TEXT("success"), bUnlinked);
+    if (!bUnlinked)
+    {
+        Reply->SetStringField(TEXT("error"), ReadInput == nullptr
+            ? FString::Printf(TEXT("disconnect_material_expressions: %s has no input named '%s'"), *TargetNodeName, *TargetPin)
+            : FString::Printf(TEXT("disconnect_material_expressions: input '%s' of %s is still connected"), *TargetPin, *TargetNodeName));
+    }
     return Reply;
 }
 
-// MCP:set_material_physical_material - Link (or clear) the UPhysicalMaterial on a UMaterial asset and persist it to disk.  Idempotent: re-setting the same phys-mat returns already_set=true.  An empty/omitted physical_material_path CLEARS the link (sets it to null).
+// MCP:set_material_physical_material - Link (or clear) the UPhysicalMaterial on a UMaterial asset and persist it to disk.  Idempotent: re-setting the same phys-mat returns already_set=true.  An empty/omitted physical_material_path CLEARS the link (sets it to null). success needs the link to read back and the save to reach disk: a failed save fails the call (saved=false, save_error).
 //   @param material_path - Full path to the material (e.g., '/Game/Materials/MyMaterial.MyMaterial')
 //   @param physical_material_path - Path to the UPhysicalMaterial asset to link, or "" / omitted to clear the link
-//   @returns { material_path: string, physical_material_path: string, already_set: bool, saved: bool, save_error?: string, success: bool }
+//   @returns { material_path: string, physical_material_path: string, already_set: bool, saved: bool, save_error?: string, success: bool, error?: string }
 
 TSharedPtr<FJsonObject> HandleSetMaterialPhysicalMaterial(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1130,7 +1195,17 @@ TSharedPtr<FJsonObject> HandleSetMaterialPhysicalMaterial(const TSharedPtr<FJson
     Reply->SetStringField(TEXT("physical_material_path"), Material->PhysMaterial ? Material->PhysMaterial->GetPathName() : FString());
     Reply->SetBoolField(TEXT("already_set"), bAlreadySet);
     mcp_common::AddSaveOutcome(Reply, bSaved, SaveError);
-    Reply->SetBoolField(TEXT("success"), true);
+    const bool bLinked = Material->PhysMaterial == Surface;
+    Reply->SetBoolField(TEXT("success"), bLinked && bSaved);
+    if (!bLinked)
+    {
+        Reply->SetStringField(TEXT("error"), TEXT("set_material_physical_material: the material's physical material does not read back as requested"));
+    }
+    else if (!bSaved)
+    {
+        Reply->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("set_material_physical_material: linked in memory but NOT saved to disk: %s"), *SaveError));
+    }
     return Reply;
 }
 
