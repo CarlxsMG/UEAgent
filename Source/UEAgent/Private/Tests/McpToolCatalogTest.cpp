@@ -6,9 +6,12 @@
 //
 // What must hold: a retired tool still runs under its own name but tools/list leaves it out, and a renamed tool's
 // old name runs the new tool, with a note that says what to call; a rename that could not run anything is dropped.
+// A param's schema carries the catalog's `items`, `enum` and `default`, and a union type is an anyOf of its types.
 
 #include "Mcp/McpToolCatalog.h"
 
+#include "Dom/JsonObject.h"
+#include "Dom/JsonValue.h"
 #include "HAL/FileManager.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
@@ -30,7 +33,11 @@ bool FMcpToolCatalogTest::RunTest(const FString& Parameters)
       "domain": "Test",
       "commands": [
         {"name": "listed_tool", "description": "Listed.", "returns": "{ ok }",
-         "params": [{"name": "x", "jsonType": "string", "required": true, "description": "X."}]},
+         "params": [{"name": "x", "jsonType": "string", "required": true, "description": "X."},
+                    {"name": "names", "jsonType": "array", "required": false, "items": {"type": "string"}, "description": "Names."},
+                    {"name": "mode", "jsonType": "string", "required": false, "enum": ["fast", "slow"], "description": "Mode.", "default": "fast"},
+                    {"name": "count", "jsonType": "integer", "required": false, "description": "Count.", "default": 3},
+                    {"name": "value", "jsonType": "string|array", "required": false, "items": {"type": "number"}, "description": "Value."}]},
         {"name": "retired_tool", "description": "Retired.", "returns": "{ ok }", "params": [],
          "retired": {"use": "listed_tool", "how": "call it with x"}}
       ]
@@ -77,6 +84,29 @@ bool FMcpToolCatalogTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("two renames kept"), Catalog->GetRenamedTools().Num(), 2);
 	TestEqual(TEXT("a rename to nothing runs nothing new"), Catalog->ResolveName(TEXT("dangling")), FString(TEXT("dangling")));
 	TestEqual(TEXT("an old name to a retired tool is kept"), Catalog->ResolveName(TEXT("old_retired")), FString(TEXT("retired_tool")));
+
+	// 4. The schema detail the catalog states reaches the input schema.
+	const FMcpToolCatalog::FTool* Listed = Catalog->FindTool(TEXT("listed_tool"));
+	const TSharedPtr<FJsonObject>* Properties = nullptr;
+	if (TestNotNull(TEXT("FindTool finds the listed tool"), Listed) && Listed->InputSchema.IsValid()
+		&& TestTrue(TEXT("its schema has properties"), Listed->InputSchema->TryGetObjectField(TEXT("properties"), Properties)))
+	{
+		const TSharedPtr<FJsonObject> Names = (*Properties)->GetObjectField(TEXT("names"));
+		const TSharedPtr<FJsonObject>* Items = nullptr;
+		TestTrue(TEXT("an array carries its items"), Names->TryGetObjectField(TEXT("items"), Items)
+			&& (*Items)->GetStringField(TEXT("type")) == TEXT("string"));
+		const TSharedPtr<FJsonObject> Mode = (*Properties)->GetObjectField(TEXT("mode"));
+		const TArray<TSharedPtr<FJsonValue>>* Enum = nullptr;
+		TestTrue(TEXT("a string carries its enum"), Mode->TryGetArrayField(TEXT("enum"), Enum) && Enum->Num() == 2);
+		TestEqual(TEXT("and its default"), Mode->GetStringField(TEXT("default")), FString(TEXT("fast")));
+		const TSharedPtr<FJsonObject> Count = (*Properties)->GetObjectField(TEXT("count"));
+		TestEqual(TEXT("an integer is typed integer"), Count->GetStringField(TEXT("type")), FString(TEXT("integer")));
+		TestEqual(TEXT("with its default"), Count->GetNumberField(TEXT("default")), 3.0);
+		const TArray<TSharedPtr<FJsonValue>>* Branches = nullptr;
+		TestTrue(TEXT("a union is an anyOf of its two types"),
+			(*Properties)->GetObjectField(TEXT("value"))->TryGetArrayField(TEXT("anyOf"), Branches) && Branches->Num() == 2
+			&& (*Branches)[1]->AsObject()->HasField(TEXT("items")));
+	}
 
 	IFileManager::Get().DeleteDirectory(*Dir, /*RequireExists*/ false, /*Tree*/ true);
 	return true;
