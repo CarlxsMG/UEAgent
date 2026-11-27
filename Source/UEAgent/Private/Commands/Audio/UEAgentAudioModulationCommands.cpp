@@ -252,11 +252,11 @@ TSharedPtr<FJsonObject> HandleCreateControlBusMix(
 // ---------------------------------------------------------------------------
 // set_control_bus_value  (push a value into the bus at runtime via statics)
 // ---------------------------------------------------------------------------
-// MCP:set_control_bus_value - Pushes a runtime value into a USoundControlBus through a global bus mix of the editor world (UAudioModulationStatics::SetGlobalBusMixValue), fading over fade_time. Transient: the asset is not modified or saved, and applied is always true, not read back; read the live value with get_control_bus_info.
+// MCP:set_control_bus_value - Pushes a runtime value into a USoundControlBus through a global bus mix of the editor world (UAudioModulationStatics::SetGlobalBusMixValue), fading over fade_time. Transient: the asset is not modified or saved. An editor world with no audio modulation manager (no audio device) is an error and nothing is pushed. The value is not read back, since the audio render thread applies it after the fade: verification says not_verifiable; read the live value with get_control_bus_info.
 //   @param bus_path - Asset path to the USoundControlBus
 //   @param value - New runtime bus value to push (required float)
 //   @param fade_time - Fade time in seconds; a negative value reuses the last fade time of the global stage, or 0.1 s if none was set (default -1.0)
-//   @returns { bus_path, value, fade_time, applied }
+//   @returns { bus_path, value, fade_time, verification: { status: "not_verifiable", ... }, verification_checks }
 TSharedPtr<FJsonObject> HandleSetControlBusValue(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -281,13 +281,24 @@ TSharedPtr<FJsonObject> HandleSetControlBusValue(
 	// UAudioModulationStatics::SetGlobalBusMixValue is the canonical path
 	// (UFUNCTION BlueprintCallable, AUDIOMODULATION_API). FadeTime<0 means
 	// use the mix's default.
+	// Without a modulation manager in the editor world (no audio device) the push goes nowhere.
+	if (!UAudioModulationStatics::GetModulation(World))
+	{
+		return mcp_common::MakeErrorReply(FString::Printf(
+			TEXT("The editor world has no audio modulation manager (no audio device), so no value can be pushed to %s; nothing changed"),
+			*Bus->GetPathName()));
+	}
 	UAudioModulationStatics::SetGlobalBusMixValue(World, Bus, (float)ValueD, (float)FadeTimeD);
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("bus_path"), Bus->GetPathName());
 	Data->SetNumberField(TEXT("value"), ValueD);
 	Data->SetNumberField(TEXT("fade_time"), FadeTimeD);
-	Data->SetBoolField(TEXT("applied"), true);
+	// The manager applies the mix on the audio render thread and fades to the value over fade_time, so nothing on
+	// this thread holds the new value when the call returns.
+	mcp_common::AddVerificationEvidence(Data, mcp_common::EMcpVerification::NotVerifiable,
+		TEXT("UAudioModulationStatics::SetGlobalBusMixValue"),
+		TEXT("the bus value is applied on the audio render thread after fade_time; read it with get_control_bus_info"));
 	return mcp_common::MakeOkReply(Data);
 }
 
