@@ -14,6 +14,7 @@
 #include "EngineUtils.h"
 // Stimuli source component (AIModule — declared plugin dependency).
 #include "Perception/AIPerceptionStimuliSourceComponent.h"
+#include "Perception/AIPerceptionSystem.h"
 // AI Sight sense class (we register for "Sight" by default; "Hearing"/"Damage" available).
 #include "Perception/AISense_Sight.h"
 #include "Perception/AISense_Hearing.h"
@@ -49,22 +50,62 @@ namespace UEAgentAIPerceptionCommands
 
 namespace
 {
-    /** Resolve an AISense subclass from a JSON name; defaults to UAISense_Sight. */
+    /** The AISense subclass a JSON name stands for (Sight, Hearing or Damage); null for any other name. */
     TSubclassOf<UAISense> ResolveSenseClass(const FString& Name)
     {
+        if (Name.Equals(TEXT("Sight"), ESearchCase::IgnoreCase))
+            return UAISense_Sight::StaticClass();
         if (Name.Equals(TEXT("Hearing"), ESearchCase::IgnoreCase))
             return UAISense_Hearing::StaticClass();
         if (Name.Equals(TEXT("Damage"), ESearchCase::IgnoreCase))
             return UAISense_Damage::StaticClass();
-        // default: Sight (also covers "Team", "Touch" via UAISense_* siblings)
-        return UAISense_Sight::StaticClass();
+        return nullptr;
+    }
+
+    /**
+     * Make Comp a saved stimuli source of SenseClass: add it to RegisterAsSourceForSenses and set
+     * bAutoRegisterAsSource, both protected UPROPERTYs written through reflection, then RegisterForSense, which
+     * registers with the world's perception system only when the world has one (the editor world has none, so
+     * the saved list is what makes the actor a source when play starts). Writes the read-back into Result and
+     * returns whether the list holds the sense with auto-registration on.
+     */
+    bool RegisterStimuliSense(UAIPerceptionStimuliSourceComponent* Comp, TSubclassOf<UAISense> SenseClass, const TSharedPtr<FJsonObject>& Result)
+    {
+        FArrayProperty* SensesProp = FindFProperty<FArrayProperty>(UAIPerceptionStimuliSourceComponent::StaticClass(), TEXT("RegisterAsSourceForSenses"));
+        FBoolProperty* AutoProp = FindFProperty<FBoolProperty>(UAIPerceptionStimuliSourceComponent::StaticClass(), TEXT("bAutoRegisterAsSource"));
+        TArray<TSubclassOf<UAISense>>* Senses = SensesProp ? SensesProp->ContainerPtrToValuePtr<TArray<TSubclassOf<UAISense>>>(Comp) : nullptr;
+        if (Senses)
+        {
+            Senses->AddUnique(SenseClass);
+        }
+        if (AutoProp)
+        {
+            AutoProp->SetPropertyValue_InContainer(Comp, true);
+        }
+        Comp->RegisterForSense(SenseClass);
+
+        TArray<TSharedPtr<FJsonValue>> SenseNames;
+        if (Senses)
+        {
+            for (const TSubclassOf<UAISense>& Sense : *Senses)
+            {
+                SenseNames.Add(MakeShared<FJsonValueString>(Sense ? Sense->GetName() : FString()));
+            }
+        }
+        const bool bListed = Senses && Senses->Contains(SenseClass);
+        const bool bAuto = AutoProp && AutoProp->GetPropertyValue_InContainer(Comp);
+        Result->SetArrayField(TEXT("registered_senses"), SenseNames);
+        Result->SetBoolField(TEXT("auto_register_as_source"), bAuto);
+        Result->SetBoolField(TEXT("registered_with_perception_system"), UAIPerceptionSystem::GetCurrent(Comp->GetWorld()) != nullptr);
+        Result->SetBoolField(TEXT("registered"), bListed && bAuto);
+        return bListed && bAuto;
     }
 }
 
-// MCP:add_ai_stimuli_source - Adds a UAIPerceptionStimuliSourceComponent to an actor and registers it as a source for the supplied AISense (default Sight). Idempotent: re-run returns the existing component.
+// MCP:add_ai_stimuli_source - Adds a UAIPerceptionStimuliSourceComponent to an editor-world actor (or reuses its first one) and makes it a source for the supplied AISense (default Sight): the sense joins the component's RegisterAsSourceForSenses with bAutoRegisterAsSource on, which registers the actor when play starts, and is registered at once where the world has a perception system (the editor world has none: registered_with_perception_system says which). One undo step; the level is dirtied, not saved. registered is the read-back of that list and flag, and false makes success false. An unknown sense is an error. Idempotent: a re-run reuses the component and leaves the list as it is.
 //   @param actor_name - Display label or internal name of the target editor-world actor (required)
 //   @param sense - "Sight" | "Hearing" | "Damage" (default "Sight")
-//   @returns { actor_name: string, component_name: string, sense: string, registered: bool, already_existed: bool }
+//   @returns { actor_name: string, component_name: string, sense: string, already_existed: bool, registered: bool, registered_senses: [string], auto_register_as_source: bool, registered_with_perception_system: bool }
 TSharedPtr<FJsonObject> HandleAddAiStimuliSource(const TSharedPtr<FJsonObject>& Params)
 {
     FString ActorName;
@@ -79,44 +120,40 @@ TSharedPtr<FJsonObject> HandleAddAiStimuliSource(const TSharedPtr<FJsonObject>& 
 
     FString SenseName = TEXT("Sight");
     Params->TryGetStringField(TEXT("sense"), SenseName);
-
-    // Idempotency: re-use the first existing stimuli source on the actor if one is present.
-    UAIPerceptionStimuliSourceComponent* Existing = Actor->FindComponentByClass<UAIPerceptionStimuliSourceComponent>();
-    if (Existing)
+    const TSubclassOf<UAISense> SenseClass = ResolveSenseClass(SenseName);
+    if (!SenseClass)
     {
-        const TSubclassOf<UAISense> SenseClass = ResolveSenseClass(SenseName);
-        Existing->RegisterForSense(SenseClass);
-
-        TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-        Result->SetStringField(TEXT("actor_name"), ActorName);
-        Result->SetStringField(TEXT("component_name"), Existing->GetName());
-        Result->SetStringField(TEXT("sense"), SenseName);
-        Result->SetBoolField(TEXT("registered"), true);
-        Result->SetBoolField(TEXT("already_existed"), true);
-        return mcp_common::MakeOkReply(Result);
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Unknown sense '%s': one of Sight, Hearing, Damage. Nothing was changed"), *SenseName));
     }
 
     const FScopedTransaction Transaction(LOCTEXT("AddAiStimuliSource", "MCP: Add AI Stimuli Source"));
-    Actor->Modify();
-
-    UAIPerceptionStimuliSourceComponent* Comp = NewObject<UAIPerceptionStimuliSourceComponent>(Actor);
-    if (!Comp)
-        return mcp_common::MakeErrorReply(TEXT("Failed to create UAIPerceptionStimuliSourceComponent"));
-
-    Comp->CreationMethod = EComponentCreationMethod::Instance;
-    const TSubclassOf<UAISense> SenseClass = ResolveSenseClass(SenseName);
-    Comp->RegisterForSense(SenseClass);
-
-    Comp->RegisterComponent();
-    Actor->AddInstanceComponent(Comp);
+    // Idempotency: re-use the first existing stimuli source on the actor if one is present.
+    UAIPerceptionStimuliSourceComponent* Comp = Actor->FindComponentByClass<UAIPerceptionStimuliSourceComponent>();
+    const bool bAlreadyExisted = Comp != nullptr;
+    if (Comp)
+    {
+        Comp->Modify();
+    }
+    else
+    {
+        Actor->Modify();
+        Comp = NewObject<UAIPerceptionStimuliSourceComponent>(Actor);
+        if (!Comp)
+            return mcp_common::MakeErrorReply(TEXT("Failed to create UAIPerceptionStimuliSourceComponent"));
+        Comp->CreationMethod = EComponentCreationMethod::Instance;
+        Actor->AddInstanceComponent(Comp);
+        Comp->RegisterComponent();
+    }
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("actor_name"), ActorName);
     Result->SetStringField(TEXT("component_name"), Comp->GetName());
     Result->SetStringField(TEXT("sense"), SenseName);
-    Result->SetBoolField(TEXT("registered"), true);
-    Result->SetBoolField(TEXT("already_existed"), false);
-    return mcp_common::MakeOkReply(Result);
+    Result->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
+    const bool bRegistered = RegisterStimuliSense(Comp, SenseClass, Result);
+    return mcp_common::MakeOutcomeReply(Result, bRegistered, bRegistered ? FString() : FString::Printf(
+        TEXT("add_ai_stimuli_source: %s does not read back as a source of %s with auto-registration on (see registered_senses, auto_register_as_source)"),
+        *Comp->GetName(), *SenseClass->GetName()));
 }
 
 // create_ai_controller_blueprint
