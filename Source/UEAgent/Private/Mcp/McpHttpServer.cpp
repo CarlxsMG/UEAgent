@@ -252,13 +252,14 @@ namespace McpHttpServerPrivate
 	 * What EnqueueToolCall returns: {"is_error": bool, "result": <what the model sees>}. The
 	 * bridge envelope is already unwrapped (McpReadback::Unwrap) and has the READBACK contract
 	 * applied.
-	 * A `success:false` is NOT flagged isError: the model reads that field itself. isError is
-	 * reserved for calls that never ran: the refusals (`result.refused`, from the PIE guards and
-	 * the preconditions), which come back as a tool error.
+	 * bOutIsError is the MCP `isError` of the call: set for a refusal (`is_error`, from the PIE
+	 * guards and the preconditions: the call never ran) and for any answer whose `success` is
+	 * false (the call ran and failed, or the readback found its success did not hold), so a
+	 * client that only looks at isError never takes a failure for a success.
 	 */
-	static TSharedRef<FJsonObject> UnwrapOutcome(const FString& OutcomeText, bool& bOutRefused, TArray<McpImageContent::FBlock>* OutImages = nullptr)
+	static TSharedRef<FJsonObject> UnwrapOutcome(const FString& OutcomeText, bool& bOutIsError, TArray<McpImageContent::FBlock>* OutImages = nullptr)
 	{
-		bOutRefused = false;
+		bOutIsError = false;
 		TSharedPtr<FJsonObject> Outcome;
 		const TSharedPtr<FJsonObject>* Result = nullptr;
 		if (!FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(OutcomeText), Outcome) || !Outcome.IsValid()
@@ -267,9 +268,14 @@ namespace McpHttpServerPrivate
 			TSharedRef<FJsonObject> Error = MakeShared<FJsonObject>();
 			Error->SetBoolField(TEXT("success"), false);
 			Error->SetStringField(TEXT("error"), TEXT("Invalid response from the Unreal bridge (not JSON)"));
+			bOutIsError = true;
 			return Error;
 		}
-		Outcome->TryGetBoolField(TEXT("is_error"), bOutRefused);
+		bool bRefused = false;
+		Outcome->TryGetBoolField(TEXT("is_error"), bRefused);
+		bool bSuccess = true;
+		(*Result)->TryGetBoolField(TEXT("success"), bSuccess);
+		bOutIsError = bRefused || !bSuccess;
 		if (OutImages)
 		{
 			*OutImages = McpImageContent::ReadBlocks(*Outcome);
@@ -1353,10 +1359,10 @@ bool FMcpHttpConnection::HandleToolsCall(const McpHttpServerPrivate::FHttpReques
 		}
 	}
 
-	bool bRefused = false;
+	bool bIsError = false;
 	TArray<McpImageContent::FBlock> Images;
-	const TSharedRef<FJsonObject> Payload = UnwrapOutcome(Future.Get(), bRefused, &Images);
-	const FString Response = MakeRpcResult(Id, McpImageContent::MakeToolResult(ToJsonText(Payload), bRefused, Images));
+	const TSharedRef<FJsonObject> Payload = UnwrapOutcome(Future.Get(), bIsError, &Images);
+	const FString Response = MakeRpcResult(Id, McpImageContent::MakeToolResult(ToJsonText(Payload), bIsError, Images));
 	if (bStreaming)
 	{
 		SendSseEvent(Response);

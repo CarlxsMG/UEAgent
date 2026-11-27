@@ -418,28 +418,42 @@ namespace UEAgentBridgeImpl
         Envelope->SetStringField(TEXT("error"), Reason);
     }
 
-    // The transport envelope around a handler's answer. A handler either states its outcome
-    // ({"success": bool, "error"?: ...}) or returns a bare payload, which counts as a success.
+    // The transport envelope around a handler's answer. The outcome is decided this way:
+    //   - no payload at all: a failure (nothing says the command did anything);
+    //   - a boolean "success": that is the outcome;
+    //   - no "success": a success only when the payload carries no "error" (a non-null "error"
+    //     other than an empty string means the handler failed without saying success=false).
     // A failure still carries the whole handler payload under "result": its diagnostics
     // (regressions, rolled_back, compile_status, ...) are the point of reporting it.
     void WrapHandlerResult(const TSharedPtr<FJsonObject>& Envelope, const TSharedPtr<FJsonObject>& HandlerResult)
     {
-        const bool bStatesOutcome = HandlerResult.IsValid() && HandlerResult->HasField(TEXT("success"));
-        if (bStatesOutcome && !HandlerResult->GetBoolField(TEXT("success")))
+        if (!HandlerResult.IsValid())
+        {
+            SetFailure(Envelope, TEXT("Command returned no result"));
+            return;
+        }
+        const TSharedPtr<FJsonValue> ErrorField = HandlerResult->TryGetField(TEXT("error"));
+        FString ErrorText;
+        const bool bHasErrorText = ErrorField.IsValid() && ErrorField->TryGetString(ErrorText) && !ErrorText.IsEmpty();
+        const bool bCarriesError = ErrorField.IsValid() && !ErrorField->IsNull()
+            && (ErrorField->Type != EJson::String || !ErrorText.IsEmpty());
+        bool bSuccess = false;
+        if (!HandlerResult->TryGetBoolField(TEXT("success"), bSuccess))
+        {
+            bSuccess = !bCarriesError;
+        }
+        if (!bSuccess)
         {
             // Never a bare "Unknown error" for a structured failure: say where the detail is.
-            SetFailure(Envelope, HandlerResult->HasField(TEXT("error"))
-                ? HandlerResult->GetStringField(TEXT("error"))
-                : FString(TEXT("Command reported success=false (see result for details)")));
+            SetFailure(Envelope, bHasErrorText
+                ? ErrorText
+                : FString(TEXT("Command reported a failure (see result for details)")));
         }
         else
         {
             Envelope->SetStringField(TEXT("status"), TEXT("success"));
         }
-        if (HandlerResult.IsValid())
-        {
-            Envelope->SetObjectField(TEXT("result"), HandlerResult);
-        }
+        Envelope->SetObjectField(TEXT("result"), HandlerResult);
     }
 }
 
@@ -1349,7 +1363,6 @@ TSharedPtr<FJsonObject> UUEAgentBridge::DispatchSingleCommand(const FString& Req
         }
     }
 
-    try
     {
         TSharedPtr<FJsonObject> ResultJson;
         // The package of an asset this call created, when that dropped the call's undo step (see FNewAssetWatch).
@@ -1647,10 +1660,6 @@ TSharedPtr<FJsonObject> UUEAgentBridge::DispatchSingleCommand(const FString& Req
             }
 
             UEAgentBridgeImpl::WrapHandlerResult(ResponseJson, ResultJson);
-        }
-        catch (const std::exception& e)
-        {
-            UEAgentBridgeImpl::SetFailure(ResponseJson, UTF8_TO_TCHAR(e.what()));
         }
 
         // Whatever changes the risk of the NEXT calls (e.g. the World Partition map that stays
