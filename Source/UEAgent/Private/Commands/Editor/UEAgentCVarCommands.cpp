@@ -324,12 +324,17 @@ TSharedPtr<FJsonObject> HandleSetCVar(const TSharedPtr<FJsonObject>& Params)
     }
 
     CVar->Set(*Value, ECVF_SetByConsole);
+    // A cvar last set by a higher-priority layer (code, a device profile...) keeps its value; so does a cvar whose
+    // type reads the text as something else.
+    const bool bSet = CVar_Holds(CVar, Value);
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetBoolField(TEXT("set"), true);
+    Data->SetBoolField(TEXT("set"), bSet);
     Data->SetStringField(TEXT("requested_value"), Value);
     FillCVarState(Data, Name, CVar); // read-back: value/int_value/float_value/...
-    return mcp_common::MakeOkReply(Data);
+    return mcp_common::MakeOutcomeReply(Data, bSet, FString::Printf(
+        TEXT("set_cvar: '%s' reads back '%s' after setting '%s'; set_by in this payload names the layer that holds it."),
+        *Name, *CVar->GetString(), *Value));
 }
 
 // ---------------------------------------------------------------------------

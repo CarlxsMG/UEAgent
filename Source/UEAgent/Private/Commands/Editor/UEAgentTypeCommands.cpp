@@ -171,6 +171,66 @@ namespace
     }
 }
 
+// ===========================================================================
+// Enum-side operations via FEnumEditorUtils.
+// The engine mutators are all void and address entries by int32 index; NumEnums()
+// includes the hidden trailing _MAX, so the user-visible count is NumEnums()-1.
+// Verify by reading state before/after (no success bool). Author in-memory like the
+// rest of this family (MarkPackageDirty; no SavePackage / no recompile needed).
+// ===========================================================================
+namespace
+{
+    // User-visible enumerator count (excludes the hidden _MAX sentinel).
+    int32 UserEnumCount(const UUserDefinedEnum* Enum)
+    {
+        return Enum ? FMath::Max(0, Enum->NumEnums() - 1) : 0;
+    }
+
+    // Resolve an enumerator index by display name (then internal name); INDEX_NONE if absent.
+    // Scans only the user range [0, NumEnums()-2], excluding _MAX.
+    int32 FindEnumEntryIndexByName(const UUserDefinedEnum* Enum, const FString& EntryName)
+    {
+        if (!Enum) { return INDEX_NONE; }
+        const int32 Count = UserEnumCount(Enum);
+        for (int32 i = 0; i < Count; ++i)
+        {
+            if (Enum->GetDisplayNameTextByIndex(i).ToString().Equals(EntryName, ESearchCase::IgnoreCase))
+            {
+                return i;
+            }
+        }
+        for (int32 i = 0; i < Count; ++i)
+        {
+            if (Enum->GetNameStringByIndex(i).Equals(EntryName, ESearchCase::IgnoreCase))
+            {
+                return i;
+            }
+        }
+        return INDEX_NONE;
+    }
+
+    // Ordered user-entry display names (excludes _MAX) as a JSON string array.
+    TArray<TSharedPtr<FJsonValue>> EnumEntryNamesJson(const UUserDefinedEnum* Enum)
+    {
+        TArray<TSharedPtr<FJsonValue>> A;
+        const int32 Count = UserEnumCount(Enum);
+        for (int32 i = 0; i < Count; ++i)
+        {
+            A.Add(MakeShared<FJsonValueString>(Enum->GetDisplayNameTextByIndex(i).ToString()));
+        }
+        return A;
+    }
+
+    // A reply about one enumerator of a Blueprint enum.
+    TSharedPtr<FJsonObject> Type_EnumEntryResult(const FString& EnumPath, const FString& EntryName)
+    {
+        TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+        Result->SetStringField(TEXT("enum_path"), EnumPath);
+        Result->SetStringField(TEXT("entry_name"), EntryName);
+        return Result;
+    }
+}
+
 // MCP:create_enum - Create a Blueprint enum asset from an ordered list of enumerator DISPLAY names -- states, categories and types that Blueprints and DataTable columns switch on. Errors if the asset already exists (not idempotent). Beware the display/internal split that follows: the engine stores enumerators internally as NewEnumerator0, NewEnumerator1, ... and writers into DataTables must use those internal names, because a display name containing spaces is cut at the first space by the text importer and silently lands on index 0. So keep single-word display names, or expect to write NewEnumeratorN. add_enum_entry / rename_enum_entry / reorder_enum_entry edit it afterwards.
 //   @param name - Enum asset name.
 //   @param entries - Ordered list of enumerator display-name strings.
@@ -229,7 +289,29 @@ TSharedPtr<FJsonObject> HandleCreateEnum(const TSharedPtr<FJsonObject>& Params)
     }
 
     TSharedPtr<FJsonObject> Result = Type_RegisterNewAsset(Enum, Package, Name, FullPath);
-    Result->SetNumberField(TEXT("entry_count"), Entries.Num());
+
+    // Read the enumerators back: SetEnumeratorDisplayName refuses an invalid or duplicate name and leaves
+    // the auto-generated one in its place.
+    TArray<FString> Unnamed;
+    const int32 ReadCount = UserEnumCount(Enum);
+    for (int32 i = 0; i < Entries.Num(); ++i)
+    {
+        if (i >= ReadCount || !Enum->GetDisplayNameTextByIndex(i).ToString().Equals(Entries[i], ESearchCase::CaseSensitive))
+        {
+            Unnamed.Add(Entries[i]);
+        }
+    }
+    const bool bCreated = Unnamed.Num() == 0 && ReadCount == Entries.Num();
+    Result->SetNumberField(TEXT("entry_count"), ReadCount);
+    Result->SetArrayField(TEXT("entries"), EnumEntryNamesJson(Enum));
+    Result->SetBoolField(TEXT("success"), bCreated);
+    if (!bCreated)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("create_enum: the enum was created at %s but reads back %d entries, and these requested display names are not on it: %s ")
+            TEXT("(invalid or duplicate names keep the engine's NewEnumeratorN name). Fix them with rename_enum_entry."),
+            *FullPath, ReadCount, *FString::Join(Unnamed, TEXT(", "))));
+    }
     return Result;
 }
 
@@ -283,6 +365,14 @@ TSharedPtr<FJsonObject> HandleCreateStruct(const TSharedPtr<FJsonObject>& Params
 
     TSharedPtr<FJsonObject> Result = Type_RegisterNewAsset(Struct, Package, Name, FullPath);
     Result->SetBoolField(TEXT("reset_stale"), bResetStale);
+    const bool bFound = FindObject<UUserDefinedStruct>(Package, *Name) == Struct;
+    Result->SetBoolField(TEXT("found_in_package"), bFound);
+    Result->SetBoolField(TEXT("success"), bFound);
+    if (!bFound)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("create_struct: the new struct is not found as %s in its package after creation."), *FullPath));
+    }
     return Result;
 }
 
@@ -332,9 +422,26 @@ TSharedPtr<FJsonObject> HandleAddStructMember(const TSharedPtr<FJsonObject>& Par
 
     Type_MarkStructDirty(Struct);
 
+    // Read the member back by its new name, from the re-fetched description list.
+    const FGuid AddedGuid = FindMemberGuidByName(Struct, MemberName);
+    const FStructVariableDescription* Added = AddedGuid.IsValid() ? FStructureEditorUtils::GetVarDescByGuid(Struct, AddedGuid) : nullptr;
+    const bool bAdded = Added && Added->Category == PinType.PinCategory && Added->ContainerType == PinType.ContainerType;
+
     TSharedPtr<FJsonObject> Result = Type_StructMemberResult(StructPath, MemberName);
     Result->SetStringField(TEXT("member_type"), MemberType);
-    Result->SetNumberField(TEXT("member_count"), Desc.Num());
+    Result->SetNumberField(TEXT("member_count"), FStructureEditorUtils::GetVarDesc(Struct).Num());
+    Result->SetBoolField(TEXT("added"), bAdded);
+    if (Added)
+    {
+        Result->SetObjectField(TEXT("member"), MakeMemberObject(*Added));
+    }
+    Result->SetBoolField(TEXT("success"), bAdded);
+    if (!bAdded)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("add_struct_member: member '%s' %s after adding it; see member in this payload."), *MemberName,
+            Added ? TEXT("reads back with a different type category or container than the one resolved from member_type") : TEXT("is not found on the struct")));
+    }
     return Result;
 }
 
@@ -363,7 +470,16 @@ TSharedPtr<FJsonObject> HandleCreateBlueprintInterface(const TSharedPtr<FJsonObj
     }
 
     TSharedPtr<FJsonObject> Result = Type_RegisterNewAsset(InterfaceBP, Package, Name, FullPath);
-    Result->SetStringField(TEXT("type"), TEXT("BlueprintInterface"));
+    const bool bIsInterface = InterfaceBP->BlueprintType == BPTYPE_Interface && InterfaceBP->GeneratedClass != nullptr;
+    Result->SetStringField(TEXT("type"), bIsInterface ? TEXT("BlueprintInterface") : TEXT("Blueprint"));
+    Result->SetBoolField(TEXT("compiled"), InterfaceBP->GeneratedClass != nullptr);
+    Result->SetBoolField(TEXT("success"), bIsInterface);
+    if (!bIsInterface)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("create_blueprint_interface: the asset at %s was created but does not read back as a compiled Blueprint Interface ")
+            TEXT("(blueprint type or generated class missing)."), *FullPath));
+    }
     return Result;
 }
 
@@ -449,6 +565,14 @@ TSharedPtr<FJsonObject> HandleSetStructMemberDefault(const TSharedPtr<FJsonObjec
     {
         Result->SetObjectField(TEXT("member"), MakeMemberObject(*After));
     }
+    const bool bHolds = After && After->DefaultValue == NewDefault;
+    Result->SetBoolField(TEXT("success"), bHolds);
+    if (!bHolds)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("set_struct_member_default: member '%s' reads back default '%s' instead of '%s'."),
+            *MemberName, After ? *After->DefaultValue : TEXT("<member not found>"), *NewDefault));
+    }
     return Result;
 }
 
@@ -485,10 +609,18 @@ TSharedPtr<FJsonObject> HandleRemoveStructMember(const TSharedPtr<FJsonObject>& 
         Type_MarkStructDirty(Struct);
     }
 
+    const bool bGone = FStructureEditorUtils::GetVarDescByGuid(Struct, Guid) == nullptr;
     TSharedPtr<FJsonObject> Result = Type_StructMemberResult(StructPath, MemberName);
-    Result->SetBoolField(TEXT("removed"), bRemoved);
+    Result->SetBoolField(TEXT("removed"), bRemoved && bGone);
     Result->SetBoolField(TEXT("already_absent"), bAlreadyAbsent);
     Result->SetNumberField(TEXT("member_count"), FStructureEditorUtils::GetVarDesc(Struct).Num());
+    const bool bOutcome = bAlreadyAbsent || bGone;
+    Result->SetBoolField(TEXT("success"), bOutcome);
+    if (!bOutcome)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("remove_struct_member: member '%s' is still on the struct after RemoveVariable reported success."), *MemberName));
+    }
     return Result;
 }
 
@@ -542,67 +674,15 @@ TSharedPtr<FJsonObject> HandleRenameStructMember(const TSharedPtr<FJsonObject>& 
     {
         Result->SetObjectField(TEXT("member"), MakeMemberObject(*After));
     }
+    const bool bNamed = After && After->FriendlyName.Equals(NewName, ESearchCase::CaseSensitive);
+    Result->SetBoolField(TEXT("success"), bNamed);
+    if (!bNamed)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("rename_struct_member: the member reads back the name '%s' instead of '%s'."),
+            After ? *After->FriendlyName : TEXT("<member not found>"), *NewName));
+    }
     return Result;
-}
-
-// ===========================================================================
-// Enum-side operations via FEnumEditorUtils.
-// The engine mutators are all void and address entries by int32 index; NumEnums()
-// includes the hidden trailing _MAX, so the user-visible count is NumEnums()-1.
-// Verify by reading state before/after (no success bool). Author in-memory like the
-// rest of this family (MarkPackageDirty; no SavePackage / no recompile needed).
-// ===========================================================================
-namespace
-{
-    // User-visible enumerator count (excludes the hidden _MAX sentinel).
-    int32 UserEnumCount(const UUserDefinedEnum* Enum)
-    {
-        return Enum ? FMath::Max(0, Enum->NumEnums() - 1) : 0;
-    }
-
-    // Resolve an enumerator index by display name (then internal name); INDEX_NONE if absent.
-    // Scans only the user range [0, NumEnums()-2], excluding _MAX.
-    int32 FindEnumEntryIndexByName(const UUserDefinedEnum* Enum, const FString& EntryName)
-    {
-        if (!Enum) { return INDEX_NONE; }
-        const int32 Count = UserEnumCount(Enum);
-        for (int32 i = 0; i < Count; ++i)
-        {
-            if (Enum->GetDisplayNameTextByIndex(i).ToString().Equals(EntryName, ESearchCase::IgnoreCase))
-            {
-                return i;
-            }
-        }
-        for (int32 i = 0; i < Count; ++i)
-        {
-            if (Enum->GetNameStringByIndex(i).Equals(EntryName, ESearchCase::IgnoreCase))
-            {
-                return i;
-            }
-        }
-        return INDEX_NONE;
-    }
-
-    // Ordered user-entry display names (excludes _MAX) as a JSON string array.
-    TArray<TSharedPtr<FJsonValue>> EnumEntryNamesJson(const UUserDefinedEnum* Enum)
-    {
-        TArray<TSharedPtr<FJsonValue>> A;
-        const int32 Count = UserEnumCount(Enum);
-        for (int32 i = 0; i < Count; ++i)
-        {
-            A.Add(MakeShared<FJsonValueString>(Enum->GetDisplayNameTextByIndex(i).ToString()));
-        }
-        return A;
-    }
-
-    // A reply about one enumerator of a Blueprint enum.
-    TSharedPtr<FJsonObject> Type_EnumEntryResult(const FString& EnumPath, const FString& EntryName)
-    {
-        TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-        Result->SetStringField(TEXT("enum_path"), EnumPath);
-        Result->SetStringField(TEXT("entry_name"), EntryName);
-        return Result;
-    }
 }
 
 // MCP:set_enum_bitflags - Turn the "Bitflags" metadata of a Blueprint Enum (UUserDefinedEnum) on or off, as the enum editor's checkbox does: on, its enumerators can be combined as bit flags, so an integer variable marked Bitmask can use it as its Bitmask Enum. Only this flag changes; build the entries with create_enum, add_enum_entry, rename_enum_entry, reorder_enum_entry or remove_enum_entry, and read them with get_enum_info. One undo step; Blueprints that use the enum are notified, and the enum is marked dirty, not saved (save_asset). Idempotent: the state it already has reports already_set=true, applied=false, and changes nothing. A path that does not load a UUserDefinedEnum (a native C++ enum included) is an error.
@@ -630,11 +710,20 @@ TSharedPtr<FJsonObject> HandleSetEnumBitflags(const TSharedPtr<FJsonObject>& Par
         Enum->MarkPackageDirty();
     }
 
+    const bool bReadBack = FEnumEditorUtils::IsEnumeratorBitflagsType(Enum);
+    const bool bHolds = bReadBack == bBitflags;
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("enum_path"), EnumPath);
-    Result->SetBoolField(TEXT("bitflags"), FEnumEditorUtils::IsEnumeratorBitflagsType(Enum));
+    Result->SetBoolField(TEXT("bitflags"), bReadBack);
     Result->SetBoolField(TEXT("already_set"), bAlreadySet);
-    Result->SetBoolField(TEXT("applied"), !bAlreadySet);
+    Result->SetBoolField(TEXT("applied"), !bAlreadySet && bHolds);
+    Result->SetBoolField(TEXT("success"), bHolds);
+    if (!bHolds)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("set_enum_bitflags: the enum reads back bitflags=%s after setting it to %s."),
+            bReadBack ? TEXT("true") : TEXT("false"), bBitflags ? TEXT("true") : TEXT("false")));
+    }
     return Result;
 }
 
@@ -673,6 +762,13 @@ TSharedPtr<FJsonObject> HandleRemoveEnumEntry(const TSharedPtr<FJsonObject>& Par
     Result->SetBoolField(TEXT("removed"), bRemoved);
     Result->SetBoolField(TEXT("already_absent"), bAlreadyAbsent);
     Result->SetNumberField(TEXT("entry_count"), UserEnumCount(Enum));
+    const bool bOutcome = bAlreadyAbsent || bRemoved;
+    Result->SetBoolField(TEXT("success"), bOutcome);
+    if (!bOutcome)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("remove_enum_entry: '%s' still resolves to an enumerator after removing it."), *EntryName));
+    }
     return Result;
 }
 
@@ -712,12 +808,21 @@ TSharedPtr<FJsonObject> HandleReorderEnumEntry(const TSharedPtr<FJsonObject>& Pa
         Enum->MarkPackageDirty();
         bMoved = (FindEnumEntryIndexByName(Enum, EntryName) == ClampedTo);
     }
+    const int32 ReadIndex = FindEnumEntryIndexByName(Enum, EntryName);
 
     TSharedPtr<FJsonObject> Result = Type_EnumEntryResult(EnumPath, EntryName);
     Result->SetNumberField(TEXT("from_index"), FromIndex);
     Result->SetNumberField(TEXT("to_index"), ClampedTo);
     Result->SetBoolField(TEXT("moved"), bMoved);
+    Result->SetNumberField(TEXT("index"), ReadIndex);
     Result->SetArrayField(TEXT("entries"), EnumEntryNamesJson(Enum));
+    const bool bOutcome = ReadIndex == ClampedTo;
+    Result->SetBoolField(TEXT("success"), bOutcome);
+    if (!bOutcome)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("reorder_enum_entry: '%s' reads back at index %d instead of %d."), *EntryName, ReadIndex, ClampedTo));
+    }
     return Result;
 }
 
@@ -778,6 +883,12 @@ TSharedPtr<FJsonObject> HandleAddEnumEntry(const TSharedPtr<FJsonObject>& Params
     Result->SetBoolField(TEXT("already_existed"), false);
     Result->SetNumberField(TEXT("entry_count"), UserEnumCount(Enum));
     Result->SetArrayField(TEXT("entries"), EnumEntryNamesJson(Enum));
+    Result->SetBoolField(TEXT("success"), bAdded);
+    if (!bAdded)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("add_enum_entry: '%s' does not resolve to an enumerator after adding it."), *EntryName));
+    }
     return Result;
 }
 
@@ -829,6 +940,15 @@ TSharedPtr<FJsonObject> HandleRenameEnumEntry(const TSharedPtr<FJsonObject>& Par
     Result->SetBoolField(TEXT("already_named"), bAlreadyNamed);
     Result->SetNumberField(TEXT("index"), Index);
     Result->SetArrayField(TEXT("entries"), EnumEntryNamesJson(Enum));
+    const FString ReadName = Enum->GetDisplayNameTextByIndex(Index).ToString();
+    const bool bOutcome = ReadName.Equals(NewName, ESearchCase::CaseSensitive);
+    Result->SetBoolField(TEXT("success"), bOutcome);
+    if (!bOutcome)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("rename_enum_entry: the enumerator at index %d reads back the display name '%s' instead of '%s'."),
+            Index, *ReadName, *NewName));
+    }
     return Result;
 }
 
