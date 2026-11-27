@@ -1327,11 +1327,26 @@ TSharedPtr<FJsonObject> HandleAddComponentToBlueprint(const TSharedPtr<FJsonObje
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
     FKismetEditorUtilities::CompileBlueprint(Blueprint);
 
-    // An echo of the request (component_type as resolved above), not a read-back of the tree.
-    TSharedPtr<FJsonObject> Echo = MakeShared<FJsonObject>();
-    Echo->SetStringField(TEXT("component_name"), ComponentName);
-    Echo->SetStringField(TEXT("component_type"), ComponentType);
-    return Echo;
+    // Read back from the tree after the compile: the node has to be in the SCS, under the name it got,
+    // holding a template of the requested class.
+    const FName MadeName = NewNode->GetVariableName();
+    const USCS_Node* MadeNode = SCS->FindSCSNode(MadeName);
+    const bool bInTree = MadeNode != nullptr && MadeNode->ComponentTemplate != nullptr
+        && MadeNode->ComponentTemplate->IsA(ComponentClass);
+    TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+    Result->SetStringField(TEXT("component_name"), MadeName.ToString());
+    Result->SetStringField(TEXT("component_type"), ComponentType);
+    Result->SetStringField(TEXT("component_class"), MadeNode && MadeNode->ComponentTemplate
+        ? MadeNode->ComponentTemplate->GetClass()->GetPathName() : FString());
+    Result->SetStringField(TEXT("parent"), MadeNode ? MadeNode->ParentComponentOrVariableName.ToString() : FString());
+    Result->SetBoolField(TEXT("success"), bInTree);
+    if (!bInTree)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("add_component_to_blueprint: '%s' is not in the construction script of '%s' as a %s after the compile"),
+            *ComponentName, *BlueprintName, *ComponentClass->GetName()));
+    }
+    return Result;
 }
 
 // MCP:set_physics_properties - Set simulate-physics, mass override, linear and angular damping on ONE primitive component TEMPLATE of a Blueprint (an OWN SCS node only -- inherited components are not found here, and it is the template, not a placed actor). Only the fields present are touched. It does NOT compile and does NOT save. For any other property of a component template use set_blueprint_component_properties, which is ICH-aware and reaches inherited components.
@@ -1342,7 +1357,7 @@ TSharedPtr<FJsonObject> HandleAddComponentToBlueprint(const TSharedPtr<FJsonObje
 //   @param mass - Optional mass override in kg (applied as SetMassOverrideInKg, not a scale)
 //   @param linear_damping - Optional linear damping coefficient
 //   @param angular_damping - Optional angular damping coefficient
-//   @returns { component: string } -- just the component name back. NOTHING is read back, so verify with get_blueprint_component_property on each property you set.
+//   @returns { component: string, simulate_physics?, mass?, linear_damping?, angular_damping? } -- each field passed, read back from the template's BodyInstance; success is false when one of them differs from the request.
 
 TSharedPtr<FJsonObject> HandleSetPhysicsProperties(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1378,8 +1393,42 @@ TSharedPtr<FJsonObject> HandleSetPhysicsProperties(const TSharedPtr<FJsonObject>
 
     FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
 
+    // Read each requested field back from the template: a setter can refuse a value (a body that cannot
+    // simulate keeps bSimulatePhysics off) without saying so.
     TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
     Reply->SetStringField(TEXT("component"), ComponentName);
+    TArray<FString> Mismatched;
+    const FBodyInstance& Body = Primitive->BodyInstance;
+    if (Params->HasField(TEXT("simulate_physics")))
+    {
+        const bool bSimulating = Body.bSimulatePhysics != 0;
+        Reply->SetBoolField(TEXT("simulate_physics"), bSimulating);
+        if (bSimulating != Params->GetBoolField(TEXT("simulate_physics"))) { Mismatched.Add(TEXT("simulate_physics")); }
+    }
+    if (Params->HasField(TEXT("mass")))
+    {
+        const float MassRead = Body.bOverrideMass ? Body.GetMassOverride() : -1.f;
+        Reply->SetNumberField(TEXT("mass"), MassRead);
+        if (!Body.bOverrideMass || !FMath::IsNearlyEqual(MassRead, (float)Params->GetNumberField(TEXT("mass")), 1e-3f)) { Mismatched.Add(TEXT("mass")); }
+    }
+    if (Params->HasField(TEXT("linear_damping")))
+    {
+        Reply->SetNumberField(TEXT("linear_damping"), Body.LinearDamping);
+        if (!FMath::IsNearlyEqual(Body.LinearDamping, (float)Params->GetNumberField(TEXT("linear_damping")), 1e-4f)) { Mismatched.Add(TEXT("linear_damping")); }
+    }
+    if (Params->HasField(TEXT("angular_damping")))
+    {
+        Reply->SetNumberField(TEXT("angular_damping"), Body.AngularDamping);
+        if (!FMath::IsNearlyEqual(Body.AngularDamping, (float)Params->GetNumberField(TEXT("angular_damping")), 1e-4f)) { Mismatched.Add(TEXT("angular_damping")); }
+    }
+    const bool bAllRead = Mismatched.Num() == 0;
+    Reply->SetBoolField(TEXT("success"), bAllRead);
+    if (!bAllRead)
+    {
+        Reply->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("set_physics_properties: %s on '%s' read back different from the request (the read values are in this payload)"),
+            *FString::Join(Mismatched, TEXT(", ")), *ComponentName));
+    }
     return Reply;
 }
 
@@ -1480,6 +1529,19 @@ TSharedPtr<FJsonObject> HandleCompileBlueprint(const TSharedPtr<FJsonObject>& Pa
     if (bReturnMessages)
     {
         Report->SetArrayField(TEXT("messages"), UEAgentBlueprintCommandsImpl::CompilerMessages(Results));
+    }
+    // The call's outcome is the compile's: a Blueprint left with errors (or in the error state the
+    // compiler sets) did not compile, and the counts above stay in the payload to say why.
+    const bool bCompiledClean = bErrorFree && Blueprint->Status != BS_Error;
+    Report->SetStringField(TEXT("blueprint_status"), Blueprint->Status == BS_UpToDate ? TEXT("up_to_date")
+        : Blueprint->Status == BS_UpToDateWithWarnings ? TEXT("up_to_date_with_warnings")
+        : Blueprint->Status == BS_Error ? TEXT("error") : TEXT("dirty"));
+    Report->SetBoolField(TEXT("success"), bCompiledClean);
+    if (!bCompiledClean)
+    {
+        Report->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("compile_blueprint: '%s' did not compile (%d error(s)); return_messages=true ties each message to its node"),
+            *BlueprintName, Results.NumErrors));
     }
     return Report;
 }
@@ -1613,6 +1675,21 @@ TSharedPtr<FJsonObject> HandleSpawnBlueprintActor(const TSharedPtr<FJsonObject>&
         mcp_common::AddWorldEvidence(Result, World);
     }
     Trace(TEXT("JSON conversion completed, returning result"));
+    // Read back: the actor has to still be alive, in the world it was spawned into (a BeginPlay or
+    // construction script can destroy it before this returns).
+    const bool bInWorld = IsValid(Spawned) && Spawned->GetWorld() == World;
+    if (!Result.IsValid())
+    {
+        Result = MakeShared<FJsonObject>();
+    }
+    Result->SetStringField(TEXT("actor_label"), IsValid(Spawned) ? Spawned->GetActorLabel() : FString());
+    Result->SetBoolField(TEXT("success"), bInWorld);
+    if (!bInWorld)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("spawn_blueprint_actor: the '%s' actor was spawned but is no longer alive in world '%s' (destroyed during spawn)"),
+            *BlueprintName, *WorldMode));
+    }
     return Result;
 }
 
@@ -1787,7 +1864,23 @@ TSharedPtr<FJsonObject> HandleSetMeshMaterialColor(const TSharedPtr<FJsonObject>
     Reply->SetNumberField(TEXT("material_slot"), SlotIndex);
     Reply->SetStringField(TEXT("parameter_name"), VectorParamName);
     Reply->SetArrayField(TEXT("color"), mcp_common::ColorToJsonArray(Tint));
-    Reply->SetBoolField(TEXT("success"), true);
+    // Read back: the slot has to hold the new instance (SetMaterial ignores a slot the mesh does not
+    // have), and parameter_found says whether the material declares the parameter at all.
+    const bool bSlotHoldsTint = Primitive->GetMaterial(SlotIndex) == TintInstance;
+    FLinearColor ReadTint;
+    const bool bParameterFound = TintInstance->GetVectorParameterValue(FMaterialParameterInfo(FName(*VectorParamName)), ReadTint);
+    Reply->SetBoolField(TEXT("parameter_found"), bParameterFound);
+    if (bParameterFound)
+    {
+        Reply->SetArrayField(TEXT("color_read"), mcp_common::ColorToJsonArray(ReadTint));
+    }
+    Reply->SetBoolField(TEXT("success"), bSlotHoldsTint);
+    if (!bSlotHoldsTint)
+    {
+        Reply->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("set_mesh_material_color: slot %d of '%s' does not hold the tinted instance after SetMaterial (the mesh may not have that slot)"),
+            SlotIndex, *ComponentName));
+    }
     return Reply;
 }
 
@@ -1876,7 +1969,7 @@ TSharedPtr<FJsonObject> HandleGetAvailableMaterials(const TSharedPtr<FJsonObject
 //   @param component_name - Name of an OWN SCS component; must be a UPrimitiveComponent
 //   @param material_path - Asset path of the UMaterialInterface (material or material instance) to assign; a path that does not load is an error
 //   @param material_slot - Optional material slot index; defaults to 0. It is not range-checked against the mesh's slot count.
-//   @returns { blueprint_name: string, component_name: string, material_path: string, material_slot: int, success: bool } -- an echo: success:true only means the material loaded and SetMaterial was called. Read it back with get_blueprint_material_info.
+//   @returns { blueprint_name: string, component_name: string, material_path: string, material_slot: int, success: bool } -- material_path is read back from the slot; success is false when the slot does not hold the material afterwards.
 
 TSharedPtr<FJsonObject> HandleApplyMaterialToBlueprint(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1907,13 +2000,21 @@ TSharedPtr<FJsonObject> HandleApplyMaterialToBlueprint(const TSharedPtr<FJsonObj
     Primitive->SetMaterial(SlotIndex, NewMaterial);
     FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
 
-    // An echo of the request: nothing is read back from the template here.
+    // Read the slot back from the template: SetMaterial ignores a slot the mesh does not have.
+    const UMaterialInterface* HeldMaterial = Primitive->GetMaterial(SlotIndex);
+    const bool bSlotHoldsMaterial = HeldMaterial == NewMaterial;
     TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
     Reply->SetStringField(TEXT("blueprint_name"), BlueprintName);
     Reply->SetStringField(TEXT("component_name"), ComponentName);
-    Reply->SetStringField(TEXT("material_path"), MaterialPath);
+    Reply->SetStringField(TEXT("material_path"), HeldMaterial ? HeldMaterial->GetPathName() : FString(TEXT("None")));
     Reply->SetNumberField(TEXT("material_slot"), SlotIndex);
-    Reply->SetBoolField(TEXT("success"), true);
+    Reply->SetBoolField(TEXT("success"), bSlotHoldsMaterial);
+    if (!bSlotHoldsMaterial)
+    {
+        Reply->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("apply_material_to_blueprint: slot %d of '%s' holds %s, not %s, after SetMaterial (the mesh may not have that slot)"),
+            SlotIndex, *ComponentName, HeldMaterial ? *HeldMaterial->GetPathName() : TEXT("None"), *NewMaterial->GetPathName()));
+    }
     return Reply;
 }
 
@@ -3151,7 +3252,7 @@ TSharedPtr<FJsonObject> HandleGetBlueprintVariables(const TSharedPtr<FJsonObject
 
 // MCP:remove_unused_variables - Delete EVERY variable the engine considers unused from a Blueprint in one shot (GatherUnusedVariables + RemoveUnusedVariables) and report which ones went. Destructive and non-selective -- "unused" means no graph node reads or writes it, so a variable only touched from C++, a DataTable, a save game or a runtime name lookup counts as unused and is deleted. Preview it by comparing get_blueprint_variables before/after, or delete a specific one with remove_blueprint_variable.
 //   @param blueprint_name - Name of the blueprint
-//   @returns { blueprint_name: string, removed_count: int, removed_variables?: [string] } -- removed_variables is the list gathered BEFORE the removal and removed_count what the engine reported removing; when they disagree, trust neither and re-read get_blueprint_variables.
+//   @returns { blueprint_name: string, removed_count: int, removed_variables?: [string] } -- removed_variables is the list gathered BEFORE the removal and removed_count what the engine reported removing; still_declared lists the gathered names the Blueprint still declares afterwards, and any of them fails the call.
 
 TSharedPtr<FJsonObject> HandleRemoveUnusedVariables(const TSharedPtr<FJsonObject>& Params)
 {
@@ -3180,12 +3281,32 @@ TSharedPtr<FJsonObject> HandleRemoveUnusedVariables(const TSharedPtr<FJsonObject
     const int32 EngineRemovedCount = UBlueprintEditorLibrary::RemoveUnusedVariables(Blueprint);
     FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
 
+    // Read back: every gathered name has to be gone from the declared variables.
+    TArray<TSharedPtr<FJsonValue>> StillDeclared;
+    for (const TSharedPtr<FJsonValue>& Name : UnusedNames)
+    {
+        const FName VarName(*Name->AsString());
+        if (Blueprint->NewVariables.ContainsByPredicate([&VarName](const FBPVariableDescription& Var) { return Var.VarName == VarName; }))
+        {
+            StillDeclared.Add(Name);
+        }
+    }
+    const bool bAllGone = StillDeclared.Num() == 0;
+
     TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
     Reply->SetStringField(TEXT("blueprint_name"), BlueprintName);
     Reply->SetNumberField(TEXT("removed_count"), EngineRemovedCount);
     if (UnusedNames.Num() > 0)
     {
         Reply->SetArrayField(TEXT("removed_variables"), UnusedNames);
+    }
+    Reply->SetArrayField(TEXT("still_declared"), StillDeclared);
+    Reply->SetBoolField(TEXT("success"), bAllGone);
+    if (!bAllGone)
+    {
+        Reply->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("remove_unused_variables: %d of the %d unused variables of '%s' are still declared after the removal (listed in still_declared)"),
+            StillDeclared.Num(), UnusedNames.Num(), *BlueprintName));
     }
     return Reply;
 }
@@ -3353,12 +3474,26 @@ TSharedPtr<FJsonObject> HandleAttachBlueprintComponent(const TSharedPtr<FJsonObj
         }
     };
 
-    // Marks the structural change, compiles, and reports the new linkage.
-    auto CommitLinkage = [&]()
+    // Marks the structural change, compiles, and reports the new linkage, read back from the tree after
+    // the compile: the child has to still be in the SCS, under ExpectedParent (NAME_None: a root), at the socket.
+    auto CommitLinkage = [&](const FName ExpectedParent)
     {
         FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
         FKismetEditorUtilities::CompileBlueprint(Blueprint);
-        return MakeLinkagePayload(/*bAlreadyAttached=*/false);
+        TSharedPtr<FJsonObject> Linkage = MakeLinkagePayload(/*bAlreadyAttached=*/false);
+        const USCS_Node* ReadParent = SCS->FindParentNode(ChildNode);
+        const FName ReadParentName = ReadParent ? ReadParent->GetVariableName() : ChildNode->ParentComponentOrVariableName;
+        const bool bLinked = SCS->GetAllNodes().Contains(ChildNode)
+            && ReadParentName == ExpectedParent && ChildNode->AttachToName == SocketFName;
+        Linkage->SetBoolField(TEXT("success"), bLinked);
+        if (!bLinked)
+        {
+            Linkage->SetStringField(TEXT("error"), FString::Printf(
+                TEXT("attach_blueprint_component: after the compile '%s' is under '%s' at socket '%s', not under '%s' at '%s'"),
+                *ComponentName, *ReadParentName.ToString(), *ChildNode->AttachToName.ToString(),
+                *ExpectedParent.ToString(), *SocketFName.ToString()));
+        }
+        return Linkage;
     };
 
     // Resolve the scene root once: GetSceneRootComponentTemplate(false, &OutNode) returns the scene
@@ -3399,7 +3534,7 @@ TSharedPtr<FJsonObject> HandleAttachBlueprintComponent(const TSharedPtr<FJsonObj
                 KeepAsRootNode();
                 ChildNode->SetParent(NativeParent); // const USceneComponent* overload: sets bIsParentComponentNative=true
                 ChildNode->AttachToName = SocketFName;
-                return CommitLinkage();
+                return CommitLinkage(NativeParent->GetFName());
             }
             return mcp_common::MakeErrorReply(FString::Printf(TEXT("Parent component not found: %s"), *ParentComponentName));
         }
@@ -3424,7 +3559,7 @@ TSharedPtr<FJsonObject> HandleAttachBlueprintComponent(const TSharedPtr<FJsonObj
 
         RecordForUndo();
         MakeChildOfSCSNode(SCS, ChildNode, ParentNode, SocketFName);
-        return CommitLinkage();
+        return CommitLinkage(ParentNode->GetVariableName());
     }
 
     // ---- Attach to root ---------------------------------------------------
@@ -3438,7 +3573,7 @@ TSharedPtr<FJsonObject> HandleAttachBlueprintComponent(const TSharedPtr<FJsonObj
         }
         RecordForUndo();
         MakeChildOfSCSNode(SCS, ChildNode, SceneRootNode, SocketFName);
-        return CommitLinkage();
+        return CommitLinkage(SceneRootNode->GetVariableName());
     }
 
     if (NativeRoot)
@@ -3453,7 +3588,7 @@ TSharedPtr<FJsonObject> HandleAttachBlueprintComponent(const TSharedPtr<FJsonObj
         KeepAsRootNode();
         ChildNode->SetParent(NativeRoot); // const USceneComponent* overload: sets bIsParentComponentNative=true
         ChildNode->AttachToName = SocketFName;
-        return CommitLinkage();
+        return CommitLinkage(NativeRoot->GetFName());
     }
 
     // No scene root exists (or the child itself is the scene root): the child stays/becomes the root.
@@ -3472,7 +3607,7 @@ TSharedPtr<FJsonObject> HandleAttachBlueprintComponent(const TSharedPtr<FJsonObj
     ChildNode->ParentComponentOwnerClassName = NAME_None;
     ChildNode->bIsParentComponentNative = false;
     ChildNode->AttachToName = SocketFName;
-    return CommitLinkage();
+    return CommitLinkage(NAME_None);
 }
 
 // =====================================================================================
@@ -4966,7 +5101,7 @@ TSharedPtr<FJsonObject> HandleGetBlueprintComponentProperty(const TSharedPtr<FJs
 //   @param responses - Object mapping channel -> response, e.g. {"Visibility":"Ignore","ECC_Pawn":"Overlap"} (optional). Channels accept the friendly display name or an ECC_* token (custom project channels included); responses are Ignore, Overlap or Block. An unknown channel is refused rather than defaulting to WorldStatic.
 //   @param compile - Optional bool (default FALSE): compile the Blueprint afterwards so the FBodyInstance change reinstances on the next spawn/PIE. Without it the edit stays in the uncompiled template.
 //   @param return_messages - No effect here: it is only read by the compile this tool may run internally, whose message log is discarded. Call compile_blueprint directly if you want the messages.
-//   @returns { success, data: { blueprint_name, component_name, source ("scs" | "inherited-ich" | "inherited-native": which template was written), profile?, collision_enabled?, responses_applied: [{channel, response}], compiled } } -- responses_applied lists ONLY the per-channel writes; profile and collision_enabled appear as their own fields only when they were given. Nothing is re-read: verify with get_blueprint_component_property or get_collision_info.
+//   @returns { success, data: { blueprint_name, component_name, source ("scs" | "inherited-ich" | "inherited-native": which template was written), profile?, collision_enabled?, responses_applied: [{channel, response}], compiled } } -- responses_applied lists ONLY the per-channel writes; profile and collision_enabled appear as their own fields only when they were given; profile_read, collision_enabled_read and each response_read are read back from the template, and a mismatch fails the call. compiled is the compile's outcome.
 TSharedPtr<FJsonObject> HandleSetBlueprintComponentCollision(const TSharedPtr<FJsonObject>& Params)
 {
     FString BlueprintName, ComponentName;
@@ -5016,19 +5151,58 @@ TSharedPtr<FJsonObject> HandleSetBlueprintComponentCollision(const TSharedPtr<FJ
 
     FBlueprintEditorUtils::MarkBlueprintAsModified(BP);
 
-    // Optional compile so the FBodyInstance changes reliably reinstance on next spawn/PIE.
+    // Read the template back before any compile can reinstance it. The profile is only checked when
+    // nothing follows it: a later mode or response turns the profile name into "Custom" by design.
+    TArray<FString> Mismatched;
+    const FName ProfileRead = Prim->GetCollisionProfileName();
+    Data->SetStringField(TEXT("profile_read"), ProfileRead.ToString());
+    if (!Profile.IsEmpty() && EnabledStr.IsEmpty() && Applied.Num() == 0 && ProfileRead != FName(*Profile))
+    {
+        Mismatched.Add(TEXT("profile"));
+    }
+    const ECollisionEnabled::Type EnabledRead = Prim->GetCollisionEnabled();
+    Data->SetStringField(TEXT("collision_enabled_read"), StaticEnum<ECollisionEnabled::Type>()->GetNameStringByValue((int64)EnabledRead));
+    if (!EnabledStr.IsEmpty() && (int64)EnabledRead != StaticEnum<ECollisionEnabled::Type>()->GetValueByNameString(EnabledStr))
+    {
+        Mismatched.Add(TEXT("collision_enabled"));
+    }
+    for (const TSharedPtr<FJsonValue>& Entry : Applied)
+    {
+        const TSharedPtr<FJsonObject> One = Entry->AsObject();
+        const FString ChanName = One->GetStringField(TEXT("channel"));
+        const int32 Idx = ChanName.StartsWith(TEXT("ECC_"))
+            ? (int32)StaticEnum<ECollisionChannel>()->GetValueByNameString(ChanName)
+            : PrimitiveComponentUtils::CollisionChannelIndex(FName(*ChanName));
+        ECollisionResponse Requested = ECR_Ignore;
+        PrimitiveComponentUtils::ParseCollisionResponse(One->GetStringField(TEXT("response")), Requested);
+        const ECollisionResponse ResponseRead = Prim->GetCollisionResponseToChannel((ECollisionChannel)Idx);
+        One->SetStringField(TEXT("response_read"), ResponseRead == ECR_Block ? TEXT("Block") : ResponseRead == ECR_Overlap ? TEXT("Overlap") : TEXT("Ignore"));
+        if (ResponseRead != Requested)
+        {
+            Mismatched.Add(ChanName);
+        }
+    }
+    const bool bAllRead = Mismatched.Num() == 0;
+
+    // Optional compile so the FBodyInstance changes reliably reinstance on next spawn/PIE; compiled is
+    // the compile's own outcome.
     bool bCompile = false;
+    bool bCompiled = false;
     if (Params->TryGetBoolField(TEXT("compile"), bCompile) && bCompile)
     {
-        HandleCompileBlueprint(Params);
+        const TSharedPtr<FJsonObject> CompileReport = HandleCompileBlueprint(Params);
+        bool bCompileSucceeded = false;
+        bCompiled = CompileReport.IsValid() && CompileReport->TryGetBoolField(TEXT("succeeded"), bCompileSucceeded) && bCompileSucceeded;
     }
 
     Data->SetStringField(TEXT("blueprint_name"), BP->GetName());
     Data->SetStringField(TEXT("component_name"), ComponentName);
     Data->SetStringField(TEXT("source"), Source);
     Data->SetArrayField(TEXT("responses_applied"), Applied);
-    Data->SetBoolField(TEXT("compiled"), bCompile);
-    return mcp_common::MakeOkReply(Data);
+    Data->SetBoolField(TEXT("compiled"), bCompiled);
+    return mcp_common::MakeOutcomeReply(Data, bAllRead, FString::Printf(
+        TEXT("set_blueprint_component_collision: %s on '%s' read back different from the request (the *_read fields hold what the template has)"),
+        *FString::Join(Mismatched, TEXT(", ")), *ComponentName));
 }
 
 // =====================================================================================
