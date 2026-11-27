@@ -112,7 +112,7 @@ Voxel-wrap the live dynamic mesh of a DynamicMeshActor in the editor world, foun
 | `actor_name` | string | yes | Label or name of the target DynamicMeshActor |
 | `winding_threshold` | number | no | Optional [0..1], default 0.5. Space with generalised winding number above this is considered inside. |
 | `extend_bounds` | number | no | Optional positive float, default 1.0. Bounds extension applied to the default input-mesh-based bounds. |
-| `surface_search_steps` | number | no | Optional int >= 1, default 3. Marching-cubes vertex search steps. |
+| `surface_search_steps` | integer | no | Optional int >= 1, default 3. Marching-cubes vertex search steps. |
 | `thicken_shells` | boolean | no | Optional bool, default false. Thicken open shells into closed solids (expensive on large meshes). |
 | `shell_thickness` | number | no | Optional positive float, default 1.0. Offset distance for shell thickening. |
 
@@ -128,7 +128,7 @@ Remesh the live dynamic mesh of a DynamicMeshActor in the editor world into even
 |---|---|---|---|
 | `actor_name` | string | yes | Label or name of the target DynamicMeshActor |
 | `target_edge_length` | number | no | Target uniform edge length in mesh units (sets TargetType=TargetEdgeLength). Mutually exclusive with target_tri_count; at least one is required. |
-| `target_tri_count` | number | no | Approximate target triangle count (sets TargetType=TriangleCount). Mutually exclusive with target_edge_length. |
+| `target_tri_count` | integer | no | Approximate target triangle count (sets TargetType=TriangleCount). Mutually exclusive with target_edge_length. |
 | `preserve_sharp_edges` | boolean | no | Approximate 'preserve sharp edges' by enabling bPreventNormalFlips on the shared RemeshOptions (default true; UE's FGeometryScriptUniformRemeshOptions has no explicit preserve-sharp flag, so the closest equivalent is the shared RemeshOptions.bPreventNormalFlips). |
 | `smoothing_type` | string | no | One of 'uniform' \| 'uv_preserving' \| 'mixed' (default 'mixed'); maps to EGeometryScriptRemeshSmoothingType on the shared RemeshOptions. |
 | `auto_compact` | boolean | no | Auto-compact the index space after remesh on the shared RemeshOptions (default true). |
@@ -182,7 +182,7 @@ Write the live dynamic mesh of a DynamicMeshActor INTO an EXISTING /Game UStatic
 |---|---|---|---|
 | `actor_name` | string | yes | Label or name of the source DynamicMeshActor. |
 | `target_static_mesh_path` | string | yes | Content path of an EXISTING /Game UStaticMesh to overwrite. |
-| `lod_index` | number | no | Optional target LOD index, 0 to 7 (default 0); a negative index or one of 8 or more is refused. |
+| `lod_index` | integer | no | Optional target LOD index, 0 to 7 (default 0); a negative index or one of 8 or more is refused. |
 | `materials` | array | no | Optional ordered list of UMaterialInterface content paths, one per MaterialID (index 0 = MaterialID 0). Supplying it flips bReplaceMaterials on, so the target asset gets exactly these material slots. WITHOUT this the asset keeps its existing slots and a multi-MaterialID mesh collapses into whatever slots already existed — this is the parameter that makes per-triangle MaterialIDs visible on the saved asset. |
 | `material_slot_names` | array | no | Optional slot names matching materials 1:1 (default: the engine names them). Ignored when materials is absent. |
 
@@ -212,7 +212,7 @@ Copy the geometry of a UStaticMesh asset INTO the live dynamic mesh of a Dynamic
 |---|---|---|---|
 | `source_static_mesh_path` | string | yes | Content path of the source UStaticMesh (e.g. "/Engine/BasicShapes/Cube"). |
 | `actor_name` | string | yes | Label or name of the target DynamicMeshActor whose GetDynamicMesh() receives the geometry. |
-| `lod_index` | number | no | Optional source LOD to read (default 0), from 0 to the mesh's last LOD, echoed as requested_lod_index; a negative one or one the mesh does not have is an error. |
+| `lod_index` | integer | no | Optional source LOD to read (default 0), from 0 to the mesh's last LOD, echoed as requested_lod_index; a negative one or one the mesh does not have is an error. |
 
 **Returns:** `{ source_static_mesh_path, actor_name, lod_index, requested_lod_index, read_hi_res_source, read_render_data, outcome_success: bool, triangle_count, vertex_count, copied: bool }`
 
@@ -269,7 +269,7 @@ Enumerate the connected components (physical pieces) of a DynamicMeshActor's liv
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Label or name of the target DynamicMeshActor. |
-| `max_components` | number | no | Cap on how many islands to return (default 64). components_truncated says whether the cap cut the list; component_count is always the real total. |
+| `max_components` | integer | no | Cap on how many islands to return (default 64). components_truncated says whether the cap cut the list; component_count is always the real total. |
 | `include_triangle_ids` | boolean | no | Also return each island's full triangle ID list (default false; use the reported id_min/id_max range instead unless the island is non-contiguous). |
 
 **Returns:** `{ actor_name, component_count: int, components_truncated: bool, components: [ { index, triangle_count, id_min, id_max, id_contiguous: bool, material_ids: [int], bounds: { min_x, min_y, min_z, max_x, max_y, max_z, center_x, center_y, center_z, size_x, size_y, size_z }, triangle_ids: [int] } ] }`
@@ -295,7 +295,7 @@ Measure one LOD of a UStaticMesh asset on a transient dynamic-mesh copy with the
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `static_mesh_path` | string | yes | Content path to the UStaticMesh asset (e.g. "/Engine/BasicShapes/Cube"; the object path form also works). |
-| `lod_index` | number | no | LOD to read (default 0), from 0 to the mesh's last LOD, echoed as requested_lod_index; a LOD the mesh does not have is an error and nothing is read. |
+| `lod_index` | integer | no | LOD to read (default 0), from 0 to the mesh's last LOD, echoed as requested_lod_index; a LOD the mesh does not have is an error and nothing is read. |
 | `uv_channel` | number | no | Optional UV channel whose UV area is measured (default 0). A negative one is an error; a channel the mesh lacks gives is_valid_uv_channel false and uv_area 0. |
 
 **Returns:** `{ static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, read_render_data, surface_area, volume, center_of_mass_x, center_of_mass_y, center_of_mass_z, is_closed, min_x, min_y, min_z, max_x, max_y, max_z, extent_x, extent_y, extent_z, center_x, center_y, center_z, triangle_count, triangle_id_count, has_triangle_id_gaps, vertex_count, vertex_id_count, has_vertex_id_gaps, connected_components, open_border_loops, open_border_spans, ambiguous_topology, uv_channel_count, uv_channel, uv_area, is_valid_uv_channel }`
@@ -355,8 +355,8 @@ Renumber MaterialIDs on a DynamicMeshActor's live dynamic mesh. Two modes: pass 
 |---|---|---|---|
 | `actor_name` | string | yes | Label or name of the target DynamicMeshActor. |
 | `compact` | boolean | no | Compact mode: renumber IDs to be contiguous from 0 (default false). |
-| `from_material_id` | number | no | Remap mode: the MaterialID to replace. Required unless compact is true. |
-| `to_material_id` | number | no | Remap mode: the MaterialID to replace it with. Required unless compact is true. |
+| `from_material_id` | integer | no | Remap mode: the MaterialID to replace. Required unless compact is true. |
+| `to_material_id` | integer | no | Remap mode: the MaterialID to replace it with. Required unless compact is true. |
 | `materials` | array | no | Compact mode: ordered UMaterialInterface content paths, one per current MaterialID. The compacted list is returned in compacted_materials, in the new ID order. |
 | `remove_duplicate_materials` | boolean | no | Compact mode: also merge IDs that point at the SAME material asset (default false). |
 
@@ -384,7 +384,7 @@ Delete the listed triangle IDs (triangle_ids, or a single triangle_id) from a Dy
 |---|---|---|---|
 | `actor_name` | string | yes | Label or object name (case-insensitive) of the target DynamicMeshActor in the editor world. |
 | `triangle_ids` | array | no | Non-empty array of non-negative integer triangle IDs, e.g. [0, 5, 12]; any negative or non-numeric entry fails the call. Required unless triangle_id is given. |
-| `triangle_id` | number | no | Optional single non-negative triangle ID, read as triangle_ids [triangle_id] when triangle_ids is absent. |
+| `triangle_id` | integer | no | Optional single non-negative triangle ID, read as triangle_ids [triangle_id] when triangle_ids is absent. |
 
 **Returns:** `{ actor_name, num_deleted, requested_count, deleted: bool, triangle_id?: int, triangle_count, previous_triangle_count } -- deleted is num_deleted > 0; triangle_id echoes the single ID when it was given.`
 
@@ -486,7 +486,7 @@ Resolve a region of a DynamicMeshActor's live dynamic mesh into a triangle selec
 | `min_triangle_points` | integer | no | How many of a triangle's 3 points must be inside for it to count, 1-3 (default 3 = fully contained). |
 | `invert` | boolean | no | Invert the spatial selection (default false). |
 | `include_triangle_ids` | boolean | no | Also return the resolved triangle IDs (default false; they can be thousands). The returned array is what set_mesh_material_id scope='triangles' consumes. |
-| `max_triangle_ids` | number | no | Cap on how many IDs to return when include_triangle_ids is on (default 1000). When the cap truncates, triangle_ids_truncated is true — the count in triangles_selected is still the real one. |
+| `max_triangle_ids` | integer | no | Cap on how many IDs to return when include_triangle_ids is on (default 1000). When the cap truncates, triangle_ids_truncated is true — the count in triangles_selected is still the real one. |
 
 **Returns:** `{ actor_name, region, triangles_selected: int, mesh_triangle_count: int, is_empty: bool, bounds: { min_x, min_y, min_z, max_x, max_y, max_z, center_x, center_y, center_z, size_x, size_y, size_z }, triangle_ids: [int], triangle_ids_truncated: bool } -- bounds are all 0 when the selection is empty.`
 
@@ -513,7 +513,7 @@ Stamp a MaterialID onto triangles of a DynamicMeshActor's live dynamic mesh. sco
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Label or name of the target DynamicMeshActor. |
-| `material_id` | number | yes | MaterialID to write (>= 0). Index into the material list later passed to copy_dynamic_mesh_to_static_mesh. |
+| `material_id` | integer | yes | MaterialID to write (>= 0). Index into the material list later passed to copy_dynamic_mesh_to_static_mesh. |
 | `scope` | string | no | 'all' \| 'triangles' \| 'region'. Default 'region' when region is given, else 'all'. |
 | `triangle_ids` | array | no | Required when scope='triangles': array of triangle IDs to repaint (e.g. from select_mesh_triangles). |
 | `region` | string | no | scope='region' only: 'all' (default) \| 'box' \| 'sphere' \| 'plane' \| 'normal_angle' \| 'material_id' \| 'polygroup' \| 'connected_component' (one physical PIECE, by the island index that get_mesh_components_detail reports). Coordinates are LOCAL to the dynamic mesh, not world; preview a region with select_mesh_triangles. |
@@ -557,11 +557,11 @@ Replace the UVs of one channel on a DynamicMeshActor's live dynamic mesh in the 
 |---|---|---|---|
 | `actor_name` | string | yes | Label or name of the target DynamicMeshActor. |
 | `projection` | string | no | 'box' (default) \| 'plane' \| 'cylinder'. |
-| `uv_channel` | number | no | UV channel to write, 0 to 7 (default 0); a channel the mesh lacks is added. |
+| `uv_channel` | integer | no | UV channel to write, 0 to 7 (default 0); a channel the mesh lacks is added. |
 | `location` | array | no | Local [x,y,z] origin of the projection shape (default the mesh origin). |
 | `rotation` | array | no | [pitch, yaw, roll] of the projection shape (default none). For 'plane', this is what chooses which way the plane faces. |
 | `scale` | array | no | [x,y,z] size of the projection shape (default [100,100,100]). THIS IS THE UV DENSITY KNOB: bigger scale = texture repeats fewer times. A tileable material that reads too big or too small is fixed here, not in the material. |
-| `min_island_tri_count` | number | no | box only: islands smaller than this are merged into a neighbour (default 2). |
+| `min_island_tri_count` | integer | no | box only: islands smaller than this are merged into a neighbour (default 2). |
 | `split_angle` | number | no | cylinder only: angle in degrees at which the wrap is split (default 45). |
 | `region` | string | no | Optional region to limit the projection to; same vocabulary as select_mesh_triangles (default 'all'). |
 | `component_index` | integer | no | Island index when region='connected_component'. |
@@ -587,7 +587,7 @@ Set the number of extended polygroup layers on the live dynamic mesh of a Dynami
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Label or name of the target DynamicMeshActor. |
-| `num_layers` | number | yes | Desired number of extended polygroup layers (>= 0). |
+| `num_layers` | integer | yes | Desired number of extended polygroup layers (>= 0). |
 
 **Returns:** `{ actor_name, requested_num_layers, num_polygroup_layers, applied: bool }`
 
@@ -613,7 +613,7 @@ Simplifies the live dynamic mesh of a DynamicMeshActor in the editor world down 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Label or object name of the DynamicMeshActor in the editor world (case-insensitive); create one with spawn_actor. |
-| `target_triangle_count` | number | yes | Triangle count to simplify down to, greater than 0 (e.g. half of the triangle_count get_dynamic_mesh_info reports); at or above the current count nothing changes. |
+| `target_triangle_count` | integer | yes | Triangle count to simplify down to, greater than 0 (e.g. half of the triangle_count get_dynamic_mesh_info reports); at or above the current count nothing changes. |
 
 **Returns:** `{ actor_name: string, target_triangle_count: int, triangle_count_before: int, triangle_count_after: int, vertex_count: int, simplified: bool }`
 
@@ -628,7 +628,7 @@ Move, rotate and/or scale every vertex of the live dynamic mesh of a DynamicMesh
 | `actor_name` | string | yes | Label or name of the target DynamicMeshActor |
 | `location` | array | no | Optional [x, y, z] translation; default (0,0,0) |
 | `translation` | array | no | Optional alias of location, read only when location is absent. |
-| `rotation` | any | no | Optional [pitch, yaw, roll] Euler rotation in degrees, or a {pitch, yaw, roll} object; default (0,0,0) |
+| `rotation` | array\|object | no | Optional [pitch, yaw, roll] Euler rotation in degrees, or a {pitch, yaw, roll} object; default (0,0,0) |
 | `scale` | array | no | Optional [x, y, z] scale; default (1,1,1) |
 
 **Returns:** `{ actor_name: string, location_x: number, location_y: number, location_z: number, rotation_pitch: number, rotation_yaw: number, rotation_roll: number, scale_x: number, scale_y: number, scale_z: number, applied: bool, note?: string }`
@@ -658,14 +658,14 @@ Compute a real UV UNWRAP for the whole mesh via UGeometryScriptLibrary_MeshUVFun
 |---|---|---|---|
 | `actor_name` | string | yes | Label or name of the target DynamicMeshActor. |
 | `method` | string | no | 'patch_builder' (default, the editor's Auto UV) or 'xatlas'. |
-| `uv_channel` | number | no | UV channel to write (default 0). |
-| `initial_patch_count` | number | no | patch_builder: how many patches to seed (default 100). More patches = less distortion, more seams. |
-| `min_patch_size` | number | no | patch_builder: minimum triangles per patch (default 2). |
+| `uv_channel` | integer | no | UV channel to write (default 0). |
+| `initial_patch_count` | integer | no | patch_builder: how many patches to seed (default 100). More patches = less distortion, more seams. |
+| `min_patch_size` | integer | no | patch_builder: minimum triangles per patch (default 2). |
 | `merging_threshold` | number | no | patch_builder: patch merging metric threshold (default 1.5). Higher merges more aggressively, giving fewer islands. |
 | `max_angle_deg` | number | no | patch_builder: max angle in degrees between merged patches (default 45). |
 | `respect_polygroups` | boolean | no | patch_builder: seed patches from the existing polygroups instead of curvature (default false). Useful right after add_mesh_primitive, where each appended face is already its own group. |
 | `auto_pack` | boolean | no | Pack the resulting islands into standard UV space (default true). |
-| `max_iterations` | number | no | xatlas: solver iterations (default 2). Higher is slower and slightly tighter. |
+| `max_iterations` | integer | no | xatlas: solver iterations (default 2). Higher is slower and slightly tighter. |
 
 **Returns:** `{ actor_name, method, uv_channel, triangle_count: int, uv_channel_count: int, applied: bool }`
 

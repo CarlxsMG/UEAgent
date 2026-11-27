@@ -148,8 +148,8 @@ Screenshot the active editor viewport to a PNG (forcing a fresh draw first), opt
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `width` | number | no | Optional target width to downscale/upscale to (omit to keep native viewport size). |
-| `height` | number | no | Optional target height (only used when width is also supplied). |
+| `width` | integer | no | Optional target width to downscale/upscale to (omit to keep native viewport size). |
+| `height` | integer | no | Optional target height (only used when width is also supplied). |
 | `filename` | string | no | Optional output filename (default MCP_Capture_&lt;timestamp>.png); ".png" extension is added if missing. |
 | `return_base64` | boolean | no | bool, also include image_base64 + image_format in the response (default false). |
 | `return_image` | boolean | no | Also return the picture as an MCP image block next to this JSON (default true); a picture over the size limits is sent as a smaller copy. |
@@ -219,7 +219,7 @@ Put editor-world actors on the editor CLIPBOARD (edactCopySelected), either by n
 | `actor_names` | array | no | Optional array of internal actor names (GetName) to copy; supplying it re-selects exactly those actors first. |
 | `copy_selected` | boolean | no | Optional bool. True (with actor_names omitted) copies whatever is selected right now, leaving the selection alone. |
 
-**Returns:** `{ copied_count: int, success: bool (hardcoded; verify with paste_actors' pasted_count) }`
+**Returns:** `{ copied_count: int, success: bool (the copied text names every copied actor), missing_from_copy?: [string] }`
 
 ## `create_blueprint_interface`
 
@@ -535,9 +535,9 @@ Find groups of assets that share the same asset name under a content folder tree
 |---|---|---|---|
 | `folder_path` | string | no | Content folder to scan, a package path such as /Game/Characters, default /Game |
 | `recursive` | boolean | no | If true, scan subfolders, default true |
-| `min_group_size` | number | no | Minimum number of same-named assets to report as a duplicate group, default 2 (a value below 1 counts as 2) |
+| `min_group_size` | integer | no | Minimum number of same-named assets to report as a duplicate group, default 2 (a value below 1 counts as 2) |
 | `class_filter` | array | no | Optional list of class short names (e.g. "StaticMesh","Material"); only assets whose AssetClassPath short name case-insensitively matches one of these are considered |
-| `max_results` | number | no | Cap on the number of duplicate GROUPS returned (not raw assets), clamped 1..20000, default 2000 |
+| `max_results` | integer | no | Cap on the number of duplicate GROUPS returned (not raw assets), clamped 1..20000, default 2000 |
 
 **Returns:** `{ folder_path, recursive, class_filter, min_group_size, group_count, total_duplicate_assets, assets_scanned, max_results, results_truncated, groups: [{ name, count, classes: [string], assets: [{path, package, class}] }] } (groups sorted by count descending)`
 
@@ -596,7 +596,7 @@ What the editor is still compiling in the background, per kind: shaders, texture
 |---|---|---|---|
 | `kinds` | array | no | Optional list of kinds to report, by kind ("textures") or engine type name ("UE-Texture"), case-insensitive; default all. An unknown kind is an error that lists the kinds there are. |
 | `include_assets` | boolean | no | Optional bool (default false): also list the object paths still compiling for textures, static_meshes, skeletal_meshes and sound_waves (the other kinds only have a count). |
-| `max_assets` | number | no | Optional int (default 50, clamped 1..1000): most paths listed per kind; assets_total still counts them all. |
+| `max_assets` | integer | no | Optional int (default 50, clamped 1..1000): most paths listed per kind; assets_total still counts them all. |
 
 **Returns:** `{ compiling: bool, total_remaining: int, kinds: [{ kind: string, type_name: string, remaining: int, assets_listable: bool, assets?: [string], assets_total?: int, assets_truncated?: bool }], shader_jobs?: { outstanding: int, pending: int, remaining: int, compiling: bool } }`
 
@@ -716,7 +716,7 @@ Read the single per-editor-session log buffer UEAgent attaches to GLog (general 
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `count` | number | no | Optional int32 cap on the number of entries returned (default 200, max 4096). |
+| `count` | integer | no | Optional int32 cap on the number of entries returned (default 200, max 4096). |
 | `filter` | string | no | Optional case-insensitive substring on the message text. |
 | `level_filter` | string | no | Optional exact verbosity name filter (Fatal\|Error\|Warning\|Display\|Log\|Verbose\|VeryVerbose), case-insensitive. |
 | `category_filter` | string | no | Optional case-insensitive substring on the log category name. |
@@ -786,7 +786,7 @@ Read the editor's undo buffer as a list, most-recent-first: each entry's title, 
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `max_entries` | number | no | Max entries to return, newest first (default 50, clamped to 1..500). |
+| `max_entries` | integer | no | Max entries to return, newest first (default 50, clamped to 1..500). |
 
 **Returns:** `{ count: int, entries: [{ queue_index: int, title: string, context: string, is_transient: bool, primary_object: string, is_undone: bool }] }`
 
@@ -862,7 +862,7 @@ List the console variables registered in the running editor whose name contains 
 | `filter` | string | no | Text the name must contain, case ignored, e.g. "Shadow" (default empty = no filter). Without prefix, space-separated words must all appear and a single character matches as a name prefix; with prefix, a name must start with prefix and contain the whole filter. |
 | `prefix` | string | no | Text the name must start with, case ignored, e.g. "r.Shadow." or "t." (default empty = any name). |
 | `include_commands` | boolean | no | true to also list console commands (name and help, no value); default false lists variables only. |
-| `max_results` | number | no | Most entries to return, a whole number of at least 1 (default 200); total_matches still counts every match. |
+| `max_results` | integer | no | Most entries to return, a whole number of at least 1 (default 200); total_matches still counts every match. |
 
 **Returns:** `{ filter: string, prefix?: string, include_commands: bool, cvars: [{name, value?, help}], count: int, total_matches: int, max_results: int, truncated: bool }`
 
@@ -1008,7 +1008,7 @@ Re-apply the transaction that undo just reverted, or `count` of them, and report
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `count` | number | no | Optional. How many transactions to redo, at least 1 (default 1); stops early when the redo stack runs out. Below 1 is refused. |
+| `count` | integer | no | Optional. How many transactions to redo, at least 1 (default 1); stops early when the redo stack runs out. Below 1 is refused. |
 
 **Returns:** `{ applied: bool (THE oracle), requested: int, actually_redone: int (compare against requested), undo_count: int, can_redo: bool, next_redo: string (label of the next redoable entry) }`
 
@@ -1115,7 +1115,7 @@ Move one enumerator to a new position in a Blueprint Enum, shifting the others (
 |---|---|---|---|
 | `enum_path` | string | yes | Full asset path of the UUserDefinedEnum. |
 | `entry_name` | string | yes | Enumerator to move, by display name (or internal name). |
-| `to_index` | number | yes | Target zero-based position among the user entries. |
+| `to_index` | integer | yes | Target zero-based position among the user entries. |
 
 **Returns:** `{ enum_path: string, entry_name: string, from_index: int, to_index: int, moved: bool, entries: [string] }`
 
@@ -1129,7 +1129,7 @@ IRREVERSIBLE: wipes the editor's ENTIRE undo AND redo history (the human's entri
 |---|---|---|---|
 | `reason` | string | no | Human-readable reason, logged by the engine so the wipe is traceable. Defaults to 'MCP reset_transaction_buffer'. |
 
-**Returns:** `{ success: bool (hardcoded), undo_count_before: int, undo_count_after: int (0) }`
+**Returns:** `{ success: bool (false when entries remain in the buffer), undo_count_before: int, undo_count_after: int (0), queue_length_after: int (0) }`
 
 ## `run_automation_test`
 
@@ -1265,7 +1265,7 @@ Sets a console variable via IConsoleManager and reads the value back.  Uses ICon
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | yes | Console variable name, e.g. "r.ScreenPercentage", "r.Shadow.MaxResolution". |
-| `value` | any | yes | New value (string, number, or bool; coerced to the cvar's type). |
+| `value` | string\|number\|boolean | yes | New value (string, number, or bool; coerced to the cvar's type). |
 
 **Returns:** `{ set: bool, requested_value: string, name: string, value: string, string_value: string, int_value: int, float_value: float, bool_value: bool, help: string, flags: int, set_by: string }`
 
@@ -1290,7 +1290,7 @@ Write one key into the GConfig copy of an INI (Engine by default), flush it to t
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `key` | string | yes | Key inside the section, e.g. "r.DefaultFeature.AntiAliasing"; its current value is replaced. |
-| `value` | any | yes | Value to write: a string written verbatim (an empty string is allowed), a JSON bool written as GConfig writes one ("True"/"False"), or a JSON number written as its text (an integer without decimals). |
+| `value` | string\|boolean\|number | yes | Value to write: a string written verbatim (an empty string is allowed), a JSON bool written as GConfig writes one ("True"/"False"), or a JSON number written as its text (an integer without decimals). |
 | `section` | string | no | INI section, e.g. "/Script/Engine.RendererSettings"; created when missing; surrounding brackets are dropped. Required unless plugin_name is given. |
 | `config_file` | string | no | Config base name without extension, e.g. "Engine" (default), "Game", "Input"; "Engine.ini" is not resolved. |
 | `plugin_name` | string | no | Optional plugin, as its .uplugin is named: an unknown one fails with nothing written; a known one adds its identity to the reply and makes section default to /Script/&lt;Plugin>.&lt;Plugin>. |
@@ -1331,7 +1331,7 @@ Set the running editor's scalability quality, every sg.* group at once (category
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `quality` | any | no | Level as a number 0-4 (0 Low, 1 Medium, 2 High, 3 Epic, 4 Cinematic; others clamped) or one of "Low", "Medium", "High", "Epic", "Cinematic", case ignored. Required. |
+| `quality` | number\|string | no | Level as a number 0-4 (0 Low, 1 Medium, 2 High, 3 Epic, 4 Cinematic; others clamped) or one of "Low", "Medium", "High", "Epic", "Cinematic", case ignored. Required. |
 | `category` | string | no | One group, case ignored: "ViewDistance", "AntiAliasing", "Shadows", "GlobalIllumination" (or "GI"), "Reflection", "PostProcess", "Texture", "Effects", "Foliage", "Shading", "Landscape"; or "all" (the default) for every group. |
 
 **Returns:** `{ set: bool, requested_level: int, category: string, ResolutionQuality: int, ViewDistanceQuality: int, AntiAliasingQuality: int, ShadowQuality: int, GlobalIlluminationQuality: int, ReflectionQuality: int, PostProcessQuality: int, TextureQuality: int, EffectsQuality: int, FoliageQuality: int, ShadingQuality: int, LandscapeQuality: int, mismatches?: [string] }`
@@ -1479,7 +1479,7 @@ Example: {"count": 3} undoes the last three transactions. It stops early at the 
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `count` | number | no | Optional. How many transactions to undo, at least 1 (default 1); stops early when the stack runs out or reaches an undo barrier. Below 1 is refused. |
+| `count` | integer | no | Optional. How many transactions to undo, at least 1 (default 1); stops early when the stack runs out or reaches an undo barrier. Below 1 is refused. |
 
 **Returns:** `{ applied: bool, requested: int, actually_undone: int, undo_count: int, can_undo: bool, next_undo: string }`
 
@@ -1497,6 +1497,6 @@ While it waits it does what the engine's tick would: it pumps every asset compil
 | `kinds` | array | no | Optional list of kinds to wait for, by kind ("shaders") or engine type name ("UE-Shader"), case-insensitive; default all. An unknown kind is an error that lists the kinds there are. |
 | `poll_interval_seconds` | number | no | Optional float (default 0.05, clamped 0.01..1): sleep between pumps. |
 | `include_assets` | boolean | no | Optional bool (default false): list the object paths still compiling after the wait, for textures, static_meshes, skeletal_meshes and sound_waves. |
-| `max_assets` | number | no | Optional int (default 50, clamped 1..1000): most paths listed per kind. |
+| `max_assets` | integer | no | Optional int (default 50, clamped 1..1000): most paths listed per kind. |
 
 **Returns:** `{ completed: bool, timed_out: bool, elapsed_seconds: float, pumps: int, remaining_before: int, remaining_after: int, kinds: [{ kind: string, type_name: string, remaining_before: int, remaining_after: int, finished: bool, assets?: [string], assets_total?: int, assets_truncated?: bool }], shader_jobs?: { outstanding: int, pending: int, remaining: int, compiling: bool } }`

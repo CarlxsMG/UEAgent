@@ -97,7 +97,7 @@ Find a navigation path between two world points on the navmesh, synchronously (U
 | `agent` | string | no | Optional supported agent name (as diagnose_navmesh lists supported_agents) whose navigation data to query; omitted: the default navigation data. Not with nav_data |
 | `nav_data` | string | no | Optional name of the navigation data actor to query, e.g. "RecastNavMesh-Default"; omitted: the default navigation data. Not with agent |
 | `filter_class` | string | no | Optional UNavigationQueryFilter subclass: a native class name (e.g. "NavFilter_AIControllerDefault") or a Blueprint filter's path or _C name; omitted: the navigation data's default filter. One that does not resolve is an error |
-| `max_points` | number | no | Optional cap on how many path points are serialized, a whole number (default 500; below 1 counts as 1); point_count still counts all |
+| `max_points` | integer | no | Optional cap on how many path points are serialized, a whole number (default 500; below 1 counts as 1); point_count still counts all |
 | `world` | string | no | Which world to query: absent/"editor" (default) \| "server" (the PIE world with authority: the one with the navmesh in PIE) \| "client" (has no navigation; an error) \| "pie:N" \| "pie" (ambiguous: PlayWorld, else the first PIE context) \| "game" (alias of "pie") |
 
 **Returns:** `{ found: bool, is_partial: bool, query_result: "Success"|"Fail"|"Error"|"Invalid", length: number, cost: number, straight_line_distance: number, point_count: int, points:[{x,y,z}], start:{x,y,z}, end:{x,y,z}, allow_partial: bool, nav_data, agent, filter_class, note?, world, world_name, world_package, world_type, net_mode, pie_instance }`
@@ -124,7 +124,7 @@ Pick random navmesh locations reachable by path from origin within radius (UNavi
 |---|---|---|---|
 | `origin` | array | yes | World-space [x, y, z] (or {x, y, z}) the points must be reachable from (required) |
 | `radius` | number | yes | Search radius around origin in cm, above 0 (required) |
-| `count` | number | no | Optional number of points to draw, a whole number from 1 to 100 (default 1; clamped); points may repeat |
+| `count` | integer | no | Optional number of points to draw, a whole number from 1 to 100 (default 1; clamped); points may repeat |
 | `agent` | string | no | Optional supported agent name (as diagnose_navmesh lists supported_agents) whose navigation data to query; omitted: the default navigation data. Not with nav_data |
 | `nav_data` | string | no | Optional name of the navigation data actor to query, e.g. "RecastNavMesh-Default"; omitted: the default navigation data. Not with agent |
 | `filter_class` | string | no | Optional UNavigationQueryFilter subclass: a native class name or a Blueprint filter's path or _C name; omitted: the navigation data's default filter. One that does not resolve is an error |
@@ -171,7 +171,7 @@ Project a world point onto the navmesh (UNavigationSystemV1::ProjectPointToNavig
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `point` | array | yes | World-space [x, y, z] (or {x, y, z}) to project (required) |
-| `extent` | any | no | Optional half-extent [x, y, z] of the box searched around point, in cm, each axis above 0; default the navigation data's DefaultQueryExtent (50, 50, 250 unless the project changed it) |
+| `extent` | array | no | Optional half-extent [x, y, z] of the box searched around point, in cm, each axis above 0; default the navigation data's DefaultQueryExtent (50, 50, 250 unless the project changed it) |
 | `agent` | string | no | Optional supported agent name (as diagnose_navmesh lists supported_agents) whose navigation data to query; omitted: the default navigation data. Not with nav_data |
 | `nav_data` | string | no | Optional name of the navigation data actor to query, e.g. "RecastNavMesh-Default"; omitted: the default navigation data. Not with agent |
 | `filter_class` | string | no | Optional UNavigationQueryFilter subclass: a native class name or a Blueprint filter's path or _C name; omitted: the navigation data's default filter. One that does not resolve is an error |
@@ -198,7 +198,7 @@ Remove the generator from one option of a UEnvQuery asset, keeping the option an
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `query_path` | string | yes | Asset path of the UEnvQuery, e.g. "/Game/EQS/EQ_FindCover" (the ".EQ_FindCover" object suffix is optional), as create_eqs_query or find_assets_by_name gives it (required) |
-| `option_index` | number | no | 0-based index of the option whose generator goes, as get_eqs_query_info lists the options (default 0); out of range is an error |
+| `option_index` | integer | no | 0-based index of the option whose generator goes, as get_eqs_query_info lists the options (default 0); out of range is an error |
 
 **Returns:** `{ query_path, option_index, removed }`
 
@@ -211,7 +211,7 @@ Remove the option at option_index from a UEnvQuery asset loaded by asset path, t
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `query_path` | string | yes | /Game/... path to the UEnvQuery asset (required) |
-| `option_index` | number | yes | Index of the option to remove (required) |
+| `option_index` | integer | yes | Index of the option to remove (required) |
 
 **Returns:** `{ query_path, option_index, removed, option_count }`
 
@@ -224,8 +224,8 @@ Remove the test at test_index from the option at option_index (default 0) of a U
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `query_path` | string | yes | /Game/... path to the UEnvQuery asset (required) |
-| `test_index` | number | yes | Index of the test to remove within the option (required) |
-| `option_index` | number | no | 0-based index of the query option that holds the test (default 0). |
+| `test_index` | integer | yes | Index of the test to remove within the option (required) |
+| `option_index` | integer | no | 0-based index of the query option that holds the test (default 0). |
 
 **Returns:** `{ query_path, option_index, test_index, removed, test_count }`
 
@@ -240,7 +240,7 @@ Run a UEnvQuery once, synchronously, in the editor world (UEnvQueryManager::RunI
 | `query_path` | string | yes | Asset path of the UEnvQuery, e.g. "/Game/EQS/EQ_FindCover" (the ".EQ_FindCover" object suffix is optional), as create_eqs_query or find_assets_by_name gives it (required) |
 | `querier_actor` | string | no | Optional object name or editor label of the editor-world actor used as the query Querier (drives EnvQueryContext_Querier and Querier-relative generators), whole name, case-insensitive, first match wins, e.g. "BP_Guard_C_0"; omitted: the query asset itself, which has no location |
 | `run_mode` | string | no | "SingleResult" (the best item) \| "RandomBest5Pct" \| "RandomBest25Pct" (one random item scoring within 5% or 25% of the best) \| "AllMatching" (every passing item, best first); case-insensitive, default "AllMatching", any other value is an error |
-| `max_items` | number | no | Optional cap on how many items are serialized into items, a whole number (default 50; negative counts as 0); the query still evaluates all and num_items counts them |
+| `max_items` | integer | no | Optional cap on how many items are serialized into items, a whole number (default 50; negative counts as 0); the query still evaluates all and num_items counts them |
 
 **Returns:** `{ query_path, ran, eqs_manager_present, status, is_successful, num_items, item_type, run_mode, items:[{index, score, location:{x,y,z}, actor?}], note? }`
 
@@ -254,7 +254,7 @@ Set properties of the generator of one option (option_index) of a UEnvQuery asse
 |---|---|---|---|
 | `query_path` | string | yes | /Game/... path to the UEnvQuery asset (required) |
 | `properties` | object | yes | JSON object { PropertyName: value, ... } applied to the generator, keys as named on its class (value formats in the description) |
-| `option_index` | number | no | Zero-based option index whose generator is edited (default 0); out of range is an error |
+| `option_index` | integer | no | Zero-based option index whose generator is edited (default 0); out of range is an error |
 
 **Returns:** `{ query_path, option_index, generator_class, set:[name], failed:[{name, error}], applied:{name: stored_value_text} }`
 
@@ -267,8 +267,8 @@ Set the scoring and filter settings of test test_index in option option_index of
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `query_path` | string | yes | /Game/... path to the UEnvQuery asset (required) |
-| `option_index` | number | no | Option index (default 0) |
-| `test_index` | number | no | Test index within the option (default 0) |
+| `option_index` | integer | no | Option index (default 0) |
+| `test_index` | integer | no | Test index within the option (default 0) |
 | `test_purpose` | string | no | "Filter" \| "Score" \| "FilterAndScore" (default "Score") |
 | `filter_type` | string | no | "Minimum" \| "Maximum" \| "Range" \| "Match" (default "Range") |
 | `scoring_equation` | string | no | "Linear" \| "Square" \| "InverseLinear" \| "SquareRoot" \| "Constant" (default "Linear") |

@@ -18,7 +18,7 @@ Add an FAnimSegment that plays a whole UAnimSequence to a UAnimComposite's Anima
 | `animation_path` | string | yes | Object path of the UAnimSequence to play, on the composite's skeleton, e.g. '/Game/Anims/A_Walk'; the segment covers its full length. |
 | `start_pos` | number | no | Optional time in seconds that places the new segment: in front of the first segment starting at or after it (0 = first), after every segment when it is at or past composite_length; all segments are then re-stacked end to end. Omit it to append at the end. |
 | `play_rate` | number | no | Playback rate of the segment, 1.0 = normal speed, 2.0 = twice as fast (default 1.0). |
-| `loop_count` | number | no | How many times the segment repeats, a whole number; values below 1 become 1 (default 1). |
+| `loop_count` | integer | no | How many times the segment repeats, a whole number; values below 1 become 1 (default 1). |
 
 **Returns:** `{ composite_path, animation_path, segment_index, num_segments, composite_length, segments, success, saved, save_error }`
 
@@ -191,7 +191,7 @@ Add a transition from source_state to target_state in an existing state machine 
 | `crossfade_duration` | number | no | Optional blend duration in seconds (default 0.2) |
 | `blend_mode` | string | no | Optional EAlphaBlendOption name, e.g. Linear, Cubic, HermiteCubic (default HermiteCubic); an unknown name is an error |
 | `bidirectional` | boolean | no | Optional, default false; sets the Bidirectional flag so the same transition can also fire target->source (no second transition is added) |
-| `priority_order` | number | no | Optional priority order (default 1); when several transitions out of a state pass at once, the smallest value wins |
+| `priority_order` | integer | no | Optional priority order (default 1); when several transitions out of a state pass at once, the smallest value wins |
 
 **Returns:** `{ anim_blueprint_path: string, machine_name: string, source_state: string, target_state: string, transition_created: bool, already_existed: bool, crossfade_duration: number, blend_mode: string, bidirectional: bool, priority_order: int, transition_count: int, saved: bool, save_error?: string }`
 
@@ -218,7 +218,7 @@ Add one sample (an animation placed at a blend position) to a UBlendSpace or UBl
 |---|---|---|---|
 | `blendspace_path` | string | yes | Object path of the UBlendSpace or UBlendSpace1D asset, e.g. '/Game/Animation/BS_Locomotion' (create_blend_space makes one). |
 | `animation_path` | string | yes | Object path of the UAnimSequence played at this position, on the blend space's skeleton or one compatible with it, e.g. '/Game/Animation/Run_Fwd'. |
-| `blend_value` | any | no | Blend position in the axis units: one number for a 1D blend space, or [x, y] (up to 3 numbers) for a 2D one, e.g. [0, 300]; default 0 on every axis. |
+| `blend_value` | number\|array | no | Blend position in the axis units: one number for a 1D blend space, or [x, y] (up to 3 numbers) for a 2D one, e.g. [0, 300]; default 0 on every axis. |
 
 **Returns:** `{ blendspace_path: string, sample_index: int, num_samples: int, added: bool, animation?: string, blend_x?: number, blend_y?: number, blend_z?: number, saved: bool, save_error?: string, message?: string }`
 
@@ -361,7 +361,7 @@ Attach a UMotionWarpingComponent named MotionWarping to an editor-world actor gi
 |---|---|---|---|
 | `actor_path` | string | yes | Full editor path (e.g. "/Game/Maps/Test.Test:PersistentLevel.ActorName"), internal name or label of the actor. |
 
-**Returns:** `{ actor_path: string, component_name: string, component_path: string, already_existed: bool }`
+**Returns:** `{ actor_path: string, component_name: string, component_path: string, already_existed: bool, added?: bool } -- added is read back: the new component is registered, listed among the actor's instance components and found on the actor; false makes the call fail`
 
 ## `add_motion_warping_target`
 
@@ -376,10 +376,10 @@ Add (or update in-place) a FMotionWarpingTarget on an existing UMotionWarpingCom
 | `location` | array | no | Optional world [x, y, z] location for the target. |
 | `rotation` | array | no | Optional world [pitch, yaw, roll] rotation in degrees for the target; alone, it re-aims an existing target and keeps its location. |
 | `component_path` | string | no | Optional name of a USceneComponent on the actor to drive the target transform. |
-| `warp_target_name` | string | no |   |
-| `actor_name` | string | no |   |
+| `warp_target_name` | string | no | Alias of `target_name`: the same value with the same meaning. Pass one of the two. |
+| `actor_name` | string | no | Alias of `actor_path`: the same value with the same meaning. Pass one of the two. |
 
-**Returns:** `{ actor_path: string, target_name: string, warp_target_count: int, previous_count: int, source: string (component | location_and_rotation | location | rotation), already_existed: bool, previous_location?: [x,y,z], previous_rotation?: [pitch,yaw,roll], location: [x,y,z], rotation: [pitch,yaw,roll], changed: bool }`
+**Returns:** `{ actor_path: string, target_name: string, warp_target_count: int, previous_count: int, source: string (component | location_and_rotation | location | rotation), already_existed: bool, previous_location?: [x,y,z], previous_rotation?: [pitch,yaw,roll], location: [x,y,z], rotation: [pitch,yaw,roll], changed: bool, applied: bool } -- applied is read back: the target is found holding the requested component, location and rotation; false makes the call fail`
 
 ## `add_notify_track`
 
@@ -452,9 +452,9 @@ Add a bone, a null (a space: a transform-only element) or an animation control t
 | `location` | array | no | Optional [x, y, z] location in rig global space for a bone or null (default the origin). |
 | `rotation` | array | no | Optional [pitch, yaw, roll] rotation in rig global space for a bone or null. |
 | `scale` | array | no | Optional [x, y, z] scale for a bone or null (default 1,1,1). |
-| `bone_name` | string | no |   |
-| `null_name` | string | no |   |
-| `control_name` | string | no |   |
+| `bone_name` | string | no | Alias of `element_name`: the same value with the same meaning. Pass one of the two. |
+| `null_name` | string | no | Alias of `element_name`: the same value with the same meaning. Pass one of the two. |
+| `control_name` | string | no | Alias of `element_name`: the same value with the same meaning. Pass one of the two. |
 
 **Returns:** `{ asset_path: string, element_key: string, element_type: string, parent: string, control_type?: string, control_type_recognized?: bool, bone_count: int, null_count: int, control_count: int, curve_count: int, other_count: int, total: int, saved: bool, save_error: string }`
 
@@ -469,7 +469,7 @@ Append one LOD to a skeletal mesh asset found by content path, its LOD info a co
 | `skeletal_mesh_path` | string | yes | Content path to the skeletal mesh asset, e.g. "/Game/Characters/SKM_Hero" |
 | `screen_size` | number | no | Optional ScreenSize.Default of the new LOD, the screen size at which it switches in (default 0.5); not clamped |
 
-**Returns:** `{ skeletal_mesh_path: string, lod_index: int, lod_count: int, screen_size: float, added: bool, note: string }`
+**Returns:** `{ skeletal_mesh_path: string, lod_index: int, lod_count: int, screen_size: float, added: bool, note: string } -- added is read back (one more LOD, carrying screen_size)`
 
 ## `add_skeletal_mesh_socket`
 
@@ -528,7 +528,7 @@ Assign a physics asset to a skeletal mesh (or pass null/empty to clear it).
 | `skeletal_mesh_path` | string | yes | Content path to the skeletal mesh asset |
 | `physics_asset_path` | string | no | Content path to the physics asset (e.g. /Game/MyPhysAsset); empty string clears the assignment |
 
-**Returns:** `{ skeletal_mesh_path: string, physics_asset_path: string, assigned: bool, cleared: bool, physics_asset_name: string }`
+**Returns:** `{ skeletal_mesh_path: string, physics_asset_path: string, assigned: bool, cleared: bool, physics_asset_name: string, applied: bool, saved: bool, save_error?: string } -- the physics asset is read back from the mesh`
 
 ## `bake_skeletal_mesh_lod`
 
@@ -539,7 +539,7 @@ Regenerate the LODs of a skeletal mesh asset (found by content path) with the en
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `skeletal_mesh_path` | string | yes | Content path to the skeletal mesh asset, e.g. "/Game/Characters/SKM_Hero" |
-| `new_lod_count` | number | no | Target LOD count; fewer than now drops the extra LODs, more appends reduced ones, and &lt;= 0 (the default when omitted) keeps the current count and re-runs reduction |
+| `new_lod_count` | integer | no | Target LOD count; fewer than now drops the extra LODs, more appends reduced ones, and &lt;= 0 (the default when omitted) keeps the current count and re-runs reduction |
 | `regenerate_even_if_imported` | boolean | no | bool, also re-reduce imported LODs above 0 when the count is kept (default false) |
 | `generate_base_lod` | boolean | no | bool, re-derive LOD 0 from its reduction settings when the count is kept (default false) |
 
@@ -588,7 +588,7 @@ Remove the property binding from one input pin of an AnimGraph node (inverse of 
 | `anim_blueprint` | string | no | Alias of anim_blueprint_path, used only when anim_blueprint_path is absent or empty. |
 | `blueprint_name` | string | no | Alias of anim_blueprint_path, used only when anim_blueprint_path and anim_blueprint are both absent or empty. |
 
-**Returns:** `{ node_id, pin_name, was_bound, is_bound, cleared, saved }`
+**Returns:** `{ node_id, pin_name, was_bound, is_bound, cleared, unbound, saved, save_error?, success, error? } -- is_bound is read back after the removal; success needs unbound and saved`
 
 ## `clear_anim_transition_rule`
 
@@ -653,7 +653,7 @@ Connect an existing IK Rig goal to a solver, creating that solver's per-goal eff
 |---|---|---|---|
 | `ik_rig_path` | string | yes | Content path to the IK Rig asset. |
 | `goal_name` | string | yes | Name of an existing goal (created via add_ik_goal). |
-| `solver_index` | number | yes | Index of the solver in the rig's solver stack. |
+| `solver_index` | integer | yes | Index of the solver in the rig's solver stack. |
 
 **Returns:** `{ ik_rig_path: string, goal_name: string, solver_index: int, connected: bool, already_connected: bool, saved: bool, save_error?: string, note?: string }`
 
@@ -673,7 +673,7 @@ Copy a set of AnimGraph nodes (with internal FAnimNode settings + intra-selectio
 | `offset_x` | number | no | X offset added to every pasted node (optional, default 0). |
 | `offset_y` | number | no | Y offset added to every pasted node (optional, default 0). |
 
-**Returns:** `{ copied_count, id_map:{old->new}, imported_nodes[], missing_node_ids[], saved }`
+**Returns:** `{ requested_count, copied_count, copied, id_map:{old->new}, imported_nodes[], missing_node_ids[], saved, save_error?, success, error? } -- copied_count counts the pasted nodes found in the destination graph; copied (and success, with saved) needs every resolved node there`
 
 ## `create_anim_blueprint`
 
@@ -752,12 +752,12 @@ Create and save a blend space asset under /Game -- a 2D UBlendSpace (default), a
 | `min_value` | number | no | Alias of axis_min. |
 | `axis_max` | number | no | X-axis maximum value (default 100; 90 for an aim offset) |
 | `max_value` | number | no | Alias of axis_max. |
-| `axis_grid` | number | no | Optional X-axis grid divisions, an integer >= 1 (default: the engine's 4). |
+| `axis_grid` | integer | no | Optional X-axis grid divisions, an integer >= 1 (default: the engine's 4). |
 | `num_grid_points` | number | no | Alias of axis_grid. |
 | `y_axis_name` | string | no | Optional Y-axis display name, 2D types only (default 'Pitch' for an aim offset; otherwise the engine's 'None' is kept). |
 | `y_axis_min` | number | no | Optional Y-axis minimum, 2D types only (default 0; -90 for an aim offset); must be below y_axis_max. |
 | `y_axis_max` | number | no | Optional Y-axis maximum, 2D types only (default 100; 90 for an aim offset). |
-| `y_axis_grid` | number | no | Optional Y-axis grid divisions, 2D types only, an integer >= 1 (default: the engine's 4). |
+| `y_axis_grid` | integer | no | Optional Y-axis grid divisions, 2D types only, an integer >= 1 (default: the engine's 4). |
 | `skeleton_path` | string | no | Asset path of the target Skeleton (default /Engine/EngineMeshes/SkeletalCube_Skeleton) |
 
 **Returns:** `{ name, package_path, asset_path, blend_space_path, blend_space_type, is_1d, skeleton_path, axis_name, axis_min, axis_max, axis_grid_num, y_axis_name?, y_axis_min?, y_axis_max?, y_axis_grid_num?, sample_count, created, already_existed, saved, save_error, message }`
@@ -888,7 +888,7 @@ Create a UPoseSearchSchema data asset at package_path/name (package_path default
 | `name` | string | yes | Asset name (e.g. 'PoseSearchSchema_Example'). |
 | `package_path` | string | no | Target content package path (default /Game/MCP); trailing slashes are stripped. |
 | `skeleton_path` | string | no | Asset path of the USkeleton (default /Engine/EngineMeshes/SkeletalCube_Skeleton); loaded only for a schema this call creates. |
-| `sample_rate` | number | no | Schema SampleRate (int, ClampMin=1, ClampMax=240; default 30); out-of-range values are clamped, and it is applied only to a schema this call creates. |
+| `sample_rate` | integer | no | Schema SampleRate (int, ClampMin=1, ClampMax=240; default 30); out-of-range values are clamped, and it is applied only to a schema this call creates. |
 
 **Returns:** `{ name, package_path, asset_path, schema_path, skeleton_path, skeleton_paths, sample_rate, schema_cardinality, channel_count (finalized), source_channel_count, finalized, finalize_warning?, created, already_existed, saved, save_error, message }`
 
@@ -929,7 +929,7 @@ Disconnect a goal from a solver, removing that solver's per-goal effector/settin
 |---|---|---|---|
 | `ik_rig_path` | string | yes | Content path to the IK Rig asset. |
 | `goal_name` | string | yes | Name of the goal. |
-| `solver_index` | number | yes | Index of the solver in the rig's solver stack. |
+| `solver_index` | integer | yes | Index of the solver in the rig's solver stack. |
 
 **Returns:** `{ ik_rig_path: string, goal_name: string, solver_index: int, connected: bool, was_connected: bool, saved: bool, save_error?: string, note?: string }`
 
@@ -945,7 +945,7 @@ Run a live motion-matching query on a PIE/Game actor against a loaded UPoseSearc
 | `world` | string | no | Which world to resolve: absent (default) = prefer the live PIE/Game world \| 'server' (the PIE world with authority) \| 'client' \| 'pie:N' \| 'pie'/'game' force the live session (errors if none running) \| 'editor' forces the editor world. |
 | `actor_name` | string | no | Actor name or label whose AnimInstance drives the query. Omitted = the first player controller's pawn. |
 | `pose_history_name` | string | no | Tag of the PoseSearchHistoryCollector anim-graph node used to build the query (default 'PoseHistory'). |
-| `max_trajectory_samples` | number | no | Cap on emitted query trajectory samples (&lt;=0 = all; default 0). |
+| `max_trajectory_samples` | integer | no | Cap on emitted query trajectory samples (&lt;=0 = all; default 0). |
 
 **Returns:** `{ world_mode, actor_name, actor_resolved, anim_instance_class, pose_history_name, pose_history_found, database_path, query_trajectory_samples[], trajectory_sample_count, is_trajectory_empty, has_match, best_match_asset, best_match_database, best_cost, selected_time, is_continuing_pose_search, wanted_play_rate, is_mirrored, is_looping, per_channel_cost[], note, world_name, world_package, world_type, net_mode, pie_instance }`
 
@@ -1073,7 +1073,7 @@ Get bone-specific settings for a bone within a solver.  FullBodyIK returns snake
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ik_rig_path` | string | yes | Content path to the IK Rig asset. |
-| `solver_index` | number | yes | Index of the solver. |
+| `solver_index` | integer | yes | Index of the solver. |
 | `bone_name` | string | yes | Name of the bone to query settings for. |
 
 **Returns:** `{ ik_rig_path: string, solver_index: int, bone_name: string, settings: object }`
@@ -1087,7 +1087,7 @@ Get goal-specific settings for a goal connected to a solver.  FullBodyIK returns
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ik_rig_path` | string | yes | Content path to the IK Rig asset. |
-| `solver_index` | number | yes | Index of the solver. |
+| `solver_index` | integer | yes | Index of the solver. |
 | `goal_name` | string | yes | Name of the goal to query settings for. |
 
 **Returns:** `{ ik_rig_path: string, solver_index: int, goal_name: string, settings: object }`
@@ -1126,7 +1126,7 @@ Read one solver of an IK Rig asset by its 0-based stack index: solver_type (the 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ik_rig_path` | string | yes | Path to the UIKRigDefinition asset |
-| `solver_index` | number | yes | 0-based solver index |
+| `solver_index` | integer | yes | 0-based solver index |
 
 **Returns:** `{ asset_path: string, solver_index: int, solver_type: string, solver_type_canonical: string, unique_name: string, enabled: bool, start_bone: string, end_bone: string, connected_goal_count: int, connected_goals: [string], settings: object }`
 
@@ -1152,8 +1152,8 @@ Read back the vertex deltas of a morph target on a specific LOD (inverse of set_
 |---|---|---|---|
 | `skeletal_mesh_path` | string | yes | Content path to the skeletal mesh asset |
 | `morph_target_name` | string | yes | Name of the morph target to read |
-| `lod_index` | number | no | LOD index to read (default 0) |
-| `max_deltas` | number | no | Optional cap on how many deltas to return (default 5000); the response is honestly marked truncated if the LOD has more |
+| `lod_index` | integer | no | LOD index to read (default 0) |
+| `max_deltas` | integer | no | Optional cap on how many deltas to return (default 5000); the response is honestly marked truncated if the LOD has more |
 
 **Returns:** `{ morph_target_name: string, lod_index: int, total_deltas: int, returned_deltas: int, truncated: bool, deltas: [{vertex_index, position_delta:{x,y,z}, normal_delta:{x,y,z}}] }`
 
@@ -1193,7 +1193,7 @@ Read-only report of the live motion-matching state on a PIE/Game actor (why a ch
 | `actor_name` | string | no | Actor name or label to inspect. Omitted = the first player controller's pawn (the locally-controlled character). |
 | `pose_history_name` | string | no | Tag of the PoseSearchHistoryCollector anim-graph node to look up on the AnimInstance (default 'PoseHistory'). A missing node is the usual reason a query builds an empty pose portion. |
 | `database_path` | string | no | Optional UPoseSearchDatabase asset path; when given, its schema_path/schema_cardinality/channels/animation_asset_count are included. |
-| `max_trajectory_samples` | number | no | Cap on emitted trajectory samples (&lt;=0 = all; default 0). |
+| `max_trajectory_samples` | integer | no | Cap on emitted trajectory samples (&lt;=0 = all; default 0). |
 
 **Returns:** `{ world_mode, actor_name, actor_resolved, actor_resolved_by, skeletal_mesh_component, anim_instance_class, pose_history_name, pose_history_found, trajectory:{found,component,property,sample_count,is_trajectory_empty,samples[]}, is_trajectory_empty, database?:{database_path,schema_path,schema_cardinality,channel_count,channels[],animation_asset_count}, note, world_name, world_package, world_type, net_mode, pie_instance }`
 
@@ -1230,7 +1230,7 @@ Read one retarget op's live settings struct from an IK Retargeter by op index.  
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ik_retargeter_path` | string | yes | Content path to the UIKRetargeter asset. |
-| `op_index` | number | yes | 0-based index of the op in the retargeter's op stack. |
+| `op_index` | integer | yes | 0-based index of the op in the retargeter's op stack. |
 
 **Returns:** `{ asset_path: string, op_index: int, op_name: string, op_type: string, enabled: bool, settings: object }`
 
@@ -1280,7 +1280,7 @@ Read the settings of one LOD of a skeletal mesh asset found by content path: scr
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `skeletal_mesh_path` | string | yes | Content path to the skeletal mesh asset, e.g. "/Game/Characters/SKM_Hero" |
-| `lod_index` | number | no | 0-based LOD index to read (default 0); it must be below the LOD count of the mesh |
+| `lod_index` | integer | no | 0-based LOD index to read (default 0); it must be below the LOD count of the mesh |
 
 **Returns:** `{ lod_index: int, screen_size: float, num_material_map_entries: int, allow_cpu_access: bool, build_settings: {...}, reduction_settings: {...}, lod_hysteresis: float, weight_of_prioritization: float, morph_target_position_error_tolerance: float, skin_cache_usage: string, allow_mesh_deformer: bool }`
 
@@ -1317,7 +1317,7 @@ Read the render sections of one LOD of a skeletal mesh asset from its imported m
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `skeletal_mesh_path` | string | yes | Content path of the USkeletalMesh asset (object or package path), e.g. '/Game/Characters/SKM_Hero'. |
-| `lod_index` | number | no | 0-based LOD index to read (default 0); it must be below num_lods from get_skeletal_mesh_info. |
+| `lod_index` | integer | no | 0-based LOD index to read (default 0); it must be below num_lods from get_skeletal_mesh_info. |
 
 **Returns:** `{ skeletal_mesh_path: string, lod_index: int, num_sections: int, lod_num_vertices: int, sections: [{section_index, material_index, num_triangles, num_vertices, recompute_tangent, cast_shadow, visible_in_ray_tracing, disabled, bone_map_count}] }`
 
@@ -1358,8 +1358,8 @@ Move the solver at from_index so that it ends up at to_index (both 0-based posit
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ik_rig_path` | string | yes | Path to the UIKRigDefinition asset |
-| `from_index` | number | yes | Source 0-based solver index |
-| `to_index` | number | yes | Target 0-based solver index, below the solver count |
+| `from_index` | integer | yes | Source 0-based solver index |
+| `to_index` | integer | yes | Target 0-based solver index, below the solver count |
 
 **Returns:** `{ asset_path: string, from_index: int, to_index: int, moved: bool, solver_count: int, saved: bool, save_error?: string, note?: string }`
 
@@ -1561,7 +1561,7 @@ Remove one FPoseSearchDatabaseAnimationAsset entry from a UPoseSearchDatabase by
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `database_path` | string | yes | Full /Game/... asset path of the database. |
-| `animation_asset_index` | number | yes | 0-based index into DatabaseAnimationAssets[]. |
+| `animation_asset_index` | integer | yes | 0-based index into DatabaseAnimationAssets[]. |
 
 **Returns:** `{ database_path, animation_asset_index, removed, previous_count, new_count }`
 
@@ -1587,7 +1587,7 @@ Remove a blend sample (by index) from a BlendSpace. WARNING: the remaining indic
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `blendspace_path` | string | yes | Full asset path to the UBlendSpace. |
-| `index` | number | yes | Index of the sample to remove. |
+| `index` | integer | yes | Index of the sample to remove. |
 
 **Returns:** `{ blendspace_path, removed, num_samples, samples, saved, save_error, message }`
 
@@ -1640,7 +1640,7 @@ Remove the solver at a 0-based index from the solver stack of an IK Rig asset th
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ik_rig_path` | string | yes | Path to the UIKRigDefinition asset |
-| `solver_index` | number | yes | 0-based index of the solver to remove |
+| `solver_index` | integer | yes | 0-based index of the solver to remove |
 
 **Returns:** `{ asset_path: string, removed_solver_index: int, solver_count: int, removed: bool, saved: bool, save_error?: string }`
 
@@ -1680,7 +1680,7 @@ Remove the segment at segment_index from a slot track of a UAnimMontage, in one 
 |---|---|---|---|
 | `montage_path` | string | yes | Object path of the UAnimMontage (e.g. "/Game/MyGame/AM_Example"). |
 | `slot_name` | string | yes | Montage slot name (e.g. DefaultSlot). |
-| `segment_index` | number | yes | Zero-based index of the segment in that slot's track. |
+| `segment_index` | integer | yes | Zero-based index of the segment in that slot's track. |
 
 **Returns:** `{ montage_path, slot_name, segment_index, removed_anim_sequence_path, removed, segment_count, montage_length, success, saved, save_error }`
 
@@ -1721,9 +1721,9 @@ Remove a FMotionWarpingTarget from a UMotionWarpingComponent by FName, or with a
 | `actor_path` | string | yes | Full editor path or short name of the actor. actor_name (the internal object name) is accepted as an alias. |
 | `target_name` | string | no | FName identifier of the warp target to remove. Required unless all is true. |
 | `all` | boolean | no | Optional bool (default false). When true, remove every warp target of the component; target_name must then be omitted. |
-| `actor_name` | string | no |   |
+| `actor_name` | string | no | Alias of `actor_path`: the same value with the same meaning. Pass one of the two. |
 
-**Returns:** `{ actor_path: string, target_name?: string, all: bool, removed_count: int, removed_names: [string], previous_count: int, warp_target_count: int, cleared: bool }`
+**Returns:** `{ actor_path: string, target_name?: string, all: bool, removed_count: int, removed_names: [string], previous_count: int, warp_target_count: int, cleared: bool, removed: bool } -- removed is read back: no target asked for is still on the component (true for a name that was already absent); false makes the call fail`
 
 ## `remove_notify_track`
 
@@ -1773,7 +1773,7 @@ Remove one feature channel (a UPoseSearchFeatureChannel_* such as Pose or Trajec
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `schema_path` | string | yes | UPoseSearchSchema asset as a package or object path, e.g. "/Game/MotionMatching/PSS_Locomotion" (required). |
-| `channel_index` | number | no | 0-based index into the schema's source channel list (the order of get_pose_search_schema_info's finalized_channels once the schema is finalized; that tool lists none before); takes precedence over channel_type when both are given. |
+| `channel_index` | integer | no | 0-based index into the schema's source channel list (the order of get_pose_search_schema_info's finalized_channels once the schema is finalized; that tool lists none before); takes precedence over channel_type when both are given. |
 | `channel_type` | string | no | "Pose", "Trajectory", "Position", "Velocity" or "Heading", case ignored; removes the first channel of that class, subclasses included. Used only when channel_index is absent. |
 
 **Returns:** `{ schema_path, channel_index, channel_type, channel_class, schema_cardinality, channel_count (source, after), previous_count (source, before), finalized_channel_count, source_channel_count, finalized, finalize_warning?, removed, already_absent, saved, save_error?, message }`
@@ -1788,7 +1788,7 @@ Remove one roled skeleton entry (FPoseSearchRoledSkeleton: a role name bound to 
 |---|---|---|---|
 | `asset_path` | string | yes | UPoseSearchSchema asset as a package or object path, e.g. "/Game/MotionMatching/PSS_Interaction" (required). |
 | `role` | string | no | Role name of the entry to remove, compared as an FName (case ignored), e.g. "Defender"; an empty string means the default (None) role. Give this OR skeleton_index. |
-| `skeleton_index` | number | no | 0-based index of the entry in the schema's roled-skeleton list, in get_pose_search_schema_info order. Give this OR role. |
+| `skeleton_index` | integer | no | 0-based index of the entry in the schema's roled-skeleton list, in get_pose_search_schema_info order. Give this OR role. |
 
 **Returns:** `{ asset_path, role, skeleton_index, removed_skeleton_path, roled_skeleton_count, previous_count, removed, already_absent, saved, save_error?, note? }`
 
@@ -1815,7 +1815,7 @@ Remove the op at a 0-based index, with any child ops, from the op stack of an IK
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ik_retargeter_path` | string | yes | Path to the UIKRetargeter asset |
-| `op_index` | number | yes | 0-based op index |
+| `op_index` | integer | yes | 0-based op index |
 
 **Returns:** `{ asset_path: string, removed_op_index: int, removed: bool, op_count: int, saved: bool, save_error?: string }`
 
@@ -1842,9 +1842,9 @@ Remove one LOD from a skeletal mesh asset, with its source model and cached redu
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `skeletal_mesh_path` | string | yes | Content path to the skeletal mesh asset |
-| `lod_index` | number | yes | Index of the LOD to remove (must be > 0) |
+| `lod_index` | integer | yes | Index of the LOD to remove (must be > 0) |
 
-**Returns:** `{ skeletal_mesh_path: string, lod_index: int, lod_count: int, removed: bool }`
+**Returns:** `{ skeletal_mesh_path: string, lod_index: int, lod_count: int, removed: bool } -- removed is read back (one LOD fewer)`
 
 ## `remove_skeletal_mesh_morph_target`
 
@@ -1857,7 +1857,7 @@ Delete one morph target, by name, from a skeletal mesh asset found by content pa
 | `skeletal_mesh_path` | string | yes | Content path to the skeletal mesh asset, e.g. "/Game/Characters/SKM_Hero" |
 | `morph_target_name` | string | yes | Name of the morph target to delete, as get_skeletal_mesh_morph_targets lists it |
 
-**Returns:** `{ morph_target_name: string, skeletal_mesh_path: string, removed: bool, remaining_morph_targets: int }`
+**Returns:** `{ morph_target_name: string, skeletal_mesh_path: string, removed: bool, remaining_morph_targets: int, saved: bool, save_error?: string } -- removed is read back (the name is no longer found)`
 
 ## `remove_skeletal_mesh_socket`
 
@@ -1998,7 +1998,7 @@ Rename a morph target on a skeletal mesh asset and save the mesh. Fails if old_n
 | `old_name` | string | yes | Current morph target name, as get_skeletal_mesh_morph_targets lists it. |
 | `new_name` | string | yes | New morph target name; must not already exist on the mesh. |
 
-**Returns:** `{ old_name: string, new_name: string, skeletal_mesh_path: string, renamed: bool }`
+**Returns:** `{ old_name: string, new_name: string, skeletal_mesh_path: string, renamed: bool, saved: bool, save_error?: string } -- renamed is read back (new_name found, old_name gone)`
 
 ## `rename_skeletal_mesh_socket`
 
@@ -2116,7 +2116,7 @@ Bind an AnimGraph node input pin to a variable or property path in the node prop
 | `anim_blueprint` | string | no | Alias of anim_blueprint_path, used only when anim_blueprint_path is absent or empty. |
 | `blueprint_name` | string | no | Alias of anim_blueprint_path, used only when anim_blueprint_path and anim_blueprint are both absent or empty. |
 
-**Returns:** `{ node_id, pin_name, binding_path, applied, binding:{property_name, property_path[], path_as_text, is_bound, is_promotion, binding_type, pin_category}, saved }`
+**Returns:** `{ node_id, pin_name, binding_path, applied, binding:{property_name, property_path[], path_as_text, is_bound, is_promotion, binding_type, pin_category}, saved, save_error?, success, error? } -- applied is read back: the stored binding for pin_name is bound to binding_path`
 
 ## `set_anim_montage_preview_mesh`
 
@@ -2173,7 +2173,7 @@ Set the number of frames of the data model of a UAnimSequence (IAnimationDataCon
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sequence_path` | string | yes | Asset path of the UAnimSequence. |
-| `frame_count` | number | yes | New number of frames (integer > 0). |
+| `frame_count` | integer | yes | New number of frames (integer > 0). |
 
 **Returns:** `{ sequence_path, frame_count, saved, save_error, note? }`
 
@@ -2317,8 +2317,8 @@ Edit a blend sample (by index): blend value and/or animation. At least one of bl
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `blendspace_path` | string | yes | Full asset path to the UBlendSpace. |
-| `index` | number | yes | Index of the sample to edit. |
-| `blend_value` | any | no | New blend position: single number (1D) or array of up to 3 numbers (optional). |
+| `index` | integer | yes | Index of the sample to edit. |
+| `blend_value` | number\|array | no | New blend position: single number (1D) or array of up to 3 numbers (optional). |
 | `animation_path` | string | no | Full asset path to a UAnimSequence to replace the sample's animation (optional). |
 
 **Returns:** `{ blendspace_path, index, value_edited, animation_replaced, num_samples, samples, saved, save_error, message }`
@@ -2360,7 +2360,7 @@ Set bone-specific settings for a bone within a solver, as one undo transaction, 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ik_rig_path` | string | yes | Content path to the IK Rig asset. |
-| `solver_index` | number | yes | Index of the solver. |
+| `solver_index` | integer | yes | Index of the solver. |
 | `bone_name` | string | yes | Name of the bone to modify. |
 | `settings` | object | yes | Object with bone-specific fields to set. |
 
@@ -2375,7 +2375,7 @@ Set goal-specific settings for a goal connected to a solver, as one undo transac
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ik_rig_path` | string | yes | Content path to the IK Rig asset. |
-| `solver_index` | number | yes | Index of the solver. |
+| `solver_index` | integer | yes | Index of the solver. |
 | `goal_name` | string | yes | Name of the goal to modify. |
 | `settings` | object | yes | Object with goal-specific fields to set. |
 
@@ -2406,7 +2406,7 @@ Set the start bone and/or end bone of one solver in an IK Rig asset (0-based sta
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ik_rig_path` | string | yes | Path to the UIKRigDefinition asset |
-| `solver_index` | number | yes | 0-based solver index |
+| `solver_index` | integer | yes | 0-based solver index |
 | `start_bone` | string | no | Optional start bone name |
 | `end_bone` | string | no | Optional end bone name |
 
@@ -2421,7 +2421,7 @@ Enable or disable the solver at a 0-based index of an IK Rig asset through the I
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ik_rig_path` | string | yes | Path to the UIKRigDefinition asset |
-| `solver_index` | number | yes | 0-based solver index |
+| `solver_index` | integer | yes | 0-based solver index |
 | `enabled` | boolean | no | Optional bool; defaults to true |
 
 **Returns:** `{ asset_path: string, solver_index: int, enabled: bool, set_ok: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
@@ -2435,7 +2435,7 @@ Set detailed solver-specific settings on a solver in an IK Rig, as one undo tran
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ik_rig_path` | string | yes | Content path to the IK Rig asset. |
-| `solver_index` | number | yes | Index of the solver in the rig's solver stack. |
+| `solver_index` | integer | yes | Index of the solver in the rig's solver stack. |
 | `settings` | object | yes | Object with solver-type-specific fields to set. |
 
 **Returns:** `{ ik_rig_path: string, solver_index: int, solver_type: string, success: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
@@ -2495,7 +2495,7 @@ Overwrite all vertex deltas of an existing morph target on one LOD of a skeletal
 | `skeletal_mesh_path` | string | yes | Content path of the USkeletalMesh asset (object or package path), e.g. '/Game/Characters/SKM_Hero'. |
 | `morph_target_name` | string | yes | Name of an existing morph target, as get_skeletal_mesh_morph_targets lists it, e.g. 'Smile'. |
 | `deltas` | array | yes | Array of objects {vertex_index, position_delta, normal_delta}: vertex_index is the vertex's index in that LOD's vertex buffer (not range-checked), the two deltas are {x, y, z} offsets in mesh-local units and a missing one is zero, e.g. [{"vertex_index": 0, "position_delta": {"x": 1.0, "y": 0, "z": 0}, "normal_delta": {"x": 0, "y": 0, "z": 0}}]. An empty array leaves the LOD with no deltas. |
-| `lod_index` | number | no | 0-based LOD index whose deltas are overwritten (default 0); it must be below num_lods from get_skeletal_mesh_info. |
+| `lod_index` | integer | no | 0-based LOD index whose deltas are overwritten (default 0); it must be below num_lods from get_skeletal_mesh_info. |
 
 **Returns:** `{ morph_target_name: string, lod_index: int, deltas_set: int, total_deltas: int, total_deltas_lod0: int, deltas_per_lod: [{ lod_index: int, total_deltas: int, written: bool, created: bool }], total_deltas_all_lods: int, saved: bool, save_error?: string }`
 
@@ -2644,7 +2644,7 @@ Partial-merge a retarget op's live settings struct (only the JSON fields present
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ik_retargeter_path` | string | yes | Content path to the UIKRetargeter asset. |
-| `op_index` | number | yes | 0-based index of the op in the retargeter's op stack. |
+| `op_index` | integer | yes | 0-based index of the op in the retargeter's op stack. |
 | `settings` | object | no | Partial settings object; only present fields are written (e.g. { lODThreshold: 5 }). |
 | `enabled` | boolean | no | Optional: enable/disable the op (applied via the controller). |
 
@@ -2726,7 +2726,7 @@ Repoint a Blueprint's skeletal mesh component AnimClass to a (fork) AnimBlueprin
 | `anim_class` | string | yes | The AnimBlueprint to use: an ABP asset path (resolved to its generated class) or a "..._C" class path/name. |
 | `component_name` | string | no | Skeletal mesh component to target (optional). Omit to target the Character's inherited Mesh. |
 
-**Returns:** `{ blueprint, component, anim_class, previous_anim_class, applied, wrote_cdo_archetype, saved }`
+**Returns:** `{ blueprint, component, anim_class, previous_anim_class, animation_blueprint_mode, applied, wrote_cdo_archetype, saved, save_error?, success, error? } -- anim_class and animation_blueprint_mode are read back from the component; applied needs both`
 
 ## `set_skeletal_mesh_component_tick`
 
@@ -2740,7 +2740,7 @@ Switch a skeletal mesh component's ticking on or off, in the editor world or the
 | `event_settings` | string | yes | Tick mode, any case: 'enable' (tick on, not while paused), 'disable' (tick off) or 'custom' (tick on, paused setting kept) |
 | `world` | string | no | Optional world selector: absent/'editor' (default) \| 'pie' (ambiguous: PlayWorld, else the first PIE context) \| 'server' (the PIE world with authority) \| 'client' \| 'pie:N' \| 'game' (alias of 'pie'). |
 
-**Returns:** `{ component_name: string, requested_settings: string, events_configured: bool, previous_tick_enabled: bool, previous_tick_when_paused: bool, current_tick_enabled: bool, current_tick_when_paused: bool, component_valid: bool, component_class: string, anim_instance_class: string?, has_anim_instance: bool, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }`
+**Returns:** `{ component_name: string, requested_settings: string, events_configured: bool (read back: the component holds the flags the mode asks for; false makes success false), success: bool, error?: string, previous_tick_enabled: bool, previous_tick_when_paused: bool, current_tick_enabled: bool, current_tick_when_paused: bool, component_valid: bool, component_class: string, anim_instance_class: string?, has_anim_instance: bool, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }`
 
 ## `set_skeletal_mesh_lod_build_settings`
 
@@ -2751,7 +2751,7 @@ Change the stored build settings of one LOD of a skeletal mesh asset, only the f
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `skeletal_mesh_path` | string | yes | Skeletal mesh asset path, e.g. "/Game/Characters/SKM_Hero". |
-| `lod_index` | number | no | 0-based LOD index (default 0); an index the mesh does not have fails the call. |
+| `lod_index` | integer | no | 0-based LOD index (default 0); an index the mesh does not have fails the call. |
 | `recompute_normals` | boolean | no | Ignore the imported normals and recompute them (bRecomputeNormals). |
 | `recompute_tangents` | boolean | no | Ignore the imported tangents and recompute them (bRecomputeTangents). |
 | `use_mikk_t_space` | boolean | no | Use MikkTSpace when computing tangents (bUseMikkTSpace). |
@@ -2760,9 +2760,9 @@ Change the stored build settings of one LOD of a skeletal mesh asset, only the f
 | `high_precision_tangents` | boolean | no | Store tangents at 16-bit instead of 8-bit precision (bUseHighPrecisionTangentBasis). |
 | `high_precision_weights` | boolean | no | Use 16-bit instead of 8-bit skin weights for rendering (bUseHighPrecisionSkinWeights). |
 | `full_precision_uvs` | boolean | no | Store UVs at full floating-point precision (bUseFullPrecisionUVs). |
-| `bone_influence_limit` | number | no | Maximum bone influences per vertex; 0 uses the DefaultBoneInfluenceLimit project setting, and values above the project limit have no effect. |
+| `bone_influence_limit` | integer | no | Maximum bone influences per vertex; 0 uses the DefaultBoneInfluenceLimit project setting, and values above the project limit have no effect. |
 
-**Returns:** `{ lod_index: int, settings_applied: {...}, saved: bool }`
+**Returns:** `{ skeletal_mesh_path: string, lod_index: int, settings_applied: {...}, mismatched: [string], applied: bool, saved: bool, save_error?: string } -- settings_applied is read back from the LOD; applied is false (and the call fails) when a written field reads back different`
 
 ## `set_skeletal_mesh_lod_reduction_settings`
 
@@ -2773,29 +2773,29 @@ Author a LOD's FSkeletalMeshOptimizationSettings (ReductionSettings) — the dat
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `skeletal_mesh_path` | string | yes | Content path to the skeletal mesh asset. |
-| `lod_index` | number | no | LOD index to modify (default 0). |
+| `lod_index` | integer | no | LOD index to modify (default 0). |
 | `termination_criterion` | string | no | SMTC_*: NumOfTriangles\|NumOfVerts\|TriangleOrVert\|AbsNumOfTriangles\|AbsNumOfVerts\|AbsTriangleOrVert. |
 | `reduction_method` | string | no | SMOT_*: NumOfTriangles\|MaxDeviation\|TriangleOrDeviation. |
 | `num_of_triangles_percentage` | number | no | float ratio of triangles to retain (0.1 = 10%). |
 | `num_of_vert_percentage` | number | no | float ratio of vertices to retain. |
 | `max_deviation_percentage` | number | no | float [0,1], accuracy target when reduction_method=MaxDeviation. |
-| `max_num_of_triangles` | number | no | int absolute triangle cap (ClampMin 4). |
-| `max_num_of_verts` | number | no | int absolute vertex cap (ClampMin 6). |
-| `max_num_of_triangles_percentage` | number | no | int (editor-only) cap when using percentage criterion (ClampMin 4). |
-| `max_num_of_verts_percentage` | number | no | int (editor-only) cap when using percentage criterion (ClampMin 6). |
-| `base_lod` | number | no | int base LOD index to generate from (default 0). |
+| `max_num_of_triangles` | integer | no | int absolute triangle cap (ClampMin 4). |
+| `max_num_of_verts` | integer | no | int absolute vertex cap (ClampMin 6). |
+| `max_num_of_triangles_percentage` | integer | no | int (editor-only) cap when using percentage criterion (ClampMin 4). |
+| `max_num_of_verts_percentage` | integer | no | int (editor-only) cap when using percentage criterion (ClampMin 6). |
+| `base_lod` | integer | no | int base LOD index to generate from (default 0). |
 | `silhouette_importance` | string | no | SMOI_*: Off\|Lowest\|Low\|Normal\|High\|Highest. |
 | `texture_importance` | string | no | SMOI_* importance of texture density. |
 | `shading_importance` | string | no | SMOI_* importance of shading quality. |
 | `skinning_importance` | string | no | SMOI_* importance of skinning quality. |
-| `max_bones_per_vertex` | number | no | int max bone influences per vertex (ClampMin 1). |
+| `max_bones_per_vertex` | integer | no | int max bone influences per vertex (ClampMin 1). |
 | `welding_threshold` | number | no | float vertex weld distance. |
 | `normals_threshold` | number | no | float hard-edge angle in degrees (used when recalc_normals). |
 | `recalc_normals` | boolean | no | bool recompute normals. |
 | `remap_morph_targets` | boolean | no | bool remap morph targets onto the reduced LOD. |
 | `enforce_bone_boundaries` | boolean | no | bool penalize collapses across different major bones. |
 
-**Returns:** `{ lod_index: int, settings_applied: {...}, saved: bool }`
+**Returns:** `{ skeletal_mesh_path: string, lod_index: int, settings_applied: {...}, mismatched: [string], applied: bool, saved: bool, save_error?: string } -- settings_applied is read back from the LOD; applied is false (and the call fails) when a written field reads back different`
 
 ## `set_skeletal_mesh_lod_settings`
 
@@ -2806,7 +2806,7 @@ Set the flat per-LOD scalars/enums of FSkeletalMeshLODInfo that no other setter 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `skeletal_mesh_path` | string | yes | Content path to the skeletal mesh asset. |
-| `lod_index` | any | no | Optional. 0-based LOD index to modify (default 0), or -1 / "all" for every LOD. allow_cpu_access with every LOD goes through USkeletalMeshEditorSubsystem::SetAllowCPUAccess. |
+| `lod_index` | integer\|string | no | Optional. 0-based LOD index to modify (default 0), or -1 / "all" for every LOD. allow_cpu_access with every LOD goes through USkeletalMeshEditorSubsystem::SetAllowCPUAccess. |
 | `screen_size` | number | no | Optional float, ScreenSize.Default: the screen size at which this LOD switches in (e.g. 0.3). |
 | `lod_hysteresis` | number | no | float, avoids flickering at the LOD boundary. |
 | `allow_cpu_access` | boolean | no | bool, keep this LOD's data on the CPU (e.g. for FX sampling). |
@@ -2815,7 +2815,7 @@ Set the flat per-LOD scalars/enums of FSkeletalMeshLODInfo that no other setter 
 | `allow_mesh_deformer` | boolean | no | bool, whether a Mesh Deformer is used on this LOD. |
 | `weight_of_prioritization` | number | no | float >=0, weight given to BonesToPrioritize/SectionsToPrioritize. |
 
-**Returns:** `{ skeletal_mesh_path: string, lod_index: int (-1 for every LOD), all_lods: bool, applied_lods: int, settings_applied: {...}, old_screen_size?: float (one LOD), old_screen_sizes?: [float] (every LOD), saved: bool }`
+**Returns:** `{ skeletal_mesh_path: string, lod_index: int (-1 for every LOD), all_lods: bool, applied_lods: int, settings_applied: {...}, mismatched: [string], mismatched_lods: [int], old_screen_size?: float (one LOD), old_screen_sizes?: [float] (every LOD), applied: bool, saved: bool, save_error?: string } -- settings_applied and mismatched are read back from the first LOD written, mismatched_lods from every one; applied is false (and the call fails) when any differs`
 
 ## `set_skeletal_mesh_material_slot`
 
@@ -2827,10 +2827,10 @@ Assign a material to an existing material slot of a skeletal mesh ASSET (writes 
 |---|---|---|---|
 | `skeletal_mesh_path` | string | yes | Content path to the USkeletalMesh asset. |
 | `material_path` | string | yes | Content path to the UMaterialInterface to assign. |
-| `slot_index` | number | no | Zero-based index of an existing material slot (mutually exclusive with slot_name). |
+| `slot_index` | integer | no | Zero-based index of an existing material slot (mutually exclusive with slot_name). |
 | `slot_name` | string | no | Name of an existing material slot to resolve to its index (mutually exclusive with slot_index). |
 
-**Returns:** `{ skeletal_mesh_path: string, slot_index: int, slot_name: string, material_path: string, saved: bool }`
+**Returns:** `{ skeletal_mesh_path: string, slot_index: int, slot_name: string, material_path: string, applied: bool, saved: bool, save_error?: string } -- material_path is read back from the slot`
 
 ## `set_skeletal_mesh_min_lod`
 
@@ -2841,9 +2841,9 @@ Set the minimum LOD a skeletal mesh asset (found by content path) renders, so th
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `skeletal_mesh_path` | string | yes | Content path to the skeletal mesh asset, e.g. "/Game/Characters/SKM_Hero" |
-| `min_lod` | number | yes | New minimum LOD index, 0-based (must be in [0, NumLODs-1]) |
+| `min_lod` | integer | yes | New minimum LOD index, 0-based (must be in [0, NumLODs-1]) |
 
-**Returns:** `{ skeletal_mesh_path: string, old_min_lod: int, min_lod: int, lod_count: int, applied: bool }`
+**Returns:** `{ skeletal_mesh_path: string, old_min_lod: int, min_lod: int, lod_count: int, applied: bool } -- min_lod is read back (GetMinLodIdx)`
 
 ## `set_skeletal_mesh_section_flags`
 
@@ -2854,14 +2854,14 @@ Turn shadow casting, runtime tangent recomputation (a GPU skin cache feature) an
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `skeletal_mesh_path` | string | yes | Content path to the skeletal mesh asset, e.g. "/Game/Characters/SKM_Hero" |
-| `lod_index` | number | no | 0-based LOD index containing the section (default 0) |
-| `section_index` | number | no | 0-based index of the section within that LOD, as get_skeletal_mesh_section_info lists it (default 0) |
+| `lod_index` | integer | no | 0-based LOD index containing the section (default 0) |
+| `section_index` | integer | no | 0-based index of the section within that LOD, as get_skeletal_mesh_section_info lists it (default 0) |
 | `cast_shadow` | boolean | no | Optional bool: whether the section casts shadows. |
 | `recompute_tangent` | boolean | no | Optional bool: whether the GPU skin cache recomputes the section's tangents at runtime. |
 | `visible_in_ray_tracing` | boolean | no | Optional bool: whether the section is visible in ray tracing (bVisibleInRayTracing). b_visible is accepted as an alias. |
-| `b_visible` | boolean | no |   |
+| `b_visible` | boolean | no | Alias of `visible_in_ray_tracing`: the same value with the same meaning. Pass one of the two. |
 
-**Returns:** `{ skeletal_mesh_path: string, lod_index: int, section_index: int, cast_shadow?: bool, recompute_tangent?: bool, visible_in_ray_tracing?: bool, saved: bool }`
+**Returns:** `{ skeletal_mesh_path: string, lod_index: int, section_index: int, cast_shadow?: bool, recompute_tangent?: bool, visible_in_ray_tracing?: bool, applied: bool, saved: bool, save_error?: string } -- the flags are read back from the section; applied is false (and the call fails) when one differs`
 
 ## `set_skeletal_mesh_socket_parent`
 
@@ -2875,7 +2875,7 @@ Re-parent an existing socket on a skeletal mesh to a different bone. Validates t
 | `socket_name` | string | yes | Name of the socket to re-parent |
 | `parent_bone_name` | string | yes | Bone name to attach the socket to (must exist in skeleton) |
 
-**Returns:** `{ socket_name: string, parent_bone_name: string, skeletal_mesh_path: string, reparented: bool }`
+**Returns:** `{ socket_name: string, parent_bone_name: string, skeletal_mesh_path: string, reparented: bool, saved: bool, save_error?: string } -- parent_bone_name is read back from the socket`
 
 ## `set_skeletal_mesh_socket_transform`
 
@@ -2918,4 +2918,4 @@ Stop montage playback on a skeletal mesh component with Montage_Stop and a 0.25 
 | `montage_path` | string | no | Full asset path of a specific AnimMontage to stop; if omitted, stops all montages (optional) |
 | `world` | string | no | Optional world selector: absent/'editor' (default) \| 'pie' (ambiguous: PlayWorld, else the first PIE context) \| 'server' (the PIE world with authority) \| 'client' \| 'pie:N' \| 'game' (alias of 'pie'). |
 
-**Returns:** `{ component_name: string, was_playing: bool, playing: bool, success: bool, montage_path: string?, montage_name: string?, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }`
+**Returns:** `{ component_name: string, was_playing: bool, playing: bool (true while a stopped montage blends out), stopped: bool (read back: the montage, or every montage, is no longer active; false makes success false), success: bool, error?: string, montage_path: string?, montage_name: string?, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }`

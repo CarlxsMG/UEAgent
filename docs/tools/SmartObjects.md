@@ -42,7 +42,7 @@ Add a behavior definition, a new instance of the class named by behavior_class, 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `definition_path` | string | yes | Path to the USmartObjectDefinition asset |
-| `slot_index` | number | yes | Index of the slot to attach the behavior to |
+| `slot_index` | integer | yes | Index of the slot to attach the behavior to |
 | `behavior_class` | string | yes | Behavior class: short native name (e.g. "GameplayBehaviorSmartObjectBehaviorDefinition") or full /Script path |
 
 **Returns:** `{ definition_path: string, slot_index: int, behavior_class: string, behavior_count: int, saved: bool, save_error?: string }`
@@ -56,7 +56,7 @@ Add an entrance annotation (an entry and/or exit point) to the slot at slot_inde
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `definition_path` | string | yes | Path to the USmartObjectDefinition asset |
-| `slot_index` | number | yes | Index of the slot to add the entrance to |
+| `slot_index` | integer | yes | Index of the slot to add the entrance to |
 | `offset` | array | no | Optional [x, y, z] local-space offset of the entrance |
 | `rotation` | array | no | Optional [pitch, yaw, roll] local-space rotation (degrees) |
 | `is_entry` | boolean | no | Optional: entrance can be used to enter the slot (default true) |
@@ -94,7 +94,7 @@ Create a USmartObjectDefinition asset at package_path/definition_name, or load t
 |---|---|---|---|
 | `definition_name` | string | yes | Name for the new Smart Object definition, also its asset name |
 | `package_path` | string | no | Content folder; defaults to /Game/MCP |
-| `num_activity_slots` | number | no | Slot count to reach, default 1: slots are added until the definition has this many, none are taken away |
+| `num_activity_slots` | integer | no | Slot count to reach, default 1: slots are added until the definition has this many, none are taken away |
 
 **Returns:** `{ definition_path: string, definition_name: string, num_slots: int, created: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
@@ -146,7 +146,7 @@ List a slot's entrance annotations with all their fields (round-trip reader for 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `definition_path` | string | yes | Path to the USmartObjectDefinition asset. |
-| `slot_index` | number | yes | Index of the slot to read. |
+| `slot_index` | integer | yes | Index of the slot to read. |
 
 **Returns:** `{ definition_path: string, slot_index: int, entrance_count: int, entrances: [ { offset: [float], rotation: [float], is_entry: bool, is_exit: bool, tags: [string], trace_ground_location: bool, check_transition_trajectory: bool, selection_priority: string, trajectory_start_height_offset: float, trajectory_slot_height_offset: float, transition_check_radius: float } ] }`
 
@@ -198,7 +198,7 @@ Remove one definition-level default behavior (the ones slots without a behavior 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `definition_path` | string | yes | Path to the USmartObjectDefinition asset |
-| `behavior_index` | number | yes | Index into DefaultBehaviorDefinitions to remove |
+| `behavior_index` | integer | yes | Index into DefaultBehaviorDefinitions to remove |
 
 **Returns:** `{ definition_path: string, behavior_index: int, default_behavior_count: int, removed: bool, already_absent: bool, saved: bool, save_error?: string }`
 
@@ -211,7 +211,7 @@ Remove the slot at slot_index from a USmartObjectDefinition asset, together with
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `definition_path` | string | yes | Path to the USmartObjectDefinition asset |
-| `slot_index` | number | yes | Index of the slot to remove |
+| `slot_index` | integer | yes | Index of the slot to remove |
 
 **Returns:** `{ definition_path: string, slot_index: int, slot_count: int, removed: bool, saved: bool, save_error?: string }`
 
@@ -224,8 +224,8 @@ Remove one behavior definition, found by its position in the slot's BehaviorDefi
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `definition_path` | string | yes | Path to the USmartObjectDefinition asset. |
-| `slot_index` | number | yes | Index of the slot to edit. |
-| `behavior_index` | number | yes | Index into the slot's BehaviorDefinitions to remove. |
+| `slot_index` | integer | yes | Index of the slot to edit. |
+| `behavior_index` | integer | yes | Index into the slot's BehaviorDefinitions to remove. |
 
 **Returns:** `{ definition_path: string, slot_index: int, behavior_index: int, behavior_count: int, removed: bool, already_absent: bool, saved: bool, save_error?: string }`
 
@@ -238,8 +238,8 @@ Remove one entrance annotation (an entry or exit point) from the slot at slot_in
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `definition_path` | string | yes | Path to the USmartObjectDefinition asset |
-| `slot_index` | number | yes | Index of the slot to edit |
-| `entrance_index` | number | yes | Index among the slot's entrance annotations to remove (0-based; entrances only, not all definition data) |
+| `slot_index` | integer | yes | Index of the slot to edit |
+| `entrance_index` | integer | yes | Index among the slot's entrance annotations to remove (0-based; entrances only, not all definition data) |
 
 **Returns:** `{ definition_path: string, slot_index: int, entrance_index: int, entrance_count: int, data_count: int, removed: bool, already_absent: bool, saved: bool, save_error?: string }`
 
@@ -294,7 +294,7 @@ Set the activity tags of the slot at slot_index in a USmartObjectDefinition asse
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `definition_path` | string | yes | Path to the USmartObjectDefinition asset |
-| `slot_index` | number | yes | Index of the slot to edit (from get_smart_object_slots_detail) |
+| `slot_index` | integer | yes | Index of the slot to edit (from get_smart_object_slots_detail) |
 | `activity_tags` | array | no | Gameplay tag names to set as the slot's activity tags; tags not registered are skipped |
 
 **Returns:** `{ definition_path: string, slot_index: int, activity_tags: [string], changed: bool, saved: bool, save_error?: string, note?: string }`
@@ -308,7 +308,7 @@ Set the authored enabled flag (bEnabled) of the slot at slot_index in a USmartOb
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `definition_path` | string | yes | Path to the USmartObjectDefinition asset |
-| `slot_index` | number | yes | Index of the slot to edit |
+| `slot_index` | integer | yes | Index of the slot to edit |
 | `enabled` | boolean | no | Whether the slot is enabled |
 
 **Returns:** `{ definition_path: string, slot_index: int, enabled: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
@@ -322,7 +322,7 @@ Set the initial runtime tags of the slot at slot_index in a USmartObjectDefiniti
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `definition_path` | string | yes | Path to the USmartObjectDefinition asset. |
-| `slot_index` | number | yes | Index of the slot to edit. |
+| `slot_index` | integer | yes | Index of the slot to edit. |
 | `runtime_tags` | array | no | Gameplay tag names to set as the slot's runtime tags. |
 
 **Returns:** `{ definition_path: string, slot_index: int, runtime_tags: [string], changed: bool, saved: bool, save_error?: string, note?: string }`
@@ -336,7 +336,7 @@ Set the local offset and/or rotation (degrees) of the slot at slot_index in a US
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `definition_path` | string | yes | Path to the USmartObjectDefinition asset |
-| `slot_index` | number | yes | Index of the slot to edit |
+| `slot_index` | integer | yes | Index of the slot to edit |
 | `offset` | array | no | Optional [x, y, z] local offset |
 | `rotation` | array | no | Optional [pitch, yaw, roll] local rotation (degrees) |
 
@@ -351,7 +351,7 @@ Replace the user tag filter of the slot at slot_index in a USmartObjectDefinitio
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `definition_path` | string | yes | Path to the USmartObjectDefinition asset |
-| `slot_index` | number | yes | Zero-based index of the slot to edit (see get_smart_object_slots_detail); out of range is an error |
+| `slot_index` | integer | yes | Zero-based index of the slot to edit (see get_smart_object_slots_detail); out of range is an error |
 | `user_tags` | array | no | Gameplay tag names the filter query matches against; unregistered names are skipped, and an empty list clears the filter |
 | `match` | string | no | Match mode: "any" (default), "all", or "none"; any other value is an error |
 

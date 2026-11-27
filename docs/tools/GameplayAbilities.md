@@ -341,7 +341,7 @@ Grant a gameplay ability class to the ability system component of an actor in th
 |---|---|---|---|
 | `actor_name` | string | yes | Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names |
 | `ability_class` | string | yes | Class path of a UGameplayAbility subclass: "/Game/Abilities/GA_Jump.GA_Jump_C" for a Blueprint (note the _C), "/Script/MyGame.MyAbility" for C++; create_gameplay_ability_blueprint makes one. |
-| `level` | number | no | Spec level, a whole number, e.g. 3 (default 1). |
+| `level` | integer | no | Spec level, a whole number, e.g. 3 (default 1). |
 
 **Returns:** `{ actor_name, ability_class, level, granted }`
 
@@ -553,7 +553,7 @@ Set how the modifier at modifier_index of a GameplayEffect Blueprint computes it
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ge_blueprint_path` | string | yes | Asset path of the GameplayEffect Blueprint |
-| `modifier_index` | number | yes | Index of the modifier in the effect's Modifiers |
+| `modifier_index` | integer | yes | Index of the modifier in the effect's Modifiers |
 | `magnitude_type` | string | no | Optional: attribute_based, custom or set_by_caller (replaces the magnitude); omitted keeps it |
 | `backing_attribute` | string | no | attribute_based: the captured attribute, e.g. "MyAttributeSet.Health" |
 | `attribute_source` | string | no | Optional, attribute_based: Source or Target (default Source) |
@@ -598,7 +598,7 @@ Write the stacking policy on the class default object of a GameplayEffect Bluepr
 |---|---|---|---|
 | `ge_blueprint_path` | string | yes | Full asset path of the GE Blueprint. |
 | `stacking_type` | string | yes | None \| AggregateBySource \| AggregateByTarget. |
-| `stack_limit` | number | no | Optional max stack count (int; 0 = no limit). |
+| `stack_limit` | integer | no | Optional max stack count (int; 0 = no limit). |
 | `duration_refresh_policy` | string | no | Optional: RefreshOnSuccessfulApplication \| NeverRefresh. |
 | `period_reset_policy` | string | no | Optional: ResetOnSuccessfulApplication \| NeverReset. |
 

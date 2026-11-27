@@ -33,8 +33,8 @@ Depth-first search of an asset's dependency graph looking for a CYCLE, returning
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `asset_name` | string | yes | Exact asset name or full package name; the bare-name fallback scans /Game only and takes the first match |
-| `max_depth` | number | no | Maximum recursion depth, default 100. Hitting it sets search_limit_reached and makes a `false` answer inconclusive. |
-| `max_visited` | number | no | Maximum total nodes visited, default 10000. Hitting it also sets search_limit_reached. |
+| `max_depth` | integer | no | Maximum recursion depth, default 100. Hitting it sets search_limit_reached and makes a `false` answer inconclusive. |
+| `max_visited` | integer | no | Maximum total nodes visited, default 10000. Hitting it also sets search_limit_reached. |
 | `dependency_type` | string | no | Filter by dependency kind considered at every DFS step: "hard", "soft", or "all" (case-insensitive), default "all" |
 
 **Returns:** `{ asset_name: string, asset_path: string, has_circular_dependency: bool, nodes_visited: int, max_depth_reached: int, search_limit_reached: bool, circular_path: [string] (the cycle itself, its first package repeated at the end), cycle_length: int (packages in the cycle), root_in_cycle: bool, lead_in_path?: [string] (root ... first package of the cycle, when the root only leads into it), suggestion?: string (the edge that closes the cycle), dependency_type: string }`
@@ -52,7 +52,7 @@ Compare the COMPONENT trees of two Blueprints (or of one Blueprint against a com
 | `components_b` | array | no | Alternative to blueprint_b: a prior get_blueprint_components components array (snapshot). A snapshot without transforms reads every transform as changed. |
 | `include_native` | boolean | no | Include native/CDO components on the live side(s) (default true). |
 | `include_inherited` | boolean | no | Include components inherited from ancestor Blueprints (default true). |
-| `max_results` | number | no | Cap on components enumerated per live side, 1..10000 (default 2000). |
+| `max_results` | integer | no | Cap on components enumerated per live side, 1..10000 (default 2000). |
 
 **Returns:** `{ blueprint_a, a_path, blueprint_b, b_path, side_b_source, added:[record], removed:[record], changed:[{name, class, changes:{class?:{a,b}, attach_parent?:{a,b}, attach_socket?:{a,b}, source?:{a,b}, transform?:{a,b}}}], unchanged_count, counts_a:{native,scs,inherited}, counts_b:{...}, truncated, total_differences }`
 
@@ -67,8 +67,8 @@ Structural diff of TWO Blueprints (or AnimBlueprints): parent class, SCS compone
 | `blueprint_a` | string | yes | First Blueprint asset path or short name. |
 | `blueprint_b` | string | yes | Second Blueprint asset path or short name. |
 | `graph_name` | string | no | Optional: diff only this graph, resolved deep on each side (function/event/macro/AnimGraph, a collapsed composite by title, or a path form 'EventGraph > Title'); an empty string means the event graph. A graph missing on either side is an error. |
-| `max_nodes` | number | no | TOTAL cap on nodes examined across every graph (default 20000). When it runs out, the remaining graphs are listed in graphs_not_examined[] instead of being silently reported as identical. |
-| `max_nodes_per_graph` | number | no | Per-graph cap so one fat graph cannot starve the rest (default = max_nodes). |
+| `max_nodes` | integer | no | TOTAL cap on nodes examined across every graph (default 20000). When it runs out, the remaining graphs are listed in graphs_not_examined[] instead of being silently reported as identical. |
+| `max_nodes_per_graph` | integer | no | Per-graph cap so one fat graph cannot starve the rest (default = max_nodes). |
 
 **Returns:** `{ blueprint_a, blueprint_b, a_path, b_path, a_class, b_class, parent_class:{a,b,changed}, components:{added,removed,changed}, variables:{added,removed,changed}, functions:{added,removed,common}, graphs:[{graph_name, nodes_added, nodes_removed, nodes_changed, node_count_a, node_count_b, nodes_examined_a, nodes_examined_b, truncated}], graphs_identical:[string], graphs_not_examined:[{graph_name, reason}], graphs_only_in_a, graphs_only_in_b, truncated, max_nodes, max_nodes_per_graph, nodes_examined, total_differences } -- with graph_name the reply is that one pair instead: { blueprint_a, blueprint_b, a_path, b_path, a_class, b_class, graph_name, resolved_graph_a, resolved_graph_b, node_count_a, node_count_b, nodes_added, nodes_removed, nodes_changed, nodes_examined_a, nodes_examined_b, truncated, max_nodes, total_differences }.`
 
@@ -101,8 +101,8 @@ Scan a content path for Blueprints and AnimBlueprints sitting in a compile ERROR
 | `only_loaded` | boolean | no | When true, only inspect Blueprints already loaded in memory (no disk load). Default false. |
 | `include_warnings` | boolean | no | Also report Blueprints with compile WARNINGS (not just errors). Default false. |
 | `compile_all` | boolean | no | Recompile EVERY scanned Blueprint (thorough but heavy); otherwise only recompile ones whose loaded Status is already Error. Default false. |
-| `max_scan` | number | no | Max Blueprints to load/inspect (default 5000). |
-| `max_results` | number | no | Max erroring/warning Blueprints to return (default 500). |
+| `max_scan` | integer | no | Max Blueprints to load/inspect (default 5000). |
+| `max_results` | integer | no | Max erroring/warning Blueprints to return (default 500). |
 
 **Returns:** `{ path, scanned, inspected, only_loaded, erroring_count, warning_count, results_truncated, blueprints:[{ asset_path, name, class, status, num_errors, num_warnings, first_error }] }`
 
@@ -115,7 +115,7 @@ List every package an asset DEPENDS ON (its outgoing edges), each with its class
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `asset_name` | string | yes | Exact asset name or full package name; the bare-name fallback scans /Game only and stops at the FIRST match, without reporting that others existed |
-| `max_results` | number | no | Maximum dependencies to return, 1..50000 (default 5000). Read `results_truncated` for the real answer: `total_dependencies` counts the RAW registry edges before exclude_engine, so it exceeds dependencies_count on almost every asset without anything having been cut. |
+| `max_results` | integer | no | Maximum dependencies to return, 1..50000 (default 5000). Read `results_truncated` for the real answer: `total_dependencies` counts the RAW registry edges before exclude_engine, so it exceeds dependencies_count on almost every asset without anything having been cut. |
 | `exclude_engine` | boolean | no | Skip /Engine and /Script dependencies, default true. Filtered entries do NOT consume the max_results budget, but they ARE counted in total_dependencies. |
 | `dependency_type` | string | no | Filter by dependency kind: "hard", "soft", or "all" (case-insensitive), default "all" |
 
@@ -136,7 +136,7 @@ List every asset that REFERENCES a target asset -- "who breaks if I delete, move
 | `dependency_type` | string | no | Optional 'hard' \| 'soft' \| 'all' (case-insensitive): which edges count. When given it wins over include_soft_references; when absent, include_soft_references decides (hard, or all). |
 | `include_soft_references` | boolean | no | If true, also include soft referencers (default false -> hard-only). Shorthand for dependency_type='all'. |
 | `exclude_engine` | boolean | no | Optional bool (default false): skip /Engine and /Script referencers. They do not count against max_results, but they do count in total. |
-| `max_results` | number | no | Cap on number of returned referencers (1..50000); defaults to 5000. |
+| `max_results` | integer | no | Cap on number of returned referencers (1..50000); defaults to 5000. |
 
 **Returns:** `{ asset_path, resolved_package, include_soft_references, dependency_type, exclude_engine, total, returned, results_truncated, referencers:[{ package_name, asset_name?, asset_path?, asset_class?, is_loaded? }] } -- total counts every referencer the registry returned, engine ones included; results_truncated says a referencer that would have been listed was left out by max_results; is_loaded is whether the referencing asset is loaded now.`
 
@@ -157,8 +157,8 @@ Per-property PROVENANCE on a Blueprint's component templates: which values this 
 | `include_identical` | boolean | no | Also emit properties that are equal in BOTH the engine comparison and the exported text (default false -- they are the vast majority). |
 | `only_editable` | boolean | no | Only consider CPF_Edit properties (default true). Transient/DuplicateTransient/NonPIEDuplicateTransient/Deprecated are always skipped. |
 | `verify_on_disk` | boolean | no | Cross-check string-ish values against the raw .uasset bytes of the package that owns the template (default false). |
-| `max_components` | number | no | Cap on components enumerated, 1..10000 (default 500). |
-| `max_properties_per_component` | number | no | Cap on properties examined per component, 1..20000 (default 1000). |
+| `max_components` | integer | no | Cap on components enumerated, 1..10000 (default 500). |
+| `max_properties_per_component` | integer | no | Cap on properties examined per component, 1..20000 (default 1000). |
 
 **Returns:** `{ blueprint_name, blueprint_path, other_blueprint?, other_blueprint_path?, baseline_mode, components:[{component, resolved, template_name, template_path, scs_variable_name, component_key_guid, matched_by_scs_node, component_class, source, declaring_class, resolved_from_class, authored_here, baseline_source, baseline_path, baseline_class, component_class_mismatch, properties:[{component, property, property_display, value, baseline_value, inherited_value, inherited_value_available, authored_here, declaring_class, resolved_from_class, template_source, baseline_source, kind, differs, identical_deep, export_text_equal, export_text_value, export_text_baseline, note, on_disk?}], properties_reported, properties_examined, properties_truncated}], components_examined, components_truncated, properties_examined, override_count, noise_count, identical_count, no_baseline_count, on_disk:{found,not_found,not_applicable}, templates_may_be_stale, success }`
 
@@ -174,7 +174,7 @@ Enumerate the COMPLETE component tree of a Blueprint asset -- native components 
 | `include_native` | boolean | no | Include C++/native components from the CDO (default true) |
 | `include_inherited` | boolean | no | Include components inherited from ancestor Blueprint classes (default true) |
 | `component_class` | string | no | Optional class filter (short name, /Script/Module.Class, or /Game/... Blueprint path). Matches this class OR ANY SUBCLASS of it (same semantics as the engine's own GetComponentsByClass), evaluated against every source (native CDO, own SCS, inherited SCS) -- unlike Actor::GetComponentsByClass/K2_GetComponentsByClass, which only ever see a live actor's already-constructed OwnedComponents and are blind to SCS node templates on a Blueprint that hasn't been instantiated yet. |
-| `max_results` | number | no | Cap on components returned, 1..10000 (default 1000) |
+| `max_results` | integer | no | Cap on components returned, 1..10000 (default 1000) |
 
 **Returns:** `{ blueprint_name: string, blueprint_path: string, blueprint_valid: bool, ambiguous_matches?: [string], parent_class: string, parent_class_path: string, components: [{ name, source, class, class_path, owner_class, is_root, is_scene_component, attach_parent, attach_socket, parent_is_native, ich_overridden?, transform?: {loc, rot, scale}, children: [string], category, mobility?, simulates_physics?, collision_enabled?, has_static_mesh?, static_mesh_path?, material_count?, generated_property_exists, scs_cdo_desync }], components_count: int, counts: object, has_simple_construction_script: bool, results_truncated: bool, max_results: int, component_class_filter: string|null, component_class_resolved: bool, desync_count: int, blueprint_status: string, generated_class_available: bool, omitted_duplicate_names: [{name, source, owner_class, shadowed_by?}], omitted_duplicate_count: int, omitted_null_templates: [{name, source, owner_class}], omitted_null_template_count: int, omitted_total: int } -- children names the components attached under a record (same SCS tree, or the CDO's own attach children for a native one); category is the text before the first underscore of the name; mobility only on scene components, simulates_physics/collision_enabled on primitives, has_static_mesh/static_mesh_path/material_count on static mesh components. generated_property_exists (bool|null) and scs_cdo_desync (bool|null): the compiler mints one FObjectProperty per SCS node with the SAME FName as the node (SCS_Node.h, KismetCompiler.cpp), so a MISSING property means the SCS and the compiled class disagree -- the fingerprint of an asset left half-reverted. This tool emits Node->GetVariableName() VERBATIM; it does NOT normalize a trailing digit.`
 
@@ -191,7 +191,7 @@ Report which exec nodes and BRANCHES actually RAN inside a Blueprint at runtime 
 | `object_path` | string | no | Optional live PIE object to set as the debugged instance (arms trace recording). |
 | `set_debug_object` | boolean | no | When object_path is given, call SetObjectBeingDebugged on it. Default true. |
 | `world` | string | no | World to resolve object_path in: absent/'editor' (default) \| 'server' (the PIE world with authority) \| 'client' \| 'pie:N' \| 'pie'/'game'/'runtime' (ambiguous). A fully-qualified PIE object path (...UEDPIE...) resolves regardless of this. |
-| `max_samples` | number | no | Max trace-stack samples to scan (default 500). |
+| `max_samples` | integer | no | Max trace-stack samples to scan (default 500). |
 
 **Returns:** `{ blueprint_name, blueprint_path, debug_object_set, object_path, trace_stack_size, filtered_count, path:[{index, node_id, node_class, node_title, graph, function, context, is_branch, is_function_result, observation_time}], note, world_selector, world_name, world_package, world_type, net_mode, pie_instance (the world of the ARMED debug object; nulls when none was armed) }`
 

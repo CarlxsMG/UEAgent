@@ -99,7 +99,7 @@ Append a new condition node, of the struct named by condition_struct and with th
 |---|---|---|---|
 | `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
 | `state_name` | string | yes | Name of the state owning the transition; the first state with that name in a depth-first walk of the hierarchy is used |
-| `transition_index` | number | yes | 0-based index of the transition within that state (the index field of get_state_tree_info transitions); required |
+| `transition_index` | integer | yes | 0-based index of the transition within that state (the index field of get_state_tree_info transitions); required |
 | `condition_struct` | string | yes | Condition struct name or /Script path; must derive from StateTreeConditionBase (e.g. "StateTreeRandomCondition") |
 
 **Returns:** `{ tree_path, state_name, transition_index, condition_struct, condition_count, added, saved }`
@@ -195,9 +195,9 @@ Dump one condition node of a StateTree state as JSON without changing the asset:
 |---|---|---|---|
 | `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
 | `state_name` | string | yes | Name of the state that owns the condition; the command fails without it. |
-| `condition_index` | number | yes | 0-based index into the selected condition list, as counted by list_conditions or get_state_tree_info (transitions[].condition_count). |
+| `condition_index` | integer | yes | 0-based index into the selected condition list, as counted by list_conditions or get_state_tree_info (transitions[].condition_count). |
 | `target_kind` | string | no | Which list to read: "state" (default, the state EnterConditions) or "transition" (the Conditions of transition transition_index); any other value reads the enter conditions. |
-| `transition_index` | number | no | 0-based index into the state transitions; required when target_kind is "transition" and ignored otherwise. |
+| `transition_index` | integer | no | 0-based index into the state transitions; required when target_kind is "transition" and ignored otherwise. |
 
 **Returns:** `{ tree_path, state_name, target_kind, transition_index, condition_index, class, instance_id, properties: {...} }`
 
@@ -213,8 +213,8 @@ Read one property of a condition node on a StateTree state by reflection, withou
 | `state_name` | string | yes | Name of the state that owns the condition; the command fails without it. |
 | `property` | string | yes | Name of a property on the condition node struct, e.g. "bInvert" on a compare condition; case-insensitive. |
 | `target_kind` | string | no | Which list holds the condition: "state" (default, EnterConditions) or "transition" (Conditions of transition transition_index); any other value means "state". |
-| `condition_index` | number | no | 0-based index into the selected condition list; omitting it fails as out of range. |
-| `transition_index` | number | no | 0-based index into the state transitions; used only when target_kind is "transition", where omitting it fails. |
+| `condition_index` | integer | no | 0-based index into the selected condition list; omitting it fails as out of range. |
+| `transition_index` | integer | no | 0-based index into the state transitions; used only when target_kind is "transition", where omitting it fails. |
 
 **Returns:** `{ tree_path, state_name, target_kind, transition_index, condition_index, property, type, value, has_value }`
 
@@ -228,7 +228,7 @@ Read one utility consideration of a state of a StateTree asset without changing 
 |---|---|---|---|
 | `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as list_state_trees (trees[].path) returns it. |
 | `state_name` | string | yes | Name of the state that owns the consideration; the first state with that name in a depth-first walk is used. |
-| `consideration_index` | number | yes | 0-based index of the consideration in that state, e.g. 0, as list_considerations reports it (index); required. |
+| `consideration_index` | integer | yes | 0-based index of the consideration in that state, e.g. 0, as list_considerations reports it (index); required. |
 
 **Returns:** `{ tree_path, state_name, consideration_index, class, instance_id, properties: {...}, instance_type: string, instance_data: {...} }`
 
@@ -242,7 +242,7 @@ Read one property of a utility consideration node on a StateTree state (consider
 |---|---|---|---|
 | `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
 | `state_name` | string | yes | Name of the state that owns the consideration; the command fails without it. |
-| `consideration_index` | number | yes | 0-based index into the state Considerations, as listed by list_considerations. |
+| `consideration_index` | integer | yes | 0-based index into the state Considerations, as listed by list_considerations. |
 | `property` | string | yes | Name of a property on the consideration node struct; case-insensitive. |
 
 **Returns:** `{ tree_path, state_name, consideration_index, property, type, value, has_value }`
@@ -256,7 +256,7 @@ Dump one tree-scoped evaluator of a StateTree asset as JSON without changing it.
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
-| `evaluator_index` | number | yes | 0-based index into the tree Evaluators, as listed by list_evaluators; out of range is an error. |
+| `evaluator_index` | integer | yes | 0-based index into the tree Evaluators, as listed by list_evaluators; out of range is an error. |
 
 **Returns:** `{ tree_path, evaluator_index, class, instance_id, properties: {...} }`
 
@@ -270,7 +270,7 @@ Read one property of a tree-scoped evaluator node of a StateTree asset (evaluato
 |---|---|---|---|
 | `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
 | `property` | string | yes | Name of a property on the evaluator node struct, e.g. "Name"; case-insensitive. |
-| `evaluator_index` | number | no | 0-based index into the tree Evaluators, as listed by list_evaluators; omitting it fails as out of range. |
+| `evaluator_index` | integer | no | 0-based index into the tree Evaluators, as listed by list_evaluators; omitting it fails as out of range. |
 
 **Returns:** `{ tree_path, evaluator_index, property, type, value, has_value }`
 
@@ -309,7 +309,7 @@ Read one task of a named state in a StateTree asset without changing it: the tas
 |---|---|---|---|
 | `tree_path` | string | yes | Asset path to the UStateTree. |
 | `state_name` | string | yes | Name of the state. |
-| `task_index` | number | yes | 0-based index into State->Tasks. |
+| `task_index` | integer | yes | 0-based index into State->Tasks. |
 
 **Returns:** `{ tree_path, state_name, task_index, class, instance_id, properties: {...} }`
 
@@ -323,7 +323,7 @@ Read one property of a task node on a StateTree state (task_index, from list_tas
 |---|---|---|---|
 | `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
 | `state_name` | string | yes | Name of the state that owns the task; the command fails without it. |
-| `task_index` | number | yes | 0-based index into the state Tasks, as listed by list_tasks. |
+| `task_index` | integer | yes | 0-based index into the state Tasks, as listed by list_tasks. |
 | `property` | string | yes | Name of a property on the task node struct, e.g. "FontScale" on a debug text task; case-insensitive. |
 
 **Returns:** `{ tree_path, state_name, task_index, property, type, value, has_value }`
@@ -455,7 +455,7 @@ Remove one utility consideration, by 0-based index, from the Considerations of o
 |---|---|---|---|
 | `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as list_state_trees (trees[].path) returns it. |
 | `state_name` | string | yes | Name of the state that owns the consideration, as get_state_tree_info lists it; the first state with that name in a depth-first walk is used. |
-| `consideration_index` | number | yes | 0-based index into the state's Considerations, as list_considerations returns it (considerations[].index). |
+| `consideration_index` | integer | yes | 0-based index into the state's Considerations, as list_considerations returns it (considerations[].index). |
 
 **Returns:** `{ tree_path, state_name, consideration_index, removed, remaining, saved, note?, save_error? }`
 
@@ -468,7 +468,7 @@ Remove one evaluator node from a StateTree asset (evaluators are tree-scoped, so
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as list_state_trees (trees[].path) returns it. |
-| `evaluator_index` | number | yes | 0-based index of the evaluator in the tree, e.g. 0, as list_evaluators reports it; required. |
+| `evaluator_index` | integer | yes | 0-based index of the evaluator in the tree, e.g. 0, as list_evaluators reports it; required. |
 
 **Returns:** `{ tree_path, evaluator_index, removed, remaining, saved }`
 
@@ -496,7 +496,7 @@ Remove one enter condition, by index, from a state of a StateTree asset and save
 |---|---|---|---|
 | `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
 | `state_name` | string | yes | Name of the state that owns the condition; the command fails without it. |
-| `condition_index` | number | yes | 0-based index into the state EnterConditions, as listed by list_conditions. |
+| `condition_index` | integer | yes | 0-based index into the state EnterConditions, as listed by list_conditions. |
 
 **Returns:** `{ tree_path, state_name, condition_index, removed, remaining, saved, note }`
 
@@ -510,7 +510,7 @@ Remove one transition, with its conditions, from a state of a StateTree asset by
 |---|---|---|---|
 | `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as list_state_trees (trees[].path) returns it. |
 | `state_name` | string | yes | Name of the state that owns the transition (its from_state); the first state with that name in a depth-first walk is used. |
-| `transition_index` | number | yes | 0-based index of the transition in that state's list, e.g. 0, as get_state_tree_info reports it (transitions[].index); required. |
+| `transition_index` | integer | yes | 0-based index of the transition in that state's list, e.g. 0, as get_state_tree_info reports it (transitions[].index); required. |
 
 **Returns:** `{ tree_path, state_name, transition_index, removed, remaining, saved }`
 
@@ -524,8 +524,8 @@ Remove one condition, by index, from a transition of a StateTree state and save 
 |---|---|---|---|
 | `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
 | `state_name` | string | yes | Name of the state that owns the transition; the command fails without it. |
-| `transition_index` | number | yes | 0-based index into the state transitions, as listed by get_state_tree_info (transitions[].index). |
-| `condition_index` | number | yes | 0-based index into the Conditions of that transition. |
+| `transition_index` | integer | yes | 0-based index into the state transitions, as listed by get_state_tree_info (transitions[].index). |
+| `condition_index` | integer | yes | 0-based index into the Conditions of that transition. |
 
 **Returns:** `{ tree_path, state_name, transition_index, condition_index, removed, remaining, saved, note }`
 
@@ -541,8 +541,8 @@ Remove the property binding whose target is target_property on one node of a Sta
 | `target_kind` | string | yes | Node list of the binding target: "task", "condition" (a state enter condition; "enter_condition" also works), "consideration", "transition" (a transition condition), "global_task" or "evaluator". |
 | `target_property` | string | yes | Property path of the binding target on that node, as list_state_tree_bindings shows it in target_path, e.g. "BindableText". |
 | `state_name` | string | no | Name of the state that owns the target node; needed for the task, condition, consideration and transition kinds. |
-| `transition_index` | number | no | 0-based index into the state transitions; used only by the transition kind. |
-| `target_index` | number | no | 0-based index of the target node in its list, default 0; for the transition kind, the index into the Conditions of that transition. |
+| `transition_index` | integer | no | 0-based index into the state transitions; used only by the transition kind. |
+| `target_index` | integer | no | 0-based index of the target node in its list, default 0; for the transition kind, the index into the Conditions of that transition. |
 
 **Returns:** `{ tree_path, target_kind, state_name?, target_index, target_property, target_struct_id, removed, removed_count, remaining, saved }`
 
@@ -555,7 +555,7 @@ Remove one global task node (a task of the whole tree, not of a state) from a St
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as list_state_trees (trees[].path) returns it. |
-| `global_task_index` | number | yes | 0-based index of the global task, e.g. 0, as list_state_tree_global_tasks reports it (global_tasks[].index); required. |
+| `global_task_index` | integer | yes | 0-based index of the global task, e.g. 0, as list_state_tree_global_tasks reports it (global_tasks[].index); required. |
 
 **Returns:** `{ tree_path, global_task_index, removed, remaining, saved }`
 
@@ -582,7 +582,7 @@ Remove one task node from a state of a StateTree asset by its 0-based index, in 
 |---|---|---|---|
 | `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard", as list_state_trees (trees[].path) returns it. |
 | `state_name` | string | yes | Name of the state that owns the task; the first state with that name in a depth-first walk is used. |
-| `task_index` | number | yes | 0-based index of the task in that state, e.g. 0, as list_tasks reports it (tasks[].index); required. |
+| `task_index` | integer | yes | 0-based index of the task in that state, e.g. 0, as list_tasks reports it (tasks[].index); required. |
 
 **Returns:** `{ tree_path, state_name, task_index, removed, remaining, saved }`
 
@@ -599,8 +599,8 @@ Write one property of a condition node on a StateTree state by reflection and sa
 | `property` | string | yes | Name of a property on the condition node struct, e.g. "bInvert" on a compare condition; case-insensitive. |
 | `value` | any | yes | New value as JSON: a number, bool or string, or an object for a struct property, applied through FJsonObjectConverter. |
 | `target_kind` | string | no | Which list holds the condition: "state" (default, EnterConditions) or "transition" (Conditions of transition transition_index); any other value means "state". |
-| `transition_index` | number | no | 0-based index into the state transitions; used only when target_kind is "transition", where omitting it fails. |
-| `condition_index` | number | no | 0-based index into the selected condition list; omitting it fails as out of range. |
+| `transition_index` | integer | no | 0-based index into the state transitions; used only when target_kind is "transition", where omitting it fails. |
+| `condition_index` | integer | no | 0-based index into the selected condition list; omitting it fails as out of range. |
 
 **Returns:** `{ tree_path, state_name, target_kind, transition_index, condition_index, property, set, value_changed, saved, new_value?, save_error? }`
 
@@ -614,7 +614,7 @@ Write one property of a utility consideration node of a StateTree state (state_n
 |---|---|---|---|
 | `tree_path` | string | yes | Asset path to the UStateTree. |
 | `state_name` | string | yes | Name of the state. |
-| `consideration_index` | number | yes | 0-based index into State->Considerations. |
+| `consideration_index` | integer | yes | 0-based index into State->Considerations. |
 | `property` | string | yes | FProperty name on the consideration struct. |
 | `value` | any | yes | JSON value to apply (any FJsonObjectConverter-supported type). |
 
@@ -629,7 +629,7 @@ Write one property of a tree-scoped evaluator node of a StateTree asset (evaluat
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
-| `evaluator_index` | number | yes | 0-based index into the tree Evaluators, as listed by list_evaluators; out of range is an error. |
+| `evaluator_index` | integer | yes | 0-based index into the tree Evaluators, as listed by list_evaluators; out of range is an error. |
 | `property` | string | yes | Name of a property on the evaluator node struct; case-insensitive. |
 | `value` | any | yes | New value as JSON: a number, bool or string, or an object for a struct property, applied through FJsonObjectConverter. |
 
@@ -673,7 +673,7 @@ Update any subset of the fields of an existing transition of a state of a StateT
 |---|---|---|---|
 | `tree_path` | string | yes | Asset path of the UStateTree |
 | `state_name` | string | yes | State that owns the transition; the first state with that name in a depth-first walk of the hierarchy is used |
-| `transition_index` | number | yes | Index into the state's Transitions array (0-based, transitions[].index of get_state_tree_info); required |
+| `transition_index` | integer | yes | Index into the state's Transitions array (0-based, transitions[].index of get_state_tree_info); required |
 | `trigger` | string | no | Optional EStateTreeTransitionTrigger name (None\|OnStateCompleted\|OnStateTick\|OnEvent\|OnDelta\|...) |
 | `priority` | string | no | Optional EStateTreeTransitionPriority name (Lowest\|Low\|Normal\|High\|Highest) |
 | `transition_type` | string | no | Optional EStateTreeTransitionType name (None\|Succeeded\|Failed\|GotoState\|Parent\|NextState\|NextSelectableState\|NextParent\|NextSelectableParent) |
@@ -712,7 +712,7 @@ Write one property of an existing global task's node struct in a StateTree asset
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
-| `global_task_index` | number | yes | 0-based index into the tree GlobalTasks, as listed by list_state_tree_global_tasks; out of range is an error. |
+| `global_task_index` | integer | yes | 0-based index into the tree GlobalTasks, as listed by list_state_tree_global_tasks; out of range is an error. |
 | `property` | string | yes | Name of a property on the global task node struct, e.g. "FontScale" on a debug text task; case-insensitive. |
 | `value` | any | yes | New value as JSON: a number, bool or string, or an object for a struct property, applied through FJsonObjectConverter. |
 
@@ -787,7 +787,7 @@ Write one property of a task's node struct on a StateTree state (state_name + ta
 |---|---|---|---|
 | `tree_path` | string | yes | Asset path to the UStateTree. |
 | `state_name` | string | yes | Name of the state. |
-| `task_index` | number | yes | 0-based index into State->Tasks. |
+| `task_index` | integer | yes | 0-based index into State->Tasks. |
 | `property` | string | yes | FProperty name on the task struct. |
 | `value` | any | yes | JSON value to apply (any FJsonObjectConverter-supported type). |
 

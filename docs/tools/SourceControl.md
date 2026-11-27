@@ -66,7 +66,7 @@ Read the revision history of one file from revision control, newest first: revis
 |---|---|---|---|
 | `asset_path` | string | no | Content path of the asset. This or file is required. |
 | `file` | string | no | Disk path of another file, absolute or relative to the project folder. This or asset_path is required. |
-| `max_results` | number | no | Optional cap on the revisions returned. Default 20. |
+| `max_results` | integer | no | Optional cap on the revisions returned. Default 20. |
 
 **Returns:** `{ provider: string, enabled: bool, available: bool, file?: string, revisions: [{revision, user, date, description, changelist}], count: int, truncated?: bool, note?: string }`
 
@@ -99,7 +99,7 @@ List the files under a content folder that have local changes in revision contro
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `path` | string | no | Optional content folder. Default /Game. |
-| `max_results` | number | no | Optional cap on the rows returned. Default 500. |
+| `max_results` | integer | no | Optional cap on the rows returned. Default 500. |
 
 **Returns:** `{ provider: string, enabled: bool, available: bool, path: string, files: [{file, asset_path?, status, source_controlled, checked_out, checked_out_by_other, other_user, added, deleted, modified, current, conflicted, ignored, can_checkout, can_checkin, can_add}], count: int, truncated: bool, note?: string }`
 

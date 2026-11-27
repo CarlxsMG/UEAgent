@@ -35,7 +35,7 @@ Add a new socket to a UStaticMesh asset (package or object path) with an optiona
 | `scale` | array | no | Socket relative scale as [x, y, z] (optional; defaults to 1,1,1) |
 | `tag` | string | no | Free-form socket tag string (optional) |
 
-**Returns:** `{ socket_name, socket_count, location_x, location_y, location_z, scale_x, scale_y, scale_z, tag }`
+**Returns:** `{ static_mesh_path, socket_name, socket_count, location_x, location_y, location_z, scale_x, scale_y, scale_z, tag, added, saved, save_error? } -- added is read back (the name resolves to the new socket)`
 
 ## `clear_render_target`
 
@@ -150,8 +150,8 @@ Create a UTexture2D asset filled with one solid color, with no source file: it a
 |---|---|---|---|
 | `name` | string | yes | Asset name of the texture, no folder, e.g. "T_Mask_White". |
 | `package_path` | string | no | Content folder as a long package path, e.g. "/Game/Textures/Placeholders" (default /Game/Textures; one trailing slash is dropped). |
-| `width` | number | no | Width in pixels, a whole number clamped to 1..8192 (default 64). |
-| `height` | number | no | Height in pixels, a whole number clamped to 1..8192 (default 64). |
+| `width` | integer | no | Width in pixels, a whole number clamped to 1..8192 (default 64). |
+| `height` | integer | no | Height in pixels, a whole number clamped to 1..8192 (default 64). |
 | `fill_color` | array | no | [R, G, B, A] as 0-255 numbers, each rounded and clamped, e.g. [255, 0, 0, 255] for opaque red; missing trailing entries keep the default 255 (opaque white). |
 
 **Returns:** `{ texture_name: string, asset_path: string, created: bool, saved: bool, width: int, height: int, format: string, has_source: bool, fill_color: [int, int, int, int], save_error?: string, existing_class?: string }`
@@ -303,7 +303,7 @@ Examples: {"search_pattern": "Grass"} finds every name that contains Grass, in a
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `search_pattern` | string | yes | Matched against the asset NAME. Contains no `*`/`?` -> case-insensitive substring (FString::Contains). Contains `*` or `?` -> glob (FString::MatchesWildcard), ANCHORED at both ends: `*` matches any run including empty, `?` matches 0 or 1 character (UE semantics, not exactly 1). Not a regex. |
-| `max_results` | number | no | Cap on number of matched assets (1..50000); defaults to 1000. WARNING: Hitting the cap ABORTS the enumeration, so `total_scanned` then counts only the assets visited before the early-out, not the whole registry. |
+| `max_results` | integer | no | Cap on number of matched assets (1..50000); defaults to 1000. WARNING: Hitting the cap ABORTS the enumeration, so `total_scanned` then counts only the assets visited before the early-out, not the whole registry. |
 | `case_sensitive` | boolean | no | When true, match is case-sensitive; defaults to false |
 | `wait_for_scan` | boolean | no | When true (default), force-completes the AssetRegistry scan before enumerating so a still-loading registry cannot report total_scanned:0. Set false to skip the (possibly blocking) wait. |
 
@@ -409,7 +409,7 @@ Batch variant of get_asset_by_name: resolve N asset names in ONE round-trip inst
 | `asset_names` | array | yes | Array of exact asset names, full package names or object paths to resolve (required) |
 | `load_full_data` | boolean | no | When true, adds the type-specific details of get_asset_by_name per asset. Defaults to FALSE here -- the opposite of the single-asset tool -- so a batch call cannot accidentally force N synchronous loads. |
 | `include_tags` | boolean | no | Optional bool, default false: add each found asset's Asset Registry `tags` [{ name, value }], as get_asset_by_name include_tags does. |
-| `max_results` | number | no | Optional safety cap on how many array entries get processed (1..5000); omitted processes every entry. Entries past the cap are dropped and results_truncated goes true. |
+| `max_results` | integer | no | Optional safety cap on how many array entries get processed (1..5000); omitted processes every entry. Entries past the cap are dropped and results_truncated goes true. |
 
 **Returns:** `{ requested_count: int, processed_count: int, results_truncated: bool, resolved: [{ asset_name, found: bool, name?, class?, path?, package?, is_loaded?, tags?, ambiguous_matches?, error?, ... (same fields as get_asset_by_name when found) }] }`
 
@@ -426,7 +426,7 @@ Search assets BY an Asset Registry tag (FARFilter::TagsAndValues), server-side a
 | `folder_path` | string | no | Root package path to search under; defaults to "/Game", so /Engine, /Water and plugin mounts need their root passed explicitly |
 | `recursive` | boolean | no | When true (DEFAULT), recurse into subfolders |
 | `class_filter` | string | no | Optional class short name or /Script path (e.g. "Blueprint", "/Script/Engine.DataTable") to additionally constrain the match; subclasses match too (bRecursiveClasses) |
-| `max_results` | number | no | Cap on number of returned assets (1..50000); defaults to 1000. `total_found` is the uncapped count. |
+| `max_results` | integer | no | Cap on number of returned assets (1..50000); defaults to 1000. `total_found` is the uncapped count. |
 
 **Returns:** `{ tag_name: string, tag_value: string, folder_path: string, recursive: bool, class_filter: string, assets: [{ name, path, class, package }], count: int, total_found: int, max_results: int, results_truncated: bool }`
 
@@ -440,7 +440,7 @@ List every asset of a CLASS under a content path, with name, object path, class,
 |---|---|---|---|
 | `asset_type` | string | yes | A class name ("DataTable"), a "/Script/Module.Class" path, or one of the shortcuts Blueprint \| StaticMesh \| Material \| Texture \| Sound. A name that resolves to no class is an error, not an empty result. WARNING: The shortcuts match those classes EXACTLY (Texture finds Texture2D but not TextureCube); any other name matches the class AND its subclasses. |
 | `package_path` | string | no | Content root to search, recursively. Defaults to "/Game"; pass "/Engine", "/Water", a plugin mount or a subfolder to look elsewhere. |
-| `max_results` | number | no | Cap on number of returned assets (1..50000); defaults to 1000. `total_found` is the uncapped count. |
+| `max_results` | integer | no | Cap on number of returned assets (1..50000); defaults to 1000. `total_found` is the uncapped count. |
 
 **Returns:** `{ assets: [{ name, path, class, package, is_loaded }], count: int, total_found: int, asset_type: string, package_path: string, max_results: int, results_truncated: bool }`
 
@@ -453,7 +453,7 @@ Enumerate every asset under a content FOLDER (recursively by default), each with
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `folder_path` | string | yes | Folder to list. A bare/relative name is prefixed with /Game/; a path already starting with "/" (e.g. /Water/Materials, /Engine/..., /&lt;PluginName>/...) is used verbatim, so every mounted content root is reachable. |
-| `max_results` | number | no | Cap on number of returned assets (1..50000); defaults to 1000. Compare `count` against `total_found` (which is NOT capped) to see how much was left out. |
+| `max_results` | integer | no | Cap on number of returned assets (1..50000); defaults to 1000. Compare `count` against `total_found` (which is NOT capped) to see how much was left out. |
 | `recursive` | boolean | no | When true (DEFAULT), include subfolders; false lists only the assets sitting directly in this folder |
 
 **Returns:** `{ assets: [{ name, path, class, package, is_loaded }], count: int, total_found: int, folder_path: string, recursive: bool, max_results: int, results_truncated: bool }`
@@ -654,7 +654,7 @@ Remove one socket, found by name, from a UStaticMesh asset loaded from its packa
 | `static_mesh_path` | string | yes | Package or object path of the UStaticMesh, e.g. "/Game/Meshes/SM_Crate". |
 | `socket_name` | string | yes | Name of the socket to remove, compared as an FName (case-insensitive). |
 
-**Returns:** `{ static_mesh_path, socket_name, removed, socket_count }`
+**Returns:** `{ static_mesh_path, socket_name, removed, socket_count, saved?, save_error? } -- removed is read back (the socket is no longer in the mesh's list)`
 
 ## `rename_assets`
 
@@ -683,7 +683,7 @@ Rename an existing static mesh socket (guards against name collisions; idempoten
 | `socket_name` | string | yes | Current name of the socket to rename. |
 | `new_name` | string | yes | New name for the socket. |
 
-**Returns:** `{ static_mesh_path, old_name, new_name, renamed, socket_count, saved }`
+**Returns:** `{ static_mesh_path, old_name, new_name, renamed, already_named?, socket_count, saved, save_error? } -- renamed is read back (new_name resolves to the socket)`
 
 ## `resolve_asset_by_name`
 
@@ -737,7 +737,7 @@ Set the collision complexity (BodySetup CollisionTraceFlag) of a UStaticMesh ass
 | `static_mesh_path` | string | yes | Content path to the UStaticMesh asset. |
 | `complexity` | string | yes | One of "default", "simple_and_complex", "simple_as_complex", "complex_as_simple", case-insensitive; any other value is stored as default. |
 
-**Returns:** `{ static_mesh_path, collision_complexity, saved }`
+**Returns:** `{ static_mesh_path, collision_complexity, applied, saved, save_error? }`
 
 ## `set_static_mesh_lightmap`
 
@@ -748,8 +748,8 @@ Sets the lightmap resolution and/or the lightmap UV channel index stored on a st
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `static_mesh_path` | string | yes | Package or object path of the UStaticMesh asset (e.g. "/Game/Props/SM_Crate"). |
-| `lightmap_resolution` | number | no | Optional lightmap texture size in texels per side, a whole number such as 64, 128 or 256 (powers of two are the usual choice); omitted, it stays as it is. |
-| `lightmap_coordinate_index` | number | no | Optional 0-based UV channel the lightmap uses (typically 1); it should name a channel the mesh has (list_uv_channels), since it is not checked. Omitted, it stays as it is. |
+| `lightmap_resolution` | integer | no | Optional lightmap texture size in texels per side, a whole number such as 64, 128 or 256 (powers of two are the usual choice); omitted, it stays as it is. |
+| `lightmap_coordinate_index` | integer | no | Optional 0-based UV channel the lightmap uses (typically 1); it should name a channel the mesh has (list_uv_channels), since it is not checked. Omitted, it stays as it is. |
 
 **Returns:** `{ static_mesh_path, lightmap_resolution, lightmap_coordinate_index, applied_count, saved, save_error? }`
 
@@ -762,16 +762,16 @@ Assign a material to one existing material slot of a UStaticMesh asset, picked b
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `static_mesh_path` | string | yes | Content path to the UStaticMesh asset. |
-| `material_index` | number | yes | Zero-based index of an existing material slot. |
+| `material_index` | integer | yes | Zero-based index of an existing material slot. |
 | `material_path` | string | yes | Content path to the UMaterialInterface to assign. |
 
-**Returns:** `{ static_mesh_path, material_index, material_path, saved }`
+**Returns:** `{ static_mesh_path, material_index, material_path, applied, saved, save_error? } -- applied is false, and the call fails, when the slot reads back another material`
 
 ## `set_static_mesh_nanite`
 
 *Destructive, idempotent.*
 
-Set the Nanite settings of a UStaticMesh asset through the StaticMeshEditor subsystem, which rebuilds the mesh, then save it; a failed save is an error. Both fields are always written: omitting enabled disables Nanite and omitting keep_percent_triangles resets it to 1.0. Returns nanite_enabled read back.
+Set the Nanite settings of a UStaticMesh asset through the StaticMeshEditor subsystem, which rebuilds the mesh, then save it; a failed save is an error. Both fields are always written: omitting enabled disables Nanite and omitting keep_percent_triangles resets it to 1.0. nanite_enabled and keep_percent_triangles are read back; applied is false, and the call fails, when either differs from the request.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -779,7 +779,7 @@ Set the Nanite settings of a UStaticMesh asset through the StaticMeshEditor subs
 | `enabled` | boolean | no | true enables Nanite, false disables it; default false, so leaving it out disables Nanite. |
 | `keep_percent_triangles` | number | no | Fraction of the source triangles Nanite keeps, 1.0 keeps them all (default 1.0, written even when omitted). |
 
-**Returns:** `{ static_mesh_path, nanite_enabled, saved }`
+**Returns:** `{ static_mesh_path, nanite_enabled, keep_percent_triangles, applied, saved, save_error? }`
 
 ## `set_static_mesh_socket_transform`
 
@@ -795,4 +795,4 @@ Move, rotate or scale an existing socket of a UStaticMesh asset relative to the 
 | `rotation` | array | no | New relative rotation [pitch, yaw, roll] in degrees, e.g. [0, 90, 0] (optional). |
 | `scale` | array | no | New relative scale [x, y, z] as multipliers, e.g. [1, 1, 1] (optional). |
 
-**Returns:** `{ static_mesh_path, socket_name, updated, location:{x,y,z}, rotation:{pitch,yaw,roll}, scale:{x,y,z}, saved }`
+**Returns:** `{ static_mesh_path, socket_name, updated, location:{x,y,z}, rotation:{pitch,yaw,roll}, scale:{x,y,z}, saved, save_error? } -- updated is read back (each given field matches the socket)`

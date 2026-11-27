@@ -15,7 +15,7 @@ Delete the save file of a slot with DeleteGameInSlot; the data is gone for good.
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `slot_name` | string | yes | Save slot name to delete |
-| `user_index` | number | no | Platform user index for the save system; default 0 (the generic desktop save system ignores it) |
+| `user_index` | integer | no | Platform user index for the save system; default 0 (the generic desktop save system ignores it) |
 
 **Returns:** `{ slot_name: string, user_index: int, success: bool, message: string }`
 
@@ -28,7 +28,7 @@ Read the file facts of one save slot without loading or changing it: exists (UGa
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `slot_name` | string | yes | Exact save slot name, e.g. "Slot1", as list_save_games returns it; on desktop it is the file name without .sav. |
-| `user_index` | number | no | Platform user index, a whole number (default 0); the generic desktop save system ignores it. |
+| `user_index` | integer | no | Platform user index, a whole number (default 0); the generic desktop save system ignores it. |
 
 **Returns:** `{ slot_name: string, user_index: int, exists: bool, save_path?: string, file_size?: int, modified_iso?: string, modified_ticks?: int, error?: string }`
 
@@ -40,7 +40,7 @@ List the save slots the platform's save system knows for a user index: on deskto
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `user_index` | number | no | Optional user index, default 0. Passed to the platform's save system; the generic desktop one keeps every user's slots in one folder, so there it changes nothing. |
+| `user_index` | integer | no | Optional user index, default 0. Passed to the platform's save system; the generic desktop one keeps every user's slots in one folder, so there it changes nothing. |
 
 **Returns:** `{ user_index: int, save_directory: string, save_games: [{ slot_name, file_path?, file_size? }], count: int, slot_folders: [{ folder, sav_files }] (subfolders of save_directory holding .sav files, searched recursively) }`
 
@@ -53,7 +53,7 @@ Load the SaveGame stored in a slot with LoadGameFromSlot and report the transien
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `slot_name` | string | yes | Save slot name to load from |
-| `user_index` | number | no | Platform user index for the save system; default 0 (the generic desktop save system ignores it) |
+| `user_index` | integer | no | Platform user index for the save system; default 0 (the generic desktop save system ignores it) |
 | `save_game_class` | string | no | Optional SaveGame subclass the slot is expected to hold. A slot file records its own class and is rebuilt as that; when the loaded object is not this class (or a child of it) the load is reported as failed. An unknown class name is an error. |
 
 **Returns:** `{ slot_name: string, user_index: int, success: bool, save_game_instance: string, save_game_class: string, save_game_path: string, expected_class?: string, error: string }`
@@ -91,7 +91,7 @@ Write a NEW SaveGame object holding its class defaults, of save_game_class (defa
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `slot_name` | string | yes | Save slot name, e.g. "Slot1"; on desktop it is the file name Saved/SaveGames/&lt;slot_name>.sav. list_save_games shows the slots that exist |
-| `user_index` | number | no | Platform user index for the save system; default 0 (the generic desktop save system ignores it) |
+| `user_index` | integer | no | Platform user index for the save system; default 0 (the generic desktop save system ignores it) |
 | `save_game_class` | string | no | Name of a loaded, concrete USaveGame subclass, e.g. "MySaveGame", or "BP_MySave_C" for a Blueprint one already loaded (found with FindFirstObject, never loaded from disk); default UMCPSaveGame |
 
 **Returns:** `{ slot_name: string, user_index: int, success: bool, message: string }`

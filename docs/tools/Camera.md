@@ -41,7 +41,7 @@ Populates the Children of a composite rig node (the rig RootNode must be a UArra
 |---|---|---|---|
 | `camera_rig_path` | string | yes | /Game/... path to the UCameraRigAsset whose composite RootNode is edited (required) |
 | `child_node_type` | string | yes | A concrete UCameraNode subclass name for the new child, e.g. "OffsetCameraNode", "FieldOfViewCameraNode" (required) |
-| `index` | number | no | Optional child slot. If given and &lt; current child count, REPLACES that slot (deterministic re-runs); otherwise appends. |
+| `index` | integer | no | Optional child slot. If given and &lt; current child count, REPLACES that slot (deterministic re-runs); otherwise appends. |
 
 **Returns:** `{ camera_rig_path, child_node_type, child_class, child_index, children_count, added, replaced, saved, save_error }`
 
@@ -180,7 +180,7 @@ List the camera actors (ACameraActor or CineCameraActor) in the editor world wit
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `max_results` | number | no | Maximum number of cameras to return (optional, default 1000, valid 1-10000) |
+| `max_results` | integer | no | Maximum number of cameras to return (optional, default 1000, valid 1-10000) |
 | `camera_name` | string | no | Optional camera to report alone, matched by actor name or label; a camera without a camera component reports fov 90 |
 
 **Returns:** `{ cameras: [{ name: string, label: string, is_valid: bool, location: [number, number, number], rotation: [number, number, number], fov: number? }], total_count: number, max_results: number, truncated: bool, camera_name?: string }`
@@ -204,7 +204,7 @@ Remove the child at index from the composite ArrayCameraNode root of a camera ri
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `camera_rig_path` | string | yes | /Game/... path to the UCameraRigAsset whose composite RootNode is edited (required) |
-| `index` | number | yes | Index of the child to remove (get_camera_rig_nodes lists them) (required) |
+| `index` | integer | yes | Index of the child to remove (get_camera_rig_nodes lists them) (required) |
 
 **Returns:** `{ camera_rig_path, index, removed_class, removed, children_count, children:[string], saved, save_error }`
 

@@ -242,6 +242,6 @@ Run DoSpawning on an editor-world AMassSpawner found by actor_label and report t
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_label` | string | yes | Editor label of the AMassSpawner actor |
-| `count` | number | no | Optional; must equal the spawner's own count (set_mass_spawner_count), which is what DoSpawning spawns. Any other value is an error and nothing is spawned. |
+| `count` | integer | no | Optional; must equal the spawner's own count (set_mass_spawner_count), which is what DoSpawning spawns. Any other value is an error and nothing is spawned. |
 
 **Returns:** `{ actor_label, entity_count_before, entity_count_after, spawned, spawner_count, note }`

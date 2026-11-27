@@ -83,7 +83,7 @@ Read ONE COLUMN ACROSS ALL ROWS of a UChooserTable, plus that column's DefaultRo
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `table_path` | string | yes | Long package path of an existing UChooserTable. |
-| `column_index` | number | yes | 0-based column index to read. |
+| `column_index` | integer | yes | 0-based column index to read. |
 
 **Returns:** `{ table_path, column_index, column_type, row_count, default: {<typed>}|null, row_values: [{<typed>}] }`
 
@@ -96,7 +96,7 @@ Read ONE ROW ACROSS ALL COLUMNS of a UChooserTable, as typed cells -- the row-wi
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `table_path` | string | yes | Long package path of an existing UChooserTable. |
-| `row_index` | number | yes | 0-based row index to read across all columns. |
+| `row_index` | integer | yes | 0-based row index to read across all columns. |
 
 **Returns:** `{ table_path, row_index, row_count, cells: [{ column_index, column_type, <typed fields> }] }`
 
@@ -133,7 +133,7 @@ Remove a column from a UChooserTable by index (inverse of add_chooser_column). T
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `table_path` | string | yes | Long package path of an existing UChooserTable. |
-| `column_index` | number | no | Optional 0-based column index (default -1 = last column). |
+| `column_index` | integer | no | Optional 0-based column index (default -1 = last column). |
 
 **Returns:** `{ table_path, removed_column_index, previous_column_count, new_column_count, column_type, saved, save_error?, note? }`
 
@@ -146,7 +146,7 @@ Remove one implicit row from a UChooserTable (inverse of add_chooser_row). A cho
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `table_path` | string | yes | Long package path of an existing UChooserTable. |
-| `row_index` | number | no | Optional 0-based row index to remove (default: last row). |
+| `row_index` | integer | no | Optional 0-based row index to remove (default: last row). |
 
 **Returns:** `{ table_path, removed_row_index, previous_row_count, new_row_count, saved, save_error?, note? }`
 
@@ -159,8 +159,8 @@ Set the cell of one existing row in one column of a UChooserTable -- a filter ce
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `table_path` | string | yes | Long package path of an existing UChooserTable. |
-| `row_index` | number | yes | 0-based row whose cell to set (get_chooser_table_info gives the row count). |
-| `column_index` | number | yes | 0-based column of the cell. |
+| `row_index` | integer | yes | 0-based row whose cell to set (get_chooser_table_info gives the row count). |
+| `column_index` | integer | yes | 0-based column of the cell. |
 | `min` | number | no | FloatRange column: lower bound of the row's float range. |
 | `max` | number | no | FloatRange column: upper bound of the row's float range. |
 | `b_no_min` | boolean | no | FloatRange column: when true, the range has no lower bound. |
@@ -182,7 +182,7 @@ Set the DefaultRowValue of one UChooserTable column, the cell value rows appende
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `table_path` | string | yes | Long package path of an existing UChooserTable. |
-| `column_index` | number | yes | 0-based column index to update. |
+| `column_index` | integer | yes | 0-based column index to update. |
 | `min` | number | no | FloatRange column: default lower bound of the row's float range. |
 | `max` | number | no | FloatRange column: default upper bound of the row's float range. |
 | `b_no_min` | boolean | no | FloatRange column: when true, disables the lower bound (row matches any value &lt;= max). |
@@ -204,7 +204,7 @@ Sets the result a Chooser Table row returns -- the row's entry in the table's re
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `table_path` | string | yes | Long package path of an existing UChooserTable (e.g. "/Game/Choosers/CT_Locomotion"), as list_chooser_tables lists it. |
-| `row_index` | number | yes | 0-based row index, below the table's result count (results_count in get_chooser_table_info). |
+| `row_index` | integer | yes | 0-based row index, below the table's result count (results_count in get_chooser_table_info). |
 | `asset_path` | string | yes | Long package path (e.g. "/Game/Anims/AS_Run") or object path of the asset the row returns; on a Class table a class path or a Blueprint. It must load, or the call is refused. |
 
 **Returns:** `{ table_path: string, row_index: int, asset_path: string, result_type: "Object"|"Class", result_struct: string, already_existed: bool, saved: bool, save_error?: string } -- asset_path is what the row now returns, read back from its result entry`

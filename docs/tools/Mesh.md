@@ -15,7 +15,7 @@ Empty the geometry of one section, or drop every section, of a UProceduralMeshCo
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_label` | string | yes | Editor label of the actor carrying the PMC |
-| `component_index` | number | no | Optional 0-based PMC index on the actor; defaults to 0 |
+| `component_index` | integer | no | Optional 0-based PMC index on the actor; defaults to 0 |
 | `section_index` | number | no | Optional 0-based section to empty; omit it, or pass -1, to drop all sections |
 
 **Returns:** `{ actor_label: string, section_cleared: int, remaining_sections: int }`
@@ -29,7 +29,7 @@ Generate a box mesh via UKismetProceduralMeshLibrary::GenerateBoxMesh and push i
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_label` | string | yes | Editor label of the actor carrying the PMC |
-| `component_index` | number | no | Optional 0-based PMC index on the actor; defaults to 0 |
+| `component_index` | integer | no | Optional 0-based PMC index on the actor; defaults to 0 |
 | `section_index` | number | no | Optional target section index, 0 to the current section count (which appends a new section); defaults to 0 |
 | `box_radius` | array | no | Optional [x, y, z] half-extents; defaults to (50, 50, 50) |
 | `create_collision` | boolean | no | Optional bool; defaults to false |
@@ -45,7 +45,7 @@ Build a flat welded grid of num_x by num_y vertices spaced grid_spacing apart, c
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_label` | string | yes | Editor label of the actor carrying the PMC |
-| `component_index` | number | no | Optional 0-based PMC index on the actor; defaults to 0 |
+| `component_index` | integer | no | Optional 0-based PMC index on the actor; defaults to 0 |
 | `section_index` | number | no | Optional target section index, 0 to the current section count (which appends a new section); defaults to 0 |
 | `num_x` | number | no | Optional vertex count along X (the grid has num_x - 1 cells; below 2 there is no geometry); defaults to 10; num_x * num_y at most 1000000 |
 | `num_y` | number | no | Optional vertex count along Y (the grid has num_y - 1 cells; below 2 there is no geometry); defaults to 10; num_x * num_y at most 1000000 |
@@ -76,7 +76,7 @@ Read a summary of one procedural mesh component on an editor-world actor, withou
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_label` | string | yes | Editor label of the actor carrying the component (whole label, case-insensitive; the object name is not matched), as create_procedural_mesh_component set it, e.g. "ProcMeshActor". |
-| `component_index` | number | no | Optional 0-based index among the actor's procedural mesh components, in component order (default 0); most actors have only one. |
+| `component_index` | integer | no | Optional 0-based index among the actor's procedural mesh components, in component order (default 0); most actors have only one. |
 
 **Returns:** `{ actor_label: string, num_sections: int, use_complex_as_simple_collision: bool, use_async_cooking: bool, sections: [{ index: int, vertex_count: int, triangle_count: int, visible: bool, collision_enabled: bool }] }`
 
@@ -89,8 +89,8 @@ Read back the raw geometry (vertices, triangles, normals, UV0, tangents, colors)
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_label` | string | yes | Editor label of the actor carrying the PMC |
-| `section_index` | number | yes | Required target section index (>= 0) |
-| `component_index` | number | no | Optional 0-based PMC index on the actor; defaults to 0 |
+| `section_index` | integer | yes | Required target section index (>= 0) |
+| `component_index` | integer | no | Optional 0-based PMC index on the actor; defaults to 0 |
 
 **Returns:** `{ actor_label, section_index, vertex_count, triangle_count, vertices, triangles, normals, uv0, tangents, colors, local_box, collision_enabled, visible }`
 
@@ -130,7 +130,7 @@ Move the vertices of an existing section of a UProceduralMeshComponent on an edi
 |---|---|---|---|
 | `actor_label` | string | yes | Editor label of the actor carrying the PMC |
 | `vertices` | array | yes | Required [[x, y, z], ...] array in component space with the same vertex count as the existing section; an entry that is not a 3-element array is skipped before the count is compared |
-| `component_index` | number | no | Optional 0-based PMC index on the actor; defaults to 0 |
+| `component_index` | integer | no | Optional 0-based PMC index on the actor; defaults to 0 |
 | `section_index` | number | no | Optional target section index (>= 0); defaults to 0 |
 
 **Returns:** `{ actor_label: string, section_index: int, vertex_count: int }`
@@ -145,7 +145,7 @@ Toggle the visibility of a single section on a procedural mesh component. Idempo
 |---|---|---|---|
 | `actor_label` | string | yes | Editor label of the actor carrying the PMC |
 | `visible` | boolean | yes | Required bool; new visibility for the section |
-| `component_index` | number | no | Optional 0-based PMC index on the actor; defaults to 0 |
+| `component_index` | integer | no | Optional 0-based PMC index on the actor; defaults to 0 |
 | `section_index` | number | no | Target section index; defaults to 0 |
 
 **Returns:** `{ actor_label: string, section_index: int, visible: bool, total_sections: int }`
@@ -159,7 +159,7 @@ Slice a procedural mesh in place with a plane, optionally spawning the other hal
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_label` | string | yes | Editor label of the actor carrying the PMC |
-| `component_index` | number | no | Optional 0-based PMC index on the actor; defaults to 0 |
+| `component_index` | integer | no | Optional 0-based PMC index on the actor; defaults to 0 |
 | `plane_position` | array | no | [x,y,z] world-space point on the slice plane |
 | `plane_normal` | array | no | [x,y,z] slice plane normal (must be non-zero); geometry on the positive side is kept |
 | `create_other_half` | boolean | no | Optional bool; if true, the sliced-off half is spawned as a new PMC on the same actor |

@@ -59,7 +59,7 @@ No parameters.
 
 *Destructive, idempotent.*
 
-Unload a Game Feature Plugin by name or URL (complement of activate/deactivate). ASYNC + honest-headless (same fire-and-return pattern): returns immediately with the current state; poll get_game_feature_plugin_state. Idempotent: if not loaded, no-ops with already_unloaded=true. Note: an active plugin is still loaded, so this unloads it regardless of active state.
+Unload a Game Feature Plugin by name or URL (complement of activate/deactivate). ASYNC + honest-headless (same fire-and-return pattern): returns immediately with the current state; poll get_game_feature_plugin_state. Idempotent: if not loaded, no-ops with already_unloaded=true. Note: an active plugin is still loaded, so this unloads it regardless of active state. verification says what is known at reply time: verified when the plugin is not loaded (no-op, or an unload that completed within the call), not_verifiable while the unload is still pending; an unload the subsystem refuses or that completes with the plugin still loaded makes success false.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -67,4 +67,4 @@ Unload a Game Feature Plugin by name or URL (complement of activate/deactivate).
 | `plugin_url` | string | no | The plugin URL directly. Takes precedence over plugin_name. |
 | `keep_registered` | boolean | no | If true, the plugin stays registered after unloading (unwinds to the Registered state instead of fully unregistering). Optional, default false. |
 
-**Returns:** `{ url: string, already_unloaded: bool, keep_registered: bool, state: string, is_active: bool, is_loaded: bool, is_registered: bool, note: string }`
+**Returns:** `{ url: string, already_unloaded: bool, keep_registered: bool, state: string, is_active: bool, is_loaded: bool, is_registered: bool, note?: string, verification: { status: "verified"|"failed"|"not_verifiable", ... }, verification_checks }`

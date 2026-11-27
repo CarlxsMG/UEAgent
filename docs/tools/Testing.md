@@ -124,7 +124,7 @@ Sample one or SEVERAL properties across a PIE session, arming BEFORE PIE starts 
 | `component` | string | no | Optional component name: sample the property on that component of the matched actor instead of on the actor. |
 | `sample_interval_seconds` | number | no | Optional periodic sampling interval (default 0.1, min 0.01). |
 | `duration_seconds` | number | no | Optional auto-disarm after this many real seconds (default 300; 0 = no time cap, disarms only on max_samples or an explicit stop). |
-| `max_samples` | number | no | Optional hard cap on recorded samples (default 400). |
-| `watch_id` | number | no | Target watch for "status" / "stop" / "clear" (omit = all of them). |
+| `max_samples` | integer | no | Optional hard cap on recorded samples (default 400). |
+| `watch_id` | integer | no | Target watch for "status" / "stop" / "clear" (omit = all of them). |
 
 **Returns:** `{ action: string, watch_id?: int, armed?: bool, watches: [{ watch_id, property_name, class_name, actor_label, component, sample_interval_seconds, duration_seconds, max_samples, active, saw_pie_world, armed_while_pie_running, sample_count, elapsed_real_seconds, stop_reason, distinct_objects_seen, samples?: [{ phase, object_path, actor_label, value_text, value, elapsed_real_seconds, world_time_seconds, world, changed_from_previous }] }], identifies_writer: bool, sampling_only: bool, armed_pre_pie?: bool, pie_running?: bool, class_resolved?: bool, hint?: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }. The five world_* / net_mode / pie_instance fields identify the PIE world the ticker is sampling AT THE MOMENT OF THE CALL (all null / pie_instance -1 when no PIE session is running, which is the normal state right after arming).`

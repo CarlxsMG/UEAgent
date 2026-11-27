@@ -65,7 +65,7 @@ Force-delete one asset with no confirmation or undo: references to it are nulled
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `asset_path` | string | yes | Asset to delete, as an object path ("/Game/Props/SM_Box.SM_Box") or a bare package path ("/Game/Props/SM_Box") |
-| `expected_class` | any | no | Optional class the asset must be, or a list of classes it may be any one of, as short names ("AnimSequence") or /Script/ paths ("/Script/Engine.StaticMesh"). A Blueprint asset also passes when its generated class derives from one ("Subsystem" accepts a subsystem Blueprint). Another class is refused with success false, deleted false, expected_class_matched false, its asset_class (and generated_class_name for a Blueprint) and a note, and nothing is deleted. With it, a path that names no asset is a no-op: success, deleted false, already_existed false. A name that resolves to no class is an error. |
+| `expected_class` | string\|array | no | Optional class the asset must be, or a list of classes it may be any one of, as short names ("AnimSequence") or /Script/ paths ("/Script/Engine.StaticMesh"). A Blueprint asset also passes when its generated class derives from one ("Subsystem" accepts a subsystem Blueprint). Another class is refused with success false, deleted false, expected_class_matched false, its asset_class (and generated_class_name for a Blueprint) and a note, and nothing is deleted. With it, a path that names no asset is a no-op: success, deleted false, already_existed false. A name that resolves to no class is an error. |
 
 **Returns:** `{ asset_path: string, object_path: string, asset_class: string (class path), asset_class_name: string (short class name of the asset), generated_class_name?: string, expected_class_matched?: bool, package_name: string, original_file_size_bytes: number, original_file_size_mb: number, delete_success: bool, delete_message: string, asset_verified_deleted: bool, file_still_exists: bool, deleted: bool, already_existed: bool, note?: string, deletion_timestamp: string? }`
 
@@ -83,7 +83,7 @@ Duplicates an asset to a new name, in the same directory or in destination_path,
 | `new_asset_name` | string | yes | Name for the duplicated asset |
 | `destination_path` | string | no | Optional folder for the copy, a long package path (/Game/MyMeshes, a project plugin mount) or a folder relative to /Game; default the source asset's own folder |
 | `if_exists` | string | no | Optional "error" (default: a taken target name is refused) or "return" (an asset of the source's class already at the target is returned untouched with created=false; one of another class is still refused) |
-| `expected_class` | any | no | Optional class the SOURCE asset must be, or a list of classes it may be any one of, short names ("SkeletalMesh") or /Script/ paths; a Blueprint also passes when its generated class derives from one. Any other source is refused and nothing is duplicated; a name that resolves to no class is an error. |
+| `expected_class` | string\|array | no | Optional class the SOURCE asset must be, or a list of classes it may be any one of, short names ("SkeletalMesh") or /Script/ paths; a Blueprint also passes when its generated class derives from one. Any other source is refused and nothing is duplicated; a name that resolves to no class is an error. |
 | `remap_internal_refs` | boolean | no | Optional bool (default false). When true, remap the copy's internal refs (original->copy) before the save; adds { new_path, refs_remapped } to the result. |
 | `repoint_parents_within` | boolean | no | Optional bool (default false). When true (and remap_internal_refs true), also re-apply MaterialInstanceConstant parents that map into the copied set via SetParentEditorOnly. |
 
@@ -285,7 +285,7 @@ Set the CookRule of an existing PrimaryAssetTypesToScan rule in the Asset Manage
 |---|---|---|---|
 | `primary_asset_type` | string | yes | Name of the primary asset type (e.g. "Item"). |
 | `cook_rule` | string | yes | One of "Unknown" / "Never" / "Development" / "DevelopmentAlways" / "Always", case-insensitive; "Development" stores ProductionNeverCook, and the EPrimaryAssetCookRule names (e.g. "AlwaysCook", "DevelopmentAlwaysProductionUnknownCook") are accepted too. |
-| `chunk_id` | number | no | Optional chunk ID override for the rule |
+| `chunk_id` | integer | no | Optional chunk ID override for the rule |
 | `apply_recursively` | boolean | no | Optional flag to apply the rule recursively |
 
 **Returns:** `{ primary_asset_type, cook_rule, priority, chunk_id, apply_recursively, saved }`

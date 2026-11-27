@@ -364,9 +364,9 @@ Assign a material ASSET to one slot of a Blueprint component TEMPLATE (an OWN SC
 | `blueprint_name` | string | yes | Name of the blueprint |
 | `component_name` | string | yes | Name of an OWN SCS component; must be a UPrimitiveComponent |
 | `material_path` | string | yes | Asset path of the UMaterialInterface (material or material instance) to assign; a path that does not load is an error |
-| `material_slot` | number | no | Optional material slot index; defaults to 0. It is not range-checked against the mesh's slot count. |
+| `material_slot` | integer | no | Optional material slot index; defaults to 0. It is not range-checked against the mesh's slot count. |
 
-**Returns:** `{ blueprint_name: string, component_name: string, material_path: string, material_slot: int, success: bool } -- an echo: success:true only means the material loaded and SetMaterial was called. Read it back with get_blueprint_material_info.`
+**Returns:** `{ blueprint_name: string, component_name: string, material_path: string, material_slot: int, success: bool } -- material_path is read back from the slot; success is false when the slot does not hold the material afterwards.`
 
 ## `attach_blueprint_component`
 
@@ -803,7 +803,7 @@ It reads the graph as the editor holds it, unsaved edits included, loading the a
 | `expand_composites` | boolean | no | When true, inline the nodes of collapsed composite subgraphs recursively; each node gains a "graph" tag naming the graph it came from. Macro-library graphs are never inlined. (Optional, default false) |
 | `compact` | boolean | no | Token-lean listing: drops pin types, positions and comments, and skips pins that are unlinked AND have no default. Also excludes K2Node_Knot + EdGraphNode_Comment unless exclude_classes is given. Good for reading topology, WRONG for checking whether a pin exists. (Optional, default false) |
 | `exclude_classes` | array | no | Array of leaf node class names to skip, matched against each node's "class" field (e.g. ["K2Node_Knot"]). Pass [] to include everything even in compact mode. Absent + compact=true means knots and comments are excluded; absent + compact=false excludes nothing. |
-| `max_nodes` | number | no | Cap on the number of nodes emitted (&lt;=0 or absent = unlimited); the response still counts every non-excluded node in total_node_count and sets truncated=true. |
+| `max_nodes` | integer | no | Cap on the number of nodes emitted (&lt;=0 or absent = unlimited); the response still counts every non-excluded node in total_node_count and sets truncated=true. |
 | `node_id` | string | no | Optional node_id (from add_graph_node / get_graph_nodes): return ONLY that node, in a Blueprint always at full fidelity (compact, exclude_classes, expand_composites and max_nodes are ignored) -- every pin with name, direction, type, linked_to and default, at a fraction of the tokens of a whole graph. A node_id the graph does not contain is an error. |
 
 **Returns:** `` { blueprint_name, graph_name, nodes: [{ node_id, object_path?, class, title, pos_x, pos_y, comment, pins: [...], subgraph? }], node_count, compact, total_node_count, excluded_count, truncated, graph_kind? } -- node_count counts the nodes returned and total_node_count those that exist; a node holding a nested graph has `subgraph`, the graph_name to read it with. Another asset: its editor's view, a MetaSound's links in connections. ``
@@ -1098,7 +1098,7 @@ Delete EVERY variable the engine considers unused from a Blueprint in one shot (
 |---|---|---|---|
 | `blueprint_name` | string | yes | Name of the blueprint |
 
-**Returns:** `{ blueprint_name: string, removed_count: int, removed_variables?: [string] } -- removed_variables is the list gathered BEFORE the removal and removed_count what the engine reported removing; when they disagree, trust neither and re-read get_blueprint_variables.`
+**Returns:** `{ blueprint_name: string, removed_count: int, removed_variables?: [string] } -- removed_variables is the list gathered BEFORE the removal and removed_count what the engine reported removing; still_declared lists the gathered names the Blueprint still declares afterwards, and any of them fails the call.`
 
 ## `rename_blueprint_variable`
 
@@ -1225,7 +1225,7 @@ Set collision on a Blueprint component TEMPLATE (own SCS or inherited via ICH), 
 | `compile` | boolean | no | Optional bool (default FALSE): compile the Blueprint afterwards so the FBodyInstance change reinstances on the next spawn/PIE. Without it the edit stays in the uncompiled template. |
 | `return_messages` | boolean | no | No effect here: it is only read by the compile this tool may run internally, whose message log is discarded. Call compile_blueprint directly if you want the messages. |
 
-**Returns:** `{ success, data: { blueprint_name, component_name, source ("scs" | "inherited-ich" | "inherited-native": which template was written), profile?, collision_enabled?, responses_applied: [{channel, response}], compiled } } -- responses_applied lists ONLY the per-channel writes; profile and collision_enabled appear as their own fields only when they were given. Nothing is re-read: verify with get_blueprint_component_property or get_collision_info.`
+**Returns:** `{ success, data: { blueprint_name, component_name, source ("scs" | "inherited-ich" | "inherited-native": which template was written), profile?, collision_enabled?, responses_applied: [{channel, response}], compiled } } -- responses_applied lists ONLY the per-channel writes; profile and collision_enabled appear as their own fields only when they were given; profile_read, collision_enabled_read and each response_read are read back from the template, and a mismatch fails the call. compiled is the compile's outcome.`
 
 ## `set_blueprint_component_properties`
 
@@ -1380,7 +1380,7 @@ Tint one material slot of a Blueprint component template by creating a DYNAMIC m
 | `blueprint_name` | string | yes | Name of the blueprint |
 | `component_name` | string | yes | Name of an OWN SCS component; must be a UPrimitiveComponent |
 | `color` | array | yes | RGBA color [R, G, B, A] as floats, each clamped to 0.0-1.0; exactly 4 values are required |
-| `material_slot` | number | no | Optional slot index; defaults to 0 |
+| `material_slot` | integer | no | Optional slot index; defaults to 0 |
 | `parameter_name` | string | no | Optional vector parameter name; defaults to "BaseColor". A name the material does not declare is NOT reported as an error -- it just has no visible effect. |
 | `material_path` | string | no | Optional material asset path to use as the MID's parent; without it the component's current slot material is used, falling back to /Engine/BasicShapes/BasicShapeMaterial |
 
@@ -1420,7 +1420,7 @@ Rewrite a UK2Node_PropertyAccess node's binding Path and reconstruct the node so
 |---|---|---|---|
 | `blueprint_name` | string | yes | Blueprint name or path (usually an Animation Blueprint). |
 | `node_id` | string | yes | NodeGuid of the property-access node; any other node class is refused by name. |
-| `path` | any | no | The new path: either an array of segment strings (["InAnimInstance","Foo"]) OR a dotted string ("InAnimInstance.Foo"). An empty result is an error, never a cleared binding. |
+| `path` | array\|string | no | The new path: either an array of segment strings (["InAnimInstance","Foo"]) OR a dotted string ("InAnimInstance.Foo"). An empty result is an error, never a cleared binding. |
 | `graph_name` | string | no | Target graph name; defaults to the Blueprint's event graph when omitted. |
 
 **Returns:** `{ node_id, graph_name, reconstructed, path:[string], text_path, resolved, resolved_pin, note? } -- path/text_path/resolved are re-read AFTER the reconstruct, so they are the oracle rather than an echo.`
@@ -1468,6 +1468,6 @@ Dry-run the K2 schema's verdict on a pin pair WITHOUT touching the graph: return
 | `target_node_id` | string | yes | NodeGuid of the target node; must be in the same graph as the source. |
 | `target_pin` | string | yes | Input pin name on the target node (falls back to any pin with that name). |
 | `graph_name` | string | no | Target graph name; defaults to the Blueprint's event graph when omitted |
-| `asset_path` | string | no |   |
+| `asset_path` | string | no | Alias of `blueprint_name`: the same value with the same meaning. Pass one of the two. |
 
 **Returns:** `{ valid, message, response_code } -- valid is false only for an outright DISALLOW; a response that would connect WITH a conversion node or by breaking an existing link still reports valid:true, and "message" is where that shows.`

@@ -75,7 +75,7 @@ Adds a component material parameter track for one indexed material slot to an ob
 |---|---|---|---|
 | `sequence_name` | string | yes | Name of the target Level Sequence |
 | `binding_guid` | string | yes | GUID of the actor/component object binding to attach the material track to |
-| `material_index` | number | no | Optional indexed material slot the track animates, a whole number >= 0 (default 0) |
+| `material_index` | integer | no | Optional indexed material slot the track animates, a whole number >= 0 (default 0) |
 | `parameter_name` | string | no | Optional scalar material parameter name to key |
 | `value` | number | no | Optional scalar value for the keyed parameter (default 0.0) |
 | `frame` | number | no | Optional frame number for the key (default 0) |
@@ -436,7 +436,7 @@ Read the playback settings of one audio section of a Level Sequence (path or bar
 |---|---|---|---|
 | `sequence_path` | string | yes | Full /Game path OR bare asset name of the Level Sequence that owns the (root) audio track. |
 | `sequence_name` | string | no | Alias for sequence_path. |
-| `section_index` | number | no | Index of the section on the resolved root audio track (default 0). |
+| `section_index` | integer | no | Index of the section on the resolved root audio track (default 0). |
 
 **Returns:** `{ sequence_path: string, section_class: string, section_index: int, sound_path: string, start_offset: int, volume: number, pitch: number, volume_key_count: int, pitch_key_count: int, looping: bool, play_until_finished?: bool (needs UE 5.8), suppress_subtitles: bool, override_attenuation: bool, attenuation_path: string }`
 
@@ -452,10 +452,10 @@ Lists every key of one channel of one section of a Level Sequence: index, tick-r
 | `sequence_name` | string | no | Alias for sequence_path, read when sequence_path is absent or empty; same formats. |
 | `binding_guid` | string | no | GUID of the binding whose section to read, as get_sequence_bindings returns it. Omit it (and binding_name_or_guid) for a section of a ROOT track -- shot, camera cut, audio, event, sub-sequence, fade: track_type or track_index then pick among the root tracks in get_sequence_tracks order, camera cut last. |
 | `track_type` | string | no | Optional track kind; the first track of exactly that kind wins, else the first subclass: transform, float, bool, vector, color, visibility, audio, event, fade, skeletalanimation, sub, cameracut, shot, slomo, property, attach. An unrecognised value is ignored and track_index is used. |
-| `track_index` | number | no | 0-based index into the binding's tracks, or into the root tracks without binding_guid, in get_sequence_tracks order (default 0); used when track_type is omitted. |
-| `section_index` | number | no | 0-based index of the section on the resolved track (default 0); out of range is an error. |
+| `track_index` | integer | no | 0-based index into the binding's tracks, or into the root tracks without binding_guid, in get_sequence_tracks order (default 0); used when track_type is omitted. |
+| `section_index` | integer | no | 0-based index of the section on the resolved track (default 0); out of range is an error. |
 | `channel_type` | string | no | Channel value kind: "double" (default; transform tracks) \| "float" (float, color and other property tracks) \| "bool" (bool and visibility tracks). Aliases transform, scalar, color, boolean, visibility are accepted; anything else is an error. |
-| `channel_index` | number | no | 0-based index among the section's channels of that kind (default 0); on a transform section 0-2 = location X/Y/Z, 3-5 = rotation roll/pitch/yaw, 6-8 = scale X/Y/Z. |
+| `channel_index` | integer | no | 0-based index among the section's channels of that kind (default 0); on a transform section 0-2 = location X/Y/Z, 3-5 = rotation roll/pitch/yaw, 6-8 = scale X/Y/Z. |
 | `binding_name_or_guid` | string | no | Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved. |
 
 **Returns:** `{ sequence_path: string, channel_index: int, channel_type: string, key_count: int, keyframes: [{ index: int, frame: int, time_seconds: number, value: number|bool, interp_mode: string, tangent_mode: string, arrive_tangent: number, leave_tangent: number }] }`
@@ -481,7 +481,7 @@ List the Level Sequence assets under a content folder and its subfolders (defaul
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `package_path` | string | no | Long package path of the folder to search, subfolders included, e.g. "/Game/Cinematics" (default "/Game"; plugin content needs its own root such as "/MyPlugin"). |
-| `max_results` | number | no | Maximum number of sequences to return, an integer from 1 to 10000 (default 1000). |
+| `max_results` | integer | no | Maximum number of sequences to return, an integer from 1 to 10000 (default 1000). |
 
 **Returns:** `{ sequences: [object], total_count: int (found under package_path), returned_count: int (listed, at most max_results), max_results: int, truncated: bool }`
 
@@ -509,8 +509,8 @@ Read the settings of one section of a Level Sequence: start_frame and end_frame 
 | `sequence_name` | string | no | Alias for sequence_path. |
 | `binding_guid` | string | no | GUID of the binding whose section to inspect, as get_sequence_bindings or get_sequence_tracks gives it. Omit it (and binding_name_or_guid) for a section of a ROOT track -- shot, camera cut, audio, event, sub-sequence, fade: track_type or track_index then pick among the root tracks in get_sequence_tracks order, camera cut last. |
 | `track_type` | string | no | Optional kind of track, case-insensitive: "transform"\|"float"\|"bool"\|"vector"\|"color"\|"visibility"\|"audio"\|"event"\|"fade"\|"skeletalanimation"\|"subsequence"\|"cameracut"\|"shot"\|"slomo"\|"property"\|"attach"; the first track of that kind wins and none is an error; any other value is ignored and track_index picks. |
-| `track_index` | number | no | Index into the binding's tracks (0 = first track, default 0), in get_sequence_tracks order. Without binding_guid it indexes the root tracks. |
-| `section_index` | number | no | Index of the section on the resolved track (default 0); get_sequence_tracks gives each track's section_count. |
+| `track_index` | integer | no | Index into the binding's tracks (0 = first track, default 0), in get_sequence_tracks order. Without binding_guid it indexes the root tracks. |
+| `section_index` | integer | no | Index of the section on the resolved track (default 0); get_sequence_tracks gives each track's section_count. |
 | `binding_name_or_guid` | string | no | Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved. |
 
 **Returns:** `{ sequence_path: string, section_index: int, start_frame: int, end_frame: int, ease_in_frames: int, ease_out_frames: int, manual_ease_in: bool, manual_ease_out: bool, completion_mode: string, blend_type: string, blend_type_valid: bool, is_locked: bool, is_active: bool, is_attach_section: bool, attach_rules: object? }`
@@ -576,14 +576,14 @@ Move one key of a channel of one section on an object-binding track of a Level S
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sequence_path` | string | yes | Full /Game path OR bare asset name of the target Level Sequence. |
-| `new_frame` | number | yes | Destination frame number for the key. |
+| `new_frame` | integer | yes | Destination frame number for the key. |
 | `sequence_name` | string | no | Alias for sequence_path. |
 | `binding_guid` | string | no | GUID of the binding whose section to edit. Omit it (and binding_name_or_guid) for a section of a ROOT track -- shot, camera cut, audio, event, sub-sequence, fade: track_type or track_index then pick among the root tracks in get_sequence_tracks order, camera cut last. |
 | `track_type` | string | no | Optional class filter (see set_section_properties) selecting the track on the binding. |
-| `track_index` | number | no | Index into the binding's tracks (default 0; used when track_type omitted). Without binding_guid it indexes the root tracks. |
-| `section_index` | number | no | Index of the section on the resolved track (default 0). |
+| `track_index` | integer | no | Index into the binding's tracks (default 0; used when track_type omitted). Without binding_guid it indexes the root tracks. |
+| `section_index` | integer | no | Index of the section on the resolved track (default 0). |
 | `channel_type` | string | no | Channel value kind: "double" (default) \| "float" \| "bool". |
-| `channel_index` | number | no | Index of the channel within its proxy view (default 0). |
+| `channel_index` | integer | no | Index of the channel within its proxy view (default 0). |
 | `index` | integer | no | Index of the key to move (mutually exclusive with frame). |
 | `frame` | integer | no | Frame of the key to move (resolved via FindKey; provide index OR frame). |
 | `tolerance` | integer | no | Optional FindKey frame tolerance when locating by frame (default 0). |
@@ -669,10 +669,10 @@ Delete one key from one channel of a section of a Level Sequence, found by its i
 | `sequence_name` | string | no | Alias for sequence_path. |
 | `binding_guid` | string | no | GUID of the binding whose section to edit. Omit it (and binding_name_or_guid) for a section of a ROOT track -- shot, camera cut, audio, event, sub-sequence, fade: track_type or track_index then pick among the root tracks in get_sequence_tracks order, camera cut last. |
 | `track_type` | string | no | Optional class filter (see set_section_properties) selecting the track on the binding. |
-| `track_index` | number | no | Index into the binding's tracks (default 0; used when track_type omitted). Without binding_guid it indexes the root tracks. |
-| `section_index` | number | no | Index of the section on the resolved track (default 0). |
+| `track_index` | integer | no | Index into the binding's tracks (default 0; used when track_type omitted). Without binding_guid it indexes the root tracks. |
+| `section_index` | integer | no | Index of the section on the resolved track (default 0). |
 | `channel_type` | string | no | Channel value kind: "double" (default) \| "float" \| "bool". |
-| `channel_index` | number | no | Index of the channel within its proxy view (default 0). |
+| `channel_index` | integer | no | Index of the channel within its proxy view (default 0). |
 | `index` | integer | no | Index of the key to remove (mutually exclusive with frame). |
 | `frame` | integer | no | Frame of the key to remove (resolved via FindKey; provide index OR frame). |
 | `tolerance` | integer | no | Optional FindKey frame tolerance when locating by frame (default 0). |
@@ -708,8 +708,8 @@ Deletes one section, by index, from a track of a Level Sequence in one undo step
 | `sequence_name` | string | no | Alias for sequence_path, read when sequence_path is absent or empty; same formats. |
 | `binding_guid` | string | no | GUID of the binding whose section to remove, as get_sequence_bindings returns it. Omit it (and binding_name_or_guid) for a section of a ROOT track -- shot, camera cut, audio, event, sub-sequence, fade: track_type or track_index then pick among the root tracks in get_sequence_tracks order, camera cut last. |
 | `track_type` | string | no | Optional track kind, case-insensitive; the first track of exactly that kind wins, else the first subclass: transform, float, bool, vector, color, visibility, audio, event, fade, skeletalanimation, sub, cameracut, shot, slomo, property, attach. An unrecognised value is an error and nothing is removed; omit it to pick by track_index. |
-| `track_index` | number | no | 0-based index into the binding's tracks, or into the root tracks without binding_guid, in get_sequence_tracks order (default 0); used when track_type is omitted. |
-| `section_index` | number | no | 0-based index of the section to delete on the resolved track (default 0); out of range is an error. |
+| `track_index` | integer | no | 0-based index into the binding's tracks, or into the root tracks without binding_guid, in get_sequence_tracks order (default 0); used when track_type is omitted. |
+| `section_index` | integer | no | 0-based index of the section to delete on the resolved track (default 0); out of range is an error. |
 | `binding_name_or_guid` | string | no | Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved. |
 
 **Returns:** `{ sequence_path: string, section_index: int, track_type: string, track_index: int, removed: bool, remaining_sections: int, saved: bool, save_error?: string }`
@@ -782,9 +782,9 @@ Set the attach and detach transform rules of one 3D-attach section on an object-
 | `sequence_path` | string | no | Asset path of the target Level Sequence (alias for sequence_name). |
 | `binding_guid` | string | no | GUID of the attachee binding that owns the attach track. Omit it (and binding_name_or_guid) for a section of a ROOT track -- shot, camera cut, audio, event, sub-sequence, fade: track_type or track_index then pick among the root tracks in get_sequence_tracks order, camera cut last. |
 | `binding_name_or_guid` | string | no | Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved. |
-| `track_index` | number | no | Optional index into the binding's tracks (default 0). Without binding_guid it indexes the root tracks. |
+| `track_index` | integer | no | Optional index into the binding's tracks (default 0). Without binding_guid it indexes the root tracks. |
 | `track_type` | string | no | Optional class filter to pick the track ("transform"\|"float"\|"bool"\|"vector"\|"color"\|"visibility"\|"audio"\|"event"\|"fade"\|"skeletalanimation"\|"subsequence"\|"cameracut"\|"property"): the first track of that kind on the binding; omitted or unrecognised, track_index picks the track. |
-| `section_index` | number | no | Optional index of the section on the track (default 0). |
+| `section_index` | integer | no | Optional index of the section on the track (default 0). |
 | `attachment_location_rule` | string | no | Optional EAttachmentRule: KeepRelative \| KeepWorld \| SnapToTarget. |
 | `attachment_rotation_rule` | string | no | Optional EAttachmentRule: KeepRelative \| KeepWorld \| SnapToTarget. |
 | `attachment_scale_rule` | string | no | Optional EAttachmentRule: KeepRelative \| KeepWorld \| SnapToTarget. |
@@ -804,8 +804,8 @@ Set playback properties of one section (section_index) on a root audio track (au
 |---|---|---|---|
 | `sequence_path` | string | yes | Full /Game path OR bare asset name of the Level Sequence that owns the (root) audio track. |
 | `sequence_name` | string | no | Alias for sequence_path. |
-| `audio_track_index` | number | no | Index of the root audio track, counting root audio tracks only (default 0). |
-| `section_index` | number | no | Index of the section on the resolved root audio track (default 0). |
+| `audio_track_index` | integer | no | Index of the root audio track, counting root audio tracks only (default 0). |
+| `section_index` | integer | no | Index of the section on the resolved root audio track (default 0). |
 | `sound_path` | string | no | Optional content path of a USoundBase to set as the section's sound. |
 | `looping` | boolean | no | Section looping, through the section's own setter (SetRepeating on UE 5.8, SetLooping on 5.7); omit to leave unchanged. |
 | `play_until_finished` | boolean | no | SetPlayUntilFinished (omit to leave unchanged). Needs UE 5.8. |
@@ -814,7 +814,7 @@ Set playback properties of one section (section_index) on a root audio track (au
 | `attenuation_path` | string | no | Optional content path of a USoundAttenuation to set (only effective when override_attenuation is true). |
 | `volume` | number | no | Optional volume to key on the SoundVolume channel (0..N; 1 = unity gain). |
 | `pitch` | number | no | Optional pitch multiplier to key on the PitchMultiplier channel (1.0 = normal speed). |
-| `time_seconds` | any | no | Optional time in seconds for the volume/pitch keys; omit to set them as constants. |
+| `time_seconds` | number | no | Optional time in seconds for the volume/pitch keys; omit to set them as constants. |
 | `start_offset_frames` | number | no | Optional start offset in tick-resolution frames (the unit get_audio_section_properties reports), written as-is with fractions truncated; wins over start_offset_seconds. |
 | `start_offset_seconds` | number | no | Optional start offset in seconds, converted to tick-resolution frames and rounded; ignored when start_offset_frames is given. |
 
@@ -832,10 +832,10 @@ Set the value, interpolation mode, tangent mode and tangents of one key of a dou
 | `sequence_name` | string | no | Alias for sequence_path. |
 | `binding_guid` | string | no | GUID of the binding whose section to edit. Omit it (and binding_name_or_guid) for a section of a ROOT track -- shot, camera cut, audio, event, sub-sequence, fade: track_type or track_index then pick among the root tracks in get_sequence_tracks order, camera cut last. |
 | `track_type` | string | no | Optional class filter (see set_section_properties) selecting the track on the binding. |
-| `track_index` | number | no | Index into the binding's tracks (default 0; used when track_type omitted). Without binding_guid it indexes the root tracks. |
-| `section_index` | number | no | Index of the section on the resolved track (default 0). |
+| `track_index` | integer | no | Index into the binding's tracks (default 0; used when track_type omitted). Without binding_guid it indexes the root tracks. |
+| `section_index` | integer | no | Index of the section on the resolved track (default 0). |
 | `channel_type` | string | no | Channel value kind: "double" (default) \| "float". ("bool" is rejected -- no interp/tangent.) |
-| `channel_index` | number | no | Index of the channel within its proxy view (default 0). |
+| `channel_index` | integer | no | Index of the channel within its proxy view (default 0). |
 | `index` | integer | no | Index of the key to edit (mutually exclusive with frame). |
 | `frame` | integer | no | Frame of the key to edit (resolved via FindKey; provide index OR frame). |
 | `tolerance` | integer | no | Optional FindKey frame tolerance when locating by frame (default 0). |
@@ -891,7 +891,7 @@ Replace every key of the first section of one property track on a Level Sequence
 | `sequence_name` | string | yes | Name of the target Level Sequence. |
 | `binding_guid` | string | yes | GUID of the binding. |
 | `property_type` | string | yes | One of "Float", "Bool", "Vector", "Color", "Visibility". |
-| `key_count` | number | yes | Target number of keys (>= 0). 0 clears all keys; 1 seeds at section start; >=2 evenly distributes. |
+| `key_count` | integer | yes | Target number of keys (>= 0). 0 clears all keys; 1 seeds at section start; >=2 evenly distributes. |
 | `default_value` | number | no | Value to use for every resampled key (default 0). |
 
 **Returns:** `{ sequence_name: string, binding_guid: string, property_type: string, key_count: int, default_value: float, keys_written: int, applied: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
@@ -916,7 +916,7 @@ Change any settings of ONE section of a Level Sequence in one call: active (mute
 | `blend_type` | string | no | Optional: Absolute, Additive, Relative or AdditiveFromBase, as the track supports |
 | `completion_mode` | string | no | Optional: KeepState, RestoreState or ProjectDefault |
 | `color` | array | no | Optional color tint [r, g, b] or [r, g, b, a], each 0..1 |
-| `row_index` | number | no | Optional row of the section within its track |
+| `row_index` | integer | no | Optional row of the section within its track |
 | `ease_in_frames` | number | no | Optional manual ease-in length in frames (sets manual easing) |
 | `ease_out_frames` | number | no | Optional manual ease-out length in frames (sets manual easing) |
 | `pre_roll_frames` | number | no | Optional pre-roll length in frames |
@@ -936,7 +936,7 @@ Sets the frame range of the FIRST section of one track on a Level Sequence bindi
 | `start_frame` | number | yes | Inclusive start frame (tick resolution). |
 | `end_frame` | number | yes | Exclusive end frame (must be > start_frame). |
 | `binding_guid` | string | no | GUID of the binding. Optional: omit it for a section of a root track (shot, camera cut, audio, event...). |
-| `track_index` | number | no | Index into the binding's tracks, or into the root tracks without binding_guid (0 = first track, default 0). |
+| `track_index` | integer | no | Index into the binding's tracks, or into the root tracks without binding_guid (0 = first track, default 0). |
 
 **Returns:** `{ sequence_name: string, binding_guid: string, track_index: int, track_class: string, requested_start_frame: int, requested_end_frame: int, applied_start_frame: int, applied_end_frame: int, range_set: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
@@ -986,8 +986,8 @@ Set the playback parameters (FMovieSceneSkeletalAnimationParams) of one skeletal
 | `sequence_name` | string | no | Alias for sequence_path. |
 | `binding_guid` | string | no | GUID of the binding whose skeletal-animation section to edit. Omit it (and binding_name_or_guid) for a section of a ROOT track -- shot, camera cut, audio, event, sub-sequence, fade: track_type or track_index then pick among the root tracks in get_sequence_tracks order, camera cut last. |
 | `track_type` | string | no | Optional class filter: "skeletalanimation" picks the binding's first skeletal-animation track (see set_section_properties for the other kinds); omitted or unrecognised, track_index picks the track. |
-| `track_index` | number | no | Index into the binding's tracks (default 0; used when track_type is omitted or unrecognised). Without binding_guid it indexes the root tracks. |
-| `section_index` | number | no | Index of the section on the resolved track (default 0). |
+| `track_index` | integer | no | Index into the binding's tracks (default 0; used when track_type is omitted or unrecognised). Without binding_guid it indexes the root tracks. |
+| `section_index` | integer | no | Index of the section on the resolved track (default 0). |
 | `reverse` | boolean | no | bReverse (omit to leave unchanged). |
 | `slot_name` | string | no | SlotName (FName; omit or pass an empty string to leave unchanged). |
 | `start_frame_offset` | number | no | StartFrameOffset in tick frames, rounded (omit to leave unchanged). |
@@ -1025,11 +1025,11 @@ Set the playback parameters of one subsequence or cinematic shot section (a UMov
 | `sequence_path` | string | yes | Full /Game path OR bare asset name of the OUTER Level Sequence that owns the sub/shot track. |
 | `sequence_name` | string | no | Alias for sequence_path. |
 | `track_type` | string | no | Optional master-track filter: "subsequence" (default) or "shot" (cinematic shot track). |
-| `section_index` | number | no | Index of the section on the resolved master track (default 0). |
+| `section_index` | integer | no | Index of the section on the resolved master track (default 0). |
 | `start_frame_offset` | number | no | StartFrameOffset in tick frames (omit to leave unchanged). |
 | `end_frame_offset` | number | no | EndFrameOffset in tick frames (omit to leave unchanged). |
 | `first_loop_start_frame_offset` | number | no | FirstLoopStartFrameOffset in tick frames; only meaningful when can_loop is true (omit to leave unchanged). |
-| `hierarchical_bias` | number | no | HierarchicalBias (int; default engine value 100; omit to leave unchanged). |
+| `hierarchical_bias` | integer | no | HierarchicalBias (int; default engine value 100; omit to leave unchanged). |
 | `can_loop` | boolean | no | bCanLoop; gates the loop offsets (omit to leave unchanged). |
 | `time_scale` | number | no | Constant playback time scale (double; must be non-zero -- ~0 is a FixedTime warp, not a play rate; omit to leave unchanged). |
 
@@ -1057,12 +1057,12 @@ Set which channels of one 3D transform section on an object-binding track of a L
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sequence_path` | string | yes | Full /Game path OR bare asset name of the target Level Sequence. |
-| `channels` | any | yes | Channels to ENABLE: a JSON array (e.g. ["TranslationX","Rotation"]) OR a comma-separated string. Tokens: TranslationX/Y/Z, Translation, RotationX/Y/Z (Roll/Pitch/Yaw), Rotation, ScaleX/Y/Z, Scale, Weight, AllTransform, All, None. |
+| `channels` | array\|string | yes | Channels to ENABLE: a JSON array (e.g. ["TranslationX","Rotation"]) OR a comma-separated string. Tokens: TranslationX/Y/Z, Translation, RotationX/Y/Z (Roll/Pitch/Yaw), Rotation, ScaleX/Y/Z, Scale, Weight, AllTransform, All, None. |
 | `sequence_name` | string | no | Alias for sequence_path. |
 | `binding_guid` | string | no | GUID of the binding whose transform section to edit. Omit it (and binding_name_or_guid) for a section of a ROOT track -- shot, camera cut, audio, event, sub-sequence, fade: track_type or track_index then pick among the root tracks in get_sequence_tracks order, camera cut last. |
 | `track_type` | string | no | Optional class filter (default resolves the transform track; see set_section_properties). |
-| `track_index` | number | no | Index into the binding's tracks (default 0). Without binding_guid it indexes the root tracks. |
-| `section_index` | number | no | Index of the section on the resolved track (default 0). |
+| `track_index` | integer | no | Index into the binding's tracks (default 0). Without binding_guid it indexes the root tracks. |
+| `section_index` | integer | no | Index of the section on the resolved track (default 0). |
 | `binding_name_or_guid` | string | no | Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved. |
 
 **Returns:** `{ sequence_path: string, section_index: int, channels: string[], channel_mask: int, set: bool, changed: bool, saved: bool, note: string, save_error?: string }`
@@ -1080,8 +1080,8 @@ Turns quaternion (slerp) rotation interpolation on or off for one 3D transform s
 | `sequence_name` | string | no | Alias for sequence_path. |
 | `binding_guid` | string | no | GUID of the binding whose transform section to edit. Omit it (and binding_name_or_guid) for a section of a ROOT track -- shot, camera cut, audio, event, sub-sequence, fade: track_type or track_index then pick among the root tracks in get_sequence_tracks order, camera cut last. |
 | `track_type` | string | no | Optional track kind, e.g. "transform": picks the binding's first track of that kind. Omitted or unrecognised, track_index picks the track instead. |
-| `track_index` | number | no | Index into the binding's tracks (default 0). Without binding_guid it indexes the root tracks. |
-| `section_index` | number | no | Index of the section on the resolved track (default 0). |
+| `track_index` | integer | no | Index into the binding's tracks (default 0). Without binding_guid it indexes the root tracks. |
+| `section_index` | integer | no | Index of the section on the resolved track (default 0). |
 | `binding_name_or_guid` | string | no | Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved. |
 
 **Returns:** `{ sequence_path: string, section_index: int, use_quaternion_interpolation: bool, set: bool, changed: bool, saved: bool, save_error?: string, note?: string }`

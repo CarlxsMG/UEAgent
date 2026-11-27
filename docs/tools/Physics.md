@@ -29,8 +29,8 @@ Author a field command node into a UFieldSystem and persist it.  Builds a transi
 | `wavelength` | number | no | Optional WaveScalar wavelength; defaults to 10000.0 |
 | `period` | number | no | Optional WaveScalar period; defaults to 1.0 |
 | `wave_function` | string | no | Optional WaveScalar function "Cosine", "Gaussian", "Falloff", "Decay"; defaults to "Cosine" |
-| `interior_value` | number | no | Optional RadialIntMask interior integer; defaults to 1 |
-| `exterior_value` | number | no | Optional RadialIntMask exterior integer; defaults to 0 |
+| `interior_value` | integer | no | Optional RadialIntMask interior integer; defaults to 1 |
+| `exterior_value` | integer | no | Optional RadialIntMask exterior integer; defaults to 0 |
 | `mask_condition` | string | no | Optional RadialIntMask condition "Always", "MergeInterior", "MergeExterior"; defaults to "Always" |
 | `angle` | number | no | Optional RotatedRadialVector rotation angle in degrees; defaults to 0.0. Needs UE 5.8. |
 
@@ -154,7 +154,7 @@ Runs auto-clustering on all transforms of a UGeometryCollection asset, targeting
 |---|---|---|---|
 | `geometry_collection_path` | string | yes | Full asset path to the UGeometryCollection |
 | `cluster_size_method` | string | no | Small, Medium, or Large, default Medium |
-| `site_count` | number | no | Target cluster count before cluster_size_method scales it, minimum 1, default 10 |
+| `site_count` | integer | no | Target cluster count before cluster_size_method scales it, minimum 1, default 10 |
 
 **Returns:** `{ geometry_collection_path: string, cluster_size_method: string, site_count: int, num_transforms_before: int, num_transforms_after: int, success: bool, saved: bool, save_error: string? }`
 
@@ -236,8 +236,8 @@ Cut every piece of a UGeometryCollection asset with num_planes flat planes place
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `geometry_collection_path` | string | yes | Asset path of the UGeometryCollection, e.g. "/Game/Destruction/GC_Wall", as create_geometry_collection returns it (asset_path). |
-| `num_planes` | number | no | Number of random cutting planes, an integer of at least 1 (smaller values become 1), default 3. |
-| `random_seed` | number | no | Integer seed for plane placement, default 1337; the same seed on the same collection gives the same planes. |
+| `num_planes` | integer | no | Number of random cutting planes, an integer of at least 1 (smaller values become 1), default 3. |
+| `random_seed` | integer | no | Integer seed for plane placement, default 1337; the same seed on the same collection gives the same planes. |
 | `grout` | number | no | Width of the gap left between cut pieces, in cm, e.g. 0.5 (default 0, no gap). |
 | `split_islands` | boolean | no | true (default) turns every disconnected part of a cut piece into its own piece; false keeps them together. |
 
@@ -271,8 +271,8 @@ Applies Voronoi fracturing to all transforms of a UGeometryCollection asset, usi
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `geometry_collection_path` | string | yes | Full asset path to the UGeometryCollection |
-| `num_sites` | number | no | Number of random Voronoi sites to generate, minimum 1, default 20 |
-| `random_seed` | number | no | Seed for the random site positions and the per-transform fracture chance, default 0 |
+| `num_sites` | integer | no | Number of random Voronoi sites to generate, minimum 1, default 20 |
+| `random_seed` | integer | no | Seed for the random site positions and the per-transform fracture chance, default 0 |
 | `chance_to_fracture` | number | no | Chance from 0 to 1 that each selected transform is fractured, default 1 |
 | `grout` | number | no | Width of the gap left between cut pieces, in cm (default 0) |
 | `split_islands` | boolean | no | Optional, split resulting islands, default false |
@@ -429,7 +429,7 @@ Remove a field command node from a UFieldSystem by index and persist.  Inverse o
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `field_system_path` | string | yes | Asset path of the UFieldSystem (e.g. "/Game/MyGame/FS_Example") |
-| `index` | number | yes | Zero-based index of the field command to remove |
+| `index` | integer | yes | Zero-based index of the field command to remove |
 
 **Returns:** `{ field_system_path: string, removed: bool, removed_index?: int, removed_target?: string, command_count: int, success: bool, saved?: bool, save_error?: string, note?: string }`
 
@@ -442,7 +442,7 @@ Remove a StaticMesh source reference from an existing geometry collection (inver
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `geometry_collection_path` | string | yes | Full asset path to the UGeometryCollection |
-| `index` | number | no | Optional 0-based index into the GeometrySource array (exactly one of index / source_mesh_path) |
+| `index` | integer | no | Optional 0-based index into the GeometrySource array (exactly one of index / source_mesh_path) |
 | `source_mesh_path` | string | no | Optional asset path of the source mesh to match against SourceGeometryObject (exactly one of index / source_mesh_path) |
 
 **Returns:** `{ geometry_collection_path: string, removed_index: int, removed_source_object: string, removed: bool, already_absent: bool, num_sources: int, success: bool, saved: bool }`
@@ -472,7 +472,7 @@ Remove the body of one bone from a UPhysicsAsset (FPhysicsAssetUtils::DestroyBod
 |---|---|---|---|
 | `physics_asset_path` | string | yes | /Game path to the UPhysicsAsset. |
 | `bone_name` | string | no | Bone whose body to remove; preferred over body_index when both are given. |
-| `body_index` | number | no | Index of the body to remove (get_physics_asset_info lists them), used when bone_name is absent. |
+| `body_index` | integer | no | Index of the body to remove (get_physics_asset_info lists them), used when bone_name is absent. |
 
 **Returns:** `{ physics_asset_path: string, bone_name: string, body_index: int, removed: bool, already_absent: bool, constraints_removed: int, body_count: int, constraint_count: int, saved: bool, save_error?: string }`
 
@@ -486,7 +486,7 @@ Remove a ragdoll constraint (joint) from a UPhysicsAsset — the inverse of add_
 |---|---|---|---|
 | `physics_asset_path` | string | yes | /Game path to the UPhysicsAsset to remove the constraint from. |
 | `constraint_name` | string | no | Optional joint name (JointName) of the constraint to remove; preferred over constraint_index when both are given (see get_physics_asset_info). |
-| `constraint_index` | number | no | Optional constraint index to remove (used when constraint_name is absent). |
+| `constraint_index` | integer | no | Optional constraint index to remove (used when constraint_name is absent). |
 
 **Returns:** `{ physics_asset_path: string, constraint_name: string, constraint_index: int, child_bone: string, parent_bone: string, removed: bool, already_absent: bool, constraint_count: int, saved: bool, save_error?: string }`
 
@@ -634,7 +634,7 @@ Set the physics type, a mass override and/or the advanced FBodyInstance fields (
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `physics_asset_path` | string | yes | /Game path to the UPhysicsAsset. |
-| `body_index` | number | no | 0-based index of the body in the asset; wins over bone_name when both are given |
+| `body_index` | integer | no | 0-based index of the body in the asset; wins over bone_name when both are given |
 | `bone_name` | string | no | Bone whose body to configure, used when body_index is absent |
 | `physics_type` | string | no | Body physics type (Default\|Kinematic\|Simulated), case-insensitive; omit to keep the current one |
 | `mass` | number | no | Mass override in kilograms; also switches the mass override on. Omit to keep the current mass |
@@ -742,10 +742,10 @@ Slices all transforms of a UGeometryCollection asset with a regular grid of slic
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `geometry_collection_path` | string | yes | Asset path of the UGeometryCollection |
-| `slices_x` | number | no | Number of evenly spaced X slices, default 2 |
-| `slices_y` | number | no | Number of evenly spaced Y slices, default 2 |
-| `slices_z` | number | no | Number of evenly spaced Z slices, default 1 |
-| `random_seed` | number | no | Seed passed to the slicer, default 1337; angle and offset variation are fixed at 0, so it changes little |
+| `slices_x` | integer | no | Number of evenly spaced X slices, default 2 |
+| `slices_y` | integer | no | Number of evenly spaced Y slices, default 2 |
+| `slices_z` | integer | no | Number of evenly spaced Z slices, default 1 |
+| `random_seed` | integer | no | Seed passed to the slicer, default 1337; angle and offset variation are fixed at 0, so it changes little |
 | `grout` | number | no | Width of the gap left between cut pieces, in cm (default 0) |
 
 **Returns:** `{ geometry_collection_path: string, slices_x: int, slices_y: int, slices_z: int, new_fracture_count: int, transform_count: int, success: bool, saved: bool, save_error: string? }`

@@ -761,7 +761,7 @@ Read a world's framework wiring: default GameMode plus the pawn / PlayerControll
 
 *Destructive.*
 
-Load a PNG or 16-bit .r16 heightmap file from disk and stamp it onto an existing landscape: this is the reliable route to terrain relief, and the reason to prefer it over the editor's Import from File dialog, which can fill only part of the components and drop the peak with no warning at all. It does not negotiate resolution -- create the landscape at the file's own vertex size first (create_landscape) so resampled comes back false. success/applied is an acknowledgement, not proof: the oracle is export_landscape_heightmap plus an array compare against the source file, or get_landscape_height_at probes.
+Load a PNG or 16-bit .r16 heightmap file from disk and stamp it onto an existing landscape: this is the reliable route to terrain relief, and the reason to prefer it over the editor's Import from File dialog, which can fill only part of the components and drop the peak with no warning at all. It does not negotiate resolution -- create the landscape at the file's own vertex size first (create_landscape) so resampled comes back false. success/applied come from re-reading the written rect from the base edit layer (mismatched_vertices counts the vertices off by more than one step), so they prove the write landed there; whether it matches the source file is export_landscape_heightmap plus an array compare.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -769,7 +769,7 @@ Load a PNG or 16-bit .r16 heightmap file from disk and stamp it onto an existing
 | `landscape_actor_name` | string | no | Optional landscape actor name, defaults to first found |
 | `flip_y` | boolean | no | Optional, flip the Y axis on import |
 
-**Returns:** `{ landscape_actor_name: string, file_path: string, source_width: int, source_height: int, dest_width: int, dest_height: int, resampled: bool, applied: bool }`
+**Returns:** `{ landscape_actor_name: string, file_path: string, source_width: int, source_height: int, dest_width: int, dest_height: int, resampled: bool, applied: bool, mismatched_vertices: int, verification_method: string }`
 
 ## `inject_analog_input`
 
@@ -781,7 +781,7 @@ Feed an analog axis value (gamepad stick, trigger) to a running PIE session's Pl
 |---|---|---|---|
 | `key` | string | yes | Required analog key name, e.g. "Gamepad_LeftX", "Gamepad_LeftTriggerAxis". Rejected with a clean error if the key is not analog. |
 | `value` | number | yes | Required float axis value; roughly -1..1 for sticks, 0..1 for triggers. |
-| `pie_client_index` | number | no | Optional int (default 0). Which PIE client window to target -- 0 is the server/host window in a ListenServer session, 1 the first client. |
+| `pie_client_index` | integer | no | Optional int (default 0). Which PIE client window to target -- 0 is the server/host window in a ListenServer session, 1 the first client. |
 | `hold_seconds` | number | no | Optional float. When > 0, the analog value is re-injected every tick for this many seconds (a single axis sample decays to zero, so sustained motion needs re-feeding), then a final 0.0 is injected to neutralize. Fire-and-forget: returns immediately and the hold runs across the next hold_seconds of PIE. Omit (or 0) for a single sample. |
 
 **Returns:** `{ injected: bool, key: string, value: number, pie_client_index: int, hold_seconds: number }`
@@ -796,7 +796,7 @@ Press or release a keyboard/gamepad key at a running PIE session's PlayerControl
 |---|---|---|---|
 | `key` | string | yes | Required key name as Unreal spells it, e.g. "SpaceBar", "W", "Gamepad_FaceButton_Bottom". An unknown name is a clean error, never a silent no-op. |
 | `event` | string | no | Optional "Pressed" (default), "Released" or "Repeat". Remember the matching Released, or the game keeps thinking the key is down. |
-| `pie_client_index` | number | no | Optional int (default 0). Which PIE client window to target -- 0 is the server/host window in a ListenServer session, 1 the first client. |
+| `pie_client_index` | integer | no | Optional int (default 0). Which PIE client window to target -- 0 is the server/host window in a ListenServer session, 1 the first client. |
 | `amount_depressed` | number | no | Optional float (default 1.0). Only meaningful on the controller route. |
 | `route` | string | no | Optional "controller" (default), "slate" or "both". NOTE: THIS IS THE DIFFERENCE BETWEEN DRIVING THE GAME AND DRIVING THE UI: the controller route goes through PlayerController::InputKey, which is the gameplay input layer -- it moves the character and fires Enhanced Input actions but NEVER moves UI focus. The slate route goes through FSlateApplication::ProcessKeyDownEvent, which is the only one that moves FOCUS, so it is the only way to test a menu's gamepad navigation headless. They are not interchangeable; "both" sends to each. |
 
@@ -812,7 +812,7 @@ Fire a simulated mouse click at a running PIE session's PlayerController: fire/a
 |---|---|---|---|
 | `button` | string | no | Optional "Left"\|"Right"\|"Middle" (default "Left"); anything else is a clean error. |
 | `event` | string | no | Optional "Pressed" (default) or "Released". A full click needs both, in two calls. |
-| `pie_client_index` | number | no | Optional int (default 0). Which PIE client window to aim at -- 0 is the server/host window in a ListenServer session, 1 the first client. |
+| `pie_client_index` | integer | no | Optional int (default 0). Which PIE client window to aim at -- 0 is the server/host window in a ListenServer session, 1 the first client. |
 
 **Returns:** `{ injected: bool (the event was delivered to the controller, NOT that the game reacted -- verify with state), button: string, event: string, pie_client_index: int }`
 
@@ -864,7 +864,7 @@ Lists the editor world's World Partition actors by walking their DESCRIPTORS wit
 | `filter_class` | string | no | Optional. Class filter: resolved to a UClass (full path, /Script name, Blueprint asset path, or bare A/U name) and matched against each descriptor's native class via IsChildOf; ALSO matched as a case-insensitive substring against the descriptor's native and base class paths (so Blueprint class names like 'BP_Foo_C' or partial names work). |
 | `name_contains` | string | no | Optional. Case-insensitive substring matched against the actor's label, object name, and soft path. |
 | `folder` | string | no | Optional. Case-insensitive substring matched against the actor's editor folder path. |
-| `limit` | number | no | Optional int cap on the number of actors returned (default 2000); total_matched reports the full match count regardless of the cap. |
+| `limit` | integer | no | Optional int cap on the number of actors returned (default 2000); total_matched reports the full match count regardless of the cap. |
 
 **Returns:** `{ world: string, is_world_partition: bool, is_initialized: bool, count: int, total_matched: int, truncated: bool, actors: [{ path: string, name: string, label: string, native_class: string, base_class: string, display_class: string, is_spatially_loaded: bool, is_loaded: bool, editor_only: bool, folder: string, runtime_grid: string, editor_bounds: {valid,origin,extent}, runtime_bounds: {valid,origin,extent}, data_layers: [string] }], note: string }`
 
@@ -900,7 +900,7 @@ Bakes a saved map (.umap) into a reusable APackedLevelActor Blueprint headless: 
 
 *Destructive.*
 
-Paint terrain texture layers headless: write ONE uniform weight (0-255) into a landscape weightmap over a vertex region, or the whole terrain if you omit region. Blunt by design -- it fills a rectangle, it does not brush or blend, so build variety by painting several layers over different rectangles. The layer must already be registered with add_landscape_layer or nothing is stored. Region coordinates are VERTICES, not world units: get the ranges from get_landscape_info. Check vertices_painted and paint_warning rather than the success flag.
+Paint terrain texture layers headless: write ONE uniform weight (0-255) into a landscape weightmap over a vertex region, or the whole terrain if you omit region. Blunt by design -- it fills a rectangle, it does not brush or blend, so build variety by painting several layers over different rectangles. The layer must already be registered with add_landscape_layer or nothing is stored. Region coordinates are VERTICES, not world units: get the ranges from get_landscape_info. success follows a read-back of the weightmap: every vertex must hold weight (one step of slack) or, on a weight-blended layer that the engine renormalises, have moved toward it; mismatched_vertices counts the rest.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -909,7 +909,7 @@ Paint terrain texture layers headless: write ONE uniform weight (0-255) into a l
 | `weight` | string | no | 0 to 255 weight value, default 255 |
 | `region` | array | no | Optional [minX, minY, maxX, maxY] vertex region, defaults to the whole landscape |
 
-**Returns:** `{ landscape_actor_name: string, layer_info_path: string, layer_name: string, weight: int, painted: bool, vertices_painted: number, region: [int], paint_warning: string }`
+**Returns:** `{ landscape_actor_name: string, layer_info_path: string, layer_name: string, weight: int, painted: bool, vertices_painted: number, mismatched_vertices: int, region: [int], paint_warning: string }`
 
 ## `pause_play_in_editor`
 
@@ -934,7 +934,7 @@ Make the first PlayerController of a running PIE session possess a pawn of that 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `pawn_actor_name` | string | yes | Name or label of the pawn actor in the PIE world, e.g. "BP_Vehicle_C_0" or "Truck"; find_actors_by_name or get_actors_in_level with world="pie" list them. |
-| `pie_client_index` | number | no | Which PIE instance, a whole number from 0 (default 0: the first, the server in a ListenServer session); 1, 2... for further clients. |
+| `pie_client_index` | integer | no | Which PIE instance, a whole number from 0 (default 0: the first, the server in a ListenServer session); 1, 2... for further clients. |
 
 **Returns:** `{ possessed: bool, already_possessed: bool, had_authority: bool, pawn_actor_name: string, pie_client_index: int, note?: string }`
 
@@ -1146,7 +1146,7 @@ Move an editor-world actor, found by internal name or label (first match), into 
 
 *Destructive, idempotent.*
 
-Set the outliner label of an editor-world actor found by internal name or current label (first match). The engine trims it and keeps the old label when the new one is invalid, for example empty, so check label in the reply. Marks the level dirty without an undo entry.
+Set the outliner label of an editor-world actor found by internal name or current label (first match). The engine trims it and keeps the old label when the new one is invalid, for example empty: then the call fails, and label in the reply is the one the actor kept. Marks the level dirty without an undo entry.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1191,7 +1191,7 @@ Set a component-level override material on one slot of an editor-world actor (fo
 |---|---|---|---|
 | `actor_name` | string | yes | Name or label of the target actor |
 | `material_path` | string | yes | Full asset path of the UMaterialInterface |
-| `slot_index` | number | no | Material slot index, from 0 to the component's slot count minus 1, default 0 |
+| `slot_index` | integer | no | Material slot index, from 0 to the component's slot count minus 1, default 0 |
 
 **Returns:** `{ actor_name: string, material: string, slot_index: int }`
 
@@ -1220,7 +1220,7 @@ Set a Controller's control rotation (AController::SetControlRotation) in the act
 | `yaw` | number | yes | Required number. Control rotation yaw (degrees). |
 | `roll` | number | yes | Required number. Control rotation roll (degrees). |
 | `target_name` | string | no | Optional. Name/label of the possessed pawn (uses its controller) or a controller; default = the PIE session's PlayerController. |
-| `pie_client_index` | number | no | Optional int (default 0). |
+| `pie_client_index` | integer | no | Optional int (default 0). |
 
 **Returns:** `{ applied: bool, target: string, control_rotation: [pitch, yaw, roll], pie_client_index: int }`
 
@@ -1302,7 +1302,7 @@ Set the KillZ death plane on the EDITOR world's WorldSettings: any actor falling
 | `kill_z` | number | yes | World-space Z height (cm) below which actors get destroyed. Put it under the lowest playable geometry, not at 0. |
 | `kill_z_damage_type` | string | no | Optional UDamageType class name or full path (e.g. 'DamageType' or '/Script/Engine.DamageType'). Resolved BEFORE anything is written, so a bad name is a clean error and KillZ is left untouched. |
 
-**Returns:** `{ applied_kill_z: number, kill_z: number (both re-read off WorldSettings), kill_z_damage_type: string ('None' if unset), success: bool (hardcoded) }`
+**Returns:** `{ applied_kill_z: number, kill_z: number (both re-read off WorldSettings), kill_z_damage_type: string ('None' if unset), success: bool (true only when KillZ and the damage type re-read as asked; otherwise the call fails) }`
 
 ## `set_landscape_grass_type_properties`
 
@@ -1317,8 +1317,8 @@ Set fields of one grass variety (variety_index) of a LandscapeGrassType asset, o
 | `grass_mesh` | string | no | Path of the StaticMesh for this variety, e.g. "/Game/Foliage/SM_Grass"; a path that does not load as a StaticMesh fails the call and nothing is changed. |
 | `grass_density` | number | no | Instances per 10 square metres (25 means 2.5 per m2), so a wrong guess is a 10x error in the instance budget. |
 | `placement_jitter` | number | no | Jitter of the grid placement from 0 to 1; only used when use_grid is true. |
-| `start_cull_distance` | number | no | Distance in cm where instances start to fade, an integer; it does nothing unless the grass material uses a PerInstanceFadeAmount node, and 0 disables it. |
-| `end_cull_distance` | number | no | Distance in cm beyond which a whole grass cluster is culled, an integer. |
+| `start_cull_distance` | integer | no | Distance in cm where instances start to fade, an integer; it does nothing unless the grass material uses a PerInstanceFadeAmount node, and 0 disables it. |
+| `end_cull_distance` | integer | no | Distance in cm beyond which a whole grass cluster is culled, an integer. |
 | `min_lod` | number | no | Smallest mesh LOD to render, from -1 to 8; -1 uses the MinLOD of the static mesh asset. |
 | `scaling` | string | no | Scale mode: Uniform, Free or LockXY, case-insensitive; any other value fails the call and nothing is changed. |
 | `scale_x` | object | no | X scale range as a JSON object {"min":0.8,"max":1.2}, also used for every axis with Uniform scaling; anything else (not an object, no number bound, another key) fails the call and nothing is changed. |
@@ -1368,7 +1368,7 @@ Dress the terrain: assign the landscape's render material (and optionally its ho
 
 *Destructive, idempotent.*
 
-Move, rotate or re-width one existing landscape spline control point by index -- how you adjust a road or river route without rebuilding the spline. Only the fields you pass change (applied_count reports how many landed). Location is LANDSCAPE-LOCAL, not world, and width is a HALF-width. Read the current values first with get_landscape_spline_control_point.
+Move, rotate or re-width one existing landscape spline control point by index -- how you adjust a road or river route without rebuilding the spline. Only the fields you pass change (applied_count reports how many landed); passing none is an error, and a field that does not re-read as given fails the call. Location is LANDSCAPE-LOCAL, not world, and width is a HALF-width. Read the current values first with get_landscape_spline_control_point.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1388,8 +1388,8 @@ Set the size of the Play-In-Editor window, so a UI can be checked at more than w
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `width` | number | yes | Window width in pixels (clamped to 160..7680). |
-| `height` | number | yes | Window height in pixels (clamped to 120..4320). |
+| `width` | integer | yes | Window width in pixels (clamped to 160..7680). |
+| `height` | integer | yes | Window height in pixels (clamped to 120..4320). |
 | `center` | boolean | no | Center the new window on screen (default true). |
 
 **Returns:** `{ width: int, height: int, center: bool, applies_to: string, pie_currently_active: bool } -- applies_to is always "next PIE session"; WARNING: pie_currently_active:true is the warning that what is on screen RIGHT NOW is not what you just set.`
@@ -1424,7 +1424,7 @@ Replace every control point of the first spline component on an editor-world act
 
 *Destructive, idempotent.*
 
-Set the should-be-loaded request flag of a streaming sub-level of the editor world (ULevelStreaming::SetShouldBeLoaded), found by package path, object path or short name (case-insensitive; a path matches only the sub-level with exactly that package, and a bare name only when one sub-level has it, two being refused with their list), inside an undo transaction that marks the map dirty without saving. It is a request: this call streams nothing in or out itself, so is_level_loaded may not change. Only a sub-level class that stores the flag honors it, such as ULevelStreamingDynamic (what add_streaming_level creates); an always-loaded sub-level keeps reporting should_be_loaded true, so asking to unload it gives applied false (applied compares ShouldBeLoaded with loaded). Repeating it leaves the same state, though each call still adds an undo step. An unknown level is an error. Visibility: set_streaming_level_visible; current state: get_streaming_levels; detaching a sub-level: remove_streaming_level.
+Set the should-be-loaded request flag of a streaming sub-level of the editor world (ULevelStreaming::SetShouldBeLoaded), found by package path, object path or short name (case-insensitive; a path matches only the sub-level with exactly that package, and a bare name only when one sub-level has it, two being refused with their list), inside an undo transaction that marks the map dirty without saving. It is a request: this call streams nothing in or out itself, so is_level_loaded may not change. Only a sub-level class that stores the flag honors it, such as ULevelStreamingDynamic (what add_streaming_level creates); an always-loaded sub-level keeps reporting should_be_loaded true, so asking to unload it is an error with applied false in the reply (applied compares ShouldBeLoaded with loaded). Repeating it leaves the same state, though each call still adds an undo step. An unknown level is an error. Visibility: set_streaming_level_visible; current state: get_streaming_levels; detaching a sub-level: remove_streaming_level.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1437,7 +1437,7 @@ Set the should-be-loaded request flag of a streaming sub-level of the editor wor
 
 *Destructive, idempotent.*
 
-Set the game-time should-be-visible request flag (ULevelStreaming bShouldBeVisible) of a streaming sub-level of the editor world, found by package path or short name (a path matches only the sub-level with exactly that package, and a bare name only when one sub-level has it, two being refused with their list), inside an undo transaction. It is a request, not an immediate change, and the editor viewport follows the level's separate editor-visibility flag, so is_level_visible may not change. Marks the map dirty without saving; an unknown level is an error. applied compares the flag with visible. Loading: set_streaming_level_loaded; current state: get_streaming_levels; adding a sub-level: add_streaming_level.
+Set the game-time should-be-visible request flag (ULevelStreaming bShouldBeVisible) of a streaming sub-level of the editor world, found by package path or short name (a path matches only the sub-level with exactly that package, and a bare name only when one sub-level has it, two being refused with their list), inside an undo transaction. It is a request, not an immediate change, and the editor viewport follows the level's separate editor-visibility flag, so is_level_visible may not change. Marks the map dirty without saving; an unknown level is an error. applied compares the flag with visible, and a flag that does not re-read as visible is an error. Loading: set_streaming_level_loaded; current state: get_streaming_levels; adding a sub-level: add_streaming_level.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1456,7 +1456,7 @@ Point the active PIE session's PlayerController camera at an actor (APlayerContr
 |---|---|---|---|
 | `target_actor_name` | string | yes | Required. Name/label of the actor to view through (its camera/eyes) in the PIE world. |
 | `blend_time` | number | no | Optional number (default 0). Seconds to blend from the current view target. |
-| `pie_client_index` | number | no | Optional int (default 0). |
+| `pie_client_index` | integer | no | Optional int (default 0). |
 
 **Returns:** `{ applied: bool, view_target: string, blend_time: float, pie_client_index: int, note?: string }`
 
@@ -1472,7 +1472,7 @@ Set an exact global gravity on the EDITOR world's WorldSettings, or one from a n
 | `preset` | string | no | Optional preset NAME instead of gravity_z, in any capitalisation: 'Earth' (-980), 'Moon' (-163), 'Mars' (-371), 'Zero' (0), 'Low' (-490), 'High' (-1960), 'Enabled' (-980), 'Disabled' (an override of 0). An unknown name is refused and nothing is written. |
 | `enable_override` | boolean | no | Optional bool (default true). True makes the world use the gravity; false disables the override so the project default applies again. |
 
-**Returns:** `{ applied_gravity_z: number (what landed in GlobalGravityZ), enable_override: bool, gravity_z: number (re-read GetGravityZ, the effective value), previous_gravity_z: number (effective gravity before the write), previous_override: bool (Override World Gravity before the write), preset?: string (echo), world_name: string, world_physics_component_count: int (actors with a primitive component), world_simulate_physics_component_count: int, world_dynamic_physics_component_count: int (Movable), gravity_impact: number, gravity_impact_rating: string, gravity_recommendations: [string], success: bool (hardcoded) }`
+**Returns:** `{ applied_gravity_z: number (what landed in GlobalGravityZ), enable_override: bool, gravity_z: number (re-read GetGravityZ, the effective value), previous_gravity_z: number (effective gravity before the write), previous_override: bool (Override World Gravity before the write), preset?: string (echo), world_name: string, world_physics_component_count: int (actors with a primitive component), world_simulate_physics_component_count: int, world_dynamic_physics_component_count: int (Movable), gravity_impact: number, gravity_impact_rating: string, gravity_recommendations: [string], success: bool (true only when GlobalGravityZ and the override flag re-read as asked; otherwise the call fails) }`
 
 ## `smooth_landscape_in_box`
 
@@ -1483,7 +1483,7 @@ Soften terrain: run a 3x3 box blur over the heightmap inside a world-space box, 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `landscape_actor_name` | string | no | Optional landscape actor name, defaults to first found |
-| `iterations` | number | no | Optional number of smoothing iterations 1 to 5, default 1 |
+| `iterations` | integer | no | Optional number of smoothing iterations 1 to 5, default 1 |
 | `box_min` | array | no | Optional [x, y, z] world-space box minimum |
 | `box_max` | array | no | Optional [x, y, z] world-space box maximum |
 | `center` | array | no | Optional [x, y, z] box center (alternative to box_min/box_max) |
@@ -1519,7 +1519,7 @@ Press Play: starts a real PlayInEditor session (a true play world with a spawned
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `number_of_clients` | number | no | Optional int (default 1, clamped 1-10). >1 opens additional client windows -- that is what makes a co-op reading possible at all. |
+| `number_of_clients` | integer | no | Optional int (default 1, clamped 1-10). >1 opens additional client windows -- that is what makes a co-op reading possible at all. |
 | `net_mode` | string | no | Optional string: "Standalone"\|"ListenServer"\|"Client" (default "Standalone"). Any other value is a clean error, not a silent fallback. Use ListenServer for co-op. |
 | `run_under_one_process` | boolean | no | Optional bool (default true). Must stay true for multi-client windows to open inside this single editor process. |
 | `force` | boolean | no | Optional bool (default false). Override the PIE-ownership guard: start even if another session (or a manually-started PIE) currently owns Play-in-Editor. Read by the server before the tool runs, so a non-owner session can seize PIE. |
@@ -1536,7 +1536,7 @@ Advance a Play-in-Editor session by a number of frames and leave it paused, as t
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `frames` | number | no | Optional int (default 1, clamped 1-1000): how many frames to advance. |
+| `frames` | integer | no | Optional int (default 1, clamped 1-1000): how many frames to advance. |
 | `force` | boolean | no | Optional bool (default false). Override the PIE-ownership guard: step a session another session (or a human) started. Read by the server before the tool runs. |
 
 **Returns:** `{ frames_requested, paused, was_paused, frame_counter_before, pie_active }`
