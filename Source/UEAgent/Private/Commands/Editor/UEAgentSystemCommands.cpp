@@ -83,9 +83,17 @@ TSharedPtr<FJsonObject> HandleCreateDirectory(const TSharedPtr<FJsonObject>& Par
     if (!bAlready && !UEditorAssetLibrary::MakeDirectory(Path))
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("Failed to create directory: %s"), *Path));
 
+    const bool bExists = UEditorAssetLibrary::DoesDirectoryExist(Path);
+
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("path"), Path);
     Result->SetBoolField(TEXT("already_existed"), bAlready);
+    Result->SetBoolField(TEXT("success"), bExists);
+    if (!bExists)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("create_directory: MakeDirectory reported success but %s does not exist when read back."), *Path));
+    }
     return Result;
 }
 
@@ -113,12 +121,19 @@ TSharedPtr<FJsonObject> HandleDeleteDirectory(const TSharedPtr<FJsonObject>& Par
     bool bDeleted = false;
     if (!bAlreadyAbsent && !AssetSubsystem->DeleteDirectory(Path))
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("Failed to delete directory: %s"), *Path));
-    bDeleted = !bAlreadyAbsent;
+    const bool bGone = !AssetSubsystem->DoesDirectoryExist(Path);
+    bDeleted = !bAlreadyAbsent && bGone;
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("path"), Path);
     Result->SetBoolField(TEXT("already_absent"), bAlreadyAbsent);
     Result->SetBoolField(TEXT("deleted"), bDeleted);
+    Result->SetBoolField(TEXT("success"), bGone);
+    if (!bGone)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("delete_directory: DeleteDirectory reported success but %s still exists when read back; some of its assets may be gone."), *Path));
+    }
     return Result;
 }
 
@@ -547,7 +562,16 @@ TSharedPtr<FJsonObject> HandleFixupRedirectors(const TSharedPtr<FJsonObject>& Pa
         }
     }
     Result->SetStringField(TEXT("message"), Message);
-    Result->SetBoolField(TEXT("success"), true);
+    // A referencer that did not save, or a redirector file still on disk after a requested delete, is a failure:
+    // the payload lists which.
+    const bool bAllDone = FailedJson.Num() == 0 && DeleteFailedJson.Num() == 0;
+    Result->SetBoolField(TEXT("success"), bAllDone);
+    if (!bAllDone)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("fixup_redirectors: %d referencing package(s) failed to load or save (packages_failed) and %d redirector package(s) are still on disk (redirectors_delete_failed). %s"),
+            FailedJson.Num(), DeleteFailedJson.Num(), *Message));
+    }
     return Result;
 }
 
@@ -1527,11 +1551,19 @@ TSharedPtr<FJsonObject> HandleImportFontFile(const TSharedPtr<FJsonObject>& Para
         }
     }
 
+    // FactoryCreateBinaryImport only logs a failed save of the face: read it back as a UFontFace whose package is
+    // on disk and no longer dirty.
+    const UFontFace* ImportedFace = Cast<UFontFace>(FSoftObjectPath(ImportedPath).ResolveObject());
+    const UPackage* FacePackage = ImportedFace ? ImportedFace->GetOutermost() : nullptr;
+    const bool bFaceSaved = FacePackage && !FacePackage->IsDirty() && FPackageName::DoesPackageExist(FacePackage->GetName());
+    const bool bImported = ImportedFace && bFaceSaved && (!bCreateFontAsset || bFontAssetSaved);
+
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("source_file_path"), SourceFilePath);
     Result->SetStringField(TEXT("destination_path"), DestinationPath);
     Result->SetStringField(TEXT("imported_object_path"), ImportedPath);
-    Result->SetBoolField(TEXT("font_face_created"), true);
+    Result->SetBoolField(TEXT("font_face_created"), ImportedFace != nullptr);
+    Result->SetBoolField(TEXT("font_face_saved"), bFaceSaved);
     Result->SetBoolField(TEXT("create_font_asset"), bCreateFontAsset);
     Result->SetStringField(TEXT("font_asset_path"), FontAssetPath);
     Result->SetBoolField(TEXT("font_asset_saved"), bFontAssetSaved);
@@ -1544,7 +1576,11 @@ TSharedPtr<FJsonObject> HandleImportFontFile(const TSharedPtr<FJsonObject>& Para
                "at the UFont with set_widget_property on the dotted path \"Font.FontObject\".")
         : TEXT("UFontFace imported WITHOUT a companion UFont: a FSlateFontInfo's FontObject wants a "
                "UFont, so this face is only usable as a typeface entry of an existing font asset."));
-    return mcp_common::MakeOkReply(Result);
+    return mcp_common::MakeOutcomeReply(Result, bImported, !ImportedFace
+        ? FString::Printf(TEXT("import_font_file: the import returned '%s' but it does not resolve to a UFontFace."), *ImportedPath)
+        : !bFaceSaved
+            ? FString::Printf(TEXT("import_font_file: the UFontFace '%s' was imported in memory but its package did not reach disk (see the Output Log for the save error)."), *ImportedPath)
+            : FString::Printf(TEXT("import_font_file: the UFontFace was saved but the companion UFont was not: %s"), *FontSaveError));
 }
 
 const McpCommandFamilies::FRegistrar Registration =

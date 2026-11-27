@@ -85,9 +85,20 @@ TSharedPtr<FJsonObject> HandleBackupAsset(const TSharedPtr<FJsonObject>& Params)
         return mcp_common::MakeErrorReply(Error);
     }
 
+    // BackupAsset does not report its save: a backup only counts once its package is on disk.
+    const bool bSaved = FPackageName::DoesPackageExist(BackupPath);
+
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("source"), AssetPath);
     Result->SetStringField(TEXT("backup_path"), BackupPath);
+    Result->SetBoolField(TEXT("saved"), bSaved);
+    Result->SetBoolField(TEXT("success"), bSaved);
+    if (!bSaved)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("backup_asset: the copy %s was made in memory but its package is not on disk, so it is no backup yet (see the Output Log for the save error)."),
+            *BackupPath));
+    }
     return Result;
 }
 
