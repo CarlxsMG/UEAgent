@@ -2,6 +2,7 @@
 
 #include "Commands/Common/McpCommonUtils.h"
 #include "Commands/Common/McpEnumLabels.h"
+#include "Algo/StableSort.h"
 #include "UEAgentProjectSettings.h"
 #include "UObject/Package.h"
 #include "UObject/SavePackage.h"
@@ -957,6 +958,78 @@ namespace mcp_common
             Out.Add(MakeShared<FJsonValueString>(Value));
         }
         return Out;
+    }
+
+    FListPage ReadListPage(const TSharedPtr<FJsonObject>& Params, int32 DefaultLimit, int32 MaxLimit)
+    {
+        FListPage Page;
+        Page.Limit = DefaultLimit;
+        double OffsetD = 0.0, LimitD = DefaultLimit;
+        if (Params.IsValid())
+        {
+            Params->TryGetNumberField(TEXT("offset"), OffsetD);
+            Params->TryGetNumberField(TEXT("limit"), LimitD);
+        }
+        Page.Offset = static_cast<int32>(FMath::Clamp(OffsetD, 0.0, static_cast<double>(MAX_int32)));
+        Page.Limit = static_cast<int32>(FMath::Clamp(LimitD, 1.0, static_cast<double>(FMath::Max(1, MaxLimit))));
+        return Page;
+    }
+
+    void SortJsonItems(TArray<TSharedPtr<FJsonValue>>& Items, const TCHAR* SortKey)
+    {
+        auto KeyOf = [SortKey](const TSharedPtr<FJsonValue>& Value) -> FString
+        {
+            if (!Value.IsValid())
+            {
+                return FString();
+            }
+            if (Value->Type == EJson::String)
+            {
+                return Value->AsString();
+            }
+            const TSharedPtr<FJsonObject>* Object = nullptr;
+            FString Key;
+            if (SortKey && Value->TryGetObject(Object) && Object && (*Object).IsValid())
+            {
+                (*Object)->TryGetStringField(SortKey, Key);
+            }
+            return Key;
+        };
+        Algo::StableSort(Items, [&KeyOf](const TSharedPtr<FJsonValue>& A, const TSharedPtr<FJsonValue>& B)
+        {
+            return KeyOf(A).Compare(KeyOf(B), ESearchCase::IgnoreCase) < 0;
+        });
+    }
+
+    void ApplyListPage(TArray<TSharedPtr<FJsonValue>>& Items, const FListPage& Page, const TSharedPtr<FJsonObject>& Result)
+    {
+        const int32 Total = Items.Num();
+        const int32 Start = FMath::Min(Page.Offset, Total);
+        const int32 End = static_cast<int32>(FMath::Min<int64>(Total, static_cast<int64>(Start) + Page.Limit));
+        TArray<TSharedPtr<FJsonValue>> Kept;
+        Kept.Reserve(End - Start);
+        for (int32 Index = Start; Index < End; ++Index)
+        {
+            Kept.Add(Items[Index]);
+        }
+        Items = MoveTemp(Kept);
+        if (!Result.IsValid())
+        {
+            return;
+        }
+        Result->SetNumberField(TEXT("total"), Total);
+        Result->SetNumberField(TEXT("offset"), Page.Offset);
+        Result->SetNumberField(TEXT("limit"), Page.Limit);
+        Result->SetNumberField(TEXT("returned"), Items.Num());
+        Result->SetBoolField(TEXT("truncated"), End < Total);
+        if (End < Total)
+        {
+            Result->SetNumberField(TEXT("next_offset"), End);
+        }
+        else
+        {
+            Result->SetField(TEXT("next_offset"), MakeShared<FJsonValueNull>());
+        }
     }
 
     TArray<TSharedPtr<FJsonValue>> GameplayTagsToJson(const FGameplayTagContainer& Tags)

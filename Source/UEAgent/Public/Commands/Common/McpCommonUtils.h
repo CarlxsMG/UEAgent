@@ -532,6 +532,27 @@ namespace mcp_common
     /** Each string as a JSON string, in order. */
     UEAGENT_API TArray<TSharedPtr<FJsonValue>> StringsToJson(const TArray<FString>& Strings);
 
+    /** The page of a list tool's entries a call asks for: Offset, the 0-based index of the first entry, and Limit,
+     *  the most entries returned. */
+    struct FListPage
+    {
+        int32 Offset = 0;
+        int32 Limit = 100;
+    };
+
+    /** The offset (default 0, a negative value read as 0) and limit (default DefaultLimit, clamped to 1..MaxLimit)
+     *  params of a list tool. The catalog takes their schema from the tool's @param lines. */
+    UEAGENT_API FListPage ReadListPage(const TSharedPtr<FJsonObject>& Params, int32 DefaultLimit = 100, int32 MaxLimit = 1000);
+
+    /** Sorts Items in place, stable and case-insensitive: objects by their string field SortKey (an object without it
+     *  sorts first), strings by value. A page cut from a list is only meaningful when the order holds across calls. */
+    UEAGENT_API void SortJsonItems(TArray<TSharedPtr<FJsonValue>>& Items, const TCHAR* SortKey);
+
+    /** Cuts Items down to Page and writes the paging fields into Result: total (entries before the cut), offset,
+     *  limit, returned (entries kept), truncated (entries exist past this page) and next_offset (the offset of the
+     *  next page, null on the last one). */
+    UEAGENT_API void ApplyListPage(TArray<TSharedPtr<FJsonValue>>& Items, const FListPage& Page, const TSharedPtr<FJsonObject>& Result);
+
     /** Each tag of the container by its full name ("A.B.C"), in container order. */
     UEAGENT_API TArray<TSharedPtr<FJsonValue>> GameplayTagsToJson(const FGameplayTagContainer& Tags);
 
