@@ -508,6 +508,12 @@ TSharedPtr<FJsonObject> NodeReply(UEdGraphNode* Node, const FString& BlueprintNa
     return Reply;
 }
 
+// The error of a node command whose node, read back, is not on its graph (or not set up as asked).
+FString NodeNotPlacedError(const TCHAR* Command, const UEdGraph* Graph, const TCHAR* What)
+{
+    return FString::Printf(TEXT("%s: read back, the %s is not in graph '%s' as requested"), Command, What, Graph ? *Graph->GetName() : TEXT("?"));
+}
+
 // A reply that starts with blueprint_name and Field, which names what the command acted on.
 TSharedPtr<FJsonObject> BlueprintReply(const FString& BlueprintName, const TCHAR* Field, const FString& Value)
 {
@@ -1525,6 +1531,21 @@ TSharedPtr<FJsonObject> HandleAddGraphNode(const TSharedPtr<FJsonObject>& Params
         Result->SetField(Field.Key, Field.Value);
     }
     Result->SetBoolField(TEXT("compiled"), bCompile);
+    // A half-wired graph often fails to compile, so compile errors are reported, not a failure: the node
+    // exists, and failing here would have the caller add it a second time.
+    if (bCompile)
+    {
+        Result->SetBoolField(TEXT("compile_errors"), Blueprint->Status == BS_Error);
+    }
+    // The node must be on its graph under a real id, the one the next tool addresses it by.
+    const bool bInGraph = NodeGraph && NodeGraph->Nodes.Contains(NewNode) && NewNode->NodeGuid.IsValid();
+    Result->SetBoolField(TEXT("success"), bInGraph);
+    if (!bInGraph)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("add_graph_node: the %s node is not in graph '%s' with a valid node_id after it was created"),
+            *NodeTypeAsGiven, NodeGraph ? *NodeGraph->GetName() : TEXT("?")));
+    }
     return Result;
 }
 
@@ -1563,6 +1584,10 @@ TSharedPtr<FJsonObject> HandleConnectPins(const TSharedPtr<FJsonObject>& Params)
     // become dangling afterwards -- the node objects survive, the pins do not.
     UEdGraphNode* NodeA = Pair.SourcePin->GetOwningNode();
     UEdGraphNode* NodeB = Pair.TargetPin->GetOwningNode();
+    const FName SourcePinFName = Pair.SourcePin->PinName;
+    const EEdGraphPinDirection SourcePinDir = Pair.SourcePin->Direction;
+    const FName TargetPinFName = Pair.TargetPin->PinName;
+    const EEdGraphPinDirection TargetPinDir = Pair.TargetPin->Direction;
 
     const bool bConnected = Schema->TryCreateConnection(Pair.SourcePin, Pair.TargetPin);
     if (!bConnected)
@@ -1598,10 +1623,29 @@ TSharedPtr<FJsonObject> HandleConnectPins(const TSharedPtr<FJsonObject>& Params)
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Pair.Blueprint);
     Pair.Graph->NotifyGraphChanged();
 
+    // Read the link back from the pins the reconstruction left. A conversion node sits between the two
+    // pins, so then each side only has to be linked to something.
+    const UEdGraphPin* SourceAfter = NodeA ? NodeA->FindPin(SourcePinFName, SourcePinDir) : nullptr;
+    const UEdGraphPin* TargetAfter = NodeB ? NodeB->FindPin(TargetPinFName, TargetPinDir) : nullptr;
+    bool bLinked = false;
+    if (SourceAfter && TargetAfter)
+    {
+        bLinked = CanConnect.Response == CONNECT_RESPONSE_MAKE_WITH_CONVERSION_NODE
+            ? (SourceAfter->LinkedTo.Num() > 0 && TargetAfter->LinkedTo.Num() > 0)
+            : SourceAfter->LinkedTo.Contains(const_cast<UEdGraphPin*>(TargetAfter));
+    }
+
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-    Result->SetBoolField(TEXT("connected"), true);
+    Result->SetBoolField(TEXT("connected"), bLinked);
     Result->SetStringField(TEXT("source_node_id"), Pair.SourceNodeId);
     Result->SetStringField(TEXT("target_node_id"), Pair.TargetNodeId);
+    Result->SetBoolField(TEXT("success"), bLinked);
+    if (!bLinked)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("connect_pins: TryCreateConnection accepted the link, but %s.%s is not linked to %s.%s when the pins are read back"),
+            *Pair.SourceNodeId, *SourcePinFName.ToString(), *Pair.TargetNodeId, *TargetPinFName.ToString()));
+    }
     return Result;
 }
 
@@ -1670,11 +1714,19 @@ TSharedPtr<FJsonObject> HandleDisconnectPin(const TSharedPtr<FJsonObject>& Param
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
     Graph->NotifyGraphChanged();
 
+    const bool bDisconnected = LinkedPin ? !Pin->LinkedTo.Contains(LinkedPin) : Pin->LinkedTo.Num() == 0;
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-    Result->SetBoolField(TEXT("disconnected"), true);
+    Result->SetBoolField(TEXT("disconnected"), bDisconnected);
     Result->SetStringField(TEXT("node_id"), NodeId);
     Result->SetStringField(TEXT("pin_name"), PinName);
     Result->SetNumberField(TEXT("links_broken"), LinksBroken);
+    Result->SetNumberField(TEXT("links_remaining"), Pin->LinkedTo.Num());
+    Result->SetBoolField(TEXT("success"), bDisconnected);
+    if (!bDisconnected)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("disconnect_pin: pin '%s' of node %s still holds the link after it was broken"), *PinName, *NodeId));
+    }
     return Result;
 }
 
@@ -1817,13 +1869,29 @@ TSharedPtr<FJsonObject> HandleSetPinDefaultValue(const TSharedPtr<FJsonObject>& 
     Blueprint->Modify();
     Node->Modify();
     const UEdGraphSchema_K2* Schema = GetDefault<UEdGraphSchema_K2>();
+    const FString DefaultBefore = Pin->GetDefaultAsString();
     Schema->TrySetDefaultValue(*Pin, FinalValue);
     FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+
+    // TrySetDefaultValue returns nothing and leaves the pin as it was when the schema rejects the value.
+    // The schema may also normalize what it stores (an object path, a float's spelling), so a stored
+    // value that moved off the old one counts as written.
+    const FString DefaultAfter = Pin->GetDefaultAsString();
+    const bool bWritten = DefaultAfter.Equals(FinalValue, ESearchCase::IgnoreCase)
+        || DefaultBefore.Equals(FinalValue, ESearchCase::IgnoreCase)
+        || DefaultAfter != DefaultBefore;
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("node_id"), NodeId);
     Result->SetStringField(TEXT("pin_name"), PinName);
-    Result->SetStringField(TEXT("default_value"), Pin->GetDefaultAsString());
+    Result->SetStringField(TEXT("default_value"), DefaultAfter);
+    Result->SetBoolField(TEXT("success"), bWritten);
+    if (!bWritten)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("set_pin_default_value: the schema rejected '%s' for pin '%s'; it still reads '%s'"),
+            *FinalValue, *PinName, *DefaultAfter));
+    }
     return Result;
 }
 
@@ -1858,9 +1926,16 @@ TSharedPtr<FJsonObject> HandleDeleteNode(const TSharedPtr<FJsonObject>& Params)
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
     Graph->NotifyGraphChanged();
 
+    const bool bGone = !Graph->Nodes.Contains(Node);
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-    Result->SetBoolField(TEXT("deleted"), true);
+    Result->SetBoolField(TEXT("deleted"), bGone);
     Result->SetStringField(TEXT("node_id"), NodeId);
+    Result->SetBoolField(TEXT("success"), bGone);
+    if (!bGone)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("remove_graph_node: node %s is still in graph '%s' after RemoveNode"), *NodeId, *Graph->GetName()));
+    }
     return Result;
 }
 
@@ -1892,10 +1967,18 @@ TSharedPtr<FJsonObject> HandleMoveNode(const TSharedPtr<FJsonObject>& Params)
     Node->NodePosY = Position.Y;
     Graph->NotifyGraphChanged();
 
+    // The canvas stores whole units: the request is compared as the node stores it.
+    const bool bMoved = Node->NodePosX == static_cast<int32>(Position.X) && Node->NodePosY == static_cast<int32>(Position.Y);
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("node_id"), NodeId);
     Result->SetNumberField(TEXT("pos_x"), Node->NodePosX);
     Result->SetNumberField(TEXT("pos_y"), Node->NodePosY);
+    Result->SetBoolField(TEXT("success"), bMoved);
+    if (!bMoved)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("move_node: node %s reads [%d, %d], not the requested position"), *NodeId, Node->NodePosX, Node->NodePosY));
+    }
     return Result;
 }
 
@@ -1943,7 +2026,14 @@ TSharedPtr<FJsonObject> HandleAddCommentNode(const TSharedPtr<FJsonObject>& Para
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
     Graph->NotifyGraphChanged();
 
-    TSharedPtr<FJsonObject> Result = FUEAgentGraphUtils::NodeToJson(Node, false);
+    const bool bPlaced = Node && Graph->Nodes.Contains(Node) && (Text.IsEmpty() || Node->NodeComment == Text);
+    TSharedPtr<FJsonObject> Result = Node ? FUEAgentGraphUtils::NodeToJson(Node, false) : MakeShared<FJsonObject>();
+    Result->SetBoolField(TEXT("success"), bPlaced);
+    if (!bPlaced)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("add_comment_node: the comment box is not in graph '%s' with the requested text after it was placed"), *Graph->GetName()));
+    }
     return Result;
 }
 
@@ -2097,9 +2187,19 @@ TSharedPtr<FJsonObject> HandleAddBlueprintVariable(const TSharedPtr<FJsonObject>
     }
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 
+    // The declaration as the Blueprint holds it after the skeleton regeneration.
+    const int32 VarIndex = FBlueprintEditorUtils::FindNewVariableIndex(Blueprint, FName(*VarName));
+    const bool bDeclared = VarIndex != INDEX_NONE && Blueprint->NewVariables[VarIndex].VarType == PinType;
     TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::BlueprintReply(BlueprintName, TEXT("variable_name"), VarName);
-    Result->SetStringField(TEXT("variable_type"), VarType);
-    Result->SetBoolField(TEXT("is_array"), bIsArray);
+    Result->SetStringField(TEXT("variable_type"), VarIndex != INDEX_NONE
+        ? UEdGraphSchema_K2::TypeToText(Blueprint->NewVariables[VarIndex].VarType).ToString() : VarType);
+    Result->SetBoolField(TEXT("is_array"), VarIndex != INDEX_NONE && Blueprint->NewVariables[VarIndex].VarType.IsArray());
+    Result->SetBoolField(TEXT("success"), bDeclared);
+    if (!bDeclared)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("add_blueprint_variable: '%s' is not declared on the Blueprint with type %s after AddMemberVariable"), *VarName, *VarType));
+    }
     return Result;
 }
 
@@ -2275,7 +2375,55 @@ TSharedPtr<FJsonObject> HandleSetBpVariableMetadata(const TSharedPtr<FJsonObject
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 
     TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::BlueprintReply(BlueprintName, TEXT("variable_name"), VarName);
-    Result->SetBoolField(TEXT("updated"), true);
+    // Each field asked for, read back off the variable description.
+    TArray<FString> Mismatched;
+    const int32 VarIndex = FBlueprintEditorUtils::FindNewVariableIndex(Blueprint, VName);
+    if (VarIndex == INDEX_NONE)
+    {
+        Mismatched.Add(TEXT("variable"));
+    }
+    else
+    {
+        const FBPVariableDescription& Desc = Blueprint->NewVariables[VarIndex];
+        if (Params->HasField(TEXT("instance_editable")))
+        {
+            const bool bReadEditable = !(Desc.PropertyFlags & CPF_DisableEditOnInstance);
+            Result->SetBoolField(TEXT("instance_editable"), bReadEditable);
+            if (bReadEditable != bInstanceEditable) { Mismatched.Add(TEXT("instance_editable")); }
+        }
+        if (bSaveGameRequested && ((Desc.PropertyFlags & CPF_SaveGame) != 0) != bSaveGame)
+        {
+            Mismatched.Add(TEXT("save_game"));
+        }
+        if (Params->HasField(TEXT("expose_on_spawn")))
+        {
+            const bool bReadExpose = Desc.HasMetaData(FBlueprintMetadata::MD_ExposeOnSpawn)
+                && Desc.GetMetaData(FBlueprintMetadata::MD_ExposeOnSpawn) == TEXT("true");
+            Result->SetBoolField(TEXT("expose_on_spawn"), bReadExpose);
+            if (bReadExpose != bExpose) { Mismatched.Add(TEXT("expose_on_spawn")); }
+        }
+        if (Params->HasField(TEXT("category")))
+        {
+            Result->SetStringField(TEXT("category"), Desc.Category.ToString());
+            // An empty category is stored as the engine's default one.
+            if (!Category.IsEmpty() && !Desc.Category.ToString().Equals(Category)) { Mismatched.Add(TEXT("category")); }
+        }
+        if (Params->HasField(TEXT("tooltip")))
+        {
+            const FString ReadTooltip = Desc.HasMetaData(FBlueprintMetadata::MD_Tooltip) ? Desc.GetMetaData(FBlueprintMetadata::MD_Tooltip) : FString();
+            Result->SetStringField(TEXT("tooltip"), ReadTooltip);
+            if (ReadTooltip != Tooltip) { Mismatched.Add(TEXT("tooltip")); }
+        }
+    }
+    const bool bUpdated = Mismatched.Num() == 0;
+    Result->SetBoolField(TEXT("updated"), bUpdated);
+    Result->SetBoolField(TEXT("success"), bUpdated);
+    if (!bUpdated)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("set_blueprint_variable_metadata: read back, these fields of '%s' do not hold the requested value: %s"),
+            *VarName, *FString::Join(Mismatched, TEXT(", "))));
+    }
     // `updated:true` measures nothing on its own, so when save_game was asked for, read the flag
     // back off BOTH places it lives -- and expect them to differ. MarkBlueprintAsStructurallyModified
     // recompiles the SKELETON only (BlueprintEditorUtils.cpp, RegenerateSkeletonOnly); the flag
@@ -2329,6 +2477,12 @@ TSharedPtr<FJsonObject> HandleDeleteBpVariable(const TSharedPtr<FJsonObject>& Pa
 
     TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::BlueprintReply(BlueprintName, TEXT("variable_name"), VarName);
     Result->SetBoolField(TEXT("deleted"), bRemoved);
+    Result->SetBoolField(TEXT("success"), bRemoved);
+    if (!bRemoved)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("remove_blueprint_variable: '%s' is still declared on the Blueprint after RemoveMemberVariable"), *VarName));
+    }
     return Result;
 }
 
@@ -2773,8 +2927,16 @@ TSharedPtr<FJsonObject> HandleImplementInterface(const TSharedPtr<FJsonObject>& 
         return mcp_common::MakeErrorReply(TEXT("ImplementNewInterface failed (already implemented, or not a valid interface)"));
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 
+    const bool bImplemented = Blueprint->ImplementedInterfaces.ContainsByPredicate(
+        [InterfaceClass](const FBPInterfaceDescription& Desc) { return Desc.Interface == InterfaceClass; });
     TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::BlueprintReply(BlueprintName, TEXT("interface"), InterfaceClass->GetName());
-    Result->SetBoolField(TEXT("implemented"), true);
+    Result->SetBoolField(TEXT("implemented"), bImplemented);
+    Result->SetBoolField(TEXT("success"), bImplemented);
+    if (!bImplemented)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("implement_interface: %s is not in the Blueprint's implemented interfaces after ImplementNewInterface"), *InterfaceClass->GetName()));
+    }
     return Result;
 }
 
@@ -2818,8 +2980,16 @@ TSharedPtr<FJsonObject> HandleRemoveInterface(const TSharedPtr<FJsonObject>& Par
     FBlueprintEditorUtils::RemoveInterface(Blueprint, InterfaceClass->GetClassPathName(), bPreserveFunctions);
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 
+    const bool bGone = !Blueprint->ImplementedInterfaces.ContainsByPredicate(
+        [InterfaceClass](const FBPInterfaceDescription& Desc) { return Desc.Interface == InterfaceClass; });
     TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::BlueprintReply(BlueprintName, TEXT("interface"), InterfaceClass->GetName());
-    Result->SetBoolField(TEXT("removed"), true);
+    Result->SetBoolField(TEXT("removed"), bGone);
+    Result->SetBoolField(TEXT("success"), bGone);
+    if (!bGone)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("remove_interface: %s is still in the Blueprint's implemented interfaces after RemoveInterface"), *InterfaceClass->GetName()));
+    }
     return Result;
 }
 
@@ -3383,9 +3553,17 @@ TSharedPtr<FJsonObject> HandleAddFunctionLocalVariable(const TSharedPtr<FJsonObj
     if (!bOk)
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("AddLocalVariable failed for '%s' (name may already exist)"), *VarName));
 
+    const FBPVariableDescription* Local = FBlueprintEditorUtils::FindLocalVariable(Blueprint, FuncGraph, FName(*VarName));
+    const bool bDeclared = Local && Local->VarType == PinType;
     TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::BlueprintReply(BlueprintName, TEXT("function_name"), FunctionName);
     Result->SetStringField(TEXT("variable_name"), VarName);
-    Result->SetStringField(TEXT("variable_type"), VarType);
+    Result->SetStringField(TEXT("variable_type"), Local ? UEdGraphSchema_K2::TypeToText(Local->VarType).ToString() : VarType);
+    Result->SetBoolField(TEXT("success"), bDeclared);
+    if (!bDeclared)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("add_function_local_variable: '%s' is not a local of '%s' with type %s after AddLocalVariable"), *VarName, *FunctionName, *VarType));
+    }
     return Result;
 }
 
@@ -4315,8 +4493,21 @@ TSharedPtr<FJsonObject> HandleAddEventDispatcher(const TSharedPtr<FJsonObject>& 
     Blueprint->DelegateSignatureGraphs.Add(NewGraph);
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 
+    // Both halves of a dispatcher, read back: the delegate variable and its signature graph.
+    const int32 VarIndex = FBlueprintEditorUtils::FindNewVariableIndex(Blueprint, Name);
+    const bool bHasVar = VarIndex != INDEX_NONE && Blueprint->NewVariables[VarIndex].VarType.PinCategory == UEdGraphSchema_K2::PC_MCDelegate;
+    const bool bHasGraph = Blueprint->DelegateSignatureGraphs.ContainsByPredicate(
+        [&Name](const UEdGraph* G) { return G && G->GetFName() == Name; });
+    const bool bCreated = bHasVar && bHasGraph;
     TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::BlueprintReply(BlueprintName, TEXT("dispatcher_name"), DispatcherName);
-    Result->SetBoolField(TEXT("created"), true);
+    Result->SetBoolField(TEXT("created"), bCreated);
+    Result->SetBoolField(TEXT("success"), bCreated);
+    if (!bCreated)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("add_event_dispatcher: read back, '%s' is missing its %s"), *DispatcherName,
+            bHasVar ? TEXT("signature graph") : TEXT("delegate variable")));
+    }
     return Result;
 }
 
@@ -4373,8 +4564,19 @@ TSharedPtr<FJsonObject> HandleRemoveEventDispatcher(const TSharedPtr<FJsonObject
     }
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 
+    const bool bVarLeft = FBlueprintEditorUtils::FindNewVariableIndex(Blueprint, Name) != INDEX_NONE;
+    const bool bGraphLeft = Blueprint->DelegateSignatureGraphs.ContainsByPredicate(
+        [&Name](const UEdGraph* G) { return G && G->GetFName() == Name; });
+    const bool bRemoved = !bVarLeft && !bGraphLeft;
     TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::BlueprintReply(BlueprintName, TEXT("dispatcher_name"), DispatcherName);
-    Result->SetBoolField(TEXT("removed"), true);
+    Result->SetBoolField(TEXT("removed"), bRemoved);
+    Result->SetBoolField(TEXT("success"), bRemoved);
+    if (!bRemoved)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("remove_event_dispatcher: read back, '%s' still has its %s"), *DispatcherName,
+            bVarLeft ? TEXT("delegate variable") : TEXT("signature graph")));
+    }
     return Result;
 }
 
@@ -4504,6 +4706,27 @@ TSharedPtr<FJsonObject> HandleSetEventDispatcherSignature(const TSharedPtr<FJson
     Result->SetArrayField(TEXT("added"), Added);
     Result->SetArrayField(TEXT("params"), ParamsOut);
     Result->SetNumberField(TEXT("param_count"), ParamsOut.Num());
+
+    // Every requested parameter must be on the entry node, with the type it was asked for.
+    TArray<FString> MissingParams;
+    for (const FParamReq& R : Reqs)
+    {
+        const bool bThere = EntryNode->UserDefinedPins.ContainsByPredicate([&R](const TSharedPtr<FUserPinInfo>& PinInfo)
+        {
+            return PinInfo.IsValid() && PinInfo->PinName == FName(*R.Name) && PinInfo->PinType == R.PinType;
+        });
+        if (!bThere)
+        {
+            MissingParams.Add(R.Name);
+        }
+    }
+    Result->SetBoolField(TEXT("success"), MissingParams.Num() == 0);
+    if (MissingParams.Num() > 0)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("set_event_dispatcher_signature: read back, these parameters are not on '%s' with the requested type: %s"),
+            *DispatcherName, *FString::Join(MissingParams, TEXT(", "))));
+    }
     return Result;
 }
 
@@ -4613,6 +4836,16 @@ TSharedPtr<FJsonObject> HandleSetBpVariableReplication(const TSharedPtr<FJsonObj
     Result->SetBoolField(TEXT("is_rep_notify"), bIsRepNotify);
     Result->SetStringField(TEXT("rep_notify_func"), VerifyRepFunc.ToString());
     Result->SetNumberField(TEXT("property_flags"), static_cast<double>(FinalFlags));
+    const bool bMatches = VerifyPtr
+        && bIsNet == (ReplMode != EReplMode::None)
+        && bIsRepNotify == (ReplMode == EReplMode::RepNotify);
+    Result->SetBoolField(TEXT("success"), bMatches);
+    if (!bMatches)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("set_blueprint_variable_replication: after the compile '%s' reads is_replicated=%s, is_rep_notify=%s, which is not mode %s"),
+            *VarName, bIsNet ? TEXT("true") : TEXT("false"), bIsRepNotify ? TEXT("true") : TEXT("false"), *Mode));
+    }
     return Result;
 }
 
@@ -4700,6 +4933,15 @@ TSharedPtr<FJsonObject> HandleSetBpFunctionRpc(const TSharedPtr<FJsonObject>& Pa
     Result->SetBoolField(TEXT("is_net"), bIsNet);
     Result->SetBoolField(TEXT("reliable"), bIsReliable);
     Result->SetNumberField(TEXT("function_flags"), static_cast<double>(VerifyFlags));
+    const bool bMatches = ResolvedType.Equals(RpcType, ESearchCase::IgnoreCase)
+        && bIsReliable == (NetSpecifier != 0 && bReliable);
+    Result->SetBoolField(TEXT("success"), bMatches);
+    if (!bMatches)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("set_blueprint_function_rpc: after the compile '%s' reads rpc_type=%s, reliable=%s, not the requested %s"),
+            *FunctionName, *ResolvedType, bIsReliable ? TEXT("true") : TEXT("false"), *RpcType));
+    }
     return Result;
 }
 
@@ -4774,6 +5016,13 @@ TSharedPtr<FJsonObject> HandleSetBlueprintFunctionPure(const TSharedPtr<FJsonObj
     Result->SetBoolField(TEXT("was_pure"), bWasPure);
     Result->SetBoolField(TEXT("changed"), bIsPure != bWasPure);
     Result->SetNumberField(TEXT("function_flags"), static_cast<double>(FlagsAfter));
+    Result->SetBoolField(TEXT("success"), bIsPure == bWantPure);
+    if (bIsPure != bWantPure)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("set_blueprint_function_pure: after the compile '%s' reads is_pure=%s; the compiler did not keep the change"),
+            *FunctionName, bIsPure ? TEXT("true") : TEXT("false")));
+    }
     return Result;
 }
 
@@ -4827,8 +5076,8 @@ TSharedPtr<FJsonObject> HandleSetBpClassReplication(const TSharedPtr<FJsonObject
 
     // Re-fetch the CDO after compile (compile may reinstance) and read back to verify.
     AActor* VerifyCDO = Cast<AActor>(Blueprint->GeneratedClass ? Blueprint->GeneratedClass->GetDefaultObject(false) : nullptr);
-    const bool bVerifyReplicates = VerifyCDO ? VerifyCDO->GetIsReplicated() : bReplicates;
-    const bool bVerifyAlwaysRelevant = VerifyCDO ? (VerifyCDO->bAlwaysRelevant != 0) : bAlwaysRelevantValue;
+    const bool bVerifyReplicates = VerifyCDO && VerifyCDO->GetIsReplicated();
+    const bool bVerifyAlwaysRelevant = VerifyCDO && VerifyCDO->bAlwaysRelevant != 0;
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("blueprint_name"), BlueprintName);
@@ -4837,6 +5086,15 @@ TSharedPtr<FJsonObject> HandleSetBpClassReplication(const TSharedPtr<FJsonObject
     if (bAlwaysRelevantSet)
     {
         Result->SetBoolField(TEXT("always_relevant"), bVerifyAlwaysRelevant);
+    }
+    const bool bMatches = VerifyCDO && bVerifyReplicates == bReplicates
+        && (!bAlwaysRelevantSet || bVerifyAlwaysRelevant == bAlwaysRelevantValue);
+    Result->SetBoolField(TEXT("success"), bMatches);
+    if (!bMatches)
+    {
+        Result->SetStringField(TEXT("error"), VerifyCDO
+            ? FString(TEXT("set_blueprint_class_replication: the post-compile CDO does not hold the requested replicates/always_relevant"))
+            : FString(TEXT("set_blueprint_class_replication: the Blueprint has no Actor CDO after the compile to read back")));
     }
     return Result;
 }
@@ -4883,10 +5141,17 @@ TSharedPtr<FJsonObject> HandleSetComponentReplication(const TSharedPtr<FJsonObje
     FKismetEditorUtilities::CompileBlueprint(Blueprint, EBlueprintCompileOptions::None);
 
     // Read the value back off the template to verify.
-    const bool bVerify = Template->GetIsReplicated();
+    const bool bVerify = OwnNode->ComponentTemplate && OwnNode->ComponentTemplate->GetIsReplicated();
 
     TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::BlueprintReply(BlueprintName, TEXT("component_name"), ComponentName);
     Result->SetBoolField(TEXT("replicates"), bVerify);
+    Result->SetBoolField(TEXT("success"), bVerify == bReplicates);
+    if (bVerify != bReplicates)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("set_component_replication: the template of '%s' reads replicates=%s after the compile"),
+            *ComponentName, bVerify ? TEXT("true") : TEXT("false")));
+    }
     return Result;
 }
 
@@ -4973,6 +5238,14 @@ TSharedPtr<FJsonObject> HandleAddTimelineToBlueprint(const TSharedPtr<FJsonObjec
     Result->SetNumberField(TEXT("length"), Verify ? Verify->TimelineLength : (float)Length);
     Result->SetBoolField(TEXT("timeline_created"), Verify != nullptr);
     Result->SetStringField(TEXT("timeline_guid"), Node->TimelineGuid.ToString());
+    const bool bCreated = Verify != nullptr && Graph->Nodes.Contains(Node);
+    Result->SetBoolField(TEXT("success"), bCreated);
+    if (!bCreated)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("add_timeline_to_blueprint: after the compile timeline '%s' has %s"), *TimelineVarName.ToString(),
+            Verify ? TEXT("no node in the graph") : TEXT("no template registered on the Blueprint")));
+    }
     return Result;
 }
 
@@ -5064,6 +5337,13 @@ TSharedPtr<FJsonObject> HandleAddComponentBoundEvent(const TSharedPtr<FJsonObjec
     Result->SetStringField(TEXT("delegate"), DelegateName);
     Result->SetStringField(TEXT("custom_function_name"), Node->CustomFunctionName.ToString());
     Result->SetBoolField(TEXT("bound"), bBound);
+    Result->SetBoolField(TEXT("success"), bBound);
+    if (!bBound)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("add_component_bound_event: after the compile no bound event for %s.%s is registered on the Blueprint"),
+            *ComponentName, *DelegateName));
+    }
     return Result;
 }
 
@@ -5163,7 +5443,20 @@ TSharedPtr<FJsonObject> HandleAddObjectBoundEvent(const TSharedPtr<FJsonObject>&
     Result->SetStringField(TEXT("graph_name"), Graph->GetName());
     Result->SetStringField(TEXT("target_class"), TargetClass->GetPathName());
     Result->SetStringField(TEXT("dispatcher"), FoundDispatcher);
-    Result->SetBoolField(TEXT("wired"), bWired);
+    // Read the wire back off the event's delegate pin, and both nodes off the graph.
+    const UEdGraphPin* EventDelegatePin = EventNode->FindPin(UK2Node_CustomEvent::DelegateOutputName, EGPD_Output);
+    const bool bLinked = bWired && EventDelegatePin && EventDelegatePin->LinkedTo.ContainsByPredicate(
+        [BindNode](const UEdGraphPin* Linked) { return Linked && Linked->GetOwningNode() == BindNode; });
+    const bool bPlaced = Graph->Nodes.Contains(BindNode) && Graph->Nodes.Contains(EventNode);
+    Result->SetBoolField(TEXT("wired"), bLinked);
+    Result->SetBoolField(TEXT("success"), bLinked && bPlaced);
+    if (!(bLinked && bPlaced))
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("add_object_bound_event: %s; the nodes made are listed here, remove them with remove_graph_node"),
+            !bPlaced ? TEXT("the AddDelegate or handler event node is not in the graph")
+                     : TEXT("the handler event's delegate pin is not linked to the AddDelegate node")));
+    }
     return Result;
 }
 
@@ -5375,6 +5668,12 @@ TSharedPtr<FJsonObject> HandleAddInputActionEventNode(const TSharedPtr<FJsonObje
     TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::NodeReply(Node, BlueprintName, Graph);
     Result->SetStringField(TEXT("input_action_name"), Node->InputActionName.ToString());
     Result->SetStringField(TEXT("node_class"), Node->GetClass()->GetName());
+    const bool bPlaced = Graph->Nodes.Contains(Node) && Node->InputActionName == FName(*InputActionName);
+    Result->SetBoolField(TEXT("success"), bPlaced);
+    if (!bPlaced)
+    {
+        Result->SetStringField(TEXT("error"), UEAgentGraphCommandsImpl::NodeNotPlacedError(TEXT("add_input_action_event_node"), Graph, TEXT("input action event node")));
+    }
     return Result;
 }
 
@@ -5434,6 +5733,12 @@ TSharedPtr<FJsonObject> HandleAddEnhancedInputActionNode(const TSharedPtr<FJsonO
     TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::NodeReply(Node, BlueprintName, Graph);
     Result->SetStringField(TEXT("input_action"), InputAction->GetPathName());
     Result->SetStringField(TEXT("node_class"), Node->GetClass()->GetName());
+    const bool bPlaced = Graph->Nodes.Contains(Node) && Node->InputAction == InputAction;
+    Result->SetBoolField(TEXT("success"), bPlaced);
+    if (!bPlaced)
+    {
+        Result->SetStringField(TEXT("error"), UEAgentGraphCommandsImpl::NodeNotPlacedError(TEXT("add_enhanced_input_action_node"), Graph, TEXT("Enhanced Input action node")));
+    }
     return Result;
 }
 
@@ -5469,6 +5774,12 @@ TSharedPtr<FJsonObject> HandleAddRerouteNode(const TSharedPtr<FJsonObject>& Para
     Graph->NotifyGraphChanged();
 
     TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::NodeReply(Node, BlueprintName, Graph);
+    const bool bPlaced = Graph->Nodes.Contains(Node);
+    Result->SetBoolField(TEXT("success"), bPlaced);
+    if (!bPlaced)
+    {
+        Result->SetStringField(TEXT("error"), UEAgentGraphCommandsImpl::NodeNotPlacedError(TEXT("add_reroute_node"), Graph, TEXT("reroute node")));
+    }
     return Result;
 }
 
@@ -5586,6 +5897,12 @@ TSharedPtr<FJsonObject> HandleAddBroadcastNode(const TSharedPtr<FJsonObject>& Pa
 
     TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::NodeReply(Node, BlueprintName, Graph);
     Result->SetStringField(TEXT("dispatcher_name"), DispatcherName);
+    const bool bPlaced = Graph->Nodes.Contains(Node) && Node->GetPropertyName() == DelegateProp->GetFName();
+    Result->SetBoolField(TEXT("success"), bPlaced);
+    if (!bPlaced)
+    {
+        Result->SetStringField(TEXT("error"), UEAgentGraphCommandsImpl::NodeNotPlacedError(TEXT("add_broadcast_node"), Graph, TEXT("broadcast node for this dispatcher")));
+    }
     return Result;
 }
 
@@ -5637,6 +5954,12 @@ TSharedPtr<FJsonObject> HandleAddParentCallNode(const TSharedPtr<FJsonObject>& P
     TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::NodeReply(Node, BlueprintName, Graph);
     Result->SetStringField(TEXT("function_name"), FunctionName);
     Result->SetStringField(TEXT("parent_class"), OwnerClass ? OwnerClass->GetName() : TEXT(""));
+    const bool bPlaced = Graph->Nodes.Contains(Node) && Node->FunctionReference.GetMemberName() == ParentFunc->GetFName();
+    Result->SetBoolField(TEXT("success"), bPlaced);
+    if (!bPlaced)
+    {
+        Result->SetStringField(TEXT("error"), UEAgentGraphCommandsImpl::NodeNotPlacedError(TEXT("add_parent_call_node"), Graph, TEXT("parent call node for this function")));
+    }
     return Result;
 }
 
@@ -6112,9 +6435,16 @@ TSharedPtr<FJsonObject> HandleCreateBlueprintMacro(const TSharedPtr<FJsonObject>
         return mcp_common::MakeErrorReply(TEXT("FBlueprintEditorUtils::CreateNewGraph failed"));
     FBlueprintEditorUtils::AddMacroGraph(Blueprint, NewGraph, /*bIsUserCreated=*/true, /*SignatureFromClass=*/nullptr);
 
+    const bool bRegistered = Blueprint->MacroGraphs.Contains(NewGraph);
     TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::BlueprintReply(BlueprintName, TEXT("macro_name"), MacroName);
     Result->SetStringField(TEXT("graph_name"), NewGraph->GetName());
     Result->SetBoolField(TEXT("already_existed"), false);
+    Result->SetBoolField(TEXT("success"), bRegistered);
+    if (!bRegistered)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("create_blueprint_macro: graph '%s' is not in the Blueprint's macro graphs after AddMacroGraph"), *NewGraph->GetName()));
+    }
     return Result;
 }
 
@@ -6161,9 +6491,16 @@ TSharedPtr<FJsonObject> HandleSplitBlueprintPin(const TSharedPtr<FJsonObject>& P
         }
     }
 
+    const bool bSplit = SubPinNames.Num() > 0;
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-    Result->SetBoolField(TEXT("split"), true);
+    Result->SetBoolField(TEXT("split"), bSplit);
     Result->SetArrayField(TEXT("sub_pins"), SubPinNames);
+    Result->SetBoolField(TEXT("success"), bSplit);
+    if (!bSplit)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("split_blueprint_pin: pin '%s' of node %s has no sub-pins after SplitPin"), *PinName, *NodeId));
+    }
     return Result;
 }
 
@@ -6205,12 +6542,25 @@ TSharedPtr<FJsonObject> HandleRecombineBlueprintPin(const TSharedPtr<FJsonObject
     FScopedTransaction Transaction(LOCTEXT("RecombineBlueprintPin", "MCP: Recombine Pin"));
     Blueprint->Modify();
     Graph->Modify();
+    // RecombinePin destroys the sub-pins, so the parent is found again by name afterwards.
+    const UEdGraphPin* ParentPin = Pin->ParentPin ? Pin->ParentPin : Pin;
+    const FName ParentPinName = ParentPin->PinName;
+    const EEdGraphPinDirection ParentPinDir = ParentPin->Direction;
     Schema->RecombinePin(Pin);
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
     Graph->NotifyGraphChanged();
 
+    const UEdGraphPin* Recombined = Node->FindPin(ParentPinName, ParentPinDir);
+    const bool bRecombined = Recombined && Recombined->SubPins.Num() == 0 && !Recombined->bHidden;
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-    Result->SetBoolField(TEXT("recombined"), true);
+    Result->SetBoolField(TEXT("recombined"), bRecombined);
+    Result->SetBoolField(TEXT("success"), bRecombined);
+    if (!bRecombined)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("recombine_blueprint_pin: pin '%s' of node %s is not a single visible pin after RecombinePin"),
+            *ParentPinName.ToString(), *NodeId));
+    }
     return Result;
 }
 
