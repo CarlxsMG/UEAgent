@@ -530,10 +530,12 @@ namespace
 //   returns their class name + CDO container / category. Headless-safe;
 //   does not load anything new from disk.
 // ---------------------------------------------------------------------------
-// MCP:list_project_setting_sections - List every loaded, concrete UDeveloperSettings subclass (the Project/Editor Settings sections) without loading new modules, read-only. Returns count and sections [{class_name, class_path, container_name, category_name, section_name, section_text}]; pass class_name to get_project_settings_value or set_project_settings_value.
-//   @returns { count: int, sections: [object] }
+// MCP:list_project_setting_sections - List every loaded, concrete UDeveloperSettings subclass (the Project/Editor Settings sections) without loading new modules, read-only. Returns count and sections [{class_name, class_path, container_name, category_name, section_name, section_text}], sorted by class_path and paged with offset/limit; pass class_name to get_project_settings_value or set_project_settings_value.
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { count: int (entries in this page), sections: [object], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }
 TSharedPtr<FJsonObject> HandleListProjectSettingSections(
-	const TSharedPtr<FJsonObject>& /*Params*/)
+	const TSharedPtr<FJsonObject>& Params)
 {
 	TArray<TSharedPtr<FJsonValue>> SectionArr;
 	for (TObjectIterator<UClass> It; It; ++It)
@@ -554,6 +556,8 @@ TSharedPtr<FJsonObject> HandleListProjectSettingSections(
 		SectionArr.Add(MakeShared<FJsonValueObject>(Entry));
 	}
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	mcp_common::SortJsonItems(SectionArr, TEXT("class_path"));
+	mcp_common::ApplyListPage(SectionArr, mcp_common::ReadListPage(Params), Data);
 	Data->SetNumberField(TEXT("count"), SectionArr.Num());
 	Data->SetArrayField(TEXT("sections"), SectionArr);
 	return mcp_common::MakeOkReply(Data);

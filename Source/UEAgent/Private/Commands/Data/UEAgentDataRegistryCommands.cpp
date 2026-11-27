@@ -671,8 +671,10 @@ TSharedPtr<FJsonObject> HandleGetDataRegistryItem(
 // list_data_registry_types
 // Enumerates all registries currently registered with the subsystem.
 // ---------------------------------------------------------------------------
-// MCP:list_data_registry_types - List every registry the UDataRegistrySubsystem currently has registered, sorted by type, each with registry_type, registry_path, item_struct and initialized. Read-only. An asset the subsystem has not loaded is absent: register it with initialize_data_registry, or call refresh_data_registry_map after edits.
-//   @returns { registries: [{registry_type, registry_path, item_struct, initialized}], registry_count: int }
+// MCP:list_data_registry_types - List the registries the UDataRegistrySubsystem currently has registered, sorted by type and paged with offset/limit, each with registry_type, registry_path, item_struct and initialized. Read-only. An asset the subsystem has not loaded is absent: register it with initialize_data_registry, or call refresh_data_registry_map after edits.
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { registries: [{registry_type, registry_path, item_struct, initialized}], registry_count: int (entries in this page), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }
 
 TSharedPtr<FJsonObject> HandleListDataRegistryTypes(
     const TSharedPtr<FJsonObject>& Params)
@@ -700,6 +702,7 @@ TSharedPtr<FJsonObject> HandleListDataRegistryTypes(
     }
 
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    mcp_common::ApplyListPage(TypesArr, mcp_common::ReadListPage(Params), ResultObj);
     ResultObj->SetArrayField(TEXT("registries"), TypesArr);
     ResultObj->SetNumberField(TEXT("registry_count"), TypesArr.Num());
     return mcp_common::MakeOkReply(ResultObj);

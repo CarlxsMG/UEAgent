@@ -413,9 +413,11 @@ TSharedPtr<FJsonObject> HandleRunEditorUtilityWidget(const TSharedPtr<FJsonObjec
 // ---------------------------------------------------------------------------
 // list_editor_utility_widgets
 // ---------------------------------------------------------------------------
-// MCP:list_editor_utility_widgets - List the Editor Utility Widget Blueprint assets under a content folder and its subfolders, read from the Asset Registry without loading them. Returns search_path, count and widgets [{name, asset_path, package_name, package_path}]; open one as an editor tab with run_editor_utility_widget.
+// MCP:list_editor_utility_widgets - List the Editor Utility Widget Blueprint assets under a content folder and its subfolders, read from the Asset Registry without loading them. Returns search_path, count and widgets [{name, asset_path, package_name, package_path}], sorted by asset_path and paged with offset/limit; open one as an editor tab with run_editor_utility_widget.
 //   @param path - Content folder to search recursively, without a trailing slash, e.g. "/Game/EditorUtilities" (default /Game).
-//   @returns { name, asset_path, package_name, package_path, search_path, count, widgets }
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { name, asset_path, package_name, package_path, search_path, count (entries in this page), widgets, total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }
 TSharedPtr<FJsonObject> HandleListEditorUtilityWidgets(const TSharedPtr<FJsonObject>& Params)
 {
     FString SearchPath = TEXT("/Game");
@@ -437,6 +439,8 @@ TSharedPtr<FJsonObject> HandleListEditorUtilityWidgets(const TSharedPtr<FJsonObj
     }
 
     TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+    mcp_common::SortJsonItems(WidgetsOut, TEXT("asset_path"));
+    mcp_common::ApplyListPage(WidgetsOut, mcp_common::ReadListPage(Params), Resp);
     Resp->SetStringField(TEXT("search_path"), SearchPath);
     Resp->SetNumberField(TEXT("count"), WidgetsOut.Num());
     Resp->SetArrayField(TEXT("widgets"), WidgetsOut);
@@ -465,9 +469,11 @@ TSharedPtr<FJsonObject> HandleListEditorUtilityWidgets(const TSharedPtr<FJsonObj
 // Enumerate Editor Utility Blueprints whose generated/parent class is a child of
 // UAssetActionUtility or UActorActionUtility. We resolve each candidate's
 // generated class (loading the BP if necessary) and classify it.
-// MCP:list_scripted_action_utilities - List the Editor Utility Blueprints under a content folder (subfolders included) whose class derives from UAssetActionUtility (kind asset: Content Browser right-click actions) or UActorActionUtility (kind actor: level actor actions). Each Editor Utility Blueprint found is LOADED to test its class, so a large folder is slow; plain Blueprints and Editor Utility Widgets are not listed. Read-only; a folder with none, or one that does not exist, is an empty list, not an error. Run one with run_asset_action_utility, which also lists its CallInEditor actions; create one with create_editor_utility_blueprint (parent_class "AssetActionUtility" or "ActorActionUtility"); Editor Utility Widgets: list_editor_utility_widgets.
+// MCP:list_scripted_action_utilities - List the Editor Utility Blueprints under a content folder (subfolders included) whose class derives from UAssetActionUtility (kind asset: Content Browser right-click actions) or UActorActionUtility (kind actor: level actor actions). Each Editor Utility Blueprint found is LOADED to test its class, so a large folder is slow; plain Blueprints and Editor Utility Widgets are not listed. Sorted by path, a page at a time (offset/limit). Read-only; a folder with none, or one that does not exist, is an empty list, not an error. Run one with run_asset_action_utility, which also lists its CallInEditor actions; create one with create_editor_utility_blueprint (parent_class "AssetActionUtility" or "ActorActionUtility"); Editor Utility Widgets: list_editor_utility_widgets.
 //   @param path - Content folder to search, subfolders included, e.g. "/Game/EditorTools", without a trailing slash (default /Game).
-//   @returns { search_path: string, count: int, utilities: [{ name: string, path: string, package_name: string, kind: string, parent_class: string }] }
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { search_path: string, count: int (entries in this page), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null, utilities: [{ name: string, path: string, package_name: string, kind: string, parent_class: string }] }
 TSharedPtr<FJsonObject> HandleListScriptedActionUtilities(const TSharedPtr<FJsonObject>& Params)
 {
     FString SearchPath = TEXT("/Game");
@@ -520,6 +526,8 @@ TSharedPtr<FJsonObject> HandleListScriptedActionUtilities(const TSharedPtr<FJson
     }
 
     TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+    mcp_common::SortJsonItems(UtilitiesOut, TEXT("path"));
+    mcp_common::ApplyListPage(UtilitiesOut, mcp_common::ReadListPage(Params), Resp);
     Resp->SetStringField(TEXT("search_path"), SearchPath);
     Resp->SetNumberField(TEXT("count"), UtilitiesOut.Num());
     Resp->SetArrayField(TEXT("utilities"), UtilitiesOut);
