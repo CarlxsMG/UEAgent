@@ -814,11 +814,7 @@ namespace
         const bool bVerified = bFound && bMatches;
         Data->SetBoolField(TEXT("set"), bFound);
         Data->SetBoolField(TEXT("verified"), bVerified);
-        if (bVerified)
-        {
-            return mcp_common::MakeOutcomeReply(Data, true);
-        }
-        return mcp_common::MakeOutcomeReply(Data, false, bFound
+        return mcp_common::MakeOutcomeReply(Data, bVerified, bVerified ? FString() : bFound
             ? FString::Printf(TEXT("%s: '%s' reads back a value other than the one written (see value_read_back)"), Command, *Target.VariableName)
             : FString::Printf(TEXT("%s: the component holds no override '%s' of this type after the write"), Command, *Target.VariableName));
     }
