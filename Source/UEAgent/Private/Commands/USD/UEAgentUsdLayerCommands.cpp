@@ -216,6 +216,22 @@ namespace
 		}
 		return false;
 	}
+
+	// The outcome of an add_* arc edit, written into Result: added is the wrapper's answer, has_arcs the prim re-read
+	// afterwards (it lists authored arcs of that kind). Returns the error for a call where not both hold, else empty.
+	FString UsdLayer_ArcAddedOutcome(const TCHAR* Command, const TCHAR* ArcKind, bool bAdded, bool bHasArcs,
+		const TSharedPtr<FJsonObject>& Result)
+	{
+		Result->SetBoolField(TEXT("added"), bAdded);
+		Result->SetBoolField(TEXT("has_arcs"), bHasArcs);
+		if (bAdded && bHasArcs)
+		{
+			return FString();
+		}
+		return bAdded
+			? FString::Printf(TEXT("%s: the wrapper reported the %s added, but the prim lists no authored %s"), Command, ArcKind, ArcKind)
+			: FString::Printf(TEXT("%s: USD rejected the %s (its messages are in errors)"), Command, ArcKind);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -511,8 +527,10 @@ TSharedPtr<FJsonObject> HandleAddUsdReference(const TSharedPtr<FJsonObject>& Par
 		return Result;
 	}
 
-	Result->SetBoolField(TEXT("added"), bAdded);
-	return mcp_common::MakeOkReply(Result);
+	const UE::FUsdPrim ReadPrim = UsdLayer_FindPrim(Request.StageName, Request.PrimPath);
+	const FString ArcError = UsdLayer_ArcAddedOutcome(TEXT("add_usd_reference"), TEXT("references"), bAdded,
+		ReadPrim && ReadPrim.HasAuthoredReferences(), Result);
+	return mcp_common::MakeOutcomeReply(Result, ArcError.IsEmpty(), ArcError);
 }
 
 // ---------------------------------------------------------------------------
@@ -569,8 +587,10 @@ TSharedPtr<FJsonObject> HandleAddUsdInternalReference(const TSharedPtr<FJsonObje
 		return Result;
 	}
 
-	Result->SetBoolField(TEXT("added"), bAdded);
-	return mcp_common::MakeOkReply(Result);
+	const UE::FUsdPrim ReadPrim = UsdLayer_FindPrim(StageName, PrimPath);
+	const FString ArcError = UsdLayer_ArcAddedOutcome(TEXT("add_usd_internal_reference"), TEXT("references"), bAdded,
+		ReadPrim && ReadPrim.HasAuthoredReferences(), Result);
+	return mcp_common::MakeOutcomeReply(Result, ArcError.IsEmpty(), ArcError);
 }
 
 // ---------------------------------------------------------------------------
@@ -612,7 +632,10 @@ TSharedPtr<FJsonObject> HandleClearUsdReferences(const TSharedPtr<FJsonObject>& 
 	}
 
 	Result->SetBoolField(TEXT("cleared"), bCleared);
-	return mcp_common::MakeOkReply(Result);
+	// References authored on other layers still compose, so the prim re-read is reported, not required.
+	const UE::FUsdPrim ReadPrim = UsdLayer_FindPrim(StageName, PrimPath);
+	Result->SetBoolField(TEXT("has_references"), ReadPrim && ReadPrim.HasAuthoredReferences());
+	return mcp_common::MakeOutcomeReply(Result, bCleared, mcp_common::MeasuredOutcomeError(TEXT("clear_usd_references"), TEXT("cleared")));
 }
 
 // ---------------------------------------------------------------------------
@@ -655,8 +678,10 @@ TSharedPtr<FJsonObject> HandleAddUsdPayload(const TSharedPtr<FJsonObject>& Param
 		return Result;
 	}
 
-	Result->SetBoolField(TEXT("added"), bAdded);
-	return mcp_common::MakeOkReply(Result);
+	const UE::FUsdPrim ReadPrim = UsdLayer_FindPrim(Request.StageName, Request.PrimPath);
+	const FString ArcError = UsdLayer_ArcAddedOutcome(TEXT("add_usd_payload"), TEXT("payloads"), bAdded,
+		ReadPrim && ReadPrim.HasAuthoredPayloads(), Result);
+	return mcp_common::MakeOutcomeReply(Result, ArcError.IsEmpty(), ArcError);
 }
 
 // ---------------------------------------------------------------------------
@@ -728,7 +753,9 @@ TSharedPtr<FJsonObject> HandleClearUsdPayloads(const TSharedPtr<FJsonObject>& Pa
 	Result->SetBoolField(TEXT("had_payloads"), bHadPayloads);
 	Result->SetBoolField(TEXT("cleared"), bCleared && bHadPayloads);
 	Result->SetBoolField(TEXT("has_payloads"), bHasPayloads);
-	return mcp_common::MakeOkReply(Result);
+	// No payload is an honest no-op; a prim that had payloads and that the edit did not clear is a failure.
+	return mcp_common::MakeOutcomeReply(Result, !bHadPayloads || bCleared,
+		mcp_common::MeasuredOutcomeError(TEXT("clear_usd_payloads"), TEXT("cleared")));
 }
 
 // ---------------------------------------------------------------------------
@@ -773,7 +800,33 @@ TSharedPtr<FJsonObject> HandleMuteUsdLayer(const TSharedPtr<FJsonObject>& Params
 		return UEAgent::UsdCommon::FailReply(Result, FString::Printf(TEXT("Stage '%s' could not be resolved"), *StageName));
 	}
 
-	return mcp_common::MakeOkReply(Result);
+	// The re-read: every layer asked muted reads muted on the stage, every layer asked unmuted reads unmuted.
+	TArray<FString> Mismatched;
+	if (const UE::FUsdStage Stage = UsdLayer_FindStage(StageName))
+	{
+		for (const FString& Path : MutePaths)
+		{
+			if (!Stage.IsLayerMuted(Path))
+			{
+				Mismatched.Add(Path);
+			}
+		}
+		for (const FString& Path : UnmutePaths)
+		{
+			if (Stage.IsLayerMuted(Path))
+			{
+				Mismatched.Add(Path);
+			}
+		}
+	}
+	else
+	{
+		Mismatched.Append(MutePaths);
+		Mismatched.Append(UnmutePaths);
+	}
+	Result->SetArrayField(TEXT("mismatched"), mcp_common::StringsToJson(Mismatched));
+	return mcp_common::MakeOutcomeReply(Result, Mismatched.Num() == 0, FString::Printf(
+		TEXT("mute_usd_layer: the stage does not read the requested mute state for %s"), *FString::Join(Mismatched, TEXT(", "))));
 }
 
 // ---------------------------------------------------------------------------
@@ -837,12 +890,8 @@ TSharedPtr<FJsonObject> HandleSetUsdEditTarget(const TSharedPtr<FJsonObject>& Pa
 	Result->SetStringField(TEXT("edit_target_real_path"), NowTarget ? NowTarget.GetRealPath() : FString());
 	Result->SetBoolField(TEXT("is_root"), LayerIndex == View.RootIndex);
 	Result->SetBoolField(TEXT("is_session"), LayerIndex < View.SessionCount);
-	if (!bApplied)
-	{
-		return UEAgent::UsdCommon::FailReply(Result,
-			FString::Printf(TEXT("the stage's edit target is not the layer at index %d after SetEditTarget"), LayerIndex));
-	}
-	return mcp_common::MakeOkReply(Result);
+	return mcp_common::MakeOutcomeReply(Result, bApplied,
+		FString::Printf(TEXT("the stage's edit target is not the layer at index %d after SetEditTarget"), LayerIndex));
 }
 
 const McpCommandFamilies::FRegistrar Registration =

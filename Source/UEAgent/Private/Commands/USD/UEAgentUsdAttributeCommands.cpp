@@ -249,7 +249,11 @@ TSharedPtr<FJsonObject> HandleCreateUsdAttribute(const TSharedPtr<FJsonObject>& 
 	Data->SetStringField(TEXT("type_name"), Attr.GetTypeName().ToString());
 	Data->SetStringField(TEXT("cpp_type"), Attr.GetCPPTypeName());
 	Data->SetBoolField(TEXT("created"), !bAlreadyExisted);
-	return mcp_common::MakeOkReply(Data);
+	// The re-read: the prim reports an attribute of that name.
+	const bool bPresent = Prim.HasAttribute(*AttrName);
+	Data->SetBoolField(TEXT("present"), bPresent);
+	return mcp_common::MakeOutcomeReply(Data, bPresent, FString::Printf(
+		TEXT("create_usd_attribute: CreateAttribute('%s') returned an attribute, but prim '%s' does not report it"), *AttrName, *PrimPath));
 }
 
 // ---------------------------------------------------------------------------
@@ -288,7 +292,10 @@ TSharedPtr<FJsonObject> HandleRemoveUsdAttribute(const TSharedPtr<FJsonObject>& 
 	TSharedPtr<FJsonObject> Data = UsdAttribute_NewPayload(PrimPath, AttrName);
 	Data->SetBoolField(TEXT("removed"), Removed);
 	Data->SetBoolField(TEXT("present"), bWasPresent);
-	return mcp_common::MakeOkReply(Data);
+	// Opinions on other layers can keep the attribute composed, so whether it still resolves is reported, not required.
+	Data->SetBoolField(TEXT("still_composed"), Prim.HasAttribute(*AttrName));
+	return mcp_common::MakeOutcomeReply(Data, Removed || !bWasPresent, FString::Printf(
+		TEXT("remove_usd_attribute: RemoveProperty('%s') returned false: the current edit target layer holds no spec of it to remove"), *AttrName));
 }
 
 // ---------------------------------------------------------------------------

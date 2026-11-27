@@ -284,9 +284,11 @@ TSharedPtr<FJsonObject> HandleAddUsdVariantSet(const TSharedPtr<FJsonObject>& Pa
 	UsdVariant_TargetStrongestPrimLayer(Stage, Prim);
 
 	UE::FUsdVariantSet NewSet = VSets.AddVariantSet(VariantSetName, Position);
-	Data->SetBoolField(TEXT("created"), NewSet.IsValid());
+	// The re-read: the prim now has a variant set of that name.
+	const bool bCreated = NewSet.IsValid() && Prim.GetVariantSets().HasVariantSet(VariantSetName);
+	Data->SetBoolField(TEXT("created"), bCreated);
 	Data->SetBoolField(TEXT("already_existed"), false);
-	return mcp_common::MakeOkReply(Data);
+	return mcp_common::MakeOutcomeReply(Data, bCreated, mcp_common::MeasuredOutcomeError(TEXT("add_usd_variant_set"), TEXT("created")));
 }
 
 // ---------------------------------------------------------------------------
@@ -351,10 +353,12 @@ TSharedPtr<FJsonObject> HandleAddUsdVariant(const TSharedPtr<FJsonObject>& Param
 
 	UsdVariant_TargetStrongestPrimLayer(Stage, Prim);
 
-	const bool Added = VSet.AddVariant(VariantName, Position);
+	const bool bAddOk = VSet.AddVariant(VariantName, Position);
+	// The re-read: the variant set, fetched again from the prim, has the variant authored.
+	const bool Added = bAddOk && Prim.GetVariantSets().GetVariantSet(VariantSetName).HasAuthoredVariant(VariantName);
 	Data->SetBoolField(TEXT("added"), Added);
 	Data->SetBoolField(TEXT("already_existed"), false);
-	return mcp_common::MakeOkReply(Data);
+	return mcp_common::MakeOutcomeReply(Data, Added, mcp_common::MeasuredOutcomeError(TEXT("add_usd_variant"), TEXT("added")));
 }
 
 // ---------------------------------------------------------------------------
@@ -408,7 +412,16 @@ TSharedPtr<FJsonObject> HandleSetUsdVariantSelection(const TSharedPtr<FJsonObjec
 	Data->SetStringField(TEXT("variant_set_name"), VariantSetName);
 	Data->SetStringField(TEXT("variant_name"), VariantName);
 	Data->SetBoolField(TEXT("set"), Set);
-	return mcp_common::MakeOkReply(Data);
+	// The re-read: the composed selection. A stronger layer's selection wins over the one authored here.
+	const FString Selection = Prim.GetVariantSets().GetVariantSelection(VariantSetName);
+	Data->SetStringField(TEXT("selection"), Selection);
+	if (!Set)
+	{
+		return mcp_common::MakeOutcomeReply(Data, false, mcp_common::MeasuredOutcomeError(TEXT("set_usd_variant_selection"), TEXT("set")));
+	}
+	return mcp_common::MakeOutcomeReply(Data, Selection == VariantName, FString::Printf(
+		TEXT("set_usd_variant_selection: the selection was authored, but '%s' composes as '%s' (a stronger layer selects it; set_usd_edit_target picks the layer)"),
+		*VariantSetName, *Selection));
 }
 
 // ---------------------------------------------------------------------------
@@ -458,7 +471,9 @@ TSharedPtr<FJsonObject> HandleClearUsdVariantSelection(const TSharedPtr<FJsonObj
 	Data->SetStringField(TEXT("prim_path"), PrimPath);
 	Data->SetStringField(TEXT("variant_set_name"), VariantSetName);
 	Data->SetBoolField(TEXT("cleared"), Cleared);
-	return mcp_common::MakeOkReply(Data);
+	// A selection authored on another layer can still apply, so the composed selection is reported, not required.
+	Data->SetStringField(TEXT("selection"), Prim.GetVariantSets().GetVariantSelection(VariantSetName));
+	return mcp_common::MakeOutcomeReply(Data, Cleared, mcp_common::MeasuredOutcomeError(TEXT("clear_usd_variant_selection"), TEXT("cleared")));
 }
 
 // ---------------------------------------------------------------------------

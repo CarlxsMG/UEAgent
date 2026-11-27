@@ -12,6 +12,7 @@
 #include "UsdWrappers/SdfLayer.h"
 #include "UsdWrappers/SdfPath.h"
 #include "UsdWrappers/ForwardDeclarations.h"
+#include "HAL/FileManager.h"           // IFileManager (flatten_usd_stage re-read)
 
 /**
  * USD stage I/O commands.
@@ -290,7 +291,11 @@ TSharedPtr<FJsonObject> HandleOpenUsdStage(const TSharedPtr<FJsonObject>& Params
     // more useful to the LLM than a pointer hash would be.
     Result->SetStringField(TEXT("stage_id"), RootLayer.GetIdentifier());
 
-    return mcp_common::MakeOkReply(Result);
+    // The re-read: stage_name now resolves to this stage in the registry the other USD tools look it up in.
+    const UE::FUsdStage* Registered = UEAgent::UsdRegistry::GStageNameCache.Find(StageName);
+    const bool bRegistered = Registered != nullptr && *Registered == Stage;
+    Result->SetBoolField(TEXT("registered"), bRegistered);
+    return mcp_common::MakeOutcomeReply(Result, bRegistered, mcp_common::MeasuredOutcomeError(TEXT("open_usd_stage"), TEXT("registered")));
 }
 
 // ---------------------------------------------------------------------------
@@ -350,7 +355,11 @@ TSharedPtr<FJsonObject> HandleCreateUsdStage(const TSharedPtr<FJsonObject>& Para
     Result->SetBoolField(TEXT("dirty"),       RootLayer.IsDirty());
     Result->SetBoolField(TEXT("is_valid"),    static_cast<bool>(Stage));
 
-    return mcp_common::MakeOkReply(Result);
+    // The re-read: stage_name now resolves to this stage in the registry the other USD tools look it up in.
+    const UE::FUsdStage* Registered = UEAgent::UsdRegistry::GStageNameCache.Find(StageName);
+    const bool bRegistered = Registered != nullptr && *Registered == Stage;
+    Result->SetBoolField(TEXT("registered"), bRegistered);
+    return mcp_common::MakeOutcomeReply(Result, bRegistered, mcp_common::MeasuredOutcomeError(TEXT("create_usd_stage"), TEXT("registered")));
 }
 
 // ---------------------------------------------------------------------------
@@ -715,8 +724,13 @@ TSharedPtr<FJsonObject> HandleFlattenUsdStage(const TSharedPtr<FJsonObject>& Par
         },
         Result);
 
+    // The re-read: the flattened file is on disk at output_path.
+    const bool bFileExists = IFileManager::Get().FileExists(*OutputPath);
     Result->SetBoolField(TEXT("exported"), bExported);
-    return mcp_common::MakeOkReply(Result);
+    Result->SetBoolField(TEXT("file_exists"), bFileExists);
+    return mcp_common::MakeOutcomeReply(Result, bExported && bFileExists, bExported
+        ? FString::Printf(TEXT("flatten_usd_stage: Export returned true but no file exists at '%s'"), *OutputPath)
+        : FString::Printf(TEXT("flatten_usd_stage: Export returned false for '%s' (see errors)"), *OutputPath));
 }
 
 const McpCommandFamilies::FRegistrar Registration =

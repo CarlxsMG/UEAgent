@@ -251,7 +251,10 @@ TSharedPtr<FJsonObject> HandleCreateUsdStageActor(
 	Data->SetStringField(TEXT("actor_path"), Actor->GetPathName());
 	Data->SetStringField(TEXT("name"), Actor->GetName());
 	Data->SetArrayField(TEXT("scale"), mcp_common::VectorToJsonArray(Actor->GetActorScale3D()));
-	return mcp_common::MakeOkReply(Data);
+	// The re-read: the USD stage module finds the new actor as the world's stage actor.
+	const bool bFound = UsdModule.FindUsdStageActor(World) == Actor;
+	return mcp_common::MakeOutcomeReply(Data, bFound, FString::Printf(
+		TEXT("create_usd_stage_actor: spawned %s, but the USD stage module does not find it in the editor world"), *Actor->GetName()));
 }
 
 // ---------------------------------------------------------------------------
@@ -311,8 +314,33 @@ TSharedPtr<FJsonObject> HandleSetUsdStageActorRootLayer(
 		},
 		Data);
 
-	Data->SetStringField(TEXT("stage_state"), StageStateToString(State));
-	return mcp_common::MakeOkReply(Data);
+	// The re-read: the actor's own state, root layer and opened stage, not the values that were asked for.
+	Data->SetStringField(TEXT("stage_state"), StageStateToString(Actor->StageState));
+	Data->SetStringField(TEXT("root_layer"), Actor->RootLayer.FilePath);
+	const UE::FUsdStage& BaseStage = Actor->GetBaseUsdStage();
+	const UE::FSdfLayer OpenedRoot = BaseStage ? BaseStage.GetRootLayer() : UE::FSdfLayer();
+	const FString OpenedRealPath = OpenedRoot ? OpenedRoot.GetRealPath() : FString();
+	Data->SetBoolField(TEXT("stage_open"), static_cast<bool>(BaseStage));
+	Data->SetStringField(TEXT("stage_real_path"), OpenedRealPath);
+
+	FString Mismatch;
+	if (Actor->StageState != State)
+	{
+		Mismatch = FString::Printf(TEXT("the actor's stage state is %s, not %s"), *StageStateToString(Actor->StageState), *StageStateToString(State));
+	}
+	else if (State != EUsdStageState::Closed)
+	{
+		if (!BaseStage)
+		{
+			Mismatch = TEXT("no stage opened from the root layer (does the file exist and parse? see errors)");
+		}
+		else if (!FPaths::IsRelative(RootLayerPath) && !FPaths::IsSamePath(OpenedRealPath, RootLayerPath))
+		{
+			Mismatch = FString::Printf(TEXT("the opened stage's root layer is '%s'"), *OpenedRealPath);
+		}
+	}
+	return mcp_common::MakeOutcomeReply(Data, Mismatch.IsEmpty(),
+		FString::Printf(TEXT("set_usd_stage_actor_root_layer: %s"), *Mismatch));
 }
 
 // ---------------------------------------------------------------------------
@@ -559,7 +587,15 @@ TSharedPtr<FJsonObject> HandleIsolateUsdLayer(
 		Data);
 
 	Data->SetStringField(TEXT("isolated_layer"), IsolatedLayerId);
-	return mcp_common::MakeOkReply(Data);
+	// The re-read: isolating the base stage's root layer leaves isolated mode (no isolated root); any other layer
+	// must be the isolated stage's root.
+	const UE::FSdfLayer BaseRoot = Actor->GetBaseUsdStage() ? Actor->GetBaseUsdStage().GetRootLayer() : UE::FSdfLayer();
+	const bool bIsBaseRoot = BaseRoot && BaseRoot.GetIdentifier().Equals(IsolatedLayerId, ESearchCase::CaseSensitive);
+	const FString NowIsolated = Actor->GetIsolatedRootLayer();
+	Data->SetStringField(TEXT("isolated_root_layer"), NowIsolated);
+	const bool bApplied = bIsBaseRoot ? NowIsolated.IsEmpty() : NowIsolated.Equals(IsolatedLayerId, ESearchCase::CaseSensitive);
+	return mcp_common::MakeOutcomeReply(Data, bApplied, FString::Printf(
+		TEXT("isolate_usd_layer: the actor's isolated root layer reads '%s' after isolating '%s'"), *NowIsolated, *IsolatedLayerId));
 }
 
 const McpCommandFamilies::FRegistrar Registration =
