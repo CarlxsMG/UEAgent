@@ -38,6 +38,7 @@ from functools import lru_cache
 # ---------------------------------------------------------------------------
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _paths  # noqa: E402
+import param_schema  # noqa: E402
 import tool_hints  # noqa: E402
 
 HANDLER_GLOB = os.path.join(_paths.COMMANDS_DIR, "**", "*.cpp")
@@ -246,6 +247,8 @@ def assemble_params(extracted: list, ann_params: dict, domain: str = "") -> list
     for pname in [*ann_params, *(n for n in code if n not in ann_params)]:
         a = ann_params.get(pname)
         jt, req = code[pname] if pname in code else ((a["type"] or "string"), a["required"])
+        if a and a["type"] and _hint_narrows(jt, a["type"]):
+            jt = a["type"]
         rows.append((pname, jt, req, a["desc"] if a else ""))
     name_like = {pname for pname, jt, _req, desc in rows if _is_name_like(pname, jt, desc, domain)}
     # The other spellings of a param (its alias chain) carry what it carries.
@@ -269,7 +272,16 @@ def assemble_params(extracted: list, ann_params: dict, domain: str = "") -> list
     _prefer_documented(params, chains)
     _mark_aliases(params, chains)
     params.sort(key=lambda p: not p.get("required", False))
-    return params
+    # The schema detail the prose and the reads give: integer, items, enum, default (Tools/param_schema.py).
+    return [param_schema.refine(p) for p in params]
+
+
+def _hint_narrows(code_type: str, hint: str) -> bool:
+    """Whether a `[type]` hint says more than the code's read: the types a raw read (`any`) accepts, or
+    `integer` for a number read."""
+    if code_type == "any":
+        return all(t in param_schema.TYPES for t in hint.split("|"))
+    return code_type == "number" and hint == "integer"
 
 
 JSON_TYPE = {
@@ -308,9 +320,11 @@ ANNOTATION_MARKER_RE = re.compile(r'^//\s*MCP:(\S+)\s+-\s+(.+)$')
 # It is needed only for params the C++ extractor cannot see (read via cross-file
 # helpers, or not read off `Params` at all) so the annotation alone is
 # authoritative for them. Without a hint, type/required come from code
-# extraction, defaulting to string/optional. Groups: name, type, '!'?, desc.
+# extraction, defaulting to string/optional. A hint also narrows a read that
+# says less: the types a raw read (`any`) accepts, written as a union
+# `[string|array]`, or `[integer]` for a number read. Groups: name, type, '!'?, desc.
 ANNOTATION_PARAM_RE  = re.compile(
-    r'^//\s{3,}@param\s+(\S+)(?:\s+\[([a-zA-Z]*)(!?)\])?\s+-\s+(.+)$')
+    r'^//\s{3,}@param\s+(\S+)(?:\s+\[([a-zA-Z|]*)(!?)\])?\s+-\s+(.+)$')
 # @returns line: `//   @returns <description or { shape }>`
 ANNOTATION_RETURNS_RE = re.compile(r'^//\s{3,}@returns\s+(.+)$')
 # @para line: `//   @para <text>` -- one more paragraph of the description, after a blank line: when to use the tool and
@@ -562,10 +576,10 @@ def parse_annotations(text: str) -> dict[str, dict]:
             if pm:
                 # group(1)=name, group(2)=type hint (may be ''), group(3)='!'?,
                 # group(4)=description. Insertion order = documented order.
-                _hint = (pm.group(2) or "").strip().lower()
+                _hint = "|".join(HINT_TYPE_ALIAS.get(t, t) for t in (pm.group(2) or "").strip().lower().split("|"))
                 entry["params"][pm.group(1)] = {
                     "desc": pm.group(4).rstrip(),
-                    "type": (HINT_TYPE_ALIAS.get(_hint, _hint) or None),
+                    "type": (_hint or None),
                     "required": (pm.group(3) == "!"),
                 }
             elif (nm := ANNOTATION_RENAMED_RE.match(ln)):
@@ -1448,7 +1462,7 @@ def describe_drift(want: dict, have_text: str | None) -> list[str]:
             if field == "params" and isinstance(a, list) and isinstance(b, list) and shape(a) == shape(b):
                 groups["param descriptions differ"].append(name)
             elif field == "params":
-                groups["params differ (name, type, required, aliasOf, intRange, nameLike or vectorShape)"].append(name)
+                groups["params differ (name, type, required, aliasOf, intRange, nameLike, vectorShape, items, enum or default)"].append(name)
             else:
                 groups[f"{field} differs"].append(name)
     lines = [f"{label} ({len(names)}): {', '.join(map(str, names[:10]))}{' ...' if len(names) > 10 else ''}"
@@ -1721,6 +1735,17 @@ def build(args) -> int:
         for e in retirement_errors:
             print(f"  {e}")
         print("FAIL: renamed or retired tools that a call could not reach.")
+        return 2
+    # The params' schemas: every array says what its elements are, a default fits its type and enum,
+    # every param says what it is (Tools/param_schema.py).
+    schema_errors = [f"`{name}.{p['name']}`: {problem}"
+                     for name, entry in sorted(all_entries.items()) for p in entry["params"]
+                     for problem in param_schema.problems(p)]
+    if schema_errors:
+        print(f"--- PARAM SCHEMAS ({len(schema_errors)}) ---")
+        for e in schema_errors:
+            print(f"  {e}")
+        print("FAIL: params whose schema a client could not trust.")
         return 2
     if trunc_warns and (args.check or args.strict):
         print(f"FAIL: {len(trunc_warns)} annotations silently lose part of their text.")
