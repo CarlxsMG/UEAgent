@@ -17,7 +17,6 @@
 #include "Misc/Paths.h"
 #include "Misc/ScopeLock.h"
 #include "Interfaces/IPluginManager.h"
-#include "Internationalization/Regex.h"
 #include "Algo/AllOf.h"
 
 // Namespace name unique per file: the module builds as unity, and two same-named helpers in
@@ -41,38 +40,57 @@ namespace McpToolCatalogPrivate
 		TEXT("PREFERRED: the OBJECT {\"roll\":R,\"pitch\":P,\"yaw\":Y} (any subset, absent axes are 0). The ARRAY form below ")
 		TEXT("is [pitch, yaw, roll] -- its index 2 is ROLL, NOT yaw, which once put a PlayerStart on its side. ");
 
-	static TSharedPtr<FJsonObject> MakeTypeSchema(const FString& JsonType)
+	static TSharedPtr<FJsonObject> CloneObject(const TSharedPtr<FJsonObject>& Source);
+
+	/**
+	 * The schema of one JSON type, or of a union ("string|array", the types a param read raw accepts).
+	 * Items is the element schema of an array (`items` in the catalog); a branch for an array carries
+	 * a copy of it.
+	 */
+	static TSharedPtr<FJsonObject> MakeTypeSchema(const FString& JsonType, const TSharedPtr<FJsonObject>& Items = nullptr)
 	{
-		auto Typed = [](const TCHAR* Type)
+		auto Typed = [&Items](const FString& Type)
 		{
 			TSharedPtr<FJsonObject> S = MakeShared<FJsonObject>();
+			if (Type == TEXT("object"))
+			{
+				S->SetStringField(TEXT("type"), Type);
+				S->SetBoolField(TEXT("additionalProperties"), true);
+				return S;
+			}
 			S->SetStringField(TEXT("type"), Type);
+			if (Type == TEXT("array") && Items.IsValid())
+			{
+				S->SetObjectField(TEXT("items"), CloneObject(Items));
+			}
 			return S;
 		};
-		auto AnyObject = [&Typed]()
+		auto IsJsonType = [](const FString& Type)
 		{
-			TSharedPtr<FJsonObject> S = Typed(TEXT("object"));
-			S->SetBoolField(TEXT("additionalProperties"), true);
-			return S;
+			return Type == TEXT("string") || Type == TEXT("number") || Type == TEXT("integer")
+				|| Type == TEXT("boolean") || Type == TEXT("array") || Type == TEXT("object");
 		};
 
-		if (JsonType == TEXT("string"))  { return Typed(TEXT("string")); }
-		if (JsonType == TEXT("number"))  { return Typed(TEXT("number")); }
-		if (JsonType == TEXT("integer")) { return Typed(TEXT("integer")); }
-		if (JsonType == TEXT("boolean")) { return Typed(TEXT("boolean")); }
-		if (JsonType == TEXT("array"))   { return Typed(TEXT("array")); }
-		if (JsonType == TEXT("object"))  { return AnyObject(); }
+		if (IsJsonType(JsonType))
+		{
+			return Typed(JsonType);
+		}
 
-		// "any": the handler forwards the JsonValue as is. The six JSON types are written as
-		// TYPED branches rather than a `{}`: an empty branch leaves the client that generates the
-		// call without a schema, and its JSON comes out broken ("input JSON failed to parse", seen
-		// repeatedly on set_blueprint_component_array_element).
+		TArray<FString> Union;
+		JsonType.ParseIntoArray(Union, TEXT("|"));
+		if (Union.Num() < 2 || !Algo::AllOf(Union, IsJsonType))
+		{
+			// "any": the handler forwards the JsonValue as is. The six JSON types are written as
+			// TYPED branches rather than a `{}`: an empty branch leaves the client that generates the
+			// call without a schema, and its JSON comes out broken ("input JSON failed to parse", seen
+			// repeatedly on set_blueprint_component_array_element).
+			Union = { TEXT("string"), TEXT("number"), TEXT("integer"), TEXT("boolean"), TEXT("array"), TEXT("object") };
+		}
 		TArray<TSharedPtr<FJsonValue>> Branches;
-		for (const TCHAR* Type : { TEXT("string"), TEXT("number"), TEXT("integer"), TEXT("boolean"), TEXT("array") })
+		for (const FString& Type : Union)
 		{
 			Branches.Add(MakeShared<FJsonValueObject>(Typed(Type)));
 		}
-		Branches.Add(MakeShared<FJsonValueObject>(AnyObject()));
 		TSharedPtr<FJsonObject> S = MakeShared<FJsonObject>();
 		S->SetArrayField(TEXT("anyOf"), Branches);
 		return S;
@@ -92,8 +110,11 @@ namespace McpToolCatalogPrivate
 		AsObject->SetObjectField(TEXT("properties"), Axes);
 		AsObject->SetBoolField(TEXT("additionalProperties"), false);
 
+		TSharedPtr<FJsonObject> Number = MakeShared<FJsonObject>();
+		Number->SetStringField(TEXT("type"), TEXT("number"));
 		TSharedPtr<FJsonObject> AsArray = MakeShared<FJsonObject>();
 		AsArray->SetStringField(TEXT("type"), TEXT("array"));
+		AsArray->SetObjectField(TEXT("items"), Number);
 
 		TArray<TSharedPtr<FJsonValue>> Branches;
 		Branches.Add(MakeShared<FJsonValueObject>(AsObject));
@@ -144,112 +165,6 @@ namespace McpToolCatalogPrivate
 		TSharedPtr<FJsonObject> Copy;
 		FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Text), Copy);
 		return Copy;
-	}
-
-	/** All matches of capture group Group (or of the whole match if Group = 0). */
-	static TArray<FString> FindAll(const FRegexPattern& Pattern, const FString& Text, int32 Group)
-	{
-		TArray<FString> Out;
-		FRegexMatcher Matcher(Pattern, Text);
-		while (Matcher.FindNext())
-		{
-			Out.Add(Matcher.GetCaptureGroup(Group));
-		}
-		return Out;
-	}
-
-	/**
-	 * Closed set of values found in a description, or empty if it is not PROVABLY an enum. A
-	 * false enum turns a call that works today into a hard validation error, so when in doubt
-	 * the parameter stays a plain string.
-	 */
-	static TArray<FString> ExtractEnumValues(const FString& Desc)
-	{
-		const TArray<FString> None;
-		if (Desc.IsEmpty())
-		{
-			return None;
-		}
-
-		// Trigger words (case-insensitive)
-		{
-			const FRegexPattern Trigger(TEXT("\\bone of\\b|\\beither\\b|\\(default\\)|\\bor\\b"), ERegexPatternFlags::CaseInsensitive);
-			FRegexMatcher Matcher(Trigger, Desc);
-			if (!Matcher.FindNext())
-			{
-				return None;
-			}
-		}
-
-		// Every quoted value must be a short lower-case token (anchored, case-sensitive)
-		const FRegexPattern Quoted(TEXT("'([^']*)'"));
-		const TArray<FString> QuotedValues = FindAll(Quoted, Desc, 1);
-		if (QuotedValues.Num() == 0)
-		{
-			return None;
-		}
-		const FRegexPattern TokenOk(TEXT("^[a-z][a-z0-9_]{1,39}$"));
-		for (const FString& Value : QuotedValues)
-		{
-			FRegexMatcher Matcher(TokenOk, Value);
-			if (!Matcher.FindNext())
-			{
-				return None;
-			}
-		}
-
-		TArray<FString> Values;
-		for (const FString& Value : QuotedValues)
-		{
-			Values.AddUnique(Value);
-		}
-		if (Values.Num() < 2 || Values.Num() > 12)
-		{
-			return None;
-		}
-
-		// Alternatives listed WITHOUT quotes ("Filter to all, functions, or events"): there the
-		// quoted values are a SUBSET of the valid ones, and pinning the enum would reject a good
-		// one (e.g. a filter_type whose quotes named 'functions' and 'events' but left out 'all').
-		FString Replaced;
-		{
-			FRegexMatcher Matcher(Quoted, Desc);
-			int32 Cursor = 0;
-			while (Matcher.FindNext())
-			{
-				Replaced += Desc.Mid(Cursor, Matcher.GetMatchBeginning() - Cursor);
-				Replaced += TEXT("<Q>");
-				Cursor = Matcher.GetMatchEnding();
-			}
-			Replaced += Desc.Mid(Cursor);
-		}
-		const FRegexPattern UnquotedAlts(
-			TEXT("\\b(?:to|one of|either)\\s+((?:[a-z]+\\s*,\\s*)+(?:or\\s+)?[a-z]+)"), ERegexPatternFlags::CaseInsensitive);
-		FRegexMatcher AltsMatcher(UnquotedAlts, Replaced);
-		if (AltsMatcher.FindNext())
-		{
-			// Split the group on "," or the word "or" (this regex is case-SENSITIVE)
-			const FString Group = AltsMatcher.GetCaptureGroup(1);
-			const FRegexPattern Separator(TEXT(",|\\bor\\b"));
-			FRegexMatcher SepMatcher(Separator, Group);
-			int32 Cursor = 0;
-			TArray<FString> Words;
-			while (SepMatcher.FindNext())
-			{
-				Words.Add(Group.Mid(Cursor, SepMatcher.GetMatchBeginning() - Cursor));
-				Cursor = SepMatcher.GetMatchEnding();
-			}
-			Words.Add(Group.Mid(Cursor));
-			for (FString& Word : Words)
-			{
-				Word.TrimStartAndEndInline();
-				if (!Word.IsEmpty() && !Values.Contains(Word))
-				{
-					return None;
-				}
-			}
-		}
-		return Values;
 	}
 
 	static bool IsNullOrMissing(const TSharedPtr<FJsonObject>& Args, const FString& Key)
@@ -699,10 +614,24 @@ TSharedPtr<const FMcpToolCatalog> FMcpToolCatalog::LoadFromFile(const FString& P
 					{
 						Param.JsonType = TEXT("any");
 					}
-					if (Param.JsonType == TEXT("string"))
+					const TArray<TSharedPtr<FJsonValue>>* EnumJson = nullptr;
+					if (Param.JsonType == TEXT("string") && (*ParamObj)->TryGetArrayField(TEXT("enum"), EnumJson) && EnumJson)
 					{
-						Param.EnumValues = ExtractEnumValues(Param.Description);
+						for (const TSharedPtr<FJsonValue>& Value : *EnumJson)
+						{
+							FString EnumValue;
+							if (Value.IsValid() && Value->TryGetString(EnumValue))
+							{
+								Param.EnumValues.AddUnique(EnumValue);
+							}
+						}
 					}
+					const TSharedPtr<FJsonObject>* ItemsObj = nullptr;
+					if ((*ParamObj)->TryGetObjectField(TEXT("items"), ItemsObj) && ItemsObj && ItemsObj->IsValid())
+					{
+						Param.Items = CloneObject(*ItemsObj);
+					}
+					Param.Default = (*ParamObj)->TryGetField(TEXT("default"));
 					Param.bIsRotation = Param.JsonType == TEXT("array") && LooksLikeRotationName(Param.Name);
 					Tool.Params.Add(MoveTemp(Param));
 				}
@@ -713,7 +642,7 @@ TSharedPtr<const FMcpToolCatalog> FMcpToolCatalog::LoadFromFile(const FString& P
 			TMap<FString, TSharedPtr<FJsonObject>> PropertyByName;
 			for (const FParam& Param : Tool.Params)
 			{
-				TSharedPtr<FJsonObject> Schema = Param.bIsRotation ? MakeRotationSchema() : MakeTypeSchema(Param.JsonType);
+				TSharedPtr<FJsonObject> Schema = Param.bIsRotation ? MakeRotationSchema() : MakeTypeSchema(Param.JsonType, Param.Items);
 				FString Description = Param.Description;
 				if (Param.bIsRotation && !Description.Contains(TEXT("\"roll\"")) && !Description.Contains(TEXT("\"pitch\"")))
 				{
@@ -731,6 +660,10 @@ TSharedPtr<const FMcpToolCatalog> FMcpToolCatalog::LoadFromFile(const FString& P
 						EnumJson.Add(MakeShared<FJsonValueString>(Value));
 					}
 					Schema->SetArrayField(TEXT("enum"), EnumJson);
+				}
+				if (Param.Default.IsValid() && Param.Default->Type != EJson::Null)
+				{
+					Schema->SetField(TEXT("default"), Param.Default);
 				}
 				Properties->SetObjectField(Param.Name, Schema);
 				PropertyByName.Add(Param.Name, Schema);

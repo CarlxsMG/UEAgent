@@ -962,7 +962,7 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshLodReductionSettings(
 // ---------------------------------------------------------------------------
 // MCP:set_skeletal_mesh_lod_settings - Set the flat per-LOD scalars/enums of FSkeletalMeshLODInfo that no other setter covers (screen size, hysteresis, CPU access, morph error tolerance, skin cache usage, mesh deformer, prioritization weight) on one LOD or, with lod_index -1 or "all", on every LOD of the mesh, then save the mesh. Partial update (idempotent): only fields present are written; a bad skin_cache_usage or lod_index is refused before anything is written. A failed save is an error that leaves the change in memory. Per-platform screen-size overrides are left as they are.
 //   @param skeletal_mesh_path - Content path to the skeletal mesh asset.
-//   @param lod_index - Optional. 0-based LOD index to modify (default 0), or -1 / "all" for every LOD. allow_cpu_access with every LOD goes through USkeletalMeshEditorSubsystem::SetAllowCPUAccess.
+//   @param lod_index [integer|string] - Optional. 0-based LOD index to modify (default 0), or -1 / "all" for every LOD. allow_cpu_access with every LOD goes through USkeletalMeshEditorSubsystem::SetAllowCPUAccess.
 //   @param screen_size - Optional float, ScreenSize.Default: the screen size at which this LOD switches in (e.g. 0.3).
 //   @param lod_hysteresis - float, avoids flickering at the LOD boundary.
 //   @param allow_cpu_access - bool, keep this LOD's data on the CPU (e.g. for FX sampling).

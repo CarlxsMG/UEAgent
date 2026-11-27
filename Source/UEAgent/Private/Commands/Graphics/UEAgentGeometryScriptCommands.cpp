@@ -1979,7 +1979,7 @@ TSharedPtr<FJsonObject> HandleAppendMeshToDynamicMesh(
 //   @param actor_name - Label or name of the target DynamicMeshActor
 //   @param location - Optional [x, y, z] translation; default (0,0,0)
 //   @param translation - Optional alias of location, read only when location is absent.
-//   @param rotation - Optional [pitch, yaw, roll] Euler rotation in degrees, or a {pitch, yaw, roll} object; default (0,0,0)
+//   @param rotation [array|object] - Optional [pitch, yaw, roll] Euler rotation in degrees, or a {pitch, yaw, roll} object; default (0,0,0)
 //   @param scale - Optional [x, y, z] scale; default (1,1,1)
 //   @returns { actor_name: string, location_x: number, location_y: number, location_z: number, rotation_pitch: number, rotation_yaw: number, rotation_roll: number, scale_x: number, scale_y: number, scale_z: number, applied: bool, note?: string }
 TSharedPtr<FJsonObject> HandleTransformDynamicMesh(

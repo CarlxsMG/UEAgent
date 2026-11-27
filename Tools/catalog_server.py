@@ -93,50 +93,36 @@ ALIAS_DESCRIPTION = (
     "differently; prefer `{0}`."
 )
 
-ENUM_TRIGGER = re.compile(r"\bone of\b|\beither\b|\(default\)|\bor\b", re.IGNORECASE)
-QUOTED = re.compile(r"'([^']*)'")
-ENUM_TOKEN = re.compile(r"^[a-z][a-z0-9_]{1,39}$")
-UNQUOTED_ALTERNATIVES = re.compile(r"\b(?:to|one of|either)\s+((?:[a-z]+\s*,\s*)+(?:or\s+)?[a-z]+)", re.IGNORECASE)
-ALTERNATIVE_SEPARATOR = re.compile(r",|\bor\b")
 PIE_ROW = re.compile(r'\{\s*TEXT\("([^"]+)"\),\s*EReason::')
 ALIAS_TOKEN = re.compile(r'TEXT\("([^"]*)"\)|(nullptr)')
 
 
-def enum_values(description: str) -> list[str]:
-    """The closed set of values a description names, or [] unless it is provably an enum."""
-    if not description or not ENUM_TRIGGER.search(description):
-        return []
-    quoted = QUOTED.findall(description)
-    if not quoted or not all(ENUM_TOKEN.match(value) for value in quoted):
-        return []
-    values = list(dict.fromkeys(quoted))
-    if not 2 <= len(values) <= 12:
-        return []
-    # Alternatives listed without quotes: then the quoted values are only some of the valid ones.
-    alternatives = UNQUOTED_ALTERNATIVES.search(QUOTED.sub("<Q>", description))
-    if alternatives:
-        known = {value.lower() for value in values}
-        for word in ALTERNATIVE_SEPARATOR.split(alternatives.group(1)):
-            word = word.strip()
-            if word and word.lower() not in known:
-                return []
-    return values
+JSON_TYPES = ("string", "number", "integer", "boolean", "array", "object")
 
 
-def type_schema(json_type: str) -> dict:
+def type_schema(json_type: str, items: dict | None = None) -> dict:
+    """One JSON type, or a union ("string|array"); an array branch carries the catalog's `items`."""
+    def typed(name: str) -> dict:
+        if name == "object":
+            return {"type": "object", "additionalProperties": True}
+        schema: dict = {"type": name}
+        if name == "array" and isinstance(items, dict):
+            schema["items"] = json.loads(json.dumps(items))
+        return schema
+
     json_type = json_type.lower()  # FString compares without case
-    if json_type in ("string", "number", "integer", "boolean", "array"):
-        return {"type": json_type}
-    if json_type == "object":
-        return {"type": "object", "additionalProperties": True}
-    branches: list[dict] = [{"type": name} for name in ("string", "number", "integer", "boolean", "array")]
-    branches.append({"type": "object", "additionalProperties": True})
-    return {"anyOf": branches}
+    if json_type in JSON_TYPES:
+        return typed(json_type)
+    union = json_type.split("|")
+    if len(union) < 2 or not all(name in JSON_TYPES for name in union):
+        union = list(JSON_TYPES)  # "any": every JSON type, as typed branches
+    return {"anyOf": [typed(name) for name in union]}
 
 
 def rotation_schema() -> dict:
     axes = {axis: {"type": "number"} for axis in ("roll", "pitch", "yaw")}
-    return {"anyOf": [{"type": "object", "properties": axes, "additionalProperties": False}, {"type": "array"}]}
+    return {"anyOf": [{"type": "object", "properties": axes, "additionalProperties": False},
+                      {"type": "array", "items": {"type": "number"}}]}
 
 
 def looks_like_rotation(name: str) -> bool:
@@ -199,7 +185,11 @@ def build_tools(catalog: dict, pie_unsafe: set[str], aliases: dict[str, list[tup
                     "required": raw.get("required") is True,
                     "description": description,
                     "type": json_type,
-                    "enum": enum_values(description) if json_type.lower() == "string" else [],
+                    "enum": [v for v in raw.get("enum") or [] if isinstance(v, str)]
+                    if json_type.lower() == "string" else [],
+                    "items": raw.get("items") if isinstance(raw.get("items"), dict) else None,
+                    "default": raw.get("default"),
+                    "has_default": "default" in raw,
                     "rotation": json_type.lower() == "array" and looks_like_rotation(param_name),
                     "alias_of": raw.get("aliasOf") or "",
                 })
@@ -209,7 +199,7 @@ def build_tools(catalog: dict, pie_unsafe: set[str], aliases: dict[str, list[tup
 
             properties: dict[str, dict] = {}
             for param in params:
-                schema = rotation_schema() if param["rotation"] else type_schema(param["type"])
+                schema = rotation_schema() if param["rotation"] else type_schema(param["type"], param["items"])
                 description = param["description"]
                 lowered = description.lower()
                 if param["rotation"] and '"roll"' not in lowered and '"pitch"' not in lowered:
@@ -217,7 +207,9 @@ def build_tools(catalog: dict, pie_unsafe: set[str], aliases: dict[str, list[tup
                 if description:
                     schema["description"] = description
                 if param["enum"]:
-                    schema["enum"] = list(param["enum"])
+                    schema["enum"] = list(dict.fromkeys(param["enum"]))
+                if param["has_default"] and param["default"] is not None:
+                    schema["default"] = param["default"]
                 properties[param["name"]] = schema
 
             if name.lower() in pie_unsafe and not find("force"):
@@ -606,6 +598,34 @@ def serve(mode: str) -> int:
     return 0
 
 
+def schema_problems(schema: dict) -> list[str]:
+    """An array schema, or array branch, without `items`, or a `default` the schema itself refuses."""
+    problems = []
+    branches = schema.get("anyOf") or [schema]
+    if any(b.get("type") == "array" and "items" not in b for b in branches) and len(branches) < len(JSON_TYPES):
+        problems.append("an array without items")
+    if "default" in schema and not any(_fits(schema["default"], {**b, "enum": schema.get("enum")}) for b in branches):
+        problems.append(f"default {json.dumps(schema['default'])} does not fit its schema")
+    return problems
+
+
+def _fits(value: object, schema: dict) -> bool:
+    kind = schema.get("type")
+    if kind is None:
+        return True
+    if kind == "string":
+        return isinstance(value, str) and (not schema.get("enum") or value in schema["enum"])
+    if kind == "boolean":
+        return isinstance(value, bool)
+    if kind == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if kind == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if kind == "array":
+        return isinstance(value, list) and all(_fits(v, schema.get("items") or {}) for v in value)
+    return kind == "object" and isinstance(value, dict)
+
+
 def check() -> int:
     """Builds the list, then runs this script as a server and talks to it over stdio."""
     catalog = json.loads(CATALOG.read_text(encoding="utf-8"))
@@ -633,7 +653,13 @@ def check() -> int:
         problems.append("no parameter is `aliasOf` another: the handlers' alias chains are not in the catalog")
     if still_required:
         problems.append(f"required although another spelling may replace it: {still_required[:5]}")
+    bad_schemas = [f"{tool['name']}.{name}: {problem}" for tool in tools
+                   for name, schema in tool["inputSchema"]["properties"].items()
+                   for problem in schema_problems(schema)]
+    if bad_schemas:
+        problems.append(f"{len(bad_schemas)} parameter schemas a client cannot trust: {bad_schemas[:5]}")
     without_annotations = [tool["name"] for tool in tools if "annotations" not in tool]
+
     if without_annotations:
         problems.append(f"{len(without_annotations)} tools without annotations: {without_annotations[:5]}")
     read_only = sum(tool.get("annotations", {}).get("readOnlyHint") is True for tool in tools)
