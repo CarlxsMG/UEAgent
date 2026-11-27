@@ -368,7 +368,9 @@ TSharedPtr<FJsonObject> HandleGetGameplayTagInfo(const TSharedPtr<FJsonObject>& 
 //   @renamed-from query_gameplay_tags
 //   @param query_tag - Optional tag whose branch to list (the tag itself and all of its descendants); omitted or empty lists every registered tag
 //   @param count_only - Optional bool, default false: return count (and manager_valid) without the matching_tags list
-//   @returns { query_tag: string, count: int, manager_valid: bool, matching_tags?: [{ tag_name: string, tag_string: string }] }
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { query_tag: string, count: int (entries in this page; with count_only, every match), manager_valid: bool, matching_tags?: [{ tag_name: string, tag_string: string }], total?: int, offset?: int, limit?: int, returned?: int, truncated?: bool, next_offset?: int|null } -- matching_tags sorted by tag_name; the paging fields come with it
 TSharedPtr<FJsonObject> HandleQueryGameplayTags(const TSharedPtr<FJsonObject>& Params)
 {
     namespace Impl = UEAgentGameplayTagsImpl;
@@ -414,9 +416,11 @@ TSharedPtr<FJsonObject> HandleQueryGameplayTags(const TSharedPtr<FJsonObject>& P
     Data->SetStringField(TEXT("query_tag"), QueryTagName);
     if (!bCountOnly)
     {
+        mcp_common::SortJsonItems(Matches, TEXT("tag_name"));
+        mcp_common::ApplyListPage(Matches, mcp_common::ReadListPage(Params), Data);
         Data->SetArrayField(TEXT("matching_tags"), Matches);
     }
-    Data->SetNumberField(TEXT("count"), MatchCount);
+    Data->SetNumberField(TEXT("count"), bCountOnly ? MatchCount : Matches.Num());
     Data->SetBoolField(TEXT("manager_valid"), IsValid(&UGameplayTagsManager::Get()));
     return mcp_common::MakeOkReply(Data);
 }

@@ -1346,9 +1346,11 @@ TSharedPtr<FJsonObject> HandleAddStateEvaluator(
 // ---------------------------------------------------------------------------
 // list_state_trees — enumerate UStateTree assets under a content path
 // ---------------------------------------------------------------------------
-// MCP:list_state_trees - List the StateTree assets (subclasses included) in a content folder and all its subfolders, from the Asset Registry, without loading or changing them: per tree its object path, asset name and class. A folder with no trees, or one that does not exist, gives count 0 rather than an error. Use it to find the tree_path every other StateTree tool takes; then read one tree's states, transitions and parameters with get_state_tree_info, or create a new one with create_state_tree; the tree a placed component runs: get_component_state_tree_path.
+// MCP:list_state_trees - List the StateTree assets (subclasses included) in a content folder and all its subfolders, from the Asset Registry, without loading or changing them: per tree its object path, asset name and class, sorted by path and paged with offset/limit. A folder with no trees, or one that does not exist, gives count 0 rather than an error. Use it to find the tree_path every other StateTree tool takes; then read one tree's states, transitions and parameters with get_state_tree_info, or create a new one with create_state_tree; the tree a placed component runs: get_component_state_tree_path.
 //   @param package_path - Content folder to search, recursively, as a long package path with no trailing slash, e.g. "/Game/AI" (default "/Game"); a plugin's content lives under its mount point, e.g. "/MyPlugin".
-//   @returns { package_path, count, trees: [{ path, name, class }] }
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { package_path, count (entries in this page), trees: [{ path, name, class }], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }
 TSharedPtr<FJsonObject> HandleListStateTrees(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -1379,7 +1381,9 @@ TSharedPtr<FJsonObject> HandleListStateTrees(
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("package_path"), Root);
-	Data->SetNumberField(TEXT("count"), Found.Num());
+	mcp_common::SortJsonItems(Trees, TEXT("path"));
+	mcp_common::ApplyListPage(Trees, mcp_common::ReadListPage(Params), Data);
+	Data->SetNumberField(TEXT("count"), Trees.Num());
 	Data->SetArrayField(TEXT("trees"), Trees);
 	return mcp_common::MakeOkReply(Data);
 }
@@ -1467,9 +1471,11 @@ TSharedPtr<FJsonObject> HandleListGlobalTasks(
 // ---------------------------------------------------------------------------
 // list_state_tree_bindings — parameter bindings on this tree
 // ---------------------------------------------------------------------------
-// MCP:list_state_tree_bindings - List the property bindings stored in the editor data of a StateTree asset, without changing it. Returns count and bindings [{index, source_path, target_path, source_id, target_id}], where source_id and target_id are the struct GUIDs of the two ends. Add bindings with add_state_tree_binding and remove them with remove_state_tree_binding.
+// MCP:list_state_tree_bindings - List the property bindings stored in the editor data of a StateTree asset, without changing it. Returns count and bindings [{index, source_path, target_path, source_id, target_id}] in index order, paged with offset/limit, where source_id and target_id are the struct GUIDs of the two ends. Add bindings with add_state_tree_binding and remove them with remove_state_tree_binding.
 //   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
-//   @returns { tree_path, count, bindings: [{ index, source_path, target_path, source_id, target_id }] }
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { tree_path, count (entries in this page), bindings: [{ index, source_path, target_path, source_id, target_id }], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }
 TSharedPtr<FJsonObject> HandleListTreeBindings(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -1481,12 +1487,10 @@ TSharedPtr<FJsonObject> HandleListTreeBindings(
 	FStateTreeEditorPropertyBindings* Bindings = ED->GetPropertyEditorBindings();
 
 	TArray<TSharedPtr<FJsonValue>> BindingsJson;
-	int32 BindingCount = 0;
 	if (Bindings)
 	{
 		// GetBindings() returns TArrayView, not TArray — iterate directly.
 		const TArrayView<const FStateTreePropertyPathBinding> All = Bindings->GetBindings();
-		BindingCount = All.Num();
 		BindingsJson.Reserve(All.Num());
 		for (int32 i = 0; i < All.Num(); ++i)
 		{
@@ -1502,7 +1506,8 @@ TSharedPtr<FJsonObject> HandleListTreeBindings(
 	}
 
 	TSharedPtr<FJsonObject> Data = StateTree_NewTreeData(Tree);
-	Data->SetNumberField(TEXT("count"),     BindingCount);
+	mcp_common::ApplyListPage(BindingsJson, mcp_common::ReadListPage(Params), Data);
+	Data->SetNumberField(TEXT("count"),     BindingsJson.Num());
 	Data->SetArrayField (TEXT("bindings"),  BindingsJson);
 	return mcp_common::MakeOkReply(Data);
 }
@@ -1962,9 +1967,9 @@ namespace
 		return nullptr;
 	}
 
-	/** { count, types: [{ name, struct_path }] } of the concrete structs deriving from Base; struct_path is the
-	 *  struct's own path, in whichever module declares it. */
-	TSharedPtr<FJsonObject> StateTree_DerivedTypesData(const UScriptStruct* Base)
+	/** { count, types: [{ name, struct_path }] } of the concrete structs deriving from Base, sorted by name, cut to
+	 *  the page Params asks for (offset/limit); struct_path is the struct's own path, in whichever module declares it. */
+	TSharedPtr<FJsonObject> StateTree_DerivedTypesData(const TSharedPtr<FJsonObject>& Params, const UScriptStruct* Base)
 	{
 		const TArray<const UScriptStruct*> Structs = ListDerivedStructs(Base);
 		TArray<TSharedPtr<FJsonValue>> TypesJson;
@@ -1977,7 +1982,8 @@ namespace
 			TypesJson.Add(MakeShared<FJsonValueObject>(Entry));
 		}
 		TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-		Data->SetNumberField(TEXT("count"), Structs.Num());
+		mcp_common::ApplyListPage(TypesJson, mcp_common::ReadListPage(Params), Data);
+		Data->SetNumberField(TEXT("count"), TypesJson.Num());
 		Data->SetArrayField (TEXT("types"), TypesJson);
 		return Data;
 	}
@@ -2104,11 +2110,13 @@ namespace
 // list_task_types — enumerate StateTreeTaskBase derivatives
 // ---------------------------------------------------------------------------
 // MCP:list_task_types - List the StateTree task struct types (FStateTreeTaskBase and its children; structs tagged Abstract are skipped) of the modules loaded now, sorted by name, without changing anything: the names add_state_task and add_state_tree_global_task take as task_struct. A task from a plugin whose module is not loaded is not listed. struct_path is the struct's own path in the module that declares it (e.g. /Script/StateTreeModule.StateTreeDelayTask, /Script/GameplayStateTreeModule.StateTreeRunEnvQueryTask), so either field can be passed. Other node types: list_condition_types, list_evaluator_types; the tasks already on a state: list_tasks; on the whole tree: list_state_tree_global_tasks.
-//   @returns { count, types: [{ name, struct_path }] }
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { count (entries in this page), types: [{ name, struct_path }], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }
 TSharedPtr<FJsonObject> HandleListTaskTypes(
 	const TSharedPtr<FJsonObject>& Params)
 {
-	return mcp_common::MakeOkReply(StateTree_DerivedTypesData(FStateTreeTaskBase::StaticStruct()));
+	return mcp_common::MakeOkReply(StateTree_DerivedTypesData(Params, FStateTreeTaskBase::StaticStruct()));
 }
 
 // ---------------------------------------------------------------------------
@@ -2411,11 +2419,13 @@ TSharedPtr<FJsonObject> HandleGetConsiderationProperty(
 // list_condition_types — enumerate StateTreeConditionBase derivatives
 // ---------------------------------------------------------------------------
 // MCP:list_condition_types - List the concrete condition struct types (children of FStateTreeConditionBase, abstract ones skipped) of the loaded modules, sorted by name, for add_state_enter_condition and add_state_transition_condition. Returns count and types [{name, struct_path}]; struct_path is the struct's own path in the module that declares it, so either field can be passed.
-//   @returns { count, types: [{ name, struct_path }] }
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { count (entries in this page), types: [{ name, struct_path }], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }
 TSharedPtr<FJsonObject> HandleListConditionTypes(
 	const TSharedPtr<FJsonObject>& Params)
 {
-	return mcp_common::MakeOkReply(StateTree_DerivedTypesData(FStateTreeConditionBase::StaticStruct()));
+	return mcp_common::MakeOkReply(StateTree_DerivedTypesData(Params, FStateTreeConditionBase::StaticStruct()));
 }
 
 // ---------------------------------------------------------------------------
@@ -2659,11 +2669,13 @@ TSharedPtr<FJsonObject> HandleRemoveTransitionCondition(
 // list_evaluator_types — enumerate StateTreeEvaluatorBase derivatives
 // ---------------------------------------------------------------------------
 // MCP:list_evaluator_types - List the concrete evaluator struct types (children of FStateTreeEvaluatorBase, abstract ones skipped) of the loaded modules, sorted by name, for add_evaluator. Returns count and types [{name, struct_path}]; struct_path is the struct's own path in the module that declares it, so either field can be passed.
-//   @returns { count, types: [{ name, struct_path }] }
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { count (entries in this page), types: [{ name, struct_path }], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }
 TSharedPtr<FJsonObject> HandleListEvaluatorTypes(
 	const TSharedPtr<FJsonObject>& Params)
 {
-	return mcp_common::MakeOkReply(StateTree_DerivedTypesData(FStateTreeEvaluatorBase::StaticStruct()));
+	return mcp_common::MakeOkReply(StateTree_DerivedTypesData(Params, FStateTreeEvaluatorBase::StaticStruct()));
 }
 
 // ---------------------------------------------------------------------------
