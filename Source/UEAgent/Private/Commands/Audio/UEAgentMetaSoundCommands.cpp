@@ -1958,88 +1958,80 @@ TSharedPtr<FJsonObject> HandleListMetaSoundNodeTypes(
 	Params->TryGetBoolField(TEXT("include_unloaded"), bIncludeUnloaded);
 
 	TArray<TSharedPtr<FJsonValue>> TypesJson;
-try
-	{
 #if UE_VERSION_OLDER_THAN(5, 8, 0)
-		// UE 5.7's ISearchEngine::FindAllClasses(bool) returns the registered classes as FMetasoundFrontendClass,
-		// without unloaded assets, and its FMetaSoundClassInfo has no ClassType (both 5.8). The same entries by
-		// hand, as 5.8 builds them: the registered classes minus the deprecated ones (FindAllClasses(false) is the
-		// query 5.8 runs for EResultVersion::Highest), then for include_unloaded the asset manager's latest tag
-		// data of every MetaSound asset whose class is not registered, deprecated ones left out; an asset class
-		// is External.
-		using namespace Metasound::Frontend;
-		auto AddEntry = [&TypesJson](const FMetasoundFrontendClassName& ClassName, EMetasoundFrontendClassType ClassType,
-			const FMetasoundFrontendVersionNumber& Version, EMetasoundFrontendClassAccessFlags AccessFlags)
-		{
-			TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
-			Entry->SetStringField(TEXT("class_name"),
-				ClassName.Name.ToString());
-			Entry->SetStringField(TEXT("class_path"),
-				ClassName.ToString());
-			Entry->SetStringField(TEXT("type"),
-				UEnum::GetValueAsString(ClassType));
-			Entry->SetStringField(TEXT("version"),
-				Version.ToString());
-			Entry->SetStringField(TEXT("access_flags"),
-				UEnum::GetValueAsString(AccessFlags));
-			MetaSound_AddNativeFields(Entry, ClassType, ClassName, Version);
-			TypesJson.Add(MakeShared<FJsonValueObject>(Entry));
-		};
-
-		const TArray<FMetasoundFrontendClass> Classes = ISearchEngine::Get().FindAllClasses(/*bInIncludeAllVersions*/ false);
-		TSet<FNodeClassRegistryKey> RegisteredKeys;
-		TypesJson.Reserve(Classes.Num());
-		for (const FMetasoundFrontendClass& Class : Classes)
-		{
-			RegisteredKeys.Add(FNodeClassRegistryKey(Class.Metadata));
-			AddEntry(Class.Metadata.GetClassName(), Class.Metadata.GetType(), Class.Metadata.GetVersion(), Class.Metadata.GetAccessFlags());
-		}
-		if (bIncludeUnloaded)
-		{
-			if (const Metasound::Engine::FMetaSoundAssetManager* AssetManager = Metasound::Engine::FMetaSoundAssetManager::Get())
-			{
-				AssetManager->IterateAssetTagData([&RegisteredKeys, &AddEntry](FMetaSoundAssetClassInfo ClassInfo)
-				{
-					if (EnumHasAnyFlags(ClassInfo.AccessFlags, EMetasoundFrontendClassAccessFlags::Deprecated))
-					{
-						return;
-					}
-					if (!RegisteredKeys.Contains(FNodeClassRegistryKey(EMetasoundFrontendClassType::External, ClassInfo.ClassName, ClassInfo.Version)))
-					{
-						AddEntry(ClassInfo.ClassName, EMetasoundFrontendClassType::External, ClassInfo.Version, ClassInfo.AccessFlags);
-					}
-				});
-			}
-		}
-#else
-		auto& SE = Metasound::Frontend::ISearchEngine::Get();
-		const TArray<Metasound::Frontend::FMetaSoundClassInfo> Infos = SE.FindAllClasses(
-			Metasound::Frontend::ISearchEngine::EResultVersion::Highest, bIncludeUnloaded);
-
-		TypesJson.Reserve(Infos.Num());
-		for (const Metasound::Frontend::FMetaSoundClassInfo& Info : Infos)
-		{
-			TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
-			Entry->SetStringField(TEXT("class_name"),
-				Info.ClassName.Name.ToString());
-			Entry->SetStringField(TEXT("class_path"),
-				Info.ClassName.ToString());
-			Entry->SetStringField(TEXT("type"),
-				UEnum::GetValueAsString(Info.ClassType));
-			Entry->SetStringField(TEXT("version"),
-				Info.Version.ToString());
-			Entry->SetStringField(TEXT("access_flags"),
-				UEnum::GetValueAsString(Info.AccessFlags));
-			MetaSound_AddNativeFields(Entry, Info.ClassType, Info.ClassName, Info.Version);
-			TypesJson.Add(MakeShared<FJsonValueObject>(Entry));
-		}
-#endif
-	}
-	catch (...)
+	// UE 5.7's ISearchEngine::FindAllClasses(bool) returns the registered classes as FMetasoundFrontendClass,
+	// without unloaded assets, and its FMetaSoundClassInfo has no ClassType (both 5.8). The same entries by
+	// hand, as 5.8 builds them: the registered classes minus the deprecated ones (FindAllClasses(false) is the
+	// query 5.8 runs for EResultVersion::Highest), then for include_unloaded the asset manager's latest tag
+	// data of every MetaSound asset whose class is not registered, deprecated ones left out; an asset class
+	// is External.
+	using namespace Metasound::Frontend;
+	auto AddEntry = [&TypesJson](const FMetasoundFrontendClassName& ClassName, EMetasoundFrontendClassType ClassType,
+		const FMetasoundFrontendVersionNumber& Version, EMetasoundFrontendClassAccessFlags AccessFlags)
 	{
-		return mcp_common::MakeErrorReply(
-			TEXT("ISearchEngine::Get() failed (MetaSound search engine not initialized in this build)"));
+		TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+		Entry->SetStringField(TEXT("class_name"),
+			ClassName.Name.ToString());
+		Entry->SetStringField(TEXT("class_path"),
+			ClassName.ToString());
+		Entry->SetStringField(TEXT("type"),
+			UEnum::GetValueAsString(ClassType));
+		Entry->SetStringField(TEXT("version"),
+			Version.ToString());
+		Entry->SetStringField(TEXT("access_flags"),
+			UEnum::GetValueAsString(AccessFlags));
+		MetaSound_AddNativeFields(Entry, ClassType, ClassName, Version);
+		TypesJson.Add(MakeShared<FJsonValueObject>(Entry));
+	};
+
+	const TArray<FMetasoundFrontendClass> Classes = ISearchEngine::Get().FindAllClasses(/*bInIncludeAllVersions*/ false);
+	TSet<FNodeClassRegistryKey> RegisteredKeys;
+	TypesJson.Reserve(Classes.Num());
+	for (const FMetasoundFrontendClass& Class : Classes)
+	{
+		RegisteredKeys.Add(FNodeClassRegistryKey(Class.Metadata));
+		AddEntry(Class.Metadata.GetClassName(), Class.Metadata.GetType(), Class.Metadata.GetVersion(), Class.Metadata.GetAccessFlags());
 	}
+	if (bIncludeUnloaded)
+	{
+		if (const Metasound::Engine::FMetaSoundAssetManager* AssetManager = Metasound::Engine::FMetaSoundAssetManager::Get())
+		{
+			AssetManager->IterateAssetTagData([&RegisteredKeys, &AddEntry](FMetaSoundAssetClassInfo ClassInfo)
+			{
+				if (EnumHasAnyFlags(ClassInfo.AccessFlags, EMetasoundFrontendClassAccessFlags::Deprecated))
+				{
+					return;
+				}
+				if (!RegisteredKeys.Contains(FNodeClassRegistryKey(EMetasoundFrontendClassType::External, ClassInfo.ClassName, ClassInfo.Version)))
+				{
+					AddEntry(ClassInfo.ClassName, EMetasoundFrontendClassType::External, ClassInfo.Version, ClassInfo.AccessFlags);
+				}
+			});
+		}
+	}
+#else
+	auto& SE = Metasound::Frontend::ISearchEngine::Get();
+	const TArray<Metasound::Frontend::FMetaSoundClassInfo> Infos = SE.FindAllClasses(
+		Metasound::Frontend::ISearchEngine::EResultVersion::Highest, bIncludeUnloaded);
+
+	TypesJson.Reserve(Infos.Num());
+	for (const Metasound::Frontend::FMetaSoundClassInfo& Info : Infos)
+	{
+		TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+		Entry->SetStringField(TEXT("class_name"),
+			Info.ClassName.Name.ToString());
+		Entry->SetStringField(TEXT("class_path"),
+			Info.ClassName.ToString());
+		Entry->SetStringField(TEXT("type"),
+			UEnum::GetValueAsString(Info.ClassType));
+		Entry->SetStringField(TEXT("version"),
+			Info.Version.ToString());
+		Entry->SetStringField(TEXT("access_flags"),
+			UEnum::GetValueAsString(Info.AccessFlags));
+		MetaSound_AddNativeFields(Entry, Info.ClassType, Info.ClassName, Info.Version);
+		TypesJson.Add(MakeShared<FJsonValueObject>(Entry));
+	}
+#endif
 
 	// The full list runs to thousands of classes (264,000 characters measured in a blank project), past the size
 	// the reply carries inline, so it is offloaded to a file. name_filter and max_results narrow it.
