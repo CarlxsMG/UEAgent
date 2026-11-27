@@ -21,8 +21,9 @@ A call answers with one text block that holds a JSON object. Most tools answer w
 - `aliased_params`: the arguments spelled the way a sibling tool spells them, which the server renamed
   before the call.
 
-A call that ran and failed answers `success: false` with its `error`. It is not a tool error: the agent
-reads `success` itself.
+A call that ran and failed answers `success: false` with its `error`, and the MCP result marks it as a
+tool error (`isError: true`), as it does a refusal. A tool whose answer has no `success` field counts as
+having worked only when the answer carries no `error` either; a non-empty `error` alone makes it a failure.
 
 ## Images
 

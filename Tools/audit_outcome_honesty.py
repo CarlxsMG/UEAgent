@@ -63,6 +63,13 @@ Usage:
     python Tools/audit_outcome_honesty.py --md out.md      # + Markdown to a file
     python Tools/audit_outcome_honesty.py --domain Audio   # filter one domain
     python Tools/audit_outcome_honesty.py --cmd set_actor_team   # one command's record
+    python Tools/audit_outcome_honesty.py --check          # CI gate against the baseline
+    python Tools/audit_outcome_honesty.py --write-baseline # regenerate the baseline
+
+The gate (`--check`) compares the hardcoded_success commands with
+`Tools/outcome_honesty_baseline.json` and fails when a command not listed there is
+hardcoded_success, or when the count rises. The debt may only go down: a command that
+leaves the class passes, and `--write-baseline` then records the smaller set.
 """
 from __future__ import annotations
 
@@ -78,6 +85,7 @@ import audit_runtime_mode as arm  # noqa: E402  (same folder; imported after the
 
 ROOT = arm.ROOT              # plugin root
 PROJECT = arm.PROJECT        # base of the relative paths in the report (= plugin root)
+BASELINE = pathlib.Path(__file__).resolve().parent / "outcome_honesty_baseline.json"
 CMDS_DIR = arm.CMDS_DIR      # .../Private/Commands
 PRIVATE_DIR = CMDS_DIR.parent
 
@@ -542,6 +550,56 @@ def build_markdown(records, counts, buckets, unmapped, domain_filter):
     return "\n".join(out)
 
 
+def hardcoded_commands(records) -> list[str]:
+    """The debt the audit counts: mutating commands only, as in --summary."""
+    return sorted(r["cmd"] for r in records.values()
+                  if r["bucket"] == "mutating" and r["klass"] == "hardcoded_success")
+
+
+def write_baseline(records) -> None:
+    cmds = hardcoded_commands(records)
+    payload = {
+        "note": "Commands audit_outcome_honesty.py classifies as hardcoded_success. "
+                "The CI gate (--check) fails on a command not listed here or a higher count; "
+                "regenerate with --write-baseline after paying debt off.",
+        "hardcoded_success_total": len(cmds),
+        "hardcoded_success": cmds,
+    }
+    BASELINE.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8", newline="\n")
+    print(f"Baseline written to {BASELINE.relative_to(ROOT).as_posix()}: {len(cmds)} hardcoded_success")
+
+
+def check_baseline(records) -> int:
+    if not BASELINE.exists():
+        print(f"ERROR: no baseline at {BASELINE}; create it with --write-baseline", file=sys.stderr)
+        return 1
+    baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
+    allowed = set(baseline.get("hardcoded_success", []))
+    limit = int(baseline.get("hardcoded_success_total", len(allowed)))
+    current = hardcoded_commands(records)
+    new = [c for c in current if c not in allowed]
+    failed = False
+    if new:
+        failed = True
+        print(f"FAIL: {len(new)} command(s) newly hardcoded_success (their success:true is a constant):")
+        for c in new:
+            r = records[c]
+            print(f"  - {c}  ({r['file']}::{r['fn']}; evidence {ev_str(r['evidence'])})")
+        print("Derive the outcome from a measurement (MakeOutcomeReply/MakeVerifiedReply/"
+              "AddVerificationEvidence) or declare it unverifiable.")
+    if len(current) > limit:
+        failed = True
+        print(f"FAIL: hardcoded_success rose from {limit} to {len(current)}.")
+    if failed:
+        return 1
+    paid = sorted(allowed - set(current))
+    print(f"OK: {len(current)} hardcoded_success (baseline {limit}).")
+    if paid:
+        print(f"{len(paid)} baseline command(s) are no longer hardcoded_success: "
+              "run --write-baseline to lock the gain in.")
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(
         description="Audit the outcome honesty of the mutating MCP commands.")
@@ -550,6 +608,11 @@ def main(argv=None):
     ap.add_argument("--domain", metavar="NAME", help="filter to a single domain")
     ap.add_argument("--cmd", metavar="NAME", help="record of a single command (with evidence)")
     ap.add_argument("--summary", action="store_true", help="counters only")
+    gate = ap.add_mutually_exclusive_group()
+    gate.add_argument("--check", action="store_true",
+                      help="fail when hardcoded_success grows past the baseline (CI gate)")
+    gate.add_argument("--write-baseline", action="store_true",
+                      help="record the current hardcoded_success commands as the baseline")
     args = ap.parse_args(argv)
 
     if not arm.CATALOG.exists():
@@ -558,6 +621,12 @@ def main(argv=None):
         sys.exit(f"ERROR: Commands tree not found at {CMDS_DIR}")
 
     records, counts, buckets, unmapped = run_audit()
+
+    if args.write_baseline:
+        write_baseline(records)
+        return
+    if args.check:
+        sys.exit(check_baseline(records))
 
     if args.cmd:
         r = records.get(args.cmd)

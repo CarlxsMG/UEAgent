@@ -116,7 +116,10 @@ Both leave `tools/list`, `find_tools` and the reference, and a call answers as b
 - A change of behavior says how it was measured: the call before and after, in a headless editor
   when possible.
 - The audits do not get worse: `Tools/audit_outcome_honesty.py` (is each mutating tool's `success`
-  measured?) and `Tools/audit_runtime_mode.py` (which tools need a live editor).
+  measured?) and `Tools/audit_runtime_mode.py` (which tools need a live editor). CI runs
+  `audit_outcome_honesty.py --check` against `Tools/outcome_honesty_baseline.json`: a new
+  `hardcoded_success` tool fails it. After making tools honest, lower the baseline with
+  `--write-baseline`.
 
 ## License of contributions
 
