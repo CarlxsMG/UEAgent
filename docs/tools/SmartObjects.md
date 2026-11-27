@@ -110,8 +110,10 @@ Spatially query the SmartObject subsystem for slots within a box centered on a p
 | `radius` | number | yes | Half-extent (uu) of the AABB search box around center |
 | `include_claimed` | boolean | no | Optional: also return already-claimed slots (default false) |
 | `include_disabled` | boolean | no | Optional: also return disabled slots (default false) |
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ center: [number, number, number], radius: number, results: [{ object_handle: string, slot_handle: string, actor_label: string }], count: int, note?: string }`
+**Returns:** `{ center: [number, number, number], radius: number, results: [{ object_handle: string, slot_handle: string, actor_label: string }], count: int (entries in this page), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null, note?: string } -- results sorted by slot_handle`
 
 ## `get_smart_object_component_definition`
 

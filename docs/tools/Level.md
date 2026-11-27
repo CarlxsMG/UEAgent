@@ -850,8 +850,10 @@ Finds __ExternalActors__ (OFPA) packages with no registered World Partition desc
 |---|---|---|---|
 | `map_path` | string | yes | Long package name of the level to inspect (e.g. /Game/MyGame/Maps/MainMap); does NOT need to be the open editor world (that only enables the stronger layer-3 cross-check). |
 | `filter_generated_class` | string | no | Optional substring (case-insensitive) matched against each candidate's generated_class_name (the AssetClassPath, resolved with zero loading); also tried as a UClass IsChildOf when the string resolves to a real class. |
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ map_path, external_actors_path, disk_count, asset_registry_count, live_registered_count (nullable), live_cross_check_available, confirmed_orphan_count, candidate_unconfirmed_count, candidates: [{ path, generated_class_name, is_loaded, on_disk, in_asset_registry, classification }], note }`
+**Returns:** `{ map_path, external_actors_path, disk_count, asset_registry_count, live_registered_count (nullable), live_cross_check_available, confirmed_orphan_count, candidate_unconfirmed_count, candidates: [{ path, generated_class_name, is_loaded, on_disk, in_asset_registry, classification }] (sorted by path, paged with offset/limit; the two counts cover every candidate), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null, note }`
 
 ## `list_world_partition_actors`
 

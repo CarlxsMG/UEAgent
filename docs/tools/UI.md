@@ -331,8 +331,10 @@ CALL THIS FIRST to discover valid widget_name values instead of guessing: it enu
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name_filter` | string | no | Optional substring filter on the owning actor's name (Contains match) |
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ components: [{ actor_name: string, widget_component_name: string, widget_name: string|null, widget_class: string|null }], component_count: number, actor_name_filter: string|null }`
+**Returns:** `{ components: [{ actor_name: string, widget_component_name: string, widget_name: string|null, widget_class: string|null }], component_count: number (entries in this page), actor_name_filter: string|null, total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }`
 
 ## `list_pie_widgets`
 

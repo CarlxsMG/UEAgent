@@ -259,8 +259,10 @@ Sphere / box / capsule overlap query against the world: "what is inside this vol
 | `trace_channel` | string | no | Collision channel, canonical ("ECC_Visibility") or friendly ("Visibility"). Defaults to "Visibility". |
 | `ignore_actors` | array | no | Actor names/labels to exclude from the overlap. |
 | `world` | string | no | Which world to query: absent/"editor" (default) \| "server" (the PIE world with authority) \| "client" \| "pie:N" \| "pie" (ambiguous) \| "game" (alias of "pie"). Pass a live world to hit World-Partition/OFPA actor collision (only cooked in the PIE physics scene). |
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ overlaps: [{actor_path, actor_name, component_name, item_index, blocking}], count: int, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }`
+**Returns:** `{ overlaps: [{actor_path, actor_name, component_name, item_index, blocking}] (sorted by actor_path, paged with offset/limit), count: int (entries in this page), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }`
 
 ## `fracture_geometry_collection`
 

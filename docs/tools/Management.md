@@ -201,8 +201,10 @@ List the plugins this editor has discovered, enabled or not, sorted by name: whe
 | `name_filter` | string | no | Optional case-insensitive substring of the plugin's name or friendly name. |
 | `category` | string | no | Optional case-insensitive substring of the plugin's category (e.g. "Editor", "Rendering"). |
 | `include_hidden` | boolean | no | Optional bool (default true): include plugins the Plugins window hides. |
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ plugins: [{ name: string, friendly_name: string, enabled: bool, mounted: bool, type: "engine"|"project", plugin_type: "engine"|"enterprise"|"project"|"external"|"mod", version: string, version_number: int, category: string, path: string, descriptor_file: string, can_contain_content: bool, is_beta: bool, is_experimental: bool, hidden: bool }], count: int, total_discovered: int }`
+**Returns:** `{ plugins: [{ name: string, friendly_name: string, enabled: bool, mounted: bool, type: "engine"|"project", plugin_type: "engine"|"enterprise"|"project"|"external"|"mod", version: string, version_number: int, category: string, path: string, descriptor_file: string, can_contain_content: bool, is_beta: bool, is_experimental: bool, hidden: bool }], count: int (entries in this page), total_discovered: int, total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }`
 
 ## `move_asset`
 

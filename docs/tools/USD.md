@@ -395,8 +395,10 @@ List every attribute of one prim on a USD stage this server has open, with each 
 |---|---|---|---|
 | `stage_name` | string | yes | Name the stage was registered under by open_usd_stage (default the file basename) or create_usd_stage (default "Untitled"). |
 | `prim_path` | string | yes | Absolute SdfPath of an existing prim on that stage, e.g. "/World/Cube", as list_usd_prims returns it. |
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ prim_path: string, attributes: [{name, type_name, cpp_type, has_value, has_authored_value, time_sample_count}], count: int }`
+**Returns:** `{ prim_path: string, attributes: [{name, type_name, cpp_type, has_value, has_authored_value, time_sample_count}], count: int (entries in this page), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }`
 
 ## `list_usd_prims`
 
@@ -409,8 +411,10 @@ List the prims under one prim (default the pseudo root "/") of a registered USD 
 | `stage_name` | string | no | Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier. |
 | `prim_path_prefix` | string | no | Absolute SdfPath of the prim whose children are listed, e.g. "/World"; it must exist (it is a parent path, not a text prefix). Default "/" (the pseudo root). |
 | `recursive` | boolean | no | false (default) lists the direct children only; true lists every descendant, each parent before its children. |
+| `offset` | integer | no | Index of the first prim returned, in the order above, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ prims: [{ prim_path, type_name, active }], count: number }`
+**Returns:** `{ prims: [{ prim_path, type_name, active }], count: number (entries in this page), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }`
 
 ## `list_usd_stage_layers`
 

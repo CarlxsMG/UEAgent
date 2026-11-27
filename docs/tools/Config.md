@@ -113,11 +113,14 @@ No parameters.
 
 *Read-only.*
 
-List every loaded, concrete UDeveloperSettings subclass (the Project/Editor Settings sections) without loading new modules, read-only. Returns count and sections [{class_name, class_path, container_name, category_name, section_name, section_text}]; pass class_name to get_project_settings_value or set_project_settings_value.
+List every loaded, concrete UDeveloperSettings subclass (the Project/Editor Settings sections) without loading new modules, read-only. Returns count and sections [{class_name, class_path, container_name, category_name, section_name, section_text}], sorted by class_path and paged with offset/limit; pass class_name to get_project_settings_value or set_project_settings_value.
 
-No parameters.
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ count: int, sections: [object] }`
+**Returns:** `{ count: int (entries in this page), sections: [object], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }`
 
 ## `remove_collision_channel`
 

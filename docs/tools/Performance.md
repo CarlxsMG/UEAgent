@@ -143,11 +143,14 @@ No parameters.
 
 *Read-only.*
 
-Enumerate .utrace files in &lt;ProjectDir>/Saved/Profiling/, returning their path, size and modification time.
+Enumerate .utrace files in &lt;ProjectDir>/Saved/Profiling/, returning their path, size and modification time, sorted by name and paged with offset/limit.
 
-No parameters.
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ directory: string, count: int, traces: [{ path, name, size_bytes, modified_iso }] } -- directory is the resolved profiling folder; only its own files are listed, not subfolders.`
+**Returns:** `{ directory: string, count: int (entries in this page), traces: [{ path, name, size_bytes, modified_iso }], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null } -- directory is the resolved profiling folder; only its own files are listed, not subfolders.`
 
 ## `set_runtime_virtual_texture_volume_bounds`
 

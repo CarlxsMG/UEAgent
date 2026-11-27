@@ -334,9 +334,12 @@ Read one property of a task node on a StateTree state (task_index, from list_tas
 
 List the concrete condition struct types (children of FStateTreeConditionBase, abstract ones skipped) of the loaded modules, sorted by name, for add_state_enter_condition and add_state_transition_condition. Returns count and types [{name, struct_path}]; struct_path is the struct's own path in the module that declares it, so either field can be passed.
 
-No parameters.
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ count, types: [{ name, struct_path }] }`
+**Returns:** `{ count (entries in this page), types: [{ name, struct_path }], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }`
 
 ## `list_conditions`
 
@@ -370,9 +373,12 @@ List the utility considerations of one state of a StateTree asset without changi
 
 List the concrete evaluator struct types (children of FStateTreeEvaluatorBase, abstract ones skipped) of the loaded modules, sorted by name, for add_evaluator. Returns count and types [{name, struct_path}]; struct_path is the struct's own path in the module that declares it, so either field can be passed.
 
-No parameters.
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ count, types: [{ name, struct_path }] }`
+**Returns:** `{ count (entries in this page), types: [{ name, struct_path }], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }`
 
 ## `list_evaluators`
 
@@ -390,13 +396,15 @@ List the evaluators of a StateTree asset without changing it, as they are in mem
 
 *Read-only.*
 
-List the property bindings stored in the editor data of a StateTree asset, without changing it. Returns count and bindings [{index, source_path, target_path, source_id, target_id}], where source_id and target_id are the struct GUIDs of the two ends. Add bindings with add_state_tree_binding and remove them with remove_state_tree_binding.
+List the property bindings stored in the editor data of a StateTree asset, without changing it. Returns count and bindings [{index, source_path, target_path, source_id, target_id}] in index order, paged with offset/limit, where source_id and target_id are the struct GUIDs of the two ends. Add bindings with add_state_tree_binding and remove them with remove_state_tree_binding.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ tree_path, count, bindings: [{ index, source_path, target_path, source_id, target_id }] }`
+**Returns:** `{ tree_path, count (entries in this page), bindings: [{ index, source_path, target_path, source_id, target_id }], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }`
 
 ## `list_state_tree_global_tasks`
 
@@ -414,13 +422,15 @@ List the global tasks of a StateTree asset (tasks that run for the whole tree, n
 
 *Read-only.*
 
-List the StateTree assets (subclasses included) in a content folder and all its subfolders, from the Asset Registry, without loading or changing them: per tree its object path, asset name and class. A folder with no trees, or one that does not exist, gives count 0 rather than an error. Use it to find the tree_path every other StateTree tool takes; then read one tree's states, transitions and parameters with get_state_tree_info, or create a new one with create_state_tree; the tree a placed component runs: get_component_state_tree_path.
+List the StateTree assets (subclasses included) in a content folder and all its subfolders, from the Asset Registry, without loading or changing them: per tree its object path, asset name and class, sorted by path and paged with offset/limit. A folder with no trees, or one that does not exist, gives count 0 rather than an error. Use it to find the tree_path every other StateTree tool takes; then read one tree's states, transitions and parameters with get_state_tree_info, or create a new one with create_state_tree; the tree a placed component runs: get_component_state_tree_path.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `package_path` | string | no | Content folder to search, recursively, as a long package path with no trailing slash, e.g. "/Game/AI" (default "/Game"); a plugin's content lives under its mount point, e.g. "/MyPlugin". |
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ package_path, count, trees: [{ path, name, class }] }`
+**Returns:** `{ package_path, count (entries in this page), trees: [{ path, name, class }], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }`
 
 ## `list_task_types`
 
@@ -428,9 +438,12 @@ List the StateTree assets (subclasses included) in a content folder and all its 
 
 List the StateTree task struct types (FStateTreeTaskBase and its children; structs tagged Abstract are skipped) of the modules loaded now, sorted by name, without changing anything: the names add_state_task and add_state_tree_global_task take as task_struct. A task from a plugin whose module is not loaded is not listed. struct_path is the struct's own path in the module that declares it (e.g. /Script/StateTreeModule.StateTreeDelayTask, /Script/GameplayStateTreeModule.StateTreeRunEnvQueryTask), so either field can be passed. Other node types: list_condition_types, list_evaluator_types; the tasks already on a state: list_tasks; on the whole tree: list_state_tree_global_tasks.
 
-No parameters.
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ count, types: [{ name, struct_path }] }`
+**Returns:** `{ count (entries in this page), types: [{ name, struct_path }], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }`
 
 ## `list_tasks`
 

@@ -13537,7 +13537,7 @@
         },
         {
           "name": "list_metasound_connections",
-          "description": "List every edge of the default graph of a MetaSound Source: from which node and output pin to which node and input pin, with each node's name and class (a graph input or output node is named after the input or output), plus count. Read-only. It reads what connect_metasound_nodes, connect_metasound_graph_input_to_node, connect_metasound_graph_input_to_output and connect_metasound_node_to_graph_output write; node ids are those of list_metasound_nodes, and an input's edge is dropped with disconnect_metasound_nodes. Patches are refused.",
+          "description": "List the edges of the default graph of a MetaSound Source, in document order and a page at a time (offset/limit): from which node and output pin to which node and input pin, with each node's name and class (a graph input or output node is named after the input or output), plus count. Read-only. It reads what connect_metasound_nodes, connect_metasound_graph_input_to_node, connect_metasound_graph_input_to_output and connect_metasound_node_to_graph_output write; node ids are those of list_metasound_nodes, and an input's edge is dropped with disconnect_metasound_nodes. Patches are refused.",
           "params": [
             {
               "name": "metasound_path",
@@ -13545,9 +13545,23 @@
               "required": true,
               "nameLike": true,
               "description": "MetaSound Source asset path, e.g. \"/Game/Audio/MS_Rain\"."
+            },
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
             }
           ],
-          "returns": "{ metasound_path: string, count: int, connections: [{ from_node_id, from_node_name, from_node_class, from_output_name, to_node_id, to_node_name, to_node_class, to_input_name, data_type }] }",
+          "returns": "{ metasound_path: string, count: int (entries in this page), connections: [{ from_node_id, from_node_name, from_node_class, from_output_name, to_node_id, to_node_name, to_node_class, to_input_name, data_type }], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }",
           "retired": {
             "use": "get_graph_nodes",
             "how": "asset_path=<MetaSound Source>; its connections field holds the same edges"
@@ -13596,7 +13610,7 @@
         },
         {
           "name": "list_metasound_nodes",
-          "description": "List every node in the default graph of a MetaSound Source asset with its GUID id, name, class name and input/output counts, plus count. Read-only; pass the id to get_metasound_node_info and the other node tools.",
+          "description": "List the nodes in the default graph of a MetaSound Source asset, in document order and a page at a time (offset/limit), with their GUID id, name, class name and input/output counts. Read-only; pass the id to get_metasound_node_info and the other node tools.",
           "params": [
             {
               "name": "metasound_path",
@@ -13604,9 +13618,23 @@
               "required": true,
               "nameLike": true,
               "description": "MetaSound Source asset path, e.g. \"/Game/Audio/MS_Rain\"; MetaSound Patches are not accepted."
+            },
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
             }
           ],
-          "returns": "{ metasound_path, count, nodes: [{ id, name, class_name, input_count, output_count }] }",
+          "returns": "{ metasound_path, count (entries in this page), nodes: [{ id, name, class_name, input_count, output_count }], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }",
           "retired": {
             "use": "get_graph_nodes",
             "how": "asset_path=<MetaSound Source>; the same nodes, each with node_id (its GUID), plus the graph's connections"
@@ -13620,7 +13648,7 @@
         },
         {
           "name": "list_subtitle_cues",
-          "description": "List every cue of a subtitles asset (USubtitleAssetUserData, the engine's list of timed subtitle cues) in stored order, without changing anything: per cue its 0-based index, text, start_offset and duration in seconds, duration_type (use_sound_duration or use_duration_property), priority, subtitle_type (subtitle, closed_caption or audio_description) and comment, plus count and max_duration (GetMaximumDuration, the latest end time). Use it to find the cue_index that set_subtitle_cue and remove_subtitle_cue take, or to check add_subtitle_cue's result; create the asset with create_subtitles_asset. An asset with no cues is a success with count 0; a path that does not load as a USubtitleAssetUserData is an error.",
+          "description": "List the cues of a subtitles asset (USubtitleAssetUserData, the engine's list of timed subtitle cues) in stored order, a page at a time (offset/limit), without changing anything: per cue its 0-based index, text, start_offset and duration in seconds, duration_type (use_sound_duration or use_duration_property), priority, subtitle_type (subtitle, closed_caption or audio_description) and comment, plus count and max_duration (GetMaximumDuration, the latest end time). Use it to find the cue_index that set_subtitle_cue and remove_subtitle_cue take, or to check add_subtitle_cue's result; create the asset with create_subtitles_asset. An asset with no cues is a success with count 0; a path that does not load as a USubtitleAssetUserData is an error.",
           "params": [
             {
               "name": "asset_path",
@@ -13628,9 +13656,23 @@
               "required": true,
               "nameLike": true,
               "description": "Subtitles asset as a package or object path, e.g. \"/Game/Audio/Subs/SUB_Intro\" or \"/Game/Audio/Subs/SUB_Intro.SUB_Intro\"."
+            },
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
             }
           ],
-          "returns": "{ asset_path: string, success: bool, count: int, max_duration: float, cues: [{index, text, start_offset, duration, duration_type, priority, subtitle_type, comment}] }",
+          "returns": "{ asset_path: string, success: bool, count: int (entries in this page), max_duration: float, total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null, cues: [{index, text, start_offset, duration, duration_type, priority, subtitle_type, comment}] }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -19140,7 +19182,7 @@
         },
         {
           "name": "list_editor_utility_widgets",
-          "description": "List the Editor Utility Widget Blueprint assets under a content folder and its subfolders, read from the Asset Registry without loading them. Returns search_path, count and widgets [{name, asset_path, package_name, package_path}]; open one as an editor tab with run_editor_utility_widget.",
+          "description": "List the Editor Utility Widget Blueprint assets under a content folder and its subfolders, read from the Asset Registry without loading them. Returns search_path, count and widgets [{name, asset_path, package_name, package_path}], sorted by asset_path and paged with offset/limit; open one as an editor tab with run_editor_utility_widget.",
           "params": [
             {
               "name": "path",
@@ -19149,9 +19191,23 @@
               "nameLike": true,
               "description": "Content folder to search recursively, without a trailing slash, e.g. \"/Game/EditorUtilities\" (default /Game).",
               "default": "/Game"
+            },
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
             }
           ],
-          "returns": "{ name, asset_path, package_name, package_path, search_path, count, widgets }",
+          "returns": "{ name, asset_path, package_name, package_path, search_path, count (entries in this page), widgets, total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -19161,7 +19217,7 @@
         },
         {
           "name": "list_overridable_functions",
-          "description": "Enumerate the functions/events that a Blueprint deriving from a class could override. Works on an EXISTING Blueprint (blueprint_name) or on ANY class (class_name) so the override surface can be inspected BEFORE the child exists. Gated with UEdGraphSchema_K2::CanKismetOverrideFunction -- the same predicate add_blueprint_function(override=true) enforces -- so discovery and authoring agree (a bare NativeEvent||FUNC_BlueprintEvent filter lets a parent Blueprint's *__DelegateSignature through as \"overridable\"). Each entry reports where the member is DECLARED and where it is last IMPLEMENTED, with is_stub, which is what distinguishes a concrete ancestor from its `_Abstract` sibling.",
+          "description": "Enumerate the functions/events that a Blueprint deriving from a class could override. Works on an EXISTING Blueprint (blueprint_name) or on ANY class (class_name) so the override surface can be inspected BEFORE the child exists. Gated with UEdGraphSchema_K2::CanKismetOverrideFunction -- the same predicate add_blueprint_function(override=true) enforces -- so discovery and authoring agree (a bare NativeEvent||FUNC_BlueprintEvent filter lets a parent Blueprint's *__DelegateSignature through as \"overridable\"). Each entry reports where the member is DECLARED and where it is last IMPLEMENTED, with is_stub, which is what distinguishes a concrete ancestor from its `_Abstract` sibling. Entries come in class-chain then interface order, a page at a time (offset/limit).",
           "params": [
             {
               "name": "blueprint_name",
@@ -19182,9 +19238,23 @@
               "jsonType": "boolean",
               "required": false,
               "description": "Optional bool (default false). true also lists the entries a NativeEvent||FUNC_BlueprintEvent filter passes but CanKismetOverrideFunction rejects (delegate signatures, BlueprintInternalUseOnly, deprecated), each flagged can_kismet_override=false. Nothing is lost silently."
+            },
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
             }
           ],
-          "returns": "{ blueprint_name?, class_name?, source_mode, resolved_class, base_class, ancestors: [string], count, functions: [{ function_name, display_name, declaring_class, is_native_event, is_event, is_interface, interface_name?, kind, can_kismet_override, has_override_graph, has_user_logic, is_implemented, parent_impl_kind, parent_impl_owner_class, parent_impl_graph, parent_impl_node_count, is_stub, is_stub_basis }] }",
+          "returns": "{ blueprint_name?, class_name?, source_mode, resolved_class, base_class, ancestors: [string], count (entries in this page), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null, functions: [{ function_name, display_name, declaring_class, is_native_event, is_event, is_interface, interface_name?, kind, can_kismet_override, has_override_graph, has_user_logic, is_implemented, parent_impl_kind, parent_impl_owner_class, parent_impl_graph, parent_impl_node_count, is_stub, is_stub_basis }] }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -19194,7 +19264,7 @@
         },
         {
           "name": "list_scripted_action_utilities",
-          "description": "List the Editor Utility Blueprints under a content folder (subfolders included) whose class derives from UAssetActionUtility (kind asset: Content Browser right-click actions) or UActorActionUtility (kind actor: level actor actions). Each Editor Utility Blueprint found is LOADED to test its class, so a large folder is slow; plain Blueprints and Editor Utility Widgets are not listed. Read-only; a folder with none, or one that does not exist, is an empty list, not an error. Run one with run_asset_action_utility, which also lists its CallInEditor actions; create one with create_editor_utility_blueprint (parent_class \"AssetActionUtility\" or \"ActorActionUtility\"); Editor Utility Widgets: list_editor_utility_widgets.",
+          "description": "List the Editor Utility Blueprints under a content folder (subfolders included) whose class derives from UAssetActionUtility (kind asset: Content Browser right-click actions) or UActorActionUtility (kind actor: level actor actions). Each Editor Utility Blueprint found is LOADED to test its class, so a large folder is slow; plain Blueprints and Editor Utility Widgets are not listed. Sorted by path, a page at a time (offset/limit). Read-only; a folder with none, or one that does not exist, is an empty list, not an error. Run one with run_asset_action_utility, which also lists its CallInEditor actions; create one with create_editor_utility_blueprint (parent_class \"AssetActionUtility\" or \"ActorActionUtility\"); Editor Utility Widgets: list_editor_utility_widgets.",
           "params": [
             {
               "name": "path",
@@ -19202,9 +19272,23 @@
               "required": false,
               "nameLike": true,
               "description": "Content folder to search, subfolders included, e.g. \"/Game/EditorTools\", without a trailing slash (default /Game)."
+            },
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
             }
           ],
-          "returns": "{ search_path: string, count: int, utilities: [{ name: string, path: string, package_name: string, kind: string, parent_class: string }] }",
+          "returns": "{ search_path: string, count: int (entries in this page), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null, utilities: [{ name: string, path: string, package_name: string, kind: string, parent_class: string }] }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -19214,7 +19298,7 @@
         },
         {
           "name": "list_widget_bound_events",
-          "description": "List every event-dispatcher BINDING wired in a Blueprint, across the three node kinds that make one in practice: UK2Node_AddDelegate (from add_object_bound_event / add_graph_node node_type=\"add_delegate\"), UK2Node_ComponentBoundEvent (from add_component_bound_event -- a component's dispatcher OR a UMG widget's, e.g. a Button's OnClicked) and UK2Node_ActorBoundEvent (a level actor's, bound from the Level Blueprint). Each entry reports which kind it is (binding_kind), what it is bound ON (bound_to: the component/widget variable, or the actor), the delegate's owner class and name, and the handler on the other end. Despite the name it works on ANY Blueprint -- but it only walks Ubergraph pages and FunctionGraphs, so a binding inside a macro or interface graph is out of scope. Run it BEFORE add_object_bound_event / add_component_bound_event: double-binding one delegate to two handlers compiles fine and silently runs BOTH. A reader that cannot see what the writer wrote is worse than no reader: a 0 reads as \"not wired\" and sends you to re-wire what is already there.",
+          "description": "List the event-dispatcher BINDINGS wired in a Blueprint, in graph order and a page at a time (offset/limit; kind_counts and total count them all), across the three node kinds that make one in practice: UK2Node_AddDelegate (from add_object_bound_event / add_graph_node node_type=\"add_delegate\"), UK2Node_ComponentBoundEvent (from add_component_bound_event -- a component's dispatcher OR a UMG widget's, e.g. a Button's OnClicked) and UK2Node_ActorBoundEvent (a level actor's, bound from the Level Blueprint). Each entry reports which kind it is (binding_kind), what it is bound ON (bound_to: the component/widget variable, or the actor), the delegate's owner class and name, and the handler on the other end. Despite the name it works on ANY Blueprint -- but it only walks Ubergraph pages and FunctionGraphs, so a binding inside a macro or interface graph is out of scope. Run it BEFORE add_object_bound_event / add_component_bound_event: double-binding one delegate to two handlers compiles fine and silently runs BOTH. A reader that cannot see what the writer wrote is worse than no reader: a 0 reads as \"not wired\" and sends you to re-wire what is already there.",
           "params": [
             {
               "name": "blueprint_name",
@@ -19222,9 +19306,23 @@
               "required": true,
               "nameLike": true,
               "description": "Blueprint asset name or path (Actor Blueprint, Widget Blueprint or Level Blueprint)."
+            },
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
             }
           ],
-          "returns": "{ blueprint_name, bindings:[{ graph_name, node_id, binding_kind, bound_to, delegate_owner_class, delegate_name, delegate_resolved, wired, custom_event_name, custom_event_node_id }], binding_count, kind_counts:{add_delegate,component_bound_event,actor_bound_event} } -- binding_kind names the node class behind the entry. bound_to is the component/widget variable name (component_bound_event), the actor name (actor_bound_event), or empty for add_delegate, whose target pin is left unconnected by design. delegate_resolved=false means the delegate no longer resolves live (renamed/removed). wired=false is a DANGLING add_delegate bind (its Delegate pin has no handler); the two *BoundEvent kinds ARE their own handler, so they are always wired and custom_event_name is the generated BndEvt__ function.",
+          "returns": "{ blueprint_name, bindings:[{ graph_name, node_id, binding_kind, bound_to, delegate_owner_class, delegate_name, delegate_resolved, wired, custom_event_name, custom_event_node_id }], binding_count (entries in this page), kind_counts:{add_delegate,component_bound_event,actor_bound_event}, total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null } -- binding_kind names the node class behind the entry. bound_to is the component/widget variable name (component_bound_event), the actor name (actor_bound_event), or empty for add_delegate, whose target pin is left unconnected by design. delegate_resolved=false means the delegate no longer resolves live (renamed/removed). wired=false is a DANGLING add_delegate bind (its Delegate pin has no handler); the two *BoundEvent kinds ARE their own handler, so they are always wired and custom_event_name is the generated BndEvt__ function.",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -21627,9 +21725,24 @@
         },
         {
           "name": "list_camera_node_types",
-          "description": "Lists all concrete UCameraNode subclasses usable in a camera rig. Read-only reflection (GetDerivedClasses).",
-          "params": [],
-          "returns": "{ base_class, count, types:[{name, path}] }",
+          "description": "Lists the concrete UCameraNode subclasses usable in a camera rig, sorted by name and paged with offset/limit. Read-only reflection (GetDerivedClasses).",
+          "params": [
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
+            }
+          ],
+          "returns": "{ base_class, count (entries in this page), types:[{name, path}], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -22478,9 +22591,23 @@
               "required": false,
               "nameLike": true,
               "description": "Optional content folder to scan, sub-folders included (default \"/Game\"; an empty string also means /Game), e.g. \"/Game/Animation/Choosers\"; plugin content lives under its mount point, such as \"/MyPlugin\"."
+            },
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
             }
           ],
-          "returns": "{ package_path, total, tables:[{ asset_name, asset_path, asset_class, row_count, column_count }] }",
+          "returns": "{ package_path, tables:[{ asset_name, asset_path, asset_class, row_count, column_count }], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -23186,9 +23313,24 @@
         },
         {
           "name": "list_project_setting_sections",
-          "description": "List every loaded, concrete UDeveloperSettings subclass (the Project/Editor Settings sections) without loading new modules, read-only. Returns count and sections [{class_name, class_path, container_name, category_name, section_name, section_text}]; pass class_name to get_project_settings_value or set_project_settings_value.",
-          "params": [],
-          "returns": "{ count: int, sections: [object] }",
+          "description": "List every loaded, concrete UDeveloperSettings subclass (the Project/Editor Settings sections) without loading new modules, read-only. Returns count and sections [{class_name, class_path, container_name, category_name, section_name, section_text}], sorted by class_path and paged with offset/limit; pass class_name to get_project_settings_value or set_project_settings_value.",
+          "params": [
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
+            }
+          ],
+          "returns": "{ count: int (entries in this page), sections: [object], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -24421,9 +24563,24 @@
         },
         {
           "name": "list_data_registry_types",
-          "description": "List every registry the UDataRegistrySubsystem currently has registered, sorted by type, each with registry_type, registry_path, item_struct and initialized. Read-only. An asset the subsystem has not loaded is absent: register it with initialize_data_registry, or call refresh_data_registry_map after edits.",
-          "params": [],
-          "returns": "{ registries: [{registry_type, registry_path, item_struct, initialized}], registry_count: int }",
+          "description": "List the registries the UDataRegistrySubsystem currently has registered, sorted by type and paged with offset/limit, each with registry_type, registry_path, item_struct and initialized. Read-only. An asset the subsystem has not loaded is absent: register it with initialize_data_registry, or call refresh_data_registry_map after edits.",
+          "params": [
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
+            }
+          ],
+          "returns": "{ registries: [{registry_type, registry_path, item_struct, initialized}], registry_count: int (entries in this page), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -26446,7 +26603,7 @@
         },
         {
           "name": "find_unused_assets",
-          "description": "Find assets in a folder with zero referencers, and annotate each survivor with the reasons it should be KEPT anyway. \"Zero referencers\" is not the same as \"safe to delete\": there are three common ways an asset stays alive with an empty referencer set -- it is explicitly protected, a Config/Default*.ini names it, or it is a fork descending from a vendored base library. Each becomes a keep_reason string on the entry; deletion_candidates lists only the entries with NO keep_reason. Nothing is ever removed from unused_assets by these flags (hiding a genuinely unreferenced asset would be the same lie in the other direction). NOTE: there is deliberately no `is_world` -- it is already visible in class_name (\"World\").",
+          "description": "Find assets in a folder with zero referencers, and annotate each survivor with the reasons it should be KEPT anyway. \"Zero referencers\" is not the same as \"safe to delete\": there are three common ways an asset stays alive with an empty referencer set -- it is explicitly protected, a Config/Default*.ini names it, or it is a fork descending from a vendored base library. Each becomes a keep_reason string on the entry; deletion_candidates lists only the entries of this page with NO keep_reason (deletion_candidate_count counts all of them). unused_assets come sorted by path, a page at a time (offset/limit). Nothing is ever removed from unused_assets by these flags (hiding a genuinely unreferenced asset would be the same lie in the other direction). NOTE: there is deliberately no `is_world` -- it is already visible in class_name (\"World\").",
           "params": [
             {
               "name": "folder_path",
@@ -26510,9 +26667,23 @@
                 "type": "string"
               },
               "description": "Vendored-library content roots for the lineage check. Default: the project's Read Only Content Roots (same default as audit_class_purity)."
+            },
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
             }
           ],
-          "returns": "{ folder_path, folder_exists, recursive, dependency_type, protect_paths: [string], include_lineage_reasons, base_libraries: [string], unused_assets: [{path, class_name, size_kb, keep_reasons: [string], keep_reason_detail: {...}}], unused_count, total_scanned, deletion_candidates: [string], deletion_candidate_count, assets_with_keep_reason, keep_reason_counts: {protected_path, referenced_by_config, descends_from_base_library}, config_scan: {files_scanned: int, files: [string]}, lineage_scan: {attempted, blueprints_loaded, skipped_non_blueprint, load_failures} }",
+          "returns": "{ folder_path, folder_exists, recursive, dependency_type, protect_paths: [string], include_lineage_reasons, base_libraries: [string], unused_assets: [{path, class_name, size_kb, keep_reasons: [string], keep_reason_detail: {...}}], unused_count (entries in this page), total_scanned, deletion_candidates: [string], deletion_candidate_count, assets_with_keep_reason, keep_reason_counts: {protected_path, referenced_by_config, descends_from_base_library}, config_scan: {files_scanned: int, files: [string]}, lineage_scan: {attempted, blueprints_loaded, skipped_non_blueprint, load_failures}, total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -27134,9 +27305,23 @@
               "jsonType": "boolean",
               "required": false,
               "description": "Optional bool (default false). Also list every object carried by each dirty package. One object-hash walk per package -- a dirty map can hold thousands, so leave it off unless you need the contents."
+            },
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
             }
           ],
-          "returns": "{ dirty_count: int, readonly_dirty_count: int, map_dirty_count: int, external_dirty_count: int, asset_dirty_count: int, filtered_out: int, pie_active: bool, current_world_package: string, path_prefix: string, readonly_roots: [string], readonly_roots_defaulted: bool, packages: [{ package_name: string, file_path: string, exists_on_disk: bool, kind: string, contains_map: bool, newly_created: bool, actor_label: string, actor_name: string, asset_name: string, asset_class: string, under_readonly_root: bool, objects?: [string] }], message: string, note: string }",
+          "returns": "{ dirty_count: int (every dirty package, not only this page), readonly_dirty_count: int, map_dirty_count: int, external_dirty_count: int, asset_dirty_count: int, filtered_out: int, pie_active: bool, current_world_package: string, path_prefix: string, readonly_roots: [string], readonly_roots_defaulted: bool, packages: [{ package_name: string, file_path: string, exists_on_disk: bool, kind: string, contains_map: bool, newly_created: bool, actor_label: string, actor_name: string, asset_name: string, asset_class: string, under_readonly_root: bool, objects?: [string] }] (sorted by package_name), message: string, note: string, total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }",
           "pack": "levels",
           "annotations": {
             "readOnlyHint": true,
@@ -27161,9 +27346,23 @@
               "jsonType": "boolean",
               "required": false,
               "description": "true (default) lists the whole in-memory merge, engine Base ini layers included; false lists only the sections in the project's Config/Default<name>.ini and Saved/Config/<Platform>/<name>.ini, as they are on disk."
+            },
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
             }
           ],
-          "returns": "{ count, sections: [string], found: bool, include_base: bool, config_file, file_path, files_read?: [string] }",
+          "returns": "{ count (entries in this page), sections: [string] (sorted by name), found: bool, include_base: bool, config_file, file_path, files_read?: [string], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -29819,9 +30018,24 @@
         },
         {
           "name": "list_niagara_data_interface_classes",
-          "description": "Enumerate every concrete UNiagaraDataInterface subclass registered in this process via TObjectIterator. Skips Abstract (those are base classes only). Used to discover what data-interface class strings are valid for add_niagara_data_interface.",
-          "params": [],
-          "returns": "{ count: int, classes: [{class_name, class_path, display_name, abstract, class_flags}] }",
+          "description": "Enumerate every concrete UNiagaraDataInterface subclass registered in this process via TObjectIterator. Skips Abstract (those are base classes only). Used to discover what data-interface class strings are valid for add_niagara_data_interface. The classes come sorted by class_path, a page at a time (offset/limit).",
+          "params": [
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
+            }
+          ],
+          "returns": "{ count: int (entries in this page), classes: [{class_name, class_path, display_name, abstract, class_flags}], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -35322,7 +35536,7 @@
         },
         {
           "name": "list_behavior_configs",
-          "description": "List the UGameplayBehaviorConfig assets under package_path, recursively, from the Asset Registry, without changing them: each config path and name with the name of its BehaviorClass (empty when unset), plus total. Each match is loaded to read that protected field, so a big folder costs one load per config. Only assets whose class is exactly UGameplayBehaviorConfig are listed: subclass configs such as GameplayBehaviorConfig_Animation or GameplayBehaviorConfig_BehaviorTree, and Blueprint subclasses, are skipped. There is no paging, and no match is total 0, not an error. One config in detail: get_behavior_config_info; create one: create_behavior_config; set its class: set_behavior_class; delete one: remove_behavior_config.",
+          "description": "List the UGameplayBehaviorConfig assets under package_path, recursively, from the Asset Registry, without changing them: each config path and name with the name of its BehaviorClass (empty when unset), plus total. Each match is loaded to read that protected field, so a big folder costs one load per config. Only assets whose class is exactly UGameplayBehaviorConfig are listed: subclass configs such as GameplayBehaviorConfig_Animation or GameplayBehaviorConfig_BehaviorTree, and Blueprint subclasses, are skipped. The configs come sorted by config_path, a page at a time (offset/limit); no match is total 0, not an error. One config in detail: get_behavior_config_info; create one: create_behavior_config; set its class: set_behavior_class; delete one: remove_behavior_config.",
           "params": [
             {
               "name": "package_path",
@@ -35330,9 +35544,23 @@
               "required": false,
               "nameLike": true,
               "description": "Optional content folder searched recursively (default \"/Game\"); an empty string also means /Game, so another mount point needs its own path"
+            },
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
             }
           ],
-          "returns": "{ package_path, total, configs:[{ config_path, config_name, behavior_class }] }",
+          "returns": "{ package_path, configs:[{ config_path, config_name, behavior_class }], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -35640,9 +35868,23 @@
               "required": false,
               "description": "Optional bool, default false: return count (and manager_valid) without the matching_tags list",
               "default": false
+            },
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
             }
           ],
-          "returns": "{ query_tag: string, count: int, manager_valid: bool, matching_tags?: [{ tag_name: string, tag_string: string }] }",
+          "returns": "{ query_tag: string, count: int (entries in this page; with count_only, every match), manager_valid: bool, matching_tags?: [{ tag_name: string, tag_string: string }], total?: int, offset?: int, limit?: int, returned?: int, truncated?: bool, next_offset?: int|null } -- matching_tags sorted by tag_name; the paging fields come with it",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -38696,7 +38938,7 @@
         },
         {
           "name": "find_free_input_key",
-          "description": "Which keys are still FREE: lists every input key not bound by any Enhanced Input mapping context or legacy mapping, filterable by category (keyboard / gamepad / mouse / touch) and substring, plus the matching keys that are already bound. The complement of list_all_input_mappings and the tool to run before binding a new keyboard shortcut, since a collision compiles silently and only shows up in play. Also the spelling lookup for any key the engine defines: with bindable_only=false and no category, free_keys + bound_keys together are the full engine key list, each with its exact FKey name (\"SpaceBar\", \"Gamepad_FaceButton_Bottom\") and its display name. Trustworthy where the Python route is not: InputMappingContext.mappings is deprecated and returns empty, which makes every taken key look available.",
+          "description": "Which keys are still FREE: lists every input key not bound by any Enhanced Input mapping context or legacy mapping, filterable by category (keyboard / gamepad / mouse / touch) and substring, plus the matching keys that are already bound. The complement of list_all_input_mappings and the tool to run before binding a new keyboard shortcut, since a collision compiles silently and only shows up in play. Also the spelling lookup for any key the engine defines: with bindable_only=false and no category, free_keys (paged with offset/limit) + bound_keys together are the full engine key list, each with its exact FKey name (\"SpaceBar\", \"Gamepad_FaceButton_Bottom\") and its display name. Trustworthy where the Python route is not: InputMappingContext.mappings is deprecated and returns empty, which makes every taken key look available.",
           "params": [
             {
               "name": "filter",
@@ -38721,9 +38963,23 @@
               "jsonType": "boolean",
               "required": false,
               "description": "When true (default), only keys where FKey::IsBindableInBlueprints() is true are considered (skips AnyKey/gestures/etc.). false lists every valid key the engine defines."
+            },
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first free_keys entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
             }
           ],
-          "returns": "{ free_keys:[{name (the FKey name binding calls take), key (same), display_name, is_gamepad, is_mouse, is_analog}], free_key_count, bound_keys:[...same shape], bound_key_count (keys bound anywhere, unfiltered), key_count (free_keys + bound_keys listed) }",
+          "returns": "{ free_keys:[{name (the FKey name binding calls take), key (same), display_name, is_gamepad, is_mouse, is_analog}] (sorted by name, paged with offset/limit), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null, free_key_count, bound_keys:[...same shape], bound_key_count (keys bound anywhere, unfiltered), key_count (free_keys + bound_keys listed) }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -38906,9 +39162,23 @@
               "required": false,
               "description": "When true, return only keys flagged as conflicts (more than one distinct action on the same key). Default false.",
               "default": false
+            },
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first key_bindings entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
             }
           ],
-          "returns": "{ contexts:[{context_path,context_name,mapping_count}], context_count, key_bindings:[{key,display_name,bindings:[{action,source,context_path}],binding_count,distinct_action_count,conflict}], bound_key_count, conflicts:[...], conflict_count, legacy_action_mapping_count, legacy_axis_mapping_count }",
+          "returns": "{ contexts:[{context_path,context_name,mapping_count}], context_count, key_bindings:[{key,display_name,bindings:[{action,source,context_path}],binding_count,distinct_action_count,conflict}] (sorted by key, paged with offset/limit), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null, bound_key_count, conflicts:[...], conflict_count, legacy_action_mapping_count, legacy_axis_mapping_count }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -41822,9 +42092,23 @@
               "required": false,
               "nameLike": true,
               "description": "Optional substring (case-insensitive) matched against each candidate's generated_class_name (the AssetClassPath, resolved with zero loading); also tried as a UClass IsChildOf when the string resolves to a real class."
+            },
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
             }
           ],
-          "returns": "{ map_path, external_actors_path, disk_count, asset_registry_count, live_registered_count (nullable), live_cross_check_available, confirmed_orphan_count, candidate_unconfirmed_count, candidates: [{ path, generated_class_name, is_loaded, on_disk, in_asset_registry, classification }], note }",
+          "returns": "{ map_path, external_actors_path, disk_count, asset_registry_count, live_registered_count (nullable), live_cross_check_available, confirmed_orphan_count, candidate_unconfirmed_count, candidates: [{ path, generated_class_name, is_loaded, on_disk, in_asset_registry, classification }] (sorted by path, paged with offset/limit; the two counts cover every candidate), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null, note }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -46066,9 +46350,23 @@
               "jsonType": "boolean",
               "required": false,
               "description": "Optional bool (default true): include plugins the Plugins window hides."
+            },
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
             }
           ],
-          "returns": "{ plugins: [{ name: string, friendly_name: string, enabled: bool, mounted: bool, type: \"engine\"|\"project\", plugin_type: \"engine\"|\"enterprise\"|\"project\"|\"external\"|\"mod\", version: string, version_number: int, category: string, path: string, descriptor_file: string, can_contain_content: bool, is_beta: bool, is_experimental: bool, hidden: bool }], count: int, total_discovered: int }",
+          "returns": "{ plugins: [{ name: string, friendly_name: string, enabled: bool, mounted: bool, type: \"engine\"|\"project\", plugin_type: \"engine\"|\"enterprise\"|\"project\"|\"external\"|\"mod\", version: string, version_number: int, category: string, path: string, descriptor_file: string, can_contain_content: bool, is_beta: bool, is_experimental: bool, hidden: bool }], count: int (entries in this page), total_discovered: int, total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -46633,9 +46931,24 @@
         },
         {
           "name": "list_mass_archetypes",
-          "description": "Census the Mass entities of the editor world (not a PIE world), read-only: every archetype with its live-entity and fragment counts. Returns archetype_count, total_entities (the sum over the archetypes), total (the entity manager's own count) and archetypes [{archetype_id, entity_count, fragment_count}]; get_mass_entity_info names the fragments of one entity, get_mass_entity_count counts by fragment or tag.",
-          "params": [],
-          "returns": "{ archetype_count: int, total_entities: int, total: int, archetypes: [{ archetype_id: string, entity_count: int, fragment_count: int }] }",
+          "description": "Census the Mass entities of the editor world (not a PIE world), read-only: every archetype with its live-entity and fragment counts. Returns archetype_count, total_entities (the sum over the archetypes), total (the entity manager's own count) and archetypes [{archetype_id, entity_count, fragment_count}], sorted by archetype_id and paged with offset/limit (archetype_count counts them all); get_mass_entity_info names the fragments of one entity, get_mass_entity_count counts by fragment or tag.",
+          "params": [
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
+            }
+          ],
+          "returns": "{ archetype_count: int, total_entities: int, total: int (live entities), archetypes: [{ archetype_id: string, entity_count: int, fragment_count: int }], offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -46645,7 +46958,7 @@
         },
         {
           "name": "list_mass_tag_types",
-          "description": "Lists the Mass tag types loaded in this editor: every struct derived from FMassTag, the zero-size markers an entity carries or not (e.g. MassOffLODTag), each with its reflected name and path, in no particular order. Abstract tag structs are left out unless include_abstract is true; nothing else is filtered. Read-only reflection: changes nothing. The name is what add_mass_tag_to_entity and remove_mass_tag_from_entity take as tag. Tags are not traits: the traits an entity config holds are listed with list_mass_traits and added with add_mass_trait; live entities and their archetypes come from list_mass_archetypes and get_mass_entity_info.",
+          "description": "Lists the Mass tag types loaded in this editor: every struct derived from FMassTag, the zero-size markers an entity carries or not (e.g. MassOffLODTag), each with its reflected name and path, sorted by path and paged with offset/limit. Abstract tag structs are left out unless include_abstract is true; nothing else is filtered. Read-only reflection: changes nothing. The name is what add_mass_tag_to_entity and remove_mass_tag_from_entity take as tag. Tags are not traits: the traits an entity config holds are listed with list_mass_traits and added with add_mass_trait; live entities and their archetypes come from list_mass_archetypes and get_mass_entity_info.",
           "params": [
             {
               "name": "include_abstract",
@@ -46653,9 +46966,23 @@
               "required": false,
               "description": "Optional bool, default false; true also lists tag structs marked Abstract (bases that are not meant to be set on entities).",
               "default": false
+            },
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
             }
           ],
-          "returns": "{ count, traits: [{ name, path }] } -- traits holds the tag types (name without the F prefix, e.g. \"MassOffLODTag\"; path is the /Script path)",
+          "returns": "{ count (entries in this page), traits: [{ name, path }], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null } -- traits holds the tag types (name without the F prefix, e.g. \"MassOffLODTag\"; path is the /Script path)",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -51641,9 +51968,24 @@
         },
         {
           "name": "list_traces",
-          "description": "Enumerate .utrace files in <ProjectDir>/Saved/Profiling/, returning their path, size and modification time.",
-          "params": [],
-          "returns": "{ directory: string, count: int, traces: [{ path, name, size_bytes, modified_iso }] } -- directory is the resolved profiling folder; only its own files are listed, not subfolders.",
+          "description": "Enumerate .utrace files in <ProjectDir>/Saved/Profiling/, returning their path, size and modification time, sorted by name and paged with offset/limit.",
+          "params": [
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
+            }
+          ],
+          "returns": "{ directory: string, count: int (entries in this page), traces: [{ path, name, size_bytes, modified_iso }], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null } -- directory is the resolved profiling folder; only its own files are listed, not subfolders.",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -52593,9 +52935,23 @@
               "nameLike": true,
               "description": "Which world to query: absent/\"editor\" (default) | \"server\" (the PIE world with authority) | \"client\" | \"pie:N\" | \"pie\" (ambiguous) | \"game\" (alias of \"pie\"). Pass a live world to hit World-Partition/OFPA actor collision (only cooked in the PIE physics scene).",
               "default": "editor"
+            },
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
             }
           ],
-          "returns": "{ overlaps: [{actor_path, actor_name, component_name, item_index, blocking}], count: int, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }",
+          "returns": "{ overlaps: [{actor_path, actor_name, component_name, item_index, blocking}] (sorted by actor_path, paged with offset/limit), count: int (entries in this page), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -54828,9 +55184,24 @@
         },
         {
           "name": "list_pcg_node_types",
-          "description": "Enumerate every PCG node type available in this build (all concrete PCGSettings subclasses, including plugin- and project-added ones), with class names and paths. Run it before add_graph_node so you pass a class that exists instead of guessing a name from documentation that may not match this engine version. Read-only reflection.",
-          "params": [],
-          "returns": "{ base_class, count, types:[{name, path}] }",
+          "description": "Enumerate every PCG node type available in this build (all concrete PCGSettings subclasses, including plugin- and project-added ones), with class names and paths, sorted by name and paged with offset/limit. Run it before add_graph_node so you pass a class that exists instead of guessing a name from documentation that may not match this engine version. Read-only reflection.",
+          "params": [
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
+            }
+          ],
+          "returns": "{ base_class, count (entries in this page), types:[{name, path}], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -55206,7 +55577,7 @@
         },
         {
           "name": "find_classes_implementing_interface",
-          "description": "Find every class loaded in memory that implements an interface (a native UInterface or a Blueprint Interface), directly or through a parent class, without changing anything: per class its name, path, is_blueprint and implemented_by_k2 (the interface was added in a Blueprint). The engine keeps no reverse index, so it sweeps every loaded class (scanned_class_count) and returns the whole list, never truncated; deprecated and replaced classes are skipped. A Blueprint that is not loaded is missed: for a base class rather than an interface use list_derived_classes, which also reads unloaded Blueprints from the Asset Registry. An interface that does not resolve, or a class that is not an interface, is an error. One class's interfaces: get_class_hierarchy; add an interface to a Blueprint: implement_interface.",
+          "description": "Find every class loaded in memory that implements an interface (a native UInterface or a Blueprint Interface), directly or through a parent class, without changing anything: per class its name, path, is_blueprint and implemented_by_k2 (the interface was added in a Blueprint). The engine keeps no reverse index, so it sweeps every loaded class (scanned_class_count) and returns the matches sorted by path, a page at a time (offset/limit; total counts them all); deprecated and replaced classes are skipped. A Blueprint that is not loaded is missed: for a base class rather than an interface use list_derived_classes, which also reads unloaded Blueprints from the Asset Registry. An interface that does not resolve, or a class that is not an interface, is an error. One class's interfaces: get_class_hierarchy; add an interface to a Blueprint: implement_interface.",
           "params": [
             {
               "name": "interface",
@@ -55220,9 +55591,23 @@
               "jsonType": "boolean",
               "required": false,
               "description": "true (default) also returns Blueprint-generated classes; false returns native C++ classes only."
+            },
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
             }
           ],
-          "returns": "{ interface: string, classes: [{class_name, path, is_blueprint, implemented_by_k2}], count: int, scanned_class_count: int }",
+          "returns": "{ interface: string, classes: [{class_name, path, is_blueprint, implemented_by_k2}], count: int (entries in this page), scanned_class_count: int, total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -55610,7 +55995,7 @@
         },
         {
           "name": "list_enums",
-          "description": "List the enum types (UEnum) loaded in memory, native C++ and Blueprint user-defined, with their entries, without changing anything: per enum its name, path, owning module (C++ enums only) and entries [{name, value}], leaving out the _MAX sentinel and entries tagged Hidden. Unfiltered it returns every loaded enum with all its entries, a very large reply, so pass name_pattern or module_filter. module_filter matches C++ enums only, since a Blueprint enum has no module, and a Blueprint enum asset that is not loaded is not listed. No match gives count 0, not an error. For one enum's display names, which differ from the internal names on a Blueprint enum, use get_enum_info; structs: list_structs; author enums with create_enum and add_enum_entry.",
+          "description": "List the enum types (UEnum) loaded in memory, native C++ and Blueprint user-defined, with their entries, without changing anything: per enum its name, path, owning module (C++ enums only) and entries [{name, value}], leaving out the _MAX sentinel and entries tagged Hidden. Unfiltered it matches every loaded enum, each with all its entries, so pass name_pattern or module_filter; the matches come sorted by path, a page at a time (offset/limit). module_filter matches C++ enums only, since a Blueprint enum has no module, and a Blueprint enum asset that is not loaded is not listed. No match gives count 0, not an error. For one enum's display names, which differ from the internal names on a Blueprint enum, use get_enum_info; structs: list_structs; author enums with create_enum and add_enum_entry.",
           "params": [
             {
               "name": "module_filter",
@@ -55623,9 +56008,23 @@
               "jsonType": "string",
               "required": false,
               "description": "Optional plain substring of the enum name, case-insensitive, no wildcards, e.g. \"Collision\"; omitted or empty keeps every name."
+            },
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
             }
           ],
-          "returns": "{ enums: [{enum_name, path, module?, entries:[{name, value}]}], count: int }",
+          "returns": "{ enums: [{enum_name, path, module?, entries:[{name, value}]}], count: int (entries in this page), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -55679,7 +56078,7 @@
         },
         {
           "name": "list_modules",
-          "description": "List the C++ modules the editor's module manager knows (FModuleManager::QueryModules) -- engine, editor, project and plugin modules, loaded or not -- each with name, file_path (its binary on disk), is_loaded and is_game_module, plus count; optionally only names containing name_pattern, or only loaded ones. Use it to check that a module's code is present and loaded before relying on its classes; for a plugin's enabled state use get_plugin_status, and for the types a module defines list_derived_classes, list_structs or list_enums (Niagara stack modules are list_niagara_modules, a different thing). Read-only and idempotent: it loads or unloads nothing. No match gives count 0, not an error.",
+          "description": "List the C++ modules the editor's module manager knows (FModuleManager::QueryModules) -- engine, editor, project and plugin modules, loaded or not -- each with name, file_path (its binary on disk), is_loaded and is_game_module, sorted by name and paged with offset/limit; optionally only names containing name_pattern, or only loaded ones. Use it to check that a module's code is present and loaded before relying on its classes; for a plugin's enabled state use get_plugin_status, and for the types a module defines list_derived_classes, list_structs or list_enums (Niagara stack modules are list_niagara_modules, a different thing). Read-only and idempotent: it loads or unloads nothing. No match gives count 0, not an error.",
           "params": [
             {
               "name": "name_pattern",
@@ -55692,9 +56091,23 @@
               "jsonType": "boolean",
               "required": false,
               "description": "true keeps only the modules loaded right now (default false)"
+            },
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
             }
           ],
-          "returns": "{ modules: [{name, file_path, is_loaded, is_game_module}], count: int }",
+          "returns": "{ modules: [{name, file_path, is_loaded, is_game_module}], count: int (entries in this page), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -55704,7 +56117,7 @@
         },
         {
           "name": "list_objects_of_class",
-          "description": "Enumerate live instances of a class currently in memory, complementing get_actors_by_class (actors only) with any UObject-derived type. Accepts `world` to SCOPE the sweep to one world — 'server' vs 'client' is what separates an authoritative census from a replicated one, and without it a PIE session returns the instances of EVERY world mixed together (host and client both), which reads as duplicates. The response stamps the world that answered, so count:0 means \"not in THIS world\" instead of \"does not exist\".",
+          "description": "Enumerate live instances of a class currently in memory, complementing get_actors_by_class (actors only) with any UObject-derived type. Accepts `world` to SCOPE the sweep to one world — 'server' vs 'client' is what separates an authoritative census from a replicated one, and without it a PIE session returns the instances of EVERY world mixed together (host and client both), which reads as duplicates. The response stamps the world that answered, so total:0 means \"not in THIS world\" instead of \"does not exist\". The instances come sorted by object_path, a page at a time (offset/limit).",
           "params": [
             {
               "name": "class_name",
@@ -55732,9 +56145,23 @@
               "required": false,
               "nameLike": true,
               "description": "Optional world selector that SCOPES the sweep: absent (default: every loaded instance, across all worlds) | 'editor' | 'pie' (ambiguous: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie'). Only objects whose GetWorld() IS that world are returned; an UNRECOGNIZED value is an error naming the worlds that exist, never a silent fallback to another world."
+            },
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
             }
           ],
-          "returns": "{ class_name: string, objects: [{object_path, name, class, outer}], count: int, world: string ('any' when no selector was given), world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }",
+          "returns": "{ class_name: string, objects: [{object_path, name, class, outer}], count: int (entries in this page), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null, world: string ('any' when no selector was given), world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -55744,7 +56171,7 @@
         },
         {
           "name": "list_structs",
-          "description": "List the struct types (UScriptStruct) loaded in memory, native C++ and Blueprint user-defined, without changing anything: per struct its name, path, owning module (C++ structs only) and is_user_defined. Unfiltered it returns every loaded struct, thousands of them, so pass name_pattern or module_filter. module_filter matches C++ structs only, since a Blueprint struct has no module, and a Blueprint struct asset that is not loaded is not listed. No match gives count 0, not an error. Read one struct's fields with get_struct_info (by the struct_name given here) or a Blueprint struct's members with get_struct_members (by its asset path); enums: list_enums; author a struct with create_struct.",
+          "description": "List the struct types (UScriptStruct) loaded in memory, native C++ and Blueprint user-defined, without changing anything: per struct its name, path, owning module (C++ structs only) and is_user_defined. Unfiltered it matches every loaded struct, thousands of them, so pass name_pattern or module_filter; the matches come sorted by path, a page at a time (offset/limit). module_filter matches C++ structs only, since a Blueprint struct has no module, and a Blueprint struct asset that is not loaded is not listed. No match gives count 0, not an error. Read one struct's fields with get_struct_info (by the struct_name given here) or a Blueprint struct's members with get_struct_members (by its asset path); enums: list_enums; author a struct with create_struct.",
           "params": [
             {
               "name": "module_filter",
@@ -55757,9 +56184,23 @@
               "jsonType": "string",
               "required": false,
               "description": "Optional plain substring of the struct name (no F prefix), case-insensitive, no wildcards, e.g. \"Vector\"; omitted or empty keeps every name."
+            },
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
             }
           ],
-          "returns": "{ structs: [{struct_name, path, module?, is_user_defined}], count: int }",
+          "returns": "{ structs: [{struct_name, path, module?, is_user_defined}], count: int (entries in this page), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -56131,9 +56572,23 @@
               ],
               "description": "Optional user index, default 0. Passed to the platform's save system; the generic desktop one keeps every user's slots in one folder, so there it changes nothing.",
               "default": 0
+            },
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first save_games entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
             }
           ],
-          "returns": "{ user_index: int, save_directory: string, save_games: [{ slot_name, file_path?, file_size? }], count: int, slot_folders: [{ folder, sav_files }] (subfolders of save_directory holding .sav files, searched recursively) }",
+          "returns": "{ user_index: int, save_directory: string, save_games: [{ slot_name, file_path?, file_size? }] (sorted by slot_name, paged with offset/limit), count: int (entries in this page), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null, slot_folders: [{ folder, sav_files }] (subfolders of save_directory holding .sav files, searched recursively) }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -56629,9 +57084,23 @@
               "jsonType": "boolean",
               "required": false,
               "description": "Optional: also return disabled slots (default false)"
+            },
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
             }
           ],
-          "returns": "{ center: [number, number, number], radius: number, results: [{ object_handle: string, slot_handle: string, actor_label: string }], count: int, note?: string }",
+          "returns": "{ center: [number, number, number], radius: number, results: [{ object_handle: string, slot_handle: string, actor_label: string }], count: int (entries in this page), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null, note?: string } -- results sorted by slot_handle",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -58405,8 +58874,23 @@
         {
           "name": "list_condition_types",
           "description": "List the concrete condition struct types (children of FStateTreeConditionBase, abstract ones skipped) of the loaded modules, sorted by name, for add_state_enter_condition and add_state_transition_condition. Returns count and types [{name, struct_path}]; struct_path is the struct's own path in the module that declares it, so either field can be passed.",
-          "params": [],
-          "returns": "{ count, types: [{ name, struct_path }] }",
+          "params": [
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
+            }
+          ],
+          "returns": "{ count (entries in this page), types: [{ name, struct_path }], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -58471,8 +58955,23 @@
         {
           "name": "list_evaluator_types",
           "description": "List the concrete evaluator struct types (children of FStateTreeEvaluatorBase, abstract ones skipped) of the loaded modules, sorted by name, for add_evaluator. Returns count and types [{name, struct_path}]; struct_path is the struct's own path in the module that declares it, so either field can be passed.",
-          "params": [],
-          "returns": "{ count, types: [{ name, struct_path }] }",
+          "params": [
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
+            }
+          ],
+          "returns": "{ count (entries in this page), types: [{ name, struct_path }], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -58502,7 +59001,7 @@
         },
         {
           "name": "list_state_tree_bindings",
-          "description": "List the property bindings stored in the editor data of a StateTree asset, without changing it. Returns count and bindings [{index, source_path, target_path, source_id, target_id}], where source_id and target_id are the struct GUIDs of the two ends. Add bindings with add_state_tree_binding and remove them with remove_state_tree_binding.",
+          "description": "List the property bindings stored in the editor data of a StateTree asset, without changing it. Returns count and bindings [{index, source_path, target_path, source_id, target_id}] in index order, paged with offset/limit, where source_id and target_id are the struct GUIDs of the two ends. Add bindings with add_state_tree_binding and remove them with remove_state_tree_binding.",
           "params": [
             {
               "name": "tree_path",
@@ -58510,9 +59009,23 @@
               "required": true,
               "nameLike": true,
               "description": "Asset path of the StateTree, e.g. \"/Game/AI/ST_Guard\"."
+            },
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
             }
           ],
-          "returns": "{ tree_path, count, bindings: [{ index, source_path, target_path, source_id, target_id }] }",
+          "returns": "{ tree_path, count (entries in this page), bindings: [{ index, source_path, target_path, source_id, target_id }], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -58542,7 +59055,7 @@
         },
         {
           "name": "list_state_trees",
-          "description": "List the StateTree assets (subclasses included) in a content folder and all its subfolders, from the Asset Registry, without loading or changing them: per tree its object path, asset name and class. A folder with no trees, or one that does not exist, gives count 0 rather than an error. Use it to find the tree_path every other StateTree tool takes; then read one tree's states, transitions and parameters with get_state_tree_info, or create a new one with create_state_tree; the tree a placed component runs: get_component_state_tree_path.",
+          "description": "List the StateTree assets (subclasses included) in a content folder and all its subfolders, from the Asset Registry, without loading or changing them: per tree its object path, asset name and class, sorted by path and paged with offset/limit. A folder with no trees, or one that does not exist, gives count 0 rather than an error. Use it to find the tree_path every other StateTree tool takes; then read one tree's states, transitions and parameters with get_state_tree_info, or create a new one with create_state_tree; the tree a placed component runs: get_component_state_tree_path.",
           "params": [
             {
               "name": "package_path",
@@ -58551,9 +59064,23 @@
               "nameLike": true,
               "description": "Content folder to search, recursively, as a long package path with no trailing slash, e.g. \"/Game/AI\" (default \"/Game\"); a plugin's content lives under its mount point, e.g. \"/MyPlugin\".",
               "default": "/Game"
+            },
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
             }
           ],
-          "returns": "{ package_path, count, trees: [{ path, name, class }] }",
+          "returns": "{ package_path, count (entries in this page), trees: [{ path, name, class }], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -58564,8 +59091,23 @@
         {
           "name": "list_task_types",
           "description": "List the StateTree task struct types (FStateTreeTaskBase and its children; structs tagged Abstract are skipped) of the modules loaded now, sorted by name, without changing anything: the names add_state_task and add_state_tree_global_task take as task_struct. A task from a plugin whose module is not loaded is not listed. struct_path is the struct's own path in the module that declares it (e.g. /Script/StateTreeModule.StateTreeDelayTask, /Script/GameplayStateTreeModule.StateTreeRunEnvQueryTask), so either field can be passed. Other node types: list_condition_types, list_evaluator_types; the tasks already on a state: list_tasks; on the whole tree: list_state_tree_global_tasks.",
-          "params": [],
-          "returns": "{ count, types: [{ name, struct_path }] }",
+          "params": [
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
+            }
+          ],
+          "returns": "{ count (entries in this page), types: [{ name, struct_path }], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -59806,9 +60348,23 @@
               "required": false,
               "nameLike": true,
               "description": "Optional USubsystem class (short name or /Script/ path): keep only the instances of that class or a subclass. A name that does not resolve to a USubsystem class is an error."
+            },
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
             }
           ],
-          "returns": "{ total: int, instance_count: int, active: bool, lifetime_filter?, class_name?, lifetime?, instances:[{ class_name, class_path, lifetime, instance_name, instance_path }] } -- total and instance_count are the same number and active is total > 0; class_name and lifetime (the class's own lifetime category) appear when class_name was given.",
+          "returns": "{ total: int, instance_count: int, active: bool, lifetime_filter?, class_name?, lifetime?, instances:[{ class_name, class_path, lifetime, instance_name, instance_path }] (sorted by instance_path, paged with offset/limit), offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null } -- total and instance_count are the same number, every match before the page cut, and active is total > 0; class_name and lifetime (the class's own lifetime category) appear when class_name was given.",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -65804,9 +66360,23 @@
               "jsonType": "string",
               "required": false,
               "description": "Optional substring filter on the owning actor's name (Contains match)"
+            },
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
             }
           ],
-          "returns": "{ components: [{ actor_name: string, widget_component_name: string, widget_name: string|null, widget_class: string|null }], component_count: number, actor_name_filter: string|null }",
+          "returns": "{ components: [{ actor_name: string, widget_component_name: string, widget_name: string|null, widget_class: string|null }], component_count: number (entries in this page), actor_name_filter: string|null, total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -68201,9 +68771,23 @@
               "jsonType": "string",
               "required": true,
               "description": "Absolute SdfPath of an existing prim on that stage, e.g. \"/World/Cube\", as list_usd_prims returns it."
+            },
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
             }
           ],
-          "returns": "{ prim_path: string, attributes: [{name, type_name, cpp_type, has_value, has_authored_value, time_sample_count}], count: int }",
+          "returns": "{ prim_path: string, attributes: [{name, type_name, cpp_type, has_value, has_authored_value, time_sample_count}], count: int (entries in this page), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -68233,9 +68817,23 @@
               "jsonType": "boolean",
               "required": false,
               "description": "false (default) lists the direct children only; true lists every descendant, each parent before its children."
+            },
+            {
+              "name": "offset",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Index of the first prim returned, in the order above, counted from 0 (default 0). Read the next page at the reply's next_offset.",
+              "default": 0
+            },
+            {
+              "name": "limit",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Most entries returned per call, 1..1000 (default 100).",
+              "default": 100
             }
           ],
-          "returns": "{ prims: [{ prim_path, type_name, active }], count: number }",
+          "returns": "{ prims: [{ prim_path, type_name, active }], count: number (entries in this page), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,

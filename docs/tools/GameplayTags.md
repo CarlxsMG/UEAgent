@@ -83,8 +83,10 @@ Search the registered gameplay tags for everything under a tag -- the discovery 
 |---|---|---|---|
 | `query_tag` | string | no | Optional tag whose branch to list (the tag itself and all of its descendants); omitted or empty lists every registered tag |
 | `count_only` | boolean | no | Optional bool, default false: return count (and manager_valid) without the matching_tags list |
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ query_tag: string, count: int, manager_valid: bool, matching_tags?: [{ tag_name: string, tag_string: string }] }`
+**Returns:** `{ query_tag: string, count: int (entries in this page; with count_only, every match), manager_valid: bool, matching_tags?: [{ tag_name: string, tag_string: string }], total?: int, offset?: int, limit?: int, returned?: int, truncated?: bool, next_offset?: int|null } -- matching_tags sorted by tag_name; the paging fields come with it`
 
 ## `get_gameplay_tag_info`
 

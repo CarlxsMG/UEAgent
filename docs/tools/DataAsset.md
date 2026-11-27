@@ -440,11 +440,14 @@ Register and initialize a UDataRegistry asset with the UDataRegistrySubsystem fo
 
 *Read-only.*
 
-List every registry the UDataRegistrySubsystem currently has registered, sorted by type, each with registry_type, registry_path, item_struct and initialized. Read-only. An asset the subsystem has not loaded is absent: register it with initialize_data_registry, or call refresh_data_registry_map after edits.
+List the registries the UDataRegistrySubsystem currently has registered, sorted by type and paged with offset/limit, each with registry_type, registry_path, item_struct and initialized. Read-only. An asset the subsystem has not loaded is absent: register it with initialize_data_registry, or call refresh_data_registry_map after edits.
 
-No parameters.
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ registries: [{registry_type, registry_path, item_struct, initialized}], registry_count: int }`
+**Returns:** `{ registries: [{registry_type, registry_path, item_struct, initialized}], registry_count: int (entries in this page), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }`
 
 ## `list_localization_targets`
 

@@ -343,11 +343,14 @@ Read a user-exposed parameter's current value from a Niagara System's exposed st
 
 *Read-only.*
 
-Enumerate every concrete UNiagaraDataInterface subclass registered in this process via TObjectIterator. Skips Abstract (those are base classes only). Used to discover what data-interface class strings are valid for add_niagara_data_interface.
+Enumerate every concrete UNiagaraDataInterface subclass registered in this process via TObjectIterator. Skips Abstract (those are base classes only). Used to discover what data-interface class strings are valid for add_niagara_data_interface. The classes come sorted by class_path, a page at a time (offset/limit).
 
-No parameters.
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ count: int, classes: [{class_name, class_path, display_name, abstract, class_flags}] }`
+**Returns:** `{ count: int (entries in this page), classes: [{class_name, class_path, display_name, abstract, class_flags}], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }`
 
 ## `list_niagara_modules`
 

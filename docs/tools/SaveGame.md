@@ -41,8 +41,10 @@ List the save slots the platform's save system knows for a user index: on deskto
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `user_index` | integer | no | Optional user index, default 0. Passed to the platform's save system; the generic desktop one keeps every user's slots in one folder, so there it changes nothing. |
+| `offset` | integer | no | Index of the first save_games entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ user_index: int, save_directory: string, save_games: [{ slot_name, file_path?, file_size? }], count: int, slot_folders: [{ folder, sav_files }] (subfolders of save_directory holding .sav files, searched recursively) }`
+**Returns:** `{ user_index: int, save_directory: string, save_games: [{ slot_name, file_path?, file_size? }] (sorted by slot_name, paged with offset/limit), count: int (entries in this page), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null, slot_folders: [{ folder, sav_files }] (subfolders of save_directory holding .sav files, searched recursively) }`
 
 ## `load_game`
 

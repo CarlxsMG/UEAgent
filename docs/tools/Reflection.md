@@ -49,14 +49,16 @@ Diff TWO LIVE objects property by property at the same instant, using the ENGINE
 
 *Read-only.*
 
-Find every class loaded in memory that implements an interface (a native UInterface or a Blueprint Interface), directly or through a parent class, without changing anything: per class its name, path, is_blueprint and implemented_by_k2 (the interface was added in a Blueprint). The engine keeps no reverse index, so it sweeps every loaded class (scanned_class_count) and returns the whole list, never truncated; deprecated and replaced classes are skipped. A Blueprint that is not loaded is missed: for a base class rather than an interface use list_derived_classes, which also reads unloaded Blueprints from the Asset Registry. An interface that does not resolve, or a class that is not an interface, is an error. One class's interfaces: get_class_hierarchy; add an interface to a Blueprint: implement_interface.
+Find every class loaded in memory that implements an interface (a native UInterface or a Blueprint Interface), directly or through a parent class, without changing anything: per class its name, path, is_blueprint and implemented_by_k2 (the interface was added in a Blueprint). The engine keeps no reverse index, so it sweeps every loaded class (scanned_class_count) and returns the matches sorted by path, a page at a time (offset/limit; total counts them all); deprecated and replaced classes are skipped. A Blueprint that is not loaded is missed: for a base class rather than an interface use list_derived_classes, which also reads unloaded Blueprints from the Asset Registry. An interface that does not resolve, or a class that is not an interface, is an error. One class's interfaces: get_class_hierarchy; add an interface to a Blueprint: implement_interface.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `interface` | string | yes | Interface to search for: bare reflected name (e.g. "Interactable" or "UInteractable"), a /Script/Module.Name path, or a Blueprint Interface asset path (e.g. "/Game/BPI/BPI_Use.BPI_Use"), resolved like list_derived_classes' base_class. |
 | `include_blueprints` | boolean | no | true (default) also returns Blueprint-generated classes; false returns native C++ classes only. |
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ interface: string, classes: [{class_name, path, is_blueprint, implemented_by_k2}], count: int, scanned_class_count: int }`
+**Returns:** `{ interface: string, classes: [{class_name, path, is_blueprint, implemented_by_k2}], count: int (entries in this page), scanned_class_count: int, total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }`
 
 ## `get_actor_properties_by_class`
 
@@ -234,14 +236,16 @@ Enumerate every class derived from a base class (native + Blueprint, Widget and 
 
 *Read-only.*
 
-List the enum types (UEnum) loaded in memory, native C++ and Blueprint user-defined, with their entries, without changing anything: per enum its name, path, owning module (C++ enums only) and entries [{name, value}], leaving out the _MAX sentinel and entries tagged Hidden. Unfiltered it returns every loaded enum with all its entries, a very large reply, so pass name_pattern or module_filter. module_filter matches C++ enums only, since a Blueprint enum has no module, and a Blueprint enum asset that is not loaded is not listed. No match gives count 0, not an error. For one enum's display names, which differ from the internal names on a Blueprint enum, use get_enum_info; structs: list_structs; author enums with create_enum and add_enum_entry.
+List the enum types (UEnum) loaded in memory, native C++ and Blueprint user-defined, with their entries, without changing anything: per enum its name, path, owning module (C++ enums only) and entries [{name, value}], leaving out the _MAX sentinel and entries tagged Hidden. Unfiltered it matches every loaded enum, each with all its entries, so pass name_pattern or module_filter; the matches come sorted by path, a page at a time (offset/limit). module_filter matches C++ enums only, since a Blueprint enum has no module, and a Blueprint enum asset that is not loaded is not listed. No match gives count 0, not an error. For one enum's display names, which differ from the internal names on a Blueprint enum, use get_enum_info; structs: list_structs; author enums with create_enum and add_enum_entry.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `module_filter` | string | no | Optional plain substring of the owning module name, case-insensitive, no wildcards, e.g. "Engine" or "StateTreeModule"; matches C++ enums only. |
 | `name_pattern` | string | no | Optional plain substring of the enum name, case-insensitive, no wildcards, e.g. "Collision"; omitted or empty keeps every name. |
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ enums: [{enum_name, path, module?, entries:[{name, value}]}], count: int }`
+**Returns:** `{ enums: [{enum_name, path, module?, entries:[{name, value}]}], count: int (entries in this page), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }`
 
 ## `list_instance_overrides`
 
@@ -263,20 +267,22 @@ List the property values a placed actor, and each of its components, holds as pe
 
 *Read-only.*
 
-List the C++ modules the editor's module manager knows (FModuleManager::QueryModules) -- engine, editor, project and plugin modules, loaded or not -- each with name, file_path (its binary on disk), is_loaded and is_game_module, plus count; optionally only names containing name_pattern, or only loaded ones. Use it to check that a module's code is present and loaded before relying on its classes; for a plugin's enabled state use get_plugin_status, and for the types a module defines list_derived_classes, list_structs or list_enums (Niagara stack modules are list_niagara_modules, a different thing). Read-only and idempotent: it loads or unloads nothing. No match gives count 0, not an error.
+List the C++ modules the editor's module manager knows (FModuleManager::QueryModules) -- engine, editor, project and plugin modules, loaded or not -- each with name, file_path (its binary on disk), is_loaded and is_game_module, sorted by name and paged with offset/limit; optionally only names containing name_pattern, or only loaded ones. Use it to check that a module's code is present and loaded before relying on its classes; for a plugin's enabled state use get_plugin_status, and for the types a module defines list_derived_classes, list_structs or list_enums (Niagara stack modules are list_niagara_modules, a different thing). Read-only and idempotent: it loads or unloads nothing. No match gives count 0, not an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `name_pattern` | string | no | Optional plain substring of the module name, case-insensitive, no wildcards, e.g. "Niagara"; omitted or empty lists every module |
 | `loaded_only` | boolean | no | true keeps only the modules loaded right now (default false) |
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ modules: [{name, file_path, is_loaded, is_game_module}], count: int }`
+**Returns:** `{ modules: [{name, file_path, is_loaded, is_game_module}], count: int (entries in this page), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }`
 
 ## `list_objects_of_class`
 
 *Read-only.*
 
-Enumerate live instances of a class currently in memory, complementing get_actors_by_class (actors only) with any UObject-derived type. Accepts `world` to SCOPE the sweep to one world — 'server' vs 'client' is what separates an authoritative census from a replicated one, and without it a PIE session returns the instances of EVERY world mixed together (host and client both), which reads as duplicates. The response stamps the world that answered, so count:0 means "not in THIS world" instead of "does not exist".
+Enumerate live instances of a class currently in memory, complementing get_actors_by_class (actors only) with any UObject-derived type. Accepts `world` to SCOPE the sweep to one world — 'server' vs 'client' is what separates an authoritative census from a replicated one, and without it a PIE session returns the instances of EVERY world mixed together (host and client both), which reads as duplicates. The response stamps the world that answered, so total:0 means "not in THIS world" instead of "does not exist". The instances come sorted by object_path, a page at a time (offset/limit).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -284,21 +290,25 @@ Enumerate live instances of a class currently in memory, complementing get_actor
 | `world_only` | boolean | no | Only include objects that resolve a UWorld via GetWorld() (default true). Ignored when `world` is given, which is already a stricter filter. |
 | `include_default` | boolean | no | Include each class's Class Default Object (default false). A CDO has no world, so passing `world` excludes CDOs regardless of this flag. |
 | `world` | string | no | Optional world selector that SCOPES the sweep: absent (default: every loaded instance, across all worlds) \| 'editor' \| 'pie' (ambiguous: PlayWorld, else the first PIE context) \| 'server' (the PIE world with authority) \| 'client' \| 'pie:N' \| 'game' (alias of 'pie'). Only objects whose GetWorld() IS that world are returned; an UNRECOGNIZED value is an error naming the worlds that exist, never a silent fallback to another world. |
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ class_name: string, objects: [{object_path, name, class, outer}], count: int, world: string ('any' when no selector was given), world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }`
+**Returns:** `{ class_name: string, objects: [{object_path, name, class, outer}], count: int (entries in this page), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null, world: string ('any' when no selector was given), world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }`
 
 ## `list_structs`
 
 *Read-only.*
 
-List the struct types (UScriptStruct) loaded in memory, native C++ and Blueprint user-defined, without changing anything: per struct its name, path, owning module (C++ structs only) and is_user_defined. Unfiltered it returns every loaded struct, thousands of them, so pass name_pattern or module_filter. module_filter matches C++ structs only, since a Blueprint struct has no module, and a Blueprint struct asset that is not loaded is not listed. No match gives count 0, not an error. Read one struct's fields with get_struct_info (by the struct_name given here) or a Blueprint struct's members with get_struct_members (by its asset path); enums: list_enums; author a struct with create_struct.
+List the struct types (UScriptStruct) loaded in memory, native C++ and Blueprint user-defined, without changing anything: per struct its name, path, owning module (C++ structs only) and is_user_defined. Unfiltered it matches every loaded struct, thousands of them, so pass name_pattern or module_filter; the matches come sorted by path, a page at a time (offset/limit). module_filter matches C++ structs only, since a Blueprint struct has no module, and a Blueprint struct asset that is not loaded is not listed. No match gives count 0, not an error. Read one struct's fields with get_struct_info (by the struct_name given here) or a Blueprint struct's members with get_struct_members (by its asset path); enums: list_enums; author a struct with create_struct.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `module_filter` | string | no | Optional plain substring of the owning module name, case-insensitive, no wildcards, e.g. "CoreUObject" or "StateTreeModule"; matches C++ structs only. |
 | `name_pattern` | string | no | Optional plain substring of the struct name (no F prefix), case-insensitive, no wildcards, e.g. "Vector"; omitted or empty keeps every name. |
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ structs: [{struct_name, path, module?, is_user_defined}], count: int }`
+**Returns:** `{ structs: [{struct_name, path, module?, is_user_defined}], count: int (entries in this page), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }`
 
 ## `poll_delegate_events`
 
