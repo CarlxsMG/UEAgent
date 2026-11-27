@@ -198,12 +198,12 @@ TSharedPtr<FJsonObject> HandleListUsdPrimAttributes(const TSharedPtr<FJsonObject
 // ---------------------------------------------------------------------------
 // create_usd_attribute
 // ---------------------------------------------------------------------------
-// MCP:create_usd_attribute - Create an attribute of a given USD type on a prim of an open stage, or return the existing one with created false. Edits the stage in memory; save_usd_stage writes it. Returns name, type_name, cpp_type and created; author its value with set_usd_attribute_value.
+// MCP:create_usd_attribute - Create an attribute of a given USD type on a prim of an open stage, or return the existing one with created false. Edits the stage in memory; save_usd_stage writes it. Returns name, type_name, cpp_type and created; author its value with set_usd_attribute_value. present is the prim re-read; false fails the call.
 //   @param stage_name [string!] - Name the stage was registered under by open_usd_stage (default the file basename) or create_usd_stage (default "Untitled").
 //   @param prim_path [string!] - Absolute SdfPath of an existing prim on that stage, e.g. "/World/Cube".
 //   @param attr_name [string!] - Attribute name (e.g. "size", "displayColor")
 //   @param type_name [string!] - USD type name (e.g. "float", "float3", "token", "asset")
-//   @returns { prim_path: string, name: string, type_name: string, cpp_type: string, created: bool }
+//   @returns { prim_path: string, name: string, type_name: string, cpp_type: string, created: bool, present: bool }
 
 TSharedPtr<FJsonObject> HandleCreateUsdAttribute(const TSharedPtr<FJsonObject>& Params)
 {
@@ -259,11 +259,11 @@ TSharedPtr<FJsonObject> HandleCreateUsdAttribute(const TSharedPtr<FJsonObject>& 
 // ---------------------------------------------------------------------------
 // remove_usd_attribute
 // ---------------------------------------------------------------------------
-// MCP:remove_usd_attribute - Remove one attribute from a prim on a registered USD stage by deleting its scene description in the current edit target layer only, so opinions from other layers or references can keep it composed. Idempotent: an absent attribute gives present=false and removed=false, not an error, and a relationship of that name counts as absent. A stage not registered under stage_name or a missing prim is an error. In memory only: save_usd_stage writes it. To keep the attribute and drop its values use clear_usd_attribute.
+// MCP:remove_usd_attribute - Remove one attribute from a prim on a registered USD stage by deleting its scene description in the current edit target layer only, so opinions from other layers or references can keep it composed. Idempotent: an absent attribute gives present=false and removed=false, not an error, and a relationship of that name counts as absent. A stage not registered under stage_name or a missing prim is an error. In memory only: save_usd_stage writes it. To keep the attribute and drop its values use clear_usd_attribute. A present attribute that RemoveProperty does not remove fails the call; still_composed says whether another layer keeps it.
 //   @param stage_name [string!] - Name the stage was registered under by open_usd_stage (default the file basename) or create_usd_stage (default "Untitled").
 //   @param prim_path [string!] - Absolute SdfPath of an existing prim on that stage, e.g. "/World/Cube".
 //   @param attr_name [string!] - Name of the attribute to remove, e.g. "size"
-//   @returns { prim_path: string, attr_name: string, removed: bool, present: bool }
+//   @returns { prim_path: string, attr_name: string, removed: bool, present: bool, still_composed: bool }
 
 TSharedPtr<FJsonObject> HandleRemoveUsdAttribute(const TSharedPtr<FJsonObject>& Params)
 {

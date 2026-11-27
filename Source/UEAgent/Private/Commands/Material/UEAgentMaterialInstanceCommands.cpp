@@ -314,10 +314,10 @@ namespace UEAgentMaterialInstanceImpl
 	}
 }
 
-// MCP:set_material_instance_parent - Re-parent a material instance onto a different base material -- how you swap an instance from a vendor master to your own without recreating it and re-pointing every referencer. Overrides whose parameter names do not exist on the new parent become orphaned and silently stop applying, so re-read with get_material_parameters afterwards and expect to re-check the static switches, whose defaults come from the new parent.
+// MCP:set_material_instance_parent - Re-parent a material instance onto a different base material -- how you swap an instance from a vendor master to your own without recreating it and re-pointing every referencer. Overrides whose parameter names do not exist on the new parent become orphaned and silently stop applying, so re-read with get_material_parameters afterwards and expect to re-check the static switches, whose defaults come from the new parent. parent_set is the instance's parent re-read; false (a parent that would make a cycle is refused) fails the call.
 //   @param material_instance_path - Content path to the UMaterialInstanceConstant.
 //   @param new_parent_path - Content path of the new parent UMaterialInterface.
-//   @returns { material_instance_path: string, old_parent: string, new_parent: string, changed: bool }
+//   @returns { material_instance_path: string, old_parent: string, new_parent: string, changed: bool, parent_set: bool }
 
 TSharedPtr<FJsonObject> HandleSetMaterialInstanceParent(const TSharedPtr<FJsonObject>& Params)
 {
@@ -353,10 +353,10 @@ TSharedPtr<FJsonObject> HandleSetMaterialInstanceParent(const TSharedPtr<FJsonOb
 		*NewParentRead, *NewParent->GetName()));
 }
 
-// MCP:copy_material_instance_parameters - Bulk-copy every scalar, vector and texture OVERRIDE from one material instance to another -- the way to clone a calibration onto a sibling instance instead of re-setting parameters one by one. Copies overrides only, so anything the source inherited untouched is not carried, and STATIC SWITCHES are not copied at all (set those with set_material_instance_parameter). Read the copied counts in the reply and verify with get_material_parameters; diff_material_instances shows what still differs.
+// MCP:copy_material_instance_parameters - Bulk-copy every scalar, vector and texture OVERRIDE from one material instance to another -- the way to clone a calibration onto a sibling instance instead of re-setting parameters one by one. Copies overrides only, so anything the source inherited untouched is not carried, and STATIC SWITCHES are not copied at all (set those with set_material_instance_parameter). The copied counts are the source overrides the destination stores with the same value after the save, and all_copied false fails the call; diff_material_instances shows what still differs.
 //   @param source_path - Content path of the source UMaterialInstanceConstant.
 //   @param destination_path - Content path of the destination UMaterialInstanceConstant.
-//   @returns { source_path: string, destination_path: string, scalars_copied: int, vectors_copied: int, textures_copied: int }
+//   @returns { source_path: string, destination_path: string, scalars_copied: int, vectors_copied: int, textures_copied: int, all_copied: bool }
 
 TSharedPtr<FJsonObject> HandleCopyMaterialInstanceParams(const TSharedPtr<FJsonObject>& Params)
 {
@@ -493,14 +493,14 @@ namespace
 // ---------------------------------------------------------------------------
 // set_material_layer_parameter
 // ---------------------------------------------------------------------------
-// MCP:set_material_layer_parameter - Write a scalar / vector / texture parameter scoped to ONE layer of a layered material instance (addressed by zero-based layer_index), so each layer of a blend keeps its own tiling, tint or texture. Different from set_material_instance_parameter_override, which targets the Global association and would hit the wrong slot on a layered material. Do not trust the success flag -- the engine's setters are known to report failure while doing the work; re-read with get_material_parameters (parameter_name, association Layer, layer_index).
+// MCP:set_material_layer_parameter - Write a scalar / vector / texture parameter scoped to ONE layer of a layered material instance (addressed by zero-based layer_index), so each layer of a blend keeps its own tiling, tint or texture. Different from set_material_instance_parameter_override, which targets the Global association and would hit the wrong slot on a layered material. The engine's setters can report failure while doing the work, so stored is the instance re-read after the save: success is false when it does not hold the written value; get_material_parameters (parameter_name, association Layer, layer_index) shows it.
 //   @retired set_material_instance_parameter - param_type="scalar"|"vector"|"texture", layer_index, value
 //   @param material_instance_path - Content path to the MIC, e.g. /Game/MyGame/MI_Example
 //   @param parameter_name - Name of the parameter to set
 //   @param parameter_type - One of "scalar", "vector", "texture"
 //   @param layer_index - Zero-based layer index (for LayerParameter association)
 //   @param value - For scalar: a float. For vector: dict {r, g, b, a}. For texture: a content path string.
-//   @returns { material_instance_path: string, parameter_name: string, layer_index: int, success: bool }
+//   @returns { material_instance_path: string, parameter_name: string, layer_index: int, stored: bool, success: bool }
 
 TSharedPtr<FJsonObject> HandleSetMaterialLayerParameter(
 	const TSharedPtr<FJsonObject>& Params)
@@ -629,7 +629,7 @@ namespace UEAgentMaterialInstanceImpl
 // ---------------------------------------------------------------------------
 // set_material_layer_stack
 // ---------------------------------------------------------------------------
-// MCP:set_material_layer_stack - Define which material-layer and blend functions a layered material instance stacks, in order -- how you compose a surface (base + dirt + snow) out of reusable layer functions instead of editing the base material graph. Order is significant and layers are addressed downstream by index (set_material_instance_parameter), so re-stacking renumbers existing per-layer values. Read the result back with get_material_layer_stack.
+// MCP:set_material_layer_stack - Define which material-layer and blend functions a layered material instance stacks, in order -- how you compose a surface (base + dirt + snow) out of reusable layer functions instead of editing the base material graph. Order is significant and layers are addressed downstream by index (set_material_instance_parameter), so re-stacking renumbers existing per-layer values. success is the instance's stack re-read against the requested layers and blends; get_material_layer_stack shows it.
 //   @param material_instance_path - Content path to the MIC
 //   @param layers - Optional list of {function_path} dicts naming layer material functions.
 //   @param blends - Optional list of {function_path} dicts naming blend material functions.
@@ -735,7 +735,7 @@ TSharedPtr<FJsonObject> HandleGetMaterialLayerStack(
 // ---------------------------------------------------------------------------
 // swap_material_layer_parameters
 // ---------------------------------------------------------------------------
-// MCP:swap_material_layer_parameters - Exchange two layer slots on a layered material instance -- reorder which surface sits above which without rebuilding the whole stack with set_material_layer_stack. Every per-layer parameter moves with the slot, so any index you recorded earlier now points at the other layer; re-read get_material_layer_stack afterwards.
+// MCP:swap_material_layer_parameters - Exchange two layer slots on a layered material instance -- reorder which surface sits above which without rebuilding the whole stack with set_material_layer_stack. Every per-layer parameter moves with the slot, so any index you recorded earlier now points at the other layer; re-read get_material_layer_stack afterwards. success is false when the two slots' scalar, vector and texture overrides did not trade places.
 //   @param material_instance_path - Content path to the MIC
 //   @param original_index - The original layer parameter index
 //   @param new_index - The new layer parameter index to swap with

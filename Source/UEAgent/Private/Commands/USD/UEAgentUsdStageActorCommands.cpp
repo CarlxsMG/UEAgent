@@ -188,7 +188,7 @@ AUsdStageActor* ResolveStageActor(
 // ---------------------------------------------------------------------------
 // create_usd_stage_actor
 // ---------------------------------------------------------------------------
-// MCP:create_usd_stage_actor - Spawn an AUsdStageActor, the actor that displays a USD file live in the level, into the editor world (not a PIE world), or return the one already there: the tool keeps one stage actor per world, so when any exists it changes nothing and returns already_existed true with that actor's actor_path, whatever name you pass. The level is not saved (save_level). The new actor shows nothing until set_usd_stage_actor_root_layer gives it a USD file; then inspect it with get_usd_stage_actor_info, get_usd_generated_component and get_usd_generated_assets. To author a USD file without an actor use create_usd_stage or open_usd_stage instead; remove the actor with delete_actor. A new actor gets scale [1, 1, 1]; scale is the actor's scale read back after the call (change it with set_actor_transform). No editor world is an error (the editor must be running with a level open).
+// MCP:create_usd_stage_actor - Spawn an AUsdStageActor, the actor that displays a USD file live in the level, into the editor world (not a PIE world), or return the one already there: the tool keeps one stage actor per world, so when any exists it changes nothing and returns already_existed true with that actor's actor_path, whatever name you pass. The level is not saved (save_level). The new actor shows nothing until set_usd_stage_actor_root_layer gives it a USD file; then inspect it with get_usd_stage_actor_info, get_usd_generated_component and get_usd_generated_assets. To author a USD file without an actor use create_usd_stage or open_usd_stage instead; remove the actor with delete_actor. A new actor gets scale [1, 1, 1]; scale is the actor's scale read back after the call (change it with set_actor_transform). No editor world is an error (the editor must be running with a level open). A spawned actor the USD stage module does not then find in the world fails the call.
 //   @param name [string] - Object name for a new actor, e.g. "UsdStageActor" (the default); a numeric suffix is added when taken, so read the real name from the reply. Ignored when a stage actor already exists.
 //   @param location [array] - World [x, y, z] location in cm for a new actor, e.g. [0, 0, 100] (default [0, 0, 0]); missing trailing numbers stay 0.
 //   @param rotation [array] - World [pitch, yaw, roll] in degrees for a new actor, e.g. [0, 90, 0] (default [0, 0, 0]).
@@ -260,11 +260,11 @@ TSharedPtr<FJsonObject> HandleCreateUsdStageActor(
 // ---------------------------------------------------------------------------
 // set_usd_stage_actor_root_layer
 // ---------------------------------------------------------------------------
-// MCP:set_usd_stage_actor_root_layer - Assign a USD file as the actor's root layer and transition the stage state.  Wraps AUsdStageActor::SetRootLayer(path) followed by AUsdStageActor::SetStageState(state). SetStageState(OpenedAndLoaded) triggers level-sequence regeneration — this can take a noticeable amount of time on large stages, so the cov harness may observe a transient 'rebuilding' state via follow-up get_usd_stage_actor_info calls. The tool does NOT verify the file exists on disk — SetRootLayer stores the path; the actual load happens during SetStageState(OpenedAndLoaded). When root_layer_path is empty, the existing root layer is preserved.
+// MCP:set_usd_stage_actor_root_layer - Assign a USD file as the actor's root layer and transition the stage state.  Wraps AUsdStageActor::SetRootLayer(path) followed by AUsdStageActor::SetStageState(state). SetStageState(OpenedAndLoaded) triggers level-sequence regeneration — this can take a noticeable amount of time on large stages, so the cov harness may observe a transient 'rebuilding' state via follow-up get_usd_stage_actor_info calls. stage_state, root_layer, stage_open and stage_real_path are read back from the actor: the call fails when the state is not the one asked, or, for Opened and OpenedAndLoaded, when no stage opened or (for an absolute root_layer_path) its root layer is another file. When root_layer_path is empty, the existing root layer is preserved.
 //   @param actor_path [string!] - Full actor path (or short name) of the AUsdStageActor.
 //   @param root_layer_path [string!] - Absolute file path of the USD file (.usd/.usda/.usdc/.usdz).
 //   @param stage_state [string] - "OpenedAndLoaded" (default), "Opened", or "Closed".
-//   @returns { actor_path: string, root_layer_path: string, stage_state: string }
+//   @returns { actor_path: string, root_layer_path: string, root_layer: string, stage_state: string, stage_open: bool, stage_real_path: string, errors: [string]? }
 
 TSharedPtr<FJsonObject> HandleSetUsdStageActorRootLayer(
 	const TSharedPtr<FJsonObject>& Params)
@@ -521,11 +521,11 @@ TSharedPtr<FJsonObject> HandleGetUsdGeneratedAssets(
 // ---------------------------------------------------------------------------
 // isolate_usd_layer
 // ---------------------------------------------------------------------------
-// MCP:isolate_usd_layer - Enter isolated mode by replacing the actor's displayed stage with a new stage rooted at one of the sublayers of the current layer stack.  Wraps AUsdStageActor::IsolateLayer(Layer, b_load_usd_stage). The layer_index selects into Stage.GetLayerStack(true) — index 0 is the root layer, >0 are sublayers. When b_load_usd_stage is true (default) assets, actors and components are regenerated from the isolated stage; when false the isolation is structural only.
+// MCP:isolate_usd_layer - Enter isolated mode by replacing the actor's displayed stage with a new stage rooted at one of the sublayers of the current layer stack.  Wraps AUsdStageActor::IsolateLayer(Layer, b_load_usd_stage). The layer_index selects into Stage.GetLayerStack(true) — index 0 is the root layer, >0 are sublayers. When b_load_usd_stage is true (default) assets, actors and components are regenerated from the isolated stage; when false the isolation is structural only. isolated_root_layer is the actor re-read: it must be the isolated layer, or empty when that layer is the base stage's root (which leaves isolated mode); otherwise the call fails.
 //   @param actor_path [string!] - Full actor path (or short name) of the AUsdStageActor.
 //   @param layer_index [integer] - Index into the actor's stage layer stack (default 0 = root layer).
 //   @param b_load_usd_stage [boolean] - Load assets/components from the isolated stage (default true).
-//   @returns { actor_path: string, layer_index: int, isolated_layer: string, b_load_usd_stage: bool }
+//   @returns { actor_path: string, layer_index: int, isolated_layer: string, isolated_root_layer: string, b_load_usd_stage: bool, errors: [string]? }
 
 TSharedPtr<FJsonObject> HandleIsolateUsdLayer(
 	const TSharedPtr<FJsonObject>& Params)

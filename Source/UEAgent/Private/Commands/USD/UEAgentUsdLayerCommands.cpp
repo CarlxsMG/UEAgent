@@ -490,13 +490,13 @@ TSharedPtr<FJsonObject> HandleRemoveUsdSublayer(const TSharedPtr<FJsonObject>& P
 // ---------------------------------------------------------------------------
 // add_usd_reference
 // ---------------------------------------------------------------------------
-// MCP:add_usd_reference - Add an external reference arc to a prim of a registered USD stage, so prim_path composes the prim prim_path_for_target of the layer file at asset_path, or that layer's defaultPrim when prim_path_for_target is empty (uses_default_prim). For a prim of the same stage use add_usd_internal_reference, for a load-on-demand arc add_usd_payload; clear_usd_references is the inverse, and get_usd_prim_info or list_usd_prims shows the composed result. The arc is authored on the stage's current edit target layer (set_usd_edit_target; list_usd_stage_layers shows the stack) and stays in memory until save_usd_stage. No undo step. added=false, with the USD messages in errors, when USD rejects the arc; an unregistered stage_name or a prim that does not exist is an error (success=false) and nothing is authored.
+// MCP:add_usd_reference - Add an external reference arc to a prim of a registered USD stage, so prim_path composes the prim prim_path_for_target of the layer file at asset_path, or that layer's defaultPrim when prim_path_for_target is empty (uses_default_prim). For a prim of the same stage use add_usd_internal_reference, for a load-on-demand arc add_usd_payload; clear_usd_references is the inverse, and get_usd_prim_info or list_usd_prims shows the composed result. The arc is authored on the stage's current edit target layer (set_usd_edit_target; list_usd_stage_layers shows the stack) and stays in memory until save_usd_stage. No undo step. The call fails when USD rejects the arc (added=false, its messages in errors) or the prim then lists no authored references (has_arcs=false); an unregistered stage_name or a prim that does not exist is an error (success=false) and nothing is authored.
 //   @param stage_name [string!] - Name the stage was registered under by open_usd_stage or create_usd_stage (list_usd_stages shows it), e.g. "Shot010".
 //   @param prim_path [string!] - Absolute SdfPath of the existing prim that receives the reference, e.g. "/World/Chair"; define_usd_prim creates one.
 //   @param asset_path [string!] - Identifier of the layer to reference: an absolute file path such as "C:/Assets/chair.usda", or a path relative to the layer being edited such as "./chair.usda".
 //   @param prim_path_for_target [string] - Absolute path of the prim inside the referenced layer to compose, e.g. "/Chair". Empty (default) authors an empty target path, which USD resolves to the referenced layer's defaultPrim; a layer without one composes nothing there.
 //   @param position [string] - "FrontOfPrependList" | "BackOfPrependList" | "FrontOfAppendList" | "BackOfAppendList", case-insensitive; prepended arcs are stronger than appended ones. Default BackOfPrependList, which is also what any other string means (the reply then echoes the string sent).
-//   @returns { stage_name: string, prim_path: string, asset_path: string, prim_path_for_target: string, uses_default_prim: bool, added: bool, position: string, errors: [string]? }
+//   @returns { stage_name: string, prim_path: string, asset_path: string, prim_path_for_target: string, uses_default_prim: bool, added: bool, has_arcs: bool, position: string, errors: [string]? }
 
 TSharedPtr<FJsonObject> HandleAddUsdReference(const TSharedPtr<FJsonObject>& Params)
 {
@@ -536,12 +536,12 @@ TSharedPtr<FJsonObject> HandleAddUsdReference(const TSharedPtr<FJsonObject>& Par
 // ---------------------------------------------------------------------------
 // add_usd_internal_reference
 // ---------------------------------------------------------------------------
-// MCP:add_usd_internal_reference - Add an internal reference composition arc (references another prim inside the SAME stage; no asset_path needed).
+// MCP:add_usd_internal_reference - Add an internal reference composition arc (references another prim inside the SAME stage; no asset_path needed). The call fails when USD rejects the arc (added=false, its messages in errors) or the prim then lists no authored references (has_arcs=false).
 //   @param stage_name [string!] - Name the stage was registered under.
 //   @param prim_path [string!] - Prim that owns the reference (the consumer).
 //   @param target_prim_path [string!] - Prim inside the same stage to reference.
 //   @param position [string] - List position (same vocabulary as add_usd_reference). Default "BackOfPrependList".
-//   @returns { stage_name: string, prim_path: string, target_prim_path: string, added: bool, position: string, errors: [string]? }
+//   @returns { stage_name: string, prim_path: string, target_prim_path: string, added: bool, has_arcs: bool, position: string, errors: [string]? }
 
 TSharedPtr<FJsonObject> HandleAddUsdInternalReference(const TSharedPtr<FJsonObject>& Params)
 {
@@ -596,10 +596,10 @@ TSharedPtr<FJsonObject> HandleAddUsdInternalReference(const TSharedPtr<FJsonObje
 // ---------------------------------------------------------------------------
 // clear_usd_references
 // ---------------------------------------------------------------------------
-// MCP:clear_usd_references - Remove every reference arc of a prim of a registered USD stage, external and internal alike (UsdReferences::ClearReferences); payloads stay (clear_usd_payloads removes those). The inverse of add_usd_reference and add_usd_internal_reference; no tool removes a single reference. Only the edits on the stage's current edit target layer go, so references authored on other layers still compose (switch layers with set_usd_edit_target; list_usd_stage_layers shows the stack); check the result with get_usd_prim_info. Irreversible: no undo step. The change stays in memory until save_usd_stage. A repeat call leaves the list empty again. An unregistered stage_name or a prim that does not exist is an error (success=false); USD complaints come back in errors.
+// MCP:clear_usd_references - Remove every reference arc of a prim of a registered USD stage, external and internal alike (UsdReferences::ClearReferences); payloads stay (clear_usd_payloads removes those). The inverse of add_usd_reference and add_usd_internal_reference; no tool removes a single reference. Only the edits on the stage's current edit target layer go, so references authored on other layers still compose (switch layers with set_usd_edit_target; list_usd_stage_layers shows the stack); check the result with get_usd_prim_info. Irreversible: no undo step. The change stays in memory until save_usd_stage. A repeat call leaves the list empty again. An unregistered stage_name or a prim that does not exist is an error (success=false); USD complaints come back in errors. cleared=false fails the call; has_references is the prim re-read, true while another layer still authors references.
 //   @param stage_name [string!] - Name the stage was registered under by open_usd_stage or create_usd_stage (list_usd_stages shows it), e.g. "Shot010".
 //   @param prim_path [string!] - Absolute SdfPath of the existing prim whose references are cleared, e.g. "/World/Chair"; list_usd_prims lists prim paths.
-//   @returns { stage_name: string, prim_path: string, cleared: bool, errors: [string]? }
+//   @returns { stage_name: string, prim_path: string, cleared: bool, has_references: bool, errors: [string]? }
 
 TSharedPtr<FJsonObject> HandleClearUsdReferences(const TSharedPtr<FJsonObject>& Params)
 {
@@ -641,13 +641,13 @@ TSharedPtr<FJsonObject> HandleClearUsdReferences(const TSharedPtr<FJsonObject>& 
 // ---------------------------------------------------------------------------
 // add_usd_payload
 // ---------------------------------------------------------------------------
-// MCP:add_usd_payload - Add a payload composition arc to a prim (load-on-demand; payloads are NOT loaded by the stage unless an explicit Load rule says so), composing the prim prim_path_for_target of the layer at asset_path, or that layer's defaultPrim when prim_path_for_target is empty (uses_default_prim). The arc is authored on the stage's current edit target layer and stays in memory until save_usd_stage; no undo step. added=false, with the USD messages in errors, when USD rejects the arc; an unregistered stage or a missing prim is an error. Read it back with get_usd_prim_metadata (key "payload"). Inverse: clear_usd_payloads (one payload with asset_path).
+// MCP:add_usd_payload - Add a payload composition arc to a prim (load-on-demand; payloads are NOT loaded by the stage unless an explicit Load rule says so), composing the prim prim_path_for_target of the layer at asset_path, or that layer's defaultPrim when prim_path_for_target is empty (uses_default_prim). The arc is authored on the stage's current edit target layer and stays in memory until save_usd_stage; no undo step. The call fails when USD rejects the arc (added=false, its messages in errors) or the prim then lists no authored payloads (has_arcs=false); an unregistered stage or a missing prim is an error. Read it back with get_usd_prim_metadata (key "payload"). Inverse: clear_usd_payloads (one payload with asset_path).
 //   @param stage_name [string!] - Name the stage was registered under.
 //   @param prim_path [string!] - Prim that owns the payload.
 //   @param asset_path [string!] - Identifier of the layer containing the payload.
 //   @param prim_path_for_target [string] - Absolute path of the prim inside the payload layer to compose, e.g. "/Chair". Empty (default) authors an empty target path, which USD resolves to that layer's defaultPrim.
 //   @param position [string] - List position (same vocabulary as add_usd_reference). Default "BackOfPrependList".
-//   @returns { stage_name: string, prim_path: string, asset_path: string, prim_path_for_target: string, uses_default_prim: bool, added: bool, position: string, errors: [string]? }
+//   @returns { stage_name: string, prim_path: string, asset_path: string, prim_path_for_target: string, uses_default_prim: bool, added: bool, has_arcs: bool, position: string, errors: [string]? }
 
 TSharedPtr<FJsonObject> HandleAddUsdPayload(const TSharedPtr<FJsonObject>& Params)
 {
@@ -687,7 +687,7 @@ TSharedPtr<FJsonObject> HandleAddUsdPayload(const TSharedPtr<FJsonObject>& Param
 // ---------------------------------------------------------------------------
 // clear_usd_payloads
 // ---------------------------------------------------------------------------
-// MCP:clear_usd_payloads - Remove the payload arcs of a prim: every payload (UsdPayloads::ClearPayloads), or with asset_path the one payload to that layer and target prim (RemovePayload). Inverse of add_usd_payload, which clear_usd_references does not touch; the edit lands on the stage's current edit target layer, as the add did. Irreversible, like every USD composition edit here (no undo). had_payloads and has_payloads are the prim read before and after (UsdPrim::HasAuthoredPayloads). A stage or prim that does not resolve is an error; a prim with no payload is an honest no-op (cleared=false). Save the layer with save_usd_stage.
+// MCP:clear_usd_payloads - Remove the payload arcs of a prim: every payload (UsdPayloads::ClearPayloads), or with asset_path the one payload to that layer and target prim (RemovePayload). Inverse of add_usd_payload, which clear_usd_references does not touch; the edit lands on the stage's current edit target layer, as the add did. Irreversible, like every USD composition edit here (no undo). had_payloads and has_payloads are the prim read before and after (UsdPrim::HasAuthoredPayloads). A stage or prim that does not resolve is an error; a prim with no payload is an honest no-op (cleared=false). Save the layer with save_usd_stage. A prim that had payloads and that the edit did not clear fails the call.
 //   @param stage_name [string!] - Name the stage was registered under.
 //   @param prim_path [string!] - Prim whose payloads should be removed.
 //   @param asset_path [string] - Optional identifier of the payload's layer: only the payload to that layer (and prim_path_for_target) goes.
@@ -761,11 +761,11 @@ TSharedPtr<FJsonObject> HandleClearUsdPayloads(const TSharedPtr<FJsonObject>& Pa
 // ---------------------------------------------------------------------------
 // mute_usd_layer
 // ---------------------------------------------------------------------------
-// MCP:mute_usd_layer - Mute and unmute layers of a registered USD stage in one atomic call (UsdStage::MuteAndUnmuteLayers): a muted layer's opinions drop out of composition until it is unmuted. Muting is stage state held in memory: no layer file changes and save_usd_stage does not record it. Read layer identifiers, and confirm is_muted afterwards, with list_usd_stage_layers; to send edits to a layer use set_usd_edit_target instead, and to show one layer alone on a stage actor isolate_usd_layer. muted and unmuted echo the identifiers sent, not a read-back. Muting a layer already muted changes nothing, so a repeat call is harmless. An unregistered stage_name is an error (success=false); USD complaints come back in errors. No undo step.
+// MCP:mute_usd_layer - Mute and unmute layers of a registered USD stage in one atomic call (UsdStage::MuteAndUnmuteLayers): a muted layer's opinions drop out of composition until it is unmuted. Muting is stage state held in memory: no layer file changes and save_usd_stage does not record it. Read layer identifiers, and confirm is_muted afterwards, with list_usd_stage_layers; to send edits to a layer use set_usd_edit_target instead, and to show one layer alone on a stage actor isolate_usd_layer. muted and unmuted echo the identifiers sent; mismatched lists the ones the stage does not read in the requested state (IsLayerMuted), and any fails the call. Muting a layer already muted changes nothing, so a repeat call is harmless. An unregistered stage_name is an error (success=false); USD complaints come back in errors. No undo step.
 //   @param stage_name [string!] - Name the stage was registered under by open_usd_stage or create_usd_stage (list_usd_stages shows it), e.g. "Shot010".
 //   @param mute_paths [array] - Layer identifiers to mute, as list_usd_stage_layers reports them, e.g. ["C:/Shots/lighting.usda"]; non-string or empty entries are skipped. Empty/missing is allowed (no-op on the mute side).
 //   @param unmute_paths [array] - Layer identifiers to unmute, same form as mute_paths. Empty/missing is allowed (no-op on the unmute side).
-//   @returns { stage_name: string, muted: [string], unmuted: [string], errors: [string]? }
+//   @returns { stage_name: string, muted: [string], unmuted: [string], mismatched: [string], errors: [string]? }
 
 TSharedPtr<FJsonObject> HandleMuteUsdLayer(const TSharedPtr<FJsonObject>& Params)
 {
