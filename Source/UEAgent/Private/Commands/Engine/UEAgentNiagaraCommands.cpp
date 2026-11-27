@@ -830,13 +830,13 @@ namespace
 // The set_niagara_component_* tools find the component by the actor's internal name or label
 // (FindNiagaraComponentByOwner), so the label is refused when another actor already answers to it.
 // ---------------------------------------------------------------------------
-// MCP:spawn_niagara_component - Place a Niagara System in the editor level as a new ANiagaraActor (the actor a drag of the system into the viewport makes, through the editor's Niagara actor factory) whose root UNiagaraComponent runs the system, at an optional location and rotation, for previews and set_niagara_component_* calls. For a Niagara component on an actor that already exists use add_component_to_actor (NiagaraComponent) and set its Asset with set_properties. actor_label labels the new actor (default: the system's name, made unique); a label that is "None" or blank, or that another editor-world actor already has as label or internal name, is an error and nothing is spawned, so set_niagara_component_* (actor_name = owner_actor_name or the label) reach this actor. A system the factory refuses (settings requiring an effect type) is an error too. One undo step; the level is marked dirty, not saved (save_level keeps it). Editor world only, PIE or not. location and rotation are read back.
+// MCP:spawn_niagara_component - Place a Niagara System in the editor level as a new ANiagaraActor (the actor a drag of the system into the viewport makes, through the editor's Niagara actor factory) whose root UNiagaraComponent runs the system, at an optional location and rotation, for previews and set_niagara_component_* calls. For a Niagara component on an actor that already exists use add_component_to_actor (NiagaraComponent) and set its Asset with set_properties. actor_label labels the new actor (default: the system's name, made unique); a label that is "None" or blank, or that another editor-world actor already has as label or internal name, is an error and nothing is spawned, so set_niagara_component_* (actor_name = owner_actor_name or the label) reach this actor. A system the factory refuses (settings requiring an effect type) is an error too. One undo step; the level is marked dirty, not saved (save_level keeps it). Editor world only, PIE or not. location and rotation are read back. Success requires the component to run the system, be registered and, with actor_label, the actor to carry that label (system_matches, is_registered, label_matches); a spawned actor that fails one stays in the level and the error names it.
 //   @retired spawn_actor - type="NiagaraActor", name, location, rotation, properties={"NiagaraComponent.Asset":"/Game/FX/NS_..."}
 //   @param system_path - Asset path of the Niagara System to place (e.g. /Game/MyGame/NS_Example); one that does not load is an error and nothing is spawned.
 //   @param location - Optional world location [X, Y, Z]; the origin when omitted.
 //   @param rotation - Optional world rotation, the object {"pitch":..,"yaw":..,"roll":..} or the array [pitch, yaw, roll] (index 2 is ROLL); zero when omitted.
 //   @param actor_label - Optional editor label for the new actor; when omitted the factory labels it after the system, made unique. A label that is not a valid actor label ("None", blank), or that another actor of the editor world already has as its label or internal name, is an error and nothing is spawned.
-//   @returns { system_path: string, owner_actor_name: string, owner_actor_label: string, actor_class: string, actor_path: string, component_name: string, is_registered: bool, is_active: bool, location: [number, number, number], rotation: { roll: number, pitch: number, yaw: number } }
+//   @returns { system_path: string, owner_actor_name: string, owner_actor_label: string, actor_class: string, actor_path: string, component_name: string, is_registered: bool, is_active: bool, system_matches: bool, label_matches: bool, location: [number, number, number], rotation: { roll: number, pitch: number, yaw: number } }
 
 TSharedPtr<FJsonObject> HandleSpawnNiagaraComponent(const TSharedPtr<FJsonObject>& Params)
 {
@@ -928,7 +928,18 @@ TSharedPtr<FJsonObject> HandleSpawnNiagaraComponent(const TSharedPtr<FJsonObject
     Data->SetBoolField(TEXT("is_active"), Component->IsActive());
     Data->SetArrayField(TEXT("location"), mcp_common::VectorToJsonArray(NewActor->GetActorLocation()));
     mcp_common::AddRotatorField(Data, TEXT("rotation"), NewActor->GetActorRotation());
-    return mcp_common::MakeOkReply(Data);
+
+    // The set_niagara_component_* tools need the component running this system, registered, and reachable by the
+    // label asked for (SetActorLabel only logs a label it refuses).
+    const bool bSystemMatches = Component->GetAsset() == System;
+    const bool bLabelMatches = !bLabelled || NewActor->GetActorLabel() == DesiredLabel;
+    const bool bPlaced = bSystemMatches && Component->IsRegistered() && bLabelMatches;
+    Data->SetBoolField(TEXT("system_matches"), bSystemMatches);
+    Data->SetBoolField(TEXT("label_matches"), bLabelMatches);
+    return mcp_common::MakeOutcomeReply(Data, bPlaced, bPlaced ? FString() : FString::Printf(
+        TEXT("spawn_niagara_component: actor %s was spawned but %s; see system_matches, is_registered and label_matches (delete_actor removes it)"),
+        *NewActor->GetName(),
+        !bSystemMatches ? TEXT("its component does not run the system") : !Component->IsRegistered() ? TEXT("its component is not registered") : TEXT("its label is not the one asked for")));
 }
 
 // ---------------------------------------------------------------------------
