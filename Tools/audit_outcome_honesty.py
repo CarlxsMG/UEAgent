@@ -161,11 +161,37 @@ SUCCESS_PATTERNS = [
      re.compile(r'SetBoolField\s*\(\s*TEXT\("success"\)\s*,\s*true\s*\)')),
 ]
 # Third success path, the MOST invisible one: returning the raw payload. The bridge
-# (UEAgentBridge.cpp, "No explicit success field -- treat the whole ResultJson as
-# the result") wraps it in `status:"success"` UNCONDITIONALLY. It is an unconditional
-# success:true that never mentions the word `success`.
+# (UEAgentBridge.cpp, WrapHandlerResult) wraps a payload without `success` in
+# `status:"success"` whenever it carries no `error`. It is a success:true that never
+# mentions the word `success`.
 RAW_PAYLOAD_DECL_RE = re.compile(
     r'TSharedPtr\s*<\s*FJsonObject\s*>\s*(\w+)\s*=\s*([^;]{0,240});')
+
+
+# The opening of a lambda's body: `[captures](params) mutable -> Type {`.
+LAMBDA_OPEN_RE = re.compile(
+    r"\[[^\[\]{};]*\]\s*(?:\([^()]*(?:\([^()]*\)[^()]*)*\))?\s*(?:mutable\s*)?"
+    r"(?:->\s*[\w:<>\s]+?)?\{")
+
+
+def blank_lambdas(body: str) -> str:
+    """The body with each lambda's body blanked (same length, newlines kept), so a
+    `return X;` inside a lambda that builds a step's params is not the handler's reply."""
+    out = list(body)
+    for m in LAMBDA_OPEN_RE.finditer(body):
+        brace = m.end() - 1
+        inner = _brace_body(body, brace)
+        for j in range(brace + 1, brace + len(inner) - 1):
+            if out[j] != "\n":
+                out[j] = " "
+    return "".join(out)
+
+
+def computed_success_on(body: str, name: str) -> bool:
+    """True when `name` gets its `success` from a computed boolean: returning it is then
+    the measured outcome, not the bridge's unconditional status:success."""
+    return re.search(re.escape(name) + r'\s*->\s*SetBoolField\s*\(\s*TEXT\("success"\)\s*,'
+                     r'(?!\s*(?:true|false)\s*\))', body) is not None
 
 
 def find_raw_payload_return(body: str, start_line: int):
@@ -176,8 +202,10 @@ def find_raw_payload_return(body: str, start_line: int):
     inside an `if (...)` condition is the guard idiom -- `if (TSharedPtr<FJsonObject>
     Error = Check(...)) { return Error; }` returns the helper's error reply -- and is skipped.
     """
+    # A payload declared inside a lambda (the params of a sub-command step) is not the reply;
+    # one declared outside and returned from a lambda (`auto Finish = [&Reply]{...; return Reply;}`) is.
     decls = []
-    for m in RAW_PAYLOAD_DECL_RE.finditer(body):
+    for m in RAW_PAYLOAD_DECL_RE.finditer(blank_lambdas(body)):
         if not re.search(r'\bif\s*\(\s*(?:const\s+)?$', body[max(0, m.start() - 24):m.start()]):
             decls.append(m.groups())
     for name, init in dict.fromkeys(decls):
@@ -188,10 +216,17 @@ def find_raw_payload_return(body: str, start_line: int):
         if DELEGATE_RE.search(init):
             return ({"label": "delegated-payload", "line": line,
                      "match": f"return {name};  (payload from another command)"}, True)
+        if computed_success_on(body, name):
+            continue
         return ({"label": "raw-payload-return", "line": line,
                  "match": f"return {name};  (the bridge wraps it in status:success)"}, False)
     return None, False
-DELEGATE_RE = re.compile(r"\bMcpCommandFamilies::Run\s*\(")
+# Delegation: the reply is another command's, run through the bridge. McpCommandFamilies::Run
+# picks a family's handler; mcp_common::RunSubCommand / RunSubCommands / ForwardCall dispatch
+# other tools and turn a failed step into success:false (McpCommonUtils.cpp), so the outcome is
+# the target handlers', audited on their own.
+DELEGATE_RE = re.compile(
+    r"\bMcpCommandFamilies::Run\s*\(|\bmcp_common::(?:RunSubCommands?|ForwardCall)\s*\(")
 
 # Affirmative boolean fields written by hand: "yes, I did it".
 CLAIM_FIELD_RE = re.compile(
@@ -297,7 +332,7 @@ def classify(body: str, start_line: int, param_names: set[str]):
     if raw_is_delegation:
         ev_delegation = [raw]
     else:
-        ev_delegation = []
+        ev_delegation = collect([("delegates", DELEGATE_RE)], body, start_line)
 
     if honest:
         klass = "verified"
