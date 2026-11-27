@@ -765,11 +765,11 @@ TSharedPtr<FJsonObject> HandleStopBehaviorTree(const TSharedPtr<FJsonObject>& Pa
 // Runtime blackboard
 //----------------------------------------------------------------------//
 
-// MCP:set_blackboard_value - Write one key of the running blackboard of an actor (its AIController blackboard, else one on the actor), converting the value string by key type. The actor is looked up in a running PIE world first, then in the editor world; world says which answered (pie or editor) and world_name names it. Not read back: set is always true, and an unparsable number or vector is written as 0. Runtime state only, nothing saved. Verify with get_blackboard_value.
+// MCP:set_blackboard_value - Write one key of the running blackboard of an actor (its AIController blackboard, else one on the actor), converting the value string by key type. The actor is looked up in a running PIE world first, then in the editor world; world says which answered (pie or editor) and world_name names it. The key is read back: set is whether it now holds the converted value (false makes success false), and value_read_back is its value as text. An unparsable number or vector is written as 0; an object or class path that does not resolve is an error and nothing changes. Runtime state only, nothing saved. Verify with get_blackboard_value.
 //   @param actor_name - Object name or label of the actor whose blackboard to modify, searched in the PIE world first, then the editor world (first match)
 //   @param key_name - Name of the blackboard key to set
 //   @param value - Value as a string, converted by key type: "42", "0.5", "true" or "1", a name, an enum index, a vector "X=1 Y=2 Z=3", a rotator "P=0 Y=90 R=0", an object or class path. Omitted means empty (0, false, none).
-//   @returns { actor_name: string, world: "pie"|"editor", world_name: string, key_name: string, key_type: string, value: string, set: bool }
+//   @returns { actor_name: string, world: "pie"|"editor", world_name: string, key_name: string, key_type: string, value: string, value_read_back: string, set: bool }
 
 TSharedPtr<FJsonObject> HandleSetBlackboardValue(const TSharedPtr<FJsonObject>& Params)
 {
@@ -793,60 +793,85 @@ TSharedPtr<FJsonObject> HandleSetBlackboardValue(const TSharedPtr<FJsonObject>& 
     FString ValueStr;
     Params->TryGetStringField(TEXT("value"), ValueStr);
 
-    bool bApplied = true;
+    // Each branch writes the converted value and compares the key's read-back with it: a key the component does
+    // not hold, or a write it refuses, leaves the old value in place.
+    bool bSupported = true;
+    bool bMatches = false;
     if (KeyTypeClass == UBlackboardKeyType_Int::StaticClass())
     {
-        BB->SetValueAsInt(Key, FCString::Atoi(*ValueStr));
+        const int32 Wanted = FCString::Atoi(*ValueStr);
+        BB->SetValueAsInt(Key, Wanted);
+        bMatches = BB->GetValueAsInt(Key) == Wanted;
     }
     else if (KeyTypeClass == UBlackboardKeyType_Float::StaticClass())
     {
-        BB->SetValueAsFloat(Key, FCString::Atof(*ValueStr));
+        const float Wanted = FCString::Atof(*ValueStr);
+        BB->SetValueAsFloat(Key, Wanted);
+        bMatches = BB->GetValueAsFloat(Key) == Wanted;
     }
     else if (KeyTypeClass == UBlackboardKeyType_Bool::StaticClass())
     {
-        const bool bVal = ValueStr.ToBool() || ValueStr == TEXT("1");
-        BB->SetValueAsBool(Key, bVal);
+        const bool bWanted = ValueStr.ToBool() || ValueStr == TEXT("1");
+        BB->SetValueAsBool(Key, bWanted);
+        bMatches = BB->GetValueAsBool(Key) == bWanted;
     }
     else if (KeyTypeClass == UBlackboardKeyType_String::StaticClass())
     {
         BB->SetValueAsString(Key, ValueStr);
+        bMatches = BB->GetValueAsString(Key) == ValueStr;
     }
     else if (KeyTypeClass == UBlackboardKeyType_Name::StaticClass())
     {
-        BB->SetValueAsName(Key, FName(*ValueStr));
+        const FName Wanted(*ValueStr);
+        BB->SetValueAsName(Key, Wanted);
+        bMatches = BB->GetValueAsName(Key) == Wanted;
     }
     else if (KeyTypeClass == UBlackboardKeyType_Enum::StaticClass())
     {
-        BB->SetValueAsEnum(Key, (uint8)FCString::Atoi(*ValueStr));
+        const uint8 Wanted = (uint8)FCString::Atoi(*ValueStr);
+        BB->SetValueAsEnum(Key, Wanted);
+        bMatches = BB->GetValueAsEnum(Key) == Wanted;
     }
     else if (KeyTypeClass == UBlackboardKeyType_Vector::StaticClass())
     {
         FVector Vec = FVector::ZeroVector;
         Vec.InitFromString(ValueStr);
         BB->SetValueAsVector(Key, Vec);
+        bMatches = BB->GetValueAsVector(Key) == Vec;
     }
     else if (KeyTypeClass == UBlackboardKeyType_Rotator::StaticClass())
     {
         FRotator Rot = FRotator::ZeroRotator;
         Rot.InitFromString(ValueStr);
         BB->SetValueAsRotator(Key, Rot);
+        bMatches = BB->GetValueAsRotator(Key) == Rot;
     }
     else if (KeyTypeClass == UBlackboardKeyType_Object::StaticClass())
     {
-        UObject* Obj = mcp_common::ResolveObjectByPath(ValueStr);
+        UObject* Obj = ValueStr.IsEmpty() ? nullptr : mcp_common::ResolveObjectByPath(ValueStr);
+        if (!ValueStr.IsEmpty() && !Obj)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(TEXT("No object found at '%s' for key '%s'; nothing was changed"), *ValueStr, *KeyText));
+        }
         BB->SetValueAsObject(Key, Obj);
+        bMatches = BB->GetValueAsObject(Key) == Obj;
     }
     else if (KeyTypeClass == UBlackboardKeyType_Class::StaticClass())
     {
         UClass* Cls = ValueStr.IsEmpty() ? nullptr : LoadObject<UClass>(nullptr, *ValueStr);
+        if (!ValueStr.IsEmpty() && !Cls)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(TEXT("No class found at '%s' for key '%s'; nothing was changed"), *ValueStr, *KeyText));
+        }
         BB->SetValueAsClass(Key, Cls);
+        bMatches = BB->GetValueAsClass(Key) == Cls;
     }
     else
     {
-        bApplied = false;
+        bSupported = false;
     }
 
-    if (!bApplied)
+    if (!bSupported)
     {
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("Unsupported blackboard key type '%s' for key '%s'"), *KeyTypeClass->GetName(), *KeyText));
     }
@@ -857,9 +882,12 @@ TSharedPtr<FJsonObject> HandleSetBlackboardValue(const TSharedPtr<FJsonObject>& 
     Result->SetStringField(TEXT("key_name"), KeyText);
     Result->SetStringField(TEXT("key_type"), KeyTypeClass->GetName());
     Result->SetStringField(TEXT("value"), ValueStr);
-    Result->SetBoolField(TEXT("set"), true);
+    Result->SetStringField(TEXT("value_read_back"), BB->DescribeKeyValue(Key, EBlackboardDescription::OnlyValue));
+    Result->SetBoolField(TEXT("set"), bMatches);
 
-    return mcp_common::MakeOkReply(Result);
+    return mcp_common::MakeOutcomeReply(Result, bMatches, bMatches ? FString() : FString::Printf(
+        TEXT("set_blackboard_value: key '%s' reads back '%s' after the write of '%s'; the blackboard did not take the value"),
+        *KeyText, *BB->DescribeKeyValue(Key, EBlackboardDescription::OnlyValue), *ValueStr));
 }
 
 // MCP:get_blackboard_value - Read one key of the running blackboard of an actor (its AIController blackboard, else one on the actor). The actor is looked up in a running PIE world first, then in the editor world; world says which answered (pie or editor) and world_name names it. value is a number for Int, Float and Enum keys, a bool for Bool, else a string (objects as paths). Read-only.
@@ -1796,12 +1824,11 @@ namespace
         R->SetStringField(TEXT("child_kind"), bComposite ? TEXT("composite") : TEXT("task"));
         R->SetBoolField(TEXT("already_exists"), false);
         R->SetNumberField(TEXT("child_count"), Parent->Children.Num());
-        mcp_common::AddSaveOutcome(R, bSaved, SaveError);
-        return mcp_common::MakeOkReply(R);
+        return mcp_common::MakeSavedReply(R, bSaved, TEXT("add_behavior_tree_child"), SaveError);
     }
 }
 
-// MCP:add_behavior_tree_child - Add a child under a BehaviorTree composite: a composite (Selector/Sequence/SimpleParallel) when composite is given, or a leaf task (Wait/MoveTo/PlaySound/RunBehavior/...) when task_class is given; exactly one of the two. The child is appended to the parent's Children (array order = execution order). Authoring is data-only: ParentNode/ExecutionIndex are assigned by the BT runtime at load (run_behavior_tree). Idempotent by child_name within the parent, whatever its kind. The returned child_name is how you address a composite as a parent for further children. Configure the node (a MoveTo's key, a Wait's time) with set_behavior_tree_node_property; read its settings with get_object_info on its object_path from get_behavior_tree_info.
+// MCP:add_behavior_tree_child - Add a child under a BehaviorTree composite: a composite (Selector/Sequence/SimpleParallel) when composite is given, or a leaf task (Wait/MoveTo/PlaySound/RunBehavior/...) when task_class is given; exactly one of the two. The child is appended to the parent's Children (array order = execution order). Authoring is data-only: ParentNode/ExecutionIndex are assigned by the BT runtime at load (run_behavior_tree). Idempotent by child_name within the parent, whatever its kind. The returned child_name is how you address a composite as a parent for further children. Configure the node (a MoveTo's key, a Wait's time) with set_behavior_tree_node_property; read its settings with get_object_info on its object_path from get_behavior_tree_info. A failed save makes success false, with saved=false and save_error, the child kept in memory.
 //   @param behavior_tree_path - Path to the UBehaviorTree asset (its RootNode must already be set via set_behavior_tree_root).
 //   @param composite [string] - Concrete composite class: "Selector" | "Sequence" | "SimpleParallel" (or a BTComposite_* class name). Give this or task_class, not both.
 //   @param task_class [string] - Concrete task class: "Wait" | "MoveTo" | "PlaySound" | "RunBehavior" | "FinishWithResult" (or a BTTask_* class name). Give this or composite, not both.
@@ -1936,6 +1963,7 @@ namespace
         }
 
         BTAsset->Modify();
+        const int32 CountBefore = Parent->Children.Num();
         Parent->Children.RemoveAt(FoundIndex, 1, EAllowShrinking::No);
 
         UPackage* Package = BTAsset->GetOutermost();
@@ -1944,15 +1972,14 @@ namespace
 
         TSharedPtr<FJsonObject> R = BehaviorTree_NodeReply(BTAsset, ResolvedParentName, TEXT("child_name"), FoundName);
         R->SetStringField(TEXT("child_kind"), FoundKind);
-        R->SetBoolField(TEXT("removed"), true);
+        R->SetBoolField(TEXT("removed"), Parent->Children.Num() == CountBefore - 1);
         R->SetBoolField(TEXT("already_absent"), false);
         R->SetNumberField(TEXT("child_count"), Parent->Children.Num());
-        mcp_common::AddSaveOutcome(R, bSaved, SaveError);
-        return mcp_common::MakeOkReply(R);
+        return mcp_common::MakeSavedReply(R, bSaved, TEXT("remove_behavior_tree_child"), SaveError);
     }
 }
 
-// MCP:remove_behavior_tree_child - Remove a child, composite or task, from a BehaviorTree composite.  Inverse of add_behavior_tree_child: drops the matching entry from the parent's Children array and saves. With kind, only child-edges of that kind are considered (a node of the other kind with the same name is untouched, and an index pointing at the other kind is an error); omitted, an edge of either kind matches. child_kind reports the kind of the edge removed. Idempotent: a missing child returns removed:false / already_absent:true.
+// MCP:remove_behavior_tree_child - Remove a child, composite or task, from a BehaviorTree composite.  Inverse of add_behavior_tree_child: drops the matching entry from the parent's Children array and saves. With kind, only child-edges of that kind are considered (a node of the other kind with the same name is untouched, and an index pointing at the other kind is an error); omitted, an edge of either kind matches. child_kind reports the kind of the edge removed. Idempotent: a missing child returns removed:false / already_absent:true. A failed save makes success false, with saved=false and save_error, the removal kept in memory.
 //   @param behavior_tree_path - Path to the UBehaviorTree asset.
 //   @param child_name - Name of the child to remove (a child_name from a prior add_behavior_tree_child); provide this or 'index'.
 //   @param index [number] - Alternative to child_name: 0-based position in the parent's Children array.
