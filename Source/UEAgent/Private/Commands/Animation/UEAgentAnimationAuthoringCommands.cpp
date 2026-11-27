@@ -1855,7 +1855,7 @@ namespace
 // MCP:add_blend_space_sample - Add one sample (an animation placed at a blend position) to a UBlendSpace or UBlendSpace1D in one undo step, rebuild its runtime data and save the asset. Every call appends a new sample, so it is not a retry-safe call. A sample the engine would reject is refused before anything changes, with success=false, added=false, sample_index -1, saved=false and the reason in the error: an animation whose skeleton is neither the blend space's nor compatible with it, an additive type the blend space does not take or that differs from the existing samples', a position already taken by a sample, or a position an axis cannot widen to in 1000 grid steps or fewer. Otherwise a position past an axis range widens that axis. The sample is read back after the rebuild: animation and blend_x, blend_y, blend_z are what the asset holds at sample_index. Create the asset with create_blend_space and list its samples with get_blend_space_samples; move or swap an existing sample with set_blend_space_sample, and take one out with remove_blend_space_sample. A failed save makes success false, with saved=false and save_error.
 //   @param blendspace_path - Object path of the UBlendSpace or UBlendSpace1D asset, e.g. '/Game/Animation/BS_Locomotion' (create_blend_space makes one).
 //   @param animation_path - Object path of the UAnimSequence played at this position, on the blend space's skeleton or one compatible with it, e.g. '/Game/Animation/Run_Fwd'.
-//   @param blend_value - Blend position in the axis units: one number for a 1D blend space, or [x, y] (up to 3 numbers) for a 2D one, e.g. [0, 300]; default 0 on every axis.
+//   @param blend_value [number|array] - Blend position in the axis units: one number for a 1D blend space, or [x, y] (up to 3 numbers) for a 2D one, e.g. [0, 300]; default 0 on every axis.
 //   @returns { blendspace_path: string, sample_index: int, num_samples: int, added: bool, animation?: string, blend_x?: number, blend_y?: number, blend_z?: number, saved: bool, save_error?: string, message?: string }
 TSharedPtr<FJsonObject> HandleAddBlendspaceSample(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2038,7 +2038,7 @@ TSharedPtr<FJsonObject> HandleRemoveBlendspaceSample(const TSharedPtr<FJsonObjec
 //   @renamed-from edit_blend_space_sample
 //   @param blendspace_path - Full asset path to the UBlendSpace.
 //   @param index - Index of the sample to edit.
-//   @param blend_value - New blend position: single number (1D) or array of up to 3 numbers (optional).
+//   @param blend_value [number|array] - New blend position: single number (1D) or array of up to 3 numbers (optional).
 //   @param animation_path - Full asset path to a UAnimSequence to replace the sample's animation (optional).
 //   @returns { blendspace_path, index, value_edited, animation_replaced, num_samples, samples, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleEditBlendspaceSample(const TSharedPtr<FJsonObject>& Params)

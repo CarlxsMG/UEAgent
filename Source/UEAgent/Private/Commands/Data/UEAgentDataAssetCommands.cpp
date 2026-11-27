@@ -2233,7 +2233,7 @@ TSharedPtr<FJsonObject> HandleGetDataTableRow(const TSharedPtr<FJsonObject>& Par
 
 // MCP:set_data_table_rows_from_json - Upsert many rows of a DataTable, loaded by asset path, in one call: each row's fields are deep-merged onto its current values (objects merge into struct members, scalars and arrays take their place), a new row name starts from struct defaults, all merged rows go through one native JSON import, and the table is saved once. Unnamed rows are untouched; no undo step. A bad row (a value that is not an object, or one the import drops) fails alone in results while the call succeeds: check summary.failed, unknown_columns, unchanged_despite_request and problems. save=false leaves the table dirty in memory; a failed save is success false, with saved=false and save_error, the rows kept in memory. A missing table or row struct is an error. One row: set_data_table_row_fields; native whole row: set_data_table_row_from_json; read back: get_data_table_rows.
 //   @param table_path - Full asset path of the DataTable (data_table also accepted)
-//   @param rows - Object of { row_name: {column:value} }, or that object as a JSON string; each fields object is overlaid non-destructively (a value that is a JSON object deep-merges into the existing struct member, scalars/arrays replace)
+//   @param rows [object|string] - Object of { row_name: {column:value} }, or that object as a JSON string; each fields object is overlaid non-destructively (a value that is a JSON object deep-merges into the existing struct member, scalars/arrays replace)
 //   @param save - When true (default) save the package once after all rows are written; when false leave it dirty in memory
 //   @param data_table - Alias of table_path (the DataTable asset path, e.g. "/Game/Data/DT_Items"); table_path wins when both are given
 //   @returns { table_path, row_struct, results:{ row_name:{ success, created, updated_existing, changed_columns:[..], unchanged_despite_request:[..], unknown_columns?:[..], error? } }, summary:{ total, created, updated, failed }, saved, save_error?, row_count, problems:[..] }
@@ -3361,12 +3361,12 @@ TSharedPtr<FJsonObject> HandleReadDataTableFromPackageFile(const TSharedPtr<FJso
 // MCP:diff_data_tables - Diff two DataTables row by row and cell by cell without modifying either: two asset paths (a, b), or two JSON dumps (before_json, after) such as get_data_table_rows or export_data_table_as_json output, which win when present. Returns identical, added/removed/changed rows with counts and changed cells as {column, a, b}.
 //   @param a - Full asset path of the first DataTable (alias: table_a); asset mode
 //   @param b - Full asset path of the second DataTable (alias: table_b); asset mode
-//   @param before_json - The 'before'/A table dump as a JSON object/array or stringified JSON (alias: before); JSON mode
-//   @param after - The 'after'/B table dump as a JSON object/array or stringified JSON (alias: after_json); JSON mode
+//   @param before_json [object|array|string] - The 'before'/A table dump as a JSON object/array or stringified JSON (alias: before); JSON mode
+//   @param after [object|array|string] - The 'after'/B table dump as a JSON object/array or stringified JSON (alias: after_json); JSON mode
 //   @param table_a - Alias of a: asset path of the first DataTable, e.g. "/Game/Data/DT_Items"; a wins when both are given
 //   @param table_b - Alias of b: asset path of the second DataTable, e.g. "/Game/Data/DT_Items_Old"; b wins when both are given
-//   @param before - Alias of before_json: the first (before) table dump; before_json wins when both are given
-//   @param after_json - Alias of after: the second (after) table dump; after wins when both are given
+//   @param before [object|array|string] - Alias of before_json: the first (before) table dump; before_json wins when both are given
+//   @param after_json [object|array|string] - Alias of after: the second (after) table dump; after wins when both are given
 //   @returns { mode, identical, added_count, removed_count, changed_count, unchanged_count, a_row_count, b_row_count, added_rows:[{row_name,row_data}], removed_rows:[...], changed_rows:[{row_name,changed_cells:[{column,a,b}]}] }
 TSharedPtr<FJsonObject> HandleDiffDataTables(const TSharedPtr<FJsonObject>& Params)
 {

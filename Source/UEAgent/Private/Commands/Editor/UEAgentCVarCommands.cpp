@@ -283,7 +283,7 @@ namespace
 // ---------------------------------------------------------------------------
 // MCP:set_cvar - Sets a console variable via IConsoleManager and reads the value back.  Uses IConsoleManager::Get().FindConsoleVariable(name)->Set(value, ECVF_SetByConsole). Honest error if the named cvar does not exist (unlike a raw console Exec which silently no-ops).
 //   @param name - Console variable name, e.g. "r.ScreenPercentage", "r.Shadow.MaxResolution".
-//   @param value - New value (string, number, or bool; coerced to the cvar's type).
+//   @param value [string|number|boolean] - New value (string, number, or bool; coerced to the cvar's type).
 //   @returns { set: bool, requested_value: string, name: string, value: string, string_value: string, int_value: int, float_value: float, bool_value: bool, help: string, flags: int, set_by: string }
 
 TSharedPtr<FJsonObject> HandleSetCVar(const TSharedPtr<FJsonObject>& Params)
@@ -451,7 +451,7 @@ TSharedPtr<FJsonObject> HandleListCVars(const TSharedPtr<FJsonObject>& Params)
 // set_scalability_quality
 // ---------------------------------------------------------------------------
 // MCP:set_scalability_quality - Set the running editor's scalability quality, every sg.* group at once (category all, the default) or one group, through Scalability::SetQualityLevels + ApplyCachedQualityLevels, then read all the levels back. It starts from the current levels, so a single-group change leaves the other groups as they were. The change lives in this editor session only: it is not undoable and is not written to GameUserSettings, an INI or a device profile. Check the levels before with get_scalability_levels; for one sg.* or r.* variable use set_cvar instead. An unknown quality word or category is an error and nothing changes; a number outside 0-4 is clamped. The levels are read back after the change: set is true only when every group asked for now holds its level, and otherwise success is false, with mismatches naming each group the engine left elsewhere. Repeating the call sets the same levels again (idempotent).
-//   @param quality - Level as a number 0-4 (0 Low, 1 Medium, 2 High, 3 Epic, 4 Cinematic; others clamped) or one of "Low", "Medium", "High", "Epic", "Cinematic", case ignored. Required.
+//   @param quality [number|string] - Level as a number 0-4 (0 Low, 1 Medium, 2 High, 3 Epic, 4 Cinematic; others clamped) or one of "Low", "Medium", "High", "Epic", "Cinematic", case ignored. Required.
 //   @param category - One group, case ignored: "ViewDistance", "AntiAliasing", "Shadows", "GlobalIllumination" (or "GI"), "Reflection", "PostProcess", "Texture", "Effects", "Foliage", "Shading", "Landscape"; or "all" (the default) for every group.
 //   @returns { set: bool, requested_level: int, category: string, ResolutionQuality: int, ViewDistanceQuality: int, AntiAliasingQuality: int, ShadowQuality: int, GlobalIlluminationQuality: int, ReflectionQuality: int, PostProcessQuality: int, TextureQuality: int, EffectsQuality: int, FoliageQuality: int, ShadingQuality: int, LandscapeQuality: int, mismatches?: [string] }
 
@@ -722,7 +722,7 @@ TSharedPtr<FJsonObject> HandleGetEngineIniValue(const TSharedPtr<FJsonObject>& P
 // MCP:set_engine_ini_value - Write one key into the GConfig copy of an INI (Engine by default), flush it to the saved config under Saved/Config/<Platform>/, and verify by reading it back (applied). It does not edit Config/Default*.ini, and objects that already loaded their config are not reloaded. The value may be text, a bool or a number; with plugin_name it writes a plugin's setting, the section defaulting to the plugin's /Script/<Plugin>.<Plugin>.
 //   @param section - INI section, e.g. "/Script/Engine.RendererSettings"; created when missing; surrounding brackets are dropped. Required unless plugin_name is given.
 //   @param key - Key inside the section, e.g. "r.DefaultFeature.AntiAliasing"; its current value is replaced.
-//   @param value - Value to write: a string written verbatim (an empty string is allowed), a JSON bool written as GConfig writes one ("True"/"False"), or a JSON number written as its text (an integer without decimals).
+//   @param value [string|boolean|number] - Value to write: a string written verbatim (an empty string is allowed), a JSON bool written as GConfig writes one ("True"/"False"), or a JSON number written as its text (an integer without decimals).
 //   @param config_file - Config base name without extension, e.g. "Engine" (default), "Game", "Input"; "Engine.ini" is not resolved.
 //   @param plugin_name - Optional plugin, as its .uplugin is named: an unknown one fails with nothing written; a known one adds its identity to the reply and makes section default to /Script/<Plugin>.<Plugin>.
 //   @returns { applied, section, key, value, value_type: "string"|"bool"|"number", readback_value, config_file, config_file_path, plugin_name?, plugin_status?, plugin_version?, plugin_description?, plugin_author?, plugin_category?, plugin_loaded?, plugin_enabled?, plugin_path?, plugin_file? }

@@ -471,7 +471,7 @@ namespace
 //   @param system_path - Asset path of the Niagara System.
 //   @param parameter_name - User parameter name (without the "User." prefix).
 //   @param type - Optional type token: Float|Vector|Vec2|Vec4|Color|Bool|Int (case-insensitive); when omitted a vector, vec2, vec4 or color key picks that type, else Float
-//   @param value - The value of a Float (a number), Int (a whole number) or Bool (true or false) parameter; those types fail without it or with another JSON type
+//   @param value [number|boolean] - The value of a Float (a number), Int (a whole number) or Bool (true or false) parameter; those types fail without it or with another JSON type
 //   @param vector - [X, Y, Z], 3 numbers, the value of a Vector parameter (required for it; also picks type Vector when type is omitted)
 //   @param vec2 - [X, Y], 2 numbers, the value of a Vec2 parameter (required for it)
 //   @param vec4 - [X, Y, Z, W], 4 numbers, the value of a Vec4 parameter (required for it)

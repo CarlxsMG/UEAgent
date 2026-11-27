@@ -6227,7 +6227,7 @@ TSharedPtr<FJsonObject> HandleSetSubSectionParameters(const TSharedPtr<FJsonObje
 //   @param attenuation_path - Optional content path of a USoundAttenuation to set (only effective when override_attenuation is true).
 //   @param volume - Optional volume to key on the SoundVolume channel (0..N; 1 = unity gain).
 //   @param pitch - Optional pitch multiplier to key on the PitchMultiplier channel (1.0 = normal speed).
-//   @param time_seconds - Optional time in seconds for the volume/pitch keys; omit to set them as constants.
+//   @param time_seconds [number] - Optional time in seconds for the volume/pitch keys; omit to set them as constants.
 //   @param start_offset_frames - Optional start offset in tick-resolution frames (the unit get_audio_section_properties reports), written as-is with fractions truncated; wins over start_offset_seconds.
 //   @param start_offset_seconds - Optional start offset in seconds, converted to tick-resolution frames and rounded; ignored when start_offset_frames is given.
 //   @returns { sequence_path: string, section_class: string, audio_track_index: int, section_index: int, sound: string, sound_set: bool, looping: bool, play_until_finished?: bool (needs UE 5.8), suppress_subtitles: bool, override_attenuation: bool, attenuation: string, attenuation_set: bool, volume?: number, volume_key_count?: int, volume_keys_written?: int, pitch?: number, pitch_key_count?: int, pitch_keys_written?: int, old_start_offset_frames?: int, new_start_offset_frames?: int, new_start_offset_seconds?: number, set: bool, changed: bool, saved: bool, save_error?: string, note?: string } -- the volume/pitch fields only when that value was passed (keys_written 0: the channel already held that constant), the start offset fields only when an offset was passed.
@@ -6470,7 +6470,7 @@ TSharedPtr<FJsonObject> HandleGetAudioSectionProperties(const TSharedPtr<FJsonOb
 //   @param track_type - Optional class filter (default resolves the transform track; see set_section_properties).
 //   @param track_index - Index into the binding's tracks (default 0). Without binding_guid it indexes the root tracks.
 //   @param section_index - Index of the section on the resolved track (default 0).
-//   @param channels - Channels to ENABLE: a JSON array (e.g. ["TranslationX","Rotation"]) OR a comma-separated string. Tokens: TranslationX/Y/Z, Translation, RotationX/Y/Z (Roll/Pitch/Yaw), Rotation, ScaleX/Y/Z, Scale, Weight, AllTransform, All, None.
+//   @param channels [array|string] - Channels to ENABLE: a JSON array (e.g. ["TranslationX","Rotation"]) OR a comma-separated string. Tokens: TranslationX/Y/Z, Translation, RotationX/Y/Z (Roll/Pitch/Yaw), Rotation, ScaleX/Y/Z, Scale, Weight, AllTransform, All, None.
 //   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
 //   @returns { sequence_path: string, section_index: int, channels: string[], channel_mask: int, set: bool, changed: bool, saved: bool, note: string, save_error?: string }
 TSharedPtr<FJsonObject> HandleSetTransformSectionMask(const TSharedPtr<FJsonObject>& Params)

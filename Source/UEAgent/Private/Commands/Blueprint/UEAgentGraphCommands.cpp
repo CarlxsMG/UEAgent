@@ -6927,7 +6927,7 @@ TSharedPtr<FJsonObject> HandleGetPropertyAccessPath(const TSharedPtr<FJsonObject
 // MCP:set_property_access_path - Rewrite a UK2Node_PropertyAccess node's binding Path and reconstruct the node so the leaf property re-resolves and the Value pin re-types, then return the path READ BACK -- so resolved:true is real evidence the new binding points at something. It does NOT recompile: follow with compile_blueprint with return_messages=true. reconstructed:false means the PropertyAccessEditor feature was unavailable: the path WAS written but text_path/resolved_pin stay stale until the graph reopens.
 //   @param blueprint_name - Blueprint name or path (usually an Animation Blueprint).
 //   @param node_id - NodeGuid of the property-access node; any other node class is refused by name.
-//   @param path - The new path: either an array of segment strings (["InAnimInstance","Foo"]) OR a dotted string ("InAnimInstance.Foo"). An empty result is an error, never a cleared binding.
+//   @param path [array|string] - The new path: either an array of segment strings (["InAnimInstance","Foo"]) OR a dotted string ("InAnimInstance.Foo"). An empty result is an error, never a cleared binding.
 //   @param graph_name - Target graph name; defaults to the Blueprint's event graph when omitted.
 //   @returns { node_id, graph_name, reconstructed, path:[string], text_path, resolved, resolved_pin, note? } -- path/text_path/resolved are re-read AFTER the reconstruct, so they are the oracle rather than an echo.
 TSharedPtr<FJsonObject> HandleSetPropertyAccessPath(const TSharedPtr<FJsonObject>& Params)
