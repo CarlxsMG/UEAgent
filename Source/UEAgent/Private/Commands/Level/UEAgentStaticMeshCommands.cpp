@@ -74,15 +74,23 @@ namespace
 		return nullptr;
 	}
 
-	/** Saves the mesh's package: null when it saved, else the error reply carrying the save error. */
-	TSharedPtr<FJsonObject> StaticMesh_SaveOrReply(UStaticMesh* Mesh)
+	/**
+	 * The reply of a mutation checked by reading the mesh back: Data[Measured] = bApplied, the mesh is saved,
+	 * and success needs both. The save runs even when the read-back disagrees, so the payload reports the
+	 * state the asset was left in.
+	 */
+	TSharedPtr<FJsonObject> StaticMesh_SaveCheckedReply(UStaticMesh* Mesh, const TSharedPtr<FJsonObject>& Data,
+		bool bApplied, const TCHAR* Command, const TCHAR* Measured)
 	{
+		Data->SetBoolField(Measured, bApplied);
 		FString SaveError;
-		if (!mcp_common::SaveAssetPackage(Mesh->GetOutermost(), Mesh, SaveError))
+		const bool bSaved = mcp_common::SaveAssetPackage(Mesh->GetOutermost(), Mesh, SaveError);
+		if (!bApplied)
 		{
-			return mcp_common::MakeErrorReply(SaveError);
+			mcp_common::AddSaveOutcome(Data, bSaved, SaveError);
+			return mcp_common::MakeOutcomeReply(Data, false, mcp_common::MeasuredOutcomeError(Command, Measured));
 		}
-		return nullptr;
+		return mcp_common::MakeSavedReply(Data, bSaved, Command, SaveError);
 	}
 
 	/** A reply payload that starts with static_mesh_path. */
@@ -230,11 +238,11 @@ TSharedPtr<FJsonObject> HandleGetStaticMeshInfo(
 // ---------------------------------------------------------------------------
 // set_static_mesh_nanite
 // ---------------------------------------------------------------------------
-// MCP:set_static_mesh_nanite - Set the Nanite settings of a UStaticMesh asset through the StaticMeshEditor subsystem, which rebuilds the mesh, then save it; a failed save is an error. Both fields are always written: omitting enabled disables Nanite and omitting keep_percent_triangles resets it to 1.0. Returns nanite_enabled read back.
+// MCP:set_static_mesh_nanite - Set the Nanite settings of a UStaticMesh asset through the StaticMeshEditor subsystem, which rebuilds the mesh, then save it; a failed save is an error. Both fields are always written: omitting enabled disables Nanite and omitting keep_percent_triangles resets it to 1.0. nanite_enabled and keep_percent_triangles are read back; applied is false, and the call fails, when either differs from the request.
 //   @param static_mesh_path - Content path to the UStaticMesh asset.
 //   @param enabled - true enables Nanite, false disables it; default false, so leaving it out disables Nanite.
 //   @param keep_percent_triangles - Fraction of the source triangles Nanite keeps, 1.0 keeps them all (default 1.0, written even when omitted).
-//   @returns { static_mesh_path, nanite_enabled, saved }
+//   @returns { static_mesh_path, nanite_enabled, keep_percent_triangles, applied, saved, save_error? }
 TSharedPtr<FJsonObject> HandleSetStaticMeshNanite(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -269,15 +277,16 @@ TSharedPtr<FJsonObject> HandleSetStaticMeshNanite(
 	SMES->SetNaniteSettings(Mesh, Settings, true);
 	FlushRenderingCommands();
 
-	if (TSharedPtr<FJsonObject> SaveFailed = StaticMesh_SaveOrReply(Mesh)) { return SaveFailed; }
-
-	// Read back to confirm
-	const bool bConfirm = SMES->GetNaniteSettings(Mesh).bEnabled != 0;
+	// Read back both fields the call writes.
+	const FMeshNaniteSettings ReadSettings = SMES->GetNaniteSettings(Mesh);
+	const bool bConfirm = ReadSettings.bEnabled != 0;
+	const bool bApplied = bConfirm == bEnabled
+		&& FMath::IsNearlyEqual(ReadSettings.KeepPercentTriangles, Settings.KeepPercentTriangles, 1e-4f);
 
 	TSharedPtr<FJsonObject> Data = StaticMesh_NewPayload(MeshPath);
 	Data->SetBoolField(TEXT("nanite_enabled"), bConfirm);
-	Data->SetBoolField(TEXT("saved"), true);
-	return mcp_common::MakeOkReply(Data);
+	Data->SetNumberField(TEXT("keep_percent_triangles"), ReadSettings.KeepPercentTriangles);
+	return StaticMesh_SaveCheckedReply(Mesh, Data, bApplied, TEXT("set_static_mesh_nanite"), TEXT("applied"));
 }
 
 // ---------------------------------------------------------------------------
@@ -290,7 +299,7 @@ TSharedPtr<FJsonObject> HandleSetStaticMeshNanite(
 //   @param rotation - Socket relative rotation as [pitch, yaw, roll] (optional)
 //   @param scale - Socket relative scale as [x, y, z] (optional; defaults to 1,1,1)
 //   @param tag - Free-form socket tag string (optional)
-//   @returns { socket_name, socket_count, location_x, location_y, location_z, scale_x, scale_y, scale_z, tag }
+//   @returns { static_mesh_path, socket_name, socket_count, location_x, location_y, location_z, scale_x, scale_y, scale_z, tag, added, saved, save_error? } -- added is read back (the name resolves to the new socket)
 TSharedPtr<FJsonObject> HandleAddStaticMeshSocket(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -331,9 +340,10 @@ TSharedPtr<FJsonObject> HandleAddStaticMeshSocket(
 	UE_LOG(LogTemp, Verbose, TEXT("add_static_mesh_socket: '%s' on %s (scale=%s tag='%s')"),
 		*SocketName, *MeshPath, *Socket->RelativeScale.ToString(), *Socket->Tag);
 
-	if (TSharedPtr<FJsonObject> SaveFailed = StaticMesh_SaveOrReply(Mesh)) { return SaveFailed; }
+	// Read back: the mesh resolves the name to the new socket.
+	const bool bAdded = Mesh->FindSocket(FName(*SocketName)) == Socket;
 
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	TSharedPtr<FJsonObject> Data = StaticMesh_NewPayload(MeshPath);
 	Data->SetStringField(TEXT("socket_name"), SocketName);
 	Data->SetNumberField(TEXT("socket_count"), Mesh->Sockets.Num());
 	Data->SetNumberField(TEXT("location_x"), Socket->RelativeLocation.X);
@@ -343,7 +353,7 @@ TSharedPtr<FJsonObject> HandleAddStaticMeshSocket(
 	Data->SetNumberField(TEXT("scale_y"), Socket->RelativeScale.Y);
 	Data->SetNumberField(TEXT("scale_z"), Socket->RelativeScale.Z);
 	Data->SetStringField(TEXT("tag"), Socket->Tag);
-	return mcp_common::MakeOkReply(Data);
+	return StaticMesh_SaveCheckedReply(Mesh, Data, bAdded, TEXT("add_static_mesh_socket"), TEXT("added"));
 }
 
 // ---------------------------------------------------------------------------
@@ -352,7 +362,7 @@ TSharedPtr<FJsonObject> HandleAddStaticMeshSocket(
 // MCP:remove_static_mesh_socket - Remove one socket, found by name, from a UStaticMesh asset loaded from its package or object path, then save the mesh; there is no undo transaction. A name the mesh does not have is a success with removed=false, and nothing is touched or saved (idempotent). A mesh that does not load is an error, and so is a failed save -- refused while PIE runs or under a read-only root -- after which the socket is already gone from the mesh in memory. socket_count is the number of sockets left. List sockets with get_static_mesh_info, add one with add_static_mesh_socket, rename one with rename_static_mesh_socket; skeletal meshes use remove_skeletal_mesh_socket and skeletons remove_skeleton_socket.
 //   @param static_mesh_path - Package or object path of the UStaticMesh, e.g. "/Game/Meshes/SM_Crate".
 //   @param socket_name - Name of the socket to remove, compared as an FName (case-insensitive).
-//   @returns { static_mesh_path, socket_name, removed, socket_count }
+//   @returns { static_mesh_path, socket_name, removed, socket_count, saved?, save_error? } -- removed is read back (the socket is no longer in the mesh's list)
 TSharedPtr<FJsonObject> HandleRemoveStaticMeshSocket(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -382,13 +392,12 @@ TSharedPtr<FJsonObject> HandleRemoveStaticMeshSocket(
 
 	UE_LOG(LogTemp, Verbose, TEXT("remove_static_mesh_socket: removed '%s' from %s"), *SocketName, *MeshPath);
 
-	if (TSharedPtr<FJsonObject> SaveFailed = StaticMesh_SaveOrReply(Mesh)) { return SaveFailed; }
-
 	TSharedPtr<FJsonObject> Data = StaticMesh_NewPayload(MeshPath);
 	Data->SetStringField(TEXT("socket_name"), SocketName);
-	Data->SetBoolField(TEXT("removed"), true);
 	Data->SetNumberField(TEXT("socket_count"), Mesh->Sockets.Num());
-	return mcp_common::MakeOkReply(Data);
+	// Read back: the socket object is no longer in the mesh's list.
+	const bool bRemoved = !Mesh->Sockets.Contains(Socket);
+	return StaticMesh_SaveCheckedReply(Mesh, Data, bRemoved, TEXT("remove_static_mesh_socket"), TEXT("removed"));
 }
 
 // ---------------------------------------------------------------------------
@@ -400,7 +409,7 @@ TSharedPtr<FJsonObject> HandleRemoveStaticMeshSocket(
 //   @param location - New relative location [x, y, z] in cm from the mesh origin, e.g. [0, 0, 50] (optional).
 //   @param rotation - New relative rotation [pitch, yaw, roll] in degrees, e.g. [0, 90, 0] (optional).
 //   @param scale - New relative scale [x, y, z] as multipliers, e.g. [1, 1, 1] (optional).
-//   @returns { static_mesh_path, socket_name, updated, location:{x,y,z}, rotation:{pitch,yaw,roll}, scale:{x,y,z}, saved }
+//   @returns { static_mesh_path, socket_name, updated, location:{x,y,z}, rotation:{pitch,yaw,roll}, scale:{x,y,z}, saved, save_error? } -- updated is read back (each given field matches the socket)
 TSharedPtr<FJsonObject> HandleSetStaticMeshSocketTransform(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -438,15 +447,25 @@ TSharedPtr<FJsonObject> HandleSetStaticMeshSocketTransform(
 	UE_LOG(LogTemp, Verbose, TEXT("set_static_mesh_socket_transform: '%s' on %s (loc=%s rot=%s scale=%s)"),
 		*SocketName, *MeshPath, *Socket->RelativeLocation.ToString(), *Socket->RelativeRotation.ToString(), *Socket->RelativeScale.ToString());
 
-	if (TSharedPtr<FJsonObject> SaveFailed = StaticMesh_SaveOrReply(Mesh)) { return SaveFailed; }
-
-	// Read back the transform fields.
+	// Read back the transform fields, and check the given ones against the socket the mesh resolves by name.
+	const UStaticMeshSocket* ReadSocket = Mesh->FindSocket(FName(*SocketName));
+	bool bUpdated = ReadSocket == Socket;
+	if (bUpdated && Params->HasField(TEXT("location")))
+	{
+		bUpdated &= ReadSocket->RelativeLocation.Equals(mcp_common::ReadJsonVector(Params, TEXT("location")), 1e-3);
+	}
+	if (bUpdated && Params->HasField(TEXT("rotation")))
+	{
+		bUpdated &= ReadSocket->RelativeRotation.Equals(mcp_common::ReadJsonRotator(Params, TEXT("rotation")), 1e-3);
+	}
+	if (bUpdated && Params->HasField(TEXT("scale")))
+	{
+		bUpdated &= ReadSocket->RelativeScale.Equals(mcp_common::ReadJsonVector(Params, TEXT("scale")), 1e-3);
+	}
 	TSharedPtr<FJsonObject> Data = StaticMesh_NewPayload(MeshPath);
 	Data->SetStringField(TEXT("socket_name"), SocketName);
-	Data->SetBoolField(TEXT("updated"), true);
 	StaticMesh_AddSocketTransform(Data, Socket);
-	Data->SetBoolField(TEXT("saved"), true);
-	return mcp_common::MakeOkReply(Data);
+	return StaticMesh_SaveCheckedReply(Mesh, Data, bUpdated, TEXT("set_static_mesh_socket_transform"), TEXT("updated"));
 }
 
 // ---------------------------------------------------------------------------
@@ -456,7 +475,7 @@ TSharedPtr<FJsonObject> HandleSetStaticMeshSocketTransform(
 //   @param static_mesh_path - Content path to the UStaticMesh asset.
 //   @param socket_name - Current name of the socket to rename.
 //   @param new_name - New name for the socket.
-//   @returns { static_mesh_path, old_name, new_name, renamed, socket_count, saved }
+//   @returns { static_mesh_path, old_name, new_name, renamed, already_named?, socket_count, saved, save_error? } -- renamed is read back (new_name resolves to the socket)
 TSharedPtr<FJsonObject> HandleRenameStaticMeshSocket(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -507,18 +526,14 @@ TSharedPtr<FJsonObject> HandleRenameStaticMeshSocket(
 
 	UE_LOG(LogTemp, Verbose, TEXT("rename_static_mesh_socket: '%s' -> '%s' on %s"), *SocketName, *NewName, *MeshPath);
 
-	if (TSharedPtr<FJsonObject> SaveFailed = StaticMesh_SaveOrReply(Mesh)) { return SaveFailed; }
-
-	// Read back: the socket must now resolve under its new name.
-	const bool bRenamed = Mesh->FindSocket(FName(*NewName)) != nullptr;
+	// Read back: the socket resolves under its new name.
+	const bool bRenamed = Mesh->FindSocket(FName(*NewName)) == Socket;
 
 	TSharedPtr<FJsonObject> Data = StaticMesh_NewPayload(MeshPath);
 	Data->SetStringField(TEXT("old_name"), SocketName);
 	Data->SetStringField(TEXT("new_name"), NewName);
-	Data->SetBoolField(TEXT("renamed"), bRenamed);
 	Data->SetNumberField(TEXT("socket_count"), Mesh->Sockets.Num());
-	Data->SetBoolField(TEXT("saved"), true);
-	return mcp_common::MakeOkReply(Data);
+	return StaticMesh_SaveCheckedReply(Mesh, Data, bRenamed, TEXT("rename_static_mesh_socket"), TEXT("renamed"));
 }
 
 // ---------------------------------------------------------------------------
@@ -528,7 +543,7 @@ TSharedPtr<FJsonObject> HandleRenameStaticMeshSocket(
 //   @param static_mesh_path - Content path to the UStaticMesh asset.
 //   @param material_index - Zero-based index of an existing material slot.
 //   @param material_path - Content path to the UMaterialInterface to assign.
-//   @returns { static_mesh_path, material_index, material_path, saved }
+//   @returns { static_mesh_path, material_index, material_path, applied, saved, save_error? } -- applied is false, and the call fails, when the slot reads back another material
 TSharedPtr<FJsonObject> HandleSetStaticMeshMaterialSlot(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -565,8 +580,6 @@ TSharedPtr<FJsonObject> HandleSetStaticMeshMaterialSlot(
 	UE_LOG(LogTemp, Verbose, TEXT("set_static_mesh_material_slot: slot %d -> %s on %s"),
 		MaterialIndex, *MaterialPath, *MeshPath);
 
-	if (TSharedPtr<FJsonObject> SaveFailed = StaticMesh_SaveOrReply(Mesh)) { return SaveFailed; }
-
 	// Read back the assigned material path.
 	UMaterialInterface* ReadBack = Mesh->GetMaterial(MaterialIndex);
 	const FString ReadBackPath = ReadBack ? ReadBack->GetPathName() : FString();
@@ -574,8 +587,7 @@ TSharedPtr<FJsonObject> HandleSetStaticMeshMaterialSlot(
 	TSharedPtr<FJsonObject> Data = StaticMesh_NewPayload(MeshPath);
 	Data->SetNumberField(TEXT("material_index"), MaterialIndex);
 	Data->SetStringField(TEXT("material_path"), ReadBackPath);
-	Data->SetBoolField(TEXT("saved"), true);
-	return mcp_common::MakeOkReply(Data);
+	return StaticMesh_SaveCheckedReply(Mesh, Data, ReadBack == Mat, TEXT("set_static_mesh_material_slot"), TEXT("applied"));
 }
 
 // ---------------------------------------------------------------------------
@@ -584,7 +596,7 @@ TSharedPtr<FJsonObject> HandleSetStaticMeshMaterialSlot(
 // MCP:set_static_mesh_collision_complexity - Set the collision complexity (BodySetup CollisionTraceFlag) of a UStaticMesh asset, creating its BodySetup when missing, then save it; a failed save is an error. An unrecognized complexity silently becomes default, so check collision_complexity, which is read back.
 //   @param static_mesh_path - Content path to the UStaticMesh asset.
 //   @param complexity - One of "default", "simple_and_complex", "simple_as_complex", "complex_as_simple", case-insensitive; any other value is stored as default.
-//   @returns { static_mesh_path, collision_complexity, saved }
+//   @returns { static_mesh_path, collision_complexity, applied, saved, save_error? }
 TSharedPtr<FJsonObject> HandleSetStaticMeshCollisionComplexity(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -613,18 +625,14 @@ TSharedPtr<FJsonObject> HandleSetStaticMeshCollisionComplexity(
 	BodySetup->Modify();
 	BodySetup->CollisionTraceFlag = Flag;
 
-	if (TSharedPtr<FJsonObject> SaveFailed = StaticMesh_SaveOrReply(Mesh)) { return SaveFailed; }
-
-	// Read back
-	UStaticMeshEditorSubsystem* SMES = GEditor->GetEditorSubsystem<UStaticMeshEditorSubsystem>();
-	const FString ReadBack = SMES
-		? CollisionFlagToString(SMES->GetCollisionComplexity(Mesh))
-		: CollisionFlagToString(Flag);
+	// Read back from the mesh's BodySetup, not from the pointer written through.
+	const UBodySetup* ReadSetup = Mesh->GetBodySetup();
+	const bool bApplied = ReadSetup && ReadSetup->CollisionTraceFlag == Flag;
 
 	TSharedPtr<FJsonObject> Data = StaticMesh_NewPayload(MeshPath);
-	Data->SetStringField(TEXT("collision_complexity"), ReadBack);
-	Data->SetBoolField(TEXT("saved"), true);
-	return mcp_common::MakeOkReply(Data);
+	Data->SetStringField(TEXT("collision_complexity"),
+		ReadSetup ? CollisionFlagToString(ReadSetup->CollisionTraceFlag) : FString());
+	return StaticMesh_SaveCheckedReply(Mesh, Data, bApplied, TEXT("set_static_mesh_collision_complexity"), TEXT("applied"));
 }
 
 // ---------------------------------------------------------------------------
