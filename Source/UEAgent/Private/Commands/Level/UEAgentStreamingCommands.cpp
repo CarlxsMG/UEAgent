@@ -254,11 +254,20 @@ TSharedPtr<FJsonObject> HandleAddStreamingLevel(const TSharedPtr<FJsonObject>& P
     }
     World->BroadcastLevelsChanged();
 
+    // The wrapper must now be listed by the world, with the requested flags.
+    const bool bAdded = World->GetStreamingLevels().Contains(StreamingLevel);
+    const bool bFlagsOk = StreamingLevel->ShouldBeLoaded() == bShouldBeLoaded
+        && StreamingLevel->GetShouldBeVisibleFlag() == bShouldBeVisible;
     TSharedPtr<FJsonObject> Data = StreamingLevelToJson(StreamingLevel);
-    Data->SetBoolField(TEXT("added"), true);
+    Data->SetBoolField(TEXT("added"), bAdded);
     Data->SetBoolField(TEXT("already_present"), false);
     Data->SetNumberField(TEXT("streaming_level_count"), World->GetStreamingLevels().Num());
-    return mcp_common::MakeOkReply(Data);
+    const bool bOk = bAdded && bFlagsOk;
+    return mcp_common::MakeOutcomeReply(Data, bOk, bOk ? FString() : FString::Printf(
+        TEXT("add_streaming_level: %s re-reads added=%s, should_be_loaded=%s, should_be_visible=%s after the add."),
+        *PackageName, bAdded ? TEXT("true") : TEXT("false"),
+        StreamingLevel->ShouldBeLoaded() ? TEXT("true") : TEXT("false"),
+        StreamingLevel->GetShouldBeVisibleFlag() ? TEXT("true") : TEXT("false")));
 }
 
 // ---------------------------------------------------------------------------
@@ -326,10 +335,14 @@ TSharedPtr<FJsonObject> HandleSetStreamingLevelLoaded(const TSharedPtr<FJsonObje
     World->BroadcastLevelsChanged();
 
     // Read the applied value back (ShouldBeLoaded() is the authoritative virtual).
+    const bool bApplied = StreamingLevel->ShouldBeLoaded() == bLoaded;
     TSharedPtr<FJsonObject> Data = StreamingLevelToJson(StreamingLevel);
     Data->SetBoolField(TEXT("requested_loaded"), bLoaded);
-    Data->SetBoolField(TEXT("applied"), StreamingLevel->ShouldBeLoaded() == bLoaded);
-    return mcp_common::MakeOkReply(Data);
+    Data->SetBoolField(TEXT("applied"), bApplied);
+    return mcp_common::MakeOutcomeReply(Data, bApplied, bApplied ? FString() : FString::Printf(
+        TEXT("set_streaming_level_loaded: %s still reads should_be_loaded=%s; its streaming class (%s) does not store the request."),
+        *StreamingLevel->GetWorldAssetPackageName(), StreamingLevel->ShouldBeLoaded() ? TEXT("true") : TEXT("false"),
+        *StreamingLevel->GetClass()->GetName()));
 }
 
 // ---------------------------------------------------------------------------
@@ -362,10 +375,13 @@ TSharedPtr<FJsonObject> HandleSetStreamingLevelVisible(const TSharedPtr<FJsonObj
     World->BroadcastLevelsChanged();
 
     // GetShouldBeVisibleFlag() reads the raw requested-visible flag we just set.
+    const bool bApplied = StreamingLevel->GetShouldBeVisibleFlag() == bVisible;
     TSharedPtr<FJsonObject> Data = StreamingLevelToJson(StreamingLevel);
     Data->SetBoolField(TEXT("requested_visible"), bVisible);
-    Data->SetBoolField(TEXT("applied"), StreamingLevel->GetShouldBeVisibleFlag() == bVisible);
-    return mcp_common::MakeOkReply(Data);
+    Data->SetBoolField(TEXT("applied"), bApplied);
+    return mcp_common::MakeOutcomeReply(Data, bApplied, bApplied ? FString() : FString::Printf(
+        TEXT("set_streaming_level_visible: %s still reads should_be_visible=%s after the request."),
+        *StreamingLevel->GetWorldAssetPackageName(), StreamingLevel->GetShouldBeVisibleFlag() ? TEXT("true") : TEXT("false")));
 }
 
 // ---------------------------------------------------------------------------

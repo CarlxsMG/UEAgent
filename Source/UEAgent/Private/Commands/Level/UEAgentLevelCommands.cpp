@@ -1649,17 +1649,30 @@ namespace
     // Inject one simulated key, mouse-button or axis event into a PlayerController. Temporarily
     // disables bFilterInputByPlatformUser (save/restore) so INPUTDEVICEID_NONE's simulated
     // event isn't dropped for not mapping to the target PlayerController's exact platform user
-    // -- a gotcha of UInputSettings/IPlatformInputDeviceMapper.
-    void InjectSimulatedKeyEvent(APlayerController* PC, const FKey& Key, EInputEvent Event, float AmountDepressed)
+    // -- a gotcha of UInputSettings/IPlatformInputDeviceMapper. Returns InputKey's verdict: whether
+    // some input layer of the controller consumed the event.
+    bool InjectSimulatedKeyEvent(APlayerController* PC, const FKey& Key, EInputEvent Event, float AmountDepressed)
     {
         UInputSettings* InputSettings = UInputSettings::GetInputSettings();
         const bool bPrevFilter = InputSettings ? InputSettings->bFilterInputByPlatformUser : false;
         if (InputSettings) { InputSettings->bFilterInputByPlatformUser = false; }
 
         const FInputKeyEventArgs Args = FInputKeyEventArgs::CreateSimulated(Key, Event, AmountDepressed);
-        PC->InputKey(Args);
+        const bool bHandled = PC->InputKey(Args);
 
         if (InputSettings) { InputSettings->bFilterInputByPlatformUser = bPrevFilter; }
+        return bHandled;
+    }
+
+    // The reply of an injection: success when the event reached the controller (or Slate); whether the
+    // game reacted is a state read the caller makes, so the verdict says that instead of claiming it.
+    TSharedPtr<FJsonObject> MakeInjectionReply(const TSharedPtr<FJsonObject>& R, bool bDelivered, const TCHAR* Command, const FString& NotDeliveredError)
+    {
+        return mcp_common::MakeVerifiedReply(R, bDelivered,
+            bDelivered ? mcp_common::EMcpVerification::NotVerifiable : mcp_common::EMcpVerification::Failed,
+            TEXT("event delivery to APlayerController::InputKey / FSlateApplication"),
+            FString::Printf(TEXT("%s: delivery is measured; the game's reaction is not -- read the state it should change."), Command),
+            bDelivered ? FString() : NotDeliveredError);
     }
 
     bool ParseDigitalInputEvent(const FString& EventStr, EInputEvent& OutEvent)
@@ -1720,6 +1733,7 @@ TSharedPtr<FJsonObject> HandleInjectKeyInput(const TSharedPtr<FJsonObject>& Para
     }
 
     bool bControllerInjected = false;
+    bool bControllerHandled = false;
     if (bRouteController)
     {
         FString ResolveError;
@@ -1728,7 +1742,7 @@ TSharedPtr<FJsonObject> HandleInjectKeyInput(const TSharedPtr<FJsonObject>& Para
         {
             return mcp_common::MakeErrorReply(ResolveError);
         }
-        InjectSimulatedKeyEvent(PC, Key, Event, static_cast<float>(AmountDepressed));
+        bControllerHandled = InjectSimulatedKeyEvent(PC, Key, Event, static_cast<float>(AmountDepressed));
         bControllerInjected = true;
     }
 
@@ -1759,13 +1773,16 @@ TSharedPtr<FJsonObject> HandleInjectKeyInput(const TSharedPtr<FJsonObject>& Para
         }
     }
 
+    const bool bInjected = bControllerInjected || bSlateInjected;
     TSharedPtr<FJsonObject> R = MakeShared<FJsonObject>();
-    R->SetBoolField(TEXT("injected"), bControllerInjected || bSlateInjected);
+    R->SetBoolField(TEXT("injected"), bInjected);
     R->SetStringField(TEXT("key"), KeyName);
     R->SetStringField(TEXT("event"), EventStr);
     R->SetNumberField(TEXT("pie_client_index"), PieClientIndex);
     R->SetStringField(TEXT("route"), RouteLower);
     R->SetBoolField(TEXT("controller_injected"), bControllerInjected);
+    // InputKey's own verdict: false means no input layer of the controller consumed the key.
+    R->SetBoolField(TEXT("controller_handled"), bControllerHandled);
     R->SetBoolField(TEXT("slate_injected"), bSlateInjected);
     // slate_handled is Slate's verdict: false means NOBODY consumed the key -- usually that
     // nothing had focus. That is the useful signal, not a failure of the call.
@@ -1774,7 +1791,8 @@ TSharedPtr<FJsonObject> HandleInjectKeyInput(const TSharedPtr<FJsonObject>& Para
     {
         R->SetStringField(TEXT("slate_note"), SlateNote);
     }
-    return mcp_common::MakeOkReply(R);
+    return MakeInjectionReply(R, bInjected, TEXT("inject_key_input"),
+        FString::Printf(TEXT("inject_key_input: the key '%s' reached no route: %s"), *KeyName, *SlateNote));
 }
 
 // MCP:inject_analog_input - Feed an analog axis value (gamepad stick, trigger) to a running PIE session's PlayerController -- how you actually MOVE or LOOK headless, where inject_key_input only does digital keys. NOTE: A single axis sample decays to zero within a tick, so sustained motion needs hold_seconds, which re-injects every tick for that long and then neutralises with a 0.0; it is fire-and-forget and returns immediately. Requires an active PIE session and a genuinely analog key (a digital one is a clean error).
@@ -1810,7 +1828,7 @@ TSharedPtr<FJsonObject> HandleInjectAnalogInput(const TSharedPtr<FJsonObject>& P
         return mcp_common::MakeErrorReply(ResolveError);
     }
 
-    InjectSimulatedKeyEvent(PC, Key, IE_Axis, static_cast<float>(Value));
+    const bool bControllerHandled = InjectSimulatedKeyEvent(PC, Key, IE_Axis, static_cast<float>(Value));
 
     // Optional sustained hold: an axis sample is consumed and decays, so re-feed the same value every
     // tick for hold_seconds, then inject 0.0 to neutralize. Weak-guarded so a mid-hold PIE stop just
@@ -1835,18 +1853,19 @@ TSharedPtr<FJsonObject> HandleInjectAnalogInput(const TSharedPtr<FJsonObject>& P
                 *Elapsed += DeltaTime;
                 const bool bDone = (*Elapsed >= TotalHold);
                 const float SampleVal = bDone ? 0.0f : HeldValue;
-                InjectSimulatedKeyEvent(PCNow, HeldKey, IE_Axis, SampleVal);
+                (void)InjectSimulatedKeyEvent(PCNow, HeldKey, IE_Axis, SampleVal);
                 return !bDone; // stop after the final neutralizing sample
             }), 0.0f);
     }
 
     TSharedPtr<FJsonObject> R = MakeShared<FJsonObject>();
     R->SetBoolField(TEXT("injected"), true);
+    R->SetBoolField(TEXT("controller_handled"), bControllerHandled);
     R->SetStringField(TEXT("key"), KeyName);
     R->SetNumberField(TEXT("value"), Value);
     R->SetNumberField(TEXT("pie_client_index"), PieClientIndex);
     R->SetNumberField(TEXT("hold_seconds"), HoldSeconds);
-    return mcp_common::MakeOkReply(R);
+    return MakeInjectionReply(R, true, TEXT("inject_analog_input"), FString());
 }
 
 // MCP:inject_mouse_button - Fire a simulated mouse click at a running PIE session's PlayerController: fire/aim/interact without a human at the mouse. Press and release are SEPARATE calls, so a click is two of them and a hold is press now, release later. It injects the button only -- it does not move the cursor, so aim with set_control_rotation first. Requires an active PIE session; use inject_key_input for keyboard/gamepad buttons and click_pie_widget for UMG buttons, which this does NOT reach.
@@ -1887,14 +1906,15 @@ TSharedPtr<FJsonObject> HandleInjectMouseButton(const TSharedPtr<FJsonObject>& P
         return mcp_common::MakeErrorReply(ResolveError);
     }
 
-    InjectSimulatedKeyEvent(PC, Key, Event, 1.0f);
+    const bool bControllerHandled = InjectSimulatedKeyEvent(PC, Key, Event, 1.0f);
 
     TSharedPtr<FJsonObject> R = MakeShared<FJsonObject>();
     R->SetBoolField(TEXT("injected"), true);
+    R->SetBoolField(TEXT("controller_handled"), bControllerHandled);
     R->SetStringField(TEXT("button"), ButtonStr);
     R->SetStringField(TEXT("event"), EventStr);
     R->SetNumberField(TEXT("pie_client_index"), PieClientIndex);
-    return mcp_common::MakeOkReply(R);
+    return MakeInjectionReply(R, true, TEXT("inject_mouse_button"), FString());
 }
 
 // MCP:possess_pawn - Make the first PlayerController of a running PIE session possess a pawn of that PIE world (AController::Possess), so input and camera go to it; the pawn it controlled before is unpossessed and stays in the world. Requires PIE: start it with start_play_in_editor; with no PIE session for pie_client_index, or a name that is not a pawn in that world, it is an error and nothing changes. Then drive it with inject_key_input or inject_analog_input, or aim it with set_control_rotation. Runtime only: nothing is saved and there is no undo. A pawn the controller already has is a success with already_possessed=true and no call. The engine's authority gate silently skips the possession on a pure client's PlayerController (Standalone and ListenServer have authority): then possessed=false, had_authority=false and a note, still a success, so always read possessed.
@@ -2005,13 +2025,17 @@ TSharedPtr<FJsonObject> HandleSetControlRotation(const TSharedPtr<FJsonObject>& 
 
     TargetController->SetControlRotation(NewRot);
     const FRotator Effective = TargetController->GetControlRotation();
+    // SetControlRotation silently refuses a rotation it deems invalid, so the re-read is the verdict.
+    const bool bApplied = Effective.Equals(NewRot, 0.01f);
 
     TSharedPtr<FJsonObject> R = MakeShared<FJsonObject>();
-    R->SetBoolField(TEXT("applied"), true);
+    R->SetBoolField(TEXT("applied"), bApplied);
     R->SetStringField(TEXT("target"), TargetController->GetName());
     R->SetArrayField(TEXT("control_rotation"), mcp_common::RotatorToJsonArray(Effective));
     R->SetNumberField(TEXT("pie_client_index"), PieClientIndex);
-    return mcp_common::MakeOkReply(R);
+    return mcp_common::MakeOutcomeReply(R, bApplied, bApplied ? FString() : FString::Printf(
+        TEXT("set_control_rotation: '%s' kept control rotation %s after asking for %s; the controller refused the value."),
+        *TargetController->GetName(), *Effective.ToString(), *NewRot.ToString()));
 }
 
 // MCP:set_view_target - Point the active PIE session's PlayerController camera at an actor (APlayerController::SetViewTargetWithBlend). blend_time=0 cuts instantly; >0 blends linearly. PIE-gated: clean error if no PIE session. Frames captures without spawning a camera by hand.
@@ -2196,9 +2220,14 @@ TSharedPtr<FJsonObject> HandleSetWorldGravity(const TSharedPtr<FJsonObject>& Par
     ResultObj->SetStringField(TEXT("gravity_impact_rating"), UEAgentLevelCommandsImpl::GravityImpactRating(Impact));
     ResultObj->SetArrayField(TEXT("gravity_recommendations"),
         UEAgentLevelCommandsImpl::GravityAdvice(bGravityOn, ReadBackGravity, SimulatingCount, MovableCount));
-    ResultObj->SetBoolField(TEXT("success"), true);
+    const bool bApplied = WorldSettings->GlobalGravityZ == static_cast<float>(GravityZ)
+        && (WorldSettings->bGlobalGravitySet != 0) == bEnableOverride;
+    ResultObj->SetBoolField(TEXT("success"), bApplied);
 
-    return mcp_common::MakeOkReply(ResultObj);
+    return mcp_common::MakeOutcomeReply(ResultObj, bApplied, bApplied ? FString() : FString::Printf(
+        TEXT("set_world_gravity: WorldSettings re-read GlobalGravityZ=%g, override=%s after asking for %g, override=%s."),
+        WorldSettings->GlobalGravityZ, WorldSettings->bGlobalGravitySet ? TEXT("true") : TEXT("false"),
+        GravityZ, bEnableOverride ? TEXT("true") : TEXT("false")));
 }
 
 // MCP:set_kill_z - Set the KillZ death plane on the EDITOR world's WorldSettings: any actor falling below this world Z is destroyed, provided the world's bounds checks are enabled (read that flag with get_world_settings, enable_world_bounds_checks -- with it off, KillZ does nothing and the fall looks like a bug). Optionally sets the damage type applied on the kill. Values come back RE-READ off WorldSettings, not echoed. Undoable, but it dirties the MAP: save_level to keep it.
@@ -2253,9 +2282,15 @@ TSharedPtr<FJsonObject> HandleSetKillZ(const TSharedPtr<FJsonObject>& Params)
     ResultObj->SetNumberField(TEXT("kill_z"), WorldSettings->KillZ);
     ResultObj->SetStringField(TEXT("kill_z_damage_type"),
         WorldSettings->KillZDamageType ? WorldSettings->KillZDamageType->GetName() : TEXT("None"));
-    ResultObj->SetBoolField(TEXT("success"), true);
+    const bool bApplied = WorldSettings->KillZ == static_cast<float>(KillZValue)
+        && (DamageTypeClass == nullptr || WorldSettings->KillZDamageType.Get() == DamageTypeClass);
+    ResultObj->SetBoolField(TEXT("success"), bApplied);
 
-    return mcp_common::MakeOkReply(ResultObj);
+    return mcp_common::MakeOutcomeReply(ResultObj, bApplied, bApplied ? FString() : FString::Printf(
+        TEXT("set_kill_z: WorldSettings re-read KillZ=%g, damage type %s after asking for %g."),
+        WorldSettings->KillZ,
+        WorldSettings->KillZDamageType ? *WorldSettings->KillZDamageType->GetName() : TEXT("None"),
+        KillZValue));
 }
 
 // ===========================================================================
@@ -2286,12 +2321,16 @@ TSharedPtr<FJsonObject> HandleSetActorLockLocation(const TSharedPtr<FJsonObject>
 
     Actor->Modify();
     Actor->SetLockLocation(bLocked);
+    const bool bLockedNow = Actor->IsLockLocation();
+    const bool bApplied = bLockedNow == bLocked;
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetBoolField(TEXT("applied"), true);
+    Data->SetBoolField(TEXT("applied"), bApplied);
     Data->SetStringField(TEXT("actor_name"), ActorName);
-    Data->SetBoolField(TEXT("locked"), bLocked);
-    return mcp_common::MakeOkReply(Data);
+    Data->SetBoolField(TEXT("locked"), bLockedNow);
+    return mcp_common::MakeOutcomeReply(Data, bApplied, bApplied ? FString() : FString::Printf(
+        TEXT("set_actor_lock_location: '%s' reads locked=%s after asking for %s."),
+        *ActorName, bLockedNow ? TEXT("true") : TEXT("false"), bLocked ? TEXT("true") : TEXT("false")));
 }
 
 // MCP:get_actor_lock_location - Read whether an EDITOR-world actor is location-locked in the viewport (AActor::IsLockLocation). The read-back oracle for set_actor_lock_location, and the thing to check first when a transform command reports success but the actor has not moved.
@@ -2336,20 +2375,23 @@ TSharedPtr<FJsonObject> HandleSetAbsoluteTransform(const TSharedPtr<FJsonObject>
 
     // Each flag is optional; only the ones present in the request are written.
     int32 FlagsWritten = 0;
-    bool bFlagValue = false;
-    if (Params->TryGetBoolField(TEXT("absolute_location"), bFlagValue))
+    bool bWantLocation = false, bWantRotation = false, bWantScale = false;
+    const bool bHasLocation = Params->TryGetBoolField(TEXT("absolute_location"), bWantLocation);
+    const bool bHasRotation = Params->TryGetBoolField(TEXT("absolute_rotation"), bWantRotation);
+    const bool bHasScale = Params->TryGetBoolField(TEXT("absolute_scale"), bWantScale);
+    if (bHasLocation)
     {
-        RootScene->SetUsingAbsoluteLocation(bFlagValue);
+        RootScene->SetUsingAbsoluteLocation(bWantLocation);
         ++FlagsWritten;
     }
-    if (Params->TryGetBoolField(TEXT("absolute_rotation"), bFlagValue))
+    if (bHasRotation)
     {
-        RootScene->SetUsingAbsoluteRotation(bFlagValue);
+        RootScene->SetUsingAbsoluteRotation(bWantRotation);
         ++FlagsWritten;
     }
-    if (Params->TryGetBoolField(TEXT("absolute_scale"), bFlagValue))
+    if (bHasScale)
     {
-        RootScene->SetUsingAbsoluteScale(bFlagValue);
+        RootScene->SetUsingAbsoluteScale(bWantScale);
         ++FlagsWritten;
     }
     if (FlagsWritten == 0)
@@ -2358,13 +2400,18 @@ TSharedPtr<FJsonObject> HandleSetAbsoluteTransform(const TSharedPtr<FJsonObject>
     }
 
     // The three flags are re-read off the component, not echoed from the request.
+    const bool bApplied = (!bHasLocation || RootScene->IsUsingAbsoluteLocation() == bWantLocation)
+        && (!bHasRotation || RootScene->IsUsingAbsoluteRotation() == bWantRotation)
+        && (!bHasScale || RootScene->IsUsingAbsoluteScale() == bWantScale);
     TSharedPtr<FJsonObject> Readback = MakeShared<FJsonObject>();
-    Readback->SetBoolField(TEXT("applied"), true);
+    Readback->SetBoolField(TEXT("applied"), bApplied);
     Readback->SetStringField(TEXT("actor_name"), TargetName);
     Readback->SetBoolField(TEXT("absolute_location"), RootScene->IsUsingAbsoluteLocation());
     Readback->SetBoolField(TEXT("absolute_rotation"), RootScene->IsUsingAbsoluteRotation());
     Readback->SetBoolField(TEXT("absolute_scale"), RootScene->IsUsingAbsoluteScale());
-    return mcp_common::MakeOkReply(Readback);
+    return mcp_common::MakeOutcomeReply(Readback, bApplied, bApplied ? FString() : FString::Printf(
+        TEXT("set_absolute_transform: a flag of '%s' re-reads different from the one asked for; compare the absolute_* fields with the request."),
+        *TargetName));
 }
 
 // MCP:get_absolute_transform - Read the absolute (world-space) location/rotation/scale flags of an EDITOR-world actor's root SceneComponent. The read-back oracle for set_absolute_transform, and the first thing to check when an attached actor inherits an unexpected offset or scale from its parent. An actor with no RootComponent answers has_root:false instead of failing.
@@ -2439,13 +2486,16 @@ TSharedPtr<FJsonObject> HandleSetActorLifetime(const TSharedPtr<FJsonObject>& Pa
     }), static_cast<float>(Seconds), /*bLoop*/ false);
 
     ActorLifetimeTimers.Add(Actor, NewHandle);
+    const bool bScheduled = TM.IsTimerActive(NewHandle);
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("actor_name"), ActorName);
     Result->SetNumberField(TEXT("seconds"), Seconds);
-    Result->SetBoolField(TEXT("scheduled"), true);
+    Result->SetBoolField(TEXT("scheduled"), bScheduled);
+    Result->SetNumberField(TEXT("remaining_seconds"), bScheduled ? TM.GetTimerRemaining(NewHandle) : 0.0f);
     Result->SetBoolField(TEXT("replaced_previous_timer"), bHadPrevious);
-    return mcp_common::MakeOkReply(Result);
+    return mcp_common::MakeOutcomeReply(Result, bScheduled, bScheduled ? FString() : FString::Printf(
+        TEXT("set_actor_lifetime: the destroy timer of '%s' is not active after SetTimer; nothing will destroy the actor."), *ActorName));
 }
 
 // ---------------------------------------------------------------------------
@@ -2488,13 +2538,19 @@ TSharedPtr<FJsonObject> HandleSetPieWindowSize(const TSharedPtr<FJsonObject>& Pa
     // false negative of measuring a layout against a resolution other than the one requested.
     const bool bPieActive = GEditor && GEditor->PlayWorld != nullptr;
 
+    const ULevelEditorPlaySettings* ReadBack = GetDefault<ULevelEditorPlaySettings>();
+    const bool bApplied = ReadBack->NewWindowWidth == Width && ReadBack->NewWindowHeight == Height
+        && (ReadBack->CenterNewWindow != 0) == bCenter;
+
     TSharedPtr<FJsonObject> R = MakeShared<FJsonObject>();
-    R->SetNumberField(TEXT("width"), Width);
-    R->SetNumberField(TEXT("height"), Height);
-    R->SetBoolField(TEXT("center"), bCenter);
+    R->SetNumberField(TEXT("width"), ReadBack->NewWindowWidth);
+    R->SetNumberField(TEXT("height"), ReadBack->NewWindowHeight);
+    R->SetBoolField(TEXT("center"), ReadBack->CenterNewWindow != 0);
     R->SetStringField(TEXT("applies_to"), TEXT("next PIE session"));
     R->SetBoolField(TEXT("pie_currently_active"), bPieActive);
-    return mcp_common::MakeOkReply(R);
+    return mcp_common::MakeOutcomeReply(R, bApplied, bApplied ? FString() : FString::Printf(
+        TEXT("set_pie_window_size: the play settings re-read %dx%d after asking for %dx%d."),
+        ReadBack->NewWindowWidth, ReadBack->NewWindowHeight, Width, Height));
 }
 
 const McpCommandFamilies::FRegistrar Registration =

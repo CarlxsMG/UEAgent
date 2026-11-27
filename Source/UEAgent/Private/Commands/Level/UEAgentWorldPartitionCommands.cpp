@@ -466,12 +466,16 @@ TSharedPtr<FJsonObject> HandleCreateDataLayerInstance(const TSharedPtr<FJsonObje
             FString::Printf(TEXT("CreateDataLayerInstance failed for asset '%s' in this world"), *AssetPath));
     }
 
+    // The world must now resolve the asset to the new instance.
+    const bool bCreated = Subsystem->GetDataLayerInstance(Asset) == NewInstance;
     TSharedPtr<FJsonObject> ResultObj = DataLayerInstanceToJson(NewInstance);
     ResultObj->SetStringField(TEXT("data_layer_asset_path"), AssetPath);
-    ResultObj->SetBoolField(TEXT("created"), true);
+    ResultObj->SetBoolField(TEXT("created"), bCreated);
     ResultObj->SetBoolField(TEXT("already_exists"), false);
 
-    return mcp_common::MakeOkReply(ResultObj);
+    return mcp_common::MakeOutcomeReply(ResultObj, bCreated, bCreated ? FString() : FString::Printf(
+        TEXT("create_data_layer_instance: the instance '%s' was created but the world does not resolve '%s' to it."),
+        *NewInstance->GetName(), *AssetPath));
 }
 
 // MCP:assign_actor_to_data_layer_instance - Assigns an editor-world actor to a data layer instance.  Uses UDataLayerEditorSubsystem::AddActorToDataLayer against the data layer instance referencing the given asset. Requires a World Partition world; on a non-WP (default) map this returns an honest error (no editor-world swap).
@@ -492,13 +496,17 @@ TSharedPtr<FJsonObject> HandleAssignActorToDataLayerInstance(const TSharedPtr<FJ
     const FScopedTransaction Transaction(FText::FromString(TEXT("MCP: Assign Actor To Data Layer Instance")));
     // false means the actor was already in the layer: reported, not an error.
     const bool bAdded = Target.Subsystem->AddActorToDataLayer(Target.Actor, Target.Instance);
+    const bool bInLayer = Target.Actor->ContainsDataLayer(Target.Instance);
 
     TSharedPtr<FJsonObject> Reply = UEAgentWorldPartitionCommandsImpl::ActorLayerReply(Target.Actor, Target.AssetPath, Target.Instance);
-    Reply->SetBoolField(TEXT("assigned"), bAdded);
+    Reply->SetBoolField(TEXT("assigned"), bAdded && bInLayer);
+    Reply->SetBoolField(TEXT("in_layer"), bInLayer);
     Reply->SetStringField(TEXT("message"), bAdded
         ? TEXT("Actor assigned to data layer instance")
         : TEXT("Actor already belonged to the data layer instance"));
-    return mcp_common::MakeOkReply(Reply);
+    return mcp_common::MakeOutcomeReply(Reply, bInLayer, bInLayer ? FString() : FString::Printf(
+        TEXT("assign_actor_to_data_layer_instance: '%s' is not in the data layer instance '%s' after the call (AddActorToDataLayer returned %s)."),
+        *Target.Actor->GetActorLabel(), *Target.Instance->GetName(), bAdded ? TEXT("true") : TEXT("false")));
 }
 
 // MCP:remove_actor_from_data_layer_instance - Removes an editor-world actor from a data layer instance (inverse of assign_actor_to_data_layer_instance).  Uses UDataLayerEditorSubsystem::RemoveActorFromDataLayer against the data layer instance referencing the given asset. Requires a World Partition world; on a non-WP (default) map this returns an honest error (no editor-world swap). Idempotent: removed=false means the actor was not in the layer (not an error).
@@ -520,13 +528,17 @@ TSharedPtr<FJsonObject> HandleRemoveActorFromDataLayerInstance(const TSharedPtr<
     // RemoveActorFromDataLayer returns false when the actor was not in the layer; that is
     // an idempotent signal (already-removed), NOT an error.
     const bool bRemoved = Target.Subsystem->RemoveActorFromDataLayer(Target.Actor, Target.Instance);
+    const bool bInLayer = Target.Actor->ContainsDataLayer(Target.Instance);
 
     TSharedPtr<FJsonObject> Reply = UEAgentWorldPartitionCommandsImpl::ActorLayerReply(Target.Actor, Target.AssetPath, Target.Instance);
-    Reply->SetBoolField(TEXT("removed"), bRemoved);
+    Reply->SetBoolField(TEXT("removed"), bRemoved && !bInLayer);
+    Reply->SetBoolField(TEXT("in_layer"), bInLayer);
     Reply->SetStringField(TEXT("message"), bRemoved
         ? TEXT("Actor removed from data layer instance")
         : TEXT("Actor was not in the layer"));
-    return mcp_common::MakeOkReply(Reply);
+    return mcp_common::MakeOutcomeReply(Reply, !bInLayer, !bInLayer ? FString() : FString::Printf(
+        TEXT("remove_actor_from_data_layer_instance: '%s' is still in the data layer instance '%s' after the call (RemoveActorFromDataLayer returned %s)."),
+        *Target.Actor->GetActorLabel(), *Target.Instance->GetName(), bRemoved ? TEXT("true") : TEXT("false")));
 }
 
 // MCP:remove_data_layer_instance - Removes a data layer instance from the editor world's World Partition (inverse of create_data_layer_instance).  Uses UDataLayerEditorSubsystem::DeleteDataLayer (void), verified by read-back: after delete GetDataLayerInstance(asset) must be null. Requires a World Partition world; on a non-WP (default) map this returns an honest error (no editor-world swap). Idempotent: already_deleted=true when no instance referenced the asset before the call.
