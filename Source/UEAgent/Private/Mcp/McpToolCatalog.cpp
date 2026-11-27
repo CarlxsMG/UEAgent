@@ -619,10 +619,10 @@ TSharedPtr<const FMcpToolCatalog> FMcpToolCatalog::LoadFromFile(const FString& P
 					{
 						for (const TSharedPtr<FJsonValue>& Value : *EnumJson)
 						{
-							FString Text;
-							if (Value.IsValid() && Value->TryGetString(Text))
+							FString EnumValue;
+							if (Value.IsValid() && Value->TryGetString(EnumValue))
 							{
-								Param.EnumValues.AddUnique(Text);
+								Param.EnumValues.AddUnique(EnumValue);
 							}
 						}
 					}
