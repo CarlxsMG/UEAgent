@@ -452,6 +452,7 @@ TSharedPtr<FJsonObject> HandleCreateLandscape(const TSharedPtr<FJsonObject>& Par
     Landscape->Modify();
 
     bool bImported = false;
+    int32 ComponentCountActual = 0;
     FString ImportError;
     {
         // ALandscape::Import (declared on ALandscapeProxy base, public in UE 5.7):
@@ -475,7 +476,12 @@ TSharedPtr<FJsonObject> HandleCreateLandscape(const TSharedPtr<FJsonObject>& Par
         if (LandscapeInfo)
         {
             LandscapeInfo->UpdateLayerInfoMap(Landscape);
-            bImported = true;
+            ComponentCountActual = LandscapeInfo->XYtoComponentMap.Num();
+            bImported = ComponentCountActual > 0;
+            if (!bImported)
+            {
+                ImportError = TEXT("ALandscape::Import left the landscape with 0 components");
+            }
         }
         else
         {
@@ -499,7 +505,8 @@ TSharedPtr<FJsonObject> HandleCreateLandscape(const TSharedPtr<FJsonObject>& Par
     ResultObj->SetNumberField(TEXT("vertex_count"), TotalVerts);
     ResultObj->SetNumberField(TEXT("height_midpoint"), HeightMidpoint);
     ResultObj->SetBoolField(TEXT("imported"), bImported);
-    ResultObj->SetBoolField(TEXT("landscape_created"), true);
+    ResultObj->SetNumberField(TEXT("component_count_actual"), ComponentCountActual);
+    ResultObj->SetBoolField(TEXT("landscape_created"), IsValid(Landscape));
 
     ResultObj->SetArrayField(TEXT("location"), mcp_common::VectorToJsonArray(Location));
 
@@ -508,7 +515,9 @@ TSharedPtr<FJsonObject> HandleCreateLandscape(const TSharedPtr<FJsonObject>& Par
         ResultObj->SetStringField(TEXT("import_warning"), ImportError);
     }
 
-    return mcp_common::MakeOkReply(ResultObj);
+    // `success` follows the components the landscape info reports after Import, not the spawn.
+    return mcp_common::MakeOutcomeReply(ResultObj, bImported,
+        bImported ? FString() : FString::Printf(TEXT("create_landscape: %s; see import_warning"), *ImportError));
 }
 
 // MCP:get_landscape_info - Find the terrain and read its geometry: every ALandscape actor in the editor world with its world location and scale, vertex extent (min_x/min_y/max_x/max_y, size_x/size_y) and component layout (component_count, component_size_quads, subsection_size_quads, num_subsections). The first call of any landscape task -- it gives you the actor name the other landscape tools need, and the numbers to convert a world XY into a heightmap vertex. Also the ONLY trustworthy check of where the terrain actually is: the editor's New Landscape dialog treats its Location field as the CENTRE, so a terrain can sit half a world away from the corner you typed; read `location` here afterwards instead of believing the input. Note it lists ALandscape actors only, not the LandscapeStreamingProxy actors a World-Partition map renders through.
@@ -621,8 +630,12 @@ TSharedPtr<FJsonObject> HandleCreateFoliageType(const TSharedPtr<FJsonObject>& P
             ExistObj->SetBoolField(TEXT("created"), false);
             ExistObj->SetBoolField(TEXT("already_exists"), true);
             ExistObj->SetBoolField(TEXT("mesh_set"), Existing->Mesh == Mesh);
-            ExistObj->SetBoolField(TEXT("saved"), bSaved);
-            return mcp_common::MakeOkReply(ExistObj);
+            if (Existing->Mesh != Mesh)
+            {
+                return mcp_common::MakeOutcomeReply(ExistObj, false,
+                    mcp_common::MeasuredOutcomeError(TEXT("create_foliage_type"), TEXT("mesh_set")));
+            }
+            return mcp_common::MakeSavedReply(ExistObj, bSaved, TEXT("create_foliage_type"), SaveErr);
         }
         return mcp_common::MakeErrorReply(
             FString::Printf(TEXT("Asset already exists at %s but is not a FoliageType"), *FullPath));
@@ -649,15 +662,23 @@ TSharedPtr<FJsonObject> HandleCreateFoliageType(const TSharedPtr<FJsonObject>& P
     TSharedPtr<FJsonObject> ResultObj = Landscape_NewAssetData(AssetName, PackagePath, FoliageType);
     ResultObj->SetStringField(TEXT("static_mesh"), FoliageType->Mesh ? FoliageType->Mesh->GetPathName() : TEXT("None"));
     ResultObj->SetStringField(TEXT("foliage_class"), FoliageType->GetClass()->GetName());
-    ResultObj->SetBoolField(TEXT("created"), true);
+    // Resolved through LoadObject: the asset registry may not have synced an asset made this session.
+    const bool bCreated = LoadObject<UFoliageType_InstancedStaticMesh>(nullptr, *FullPath) == FoliageType;
+    const bool bMeshSet = FoliageType->Mesh == Mesh;
+    ResultObj->SetBoolField(TEXT("created"), bCreated);
     ResultObj->SetBoolField(TEXT("already_exists"), false);
-    ResultObj->SetBoolField(TEXT("mesh_set"), FoliageType->Mesh == Mesh);
+    ResultObj->SetBoolField(TEXT("mesh_set"), bMeshSet);
     ResultObj->SetBoolField(TEXT("saved"), bSaved);
     ResultObj->SetStringField(TEXT("message"), bSaved
         ? TEXT("FoliageType created and saved to disk")
         : FString::Printf(TEXT("FoliageType created but save failed: %s"), *SaveError));
 
-    return mcp_common::MakeOkReply(ResultObj);
+    if (!bCreated || !bMeshSet)
+    {
+        return mcp_common::MakeOutcomeReply(ResultObj, false,
+            mcp_common::MeasuredOutcomeError(TEXT("create_foliage_type"), bCreated ? TEXT("mesh_set") : TEXT("created")));
+    }
+    return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("create_foliage_type"), SaveError);
 }
 
 // Read-back helper shared by set/get_foliage_type_properties.
@@ -1017,13 +1038,16 @@ TSharedPtr<FJsonObject> HandleAddFoliageInstances(const TSharedPtr<FJsonObject>&
     ResultObj->SetNumberField(TEXT("instance_count_before"), CountBefore);
     ResultObj->SetNumberField(TEXT("instance_count"), CountAfter);
     ResultObj->SetNumberField(TEXT("placed_instance_count"), PlacedCount);
-    ResultObj->SetBoolField(TEXT("instances_added_ok"), Added >= Transforms.Num());
+    const bool bAddedOk = Added >= Transforms.Num();
+    ResultObj->SetBoolField(TEXT("instances_added_ok"), bAddedOk);
     if (IFAAfter)
     {
         ResultObj->SetStringField(TEXT("foliage_actor"), IFAAfter->GetActorLabel());
     }
 
-    return mcp_common::MakeOkReply(ResultObj);
+    // `success` follows the instance count re-read from the foliage actor.
+    return mcp_common::MakeOutcomeReply(ResultObj, bAddedOk,
+        bAddedOk ? FString() : mcp_common::MeasuredOutcomeError(TEXT("add_foliage_instances"), TEXT("instances_added_ok")));
 }
 
 // MCP:get_foliage_types - List every FoliageType actually present in the level's InstancedFoliageActors, with the instance counts each carries. The level-side inventory ("what vegetation is in this map, and how much"), as opposed to get_properties which describes one asset. Nothing here means nothing has been placed, even if the FoliageType assets exist in Content.
@@ -1174,7 +1198,8 @@ TSharedPtr<FJsonObject> HandleScatterFoliageInBox(const TSharedPtr<FJsonObject>&
     ResultObj->SetNumberField(TEXT("instance_count_before"), CountBefore);
     ResultObj->SetNumberField(TEXT("total_instance_count"), CountAfter);
     ResultObj->SetNumberField(TEXT("placed_instance_count"), PlacedCount);
-    ResultObj->SetBoolField(TEXT("instances_added_ok"), Added >= Count);
+    const bool bAddedOk = Added >= Count;
+    ResultObj->SetBoolField(TEXT("instances_added_ok"), bAddedOk);
 
     ResultObj->SetArrayField(TEXT("center"), mcp_common::VectorToJsonArray(Center));
 
@@ -1185,7 +1210,9 @@ TSharedPtr<FJsonObject> HandleScatterFoliageInBox(const TSharedPtr<FJsonObject>&
         ResultObj->SetStringField(TEXT("foliage_actor"), IFAAfter->GetActorLabel());
     }
 
-    return mcp_common::MakeOkReply(ResultObj);
+    // `success` follows the instance count re-read from the foliage actor.
+    return mcp_common::MakeOutcomeReply(ResultObj, bAddedOk,
+        bAddedOk ? FString() : mcp_common::MeasuredOutcomeError(TEXT("scatter_foliage_in_box"), TEXT("instances_added_ok")));
 }
 
 // MCP:remove_foliage_instances - Delete the placed instances of one FoliageType from all InstancedFoliageActors in the level: EVERY instance by default -- the bulk undo for a scatter that went wrong -- or, with a radius, only those inside a world-space sphere, the way to carve a building site, road or clearing out of existing vegetation without wiping the whole type. Preview a sphere with get_foliage_in_radius first. The FoliageType asset itself is untouched. Undoable. Check remaining (and remaining_in_radius for a sphere) in the reply, not just removed_count.
@@ -1297,7 +1324,11 @@ TSharedPtr<FJsonObject> HandleRemoveAllFoliageForType(const TSharedPtr<FJsonObje
         ResultObj->SetNumberField(TEXT("remaining_in_radius"), RemainingInSphere);
     }
 
-    return mcp_common::MakeOkReply(ResultObj);
+    // `success` follows the re-count: no instance of the type left in the removal scope.
+    const bool bCleared = bInSphere ? (RemainingInSphere == 0) : (Remaining == 0);
+    return mcp_common::MakeOutcomeReply(ResultObj, bCleared,
+        bCleared ? FString() : mcp_common::MeasuredOutcomeError(TEXT("remove_foliage_instances"),
+            bInSphere ? TEXT("remaining_in_radius == 0") : TEXT("removed_all")));
 }
 
 // MCP:get_foliage_instance_count - Count how many instances of one FoliageType are placed across the level's InstancedFoliageActors. The cheapest oracle for "did that scatter place anything / did the removal clear it" -- one number, no transform payload. has_instances is the plain yes/no. Use get_foliage_in_radius when you need WHERE they are.
@@ -1384,11 +1415,17 @@ TSharedPtr<FJsonObject> HandleCreateLandscapeLayerInfo(const TSharedPtr<FJsonObj
             const bool bSaved = mcp_common::SaveAssetPackage(Existing->GetOutermost(), Existing, SaveErr);
 
             TSharedPtr<FJsonObject> ExistObj = Landscape_NewAssetData(AssetName, PackagePath, Existing);
+            const bool bNameSet = Existing->GetLayerName() == FName(*LayerName);
             ExistObj->SetStringField(TEXT("layer_name"), Existing->GetLayerName().ToString());
             ExistObj->SetBoolField(TEXT("created"), false);
             ExistObj->SetBoolField(TEXT("already_exists"), true);
-            ExistObj->SetBoolField(TEXT("saved"), bSaved);
-            return mcp_common::MakeOkReply(ExistObj);
+            ExistObj->SetBoolField(TEXT("layer_name_set"), bNameSet);
+            if (!bNameSet)
+            {
+                return mcp_common::MakeOutcomeReply(ExistObj, false,
+                    mcp_common::MeasuredOutcomeError(TEXT("create_landscape_layer_info"), TEXT("layer_name_set")));
+            }
+            return mcp_common::MakeSavedReply(ExistObj, bSaved, TEXT("create_landscape_layer_info"), SaveErr);
         }
         return mcp_common::MakeErrorReply(
             FString::Printf(TEXT("Asset already exists at %s but is not a LandscapeLayerInfoObject"), *FullPath));
@@ -1412,16 +1449,25 @@ TSharedPtr<FJsonObject> HandleCreateLandscapeLayerInfo(const TSharedPtr<FJsonObj
     const bool bSaved = mcp_common::SaveAssetPackage(LayerInfo->GetOutermost(), LayerInfo, SaveError);
 
     TSharedPtr<FJsonObject> ResultObj = Landscape_NewAssetData(AssetName, PackagePath, LayerInfo);
+    // Resolved through LoadObject: the asset registry may not have synced an asset made this session.
+    const bool bCreated = LoadObject<ULandscapeLayerInfoObject>(nullptr, *FullPath) == LayerInfo;
+    const bool bNameSet = LayerInfo->GetLayerName() == FName(*LayerName);
     ResultObj->SetStringField(TEXT("layer_name"), LayerInfo->GetLayerName().ToString());
     ResultObj->SetStringField(TEXT("layer_info_class"), LayerInfo->GetClass()->GetName());
-    ResultObj->SetBoolField(TEXT("created"), true);
+    ResultObj->SetBoolField(TEXT("created"), bCreated);
     ResultObj->SetBoolField(TEXT("already_exists"), false);
-    ResultObj->SetBoolField(TEXT("saved"), bSaved);
+    ResultObj->SetBoolField(TEXT("layer_name_set"), bNameSet);
     ResultObj->SetStringField(TEXT("message"), bSaved
         ? TEXT("LandscapeLayerInfoObject created and saved to disk")
         : FString::Printf(TEXT("LandscapeLayerInfoObject created but save failed: %s"), *SaveError));
 
-    return mcp_common::MakeOkReply(ResultObj);
+    if (!bCreated || !bNameSet)
+    {
+        ResultObj->SetBoolField(TEXT("saved"), bSaved);
+        return mcp_common::MakeOutcomeReply(ResultObj, false,
+            mcp_common::MeasuredOutcomeError(TEXT("create_landscape_layer_info"), bCreated ? TEXT("layer_name_set") : TEXT("created")));
+    }
+    return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("create_landscape_layer_info"), SaveError);
 }
 
 // MCP:add_landscape_layer - Register a LandscapeLayerInfo asset as a target weight (paint) layer on a landscape, so the terrain can store weight for it and the material's LandscapeLayerBlend can read it. Step 2 of three, between create_landscape_layer_info and paint_landscape_layer -- painting a layer that was never registered writes nothing. Already-registered layers return already_present=true; remove_landscape_layer is the inverse, get_landscape_layers lists what is registered now.
@@ -1476,7 +1522,9 @@ TSharedPtr<FJsonObject> HandleAddLandscapeLayer(const TSharedPtr<FJsonObject>& P
     ResultObj->SetBoolField(TEXT("already_present"), bAlreadyPresent);
     ResultObj->SetNumberField(TEXT("target_layer_count"), TargetLayerCount);
 
-    return mcp_common::MakeOkReply(ResultObj);
+    // `success` follows HasTargetLayer re-read after the add.
+    return mcp_common::MakeOutcomeReply(ResultObj, bHasLayer,
+        bHasLayer ? FString() : mcp_common::MeasuredOutcomeError(TEXT("add_landscape_layer"), TEXT("layer_added")));
 }
 
 // MCP:remove_landscape_layer - Unregister a target weight (paint) layer from a landscape -- the inverse of add_landscape_layer. Identify it either by layer_info_path or by layer_name. This detaches the layer from the terrain; it does not delete the LandscapeLayerInfo asset, and any material that still blends that layer will now read zero weight for it.
@@ -1576,7 +1624,9 @@ TSharedPtr<FJsonObject> HandleRemoveLandscapeLayer(const TSharedPtr<FJsonObject>
     ResultObj->SetBoolField(TEXT("already_absent"), false);
     ResultObj->SetNumberField(TEXT("target_layer_count"), TargetLayerCount);
 
-    return mcp_common::MakeOkReply(ResultObj);
+    // `success` follows HasTargetLayer re-read after DeleteLayer.
+    return mcp_common::MakeOutcomeReply(ResultObj, !bHasLayer,
+        !bHasLayer ? FString() : mcp_common::MeasuredOutcomeError(TEXT("remove_landscape_layer"), TEXT("layer_removed")));
 }
 
 // MCP:paint_landscape_layer - Paint terrain texture layers headless: write ONE uniform weight (0-255) into a landscape weightmap over a vertex region, or the whole terrain if you omit region. Blunt by design -- it fills a rectangle, it does not brush or blend, so build variety by painting several layers over different rectangles. The layer must already be registered with add_landscape_layer or nothing is stored. Region coordinates are VERTICES, not world units: get the ranges from get_landscape_info. Check vertices_painted and paint_warning rather than the success flag.
@@ -1685,7 +1735,28 @@ TSharedPtr<FJsonObject> HandlePaintLandscapeLayer(const TSharedPtr<FJsonObject>&
         AlphaAccessor.SetData(MinX, MinY, MaxX, MaxY, WeightData.GetData(),
             ELandscapeLayerPaintingRestriction::None);
         AlphaAccessor.Flush();
-        bPainted = true;
+    }
+    // Read the weight back from the same edit layer: the vertices that do not hold Weight (one step of slack).
+    int32 MismatchedVertices = 0;
+    {
+        TArray<uint8> Actual;
+        Actual.SetNumZeroed(WeightData.Num());
+        FScopedSetLandscapeEditingLayer LayerScope(Landscape, EditLayerGuid);
+        TAlphamapAccessor<false> ReadAccessor(Info, LayerInfo);
+        ReadAccessor.GetDataFast(MinX, MinY, MaxX, MaxY, Actual.GetData());
+        for (const uint8 Value : Actual)
+        {
+            if (FMath::Abs(static_cast<int32>(Value) - WeightI) > 1)
+            {
+                ++MismatchedVertices;
+            }
+        }
+    }
+    bPainted = MismatchedVertices == 0;
+    if (!bPainted)
+    {
+        PaintError = FString::Printf(TEXT("%d of %lld vertices do not hold weight %d after the write"),
+            MismatchedVertices, NumVerts, WeightI);
     }
     // Recompose the final weightmap from the edit layers so a read-back / the
     // landscape material reflects the paint (only when we wrote to a valid layer).
@@ -1711,12 +1782,15 @@ TSharedPtr<FJsonObject> HandlePaintLandscapeLayer(const TSharedPtr<FJsonObject>&
 
     ResultObj->SetArrayField(TEXT("region"), Landscape_RectToJson(MinX, MinY, MaxX, MaxY));
 
+    ResultObj->SetNumberField(TEXT("mismatched_vertices"), MismatchedVertices);
     if (!PaintError.IsEmpty())
     {
         ResultObj->SetStringField(TEXT("paint_warning"), PaintError);
     }
 
-    return mcp_common::MakeOkReply(ResultObj);
+    // `success` follows the weightmap re-read above.
+    return mcp_common::MakeOutcomeReply(ResultObj, bPainted,
+        bPainted ? FString() : mcp_common::MeasuredOutcomeError(TEXT("paint_landscape_layer"), TEXT("painted")));
 }
 
 // MCP:get_landscape_layers - List which paint/weight layers are registered on a landscape (name plus its LandscapeLayerInfo asset). The cheap check before painting: a layer missing from this list will silently absorb any paint_landscape_layer call. Use it to discover the layer names a terrain material expects.
@@ -1924,12 +1998,17 @@ TSharedPtr<FJsonObject> HandleAddLandscapeSplineControlPoint(const TSharedPtr<FJ
     TSharedPtr<FJsonObject> ResultObj = Landscape_NewReplyData(TEXT("landscape_name"), Landscape);
     ResultObj->SetNumberField(TEXT("control_point_index"), NewIndex);
     ResultObj->SetNumberField(TEXT("control_point_count"), ControlPointCount);
-    ResultObj->SetNumberField(TEXT("width"), Width);
-    ResultObj->SetBoolField(TEXT("added"), true);
+    // Re-read from the component: the point is in ControlPoints and holds the location and width asked for.
+    const bool bAdded = SplinesComp->GetControlPoints().Contains(NewControlPoint)
+        && NewControlPoint->Location.Equals(Location, KINDA_SMALL_NUMBER)
+        && FMath::IsNearlyEqual(NewControlPoint->Width, Width);
+    ResultObj->SetNumberField(TEXT("width"), NewControlPoint->Width);
+    ResultObj->SetBoolField(TEXT("added"), bAdded);
 
-    ResultObj->SetArrayField(TEXT("location"), mcp_common::VectorToJsonArray(Location));
+    ResultObj->SetArrayField(TEXT("location"), mcp_common::VectorToJsonArray(NewControlPoint->Location));
 
-    return mcp_common::MakeOkReply(ResultObj);
+    return mcp_common::MakeOutcomeReply(ResultObj, bAdded,
+        bAdded ? FString() : mcp_common::MeasuredOutcomeError(TEXT("add_landscape_spline_control_point"), TEXT("added")));
 }
 
 // MCP:set_landscape_spline_control_point - Move, rotate or re-width one existing landscape spline control point by index -- how you adjust a road or river route without rebuilding the spline. Only the fields you pass change (applied_count reports how many landed). Location is LANDSCAPE-LOCAL, not world, and width is a HALF-width. Read the current values first with get_landscape_spline_control_point.
@@ -1963,9 +2042,17 @@ TSharedPtr<FJsonObject> HandleSetLandscapeSplineControlPoint(const TSharedPtr<FJ
     // Apply only the provided properties (location/rotation/width), mirroring the field
     // names + coordinate frames used by add_landscape_spline_control_point.
     int32 Applied = 0;
+    bool bHasLocation = false;
+    bool bHasRotation = false;
+    bool bHasWidth = false;
+    FVector WantLocation = FVector::ZeroVector;
+    FRotator WantRotation = FRotator::ZeroRotator;
+    float WantWidth = 0.0f;
     if (Params->HasField(TEXT("location")))
     {
-        ControlPoint->Location = mcp_common::ReadJsonVector(Params, TEXT("location"));
+        WantLocation = mcp_common::ReadJsonVector(Params, TEXT("location"));
+        ControlPoint->Location = WantLocation;
+        bHasLocation = true;
         ++Applied;
     }
     if (Params->HasField(TEXT("rotation")))
@@ -1974,32 +2061,47 @@ TSharedPtr<FJsonObject> HandleSetLandscapeSplineControlPoint(const TSharedPtr<FJ
         const TArray<TSharedPtr<FJsonValue>>* RotArr = nullptr;
         if (Params->TryGetArrayField(TEXT("rotation"), RotArr) && RotArr && RotArr->Num() >= 3)
         {
-            ControlPoint->Rotation = FRotator(
+            WantRotation = FRotator(
                 (*RotArr)[0]->AsNumber(), (*RotArr)[1]->AsNumber(), (*RotArr)[2]->AsNumber());
+            ControlPoint->Rotation = WantRotation;
+            bHasRotation = true;
             ++Applied;
         }
     }
     double WidthD = 0.0;
     if (Params->TryGetNumberField(TEXT("width"), WidthD))
     {
-        ControlPoint->Width = static_cast<float>(WidthD);
+        WantWidth = static_cast<float>(WidthD);
+        ControlPoint->Width = WantWidth;
+        bHasWidth = true;
         ++Applied;
     }
 
     SplinesComp->MarkRenderStateDirty();
+
+    // Re-read every field that was asked for from the control point itself.
+    const bool bLocationOk = !bHasLocation || ControlPoint->Location.Equals(WantLocation, KINDA_SMALL_NUMBER);
+    const bool bRotationOk = !bHasRotation || ControlPoint->Rotation.Equals(WantRotation, KINDA_SMALL_NUMBER);
+    const bool bWidthOk = !bHasWidth || FMath::IsNearlyEqual(ControlPoint->Width, WantWidth);
+    const bool bUpdated = Applied > 0 && bLocationOk && bRotationOk && bWidthOk;
 
     TSharedPtr<FJsonObject> ResultObj = Landscape_NewReplyData(TEXT("landscape_name"), Landscape);
     ResultObj->SetNumberField(TEXT("control_point_index"), Index);
     ResultObj->SetNumberField(TEXT("control_point_count"), SplinesComp->GetControlPoints().Num());
     ResultObj->SetNumberField(TEXT("applied_count"), Applied);
     ResultObj->SetNumberField(TEXT("width"), ControlPoint->Width);
-    ResultObj->SetBoolField(TEXT("updated"), Applied > 0);
+    ResultObj->SetBoolField(TEXT("updated"), bUpdated);
 
     ResultObj->SetArrayField(TEXT("location"), mcp_common::VectorToJsonArray(ControlPoint->Location));
 
     ResultObj->SetArrayField(TEXT("rotation"), mcp_common::RotatorToJsonArray(ControlPoint->Rotation));
 
-    return mcp_common::MakeOkReply(ResultObj);
+    if (Applied == 0)
+    {
+        return mcp_common::MakeErrorReply(TEXT("set_landscape_spline_control_point: none of location, rotation or width was given; nothing was changed"));
+    }
+    return mcp_common::MakeOutcomeReply(ResultObj, bUpdated,
+        bUpdated ? FString() : mcp_common::MeasuredOutcomeError(TEXT("set_landscape_spline_control_point"), TEXT("updated")));
 }
 
 // MCP:get_landscape_spline_control_point - Read ONE landscape spline control point by index: its landscape-local location and rotation, half-width, side/end falloff, and how many segments connect to it. The per-point reader that pairs with set_landscape_spline_control_point; get_landscape_splines only gives component-level counts, so this is the only way to see where a road or river point actually sits. connected_segment_count = 0 marks a dangling point that draws nothing.
@@ -2115,9 +2217,15 @@ TSharedPtr<FJsonObject> HandleAddLandscapeSplineSegment(const TSharedPtr<FJsonOb
     ResultObj->SetNumberField(TEXT("segment_count"), SegmentCount);
     ResultObj->SetNumberField(TEXT("start_point_index"), StartIndex);
     ResultObj->SetNumberField(TEXT("end_point_index"), EndIndex);
-    ResultObj->SetBoolField(TEXT("added"), true);
+    // Re-read: the segment is in Segments and both endpoints list it among their connections.
+    auto ConnectsNewSegment = [NewSegment](const FLandscapeSplineConnection& Conn) { return Conn.Segment == NewSegment; };
+    const bool bAdded = SplinesComp->GetSegments().Contains(NewSegment)
+        && Start->ConnectedSegments.ContainsByPredicate(ConnectsNewSegment)
+        && End->ConnectedSegments.ContainsByPredicate(ConnectsNewSegment);
+    ResultObj->SetBoolField(TEXT("added"), bAdded);
 
-    return mcp_common::MakeOkReply(ResultObj);
+    return mcp_common::MakeOutcomeReply(ResultObj, bAdded,
+        bAdded ? FString() : mcp_common::MeasuredOutcomeError(TEXT("add_landscape_spline_segment"), TEXT("added")));
 }
 
 // MCP:get_landscape_splines - Summary of a landscape's spline component: whether it has one at all, plus the control point and segment counts. The quick "is there a road/river network on this terrain, and how big" check, and the count oracle after adding or removing points. For an individual point's position and width use get_landscape_spline_control_point -- this returns no per-point data.
@@ -2218,13 +2326,26 @@ TSharedPtr<FJsonObject> HandleRemoveLandscapeSplineControlPoint(const TSharedPtr
     const int32 SegmentCount = SplinesComp->GetSegments().Num();
 
     TSharedPtr<FJsonObject> ResultObj = Landscape_NewReplyData(TEXT("landscape_name"), Landscape);
+    // Re-read: the point is gone from ControlPoints and no remaining segment still ends on it.
+    bool bRemoved = !SplinesComp->GetControlPoints().Contains(ControlPoint);
+    if (ControlPoint)
+    {
+        for (const TObjectPtr<ULandscapeSplineSegment>& Remaining : SplinesComp->GetSegments())
+        {
+            if (Remaining && (Remaining->Connections[0].ControlPoint == ControlPoint || Remaining->Connections[1].ControlPoint == ControlPoint))
+            {
+                bRemoved = false;
+            }
+        }
+    }
     ResultObj->SetNumberField(TEXT("control_point_index"), Index);
-    ResultObj->SetBoolField(TEXT("removed"), true);
+    ResultObj->SetBoolField(TEXT("removed"), bRemoved);
     ResultObj->SetNumberField(TEXT("control_point_count"), ControlPointCount);
     ResultObj->SetNumberField(TEXT("segments_removed"), SegmentsRemoved);
     ResultObj->SetNumberField(TEXT("segment_count"), SegmentCount);
 
-    return mcp_common::MakeOkReply(ResultObj);
+    return mcp_common::MakeOutcomeReply(ResultObj, bRemoved,
+        bRemoved ? FString() : mcp_common::MeasuredOutcomeError(TEXT("remove_landscape_spline_control_point"), TEXT("removed")));
 }
 
 // MCP:remove_landscape_spline_segment - Delete ONE landscape spline segment by index, unlinking its two endpoint control points but keeping them -- the way to cut a road or river without losing the route's points (remove_landscape_spline_control_point destroys the point and all its segments instead). Segment indices shift after a removal, so work from the highest index down.
@@ -2283,12 +2404,15 @@ TSharedPtr<FJsonObject> HandleRemoveLandscapeSplineSegment(const TSharedPtr<FJso
     const int32 SegmentCount = SplinesComp->GetSegments().Num();
 
     TSharedPtr<FJsonObject> ResultObj = Landscape_NewReplyData(TEXT("landscape_name"), Landscape);
+    // Re-read: the segment is gone from Segments.
+    const bool bRemoved = !SplinesComp->GetSegments().Contains(Segment);
     ResultObj->SetNumberField(TEXT("segment_index"), Index);
-    ResultObj->SetBoolField(TEXT("removed"), true);
+    ResultObj->SetBoolField(TEXT("removed"), bRemoved);
     ResultObj->SetNumberField(TEXT("segment_count"), SegmentCount);
     ResultObj->SetNumberField(TEXT("control_points_unlinked"), ControlPointsUnlinked);
 
-    return mcp_common::MakeOkReply(ResultObj);
+    return mcp_common::MakeOutcomeReply(ResultObj, bRemoved,
+        bRemoved ? FString() : mcp_common::MeasuredOutcomeError(TEXT("remove_landscape_spline_segment"), TEXT("removed")));
 }
 // ========================================================================== //
 // Landscape sculpt + heightmap I/O
@@ -2479,6 +2603,41 @@ namespace
         return EditLayerGuid;
     }
 
+    // The vertices of the rect whose base-edit-layer height (the layer the writes above target) differs from
+    // Expected by more than one uint16 step: the read-back of a height write, 0 when it landed.
+    int32 Landscape_CountHeightMismatches(ALandscape* Landscape, ULandscapeInfo* Info,
+        int32 MinX, int32 MinY, int32 MaxX, int32 MaxY, const TArray<uint16>& Expected)
+    {
+        TArray<uint16> Actual;
+        Actual.SetNumZeroed(Expected.Num());
+        {
+            FScopedSetLandscapeEditingLayer LayerScope(Landscape, GetBaseEditLayerGuid(Landscape));
+            FHeightmapAccessor<false> Accessor(Info);
+            Accessor.GetDataFast(MinX, MinY, MaxX, MaxY, Actual.GetData());
+        }
+        int32 Mismatches = 0;
+        for (int32 i = 0; i < Expected.Num(); ++i)
+        {
+            if (FMath::Abs(static_cast<int32>(Actual[i]) - static_cast<int32>(Expected[i])) > 1)
+            {
+                ++Mismatches;
+            }
+        }
+        return Mismatches;
+    }
+
+    // Writes the read-back of a height write into Data (applied, mismatched_vertices) and returns the reply:
+    // success only when every vertex of the rect holds the height written.
+    TSharedPtr<FJsonObject> Landscape_HeightWriteReply(const TSharedPtr<FJsonObject>& Data, const TCHAR* Command, int32 Mismatches)
+    {
+        const bool bApplied = Mismatches == 0;
+        Data->SetBoolField(TEXT("applied"), bApplied);
+        Data->SetNumberField(TEXT("mismatched_vertices"), Mismatches);
+        Data->SetStringField(TEXT("verification_method"), TEXT("heightmap re-read from the base edit layer after the write"));
+        return mcp_common::MakeOutcomeReply(Data, bApplied,
+            bApplied ? FString() : mcp_common::MeasuredOutcomeError(Command, TEXT("applied")));
+    }
+
     // Src as DstW x DstH heights: moved when the sizes match, otherwise resampled with the source centred.
     TArray<uint16> Landscape_FitHeights(TArray<uint16>& Src, int32 SrcW, int32 SrcH, int32 DstW, int32 DstH)
     {
@@ -2634,12 +2793,19 @@ TSharedPtr<FJsonObject> HandleSetLandscapeHeightInBox(const TSharedPtr<FJsonObje
     TSharedPtr<FJsonObject> ResultObj = Landscape_NewReplyData(TEXT("landscape_actor_name"), Landscape);
     ResultObj->SetNumberField(TEXT("delta_z"), DeltaZ);
     ResultObj->SetNumberField(TEXT("delta_steps"), DeltaSteps);
-    ResultObj->SetBoolField(TEXT("applied"), DeltaSteps != 0);
-    ResultObj->SetNumberField(TEXT("vertices_modified"), WidthVerts * HeightVerts);
+    ResultObj->SetNumberField(TEXT("vertices_modified"), DeltaSteps != 0 ? WidthVerts * HeightVerts : 0);
     ResultObj->SetNumberField(TEXT("region_width"), WidthVerts);
     ResultObj->SetNumberField(TEXT("region_height"), HeightVerts);
     ResultObj->SetArrayField(TEXT("region"), Landscape_RectToJson(MinX, MinY, MaxX, MaxY));
-    return mcp_common::MakeOkReply(ResultObj);
+    if (DeltaSteps == 0)
+    {
+        // A delta below one heightmap step asks for no change: nothing was written, nothing to verify.
+        ResultObj->SetBoolField(TEXT("applied"), false);
+        ResultObj->SetStringField(TEXT("note"), TEXT("delta_z rounds to 0 heightmap steps; the terrain was left unchanged"));
+        return mcp_common::MakeOkReply(ResultObj);
+    }
+    return Landscape_HeightWriteReply(ResultObj, TEXT("set_landscape_height_in_box"),
+        Landscape_CountHeightMismatches(Landscape, Info, MinX, MinY, MaxX, MaxY, Data));
 }
 
 TSharedPtr<FJsonObject> HandleFlattenLandscapeInBox(const TSharedPtr<FJsonObject>& Params)
@@ -2684,12 +2850,12 @@ TSharedPtr<FJsonObject> HandleFlattenLandscapeInBox(const TSharedPtr<FJsonObject
 
     TSharedPtr<FJsonObject> ResultObj = Landscape_NewReplyData(TEXT("landscape_actor_name"), Landscape);
     ResultObj->SetNumberField(TEXT("target_height"), TargetH);
-    ResultObj->SetBoolField(TEXT("applied"), true);
     ResultObj->SetNumberField(TEXT("vertices_modified"), WidthVerts * HeightVerts);
     ResultObj->SetNumberField(TEXT("region_width"), WidthVerts);
     ResultObj->SetNumberField(TEXT("region_height"), HeightVerts);
     ResultObj->SetArrayField(TEXT("region"), Landscape_RectToJson(MinX, MinY, MaxX, MaxY));
-    return mcp_common::MakeOkReply(ResultObj);
+    return Landscape_HeightWriteReply(ResultObj, TEXT("flatten_landscape_in_box"),
+        Landscape_CountHeightMismatches(Landscape, Info, MinX, MinY, MaxX, MaxY, Data));
 }
 
 TSharedPtr<FJsonObject> HandleSmoothLandscapeInBox(const TSharedPtr<FJsonObject>& Params)
@@ -2843,7 +3009,6 @@ TSharedPtr<FJsonObject> HandleCopyLandscapeRegion(const TSharedPtr<FJsonObject>&
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
     ResultObj->SetStringField(TEXT("source_landscape_actor_name"), Source->GetActorLabel());
     ResultObj->SetStringField(TEXT("dest_landscape_actor_name"), Target.Landscape->GetActorLabel());
-    ResultObj->SetBoolField(TEXT("applied"), true);
     ResultObj->SetBoolField(TEXT("resampled"), !(SrcW == DstW && SrcH == DstH));
     ResultObj->SetNumberField(TEXT("source_width"), SrcW);
     ResultObj->SetNumberField(TEXT("source_height"), SrcH);
@@ -2851,7 +3016,8 @@ TSharedPtr<FJsonObject> HandleCopyLandscapeRegion(const TSharedPtr<FJsonObject>&
     ResultObj->SetNumberField(TEXT("dest_height"), DstH);
     ResultObj->SetArrayField(TEXT("source_region"), Landscape_RectToJson(SrcMinX, SrcMinY, SrcMaxX, SrcMaxY));
     ResultObj->SetArrayField(TEXT("dest_region"), Landscape_RectToJson(DstMinX, DstMinY, DstMaxX, DstMaxY));
-    return mcp_common::MakeOkReply(ResultObj);
+    return Landscape_HeightWriteReply(ResultObj, TEXT("copy_landscape_region"),
+        Landscape_CountHeightMismatches(Target.Landscape, Target.Info, DstMinX, DstMinY, DstMaxX, DstMaxY, ApplyData));
 }
 
 TSharedPtr<FJsonObject> HandleImportLandscapeHeightmap(const TSharedPtr<FJsonObject>& Params)
@@ -2918,13 +3084,14 @@ TSharedPtr<FJsonObject> HandleImportLandscapeHeightmap(const TSharedPtr<FJsonObj
     ResultObj->SetNumberField(TEXT("dest_width"), DstW);
     ResultObj->SetNumberField(TEXT("dest_height"), DstH);
     ResultObj->SetBoolField(TEXT("resampled"), !(SrcW == DstW && SrcH == DstH));
-    ResultObj->SetBoolField(TEXT("applied"), true);
     // Diagnostics: whether the write was routed through an edit layer (UE 5.8). A
     // false here on a create_landscape-made landscape would mean the import went to
     // the composite and will be stomped -- the terrain then comes out flat.
     ResultObj->SetBoolField(TEXT("edit_layer_applied"), EditLayerGuid.IsValid());
     ResultObj->SetStringField(TEXT("edit_layer_guid"), EditLayerGuid.IsValid() ? EditLayerGuid.ToString() : FString());
-    return mcp_common::MakeOkReply(ResultObj);
+    return Landscape_HeightWriteReply(ResultObj, TEXT("import_landscape_heightmap"),
+        Landscape_CountHeightMismatches(Target.Landscape, Target.Info,
+            Target.ExtMinX, Target.ExtMinY, Target.ExtMaxX, Target.ExtMaxY, ApplyData));
 }
 
 // The surface height comes straight from the heightmap (collision-free): see
@@ -3624,22 +3791,28 @@ TSharedPtr<FJsonObject> HandleScatterFoliageOnLayer(const TSharedPtr<FJsonObject
     {
         FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "ScatterFoliageOnLayer", "Scatter Foliage On Layer (MCP)"));
         IFA->Modify();
-        if (Landscape_AddFoliageInstances(IFA, FoliageType, AcceptedTransforms))
-        {
-            InstancesAdded = AcceptedTransforms.Num();
-        }
+        Landscape_AddFoliageInstances(IFA, FoliageType, AcceptedTransforms);
     }
+
+    // Re-count the foliage actor: the instances added are the measured delta, not the accepted candidates.
+    const int32 CountAfter = Landscape_FoliageInstanceCount(IFA, FoliageType);
+    InstancesAdded = CountAfter - CountBefore;
+    const bool bAllAccepted = InstancesAdded >= AcceptedTransforms.Num();
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetBoolField(TEXT("applied"), InstancesAdded > 0);
+    Data->SetNumberField(TEXT("instances_accepted"), AcceptedTransforms.Num());
     Data->SetNumberField(TEXT("requested_count"), Count);
     Data->SetNumberField(TEXT("instances_added"), InstancesAdded);
     Data->SetNumberField(TEXT("instances_rejected"), InstancesRejected);
     Data->SetNumberField(TEXT("layer_weight_threshold"), Threshold);
     Data->SetStringField(TEXT("layer_name"), LayerNameStr);
     Data->SetNumberField(TEXT("count_before"), CountBefore);
-    Data->SetNumberField(TEXT("count_after"), CountBefore + InstancesAdded);
-    return mcp_common::MakeOkReply(Data);
+    Data->SetNumberField(TEXT("count_after"), CountAfter);
+    return mcp_common::MakeOutcomeReply(Data, bAllAccepted,
+        bAllAccepted ? FString() : FString::Printf(
+            TEXT("scatter_foliage_on_layer: %d candidates passed the layer test but the foliage actor gained %d instances"),
+            AcceptedTransforms.Num(), InstancesAdded));
 }
 
 // ---------------------------------------------------------------------------
@@ -3859,12 +4032,20 @@ TSharedPtr<FJsonObject> HandleAddLandscapeLayerBlendNode(const TSharedPtr<FJsonO
             FString::Printf(TEXT("Saved blend node but failed to save material: %s"), *SaveError));
     }
 
+    // Re-read the graph: the node is among the material's expressions and carries one input per layer name.
+    const bool bNodeInGraph = Material->GetEditorOnlyData()->ExpressionCollection.Expressions.Contains(static_cast<UMaterialExpression*>(BlendNode));
+    const bool bLayersSet = BlendNode->Layers.Num() == LayerJson.Num();
+    const bool bAdded = bNodeInGraph && bLayersSet;
+
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("material_path"), MaterialPath);
     Data->SetStringField(TEXT("expression_id"), BlendNode->GetPathName(Material));
     Data->SetNumberField(TEXT("layer_count"), BlendNode->Layers.Num());
     Data->SetArrayField(TEXT("layers"), LayerJson);
-    return mcp_common::MakeOkReply(Data);
+    Data->SetBoolField(TEXT("node_in_graph"), bNodeInGraph);
+    return mcp_common::MakeOutcomeReply(Data, bAdded,
+        bAdded ? FString() : mcp_common::MeasuredOutcomeError(TEXT("add_landscape_layer_blend_node"),
+            bNodeInGraph ? TEXT("layer_count == layer_names") : TEXT("node_in_graph")));
 }
 
 // ---------------------------------------------------------------------------
