@@ -37,6 +37,8 @@ jobs:
         run: python Tools/catalog_server.py --check
       - name: Copyright notice in every source file (Fab refuses a plugin without it)
         run: python Tools/check_copyright.py
+      - name: Outcome honesty does not regress (no new hardcoded success:true)
+        run: python Tools/audit_outcome_honesty.py --check
 
   docs:
     name: Documentation links resolve
