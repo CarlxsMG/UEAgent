@@ -176,13 +176,16 @@ TSharedPtr<FJsonObject> HandleSpawnTextRenderActor(const TSharedPtr<FJsonObject>
     bool bColorSet = false;
     bool bSizeSet = false;
     double WorldSize = 0.0;
+    // Each requested property is re-read off the component after it is written.
+    TArray<FString> Mismatches;
 
     if (TextComp)
     {
         if (!Text.IsEmpty())
         {
             TextComp->SetText(FText::FromString(Text));
-            bTextSet = true;
+            bTextSet = TextComp->Text.ToString() == Text;
+            if (!bTextSet) { Mismatches.Add(TEXT("text")); }
         }
 
         // Optional [r,g,b] color in 0..255 (alpha forced opaque).
@@ -193,16 +196,22 @@ TSharedPtr<FJsonObject> HandleSpawnTextRenderActor(const TSharedPtr<FJsonObject>
             const uint8 G = static_cast<uint8>(FMath::Clamp((*ColorArr)[1]->AsNumber(), 0.0, 255.0));
             const uint8 B = static_cast<uint8>(FMath::Clamp((*ColorArr)[2]->AsNumber(), 0.0, 255.0));
             TextComp->SetTextRenderColor(FColor(R, G, B, 255));
-            bColorSet = true;
+            bColorSet = TextComp->TextRenderColor == FColor(R, G, B, 255);
+            if (!bColorSet) { Mismatches.Add(TEXT("color")); }
         }
 
         double Size = 0.0;
         if (Params->TryGetNumberField(TEXT("size"), Size))
         {
             TextComp->SetWorldSize(static_cast<float>(Size));
-            bSizeSet = true;
+            bSizeSet = TextComp->WorldSize == static_cast<float>(Size);
+            if (!bSizeSet) { Mismatches.Add(TEXT("size")); }
         }
         WorldSize = static_cast<double>(TextComp->WorldSize); // read back
+    }
+    else
+    {
+        Mismatches.Add(TEXT("text render component missing"));
     }
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
@@ -214,8 +223,11 @@ TSharedPtr<FJsonObject> HandleSpawnTextRenderActor(const TSharedPtr<FJsonObject>
     Result->SetBoolField(TEXT("color_set"), bColorSet);
     Result->SetBoolField(TEXT("size_set"), bSizeSet);
     Result->SetNumberField(TEXT("world_size"), WorldSize);
-    Result->SetBoolField(TEXT("spawned"), true);
-    return mcp_common::MakeOkReply(Result);
+    Result->SetBoolField(TEXT("spawned"), IsValid(Actor));
+    const bool bOk = IsValid(Actor) && Mismatches.Num() == 0;
+    return mcp_common::MakeOutcomeReply(Result, bOk, bOk ? FString() : FString::Printf(
+        TEXT("spawn_text_render_actor: '%s' was spawned but re-reads differ from the request: %s."),
+        *Actor->GetName(), *FString::Join(Mismatches, TEXT(", "))));
 }
 
 // MCP:add_spline_component - Add a USplineComponent to a named editor-world actor (name or label) as an undoable instance component on its root, optionally replacing its default points with your local-space points -- what add_component_to_actor cannot set in the same call. Not idempotent: each call adds a spline, while set_spline_points and get_spline_points act on the actor's FIRST one. An entry that is not [x, y, z] (3 numbers) is an error and nothing is added. Not saved (save_level).
@@ -265,14 +277,19 @@ TSharedPtr<FJsonObject> HandleAddSplineComponent(const TSharedPtr<FJsonObject>& 
         Spline->UpdateSpline();
     }
     const int32 NumPoints = Spline->GetNumberOfSplinePoints();
+    const bool bAdded = Spline->IsRegistered() && Actor->GetInstanceComponents().Contains(Spline);
+    const bool bPointsOk = Points.Num() == 0 || NumPoints == Points.Num();
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("actor_name"), Actor->GetActorLabel());
     Result->SetStringField(TEXT("component_name"), Spline->GetName());
     Result->SetStringField(TEXT("component_class"), Spline->GetClass()->GetName());
     Result->SetNumberField(TEXT("num_points"), NumPoints);
-    Result->SetBoolField(TEXT("added"), true);
-    return mcp_common::MakeOkReply(Result);
+    Result->SetBoolField(TEXT("added"), bAdded);
+    const bool bOk = bAdded && bPointsOk;
+    return mcp_common::MakeOutcomeReply(Result, bOk, bOk ? FString() : FString::Printf(
+        TEXT("add_spline_component: on '%s' the spline re-reads added=%s with %d points (asked for %d)."),
+        *Actor->GetActorLabel(), bAdded ? TEXT("true") : TEXT("false"), NumPoints, Points.Num()));
 }
 
 // MCP:set_spline_points - Replace every control point of the first spline component on an editor-world actor with the given local-space positions, in order, in one undo step; the level is marked dirty, not saved (save_level). The new points get the default auto-curve tangents, and closed_loop, when given, also sets whether the last point joins the first. An empty points array leaves the spline with no points. Idempotent: the same points again give the same spline. Read the result with get_spline_points (same local space); give an actor a spline first with add_spline_component; to bend a mesh along a spline use add_spline_mesh_component. An unknown actor, an actor without a spline component, or a points entry that is not 3 numbers is an error and nothing changes.
@@ -318,13 +335,26 @@ TSharedPtr<FJsonObject> HandleSetSplinePoints(const TSharedPtr<FJsonObject>& Par
 
     Spline->UpdateSpline();
 
+    // Every point is re-read in the same local space it was written in.
+    const int32 NumNow = Spline->GetNumberOfSplinePoints();
+    bool bPointsSet = NumNow == Points.Num();
+    for (int32 Index = 0; bPointsSet && Index < NumNow; ++Index)
+    {
+        bPointsSet = Spline->GetLocationAtSplinePoint(Index, ESplineCoordinateSpace::Local).Equals(Points[Index], 0.01);
+    }
+    const bool bLoopOk = !Params->HasField(TEXT("closed_loop")) || Spline->IsClosedLoop() == bClosedLoop;
+
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("actor_name"), Actor->GetActorLabel());
     Result->SetStringField(TEXT("component_name"), Spline->GetName());
-    Result->SetNumberField(TEXT("num_points"), Spline->GetNumberOfSplinePoints());
+    Result->SetNumberField(TEXT("num_points"), NumNow);
     Result->SetBoolField(TEXT("closed_loop"), Spline->IsClosedLoop());
-    Result->SetBoolField(TEXT("points_set"), true);
-    return mcp_common::MakeOkReply(Result);
+    Result->SetBoolField(TEXT("points_set"), bPointsSet);
+    const bool bOk = bPointsSet && bLoopOk;
+    return mcp_common::MakeOutcomeReply(Result, bOk, bOk ? FString() : FString::Printf(
+        TEXT("set_spline_points: the spline of '%s' re-reads %d points (asked for %d), points_set=%s, closed_loop=%s."),
+        *Actor->GetActorLabel(), NumNow, Points.Num(), bPointsSet ? TEXT("true") : TEXT("false"),
+        Spline->IsClosedLoop() ? TEXT("true") : TEXT("false")));
 }
 
 // MCP:get_spline_points - Reads the control points of a named actor's USplineComponent (reader twin of set_spline_points). Returns each point's index and local-space location (the same space set_spline_points writes in), plus the total count and closed-loop flag.
@@ -415,16 +445,26 @@ TSharedPtr<FJsonObject> HandleAddSplineMeshComponent(const TSharedPtr<FJsonObjec
     const FVector Tangent = End - Start;
     SplineMesh->SetStartAndEnd(Start, Tangent, End, Tangent, true);
 
+    const bool bAdded = SplineMesh->IsRegistered() && Actor->GetInstanceComponents().Contains(SplineMesh);
+    const bool bMeshNow = bMeshSet && SplineMesh->GetStaticMesh() == Mesh;
+    const FVector StartNow = SplineMesh->GetStartPosition();
+    const FVector EndNow = SplineMesh->GetEndPosition();
+    const bool bShapeOk = StartNow.Equals(Start, 0.01) && EndNow.Equals(End, 0.01);
+
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("actor_name"), Actor->GetActorLabel());
     Result->SetStringField(TEXT("component_name"), SplineMesh->GetName());
     Result->SetStringField(TEXT("component_class"), SplineMesh->GetClass()->GetName());
-    Result->SetStringField(TEXT("static_mesh_path"), MeshPath);
-    Result->SetBoolField(TEXT("mesh_set"), bMeshSet);
-    Result->SetArrayField(TEXT("start"), mcp_common::VectorToJsonArray(Start));
-    Result->SetArrayField(TEXT("end"), mcp_common::VectorToJsonArray(End));
-    Result->SetBoolField(TEXT("added"), true);
-    return mcp_common::MakeOkReply(Result);
+    Result->SetStringField(TEXT("static_mesh_path"), bMeshNow ? Mesh->GetPathName() : FString());
+    Result->SetBoolField(TEXT("mesh_set"), bMeshNow);
+    Result->SetArrayField(TEXT("start"), mcp_common::VectorToJsonArray(StartNow));
+    Result->SetArrayField(TEXT("end"), mcp_common::VectorToJsonArray(EndNow));
+    Result->SetBoolField(TEXT("added"), bAdded);
+    const bool bOk = bAdded && bMeshNow && bShapeOk;
+    return mcp_common::MakeOutcomeReply(Result, bOk, bOk ? FString() : FString::Printf(
+        TEXT("add_spline_mesh_component: on '%s' the component re-reads added=%s, mesh_set=%s, start/end as asked=%s."),
+        *Actor->GetActorLabel(), bAdded ? TEXT("true") : TEXT("false"), bMeshNow ? TEXT("true") : TEXT("false"),
+        bShapeOk ? TEXT("true") : TEXT("false")));
 }
 
 // MCP:set_actor_component_collision - Sets collision on a PLACED actor's UPrimitiveComponent (the placed-actor twin of set_blueprint_component_collision). Resolves the actor by name/label then its primitive component (by name, or the root primitive when component_name is omitted) and applies, in order: SetCollisionProfileName (expands the profile into the FBodyInstance response array), SetCollisionEnabled, then per-channel SetCollisionResponseToChannel. Channel keys accept a friendly display name ("Pawn", "Visibility", or a project CUSTOM trace/object channel) OR an ECC_* token; this is how you block a custom game channel that the BlockAll profile leaves at Ignore. After applying, collision-enabled is toggled off/on to force the FBodyInstance to rebuild its filter data, and Actor->Modify() marks the (OFPA) package dirty so save_level persists the change.
@@ -508,12 +548,53 @@ TSharedPtr<FJsonObject> HandleSetActorComponentCollision(const TSharedPtr<FJsonO
     Data->SetStringField(TEXT("collision_enabled_effective"),
         StaticEnum<ECollisionEnabled::Type>()->GetNameStringByValue((int64)FinalEnabled));
     Data->SetBoolField(TEXT("rebuilt"), FinalEnabled != ECollisionEnabled::NoCollision);
+
+    // Re-read what was asked for. A profile is checked alone only: any later enabled/response edit renames it "Custom".
+    TArray<FString> Mismatches;
+    const ECollisionEnabled::Type EnabledNow = Prim->GetCollisionEnabled();
+    if (!EnabledStr.IsEmpty()
+        && StaticEnum<ECollisionEnabled::Type>()->GetValueByNameString(EnabledStr) != (int64)EnabledNow)
+    {
+        Mismatches.Add(FString::Printf(TEXT("collision_enabled reads %s"),
+            *StaticEnum<ECollisionEnabled::Type>()->GetNameStringByValue((int64)EnabledNow)));
+    }
+    if (!Profile.IsEmpty() && EnabledStr.IsEmpty() && !bHasResponses && Prim->GetCollisionProfileName() != FName(*Profile))
+    {
+        Mismatches.Add(FString::Printf(TEXT("profile reads %s"), *Prim->GetCollisionProfileName().ToString()));
+    }
+    if (bHasResponses && ResponsesObj && ResponsesObj->IsValid())
+    {
+        for (const auto& Pair : (*ResponsesObj)->Values)
+        {
+            const FString ChanName(*Pair.Key);
+            const int32 Idx = ChanName.StartsWith(TEXT("ECC_"))
+                ? (int32)StaticEnum<ECollisionChannel>()->GetValueByNameString(ChanName)
+                : PrimitiveComponentUtils::CollisionChannelIndex(FName(*ChanName));
+            FString RespStr;
+            ECollisionResponse Wanted = ECR_Ignore;
+            if (Idx < 0 || !Pair.Value.IsValid() || !Pair.Value->TryGetString(RespStr)
+                || !PrimitiveComponentUtils::ParseCollisionResponse(RespStr, Wanted))
+            {
+                continue;
+            }
+            const ECollisionResponse Now = Prim->GetCollisionResponseToChannel((ECollisionChannel)Idx);
+            if (Now != Wanted)
+            {
+                Mismatches.Add(FString::Printf(TEXT("%s reads %s"), *ChanName,
+                    *StaticEnum<ECollisionResponse>()->GetNameStringByValue((int64)Now)));
+            }
+        }
+    }
+    const bool bApplied = Mismatches.Num() == 0;
+    Data->SetBoolField(TEXT("applied"), bApplied);
     // The selector that picked the world, not a second parse of the params.
     Data->SetStringField(TEXT("world"), WorldMode);
     // Collision edited in the PIE world is transient; knowing WHICH world took the edit
     // is the difference between "it didn't apply" and "it applied where nothing saves".
     mcp_common::AddWorldEvidence(Data, World);
-    return mcp_common::MakeOkReply(Data);
+    return mcp_common::MakeOutcomeReply(Data, bApplied, bApplied ? FString() : FString::Printf(
+        TEXT("set_actor_component_collision: %s on '%s' re-reads differently from the request: %s."),
+        *Prim->GetName(), *Actor->GetActorLabel(), *FString::Join(Mismatches, TEXT("; "))));
 }
 
 const McpCommandFamilies::FRegistrar Registration =
