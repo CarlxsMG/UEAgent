@@ -203,12 +203,12 @@ Diff two DataTables row by row and cell by cell without modifying either: two as
 |---|---|---|---|
 | `a` | string | no | Full asset path of the first DataTable (alias: table_a); asset mode |
 | `b` | string | no | Full asset path of the second DataTable (alias: table_b); asset mode |
-| `before_json` | any | no | The 'before'/A table dump as a JSON object/array or stringified JSON (alias: before); JSON mode |
-| `after` | any | no | The 'after'/B table dump as a JSON object/array or stringified JSON (alias: after_json); JSON mode |
+| `before_json` | object\|array\|string | no | The 'before'/A table dump as a JSON object/array or stringified JSON (alias: before); JSON mode |
+| `after` | object\|array\|string | no | The 'after'/B table dump as a JSON object/array or stringified JSON (alias: after_json); JSON mode |
 | `table_a` | string | no | Alias of a: asset path of the first DataTable, e.g. "/Game/Data/DT_Items"; a wins when both are given |
 | `table_b` | string | no | Alias of b: asset path of the second DataTable, e.g. "/Game/Data/DT_Items_Old"; b wins when both are given |
-| `before` | any | no | Alias of before_json: the first (before) table dump; before_json wins when both are given |
-| `after_json` | any | no | Alias of after: the second (after) table dump; after wins when both are given |
+| `before` | object\|array\|string | no | Alias of before_json: the first (before) table dump; before_json wins when both are given |
+| `after_json` | object\|array\|string | no | Alias of after: the second (after) table dump; after wins when both are given |
 
 **Returns:** `{ mode, identical, added_count, removed_count, changed_count, unchanged_count, a_row_count, b_row_count, added_rows:[{row_name,row_data}], removed_rows:[...], changed_rows:[{row_name,changed_cells:[{column,a,b}]}] }`
 
@@ -440,11 +440,14 @@ Register and initialize a UDataRegistry asset with the UDataRegistrySubsystem fo
 
 *Read-only.*
 
-List every registry the UDataRegistrySubsystem currently has registered, sorted by type, each with registry_type, registry_path, item_struct and initialized. Read-only. An asset the subsystem has not loaded is absent: register it with initialize_data_registry, or call refresh_data_registry_map after edits.
+List the registries the UDataRegistrySubsystem currently has registered, sorted by type and paged with offset/limit, each with registry_type, registry_path, item_struct and initialized. Read-only. An asset the subsystem has not loaded is absent: register it with initialize_data_registry, or call refresh_data_registry_map after edits.
 
-No parameters.
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ registries: [{registry_type, registry_path, item_struct, initialized}], registry_count: int }`
+**Returns:** `{ registries: [{registry_type, registry_path, item_struct, initialized}], registry_count: int (entries in this page), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }`
 
 ## `list_localization_targets`
 
@@ -478,7 +481,7 @@ Delete one keyframe from a curve channel, addressed either by key_index or by ti
 |---|---|---|---|
 | `curve_path` | string | yes | Full asset path of the curve |
 | `channel` | number | no | Curve channel index (defaults to 0) |
-| `key_index` | number | no | Index of the key to remove (0 &lt;= index &lt; key_count); provide this OR time |
+| `key_index` | integer | no | Index of the key to remove (0 &lt;= index &lt; key_count); provide this OR time |
 | `time` | number | no | Time of the key to remove; provide this OR key_index |
 
 **Returns:** `{ curve_path, curve_class, channel, num_channels, removed, existed, key_count, saved }`
@@ -493,7 +496,7 @@ Remove a single key from an existing UCurveTable row's rich curve by index or ti
 |---|---|---|---|
 | `curve_table_path` | string | yes | Full asset path to the UCurveTable. |
 | `row_name` | string | yes | Name of the row (rich curve) to edit. |
-| `key_index` | number | no | Index of the key to remove (0 &lt;= index &lt; key_count); provide this OR time |
+| `key_index` | integer | no | Index of the key to remove (0 &lt;= index &lt; key_count); provide this OR time |
 | `time` | number | no | Time of the key to remove; provide this OR key_index |
 
 **Returns:** `{ curve_table_path: string, row_name: string, row_existed: bool, key_existed: bool, removed: bool, key_count: int, row_count: int, curve_table_mode: string, saved: bool, save_error: string? }`
@@ -521,7 +524,7 @@ Remove a DataTable source from a UDataRegistry asset (the true inverse of add_da
 |---|---|---|---|
 | `registry_path` | string | yes | Content path to the UDataRegistry asset. |
 | `data_table_path` | string | no | Content path of the source DataTable to remove (matched against SourceTable). Provide this OR source_index OR all. |
-| `source_index` | number | no | Direct index into DataSources[] to remove. Provide this OR data_table_path OR all. |
+| `source_index` | integer | no | Direct index into DataSources[] to remove. Provide this OR data_table_path OR all. |
 | `all` | boolean | no | Optional bool, default false: true removes every source (null slots included) instead of one; it excludes data_table_path and source_index. |
 
 **Returns:** `{ registry_path: string, source_index?: int, data_table_path?: string, all?: bool, source_count_before: int, source_count_after: int, removed: bool, saved: bool, save_error?: string, note?: string }`
@@ -683,7 +686,7 @@ Upsert many rows of a DataTable, loaded by asset path, in one call: each row's f
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `table_path` | string | yes | Full asset path of the DataTable (data_table also accepted) |
-| `rows` | any | yes | Object of { row_name: {column:value} }, or that object as a JSON string; each fields object is overlaid non-destructively (a value that is a JSON object deep-merges into the existing struct member, scalars/arrays replace) |
+| `rows` | object\|string | yes | Object of { row_name: {column:value} }, or that object as a JSON string; each fields object is overlaid non-destructively (a value that is a JSON object deep-merges into the existing struct member, scalars/arrays replace) |
 | `save` | boolean | no | When true (default) save the package once after all rows are written; when false leave it dirty in memory |
 | `data_table` | string | no | Alias of table_path (the DataTable asset path, e.g. "/Game/Data/DT_Items"); table_path wins when both are given |
 

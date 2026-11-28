@@ -498,8 +498,8 @@ namespace
     }
 
     // A curve setter's curve_table_* and row_name_* fields, read back from Readback (null when the
-    // magnitude's sub-struct is unreachable), and its set flag: both round-tripped.
-    void GASAuthoring_AddCurveRowFields(const TSharedPtr<FJsonObject>& Result, const UCurveTable* CurveTable,
+    // magnitude's sub-struct is unreachable), and its set flag, also returned: both round-tripped.
+    bool GASAuthoring_AddCurveRowFields(const TSharedPtr<FJsonObject>& Result, const UCurveTable* CurveTable,
                                         const FString& RowName, const FCurveTableRowHandle* Readback, bool bRowExists)
     {
         FString CurveTableReadback;
@@ -523,6 +523,7 @@ namespace
         Result->SetBoolField(TEXT("row_name_matches"), bRowMatches);
         Result->SetBoolField(TEXT("row_exists"), bRowExists);
         Result->SetBoolField(TEXT("set"), bCurveMatches && bRowMatches);
+        return bCurveMatches && bRowMatches;
     }
 
     // Resolve a gameplay attribute by bare name (e.g. "Mana") or "Set.Attribute"
@@ -1692,7 +1693,7 @@ TSharedPtr<FJsonObject> HandleRemoveGameplayEffectModifier(const TSharedPtr<FJso
 //   FGameplayEffectAttributeCaptureDefinition(FGameplayAttribute, EGameplayEffectAttributeCaptureSource, bSnapshot) (inline)
 //   Read-back: GetMagnitudeCalculationType()/GetSetByCallerFloat() (inline), GetAttributeCaptureDefinitions() (UE_API)
 
-// MCP:set_gameplay_effect_modifier_set_by_caller - Switch an existing GE modifier's magnitude to SetByCaller (resolved at runtime by tag/name). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
+// MCP:set_gameplay_effect_modifier_set_by_caller - Switch an existing GE modifier's magnitude to SetByCaller (resolved at runtime by tag/name). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. set is whether the modifier reads back as written after the save; false makes success false.
 //   @retired set_gameplay_effect_modifier - magnitude_type="set_by_caller", data_tag or data_name
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param modifier_index - Index into the GE CDO Modifiers array (add_gameplay_effect_modifier appends; 0 = first)
@@ -1770,11 +1771,13 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierSetByCaller(const TShared
     Result->SetStringField(TEXT("data_tag"), OutSBC.DataTag.ToString());
     Result->SetBoolField(TEXT("data_tag_valid"), bTagValid);
     Result->SetStringField(TEXT("data_name"), OutSBC.DataName.ToString());
-    Result->SetBoolField(TEXT("set"), bIsSetByCaller);
-    return mcp_common::MakeOkReply(Result);
+    const bool bSet = bIsSetByCaller && OutSBC.DataTag == SetByCaller.DataTag && OutSBC.DataName == SetByCaller.DataName;
+    Result->SetBoolField(TEXT("set"), bSet);
+    return mcp_common::MakeOutcomeReply(Result, bSet, bSet ? FString()
+        : mcp_common::MeasuredOutcomeError(TEXT("set_gameplay_effect_modifier_set_by_caller"), TEXT("set")));
 }
 
-// MCP:set_gameplay_effect_modifier_attribute_based - Replace the magnitude of the modifier at modifier_index on the class default object of a GameplayEffect Blueprint with an AttributeBased one: backing_attribute, captured from attribute_source, scaled as (value + pre_multiply_add) * coefficient + post_multiply_add, under one of the four calculation policies (with AttributeMagnitudeEvaluatedUpToChannel, only through mod channel final_channel), then save the asset without recompiling. The modifier keeps its attribute and operation, but its previous magnitude is discarded whole, attribute curve and tag filters included. The policy and channel are read back. An unknown attribute, a bad attribute_source, calculation_type or final_channel, an out-of-range modifier_index, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. Refine afterwards with set_gameplay_effect_modifier_attribute_curve or set_gameplay_effect_modifier_attribute_tag_filters.
+// MCP:set_gameplay_effect_modifier_attribute_based - Replace the magnitude of the modifier at modifier_index on the class default object of a GameplayEffect Blueprint with an AttributeBased one: backing_attribute, captured from attribute_source, scaled as (value + pre_multiply_add) * coefficient + post_multiply_add, under one of the four calculation policies (with AttributeMagnitudeEvaluatedUpToChannel, only through mod channel final_channel), then save the asset without recompiling. The modifier keeps its attribute and operation, but its previous magnitude is discarded whole, attribute curve and tag filters included. The policy and channel are read back. An unknown attribute, a bad attribute_source, calculation_type or final_channel, an out-of-range modifier_index, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. Refine afterwards with set_gameplay_effect_modifier_attribute_curve or set_gameplay_effect_modifier_attribute_tag_filters. set is whether the modifier reads back as written after the save; false makes success false.
 //   @retired set_gameplay_effect_modifier - magnitude_type="attribute_based", backing_attribute, attribute_source, coefficient, pre_multiply_add, post_multiply_add, calculation_type, final_channel, snapshot
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param modifier_index - Index into the GE CDO Modifiers array (0 = first)
@@ -1919,8 +1922,10 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierAttributeBased(const TSha
         Result->SetBoolField(TEXT("channel_matches"), bChannelMatches);
     }
     Result->SetBoolField(TEXT("snapshot"), bSnapshot);
-    Result->SetBoolField(TEXT("set"), bIsAttrBased && bCalcTypeOk && bChannelMatches);
-    return mcp_common::MakeOkReply(Result);
+    const bool bSet = bIsAttrBased && bCalcTypeOk && bChannelMatches && CaptureReadback == BackingAttr.GetName();
+    Result->SetBoolField(TEXT("set"), bSet);
+    return mcp_common::MakeOutcomeReply(Result, bSet, bSet ? FString()
+        : mcp_common::MeasuredOutcomeError(TEXT("set_gameplay_effect_modifier_attribute_based"), TEXT("set")));
 }
 
 // MCP:create_gameplay_mod_magnitude_calculation_blueprint - Create a Blueprint parented to UGameplayModMagnitudeCalculation (a custom magnitude calc class for GE modifiers), compile and save it. A Blueprint of that class already at the path is returned untouched (created false, already_existed true); one of another class there is an error.
@@ -1944,7 +1949,7 @@ TSharedPtr<FJsonObject> HandleCreateGameplayModMagnitudeCalculationBlueprint(con
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:set_gameplay_effect_modifier_custom - Replace the magnitude of the modifier at modifier_index on the class default object of a GameplayEffect Blueprint with a CustomCalculationClass one: calculation_class computes the base value, scaled as (value + pre_multiply_add) * coefficient + post_multiply_add, and the asset is saved without recompiling. The modifier keeps its attribute and operation, but its previous magnitude is discarded whole (a FinalLookupCurve included), and omitted coefficients take their defaults, not the old values. An unknown, abstract or non-UGameplayModMagnitudeCalculation class, an out-of-range modifier_index, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. Make the class with create_gameplay_mod_magnitude_calculation_blueprint, add a lookup curve with set_gameplay_effect_modifier_custom_curve; other magnitudes: set_gameplay_effect_modifier_attribute_based, set_gameplay_effect_modifier_set_by_caller.
+// MCP:set_gameplay_effect_modifier_custom - Replace the magnitude of the modifier at modifier_index on the class default object of a GameplayEffect Blueprint with a CustomCalculationClass one: calculation_class computes the base value, scaled as (value + pre_multiply_add) * coefficient + post_multiply_add, and the asset is saved without recompiling. The modifier keeps its attribute and operation, but its previous magnitude is discarded whole (a FinalLookupCurve included), and omitted coefficients take their defaults, not the old values. An unknown, abstract or non-UGameplayModMagnitudeCalculation class, an out-of-range modifier_index, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. Make the class with create_gameplay_mod_magnitude_calculation_blueprint, add a lookup curve with set_gameplay_effect_modifier_custom_curve; other magnitudes: set_gameplay_effect_modifier_attribute_based, set_gameplay_effect_modifier_set_by_caller. set is whether the modifier reads back as written after the save; false makes success false.
 //   @retired set_gameplay_effect_modifier - magnitude_type="custom", calculation_class, coefficient, pre_multiply_add, post_multiply_add
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param modifier_index - Index into the GE CDO Modifiers array (0 = first)
@@ -2019,8 +2024,10 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierCustom(const TSharedPtr<F
     Result->SetNumberField(TEXT("coefficient"), Coefficient);
     Result->SetNumberField(TEXT("pre_multiply_add"), PreAdd);
     Result->SetNumberField(TEXT("post_multiply_add"), PostAdd);
-    Result->SetBoolField(TEXT("set"), bIsCustom);
-    return mcp_common::MakeOkReply(Result);
+    const bool bSet = bIsCustom && RBClass == CalcClass;
+    Result->SetBoolField(TEXT("set"), bSet);
+    return mcp_common::MakeOutcomeReply(Result, bSet, bSet ? FString()
+        : mcp_common::MeasuredOutcomeError(TEXT("set_gameplay_effect_modifier_custom"), TEXT("set")));
 }
 
 // GAS magnitude extras (refinements of the AttributeBased / Custom magnitudes above).
@@ -2030,7 +2037,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierCustom(const TSharedPtr<F
 //   reflection (GetMagnitudeSubStructPtr, by-name UScriptStruct lookup) — the FinalLookupCurve
 //   write/read (FinalLookupCurve is a public member once the struct is reached).
 
-// MCP:set_gameplay_effect_modifier_custom_curve - Set the FinalLookupCurve (a CurveTable row) on a GE modifier whose magnitude is already CustomCalculationClass; the custom calc output is remapped through the curve. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
+// MCP:set_gameplay_effect_modifier_custom_curve - Set the FinalLookupCurve (a CurveTable row) on a GE modifier whose magnitude is already CustomCalculationClass; the custom calc output is remapped through the curve. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. set is whether the modifier reads back as written after the save; false makes success false.
 //   @retired set_gameplay_effect_modifier - curve_table_path, row_name, magnitude_curve_for="custom"
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param modifier_index - Index into the GE CDO Modifiers array; the modifier's magnitude must already be CustomCalculationClass (call set_gameplay_effect_modifier_custom first)
@@ -2093,8 +2100,9 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierCustomCurve(const TShared
 
     TSharedPtr<FJsonObject> Result = GASAuthoring_ModifierResult(Modifier, TEXT("CustomCalculationClass"));
     Result->SetStringField(TEXT("calculation_class"), CalcClass ? CalcClass->GetName() : FString());
-    GASAuthoring_AddCurveRowFields(Result, CurveTable, RowNameStr, RB ? &RB->FinalLookupCurve : nullptr, bRowExists);
-    return mcp_common::MakeOkReply(Result);
+    const bool bSet = GASAuthoring_AddCurveRowFields(Result, CurveTable, RowNameStr, RB ? &RB->FinalLookupCurve : nullptr, bRowExists);
+    return mcp_common::MakeOutcomeReply(Result, bSet, bSet ? FString()
+        : mcp_common::MeasuredOutcomeError(TEXT("set_gameplay_effect_modifier_custom_curve"), TEXT("set")));
 }
 
 // FAttributeBasedFloat authoring (refinements of the AttributeBased magnitude above):
@@ -2104,7 +2112,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierCustomCurve(const TShared
 //   Both reach the protected AttributeBasedMagnitude sub-struct by reflection (GetMagnitudeSubStructPtr)
 //   and write its public members.
 
-// MCP:set_gameplay_effect_modifier_attribute_curve - Set the AttributeCurve (a CurveTable row) on a GE modifier whose magnitude is already AttributeBased; the captured attribute is remapped through the curve instead of used directly. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
+// MCP:set_gameplay_effect_modifier_attribute_curve - Set the AttributeCurve (a CurveTable row) on a GE modifier whose magnitude is already AttributeBased; the captured attribute is remapped through the curve instead of used directly. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. set is whether the modifier reads back as written after the save; false makes success false.
 //   @retired set_gameplay_effect_modifier - curve_table_path, row_name, magnitude_curve_for="attribute_based"
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param modifier_index - Index into the GE CDO Modifiers array; the modifier's magnitude must already be AttributeBased (call set_gameplay_effect_modifier_attribute_based first)
@@ -2167,11 +2175,12 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierAttributeCurve(const TSha
 
     TSharedPtr<FJsonObject> Result = GASAuthoring_ModifierResult(Modifier, TEXT("AttributeBased"));
     Result->SetStringField(TEXT("backing_attribute"), RB ? RB->BackingAttribute.AttributeToCapture.GetName() : FString());
-    GASAuthoring_AddCurveRowFields(Result, CurveTable, RowNameStr, RB ? &RB->AttributeCurve : nullptr, bRowExists);
-    return mcp_common::MakeOkReply(Result);
+    const bool bSet = GASAuthoring_AddCurveRowFields(Result, CurveTable, RowNameStr, RB ? &RB->AttributeCurve : nullptr, bRowExists);
+    return mcp_common::MakeOutcomeReply(Result, bSet, bSet ? FString()
+        : mcp_common::MeasuredOutcomeError(TEXT("set_gameplay_effect_modifier_attribute_curve"), TEXT("set")));
 }
 
-// MCP:set_gameplay_effect_modifier_attribute_tag_filters - Set the Source/Target tag filters on a GE modifier whose magnitude is already AttributeBased; only modifiers carrying all of a filter's tags factor into the captured attribute's evaluation. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
+// MCP:set_gameplay_effect_modifier_attribute_tag_filters - Set the Source/Target tag filters on a GE modifier whose magnitude is already AttributeBased; only modifiers carrying all of a filter's tags factor into the captured attribute's evaluation. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. set is whether the modifier reads back as written after the save; false makes success false.
 //   @retired set_gameplay_effect_modifier - source_tags, target_tags
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param modifier_index - Index into the GE CDO Modifiers array; the modifier's magnitude must already be AttributeBased (call set_gameplay_effect_modifier_attribute_based first)
@@ -2266,8 +2275,10 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierAttributeTagFilters(const
     Result->SetArrayField(TEXT("target_unknown_tags"), TargetUnknown);
     Result->SetArrayField(TEXT("source_tag_filter"), SourceFilterReadback);
     Result->SetArrayField(TEXT("target_tag_filter"), TargetFilterReadback);
-    Result->SetBoolField(TEXT("set"), bSourceOk && bTargetOk);
-    return mcp_common::MakeOkReply(Result);
+    const bool bSet = bSourceOk && bTargetOk;
+    Result->SetBoolField(TEXT("set"), bSet);
+    return mcp_common::MakeOutcomeReply(Result, bSet, bSet ? FString()
+        : mcp_common::MeasuredOutcomeError(TEXT("set_gameplay_effect_modifier_attribute_tag_filters"), TEXT("set")));
 }
 
 // GameplayAbility CDO authoring

@@ -470,8 +470,8 @@ namespace
 // MCP:set_niagara_user_parameter - Set the default value of one user parameter (the User. namespace) of a Niagara System asset in one undo step, adding the parameter when the system has none of that name and type; the asset is marked dirty, not saved (save_asset keeps it). type picks Float, Vector, Vec2, Vec4, Color, Bool or Int; without it a vector, vec2, vec4 or color key picks that type, else Float. A missing value, or one not of the JSON type the parameter takes, is an error with nothing written. A parameter already holding the value is a success with changed=false and value_set=false, nothing written. verified means the value reads back as sent. Read it with get_niagara_user_parameter; inverse: remove_niagara_user_parameter.
 //   @param system_path - Asset path of the Niagara System.
 //   @param parameter_name - User parameter name (without the "User." prefix).
-//   @param type - Optional type token: Float|Vector|Vec2|Vec4|Color|Bool|Int (case-insensitive); when omitted a vector, vec2, vec4 or color key picks that type, else Float
-//   @param value - The value of a Float (a number), Int (a whole number) or Bool (true or false) parameter; those types fail without it or with another JSON type
+//   @param type - Optional type token: Float|Vector|Vec2|Vec4|Color|Bool|Int (case-insensitive); Vec3, Vector2, Vector4, LinearColor, Boolean, Int32 and Integer are accepted too. When omitted a vector, vec2, vec4 or color key picks that type, else Float
+//   @param value [number|boolean] - The value of a Float (a number), Int (a whole number) or Bool (true or false) parameter; those types fail without it or with another JSON type
 //   @param vector - [X, Y, Z], 3 numbers, the value of a Vector parameter (required for it; also picks type Vector when type is omitted)
 //   @param vec2 - [X, Y], 2 numbers, the value of a Vec2 parameter (required for it)
 //   @param vec4 - [X, Y, Z, W], 4 numbers, the value of a Vec4 parameter (required for it)
@@ -687,7 +687,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraUserParameter(const TSharedPtr<FJsonObje
 // MCP:get_niagara_user_parameter - Read a user-exposed parameter's current value from a Niagara System's exposed store.  Resolves the parameter by short name (no "User." prefix) and the supplied ``type`` token, reads the POD value back. Round-trip companion to set_niagara_user_parameter.
 //   @param system_path - Asset path of the Niagara System.
 //   @param parameter_name - User parameter name (without the "User." prefix).
-//   @param type - Type token: Float|Vector|Vec2|Vec4|Color|Bool|Int (case-insensitive); defaults to Float
+//   @param type - Type token: Float|Vector|Vec2|Vec4|Color|Bool|Int (case-insensitive); defaults to Float. Vec3, Vector2, Vector4, LinearColor, Boolean, Int32 and Integer are accepted too.
 //   @returns { system_path: string, parameter_name: string, parameter_type: string, found: bool, value_read_back?: number|bool|[number...] }
 
 TSharedPtr<FJsonObject> HandleGetNiagaraUserParameter(const TSharedPtr<FJsonObject>& Params)
@@ -806,12 +806,17 @@ namespace
         return Data;
     }
 
-    // The note of a component setter whose value UNiagaraComponent has no getter to read back.
-    FString Niagara_NoReadbackNote(const TCHAR* VariableType)
+    // The reply of a component setter from its read-back: set is whether the component holds an override of that
+    // name and type after the write, verified whether it holds the value written; success needs both.
+    TSharedPtr<FJsonObject> Niagara_ComponentSetReply(const TCHAR* Command, const FNiagaraComponentTarget& Target,
+        const TSharedPtr<FJsonObject>& Data, bool bFound, bool bMatches)
     {
-        return FString::Printf(
-            TEXT("UE 5.8 UNiagaraComponent does not expose GetNiagaraVariable%s as public API -- set succeeded but round-trip readback is not available"),
-            VariableType);
+        const bool bVerified = bFound && bMatches;
+        Data->SetBoolField(TEXT("set"), bFound);
+        Data->SetBoolField(TEXT("verified"), bVerified);
+        return mcp_common::MakeOutcomeReply(Data, bVerified, bVerified ? FString() : bFound
+            ? FString::Printf(TEXT("%s: '%s' reads back a value other than the one written (see value_read_back)"), Command, *Target.VariableName)
+            : FString::Printf(TEXT("%s: the component holds no override '%s' of this type after the write"), Command, *Target.VariableName));
     }
 }
 
@@ -825,13 +830,13 @@ namespace
 // The set_niagara_component_* tools find the component by the actor's internal name or label
 // (FindNiagaraComponentByOwner), so the label is refused when another actor already answers to it.
 // ---------------------------------------------------------------------------
-// MCP:spawn_niagara_component - Place a Niagara System in the editor level as a new ANiagaraActor (the actor a drag of the system into the viewport makes, through the editor's Niagara actor factory) whose root UNiagaraComponent runs the system, at an optional location and rotation, for previews and set_niagara_component_* calls. For a Niagara component on an actor that already exists use add_component_to_actor (NiagaraComponent) and set its Asset with set_properties. actor_label labels the new actor (default: the system's name, made unique); a label that is "None" or blank, or that another editor-world actor already has as label or internal name, is an error and nothing is spawned, so set_niagara_component_* (actor_name = owner_actor_name or the label) reach this actor. A system the factory refuses (settings requiring an effect type) is an error too. One undo step; the level is marked dirty, not saved (save_level keeps it). Editor world only, PIE or not. location and rotation are read back.
+// MCP:spawn_niagara_component - Place a Niagara System in the editor level as a new ANiagaraActor (the actor a drag of the system into the viewport makes, through the editor's Niagara actor factory) whose root UNiagaraComponent runs the system, at an optional location and rotation, for previews and set_niagara_component_* calls. For a Niagara component on an actor that already exists use add_component_to_actor (NiagaraComponent) and set its Asset with set_properties. actor_label labels the new actor (default: the system's name, made unique); a label that is "None" or blank, or that another editor-world actor already has as label or internal name, is an error and nothing is spawned, so set_niagara_component_* (actor_name = owner_actor_name or the label) reach this actor. A system the factory refuses (settings requiring an effect type) is an error too. One undo step; the level is marked dirty, not saved (save_level keeps it). Editor world only, PIE or not. location and rotation are read back. Success requires the component to run the system, be registered and, with actor_label, the actor to carry that label (system_matches, is_registered, label_matches); a spawned actor that fails one stays in the level and the error names it.
 //   @retired spawn_actor - type="NiagaraActor", name, location, rotation, properties={"NiagaraComponent.Asset":"/Game/FX/NS_..."}
 //   @param system_path - Asset path of the Niagara System to place (e.g. /Game/MyGame/NS_Example); one that does not load is an error and nothing is spawned.
 //   @param location - Optional world location [X, Y, Z]; the origin when omitted.
 //   @param rotation - Optional world rotation, the object {"pitch":..,"yaw":..,"roll":..} or the array [pitch, yaw, roll] (index 2 is ROLL); zero when omitted.
 //   @param actor_label - Optional editor label for the new actor; when omitted the factory labels it after the system, made unique. A label that is not a valid actor label ("None", blank), or that another actor of the editor world already has as its label or internal name, is an error and nothing is spawned.
-//   @returns { system_path: string, owner_actor_name: string, owner_actor_label: string, actor_class: string, actor_path: string, component_name: string, is_registered: bool, is_active: bool, location: [number, number, number], rotation: { roll: number, pitch: number, yaw: number } }
+//   @returns { system_path: string, owner_actor_name: string, owner_actor_label: string, actor_class: string, actor_path: string, component_name: string, is_registered: bool, is_active: bool, system_matches: bool, label_matches: bool, location: [number, number, number], rotation: { roll: number, pitch: number, yaw: number } }
 
 TSharedPtr<FJsonObject> HandleSpawnNiagaraComponent(const TSharedPtr<FJsonObject>& Params)
 {
@@ -923,13 +928,24 @@ TSharedPtr<FJsonObject> HandleSpawnNiagaraComponent(const TSharedPtr<FJsonObject
     Data->SetBoolField(TEXT("is_active"), Component->IsActive());
     Data->SetArrayField(TEXT("location"), mcp_common::VectorToJsonArray(NewActor->GetActorLocation()));
     mcp_common::AddRotatorField(Data, TEXT("rotation"), NewActor->GetActorRotation());
-    return mcp_common::MakeOkReply(Data);
+
+    // The set_niagara_component_* tools need the component running this system, registered, and reachable by the
+    // label asked for (SetActorLabel only logs a label it refuses).
+    const bool bSystemMatches = Component->GetAsset() == System;
+    const bool bLabelMatches = !bLabelled || NewActor->GetActorLabel() == DesiredLabel;
+    const bool bPlaced = bSystemMatches && Component->IsRegistered() && bLabelMatches;
+    Data->SetBoolField(TEXT("system_matches"), bSystemMatches);
+    Data->SetBoolField(TEXT("label_matches"), bLabelMatches);
+    return mcp_common::MakeOutcomeReply(Data, bPlaced, bPlaced ? FString() : FString::Printf(
+        TEXT("spawn_niagara_component: actor %s was spawned but %s; see system_matches, is_registered and label_matches (delete_actor removes it)"),
+        *NewActor->GetName(),
+        !bSystemMatches ? TEXT("its component does not run the system") : !Component->IsRegistered() ? TEXT("its component is not registered") : TEXT("its label is not the one asked for")));
 }
 
 // ---------------------------------------------------------------------------
 // set_niagara_component_float
 // ---------------------------------------------------------------------------
-// MCP:set_niagara_component_float - Set a float override (a user parameter value) on the Niagara component of an actor in the editor world, the actor found by internal name or editor label and the first UNiagaraComponent on it used, through UNiagaraComponent::SetVariableFloat, which adds the override when the component has none of that name. value is required and must be a JSON number; a missing or mistyped value, a missing actor_name or variable_name, or an actor without a Niagara component is an error and nothing changes. The value is set on the component in memory with no undo step; the level is neither marked dirty nor saved. verified is whether GetVariableFloat finds the variable, and value_read_back is what it reads. Spawn a component with spawn_niagara_component; whole numbers: set_niagara_component_int; the asset default: set_niagara_user_parameter.
+// MCP:set_niagara_component_float - Set a float override (a user parameter value) on the Niagara component of an actor in the editor world, the actor found by internal name or editor label and the first UNiagaraComponent on it used, through UNiagaraComponent::SetVariableFloat, which adds the override when the component has none of that name. value is required and must be a JSON number; a missing or mistyped value, a missing actor_name or variable_name, or an actor without a Niagara component is an error and nothing changes. The value is set on the component in memory with no undo step; the level is neither marked dirty nor saved. set is whether GetVariableFloat finds the variable, verified whether it reads back the value written (false makes success false), and value_read_back is what it reads. Spawn a component with spawn_niagara_component; whole numbers: set_niagara_component_int; the asset default: set_niagara_user_parameter.
 //   @retired set_niagara_component_variable - type="float", value
 //   @param actor_name - Owner actor identifier (internal name or editor label).
 //   @param variable_name - Niagara variable name (override is added locally if needed).
@@ -955,16 +971,14 @@ TSharedPtr<FJsonObject> HandleSetNiagaraComponentFloat(const TSharedPtr<FJsonObj
     const float ReadBack = Target.Component->GetVariableFloat(VarName, bIsValid);
 
     TSharedPtr<FJsonObject> Data = Niagara_StartComponentReply(Target, TEXT("Float"));
-    Data->SetBoolField(TEXT("set"), true);
-    Data->SetBoolField(TEXT("verified"), bIsValid);
     Data->SetNumberField(TEXT("value_read_back"), ReadBack);
-    return mcp_common::MakeOkReply(Data);
+    return Niagara_ComponentSetReply(TEXT("set_niagara_component_float"), Target, Data, bIsValid, ReadBack == (float)Value);
 }
 
 // ---------------------------------------------------------------------------
 // set_niagara_component_vector
 // ---------------------------------------------------------------------------
-// MCP:set_niagara_component_vector - Sets a Vector3 override parameter on a spawned Niagara component.  Resolves the UNiagaraComponent on the owner actor and calls SetVariableVec3, then reads it back.
+// MCP:set_niagara_component_vector - Sets a Vector3 override parameter on a spawned Niagara component.  Resolves the UNiagaraComponent on the owner actor and calls SetVariableVec3, then reads it back: verified is whether it holds the value written in single precision (false makes success false).
 //   @retired set_niagara_component_variable - type="vector", value=[x, y, z]
 //   @param actor_name - Owner actor identifier (internal name or editor label).
 //   @param variable_name - Niagara variable name (override is added locally if needed).
@@ -987,16 +1001,15 @@ TSharedPtr<FJsonObject> HandleSetNiagaraComponentVector(const TSharedPtr<FJsonOb
     const FVector ReadBack = Target.Component->GetVariableVec3(VarName, bIsValid);
 
     TSharedPtr<FJsonObject> Data = Niagara_StartComponentReply(Target, TEXT("Vector"));
-    Data->SetBoolField(TEXT("set"), true);
-    Data->SetBoolField(TEXT("verified"), bIsValid);
     Data->SetArrayField(TEXT("value_read_back"), mcp_common::VectorToJsonArray(ReadBack));
-    return mcp_common::MakeOkReply(Data);
+    // The override is stored in single precision.
+    return Niagara_ComponentSetReply(TEXT("set_niagara_component_vector"), Target, Data, bIsValid, ReadBack == FVector(FVector3f(Vec)));
 }
 
 // ---------------------------------------------------------------------------
 // set_niagara_component_color
 // ---------------------------------------------------------------------------
-// MCP:set_niagara_component_color - Set a LinearColor override (a user parameter value) on the Niagara component of an actor in the editor world, the actor found by internal name or editor label and the first UNiagaraComponent on it used, through UNiagaraComponent::SetVariableLinearColor, which adds the override when needed. color is [r, g, b] or [r, g, b, a] in numbers within the float range; an omitted alpha is 1 and an omitted color is opaque black. Any other color, a missing actor_name or variable_name, or an actor without a Niagara component is an error and nothing changes. The value is set on the component in memory with no undo step; the level is neither marked dirty nor saved. verified is whether GetVariableColor finds the variable, and value_read_back is what it reads. Four plain components: set_niagara_component_vec4; the asset default: set_niagara_user_parameter.
+// MCP:set_niagara_component_color - Set a LinearColor override (a user parameter value) on the Niagara component of an actor in the editor world, the actor found by internal name or editor label and the first UNiagaraComponent on it used, through UNiagaraComponent::SetVariableLinearColor, which adds the override when needed. color is [r, g, b] or [r, g, b, a] in numbers within the float range; an omitted alpha is 1 and an omitted color is opaque black. Any other color, a missing actor_name or variable_name, or an actor without a Niagara component is an error and nothing changes. The value is set on the component in memory with no undo step; the level is neither marked dirty nor saved. set is whether GetVariableColor finds the variable, verified whether it reads back the value written (false makes success false), and value_read_back is what it reads. Four plain components: set_niagara_component_vec4; the asset default: set_niagara_user_parameter.
 //   @retired set_niagara_component_variable - type="color", value=[r, g, b, a]
 //   @param actor_name - Owner actor identifier (internal name or editor label).
 //   @param variable_name - Niagara variable name (override is added locally if needed).
@@ -1026,16 +1039,14 @@ TSharedPtr<FJsonObject> HandleSetNiagaraComponentColor(const TSharedPtr<FJsonObj
     const FLinearColor ReadBack = Target.Component->GetVariableColor(VarName, bIsValid);
 
     TSharedPtr<FJsonObject> Data = Niagara_StartComponentReply(Target, TEXT("LinearColor"));
-    Data->SetBoolField(TEXT("set"), true);
-    Data->SetBoolField(TEXT("verified"), bIsValid);
     Data->SetArrayField(TEXT("value_read_back"), mcp_common::ColorToJsonArray(ReadBack));
-    return mcp_common::MakeOkReply(Data);
+    return Niagara_ComponentSetReply(TEXT("set_niagara_component_color"), Target, Data, bIsValid, ReadBack == Color);
 }
 
 // ---------------------------------------------------------------------------
 // set_niagara_component_bool
 // ---------------------------------------------------------------------------
-// MCP:set_niagara_component_bool - Sets a bool override parameter on a spawned Niagara component.  Resolves the UNiagaraComponent on the owner actor and calls SetVariableBool, then reads it back.
+// MCP:set_niagara_component_bool - Sets a bool override parameter on a spawned Niagara component.  Resolves the UNiagaraComponent on the owner actor and calls SetVariableBool, then reads it back: verified is whether it holds the value written (false makes success false).
 //   @retired set_niagara_component_variable - type="bool", value
 //   @param actor_name - Owner actor identifier (internal name or editor label).
 //   @param variable_name - Niagara variable name (override is added locally if needed).
@@ -1059,10 +1070,8 @@ TSharedPtr<FJsonObject> HandleSetNiagaraComponentBool(const TSharedPtr<FJsonObje
     const bool ReadBack = Target.Component->GetVariableBool(VarName, bIsValid);
 
     TSharedPtr<FJsonObject> Data = Niagara_StartComponentReply(Target, TEXT("Bool"));
-    Data->SetBoolField(TEXT("set"), true);
-    Data->SetBoolField(TEXT("verified"), bIsValid);
     Data->SetBoolField(TEXT("value_read_back"), ReadBack);
-    return mcp_common::MakeOkReply(Data);
+    return Niagara_ComponentSetReply(TEXT("set_niagara_component_bool"), Target, Data, bIsValid, ReadBack == bValue);
 }
 
 // ---------------------------------------------------------------------------
@@ -1097,29 +1106,32 @@ TSharedPtr<FJsonObject> HandleSetNiagaraSystemFixedBounds(const TSharedPtr<FJson
 
     const FBox ReadBack = Component->GetSystemFixedBounds();
 
+    const bool bApplied = ReadBack.IsValid != 0 && ReadBack.Min == LocalBounds.Min && ReadBack.Max == LocalBounds.Max;
+
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("actor_name"), Owner ? Owner->GetName() : ActorName);
-    Data->SetBoolField(TEXT("applied"), true);
+    Data->SetBoolField(TEXT("applied"), bApplied);
     Data->SetBoolField(TEXT("bounds_valid"), ReadBack.IsValid != 0);
     Data->SetArrayField(TEXT("min_read_back"), mcp_common::VectorToJsonArray(ReadBack.Min));
     Data->SetArrayField(TEXT("max_read_back"), mcp_common::VectorToJsonArray(ReadBack.Max));
     // UNiagaraComponent keeps SystemFixedBounds in a plain member, not a UPROPERTY, in 5.7 and 5.8 alike, and the
     // details panel has no fixed-bounds field for a component: there is no serialized property to write instead,
     // so this stays runtime state (the description says so).
-    return mcp_common::MakeOkReply(Data);
+    return mcp_common::MakeOutcomeReply(Data, bApplied, bApplied ? FString()
+        : mcp_common::MeasuredOutcomeError(TEXT("set_niagara_component_fixed_bounds"), TEXT("applied")));
 }
 
 // ---------------------------------------------------------------------------
 // Spawned-component complex-type override parameters.
 // ---------------------------------------------------------------------------
 
-// MCP:set_niagara_component_vec2 - Set a Vec2 override (a user parameter value) on the Niagara component of an actor in the editor world, the actor found by internal name or editor label and the first UNiagaraComponent on it used, through UNiagaraComponent::SetVariableVec2 with x and y. An omitted component is 0; a component that is not a JSON number, a missing actor_name or variable_name, or an actor without a Niagara component is an error and nothing changes. The value is set on the component in memory with no undo step; the level is neither marked dirty nor saved. The component has no public getter for this type, so nothing is read back: verified is always true and note says so. Four components: set_niagara_component_vec4; three: set_niagara_component_vector.
+// MCP:set_niagara_component_vec2 - Set a Vec2 override (a user parameter value) on the Niagara component of an actor in the editor world, the actor found by internal name or editor label and the first UNiagaraComponent on it used, through UNiagaraComponent::SetVariableVec2 with x and y. An omitted component is 0; a component that is not a JSON number, a missing actor_name or variable_name, or an actor without a Niagara component is an error and nothing changes. The value is set on the component in memory with no undo step; the level is neither marked dirty nor saved. set is whether the matching UNiagaraComponent::GetVariable getter finds the variable, verified whether it reads back the value written (false makes success false), and value_read_back is what it reads. Four components: set_niagara_component_vec4; three: set_niagara_component_vector.
 //   @retired set_niagara_component_variable - type="vec2", value=[x, y]
 //   @param actor_name - Owner actor identifier (internal name or editor label).
 //   @param variable_name - Niagara variable name (override is added locally if needed).
 //   @param x - X component of the Vec2, a JSON number; 0 when omitted.
 //   @param y - Y component of the Vec2, a JSON number; 0 when omitted.
-//   @returns { actor_name: string, variable_name: string, variable_type: string, set: bool, verified: bool, note: string }
+//   @returns { actor_name: string, variable_name: string, variable_type: string, set: bool, verified: bool, value_read_back: number|array }
 
 TSharedPtr<FJsonObject> HandleSetNiagaraComponentVec2(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1138,17 +1150,19 @@ TSharedPtr<FJsonObject> HandleSetNiagaraComponentVec2(const TSharedPtr<FJsonObje
     Params->TryGetNumberField(TEXT("x"), X);
     Params->TryGetNumberField(TEXT("y"), Y);
 
-    const FString VarName(*Target.VariableName);
-    Target.Component->SetVariableVec2(FName(*VarName), FVector2D((float)X, (float)Y));
+    const FName VarName(*Target.VariableName);
+    const FVector2D Written((float)X, (float)Y);
+    Target.Component->SetVariableVec2(VarName, Written);
+
+    bool bIsValid = false;
+    const FVector2D ReadBack = Target.Component->GetVariableVec2(VarName, bIsValid);
 
     TSharedPtr<FJsonObject> Data = Niagara_StartComponentReply(Target, TEXT("Vec2"));
-    Data->SetBoolField(TEXT("set"), true);
-    Data->SetBoolField(TEXT("verified"), true);
-    Data->SetStringField(TEXT("note"), Niagara_NoReadbackNote(TEXT("Vec2")));
-    return mcp_common::MakeOkReply(Data);
+    Data->SetArrayField(TEXT("value_read_back"), mcp_common::Vector2DToJsonArray(ReadBack));
+    return Niagara_ComponentSetReply(TEXT("set_niagara_component_vec2"), Target, Data, bIsValid, ReadBack == Written);
 }
 
-// MCP:set_niagara_component_vec4 - Set a Vec4 override (a user parameter value) on the Niagara component of an actor in the editor world, the actor found by internal name or editor label and the first UNiagaraComponent on it used, through UNiagaraComponent::SetVariableVec4 with x, y, z and w. An omitted component is 0; a component that is not a JSON number, a missing actor_name or variable_name, or an actor without a Niagara component is an error and nothing changes. The value is set on the component in memory with no undo step; the level is neither marked dirty nor saved. The component has no public getter for this type, so nothing is read back: verified is always true and note says so. Two components: set_niagara_component_vec2; a color: set_niagara_component_color.
+// MCP:set_niagara_component_vec4 - Set a Vec4 override (a user parameter value) on the Niagara component of an actor in the editor world, the actor found by internal name or editor label and the first UNiagaraComponent on it used, through UNiagaraComponent::SetVariableVec4 with x, y, z and w. An omitted component is 0; a component that is not a JSON number, a missing actor_name or variable_name, or an actor without a Niagara component is an error and nothing changes. The value is set on the component in memory with no undo step; the level is neither marked dirty nor saved. set is whether the matching UNiagaraComponent::GetVariable getter finds the variable, verified whether it reads back the value written (false makes success false), and value_read_back is what it reads. Two components: set_niagara_component_vec2; a color: set_niagara_component_color.
 //   @retired set_niagara_component_variable - type="vec4", value=[x, y, z, w]
 //   @param actor_name - Owner actor identifier (internal name or editor label).
 //   @param variable_name - Niagara variable name (override is added locally if needed).
@@ -1156,7 +1170,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraComponentVec2(const TSharedPtr<FJsonObje
 //   @param y - Y component of the Vec4, a JSON number; 0 when omitted.
 //   @param z - Z component of the Vec4, a JSON number; 0 when omitted.
 //   @param w - W component of the Vec4, a JSON number; 0 when omitted.
-//   @returns { actor_name: string, variable_name: string, variable_type: string, set: bool, verified: bool, note: string }
+//   @returns { actor_name: string, variable_name: string, variable_type: string, set: bool, verified: bool, value_read_back: number|array }
 
 TSharedPtr<FJsonObject> HandleSetNiagaraComponentVec4(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1179,22 +1193,29 @@ TSharedPtr<FJsonObject> HandleSetNiagaraComponentVec4(const TSharedPtr<FJsonObje
     Params->TryGetNumberField(TEXT("z"), Z);
     Params->TryGetNumberField(TEXT("w"), W);
 
-    const FString VarName(*Target.VariableName);
-    Target.Component->SetVariableVec4(FName(*VarName), FVector4((float)X, (float)Y, (float)Z, (float)W));
+    const FName VarName(*Target.VariableName);
+    const FVector4 Written((float)X, (float)Y, (float)Z, (float)W);
+    Target.Component->SetVariableVec4(VarName, Written);
+
+    bool bIsValid = false;
+    const FVector4 ReadBack = Target.Component->GetVariableVec4(VarName, bIsValid);
 
     TSharedPtr<FJsonObject> Data = Niagara_StartComponentReply(Target, TEXT("Vec4"));
-    Data->SetBoolField(TEXT("set"), true);
-    Data->SetBoolField(TEXT("verified"), true);
-    Data->SetStringField(TEXT("note"), Niagara_NoReadbackNote(TEXT("Vec4")));
-    return mcp_common::MakeOkReply(Data);
+    TArray<TSharedPtr<FJsonValue>> ReadBackJson;
+    for (int32 Index = 0; Index < 4; ++Index)
+    {
+        ReadBackJson.Add(MakeShared<FJsonValueNumber>(ReadBack[Index]));
+    }
+    Data->SetArrayField(TEXT("value_read_back"), ReadBackJson);
+    return Niagara_ComponentSetReply(TEXT("set_niagara_component_vec4"), Target, Data, bIsValid, ReadBack == Written);
 }
 
-// MCP:set_niagara_component_int - Set an int32 override (a user parameter value) on the Niagara component of an actor in the editor world, the actor found by internal name or editor label and the first UNiagaraComponent on it used, through UNiagaraComponent::SetVariableInt, which adds the override when needed. value is required and must be a JSON number; a missing or mistyped value, a missing actor_name or variable_name, or an actor without a Niagara component is an error and nothing changes. The value is set on the component in memory with no undo step; the level is neither marked dirty nor saved. The component has no public getter for this type, so nothing is read back: verified is always true and note says so. Floats: set_niagara_component_float; the asset default: set_niagara_user_parameter.
+// MCP:set_niagara_component_int - Set an int32 override (a user parameter value) on the Niagara component of an actor in the editor world, the actor found by internal name or editor label and the first UNiagaraComponent on it used, through UNiagaraComponent::SetVariableInt, which adds the override when needed. value is required and must be a JSON number; a missing or mistyped value, a missing actor_name or variable_name, or an actor without a Niagara component is an error and nothing changes. The value is set on the component in memory with no undo step; the level is neither marked dirty nor saved. set is whether the matching UNiagaraComponent::GetVariable getter finds the variable, verified whether it reads back the value written (false makes success false), and value_read_back is what it reads. Floats: set_niagara_component_float; the asset default: set_niagara_user_parameter.
 //   @retired set_niagara_component_variable - type="int", value
 //   @param actor_name - Owner actor identifier (internal name or editor label).
 //   @param variable_name - Niagara variable name (override is added locally if needed).
 //   @param value - Integer value to set, a JSON number; the call fails without it.
-//   @returns { actor_name: string, variable_name: string, variable_type: string, set: bool, verified: bool, note: string }
+//   @returns { actor_name: string, variable_name: string, variable_type: string, set: bool, verified: bool, value_read_back: number|array }
 
 TSharedPtr<FJsonObject> HandleSetNiagaraComponentInt(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1208,22 +1229,23 @@ TSharedPtr<FJsonObject> HandleSetNiagaraComponentInt(const TSharedPtr<FJsonObjec
     int32 Value = 0;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("value"), Value)) { return Missing; }
 
-    const FString VarName(*Target.VariableName);
-    Target.Component->SetVariableInt(FName(*VarName), (int32)Value);
+    const FName VarName(*Target.VariableName);
+    Target.Component->SetVariableInt(VarName, (int32)Value);
+
+    bool bIsValid = false;
+    const int32 ReadBack = Target.Component->GetVariableInt(VarName, bIsValid);
 
     TSharedPtr<FJsonObject> Data = Niagara_StartComponentReply(Target, TEXT("Int"));
-    Data->SetBoolField(TEXT("set"), true);
-    Data->SetBoolField(TEXT("verified"), true);
-    Data->SetStringField(TEXT("note"), Niagara_NoReadbackNote(TEXT("Int")));
-    return mcp_common::MakeOkReply(Data);
+    Data->SetNumberField(TEXT("value_read_back"), ReadBack);
+    return Niagara_ComponentSetReply(TEXT("set_niagara_component_int"), Target, Data, bIsValid, ReadBack == Value);
 }
 
-// MCP:set_niagara_component_position - Sets a Position (FVector) override parameter on a spawned Niagara component.  Resolves the UNiagaraComponent on the owner actor and calls SetVariablePosition, then reads it back via GetNiagaraVariablePosition.
+// MCP:set_niagara_component_position - Sets a Position (FVector) override parameter on a spawned Niagara component.  Resolves the UNiagaraComponent on the owner actor and calls SetVariablePosition, which writes a single-precision Vector instead when the variable is not a Position (stored_as says which), then reads it back: verified is whether it holds the value written (false makes success false).
 //   @retired set_niagara_component_variable - type="position", value=[x, y, z]
 //   @param actor_name - Owner actor identifier (internal name or editor label).
 //   @param variable_name - Niagara variable name (override is added locally if needed).
 //   @param position - World-space position override as [x, y, z].
-//   @returns { actor_name: string, variable_name: string, variable_type: string, set: bool, verified: bool, value_read_back: [number, number, number] }
+//   @returns { actor_name: string, variable_name: string, variable_type: string, stored_as: "Position"|"Vector", set: bool, verified: bool, value_read_back: [number, number, number] }
 
 TSharedPtr<FJsonObject> HandleSetNiagaraComponentPosition(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1234,17 +1256,28 @@ TSharedPtr<FJsonObject> HandleSetNiagaraComponentPosition(const TSharedPtr<FJson
     }
 
     const FVector Vec = mcp_common::ReadJsonVector(Params, TEXT("position"));
-    const FString VarName(*Target.VariableName);
-    Target.Component->SetVariablePosition(FName(*VarName), Vec);
+    const FName VarName(*Target.VariableName);
+    Target.Component->SetVariablePosition(VarName, Vec);
+
+    // SetVariablePosition writes a single-precision Vector instead when the variable is not a Position.
+    bool bIsValid = false;
+    FVector ReadBack = Target.Component->GetVariablePosition(VarName, bIsValid);
+    FVector Expected = Vec;
+    const TCHAR* StoredAs = TEXT("Position");
+    if (!bIsValid)
+    {
+        ReadBack = Target.Component->GetVariableVec3(VarName, bIsValid);
+        Expected = FVector(FVector3f(Vec));
+        StoredAs = TEXT("Vector");
+    }
 
     TSharedPtr<FJsonObject> Data = Niagara_StartComponentReply(Target, TEXT("Position"));
-    Data->SetBoolField(TEXT("set"), true);
-    Data->SetBoolField(TEXT("verified"), true);
-    Data->SetStringField(TEXT("note"), Niagara_NoReadbackNote(TEXT("Position")));
-    return mcp_common::MakeOkReply(Data);
+    Data->SetStringField(TEXT("stored_as"), StoredAs);
+    Data->SetArrayField(TEXT("value_read_back"), mcp_common::VectorToJsonArray(ReadBack));
+    return Niagara_ComponentSetReply(TEXT("set_niagara_component_position"), Target, Data, bIsValid, ReadBack == Expected);
 }
 
-// MCP:set_niagara_component_quat - Set a Quat override (a user parameter value) on the Niagara component of an actor in the editor world, the actor found by internal name or editor label and the first UNiagaraComponent on it used, through UNiagaraComponent::SetVariableQuat with w, x, y and z, not normalized. An omitted component is the identity one (w 1, x, y and z 0); a component that is not a JSON number, a missing actor_name or variable_name, or an actor without a Niagara component is an error and nothing changes. The value is set on the component in memory with no undo step; the level is neither marked dirty nor saved. The component has no public getter for this type, so nothing is read back: verified is always true and note says so. Four plain components: set_niagara_component_vec4.
+// MCP:set_niagara_component_quat - Set a Quat override (a user parameter value) on the Niagara component of an actor in the editor world, the actor found by internal name or editor label and the first UNiagaraComponent on it used, through UNiagaraComponent::SetVariableQuat with w, x, y and z, not normalized. An omitted component is the identity one (w 1, x, y and z 0); a component that is not a JSON number, a missing actor_name or variable_name, or an actor without a Niagara component is an error and nothing changes. The value is set on the component in memory with no undo step; the level is neither marked dirty nor saved. set is whether the matching UNiagaraComponent::GetVariable getter finds the variable, verified whether it reads back the value written (false makes success false), and value_read_back is what it reads. Four plain components: set_niagara_component_vec4.
 //   @retired set_niagara_component_variable - type="quat", value=[x, y, z, w]
 //   @param actor_name - Owner actor identifier (internal name or editor label).
 //   @param variable_name - Niagara variable name (override is added locally if needed).
@@ -1252,7 +1285,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraComponentPosition(const TSharedPtr<FJson
 //   @param x - X component of the quaternion, a JSON number; 0 when omitted.
 //   @param y - Y component of the quaternion, a JSON number; 0 when omitted.
 //   @param z - Z component of the quaternion, a JSON number; 0 when omitted.
-//   @returns { actor_name: string, variable_name: string, variable_type: string, set: bool, verified: bool, note: string }
+//   @returns { actor_name: string, variable_name: string, variable_type: string, set: bool, verified: bool, value_read_back: number|array }
 
 TSharedPtr<FJsonObject> HandleSetNiagaraComponentQuat(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1275,22 +1308,31 @@ TSharedPtr<FJsonObject> HandleSetNiagaraComponentQuat(const TSharedPtr<FJsonObje
     Params->TryGetNumberField(TEXT("y"), Y);
     Params->TryGetNumberField(TEXT("z"), Z);
 
-    const FString VarName(*Target.VariableName);
-    Target.Component->SetVariableQuat(FName(*VarName), FQuat((float)X, (float)Y, (float)Z, (float)W));
+    const FName VarName(*Target.VariableName);
+    const FQuat Written((float)X, (float)Y, (float)Z, (float)W);
+    Target.Component->SetVariableQuat(VarName, Written);
+
+    bool bIsValid = false;
+    const FQuat ReadBack = Target.Component->GetVariableQuat(VarName, bIsValid);
 
     TSharedPtr<FJsonObject> Data = Niagara_StartComponentReply(Target, TEXT("Quat"));
-    Data->SetBoolField(TEXT("set"), true);
-    Data->SetBoolField(TEXT("verified"), true);
-    Data->SetStringField(TEXT("note"), Niagara_NoReadbackNote(TEXT("Quat")));
-    return mcp_common::MakeOkReply(Data);
+    TArray<TSharedPtr<FJsonValue>> ReadBackJson;
+    ReadBackJson.Add(MakeShared<FJsonValueNumber>(ReadBack.W));
+    ReadBackJson.Add(MakeShared<FJsonValueNumber>(ReadBack.X));
+    ReadBackJson.Add(MakeShared<FJsonValueNumber>(ReadBack.Y));
+    ReadBackJson.Add(MakeShared<FJsonValueNumber>(ReadBack.Z));
+    Data->SetArrayField(TEXT("value_read_back"), ReadBackJson);
+    // Compared component by component: FQuat::Equals also takes the negated quaternion as equal.
+    const bool bMatches = ReadBack.W == Written.W && ReadBack.X == Written.X && ReadBack.Y == Written.Y && ReadBack.Z == Written.Z;
+    return Niagara_ComponentSetReply(TEXT("set_niagara_component_quat"), Target, Data, bIsValid, bMatches);
 }
 
-// MCP:set_niagara_component_object - Sets an Object (UObject*) override parameter on a spawned Niagara component by loading the UObject at the given object_path.  Resolves the UNiagaraComponent on the owner actor and calls SetVariableObject, then reads it back via GetNiagaraVariableObject and returns its GetPathName() as a string.
+// MCP:set_niagara_component_object - Sets an Object (UObject*) override parameter on a spawned Niagara component by loading the UObject at the given object_path.  Resolves the UNiagaraComponent on the owner actor and calls SetVariableObject, then reads it back from the component override store (UNiagaraComponent has no object getter): verified is whether it holds that object (false makes success false), object_path_read_back its path.
 //   @retired set_niagara_component_variable - type="object", value=<asset path>
 //   @param actor_name - Owner actor identifier (internal name or editor label).
 //   @param variable_name - Niagara variable name (override is added locally if needed).
 //   @param object_path - Asset path of the UObject to bind (e.g. "/Game/Materials/M_Heat.M_Heat").
-//   @returns { actor_name: string, variable_name: string, variable_type: string, set: bool, verified: bool, object_path_read_back: string, object_class_read_back: string }
+//   @returns { actor_name: string, variable_name: string, variable_type: string, set: bool, verified: bool, object_path_set: string, object_path_read_back: string, object_class_read_back: string }
 
 TSharedPtr<FJsonObject> HandleSetNiagaraComponentObject(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1316,18 +1358,23 @@ TSharedPtr<FJsonObject> HandleSetNiagaraComponentObject(const TSharedPtr<FJsonOb
             FString::Printf(TEXT("Could not load UObject: %s"), *ObjectPath));
     }
 
-    const FString VarName(*Target.VariableName);
-    Target.Component->SetVariableObject(FName(*VarName), Resolved);
+    const FName VarName(*Target.VariableName);
+    Target.Component->SetVariableObject(VarName, Resolved);
+
+    // UNiagaraComponent has no object getter: the override store answers, as for get_niagara_component_matrix.
+    const FNiagaraParameterStore& Store = Target.Component->GetOverrideParameters();
+    const FNiagaraVariable Var(FNiagaraTypeDefinition::GetUObjectDef(), VarName);
+    const bool bFound = Store.IndexOf(Var) != INDEX_NONE;
+    const UObject* ReadBack = bFound ? Store.GetUObject(Var).Get() : nullptr;
 
     TSharedPtr<FJsonObject> Data = Niagara_StartComponentReply(Target, TEXT("Object"));
-    Data->SetBoolField(TEXT("set"), true);
-    Data->SetBoolField(TEXT("verified"), true);
-    Data->SetStringField(TEXT("object_path_set"), ObjectPath);
-    Data->SetStringField(TEXT("note"), Niagara_NoReadbackNote(TEXT("Object")));
-    return mcp_common::MakeOkReply(Data);
+    Data->SetStringField(TEXT("object_path_set"), Resolved->GetPathName());
+    Data->SetStringField(TEXT("object_path_read_back"), ReadBack ? ReadBack->GetPathName() : FString());
+    Data->SetStringField(TEXT("object_class_read_back"), ReadBack ? ReadBack->GetClass()->GetName() : FString());
+    return Niagara_ComponentSetReply(TEXT("set_niagara_component_object"), Target, Data, bFound, ReadBack == Resolved);
 }
 
-// MCP:set_niagara_component_matrix - Sets a Matrix (FMatrix) override parameter on a spawned Niagara component. Resolves the UNiagaraComponent on the owner actor and calls SetVariableMatrix with a 4x4 row-major matrix built from 16 floats. UNiagaraComponent does NOT expose GetNiagaraVariableMatrix as public API, so round-trip readback is not available; verified:true means the set call succeeded.
+// MCP:set_niagara_component_matrix - Sets a Matrix (FMatrix) override parameter on a spawned Niagara component. Resolves the UNiagaraComponent on the owner actor and calls SetVariableMatrix with a 4x4 row-major matrix built from 16 floats. GetVariableMatrix reads it back: verified is whether it holds the value written in single precision (false makes success false), and value_read_back is what it reads.
 //   @retired set_niagara_component_variable - type="matrix", value=[16 numbers, row-major]
 //   @param actor_name - Owner actor identifier (internal name or editor label).
 //   @param variable_name - Niagara variable name (override is added locally if needed).
@@ -1367,14 +1414,27 @@ TSharedPtr<FJsonObject> HandleSetNiagaraComponentMatrix(const TSharedPtr<FJsonOb
         FVector(M[8],  M[9],  M[10]),
         FVector(M[12], M[13], M[14]));
 
-    const FString VarName(*Target.VariableName);
-    Target.Component->SetVariableMatrix(FName(*VarName), Mat);
+    const FName VarName(*Target.VariableName);
+    Target.Component->SetVariableMatrix(VarName, Mat);
 
+    bool bIsValid = false;
+    const FMatrix ReadBack = Target.Component->GetVariableMatrix(VarName, bIsValid);
+
+    // The override is stored in single precision.
+    const FMatrix Expected((FMatrix)FMatrix44f(Mat));
+    bool bMatches = true;
+    TArray<TSharedPtr<FJsonValue>> ReadBackJson;
+    for (int32 Row = 0; Row < 4; ++Row)
+    {
+        for (int32 Col = 0; Col < 4; ++Col)
+        {
+            ReadBackJson.Add(MakeShared<FJsonValueNumber>(ReadBack.M[Row][Col]));
+            bMatches = bMatches && ReadBack.M[Row][Col] == Expected.M[Row][Col];
+        }
+    }
     TSharedPtr<FJsonObject> Data = Niagara_StartComponentReply(Target, TEXT("Matrix"));
-    Data->SetBoolField(TEXT("set"), true);
-    Data->SetBoolField(TEXT("verified"), true);
-    Data->SetStringField(TEXT("note"), Niagara_NoReadbackNote(TEXT("Matrix")));
-    return mcp_common::MakeOkReply(Data);
+    Data->SetArrayField(TEXT("value_read_back"), ReadBackJson);
+    return Niagara_ComponentSetReply(TEXT("set_niagara_component_matrix"), Target, Data, bIsValid, bMatches);
 }
 
 // MCP:get_niagara_component_matrix - Reads a Matrix (FMatrix4f) override parameter back off a spawned Niagara component — the round-trip reader for set_niagara_component_variable. UNiagaraComponent exposes no GetNiagaraVariableMatrix, so this reads the value straight out of the component's OverrideParameters store (FNiagaraParameterStore) by looking up the Matrix4 FNiagaraVariable; the override is stored as FMatrix44f. Returns found:false with an empty matrix (never a faked identity) when the variable has no local override on the component.
@@ -3580,7 +3640,7 @@ namespace
 //   @param emitter_name - Display name of the emitter handle.
 //   @param module_node_name - The module function-call node name (from add_niagara_module_to_stack's module_node_name).
 //   @param input_name - Leaf name of the module input (e.g. "Drag" for "Module.Drag").
-//   @param value_type - One of "float", "int", "vector", or "color"; defaults to "float"
+//   @param value_type - One of "float", "int", "vector", or "color"; defaults to "float". int32, vec3 and linearcolor are accepted too.
 //   @param value - Required. For float/int: a JSON number. For vector: [x, y, z], numbers within the float range. For color: [r, g, b] or [r, g, b, a], alpha 1 when omitted. A missing or malformed value is an error.
 //   @returns { system_path: string, emitter_name: string, module_node_name: string, input_name: string, value_type: string, ri_param_name: string, verified: bool, success: bool, saved: bool, save_error?: string }
 
@@ -8231,12 +8291,20 @@ TSharedPtr<FJsonObject> HandleListNiagaraRendererClasses(
     return mcp_common::MakeOkReply(Niagara_ListConcreteSubclasses(UNiagaraRendererProperties::StaticClass()));
 }
 
-// MCP:list_niagara_data_interface_classes - Enumerate every concrete UNiagaraDataInterface subclass registered in this process via TObjectIterator. Skips Abstract (those are base classes only). Used to discover what data-interface class strings are valid for add_niagara_data_interface.
-//   @returns { count: int, classes: [{class_name, class_path, display_name, abstract, class_flags}] }
+// MCP:list_niagara_data_interface_classes - Enumerate every concrete UNiagaraDataInterface subclass registered in this process via TObjectIterator. Skips Abstract (those are base classes only). Used to discover what data-interface class strings are valid for add_niagara_data_interface. The classes come sorted by class_path, a page at a time (offset/limit).
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { count: int (entries in this page), classes: [{class_name, class_path, display_name, abstract, class_flags}], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }
 TSharedPtr<FJsonObject> HandleListNiagaraDataInterfaceClasses(
     const TSharedPtr<FJsonObject>& Params)
 {
-    return mcp_common::MakeOkReply(Niagara_ListConcreteSubclasses(UNiagaraDataInterface::StaticClass()));
+    TSharedPtr<FJsonObject> Data = Niagara_ListConcreteSubclasses(UNiagaraDataInterface::StaticClass());
+    TArray<TSharedPtr<FJsonValue>> Classes = Data->GetArrayField(TEXT("classes"));
+    mcp_common::SortJsonItems(Classes, TEXT("class_path"));
+    mcp_common::ApplyListPage(Classes, mcp_common::ReadListPage(Params), Data);
+    Data->SetNumberField(TEXT("count"), Classes.Num());
+    Data->SetArrayField(TEXT("classes"), Classes);
+    return mcp_common::MakeOkReply(Data);
 }
 
 // MCP:get_niagara_renderer_info - Dump the full property set of a specific renderer instance owned by a system emitter. Resolves the system via path, the emitter via name (or handle_index), and the renderer via index — then runs FJsonObjectConverter::UStructToJsonObject on the renderer to produce a flat property map. get_niagara_emitter_renderers lists every renderer; this cmd returns the full UPROPERTY surface of one renderer.

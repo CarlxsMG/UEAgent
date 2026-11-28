@@ -119,7 +119,8 @@ namespace
     //  - Numbers go through LexTryParseString: ImportText_Direct cannot fail on a float
     //    property ("abc" imports as 0 and returns a non-null cursor).
     //  - Every other type goes through ImportText_Direct, whose null return means rejected.
-    bool ImportExpressionProperty(UMaterialExpression* Expression, FProperty* Property, const FString& Text, FString& OutError)
+    // OutWrittenText is the parsed value exported as text, to compare the node's value against.
+    bool ImportExpressionProperty(UMaterialExpression* Expression, FProperty* Property, const FString& Text, FString& OutWrittenText, FString& OutError)
     {
         void* Dest = Property->ContainerPtrToValuePtr<void>(Expression);
         void* Scratch = Property->AllocateAndInitializeValue();
@@ -177,6 +178,7 @@ namespace
 
         if (bParsed)
         {
+            Property->ExportText_Direct(OutWrittenText, Scratch, nullptr, Expression, PPF_None);
             Expression->Modify();
             Property->CopyCompleteValue(Dest, Scratch);
         }
@@ -259,13 +261,13 @@ namespace UEAgentMaterialExtraImpl
 #endif
 }
 
-// MCP:connect_to_material_output - Wire one output of an expression node into a main input of a UMaterial asset (BaseColor, Roughness, Normal...). The edit stays in memory and marks the material dirty, with no recompile and no save, so follow with compile_material and save_asset; FrontMaterial is refused while Substrate is disabled. Node-to-node wiring is connect_material_expressions.
+// MCP:connect_to_material_output - Wire one output of an expression node into a main input of a UMaterial asset (BaseColor, Roughness, Normal...). The edit stays in memory and marks the material dirty, with no recompile and no save, so follow with compile_material and save_asset; FrontMaterial is refused while Substrate is disabled. Node-to-node wiring is connect_material_expressions. connected is the material input re-read; false fails the call.
 //   @retired connect_pins - asset_path=<material>, source_node_id=<expression name>, source_pin=<output name, "" for the first>, target_node_id="@output", target_pin=<BaseColor, Metallic, Specular, Roughness, Normal, EmissiveColor, Opacity, OpacityMask, ..., FrontMaterial, MaterialAttributes>
 //   @param material_path - UMaterial asset path, e.g. "/Game/Materials/M_Rock"; a material instance path fails with Material not found.
 //   @param from_node_id - Id of the source expression (from create_material_expression / get_material_graph_info).
 //   @param output_property - Material input to feed, case-insensitive: BaseColor, Metallic, Specular, Roughness, Anisotropy, Normal, Tangent, EmissiveColor (or Emissive), Opacity, OpacityMask, WorldPositionOffset (WPO), AmbientOcclusion (AO), Refraction, PixelDepthOffset, SubsurfaceColor, FrontMaterial (Substrate), MaterialAttributes.
 //   @param from_pin - Output pin name on the source node, e.g. "RGB" or "R"; omitted or empty uses its first output.
-//   @returns { material: string, from_node_id: string, output_property: string, connected: bool }
+//   @returns { material: string, from_node_id: string, output_property: string, connected: bool, success: bool, error?: string }
 
 TSharedPtr<FJsonObject> HandleConnectToMaterialOutput(const TSharedPtr<FJsonObject>& Params)
 {
@@ -298,19 +300,29 @@ TSharedPtr<FJsonObject> HandleConnectToMaterialOutput(const TSharedPtr<FJsonObje
         return mcp_common::MakeErrorReply(TEXT("ConnectMaterialProperty failed (incompatible output or property)"));
     Material->MarkPackageDirty();
 
+    // The re-read: the material input now points at the source node.
+    const FExpressionInput* PropertyInput = Material->GetExpressionInputForProperty(Property);
+    const bool bLinked = PropertyInput != nullptr && PropertyInput->Expression == FromExpression;
+
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("material"), Material->GetName());
     Result->SetStringField(TEXT("from_node_id"), FromNodeId);
     Result->SetStringField(TEXT("output_property"), OutputProperty);
-    Result->SetBoolField(TEXT("connected"), true);
+    Result->SetBoolField(TEXT("connected"), bLinked);
+    Result->SetBoolField(TEXT("success"), bLinked);
+    if (!bLinked)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("connect_to_material_output: %s does not point at %s after connecting"), *OutputProperty, *FromNodeId));
+    }
     return Result;
 }
 
-// MCP:disconnect_to_material_output - Disconnect a material output property (inverse of connect_to_material_output).  Idempotent: an already-disconnected property returns already_disconnected=true (still success — the output slot always resolves to a valid input, so false is unambiguously "nothing was connected", never an error).
+// MCP:disconnect_to_material_output - Disconnect a material output property (inverse of connect_to_material_output).  Idempotent: an already-disconnected property returns already_disconnected=true (still success — the output slot always resolves to a valid input, so false is unambiguously "nothing was connected", never an error). A property that still reads connected afterwards fails the call.
 //   @retired disconnect_pin - asset_path=<material>, node_id="@output", pin_name=<BaseColor, ..., FrontMaterial, MaterialAttributes>
 //   @param material_path - Material asset path.
 //   @param output_property - BaseColor, Metallic, Roughness, Normal, Emissive, Opacity, OpacityMask, Specular, ... (same strings as connect_to_material_output), FrontMaterial (the Substrate slab wire connect_substrate_slab_to_material makes) and MaterialAttributes (the wire add_material_attribute_layers_node makes) included
-//   @returns { material: string, output_property: string, disconnected: bool, already_disconnected: bool }
+//   @returns { material: string, output_property: string, disconnected: bool, already_disconnected: bool, success: bool, error?: string }
 
 TSharedPtr<FJsonObject> HandleDisconnectToMaterialOutput(const TSharedPtr<FJsonObject>& Params)
 {
@@ -341,16 +353,26 @@ TSharedPtr<FJsonObject> HandleDisconnectToMaterialOutput(const TSharedPtr<FJsonO
     Result->SetStringField(TEXT("output_property"), OutputProperty);
     Result->SetBoolField(TEXT("disconnected"), bDisconnected);
     Result->SetBoolField(TEXT("already_disconnected"), !bDisconnected);
+
+    // The re-read: the material input holds no link.
+    const FExpressionInput* PropertyInput = Material->GetExpressionInputForProperty(Property);
+    const bool bUnlinked = PropertyInput != nullptr && !PropertyInput->IsConnected();
+    Result->SetBoolField(TEXT("success"), bUnlinked);
+    if (!bUnlinked)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("disconnect_to_material_output: %s is still connected"), *OutputProperty));
+    }
     return Result;
 }
 
-// MCP:set_material_expression_property - Write one property of an expression node of a UMaterial asset (not an instance), found by its object name node_id. param_name names the property on every node type (R on Constant, DefaultValue or SliderMax on ScalarParameter, Constant on Constant3Vector and Constant4Vector, DefaultValue on VectorParameter...); ParameterName renames a parameter node through its own SetParameterName. Over set_properties on the node it also runs PostEditChange on the material and accepts "[r,g,b,a]" or "r,g,b" for a linear color. A value that does not parse for the property is refused and nothing is written. No undo, no save: it marks the material dirty (persist with save_asset). value_after is the property read back. Instances: set_material_instance_parameter.
+// MCP:set_material_expression_property - Write one property of an expression node of a UMaterial asset (not an instance), found by its object name node_id. param_name names the property on every node type (R on Constant, DefaultValue or SliderMax on ScalarParameter, Constant on Constant3Vector and Constant4Vector, DefaultValue on VectorParameter...); ParameterName renames a parameter node through its own SetParameterName. Over set_properties on the node it also runs PostEditChange on the material and accepts "[r,g,b,a]" or "r,g,b" for a linear color. A value that does not parse for the property is refused and nothing is written. No undo, no save: it marks the material dirty (persist with save_asset). value_after is the property read back after PostEditChange, and the call fails when it differs from the value written. Instances: set_material_instance_parameter.
 //   @retired set_properties - object_path=<the expression's object_path from get_graph_nodes, or "<material>:<node_id>">, properties={"R":0.5} or {"DefaultValue":{"R":1,"G":0.5,"B":0,"A":1}} or {"ParameterName":"Tint"}
 //   @param material_path - Material asset path
 //   @param node_id - Id of the target expression in the material
 //   @param param_name - Name of the property to set (e.g. "ParameterName", "R", "DefaultValue")
 //   @param value - Text to write: a number for a numeric property, "(R=1,G=0.5,B=0,A=1)", "[1,0.5,0,1]" or "1,0.5,0" for a linear color, the new name for ParameterName, else UE import text for the property; omitted means empty text.
-//   @returns { material: string, node_id: string, param_name: string, value: string, value_after: string }
+//   @returns { material: string, node_id: string, param_name: string, value: string, value_after: string, success: bool, error?: string }
 
 TSharedPtr<FJsonObject> HandleSetMaterialNodeParam(const TSharedPtr<FJsonObject>& Params)
 {
@@ -368,6 +390,8 @@ TSharedPtr<FJsonObject> HandleSetMaterialNodeParam(const TSharedPtr<FJsonObject>
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("Expression not found: %s"), *NodeId));
 
     FString ValueAfter;
+    FString ValueWritten;
+    FProperty* WrittenProperty = nullptr;
     if (ParamName.Equals(TEXT("ParameterName"), ESearchCase::IgnoreCase) && Expr->HasAParameterName())
     {
         // SetParameterName is the node's own way to rename its parameter. An empty name would
@@ -378,7 +402,7 @@ TSharedPtr<FJsonObject> HandleSetMaterialNodeParam(const TSharedPtr<FJsonObject>
         Material->Modify();
         Expr->Modify();
         Expr->SetParameterName(FName(*NewName));
-        ValueAfter = Expr->GetParameterName().ToString();
+        ValueWritten = FName(*NewName).ToString();
     }
     else
     {
@@ -391,16 +415,27 @@ TSharedPtr<FJsonObject> HandleSetMaterialNodeParam(const TSharedPtr<FJsonObject>
 
         // Parse first, write after: a value the property rejects leaves the node untouched.
         FString ImportError;
-        if (!ImportExpressionProperty(Expr, Property, Value, ImportError))
+        if (!ImportExpressionProperty(Expr, Property, Value, ValueWritten, ImportError))
             return mcp_common::MakeErrorReply(FString::Printf(TEXT("Could not set '%s' on expression %s: %s"),
                 *ParamName, *NodeId, *ImportError));
         Material->Modify();
-        Property->ExportText_Direct(ValueAfter, Property->ContainerPtrToValuePtr<void>(Expr), nullptr, Expr, PPF_None);
+        WrittenProperty = Property;
     }
 
     Expr->PostEditChange();
     Material->PostEditChange();
     Material->MarkPackageDirty();
+
+    // The re-read, after PostEditChange (which may clamp or reset a value): the node holds what was written.
+    if (WrittenProperty != nullptr)
+    {
+        WrittenProperty->ExportText_Direct(ValueAfter, WrittenProperty->ContainerPtrToValuePtr<void>(Expr), nullptr, Expr, PPF_None);
+    }
+    else
+    {
+        ValueAfter = Expr->GetParameterName().ToString();
+    }
+    const bool bMatches = ValueAfter == ValueWritten;
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("material"), Material->GetName());
@@ -408,6 +443,13 @@ TSharedPtr<FJsonObject> HandleSetMaterialNodeParam(const TSharedPtr<FJsonObject>
     Result->SetStringField(TEXT("param_name"), ParamName);
     Result->SetStringField(TEXT("value"), Value);
     Result->SetStringField(TEXT("value_after"), ValueAfter);
+    Result->SetBoolField(TEXT("success"), bMatches);
+    if (!bMatches)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("set_material_expression_property: '%s' on %s reads back as '%s', not the written '%s'"),
+            *ParamName, *NodeId, *ValueAfter, *ValueWritten));
+    }
     return Result;
 }
 
@@ -834,9 +876,9 @@ TSharedPtr<FJsonObject> HandleSetMaterialInstanceParam(const TSharedPtr<FJsonObj
     return mcp_common::MakeOutcomeReply(Result, bSet, Error);
 }
 
-// MCP:compile_material - Recompile a UMaterial asset through UMaterialEditingLibrary::RecompileMaterial: refreshes its child material instances and the viewports and marks the package dirty, without saving. recompiled is always true and does not report shader errors. Material functions use recompile_material_function.
+// MCP:compile_material - Recompile a UMaterial asset through UMaterialEditingLibrary::RecompileMaterial: refreshes its child material instances and the viewports and marks the package dirty, without saving. recompiled is always true and does not report shader errors: verification says not_verifiable, so read compile_errors and stats_valid with get_material_stats. Material functions use recompile_material_function.
 //   @param material_path - UMaterial asset path, e.g. "/Game/Materials/M_Rock"; a material instance or function path fails with Material not found.
-//   @returns { material: string, recompiled: bool }
+//   @returns { material: string, recompiled: bool, verification: object, verification_checks: [object] }
 
 TSharedPtr<FJsonObject> HandleCompileMaterial(const TSharedPtr<FJsonObject>& Params)
 {
@@ -851,6 +893,10 @@ TSharedPtr<FJsonObject> HandleCompileMaterial(const TSharedPtr<FJsonObject>& Par
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("material"), Material->GetName());
     Result->SetBoolField(TEXT("recompiled"), true);
+    // RecompileMaterial returns nothing and compiles shaders asynchronously, so the outcome cannot be read here.
+    mcp_common::AddVerificationEvidence(Result, mcp_common::EMcpVerification::NotVerifiable,
+        TEXT("RecompileMaterial returns void"),
+        TEXT("recompiled only says the recompile was requested; read compile_errors and stats_valid with get_material_stats"));
     return Result;
 }
 
@@ -981,6 +1027,28 @@ namespace
             if ((*PV)->TryGetNumberField(TEXT("w"), C)) { V.W = static_cast<float>(C); }
             In->PreviewValue = V;
         }
+    }
+
+    // The optional props of Params that In does not hold after ApplyOptionalInputProps, by param name.
+    TArray<FString> OptionalInputPropsMismatches(const UMaterialExpressionFunctionInput* In, const TSharedPtr<FJsonObject>& Params)
+    {
+        TArray<FString> Mismatches;
+        FString Desc; double Num; bool bVal;
+        if (Params->TryGetStringField(TEXT("description"), Desc) && In->Description != Desc)                          { Mismatches.Add(TEXT("description")); }
+        if (Params->TryGetNumberField(TEXT("sort_priority"), Num) && In->SortPriority != static_cast<int32>(Num))   { Mismatches.Add(TEXT("sort_priority")); }
+        if (Params->TryGetBoolField(TEXT("use_preview_value_as_default"), bVal) && (In->bUsePreviewValueAsDefault != 0) != bVal) { Mismatches.Add(TEXT("use_preview_value_as_default")); }
+        const TSharedPtr<FJsonObject>* PV = nullptr;
+        if (Params->TryGetObjectField(TEXT("preview_value"), PV) && PV && *PV)
+        {
+            double C;
+            const bool bOff =
+                ((*PV)->TryGetNumberField(TEXT("x"), C) && In->PreviewValue.X != static_cast<float>(C)) ||
+                ((*PV)->TryGetNumberField(TEXT("y"), C) && In->PreviewValue.Y != static_cast<float>(C)) ||
+                ((*PV)->TryGetNumberField(TEXT("z"), C) && In->PreviewValue.Z != static_cast<float>(C)) ||
+                ((*PV)->TryGetNumberField(TEXT("w"), C) && In->PreviewValue.W != static_cast<float>(C));
+            if (bOff) { Mismatches.Add(TEXT("preview_value")); }
+        }
+        return Mismatches;
     }
 
     // Map a string domain name to EMaterialDomain. Returns false if unknown.
@@ -1310,7 +1378,7 @@ TSharedPtr<FJsonObject> HandleCreateMaterialFunction(const TSharedPtr<FJsonObjec
     return mcp_common::MakeSavedReply(Result, bSaved, TEXT("create_material_function"), SaveError);
 }
 
-// MCP:add_material_function_input - Add a FunctionInput node (a new input pin) to a UMaterialFunction asset with the optional props applied, then recompile the function and mark it dirty without saving. Returns node_id, the handle for set_material_function_input_props and remove_material_function_input, plus num_inputs and added.
+// MCP:add_material_function_input - Add a FunctionInput node (a new input pin) to a UMaterialFunction asset with the optional props applied, then recompile the function and mark it dirty without saving. Returns node_id, the handle for set_material_function_input_props and remove_material_function_input, plus num_inputs and added. added is the input count re-read: the call fails when it did not rise by one or a sent prop does not read back.
 //   @param function_path - Full path to the material function, e.g. '/Game/MyGame/MF_Example.MF_Example'
 //   @param input_name - Name of the new input pin, stored as given: a name another input already uses is not made unique.
 //   @param input_type - One of the 13 EFunctionInputType values: Scalar|Vector2|Vector3|Vector4|Texture2D|TextureCube|Texture2DArray|VolumeTexture|StaticBool|MaterialAttributes|TextureExternal|Bool|Substrate (optional, default "Scalar")
@@ -1318,7 +1386,7 @@ TSharedPtr<FJsonObject> HandleCreateMaterialFunction(const TSharedPtr<FJsonObjec
 //   @param preview_value [object] - JSON object {"x":0,"y":0,"z":0,"w":0} (FVector4f), any subset; missing components keep their current value. Used for previews, and as the default with use_preview_value_as_default.
 //   @param use_preview_value_as_default [bool] - Optional bool; if true, the preview value becomes the input's default
 //   @param sort_priority [number] - Optional int controlling the input's display order relative to other inputs
-//   @returns { function_path: string, input_name: string, input_type: string, node_id: string, num_inputs: number, added: bool }
+//   @returns { function_path: string, input_name: string, input_type: string, node_id: string, num_inputs: number, added: bool, success: bool, error?: string }
 
 TSharedPtr<FJsonObject> HandleAddMaterialFunctionInput(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1364,14 +1432,31 @@ TSharedPtr<FJsonObject> HandleAddMaterialFunctionInput(const TSharedPtr<FJsonObj
     Result->SetStringField(TEXT("input_type"), FunctionInputTypeToString(InputType));
     Result->SetStringField(TEXT("node_id"), InputExpr->GetName());
     Result->SetNumberField(TEXT("num_inputs"), AfterInputs);
-    Result->SetBoolField(TEXT("added"), AfterInputs == BeforeInputs + 1);
+    const bool bAdded = AfterInputs == BeforeInputs + 1;
+    Result->SetBoolField(TEXT("added"), bAdded);
+
+    // The re-read of the new node: name, type and every optional prop sent.
+    TArray<FString> Mismatches = OptionalInputPropsMismatches(InputExpr, Params);
+    if (InputExpr->InputName != FName(*InputName)) { Mismatches.Add(TEXT("input_name")); }
+    if (InputExpr->InputType != InputType)         { Mismatches.Add(TEXT("input_type")); }
+    Result->SetBoolField(TEXT("success"), bAdded && Mismatches.Num() == 0);
+    if (!bAdded)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("add_material_function_input: the function has %d inputs, not %d"), AfterInputs, BeforeInputs + 1));
+    }
+    else if (Mismatches.Num() > 0)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("add_material_function_input: the new input does not read back these props as sent: %s"), *FString::Join(Mismatches, TEXT(", "))));
+    }
     return Result;
 }
 
-// MCP:add_material_function_output - Add a FunctionOutput node, the output pin named output_name, to a UMaterialFunction asset loaded from function_path, then recompile the function (loaded materials that use it recompile too) and mark it dirty, without saving and without an undo transaction. Each call adds another node, so it is not idempotent, and output_name is stored as given: a name another output already has is not made unique. The new output starts unwired, placed right of the graph below the existing outputs, and node_id is its handle; added confirms the output count rose by one. A function that does not load is an error. Wire it with connect_pins, edit it with set_material_function_output_props, and its inverse is remove_material_function_output; inputs are add_material_function_input; list pins with get_material_function_info; persist with save_asset.
+// MCP:add_material_function_output - Add a FunctionOutput node, the output pin named output_name, to a UMaterialFunction asset loaded from function_path, then recompile the function (loaded materials that use it recompile too) and mark it dirty, without saving and without an undo transaction. Each call adds another node, so it is not idempotent, and output_name is stored as given: a name another output already has is not made unique. The new output starts unwired, placed right of the graph below the existing outputs, and node_id is its handle; added confirms the output count rose by one and the new node carries output_name; false fails the call. A function that does not load is an error. Wire it with connect_pins, edit it with set_material_function_output_props, and its inverse is remove_material_function_output; inputs are add_material_function_input; list pins with get_material_function_info; persist with save_asset.
 //   @param function_path - Full path to the material function, e.g. "/Game/MyGame/MF_Example.MF_Example"
 //   @param output_name - Name of the new output pin, stored as given: a name another output already uses is not made unique
-//   @returns { function_path: string, output_name: string, node_id: string, num_outputs: number, added: bool }
+//   @returns { function_path: string, output_name: string, node_id: string, num_outputs: number, added: bool, success: bool, error?: string }
 
 TSharedPtr<FJsonObject> HandleAddMaterialFunctionOutput(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1405,11 +1490,19 @@ TSharedPtr<FJsonObject> HandleAddMaterialFunctionOutput(const TSharedPtr<FJsonOb
     Result->SetStringField(TEXT("output_name"), OutputName);
     Result->SetStringField(TEXT("node_id"), OutputExpr->GetName());
     Result->SetNumberField(TEXT("num_outputs"), AfterOutputs);
-    Result->SetBoolField(TEXT("added"), AfterOutputs == BeforeOutputs + 1);
+    const bool bAdded = AfterOutputs == BeforeOutputs + 1 && OutputExpr->OutputName == FName(*OutputName);
+    Result->SetBoolField(TEXT("added"), bAdded);
+    Result->SetBoolField(TEXT("success"), bAdded);
+    if (!bAdded)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("add_material_function_output: the function has %d outputs (expected %d) and the new node is named '%s'"),
+            AfterOutputs, BeforeOutputs + 1, *OutputExpr->OutputName.ToString()));
+    }
     return Result;
 }
 
-// MCP:set_material_function_input_props - Edit an existing FunctionInput node of a UMaterialFunction asset, found by node_id: only the fields you pass are written (name, type, description, preview value, default flag, sort priority), then the function is recompiled and marked dirty without saving. Read it back with get_material_function_info.
+// MCP:set_material_function_input_props - Edit an existing FunctionInput node of a UMaterialFunction asset, found by node_id: only the fields you pass are written (name, type, description, preview value, default flag, sort priority), then the function is recompiled and marked dirty without saving. Read it back with get_material_function_info. applied is the re-read: false, with the props that differ named in error, fails the call.
 //   @param function_path - Full path to the material function, e.g. '/Game/MyGame/MF_Example.MF_Example'
 //   @param node_id - The input node id (UMaterialExpression name) from add_material_function_input
 //   @param input_name - New pin name, stored as given: it is not made unique (the engine ValidateName only acts on nodes owned by a material).
@@ -1418,7 +1511,7 @@ TSharedPtr<FJsonObject> HandleAddMaterialFunctionOutput(const TSharedPtr<FJsonOb
 //   @param preview_value [object] - JSON object {"x":0,"y":0,"z":0,"w":0} (FVector4f), any subset; missing components keep their current value.
 //   @param use_preview_value_as_default [bool] - Bool: true makes the preview value the default of the input when its pin is left unconnected.
 //   @param sort_priority [number] - Integer that orders this input pin relative to the other inputs of the function.
-//   @returns { function_path: string, node_id: string, input_name: string, input_type: string, applied: bool }
+//   @returns { function_path: string, node_id: string, input_name: string, input_type: string, applied: bool, success: bool, error?: string }
 
 TSharedPtr<FJsonObject> HandleSetMaterialFunctionInputProps(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1436,15 +1529,17 @@ TSharedPtr<FJsonObject> HandleSetMaterialFunctionInputProps(const TSharedPtr<FJs
 
     // input_type (optional) via the shared parser — honest error on an unknown name.
     FString InputTypeStr;
+    bool bTypeSent = false;
+    EFunctionInputType InputType = FunctionInput_Scalar;
     if (Params->TryGetStringField(TEXT("input_type"), InputTypeStr))
     {
-        EFunctionInputType InputType = FunctionInput_Scalar;
         if (!ParseFunctionInputType(InputTypeStr, InputType))
             return mcp_common::MakeErrorReply(FString::Printf(
                 TEXT("Unknown input_type: %s (Scalar/Vector2/Vector3/Vector4/Texture2D/TextureCube/"
                      "Texture2DArray/VolumeTexture/StaticBool/MaterialAttributes/TextureExternal/Bool/Substrate)"),
                 *InputTypeStr));
         In->InputType = InputType;
+        bTypeSent = true;
     }
 
     // input_name (optional) -> must re-validate uniqueness.
@@ -1466,17 +1561,29 @@ TSharedPtr<FJsonObject> HandleSetMaterialFunctionInputProps(const TSharedPtr<FJs
     Result->SetStringField(TEXT("node_id"), In->GetName());
     Result->SetStringField(TEXT("input_name"), In->InputName.ToString());
     Result->SetStringField(TEXT("input_type"), FunctionInputTypeToString(In->InputType));
-    Result->SetBoolField(TEXT("applied"), true);
+
+    // The re-read: every field sent is what the node now holds.
+    TArray<FString> Mismatches = OptionalInputPropsMismatches(In, Params);
+    if (bNameChanged && In->InputName != FName(*NewName)) { Mismatches.Add(TEXT("input_name")); }
+    if (bTypeSent && In->InputType != InputType)          { Mismatches.Add(TEXT("input_type")); }
+    const bool bApplied = Mismatches.Num() == 0;
+    Result->SetBoolField(TEXT("applied"), bApplied);
+    Result->SetBoolField(TEXT("success"), bApplied);
+    if (!bApplied)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("set_material_function_input_props: these props do not read back as sent: %s"), *FString::Join(Mismatches, TEXT(", "))));
+    }
     return Result;
 }
 
-// MCP:set_material_function_output_props - Set properties on an existing UMaterialExpressionFunctionOutput (located by node_id).  Partial update (idempotent). ValidateName is re-run when output_name changes.
+// MCP:set_material_function_output_props - Set properties on an existing UMaterialExpressionFunctionOutput (located by node_id).  Partial update (idempotent). ValidateName is re-run when output_name changes. applied is the re-read: false, with the props that differ named in error, fails the call.
 //   @param function_path - Full path to the material function, e.g. '/Game/MyGame/MF_Example.MF_Example'
 //   @param node_id - The output node id (UMaterialExpression name) from add_material_function_output
 //   @param output_name - Optional new pin name (re-validated for uniqueness)
 //   @param description - Optional tooltip/description string
 //   @param sort_priority - Optional int display-order
-//   @returns { function_path: string, node_id: string, output_name: string, applied: bool }
+//   @returns { function_path: string, node_id: string, output_name: string, applied: bool, success: bool, error?: string }
 
 TSharedPtr<FJsonObject> HandleSetMaterialFunctionOutputProps(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1494,10 +1601,12 @@ TSharedPtr<FJsonObject> HandleSetMaterialFunctionOutputProps(const TSharedPtr<FJ
 
     bool bNameChanged = false;
     FString NewName, Desc;
-    double Num;
+    double Num = 0.0;
+    const bool bDescSent = Params->TryGetStringField(TEXT("description"), Desc);
+    const bool bSortSent = Params->TryGetNumberField(TEXT("sort_priority"), Num);
     if (Params->TryGetStringField(TEXT("output_name"), NewName)) { Out->OutputName = FName(*NewName); bNameChanged = true; }
-    if (Params->TryGetStringField(TEXT("description"), Desc))    { Out->Description = Desc; }
-    if (Params->TryGetNumberField(TEXT("sort_priority"), Num))   { Out->SortPriority = static_cast<int32>(Num); }
+    if (bDescSent) { Out->Description = Desc; }
+    if (bSortSent) { Out->SortPriority = static_cast<int32>(Num); }
 
     if (bNameChanged) { Out->ValidateName(); }
     UEAgentMaterialExtraImpl::CommitNodeEdit(Function, Out);
@@ -1506,7 +1615,20 @@ TSharedPtr<FJsonObject> HandleSetMaterialFunctionOutputProps(const TSharedPtr<FJ
     Result->SetStringField(TEXT("function_path"), Function->GetPathName());
     Result->SetStringField(TEXT("node_id"), Out->GetName());
     Result->SetStringField(TEXT("output_name"), Out->OutputName.ToString());
-    Result->SetBoolField(TEXT("applied"), true);
+
+    // The re-read: every field sent is what the node now holds.
+    TArray<FString> Mismatches;
+    if (bNameChanged && Out->OutputName != FName(*NewName))            { Mismatches.Add(TEXT("output_name")); }
+    if (bDescSent && Out->Description != Desc)                          { Mismatches.Add(TEXT("description")); }
+    if (bSortSent && Out->SortPriority != static_cast<int32>(Num))      { Mismatches.Add(TEXT("sort_priority")); }
+    const bool bApplied = Mismatches.Num() == 0;
+    Result->SetBoolField(TEXT("applied"), bApplied);
+    Result->SetBoolField(TEXT("success"), bApplied);
+    if (!bApplied)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("set_material_function_output_props: these props do not read back as sent: %s"), *FString::Join(Mismatches, TEXT(", "))));
+    }
     return Result;
 }
 
@@ -1596,10 +1718,10 @@ TSharedPtr<FJsonObject> HandleCreatePostProcessMaterial(const TSharedPtr<FJsonOb
     return mcp_common::MakeSavedReply(Result, bSaved, TEXT("create_post_process_material"), SaveError);
 }
 
-// MCP:set_material_domain - Set the material domain (EMaterialDomain) of a UMaterial asset, then recompile it and mark its package dirty, without saving and without an undo transaction. domain is matched without case and also accepts spellings such as post_process, decal or light function; an unknown domain is an error before the material loads, and a material instance or a path that does not load is an error (Material not found). Setting the domain it already has still recompiles. previous_domain and domain are read back, and domain_set confirms the change took. Persist with save_asset; a new post-process material is create_post_process_material; a recompile alone is compile_material.
+// MCP:set_material_domain - Set the material domain (EMaterialDomain) of a UMaterial asset, then recompile it and mark its package dirty, without saving and without an undo transaction. domain is matched without case and also accepts spellings such as post_process, decal or light function; an unknown domain is an error before the material loads, and a material instance or a path that does not load is an error (Material not found). Setting the domain it already has still recompiles. previous_domain and domain are read back, and domain_set confirms the change took, and false fails the call. Persist with save_asset; a new post-process material is create_post_process_material; a recompile alone is compile_material.
 //   @param material_path - Full path to the material, e.g. '/Game/MyGame/M_Example.M_Example'; a UMaterial, not a material instance
 //   @param domain - One of 'Surface', 'PostProcess', 'UI', 'DeferredDecal', 'LightFunction', 'Volume', matched without case; post_process, userinterface, decal, deferred_decal and light_function (or the same words with spaces) work too
-//   @returns { material: string, material_path: string, previous_domain: string, requested_domain: string, domain: string, domain_set: bool }
+//   @returns { material: string, material_path: string, previous_domain: string, requested_domain: string, domain: string, domain_set: bool, success: bool, error?: string }
 
 TSharedPtr<FJsonObject> HandleSetMaterialDomain(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1640,7 +1762,15 @@ TSharedPtr<FJsonObject> HandleSetMaterialDomain(const TSharedPtr<FJsonObject>& P
     Result->SetStringField(TEXT("previous_domain"), MaterialDomainToString(Previous));
     Result->SetStringField(TEXT("requested_domain"), DomainStr);
     Result->SetStringField(TEXT("domain"), MaterialDomainToString(ReadBack));
-    Result->SetBoolField(TEXT("domain_set"), ReadBack == Domain);
+    const bool bDomainSet = ReadBack == Domain;
+    Result->SetBoolField(TEXT("domain_set"), bDomainSet);
+    Result->SetBoolField(TEXT("success"), bDomainSet);
+    if (!bDomainSet)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("set_material_domain: the material's domain reads back as %s, not %s"),
+            MaterialDomainToString(ReadBack), MaterialDomainToString(Domain)));
+    }
     return Result;
 }
 
@@ -1653,11 +1783,11 @@ TSharedPtr<FJsonObject> HandleSetMaterialDomain(const TSharedPtr<FJsonObject>& P
 // mutation is serialized against any in-flight render work.
 // ===========================================================================
 
-// MCP:add_material_function_call - Insert a call to a UMaterialFunction into a UMaterial graph: a MaterialFunctionCall node bound to the function, so the function's inputs and outputs become the node's pins. Refused, with the node removed again, when the function cannot be called from this material.
+// MCP:add_material_function_call - Insert a call to a UMaterialFunction into a UMaterial graph: a MaterialFunctionCall node bound to the function, so the function's inputs and outputs become the node's pins. Refused, with the node removed again, when the function cannot be called from this material. The call fails when the new node is not among the material's expressions, bound to the function, after the recompile.
 //   @param material_path - Full asset path of the UMaterial (e.g. '/Game/MyGame/M_Example')
 //   @param function_path - Full asset path of the UMaterialFunction to call (e.g. '/Game/Functions/MF_Foo.MF_Foo')
 //   @param node_name - Optional name for the new node; a name another object of the material already has gets a unique variant
-//   @returns { material_path: string, function_path: string, node_name: string, node_class: string, expression_count: number }
+//   @returns { material_path: string, function_path: string, node_name: string, node_class: string, expression_count: number, success: bool, error?: string }
 
 TSharedPtr<FJsonObject> HandleAddMaterialFunctionCall(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1710,14 +1840,24 @@ TSharedPtr<FJsonObject> HandleAddMaterialFunctionCall(const TSharedPtr<FJsonObje
     Result->SetStringField(TEXT("node_name"), NewNode->GetName());
     Result->SetStringField(TEXT("node_class"), NewNode->GetClass()->GetName());
     Result->SetNumberField(TEXT("expression_count"), Material->GetExpressions().Num());
+
+    // The re-read: the node is one of the material's expressions and still calls the function.
+    const bool bInGraph = Material->GetExpressions().Contains(NewNode) && NewNode->MaterialFunction == Function;
+    Result->SetBoolField(TEXT("success"), bInGraph);
+    if (!bInGraph)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("add_material_function_call: %s is not among the material's expressions bound to %s after the recompile"),
+            *NewNode->GetName(), *Function->GetPathName()));
+    }
     return Result;
 }
 
-// MCP:duplicate_material_expression - Copy one expression node of a UMaterial asset into the same material, optionally renamed, then recompile the material and mark it dirty without saving. The copy keeps the source position and settings (a parameter keeps its name) and its output is unwired. Returns duplicate_node and expression_count.
+// MCP:duplicate_material_expression - Copy one expression node of a UMaterial asset into the same material, optionally renamed, then recompile the material and mark it dirty without saving. The copy keeps the source position and settings (a parameter keeps its name) and its output is unwired. Returns duplicate_node and expression_count. The call fails when the copy is not among the material's expressions.
 //   @param material_path - Full asset path of the UMaterial.
 //   @param node_id - Object name of the expression to copy, as listed by get_graph_nodes (nodes[].name).
 //   @param new_node_name - Object name for the copy; when taken, a unique variant is used (read duplicate_node). Default: a name the engine picks.
-//   @returns { material_path: string, source_node: string, duplicate_node: string, duplicate_class: string, expression_count: number }
+//   @returns { material_path: string, source_node: string, duplicate_node: string, duplicate_class: string, expression_count: number, success: bool, error?: string }
 
 TSharedPtr<FJsonObject> HandleDuplicateMaterialExpression(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1763,6 +1903,15 @@ TSharedPtr<FJsonObject> HandleDuplicateMaterialExpression(const TSharedPtr<FJson
     Result->SetStringField(TEXT("duplicate_node"), Dup->GetName());
     Result->SetStringField(TEXT("duplicate_class"), Dup->GetClass()->GetName());
     Result->SetNumberField(TEXT("expression_count"), Material->GetExpressions().Num());
+
+    // The re-read: the copy is one of the material's expressions.
+    const bool bInGraph = Material->GetExpressions().Contains(Dup);
+    Result->SetBoolField(TEXT("success"), bInGraph);
+    if (!bInGraph)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("duplicate_material_expression: the copy %s is not among the material's expressions"), *Dup->GetName()));
+    }
     return Result;
 }
 
@@ -2240,11 +2389,11 @@ TSharedPtr<FJsonObject> HandleGetMaterialFunctionInputs(const TSharedPtr<FJsonOb
 // PostEditChange()/MarkPackageDirty(). `deleted` is asserted by the count drop.
 // ========================================================================== //
 
-// MCP:remove_material_function_input - Delete a UMaterialExpressionFunctionInput node from a material function (inverse of add_material_function_input).  Located by node_id via the function's own expression list. Idempotent: an already-absent node_id returns { deleted:false, already_absent:true } as success, not an error.
+// MCP:remove_material_function_input - Delete a UMaterialExpressionFunctionInput node from a material function (inverse of add_material_function_input).  Located by node_id via the function's own expression list. Idempotent: an already-absent node_id returns { deleted:false, already_absent:true } as success, not an error. deleted is the re-read (one input fewer and node_id gone); false fails the call.
 //   @renamed-from delete_material_function_input
 //   @param function_path - Full path to the material function, e.g. '/Game/MyGame/MF_Example.MF_Example'
 //   @param node_id - The input node id (UMaterialExpression name) from add_material_function_input
-//   @returns { function_path: string, node_id: string, deleted: bool, already_absent: bool, num_inputs: number, num_outputs: number }
+//   @returns { function_path: string, node_id: string, deleted: bool, already_absent: bool, num_inputs: number, num_outputs: number, success: bool, error?: string }
 
 TSharedPtr<FJsonObject> HandleDeleteMaterialFunctionInput(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2292,18 +2441,27 @@ TSharedPtr<FJsonObject> HandleDeleteMaterialFunctionInput(const TSharedPtr<FJson
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("function_path"), Function->GetPathName());
     Result->SetStringField(TEXT("node_id"), NodeId);
-    Result->SetBoolField(TEXT("deleted"), AfterInputs == BeforeInputs - 1);
+    // The re-read: the count dropped by one and the node id no longer resolves in the function.
+    const bool bDeleted = AfterInputs == BeforeInputs - 1 && FindFunctionExpressionByNodeId(Function, NodeId) == nullptr;
+    Result->SetBoolField(TEXT("deleted"), bDeleted);
     Result->SetBoolField(TEXT("already_absent"), false);
     Result->SetNumberField(TEXT("num_inputs"), AfterInputs);
     Result->SetNumberField(TEXT("num_outputs"), AfterOutputs);
+    Result->SetBoolField(TEXT("success"), bDeleted);
+    if (!bDeleted)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("remove_material_function_input: '%s' is still in the function (%d inputs, was %d)"),
+            *NodeId, AfterInputs, BeforeInputs));
+    }
     return Result;
 }
 
-// MCP:remove_material_function_output - Delete a UMaterialExpressionFunctionOutput node from a material function (inverse of add_material_function_output).  Located by node_id via the function's own expression list. Idempotent: an already-absent node_id returns { deleted:false, already_absent:true } as success, not an error.
+// MCP:remove_material_function_output - Delete a UMaterialExpressionFunctionOutput node from a material function (inverse of add_material_function_output).  Located by node_id via the function's own expression list. Idempotent: an already-absent node_id returns { deleted:false, already_absent:true } as success, not an error. deleted is the re-read (one output fewer and node_id gone); false fails the call.
 //   @renamed-from delete_material_function_output
 //   @param function_path - Full path to the material function, e.g. '/Game/MyGame/MF_Example.MF_Example'
 //   @param node_id - The output node id (UMaterialExpression name) from add_material_function_output
-//   @returns { function_path: string, node_id: string, deleted: bool, already_absent: bool, num_inputs: number, num_outputs: number }
+//   @returns { function_path: string, node_id: string, deleted: bool, already_absent: bool, num_inputs: number, num_outputs: number, success: bool, error?: string }
 
 TSharedPtr<FJsonObject> HandleDeleteMaterialFunctionOutput(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2347,10 +2505,19 @@ TSharedPtr<FJsonObject> HandleDeleteMaterialFunctionOutput(const TSharedPtr<FJso
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("function_path"), Function->GetPathName());
     Result->SetStringField(TEXT("node_id"), NodeId);
-    Result->SetBoolField(TEXT("deleted"), AfterOutputs == BeforeOutputs - 1);
+    // The re-read: the count dropped by one and the node id no longer resolves in the function.
+    const bool bDeleted = AfterOutputs == BeforeOutputs - 1 && FindFunctionExpressionByNodeId(Function, NodeId) == nullptr;
+    Result->SetBoolField(TEXT("deleted"), bDeleted);
     Result->SetBoolField(TEXT("already_absent"), false);
     Result->SetNumberField(TEXT("num_inputs"), AfterInputs);
     Result->SetNumberField(TEXT("num_outputs"), AfterOutputs);
+    Result->SetBoolField(TEXT("success"), bDeleted);
+    if (!bDeleted)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("remove_material_function_output: '%s' is still in the function (%d outputs, was %d)"),
+            *NodeId, AfterOutputs, BeforeOutputs));
+    }
     return Result;
 }
 

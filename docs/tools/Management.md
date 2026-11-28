@@ -25,7 +25,7 @@ Add a PrimaryAssetTypesToScan rule to the Asset Manager project settings, or upd
 
 *Read-only.*
 
-Project-wide "fork purity" audit of INHERITANCE lineage (complements audit_fork_refs, which audits a fork's INTERNAL refs). Walks every Blueprint UClass under class_root, ascends each parent chain to the point where it leaves class_root, and flags any project class whose chain crosses DIRECTLY into an upstream base library (base_libraries, e.g. /Game/VendorPack) WITHOUT going through a declared thin fork -- a class carrying the fork-origin metadata tag (project setting Fork Origin Tag) that fork_class_chain writes. Catches a new asset that inherits straight from a vendored library instead of via a project fork. Read-only: classes are loaded to resolve the chain (like audit_replication) but never saved. Returns a summary plus the full per-class classification and the actionable violation list inline. NOTE: matches exact UBlueprint assets (as audit_replication/audit_fork_refs do); Widget/Anim blueprints are out of scope for v1. A legit fork created without the fork-origin tag reports as a violation -- back-fill it with set_asset_metadata_tag. The tag is also CHECKED FOR TRUTH, not just for presence: the class it names must really be in the fork point's ancestor chain (the full chain, so declaring a grandparent is fine). A class that declares a fork origin it does not actually descend from -- a copy-sibling rather than a child, or a stale tag left behind by a re-parent -- reports verdict fork_origin_mismatch, whatever its boundary looks like; that also catches copies parented straight to a native class, which the boundary check alone would wave through as native_rooted.
+Read-only "fork purity" audit of inheritance (audit_fork_refs audits a fork's internal refs): walks every Blueprint class under class_root up its parent chain and flags a project class that crosses DIRECTLY into a base library (base_libraries, e.g. /Game/VendorPack) without passing a declared fork, a class carrying the fork-origin tag (project setting Fork Origin Tag) that fork_class_chain writes. Classes are loaded, never saved; Widget and Anim Blueprints are out of scope. A fork without the tag reports as a violation (back-fill it with set_asset_metadata_tag). The tag is checked for truth: a class whose tagged fork origin is not in its ancestor chain (a copy-sibling, a stale tag after a re-parent) reports fork_origin_mismatch.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -65,7 +65,7 @@ Force-delete one asset with no confirmation or undo: references to it are nulled
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `asset_path` | string | yes | Asset to delete, as an object path ("/Game/Props/SM_Box.SM_Box") or a bare package path ("/Game/Props/SM_Box") |
-| `expected_class` | any | no | Optional class the asset must be, or a list of classes it may be any one of, as short names ("AnimSequence") or /Script/ paths ("/Script/Engine.StaticMesh"). A Blueprint asset also passes when its generated class derives from one ("Subsystem" accepts a subsystem Blueprint). Another class is refused with success false, deleted false, expected_class_matched false, its asset_class (and generated_class_name for a Blueprint) and a note, and nothing is deleted. With it, a path that names no asset is a no-op: success, deleted false, already_existed false. A name that resolves to no class is an error. |
+| `expected_class` | string\|array | no | Optional class the asset must be, or a list of classes it may be any one of, as short names ("AnimSequence") or /Script/ paths ("/Script/Engine.StaticMesh"). A Blueprint asset also passes when its generated class derives from one ("Subsystem" accepts a subsystem Blueprint). Another class is refused with success false, deleted false, expected_class_matched false, its asset_class (and generated_class_name for a Blueprint) and a note, and nothing is deleted. With it, a path that names no asset is a no-op: success, deleted false, already_existed false. A name that resolves to no class is an error. |
 
 **Returns:** `{ asset_path: string, object_path: string, asset_class: string (class path), asset_class_name: string (short class name of the asset), generated_class_name?: string, expected_class_matched?: bool, package_name: string, original_file_size_bytes: number, original_file_size_mb: number, delete_success: bool, delete_message: string, asset_verified_deleted: bool, file_still_exists: bool, deleted: bool, already_existed: bool, note?: string, deletion_timestamp: string? }`
 
@@ -83,7 +83,7 @@ Duplicates an asset to a new name, in the same directory or in destination_path,
 | `new_asset_name` | string | yes | Name for the duplicated asset |
 | `destination_path` | string | no | Optional folder for the copy, a long package path (/Game/MyMeshes, a project plugin mount) or a folder relative to /Game; default the source asset's own folder |
 | `if_exists` | string | no | Optional "error" (default: a taken target name is refused) or "return" (an asset of the source's class already at the target is returned untouched with created=false; one of another class is still refused) |
-| `expected_class` | any | no | Optional class the SOURCE asset must be, or a list of classes it may be any one of, short names ("SkeletalMesh") or /Script/ paths; a Blueprint also passes when its generated class derives from one. Any other source is refused and nothing is duplicated; a name that resolves to no class is an error. |
+| `expected_class` | string\|array | no | Optional class the SOURCE asset must be, or a list of classes it may be any one of, short names ("SkeletalMesh") or /Script/ paths; a Blueprint also passes when its generated class derives from one. Any other source is refused and nothing is duplicated; a name that resolves to no class is an error. |
 | `remap_internal_refs` | boolean | no | Optional bool (default false). When true, remap the copy's internal refs (original->copy) before the save; adds { new_path, refs_remapped } to the result. |
 | `repoint_parents_within` | boolean | no | Optional bool (default false). When true (and remap_internal_refs true), also re-apply MaterialInstanceConstant parents that map into the copied set via SetParentEditorOnly. |
 
@@ -201,8 +201,10 @@ List the plugins this editor has discovered, enabled or not, sorted by name: whe
 | `name_filter` | string | no | Optional case-insensitive substring of the plugin's name or friendly name. |
 | `category` | string | no | Optional case-insensitive substring of the plugin's category (e.g. "Editor", "Rendering"). |
 | `include_hidden` | boolean | no | Optional bool (default true): include plugins the Plugins window hides. |
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ plugins: [{ name: string, friendly_name: string, enabled: bool, mounted: bool, type: "engine"|"project", plugin_type: "engine"|"enterprise"|"project"|"external"|"mod", version: string, version_number: int, category: string, path: string, descriptor_file: string, can_contain_content: bool, is_beta: bool, is_experimental: bool, hidden: bool }], count: int, total_discovered: int }`
+**Returns:** `{ plugins: [{ name: string, friendly_name: string, enabled: bool, mounted: bool, type: "engine"|"project", plugin_type: "engine"|"enterprise"|"project"|"external"|"mod", version: string, version_number: int, category: string, path: string, descriptor_file: string, can_contain_content: bool, is_beta: bool, is_experimental: bool, hidden: bool }], count: int (entries in this page), total_discovered: int, total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }`
 
 ## `move_asset`
 
@@ -285,7 +287,7 @@ Set the CookRule of an existing PrimaryAssetTypesToScan rule in the Asset Manage
 |---|---|---|---|
 | `primary_asset_type` | string | yes | Name of the primary asset type (e.g. "Item"). |
 | `cook_rule` | string | yes | One of "Unknown" / "Never" / "Development" / "DevelopmentAlways" / "Always", case-insensitive; "Development" stores ProductionNeverCook, and the EPrimaryAssetCookRule names (e.g. "AlwaysCook", "DevelopmentAlwaysProductionUnknownCook") are accepted too. |
-| `chunk_id` | number | no | Optional chunk ID override for the rule |
+| `chunk_id` | integer | no | Optional chunk ID override for the rule |
 | `apply_recursively` | boolean | no | Optional flag to apply the rule recursively |
 
 **Returns:** `{ primary_asset_type, cook_rule, priority, chunk_id, apply_recursively, saved }`

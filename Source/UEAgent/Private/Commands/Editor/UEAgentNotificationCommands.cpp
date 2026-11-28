@@ -240,6 +240,11 @@ TSharedPtr<FJsonObject> HandleAddMessageLogEntry(const TSharedPtr<FJsonObject>& 
         AppliedSeverity = TEXT("Info");
     }
 
+    // The listing the message lands in, read before and after the add.
+    TSharedPtr<IMessageLogListing> Listing;
+    if (TSharedPtr<FJsonObject> Error = Notification_GetLogListing(LogName, Listing)) { return Error; }
+    const FString TextBefore = Listing->GetAllMessagesAsString();
+
     // FMessageLog buffers messages; Flush() pushes them to the listing and the
     // output log. The listing is created on demand if it does not yet exist.
     {
@@ -251,23 +256,20 @@ TSharedPtr<FJsonObject> HandleAddMessageLogEntry(const TSharedPtr<FJsonObject>& 
         MsgLog.Flush();
     }
 
-    // Read back the listing message count so the caller has a real effect to
-    // verify (the listing is registered/created lazily by the module).
-    int32 MessageCount = 0;
-    if (FModuleManager::Get().IsModuleLoaded(TEXT("MessageLog")))
-    {
-        FMessageLogModule& MessageLogModule = FModuleManager::LoadModuleChecked<FMessageLogModule>(TEXT("MessageLog"));
-        TSharedRef<IMessageLogListing> Listing = MessageLogModule.GetLogListing(FName(*LogName));
-        MessageCount = Listing->GetFilteredMessages().Num();
-    }
+    // The listing's text grows by the message when it lands; a listing that discards duplicates keeps it unchanged.
+    const int32 MessageCount = Listing->GetFilteredMessages().Num();
+    const FString TextAfter = Listing->GetAllMessagesAsString();
+    const bool bAdded = TextAfter.Len() > TextBefore.Len() && TextAfter.Contains(Message);
 
     TSharedPtr<FJsonObject> Response = MakeShared<FJsonObject>();
-    Response->SetBoolField(TEXT("added"), true);
+    Response->SetBoolField(TEXT("added"), bAdded);
     Response->SetStringField(TEXT("log_name"), LogName);
     Response->SetStringField(TEXT("message"), Message);
     Response->SetStringField(TEXT("severity"), AppliedSeverity);
     Response->SetNumberField(TEXT("message_count"), MessageCount);
-    return mcp_common::MakeOkReply(Response);
+    return mcp_common::MakeOutcomeReply(Response, bAdded, FString::Printf(
+        TEXT("add_message_log_entry: the message is not in listing '%s' after the add (a listing that discards duplicates drops a repeated message)."),
+        *LogName));
 }
 
 // ---------------------------------------------------------------------------
@@ -332,12 +334,15 @@ TSharedPtr<FJsonObject> HandleClearMessageLog(const TSharedPtr<FJsonObject>& Par
     Listing->ClearMessages();
     const int32 MessagesAfter = Listing->GetFilteredMessages().Num();
 
+    const bool bCleared = MessagesAfter == 0;
+
     TSharedPtr<FJsonObject> Response = MakeShared<FJsonObject>();
-    Response->SetBoolField(TEXT("cleared"), true);
+    Response->SetBoolField(TEXT("cleared"), bCleared);
     Response->SetStringField(TEXT("log_name"), LogName);
     Response->SetNumberField(TEXT("cleared_count"), ClearedCount);
     Response->SetNumberField(TEXT("messages_after"), MessagesAfter);
-    return mcp_common::MakeOkReply(Response);
+    return mcp_common::MakeOutcomeReply(Response, bCleared, FString::Printf(
+        TEXT("clear_message_log: listing '%s' still holds %d messages after clearing it."), *LogName, MessagesAfter));
 }
 
 // ---------------------------------------------------------------------------

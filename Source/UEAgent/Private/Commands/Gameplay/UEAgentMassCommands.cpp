@@ -1224,16 +1224,17 @@ TSharedPtr<FJsonObject> HandleRemoveMassTraitFromEntity(const TSharedPtr<FJsonOb
 // ---------------------------------------------------------------------------
 // list_mass_tag_types
 // ---------------------------------------------------------------------------
-// MCP:list_mass_tag_types - Lists the Mass tag types loaded in this editor: every struct derived from FMassTag, the zero-size markers an entity carries or not (e.g. MassOffLODTag), each with its reflected name and path, in no particular order. Abstract tag structs are left out unless include_abstract is true; nothing else is filtered. Read-only reflection: changes nothing. The name is what add_mass_tag_to_entity and remove_mass_tag_from_entity take as tag. Tags are not traits: the traits an entity config holds are listed with list_mass_traits and added with add_mass_trait; live entities and their archetypes come from list_mass_archetypes and get_mass_entity_info.
+// MCP:list_mass_tag_types - Lists the Mass tag types loaded in this editor: every struct derived from FMassTag, the zero-size markers an entity carries or not (e.g. MassOffLODTag), each with its reflected name and path, sorted by path and paged with offset/limit. Abstract tag structs are left out unless include_abstract is true; nothing else is filtered. Read-only reflection: changes nothing. The name is what add_mass_tag_to_entity and remove_mass_tag_from_entity take as tag. Tags are not traits: the traits an entity config holds are listed with list_mass_traits and added with add_mass_trait; live entities and their archetypes come from list_mass_archetypes and get_mass_entity_info.
 //   @param include_abstract - Optional bool, default false; true also lists tag structs marked Abstract (bases that are not meant to be set on entities).
-//   @returns { count, traits: [{ name, path }] } -- traits holds the tag types (name without the F prefix, e.g. "MassOffLODTag"; path is the /Script path)
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { count (entries in this page), traits: [{ name, path }], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null } -- traits holds the tag types (name without the F prefix, e.g. "MassOffLODTag"; path is the /Script path)
 TSharedPtr<FJsonObject> HandleListMassTraitTypes(const TSharedPtr<FJsonObject>& Params)
 {
 	bool bIncludeAbstract = false;
 	Params->TryGetBoolField(TEXT("include_abstract"), bIncludeAbstract);
 
 	TArray<TSharedPtr<FJsonValue>> Out;
-	int32 Count = 0;
 	for (TObjectIterator<UScriptStruct> It; It; ++It)
 	{
 		UScriptStruct* S = *It;
@@ -1246,10 +1247,11 @@ TSharedPtr<FJsonObject> HandleListMassTraitTypes(const TSharedPtr<FJsonObject>& 
 		Entry->SetStringField(TEXT("name"), S->GetName());
 		Entry->SetStringField(TEXT("path"), S->GetPathName());
 		Out.Add(MakeShared<FJsonValueObject>(Entry));
-		++Count;
 	}
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetNumberField(TEXT("count"), Count);
+	mcp_common::SortJsonItems(Out, TEXT("path"));
+	mcp_common::ApplyListPage(Out, mcp_common::ReadListPage(Params), Data);
+	Data->SetNumberField(TEXT("count"), Out.Num());
 	Data->SetArrayField (TEXT("traits"), Out);
 	return mcp_common::MakeOkReply(Data);
 }
@@ -1359,8 +1361,10 @@ TSharedPtr<FJsonObject> HandleGetMassConfigParent(const TSharedPtr<FJsonObject>&
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:list_mass_archetypes - Census the Mass entities of the editor world (not a PIE world), read-only: every archetype with its live-entity and fragment counts. Returns archetype_count, total_entities (the sum over the archetypes), total (the entity manager's own count) and archetypes [{archetype_id, entity_count, fragment_count}]; get_mass_entity_info names the fragments of one entity, get_mass_entity_count counts by fragment or tag.
-//   @returns { archetype_count: int, total_entities: int, total: int, archetypes: [{ archetype_id: string, entity_count: int, fragment_count: int }] }
+// MCP:list_mass_archetypes - Census the Mass entities of the editor world (not a PIE world), read-only: every archetype with its live-entity and fragment counts. Returns archetype_count, total_entities (the sum over the archetypes), total (the entity manager's own count) and archetypes [{archetype_id, entity_count, fragment_count}], sorted by archetype_id and paged with offset/limit (archetype_count counts them all); get_mass_entity_info names the fragments of one entity, get_mass_entity_count counts by fragment or tag.
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { archetype_count: int, total_entities: int, total: int (live entities), archetypes: [{ archetype_id: string, entity_count: int, fragment_count: int }], offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }
 TSharedPtr<FJsonObject> HandleListMassArchetypes(const TSharedPtr<FJsonObject>& Params)
 {
 	UMassEntitySubsystem* MassSub = GetMassEntitySubsystem();
@@ -1389,6 +1393,14 @@ Mgr.ForEachArchetype(0, ArchetypeCount, [&](const FMassEntityManager& IterMgr, c
     });
 
 	TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+	// total is the live-entity count here, so the page's fields are copied without the page's own total.
+	mcp_common::SortJsonItems(Archetypes, TEXT("archetype_id"));
+	TSharedPtr<FJsonObject> PageFields = MakeShared<FJsonObject>();
+	mcp_common::ApplyListPage(Archetypes, mcp_common::ReadListPage(Params), PageFields);
+	for (const TCHAR* Field : { TEXT("offset"), TEXT("limit"), TEXT("returned"), TEXT("truncated"), TEXT("next_offset") })
+	{
+		Resp->SetField(Field, PageFields->TryGetField(Field));
+	}
 	Resp->SetNumberField(TEXT("archetype_count"), ArchetypeCount);
 	Resp->SetNumberField(TEXT("total_entities"), TotalEntities);
 	Resp->SetNumberField(TEXT("total"), Mass_LiveEntityCount(Mgr));

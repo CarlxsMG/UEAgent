@@ -100,7 +100,7 @@ Sets the REAL LOD count on a UStaticMesh (adds/removes FStaticMeshSourceModel en
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `asset_path` | string | yes | The path to the asset in the asset registry. |
-| `lod_count` | number | yes | The desired number of LOD levels (1-8). Must be an integer. Only mutates for UStaticMesh; reported but not applied for SkeletalMesh/other. |
+| `lod_count` | integer | yes | The desired number of LOD levels (1-8). Must be an integer. Only mutates for UStaticMesh; reported but not applied for SkeletalMesh/other. |
 
 **Returns:** `{ asset_path: string, requested_lod_count: number, asset_type: string, current_lod_count?: number, total_triangles?: number, total_vertices?: number, lod_data?: [object], saved?: bool, success: bool, message: string, error?: string, final_lod_count: number, lod_efficiency?: number, lod_recommendations?: [string] }`
 

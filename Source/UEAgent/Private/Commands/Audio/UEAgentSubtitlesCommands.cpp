@@ -441,9 +441,11 @@ TSharedPtr<FJsonObject> HandleSetSubtitleCueTiming(
 // (from USubtitleAssetUserData::GetMaximumDuration — Duration + StartOffset),
 // and per-cue fields matching add_subtitle_cue's wire shape.
 // ---------------------------------------------------------------------------
-// MCP:list_subtitle_cues - List every cue of a subtitles asset (USubtitleAssetUserData, the engine's list of timed subtitle cues) in stored order, without changing anything: per cue its 0-based index, text, start_offset and duration in seconds, duration_type (use_sound_duration or use_duration_property), priority, subtitle_type (subtitle, closed_caption or audio_description) and comment, plus count and max_duration (GetMaximumDuration, the latest end time). Use it to find the cue_index that set_subtitle_cue and remove_subtitle_cue take, or to check add_subtitle_cue's result; create the asset with create_subtitles_asset. An asset with no cues is a success with count 0; a path that does not load as a USubtitleAssetUserData is an error.
+// MCP:list_subtitle_cues - List the cues of a subtitles asset (USubtitleAssetUserData, the engine's list of timed subtitle cues) in stored order, a page at a time (offset/limit), without changing anything: per cue its 0-based index, text, start_offset and duration in seconds, duration_type (use_sound_duration or use_duration_property), priority, subtitle_type (subtitle, closed_caption or audio_description) and comment, plus count and max_duration (GetMaximumDuration, the latest end time). Use it to find the cue_index that set_subtitle_cue and remove_subtitle_cue take, or to check add_subtitle_cue's result; create the asset with create_subtitles_asset. An asset with no cues is a success with count 0; a path that does not load as a USubtitleAssetUserData is an error.
 //   @param asset_path - Subtitles asset as a package or object path, e.g. "/Game/Audio/Subs/SUB_Intro" or "/Game/Audio/Subs/SUB_Intro.SUB_Intro".
-//   @returns { asset_path: string, success: bool, count: int, max_duration: float, cues: [{index, text, start_offset, duration, duration_type, priority, subtitle_type, comment}] }
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { asset_path: string, success: bool, count: int (entries in this page), max_duration: float, total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null, cues: [{index, text, start_offset, duration, duration_type, priority, subtitle_type, comment}] }
 
 TSharedPtr<FJsonObject> HandleListSubtitleCues(
     const TSharedPtr<FJsonObject>& Params)
@@ -465,9 +467,10 @@ TSharedPtr<FJsonObject> HandleListSubtitleCues(
     }
 
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    mcp_common::ApplyListPage(CuesArr, mcp_common::ReadListPage(Params), ResultObj);
     ResultObj->SetStringField(TEXT("asset_path"), Asset->GetPathName());
     ResultObj->SetBoolField(TEXT("success"), true);
-    ResultObj->SetNumberField(TEXT("count"), Asset->Subtitles.Num());
+    ResultObj->SetNumberField(TEXT("count"), CuesArr.Num());
     ResultObj->SetNumberField(TEXT("max_duration"), Asset->GetMaximumDuration());
     ResultObj->SetArrayField(TEXT("cues"), CuesArr);
     return mcp_common::MakeOkReply(ResultObj);

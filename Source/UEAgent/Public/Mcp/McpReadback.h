@@ -112,6 +112,8 @@ namespace McpReadback
 	// --- helpers for the checks ------------------------------------------------------------
 	/** A re-read that fails OPEN: an empty object means "could not tell". */
 	UEAGENT_API FO ProbeOrEmpty(const FSend& Send, const FString& Command, const FO& Params);
+	/** ProbeOrEmpty over every page of a paginated list: the first page's reply with ListKey holding all the entries. */
+	UEAGENT_API FO ProbeAllPages(const FSend& Send, const FString& Command, const FO& Params, const FString& ListKey);
 	/** `{"checked": true}` followed by the finding's fields. */
 	UEAGENT_API FO Checked(const FO& Finding);
 	/** Adds a value to a set (a TArray without duplicates, case-sensitive); false if it was already there. */

@@ -407,8 +407,10 @@ TSharedPtr<FJsonObject> HandleSetViewportRealtime(const TSharedPtr<FJsonObject>&
     Client->SaveRealtimeStateToConfig(bRawRealtime);
     const bool bOverrideActive = Client->IsRealtimeOverrideSet();
 
+    // An override still masking the base flag is reported, not a failure: the base flag is what was set.
+    const bool bApplied = bRawRealtime == bEnabled;
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetBoolField(TEXT("applied"), true);
+    Data->SetBoolField(TEXT("applied"), bApplied);
     Data->SetBoolField(TEXT("requested"), bEnabled);
     Data->SetBoolField(TEXT("realtime"), bRawRealtime);
     Data->SetBoolField(TEXT("effective_realtime"), Client->IsRealtime());
@@ -417,7 +419,9 @@ TSharedPtr<FJsonObject> HandleSetViewportRealtime(const TSharedPtr<FJsonObject>&
     {
         Data->SetStringField(TEXT("override_source"), Client->GetRealtimeOverrideMessage().ToString());
     }
-    return mcp_common::MakeOkReply(Data);
+    return mcp_common::MakeOutcomeReply(Data, bApplied, FString::Printf(
+        TEXT("set_viewport_realtime: the viewport's realtime flag reads back %s after setting it to %s."),
+        bRawRealtime ? TEXT("true") : TEXT("false"), bEnabled ? TEXT("true") : TEXT("false")));
 }
 
 // ---------------------------------------------------------------------------
@@ -443,13 +447,16 @@ TSharedPtr<FJsonObject> HandleSetViewportViewMode(const TSharedPtr<FJsonObject>&
     Client->Invalidate();
 
     const EViewModeIndex ReadBack = Client->GetViewMode();
+    const bool bApplied = ReadBack == DesiredIndex;
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetBoolField(TEXT("applied"), true);
+    Data->SetBoolField(TEXT("applied"), bApplied);
     Data->SetStringField(TEXT("requested"), ViewModeStr);
     Data->SetNumberField(TEXT("view_mode_index"), (int32)ReadBack);
     Data->SetStringField(TEXT("view_mode"), ViewModeIndexToName(ReadBack));
-    return mcp_common::MakeOkReply(Data);
+    return mcp_common::MakeOutcomeReply(Data, bApplied, FString::Printf(
+        TEXT("set_viewport_view_mode: the viewport reads back view mode '%s' after setting '%s'."),
+        *ViewModeIndexToName(ReadBack), *ViewModeIndexToName(DesiredIndex)));
 }
 
 // ---------------------------------------------------------------------------
@@ -483,14 +490,17 @@ TSharedPtr<FJsonObject> HandleSetShowFlag(const TSharedPtr<FJsonObject>& Params)
     Client->Invalidate();
 
     const bool bReadBack = Client->EngineShowFlags.GetSingleFlag((uint32)FlagIndex);
+    const bool bApplied = bReadBack == bEnabled;
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetBoolField(TEXT("applied"), true);
+    Data->SetBoolField(TEXT("applied"), bApplied);
     Data->SetStringField(TEXT("flag_name"), FlagName);
     Data->SetNumberField(TEXT("flag_index"), FlagIndex);
     Data->SetBoolField(TEXT("requested"), bEnabled);
     Data->SetBoolField(TEXT("value"), bReadBack);
-    return mcp_common::MakeOkReply(Data);
+    return mcp_common::MakeOutcomeReply(Data, bApplied, FString::Printf(
+        TEXT("set_show_flag: show flag '%s' reads back %s after setting it to %s."),
+        *FlagName, bReadBack ? TEXT("true") : TEXT("false"), bEnabled ? TEXT("true") : TEXT("false")));
 }
 
 // ---------------------------------------------------------------------------
@@ -517,12 +527,15 @@ TSharedPtr<FJsonObject> HandleSetCameraSpeed(const TSharedPtr<FJsonObject>& Para
     // Integer 1-8 camera-speed settings are deprecated (5.7); the camera speed is a float now.
     Client->SetCameraSpeedSettings(FEditorViewportCameraSpeedSettings((float)SpeedNum));
     const float ReadBack = Client->GetCameraSpeed();
+    const bool bApplied = FMath::IsNearlyEqual((double)ReadBack, SpeedNum, FMath::Max(1e-4, SpeedNum * 1e-5));
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetBoolField(TEXT("applied"), true);
+    Data->SetBoolField(TEXT("applied"), bApplied);
     Data->SetNumberField(TEXT("requested"), SpeedNum);
     Data->SetNumberField(TEXT("camera_speed"), ReadBack);
-    return mcp_common::MakeOkReply(Data);
+    return mcp_common::MakeOutcomeReply(Data, bApplied, FString::Printf(
+        TEXT("set_camera_speed: the viewport reads back camera speed %g after setting %g (the viewport clamps it to its own range)."),
+        (double)ReadBack, SpeedNum));
 }
 
 // ---------------------------------------------------------------------------
@@ -542,6 +555,8 @@ TSharedPtr<FJsonObject> HandleSetViewportCamera(const TSharedPtr<FJsonObject>& P
     bool bAnythingSet = false;
     bool bLocationSet = false;
     bool bRotationSet = false;
+    FVector RequestedLocation = FVector::ZeroVector;
+    FRotator RequestedRotation = FRotator::ZeroRotator;
 
     // Both shapes are checked before the camera moves, so a bad rotation does not leave a
     // location already applied.
@@ -558,16 +573,16 @@ TSharedPtr<FJsonObject> HandleSetViewportCamera(const TSharedPtr<FJsonObject>& P
 
     if (Params->HasField(TEXT("location")))
     {
-        const FVector Location = mcp_common::ReadJsonVector(Params, TEXT("location"));
-        Client->SetViewLocation(Location);
+        RequestedLocation = mcp_common::ReadJsonVector(Params, TEXT("location"));
+        Client->SetViewLocation(RequestedLocation);
         bLocationSet = true;
         bAnythingSet = true;
     }
 
     if (Params->HasField(TEXT("rotation")))
     {
-        const FRotator Rotation = mcp_common::ReadJsonRotator(Params, TEXT("rotation"));
-        Client->SetViewRotation(Rotation);
+        RequestedRotation = mcp_common::ReadJsonRotator(Params, TEXT("rotation"));
+        Client->SetViewRotation(RequestedRotation);
         bRotationSet = true;
         bAnythingSet = true;
     }
@@ -587,13 +602,19 @@ TSharedPtr<FJsonObject> HandleSetViewportCamera(const TSharedPtr<FJsonObject>& P
 
     TArray<TSharedPtr<FJsonValue>> RotArr = mcp_common::RotatorToJsonArray(ReadRot);
 
+    const bool bLocationMatches = !bLocationSet || ReadLoc.Equals(RequestedLocation, 0.01);
+    const bool bRotationMatches = !bRotationSet || ReadRot.Equals(RequestedRotation, 0.01);
+    const bool bApplied = bLocationMatches && bRotationMatches;
+
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetBoolField(TEXT("applied"), true);
+    Data->SetBoolField(TEXT("applied"), bApplied);
     Data->SetBoolField(TEXT("location_set"), bLocationSet);
     Data->SetBoolField(TEXT("rotation_set"), bRotationSet);
     Data->SetArrayField(TEXT("location"), LocArr);
     Data->SetArrayField(TEXT("rotation"), RotArr);
-    return mcp_common::MakeOkReply(Data);
+    return mcp_common::MakeOutcomeReply(Data, bApplied, FString::Printf(
+        TEXT("set_viewport_camera: the camera reads back %s that differs from the one requested; location and rotation in this payload are what the viewport holds."),
+        !bLocationMatches && !bRotationMatches ? TEXT("a location and a rotation") : (!bLocationMatches ? TEXT("a location") : TEXT("a rotation"))));
 }
 
 // ---------------------------------------------------------------------------
@@ -684,12 +705,17 @@ TSharedPtr<FJsonObject> HandleSetViewportFOV(const TSharedPtr<FJsonObject>& Para
     Client->ViewFOV = (float)FovNum;
     Client->Invalidate();
 
+    const bool bApplied = FMath::IsNearlyEqual((double)Client->ViewFOV, FovNum, 1e-3)
+        && FMath::IsNearlyEqual((double)Client->FOVAngle, FovNum, 1e-3);
+
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetBoolField(TEXT("applied"), true);
+    Data->SetBoolField(TEXT("applied"), bApplied);
     Data->SetNumberField(TEXT("requested"), FovNum);
     Data->SetNumberField(TEXT("fov"), Client->ViewFOV);
     Data->SetNumberField(TEXT("stored_fov"), Client->FOVAngle);
-    return mcp_common::MakeOkReply(Data);
+    return mcp_common::MakeOutcomeReply(Data, bApplied, FString::Printf(
+        TEXT("set_viewport_fov: the viewport reads back fov %g and stored_fov %g after setting %g."),
+        (double)Client->ViewFOV, (double)Client->FOVAngle, FovNum));
 }
 
 // ---------------------------------------------------------------------------
@@ -720,13 +746,19 @@ TSharedPtr<FJsonObject> HandleSetNearClipPlane(const TSharedPtr<FJsonObject>& Pa
     Client->OverrideNearClipPlane((float)Dist);
     Client->Invalidate();
 
+    // A cleared override leaves the engine near plane, GNearClippingPlane, in effect.
+    const double ReadNear = Client->GetNearClipPlane();
+    const double ExpectedNear = Dist >= 0.0 ? (double)(float)Dist : (double)GNearClippingPlane;
+    const bool bApplied = FMath::IsNearlyEqual(ReadNear, ExpectedNear, FMath::Max(1e-4, ExpectedNear * 1e-5));
+
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetBoolField(TEXT("applied"), true);
+    Data->SetBoolField(TEXT("applied"), bApplied);
     Data->SetNumberField(TEXT("requested"), Dist);
-    Data->SetNumberField(TEXT("near_clip_plane"), Client->GetNearClipPlane());
+    Data->SetNumberField(TEXT("near_clip_plane"), ReadNear);
     // override_active: requested >= 0 means override engaged; -1 clears it.
     Data->SetBoolField(TEXT("override_active"), Dist >= 0.0);
-    return mcp_common::MakeOkReply(Data);
+    return mcp_common::MakeOutcomeReply(Data, bApplied, FString::Printf(
+        TEXT("set_near_clip_plane: the viewport reads back near plane %g where %g was expected."), ReadNear, ExpectedNear));
 }
 
 // ---------------------------------------------------------------------------
@@ -748,12 +780,16 @@ TSharedPtr<FJsonObject> HandleSetFarClipPlane(const TSharedPtr<FJsonObject>& Par
     Client->OverrideFarClipPlane((float)Dist);
     Client->Invalidate();
 
+    const double ReadFar = Client->GetFarClipPlaneOverride();
+    const bool bApplied = FMath::IsNearlyEqual(ReadFar, (double)(float)Dist, FMath::Max(1e-4, FMath::Abs(Dist) * 1e-5));
+
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetBoolField(TEXT("applied"), true);
+    Data->SetBoolField(TEXT("applied"), bApplied);
     Data->SetNumberField(TEXT("requested"), Dist);
-    Data->SetNumberField(TEXT("far_clip_plane"), Client->GetFarClipPlaneOverride());
+    Data->SetNumberField(TEXT("far_clip_plane"), ReadFar);
     Data->SetBoolField(TEXT("override_active"), Dist > 0.0);
-    return mcp_common::MakeOkReply(Data);
+    return mcp_common::MakeOutcomeReply(Data, bApplied, FString::Printf(
+        TEXT("set_far_clip_plane: the viewport reads back far plane override %g after setting %g."), ReadFar, Dist));
 }
 
 // ---------------------------------------------------------------------------
@@ -780,11 +816,17 @@ TSharedPtr<FJsonObject> HandleSetViewportExposure(const TSharedPtr<FJsonObject>&
     Client->ExposureSettings.FixedEV100 = (float)EV100;
     Client->Invalidate();
 
+    const bool bApplied = Client->ExposureSettings.bFixed == bFixed
+        && FMath::IsNearlyEqual((double)Client->ExposureSettings.FixedEV100, EV100, 1e-3);
+
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetBoolField(TEXT("applied"), true);
+    Data->SetBoolField(TEXT("applied"), bApplied);
     Data->SetBoolField(TEXT("fixed"), Client->ExposureSettings.bFixed);
     Data->SetNumberField(TEXT("ev100"), Client->ExposureSettings.FixedEV100);
-    return mcp_common::MakeOkReply(Data);
+    return mcp_common::MakeOutcomeReply(Data, bApplied, FString::Printf(
+        TEXT("set_viewport_exposure: the viewport reads back fixed=%s ev100=%g after setting fixed=%s ev100=%g."),
+        Client->ExposureSettings.bFixed ? TEXT("true") : TEXT("false"), (double)Client->ExposureSettings.FixedEV100,
+        bFixed ? TEXT("true") : TEXT("false"), EV100));
 }
 
 // ---------------------------------------------------------------------------
@@ -806,11 +848,16 @@ TSharedPtr<FJsonObject> HandleSetGameView(const TSharedPtr<FJsonObject>& Params)
     Client->SetGameView(bEnabled);
     Client->Invalidate();
 
+    const bool bInGameView = Client->IsInGameView();
+    const bool bApplied = bInGameView == bEnabled;
+
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetBoolField(TEXT("applied"), true);
+    Data->SetBoolField(TEXT("applied"), bApplied);
     Data->SetBoolField(TEXT("requested"), bEnabled);
-    Data->SetBoolField(TEXT("in_game_view"), Client->IsInGameView());
-    return mcp_common::MakeOkReply(Data);
+    Data->SetBoolField(TEXT("in_game_view"), bInGameView);
+    return mcp_common::MakeOutcomeReply(Data, bApplied, FString::Printf(
+        TEXT("set_game_view: the viewport reads back in_game_view=%s after setting it to %s."),
+        bInGameView ? TEXT("true") : TEXT("false"), bEnabled ? TEXT("true") : TEXT("false")));
 }
 
 // ---------------------------------------------------------------------------
@@ -832,11 +879,16 @@ TSharedPtr<FJsonObject> HandleSetAllowCinematicControl(const TSharedPtr<FJsonObj
     Client->SetAllowCinematicControl(bAllow);
     Client->Invalidate();
 
+    const bool bAllows = Client->AllowsCinematicControl();
+    const bool bApplied = bAllows == bAllow;
+
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetBoolField(TEXT("applied"), true);
+    Data->SetBoolField(TEXT("applied"), bApplied);
     Data->SetBoolField(TEXT("requested"), bAllow);
-    Data->SetBoolField(TEXT("allows_cinematic_control"), Client->AllowsCinematicControl());
-    return mcp_common::MakeOkReply(Data);
+    Data->SetBoolField(TEXT("allows_cinematic_control"), bAllows);
+    return mcp_common::MakeOutcomeReply(Data, bApplied, FString::Printf(
+        TEXT("set_allow_cinematic_control: the viewport reads back allows_cinematic_control=%s after setting it to %s."),
+        bAllows ? TEXT("true") : TEXT("false"), bAllow ? TEXT("true") : TEXT("false")));
 }
 
 // ---------------------------------------------------------------------------
@@ -880,12 +932,16 @@ TSharedPtr<FJsonObject> HandleSetViewportType(const TSharedPtr<FJsonObject>& Par
     const ELevelViewportType ReadBack = LevelClient->GetViewportType();
     const FString ReadBackName = ViewportControl_ViewTypeName(ReadBack);
 
+    const bool bApplied = ReadBack == DesiredType;
+
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetBoolField(TEXT("applied"), true);
+    Data->SetBoolField(TEXT("applied"), bApplied);
     Data->SetStringField(TEXT("requested"), ViewTypeStr);
     Data->SetStringField(TEXT("view_type"), ReadBackName);
     Data->SetNumberField(TEXT("view_type_index"), (int32)ReadBack);
-    return mcp_common::MakeOkReply(Data);
+    return mcp_common::MakeOutcomeReply(Data, bApplied, FString::Printf(
+        TEXT("set_view_type: the viewport reads back view type '%s' after setting '%s'."),
+        *ReadBackName, *ViewportControl_ViewTypeName(DesiredType)));
 }
 
 // MCP:set_viewport_settings - Change any settings of the active level editor viewport (the focused one, else the first) in one call: camera location and rotation, field of view, near and far clip planes, exposure, realtime, view mode, show flags, camera speed, perspective or orthographic view type, game view and cinematic control. Pass only the settings to change; each is validated and applied as its own step, in the order listed here, and the call stops at the first one refused (applied lists those already changed). Editor view only: not undoable, nothing saved. get_viewport_state reads every one of them back.

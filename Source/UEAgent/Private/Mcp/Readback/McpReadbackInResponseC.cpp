@@ -888,7 +888,11 @@ namespace McpReadbackInResponseC
 		{
 			return nullptr;
 		}
-		FV InstanceCount = Get(Data, TEXT("count"));
+		FV InstanceCount = Get(Data, TEXT("total")); // count is this page only
+		if (IsNone(InstanceCount))
+		{
+			InstanceCount = Get(Data, TEXT("count"));
+		}
 		if (IsNone(InstanceCount))
 		{
 			const FV Objects = Get(Data, TEXT("objects"));

@@ -10,7 +10,7 @@ Back to the [index](README.md).
 
 *Additive, idempotent.*
 
-Add a child under a BehaviorTree composite: a composite (Selector/Sequence/SimpleParallel) when composite is given, or a leaf task (Wait/MoveTo/PlaySound/RunBehavior/...) when task_class is given; exactly one of the two. The child is appended to the parent's Children (array order = execution order). Authoring is data-only: ParentNode/ExecutionIndex are assigned by the BT runtime at load (run_behavior_tree). Idempotent by child_name within the parent, whatever its kind. The returned child_name is how you address a composite as a parent for further children. Configure the node (a MoveTo's key, a Wait's time) with set_behavior_tree_node_property; read its settings with get_object_info on its object_path from get_behavior_tree_info.
+Add a child under a BehaviorTree composite: a composite (Selector/Sequence/SimpleParallel) when composite is given, or a leaf task (Wait/MoveTo/PlaySound/RunBehavior/...) when task_class is given; exactly one of the two. The child is appended to the parent's Children (array order = execution order). Authoring is data-only: ParentNode/ExecutionIndex are assigned by the BT runtime at load (run_behavior_tree). Idempotent by child_name within the parent, whatever its kind. The returned child_name is how you address a composite as a parent for further children. Configure the node (a MoveTo's key, a Wait's time) with set_behavior_tree_node_property; read its settings with get_object_info on its object_path from get_behavior_tree_info. A failed save makes success false, with saved=false and save_error, the child kept in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -161,7 +161,7 @@ Pause the behavior tree of an actor (its AIController brain component, else a UB
 
 *Destructive, idempotent.*
 
-Remove a child, composite or task, from a BehaviorTree composite.  Inverse of add_behavior_tree_child: drops the matching entry from the parent's Children array and saves. With kind, only child-edges of that kind are considered (a node of the other kind with the same name is untouched, and an index pointing at the other kind is an error); omitted, an edge of either kind matches. child_kind reports the kind of the edge removed. Idempotent: a missing child returns removed:false / already_absent:true.
+Remove a child, composite or task, from a BehaviorTree composite.  Inverse of add_behavior_tree_child: drops the matching entry from the parent's Children array and saves. With kind, only child-edges of that kind are considered (a node of the other kind with the same name is untouched, and an index pointing at the other kind is an error); omitted, an edge of either kind matches. child_kind reports the kind of the edge removed. Idempotent: a missing child returns removed:false / already_absent:true. A failed save makes success false, with saved=false and save_error, the removal kept in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -303,7 +303,7 @@ Constrain an existing blackboard key's subsettings on a UBlackboardData asset an
 
 *Destructive, idempotent.*
 
-Write one key of the running blackboard of an actor (its AIController blackboard, else one on the actor), converting the value string by key type. The actor is looked up in a running PIE world first, then in the editor world; world says which answered (pie or editor) and world_name names it. Not read back: set is always true, and an unparsable number or vector is written as 0. Runtime state only, nothing saved. Verify with get_blackboard_value.
+Write one key of the running blackboard of an actor (its AIController blackboard, else one on the actor), converting the value string by key type. The actor is looked up in a running PIE world first, then in the editor world; world says which answered (pie or editor) and world_name names it. The key is read back: set is whether it now holds the converted value (false makes success false), and value_read_back is its value as text. An unparsable number or vector is written as 0; an object or class path that does not resolve is an error and nothing changes. Runtime state only, nothing saved. Verify with get_blackboard_value.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -311,7 +311,7 @@ Write one key of the running blackboard of an actor (its AIController blackboard
 | `key_name` | string | yes | Name of the blackboard key to set |
 | `value` | string | no | Value as a string, converted by key type: "42", "0.5", "true" or "1", a name, an enum index, a vector "X=1 Y=2 Z=3", a rotator "P=0 Y=90 R=0", an object or class path. Omitted means empty (0, false, none). |
 
-**Returns:** `{ actor_name: string, world: "pie"|"editor", world_name: string, key_name: string, key_type: string, value: string, set: bool }`
+**Returns:** `{ actor_name: string, world: "pie"|"editor", world_name: string, key_name: string, key_type: string, value: string, value_read_back: string, set: bool }`
 
 ## `stop_behavior_tree`
 

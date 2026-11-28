@@ -28,7 +28,7 @@ Add a URuntimeVirtualTexture to the landscape's RuntimeVirtualTextures array (sl
 |---|---|---|---|
 | `landscape_name_or_label` | string | yes | Actor label/name of the target ALandscape |
 | `rvt_asset_path` | string | yes | /Game path to the RVT asset |
-| `slot_index` | number | no | 0-based index into LandscapeProxy::RuntimeVirtualTextures (default 0) |
+| `slot_index` | integer | no | 0-based index into LandscapeProxy::RuntimeVirtualTextures (default 0) |
 | `propagate_to_proxies` | boolean | no | Optional bool, default TRUE. Opt-out that writes the landscape actor alone. NOTE: with it false the proxies stay empty and nothing writes to the RVT cache, so `applied` will still report false (plus a `warning`) unless the proxies already carried the RVT -- the opt-out exists to reproduce that write, not to bless its result. |
 
 **Returns:** `{ applied, slot_index, rvt_asset_path, landscape, landscape_has_rvt, propagate_to_proxies, proxies_total, proxies_updated, proxies_with_rvt, proxies_missing: [string], proxies_missing_truncated: bool, proxy_enumeration, warning?, requested: {...} }`
@@ -44,8 +44,8 @@ Create a URuntimeVirtualTexture asset at directory_path/asset_name with the give
 | `asset_name` | string | yes | Name of the new RVT asset (e.g. "RVT_Landscape"), without a folder. |
 | `directory_path` | string | no | Content folder as a long package path (e.g. "/Game/VirtualTextures"), not a relative one (default /Game). |
 | `material_type` | string | no | One of "BaseColor_Normal_Specular", "BaseColor_Normal_Roughness" or "WorldHeight", case-insensitive (default "BaseColor_Normal_Specular"); any other value, BaseColor_YCoCg included, is refused. |
-| `tile_count` | number | no | Exponent of the size in tiles: 2^n tiles, clamped to 0..12 (default 8 = 256 tiles); a texel value such as 256 is clamped to 12. |
-| `tile_size` | number | no | Exponent of the tile size: 2^(n+6) texels, clamped to 0..4 (default 2 = 256 texels). |
+| `tile_count` | integer | no | Exponent of the size in tiles: 2^n tiles, clamped to 0..12 (default 8 = 256 tiles); a texel value such as 256 is clamped to 12. |
+| `tile_size` | integer | no | Exponent of the tile size: 2^(n+6) texels, clamped to 0..4 (default 2 = 256 texels). |
 | `continuous_update` | boolean | no | When true, already mapped pages are re-rendered round-robin (bContinuousUpdate); default false. |
 
 **Returns:** `{ asset_path, material_type, tile_count, tile_size, size }`
@@ -143,11 +143,14 @@ No parameters.
 
 *Read-only.*
 
-Enumerate .utrace files in &lt;ProjectDir>/Saved/Profiling/, returning their path, size and modification time.
+Enumerate .utrace files in &lt;ProjectDir>/Saved/Profiling/, returning their path, size and modification time, sorted by name and paged with offset/limit.
 
-No parameters.
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ directory: string, count: int, traces: [{ path, name, size_bytes, modified_iso }] } -- directory is the resolved profiling folder; only its own files are listed, not subfolders.`
+**Returns:** `{ directory: string, count: int (entries in this page), traces: [{ path, name, size_bytes, modified_iso }], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null } -- directory is the resolved profiling folder; only its own files are listed, not subfolders.`
 
 ## `set_runtime_virtual_texture_volume_bounds`
 
@@ -208,6 +211,6 @@ Inverse of assign_runtime_virtual_texture_to_landscape: clears ONE slot of a lan
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `landscape_name` | string | no | Actor name (or label) of the ALandscape actor (omit for first landscape in world) |
-| `slot_index` | number | no | 0-based index to clear (default 0) |
+| `slot_index` | integer | no | 0-based index to clear (default 0) |
 
 **Returns:** `{ cleared, slot_index, previous_rvt_asset_path?, landscape }`

@@ -29,7 +29,7 @@ Expose a tunable on a PCG graph (bool / int / float / double / string) so densit
 |---|---|---|---|
 | `pcg_graph_path` | string | yes | /Game/... path to the UPCGGraph (required) |
 | `name` | string | yes | Parameter name (required) |
-| `type` | string | yes | "bool" \| "int" \| "float" \| "double" \| "string" (required) |
+| `type` | string | yes | "bool" \| "int" \| "float" \| "double" \| "string" (required); int32 and integer are accepted too. |
 
 **Returns:** `{ pcg_graph_path, name, type, added, already_existed, parameter_count }`
 
@@ -112,11 +112,14 @@ List a PCG graph's user parameters with name, type and current value -- and the 
 
 *Read-only.*
 
-Enumerate every PCG node type available in this build (all concrete PCGSettings subclasses, including plugin- and project-added ones), with class names and paths. Run it before add_graph_node so you pass a class that exists instead of guessing a name from documentation that may not match this engine version. Read-only reflection.
+Enumerate every PCG node type available in this build (all concrete PCGSettings subclasses, including plugin- and project-added ones), with class names and paths, sorted by name and paged with offset/limit. Run it before add_graph_node so you pass a class that exists instead of guessing a name from documentation that may not match this engine version. Read-only reflection.
 
-No parameters.
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ base_class, count, types:[{name, path}] }`
+**Returns:** `{ base_class, count (entries in this page), types:[{name, path}], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }`
 
 ## `remove_pcg_graph_parameter`
 

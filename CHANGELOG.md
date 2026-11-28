@@ -4,6 +4,83 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 ## Unreleased
 
+## 2.13.0 - 2026-11-27
+
+About 230 tools now take their `success` from a re-read of what they changed, where it used to be a constant. A
+failed call is marked as an MCP tool error. 42 list and find tools return their results a page at a time. The
+catalog gives more parameters a type, an enum or a default.
+
+### Added
+
+- **Paging for 42 `list_` and `find_` tools.** They take `offset` and `limit` (100 by default, 1000 at most) and
+  answer `total`, `returned`, `truncated` and `next_offset`.
+- **CI gate on outcome honesty.** `Tools/audit_outcome_honesty.py --check` compares the mutating tools whose
+  `success: true` is a constant against `Tools/outcome_honesty_baseline.json`. It fails when a new tool joins that
+  list or the count rises. `--write-baseline` updates the file after tools are fixed.
+- **Richer parameter schemas.** Compared with 2.12.0:
+
+  | In the catalog | 2.12.0 | 2.13.0 |
+  |---|---|---|
+  | Parameters with an `enum` | 18 | 90 |
+  | Structured `default`s | 0 | 622 |
+  | `integer` parameters | 38 | 460 |
+  | Arrays without `items` | 318 | 0 |
+  | `any` parameters | 50 | 28 |
+  | Parameters with no description | 8 | 0 |
+
+  Unions are published as `anyOf`. The server reads `enum`, `items` and `default` from the catalog. The catalog
+  generator fails on an array without `items` or on an invalid default.
+
+### Changed
+
+- **A failed call is an MCP tool error.** `tools/call` returns `isError: true` for any `success: false`, not only for
+  refusals. A client that reads only `isError` no longer takes a failure for a success.
+- **A handler payload with no `success` field succeeds only if it has no `error`.** A non-empty `error` with no
+  `success` makes the call fail, and so does a null payload. When a failure has no message of its own, the call
+  answers `Command reported a failure (see result for details)`.
+- **About 230 tools check their result before reporting success.** The audit's count of mutating tools whose
+  `success: true` is a constant falls from 425 to 194. The tools covered are in these domains:
+  - Editor and Level
+  - Blueprint
+  - Animation, SkeletalMesh and StaticMesh
+  - USD and Material
+  - BehaviorTree and AIPerception
+  - Niagara and GAS
+  - Audio Modulation and GameFeatures
+
+  These tools now fail when the re-read does not match. In particular:
+  - `compile_blueprint` fails when the compile has errors. The compiler's payload is included in the answer.
+  - `add_graph_node` with `compile=true` lists the errors in `compile_errors` without failing the call.
+  - `fixup_redirectors` fails when only some redirectors are fixed.
+  - `import_font_file` fails when no `UFont` was saved.
+  - `set_streaming_level_loaded` and `set_streaming_level_visible` fail when the level does not reach the state
+    they asked for.
+  - `set_actor_label` fails when the editor rejects the label.
+  - `set_landscape_spline_control_point` is an error when no field to change is given.
+  - The AnimGraph tools fail when the save fails.
+  - `set_usd_variant_selection` fails when a stronger layer overrides the selection.
+  - `add_usd_reference` and `add_usd_payload` fail when USD rejects the arc.
+  - `disconnect_material_expressions` is an error on an unknown pin.
+  - `set_material_physical_material` fails when the save fails.
+  - `compile_material` says that it cannot verify the result (`NotVerifiable`), because the compile is
+    asynchronous.
+  - `spawn_niagara_component` checks the system and the label of the component it spawned.
+  - `set_blackboard_value` re-reads the value. A path it cannot resolve is an error.
+- **Lists that had no limit now return 100 entries by default.** Pass `limit` (up to 1000) and follow
+  `next_offset` to read the rest. `count` is the number of entries in the page.
+  - `list_mass_archetypes` still answers `total` as the number of live entities.
+  - `find_unused_assets` returns the `deletion_candidates` of the page and the overall
+    `deletion_candidate_count`.
+- **13 tool descriptions over 1500 characters were shortened.** For example, `add_graph_node`'s went from 2516 to
+  1460 characters.
+
+### Fixed
+
+- `add_ai_stimuli_source` did nothing in the editor. It now saves `RegisterAsSourceForSenses`. An unknown sense is an
+  error, where it used to fall back to Sight.
+- The dispatch no longer has a `try`/`catch` around it. The plugin builds without C++ exceptions, so the `catch`
+  could never run.
+
 ## 2.12.0 - 2026-11-19
 
 New tools read and drive the Content Browser and the asset editors, query the navmesh, draw debug shapes, wait for

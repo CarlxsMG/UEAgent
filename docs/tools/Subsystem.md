@@ -17,7 +17,7 @@ Find the live instance of a subsystem class by its lifetime and read its exposed
 | `subsystem_class` | string | yes | Class of the subsystem to inspect: short reflected name (with or without the U prefix), /Script path, or a Blueprint subsystem's class path. Must derive from USubsystem. |
 | `lifetime` | string | yes | Which host resolves the instance: one of engine \| gameinstance \| world \| editor \| localplayer (case-insensitive). |
 | `class_name` | string | no | Alias of subsystem_class. |
-| `player_index` | number | no | Local player index, used only when lifetime is "localplayer" (default 0). |
+| `player_index` | integer | no | Local player index, used only when lifetime is "localplayer" (default 0). |
 | `include_properties` | boolean | no | Optional bool (default true). false returns the instance's identity only, with no properties walk. |
 | `world` | string | no | Optional world selector for the world, gameinstance and localplayer lifetimes, ignored by the others: editor, pie (ambiguous: PlayWorld, else the first PIE context), game (alias of pie), server (the PIE world with authority), client or pie:N. Absent means editor for world and pie for gameinstance and localplayer. An unrecognised value fails naming the worlds that exist |
 

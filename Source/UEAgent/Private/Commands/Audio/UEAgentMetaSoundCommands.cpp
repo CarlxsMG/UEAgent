@@ -1958,88 +1958,80 @@ TSharedPtr<FJsonObject> HandleListMetaSoundNodeTypes(
 	Params->TryGetBoolField(TEXT("include_unloaded"), bIncludeUnloaded);
 
 	TArray<TSharedPtr<FJsonValue>> TypesJson;
-try
-	{
 #if UE_VERSION_OLDER_THAN(5, 8, 0)
-		// UE 5.7's ISearchEngine::FindAllClasses(bool) returns the registered classes as FMetasoundFrontendClass,
-		// without unloaded assets, and its FMetaSoundClassInfo has no ClassType (both 5.8). The same entries by
-		// hand, as 5.8 builds them: the registered classes minus the deprecated ones (FindAllClasses(false) is the
-		// query 5.8 runs for EResultVersion::Highest), then for include_unloaded the asset manager's latest tag
-		// data of every MetaSound asset whose class is not registered, deprecated ones left out; an asset class
-		// is External.
-		using namespace Metasound::Frontend;
-		auto AddEntry = [&TypesJson](const FMetasoundFrontendClassName& ClassName, EMetasoundFrontendClassType ClassType,
-			const FMetasoundFrontendVersionNumber& Version, EMetasoundFrontendClassAccessFlags AccessFlags)
-		{
-			TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
-			Entry->SetStringField(TEXT("class_name"),
-				ClassName.Name.ToString());
-			Entry->SetStringField(TEXT("class_path"),
-				ClassName.ToString());
-			Entry->SetStringField(TEXT("type"),
-				UEnum::GetValueAsString(ClassType));
-			Entry->SetStringField(TEXT("version"),
-				Version.ToString());
-			Entry->SetStringField(TEXT("access_flags"),
-				UEnum::GetValueAsString(AccessFlags));
-			MetaSound_AddNativeFields(Entry, ClassType, ClassName, Version);
-			TypesJson.Add(MakeShared<FJsonValueObject>(Entry));
-		};
-
-		const TArray<FMetasoundFrontendClass> Classes = ISearchEngine::Get().FindAllClasses(/*bInIncludeAllVersions*/ false);
-		TSet<FNodeClassRegistryKey> RegisteredKeys;
-		TypesJson.Reserve(Classes.Num());
-		for (const FMetasoundFrontendClass& Class : Classes)
-		{
-			RegisteredKeys.Add(FNodeClassRegistryKey(Class.Metadata));
-			AddEntry(Class.Metadata.GetClassName(), Class.Metadata.GetType(), Class.Metadata.GetVersion(), Class.Metadata.GetAccessFlags());
-		}
-		if (bIncludeUnloaded)
-		{
-			if (const Metasound::Engine::FMetaSoundAssetManager* AssetManager = Metasound::Engine::FMetaSoundAssetManager::Get())
-			{
-				AssetManager->IterateAssetTagData([&RegisteredKeys, &AddEntry](FMetaSoundAssetClassInfo ClassInfo)
-				{
-					if (EnumHasAnyFlags(ClassInfo.AccessFlags, EMetasoundFrontendClassAccessFlags::Deprecated))
-					{
-						return;
-					}
-					if (!RegisteredKeys.Contains(FNodeClassRegistryKey(EMetasoundFrontendClassType::External, ClassInfo.ClassName, ClassInfo.Version)))
-					{
-						AddEntry(ClassInfo.ClassName, EMetasoundFrontendClassType::External, ClassInfo.Version, ClassInfo.AccessFlags);
-					}
-				});
-			}
-		}
-#else
-		auto& SE = Metasound::Frontend::ISearchEngine::Get();
-		const TArray<Metasound::Frontend::FMetaSoundClassInfo> Infos = SE.FindAllClasses(
-			Metasound::Frontend::ISearchEngine::EResultVersion::Highest, bIncludeUnloaded);
-
-		TypesJson.Reserve(Infos.Num());
-		for (const Metasound::Frontend::FMetaSoundClassInfo& Info : Infos)
-		{
-			TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
-			Entry->SetStringField(TEXT("class_name"),
-				Info.ClassName.Name.ToString());
-			Entry->SetStringField(TEXT("class_path"),
-				Info.ClassName.ToString());
-			Entry->SetStringField(TEXT("type"),
-				UEnum::GetValueAsString(Info.ClassType));
-			Entry->SetStringField(TEXT("version"),
-				Info.Version.ToString());
-			Entry->SetStringField(TEXT("access_flags"),
-				UEnum::GetValueAsString(Info.AccessFlags));
-			MetaSound_AddNativeFields(Entry, Info.ClassType, Info.ClassName, Info.Version);
-			TypesJson.Add(MakeShared<FJsonValueObject>(Entry));
-		}
-#endif
-	}
-	catch (...)
+	// UE 5.7's ISearchEngine::FindAllClasses(bool) returns the registered classes as FMetasoundFrontendClass,
+	// without unloaded assets, and its FMetaSoundClassInfo has no ClassType (both 5.8). The same entries by
+	// hand, as 5.8 builds them: the registered classes minus the deprecated ones (FindAllClasses(false) is the
+	// query 5.8 runs for EResultVersion::Highest), then for include_unloaded the asset manager's latest tag
+	// data of every MetaSound asset whose class is not registered, deprecated ones left out; an asset class
+	// is External.
+	using namespace Metasound::Frontend;
+	auto AddEntry = [&TypesJson](const FMetasoundFrontendClassName& ClassName, EMetasoundFrontendClassType ClassType,
+		const FMetasoundFrontendVersionNumber& Version, EMetasoundFrontendClassAccessFlags AccessFlags)
 	{
-		return mcp_common::MakeErrorReply(
-			TEXT("ISearchEngine::Get() failed (MetaSound search engine not initialized in this build)"));
+		TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+		Entry->SetStringField(TEXT("class_name"),
+			ClassName.Name.ToString());
+		Entry->SetStringField(TEXT("class_path"),
+			ClassName.ToString());
+		Entry->SetStringField(TEXT("type"),
+			UEnum::GetValueAsString(ClassType));
+		Entry->SetStringField(TEXT("version"),
+			Version.ToString());
+		Entry->SetStringField(TEXT("access_flags"),
+			UEnum::GetValueAsString(AccessFlags));
+		MetaSound_AddNativeFields(Entry, ClassType, ClassName, Version);
+		TypesJson.Add(MakeShared<FJsonValueObject>(Entry));
+	};
+
+	const TArray<FMetasoundFrontendClass> Classes = ISearchEngine::Get().FindAllClasses(/*bInIncludeAllVersions*/ false);
+	TSet<FNodeClassRegistryKey> RegisteredKeys;
+	TypesJson.Reserve(Classes.Num());
+	for (const FMetasoundFrontendClass& Class : Classes)
+	{
+		RegisteredKeys.Add(FNodeClassRegistryKey(Class.Metadata));
+		AddEntry(Class.Metadata.GetClassName(), Class.Metadata.GetType(), Class.Metadata.GetVersion(), Class.Metadata.GetAccessFlags());
 	}
+	if (bIncludeUnloaded)
+	{
+		if (const Metasound::Engine::FMetaSoundAssetManager* AssetManager = Metasound::Engine::FMetaSoundAssetManager::Get())
+		{
+			AssetManager->IterateAssetTagData([&RegisteredKeys, &AddEntry](FMetaSoundAssetClassInfo ClassInfo)
+			{
+				if (EnumHasAnyFlags(ClassInfo.AccessFlags, EMetasoundFrontendClassAccessFlags::Deprecated))
+				{
+					return;
+				}
+				if (!RegisteredKeys.Contains(FNodeClassRegistryKey(EMetasoundFrontendClassType::External, ClassInfo.ClassName, ClassInfo.Version)))
+				{
+					AddEntry(ClassInfo.ClassName, EMetasoundFrontendClassType::External, ClassInfo.Version, ClassInfo.AccessFlags);
+				}
+			});
+		}
+	}
+#else
+	auto& SE = Metasound::Frontend::ISearchEngine::Get();
+	const TArray<Metasound::Frontend::FMetaSoundClassInfo> Infos = SE.FindAllClasses(
+		Metasound::Frontend::ISearchEngine::EResultVersion::Highest, bIncludeUnloaded);
+
+	TypesJson.Reserve(Infos.Num());
+	for (const Metasound::Frontend::FMetaSoundClassInfo& Info : Infos)
+	{
+		TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+		Entry->SetStringField(TEXT("class_name"),
+			Info.ClassName.Name.ToString());
+		Entry->SetStringField(TEXT("class_path"),
+			Info.ClassName.ToString());
+		Entry->SetStringField(TEXT("type"),
+			UEnum::GetValueAsString(Info.ClassType));
+		Entry->SetStringField(TEXT("version"),
+			Info.Version.ToString());
+		Entry->SetStringField(TEXT("access_flags"),
+			UEnum::GetValueAsString(Info.AccessFlags));
+		MetaSound_AddNativeFields(Entry, Info.ClassType, Info.ClassName, Info.Version);
+		TypesJson.Add(MakeShared<FJsonValueObject>(Entry));
+	}
+#endif
 
 	// The full list runs to thousands of classes (264,000 characters measured in a blank project), past the size
 	// the reply carries inline, so it is offloaded to a file. name_filter and max_results narrow it.
@@ -2086,10 +2078,12 @@ try
 // ---------------------------------------------------------------------------
 // list_metasound_nodes — enumerate nodes in a MetaSound graph
 // ---------------------------------------------------------------------------
-// MCP:list_metasound_nodes - List every node in the default graph of a MetaSound Source asset with its GUID id, name, class name and input/output counts, plus count. Read-only; pass the id to get_metasound_node_info and the other node tools.
+// MCP:list_metasound_nodes - List the nodes in the default graph of a MetaSound Source asset, in document order and a page at a time (offset/limit), with their GUID id, name, class name and input/output counts. Read-only; pass the id to get_metasound_node_info and the other node tools.
 //   @retired get_graph_nodes - asset_path=<MetaSound Source>; the same nodes, each with node_id (its GUID), plus the graph's connections
 //   @param metasound_path - MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain"; MetaSound Patches are not accepted.
-//   @returns { metasound_path, count, nodes: [{ id, name, class_name, input_count, output_count }] }
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { metasound_path, count (entries in this page), nodes: [{ id, name, class_name, input_count, output_count }], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }
 TSharedPtr<FJsonObject> HandleListMetaSoundNodes(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -2129,8 +2123,9 @@ TSharedPtr<FJsonObject> HandleListMetaSoundNodes(
 	}
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	mcp_common::ApplyListPage(NodesJson, mcp_common::ReadListPage(Params), Data);
 	Data->SetStringField(TEXT("metasound_path"), MetaSoundPath);
-	Data->SetNumberField(TEXT("count"),          Nodes.Num());
+	Data->SetNumberField(TEXT("count"),          NodesJson.Num());
 	Data->SetArrayField (TEXT("nodes"),          NodesJson);
 	return mcp_common::MakeOkReply(Data);
 }
@@ -2690,10 +2685,12 @@ TSharedPtr<FJsonObject> HandleDisconnectMetaSoundNodeInput(const TSharedPtr<FJso
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("disconnect_metasound_nodes"), SaveErr);
 }
 
-// MCP:list_metasound_connections - List every edge of the default graph of a MetaSound Source: from which node and output pin to which node and input pin, with each node's name and class (a graph input or output node is named after the input or output), plus count. Read-only. It reads what connect_metasound_nodes, connect_metasound_graph_input_to_node, connect_metasound_graph_input_to_output and connect_metasound_node_to_graph_output write; node ids are those of list_metasound_nodes, and an input's edge is dropped with disconnect_metasound_nodes. Patches are refused.
+// MCP:list_metasound_connections - List the edges of the default graph of a MetaSound Source, in document order and a page at a time (offset/limit): from which node and output pin to which node and input pin, with each node's name and class (a graph input or output node is named after the input or output), plus count. Read-only. It reads what connect_metasound_nodes, connect_metasound_graph_input_to_node, connect_metasound_graph_input_to_output and connect_metasound_node_to_graph_output write; node ids are those of list_metasound_nodes, and an input's edge is dropped with disconnect_metasound_nodes. Patches are refused.
 //   @retired get_graph_nodes - asset_path=<MetaSound Source>; its connections field holds the same edges
 //   @param metasound_path - MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain".
-//   @returns { metasound_path: string, count: int, connections: [{ from_node_id, from_node_name, from_node_class, from_output_name, to_node_id, to_node_name, to_node_class, to_input_name, data_type }] }
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { metasound_path: string, count: int (entries in this page), connections: [{ from_node_id, from_node_name, from_node_class, from_output_name, to_node_id, to_node_name, to_node_class, to_input_name, data_type }], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }
 
 TSharedPtr<FJsonObject> HandleListMetaSoundConnections(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2752,6 +2749,7 @@ TSharedPtr<FJsonObject> HandleListMetaSoundConnections(const TSharedPtr<FJsonObj
     }
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    mcp_common::ApplyListPage(EdgesJson, mcp_common::ReadListPage(Params), Data);
     Data->SetStringField(TEXT("metasound_path"), MetaSoundPath);
     Data->SetNumberField(TEXT("count"), EdgesJson.Num());
     Data->SetArrayField(TEXT("connections"), EdgesJson);

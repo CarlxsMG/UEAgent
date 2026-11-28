@@ -1181,7 +1181,7 @@ TSharedPtr<FJsonObject> HandleGetMpciInfo(const TSharedPtr<FJsonObject>& Params)
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:reset_material_parameter_collection_instance - Reset the Material Parameter Collection Instance (MPCI: the transient per-world values of a collection asset) of one collection on a world to the collection's default values by dropping all its scalar and vector overrides. The world is the editor world by default, or the Play-in-Editor world world_label selects; world_package and world_type say which one was reached. Runtime only: nothing is saved, no undo. A world with no instance for the collection gets a fresh one at the defaults (created=true, already_existed=false), so this is also how to give a world its instance; is_valid says whether the instance is bound to a valid collection. scalars_reset_to_default and vectors_reset_to_default count parameters now reading their default. For a Material Instance Constant asset use set_material_instance_parameter_override with all=true and override=false.
+// MCP:reset_material_parameter_collection_instance - Reset the Material Parameter Collection Instance (MPCI: the transient per-world values of a collection asset) of one collection on a world to the collection's default values by dropping all its scalar and vector overrides. The world is the editor world by default, or the Play-in-Editor world world_label selects; world_package and world_type say which one was reached. Runtime only: nothing is saved, no undo. A world with no instance for the collection gets a fresh one at the defaults (created=true, already_existed=false), so this is also how to give a world its instance; is_valid says whether the instance is bound to a valid collection. scalars_reset_to_default and vectors_reset_to_default count parameters now reading their default. For a Material Instance Constant asset use set_material_instance_parameter_override with all=true and override=false. cleared is true only when every parameter reads its default; otherwise the call fails.
 //   @param collection_path - Full /Game path of the parent MPC
 //   @param world_label - Which world: empty or "editor" for the editor world (the default), even while Play-in-Editor runs; "pie" (alias "game") for the running PIE world, "server" or "client" for that PIE world, "pie:N" for PIE instance N. any other value names a live world by its object name (the editor world is checked first, so a map name selects it) or by its package name (UEDPIE_N_ and the map name for a PIE world), and a value no world has fails and lists the worlds present
 //   @returns { collection_path: string, world_name: string, world_package: string, world_type: string, net_mode: string, pie_instance: int, scalar_count: int, vector_count: int, scalars_reset_to_default: int, vectors_reset_to_default: int, cleared: bool, is_valid: bool, already_existed: bool, created: bool }
@@ -1244,11 +1244,13 @@ TSharedPtr<FJsonObject> HandleClearMpciParameterOverrides(const TSharedPtr<FJson
     Result->SetNumberField(TEXT("vector_count"), Collection->VectorParameters.Num());
     Result->SetNumberField(TEXT("scalars_reset_to_default"), ScalarsReadback);
     Result->SetNumberField(TEXT("vectors_reset_to_default"), VectorsReadback);
-    Result->SetBoolField(TEXT("cleared"), true);
+    const bool bCleared = ScalarsReadback == Collection->ScalarParameters.Num() && VectorsReadback == Collection->VectorParameters.Num();
+    Result->SetBoolField(TEXT("cleared"), bCleared);
     Result->SetBoolField(TEXT("is_valid"), Instance->IsCollectionValid());
     Result->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
     Result->SetBoolField(TEXT("created"), !bAlreadyExisted);
-    return mcp_common::MakeOkReply(Result);
+    return mcp_common::MakeOutcomeReply(Result, bCleared,
+        mcp_common::MeasuredOutcomeError(TEXT("reset_material_parameter_collection_instance"), TEXT("cleared")));
 }
 
 const McpCommandFamilies::FRegistrar Registration =

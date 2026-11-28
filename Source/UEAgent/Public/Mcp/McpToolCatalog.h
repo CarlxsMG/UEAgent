@@ -6,6 +6,7 @@
 #include "HAL/CriticalSection.h"
 
 class FJsonObject;
+class FJsonValue;
 class FMcpToolPolicy;
 
 /**
@@ -49,12 +50,17 @@ public:
 	struct FParam
 	{
 		FString Name;
-		/** string | number | integer | boolean | array | object | any */
+		/** string | number | integer | boolean | array | object | any, or a union of them ("string|array") */
 		FString JsonType;
 		bool bRequired = false;
 		FString Description;
-		/** Closed set of values (strings only). Empty = not a provable enum. */
+		/** Closed set of values (strings only, `enum` in the catalog). Empty = not a provable enum. */
 		TArray<FString> EnumValues;
+		/** Element schema of an array (`items` in the catalog); null when the param is no array. */
+		TSharedPtr<FJsonObject> Items;
+		/** The value the handler uses when the param is left out (`default` in the catalog); null when the
+		 *  annotation states none. Published only: the dispatcher does not fill it in. */
+		TSharedPtr<FJsonValue> Default;
 		/** Array-typed rotation parameter: its schema also accepts the object form. */
 		bool bIsRotation = false;
 		/** The parameter this one is another spelling of (`aliasOf` in the catalog): the handler

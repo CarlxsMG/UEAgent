@@ -79,6 +79,7 @@
 #include "Commands/Environment/LandscapeHeightSampling.h"  // LandscapeHeightSampling::SampleHeightAt
 #include "Components/MeshComponent.h"     // UMeshComponent (mesh-bbox bottom, excludes shape volumes)
 #include "Components/PrimitiveComponent.h"// UPrimitiveComponent::CalcBounds (local-space bbox)
+#include "HAL/PlatformApplicationMisc.h"     // FPlatformApplicationMisc::ClipboardCopy (copy_actors)
 
 /**
  * Editor-domain commands: actors in a level (listing, lookup, spawn, delete, transforms, selection,
@@ -316,6 +317,25 @@ namespace UEAgentEditorCommandsImpl
         {
             Transform.SetScale3D(mcp_common::ReadJsonVector(Params, TEXT("scale")));
         }
+    }
+
+    // Whether Actor's world transform reads back Expected: location within 0.01 cm, and rotation with scale compared
+    // as one basis matrix (within 1e-3), so a negative scale that the engine decomposes into another rotation still
+    // matches. An actor without a root component, or one whose parent re-derives its transform, can refuse the write.
+    bool TransformHolds(const AActor* Actor, const FTransform& Expected)
+    {
+        const FTransform Read = Actor->GetActorTransform();
+        FMatrix ReadBasis = Read.ToMatrixWithScale();
+        FMatrix ExpectedBasis = Expected.ToMatrixWithScale();
+        ReadBasis.SetOrigin(FVector::ZeroVector);
+        ExpectedBasis.SetOrigin(FVector::ZeroVector);
+        return Read.GetLocation().Equals(Expected.GetLocation(), 0.01) && ReadBasis.Equals(ExpectedBasis, 1e-3);
+    }
+
+    // Whether the actor Weak pointed at is gone: destroyed, or on its way out of the world.
+    bool ActorIsGone(const TWeakObjectPtr<AActor>& Weak)
+    {
+        return !Weak.IsValid() || Weak->IsActorBeingDestroyed();
     }
 
     // Visibility trace from From straight down by Depth, ignoring the actor being moved.
@@ -1070,6 +1090,7 @@ TSharedPtr<FJsonObject> HandleDeleteActor(const TSharedPtr<FJsonObject>& Params)
 
     // The reply describes the actor as it was, so capture it before it goes away.
     TSharedPtr<FJsonObject> Removed = mcp_common::DescribeActorObject(Doomed);
+    const TWeakObjectPtr<AActor> DoomedRef(Doomed);
 
     if (GEditor != nullptr)
     {
@@ -1085,8 +1106,17 @@ TSharedPtr<FJsonObject> HandleDeleteActor(const TSharedPtr<FJsonObject>& Params)
         Doomed->Destroy();
     }
 
+    const bool bGone = UEAgentEditorCommandsImpl::ActorIsGone(DoomedRef);
+
     TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
     Reply->SetObjectField(TEXT("deleted_actor"), Removed);
+    Reply->SetBoolField(TEXT("success"), bGone);
+    if (!bGone)
+    {
+        Reply->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("delete_actor: '%s' is still in the world after the editor's delete (a locked level or an actor the editor refuses to delete)."),
+            *DoomedName));
+    }
     return Reply;
 }
 
@@ -1142,11 +1172,20 @@ TSharedPtr<FJsonObject> HandleSetActorTransform(const TSharedPtr<FJsonObject>& P
     FTransform Updated = Target->GetTransform();
     UEAgentEditorCommandsImpl::OverlayTransformFields(Params, Updated);
     Target->SetActorTransform(Updated);
+    const bool bHolds = UEAgentEditorCommandsImpl::TransformHolds(Target, Updated);
 
     // Re-read off the actor, stamped with WHICH world was written: two tools resolving
     // "pie" to different worlds otherwise produce contradictions that look like a game bug.
     TSharedPtr<FJsonObject> Reply = mcp_common::DescribeActorObject(Target, true);
     mcp_common::AddWorldEvidence(Reply, World);
+    Reply->SetBoolField(TEXT("success"), bHolds);
+    if (!bHolds)
+    {
+        Reply->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("set_actor_transform: '%s' reads back a transform other than the one written (no root component, ")
+            TEXT("a static root in a running world, or a parent that drives it); the payload holds the re-read transform."),
+            *TargetName));
+    }
     return Reply;
 }
 
@@ -1202,15 +1241,33 @@ TSharedPtr<FJsonObject> HandleSelectActors(const TSharedPtr<FJsonObject>& Params
         GEditor->NoteSelectionChange();
     }
 
+    // Read the selection back: an actor the editor will not select (hidden, locked level) stays out of it.
+    TArray<FString> NotSelected;
+    for (AActor* Each : Picked)
+    {
+        if (GEditor == nullptr || !GEditor->GetSelectedActors()->IsSelected(Each))
+        {
+            NotSelected.Add(Each->GetName());
+        }
+    }
+
     TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
     Reply->SetArrayField(TEXT("selected_actors"), PickedJson);
-    Reply->SetNumberField(TEXT("selected_count"), Picked.Num());
+    Reply->SetNumberField(TEXT("selected_count"), Picked.Num() - NotSelected.Num());
     Reply->SetNumberField(TEXT("not_found_count"), Unmatched.Num());
     if (Unmatched.Num() > 0)
     {
         Reply->SetArrayField(TEXT("not_found_names"), mcp_common::StringsToJson(Unmatched));
     }
     Reply->SetBoolField(TEXT("add_to_selection"), bAppend);
+    Reply->SetBoolField(TEXT("success"), NotSelected.Num() == 0);
+    if (NotSelected.Num() > 0)
+    {
+        Reply->SetArrayField(TEXT("not_selected_names"), mcp_common::StringsToJson(NotSelected));
+        Reply->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("select_actors: %d resolved actor(s) are not in the editor selection when read back: %s"),
+            NotSelected.Num(), *FString::Join(NotSelected, TEXT(", "))));
+    }
     return Reply;
 }
 
@@ -1271,9 +1328,35 @@ TSharedPtr<FJsonObject> HandleDeselectActors(const TSharedPtr<FJsonObject>& Para
         }
     }
 
+    // Read the selection back: clear-all leaves nothing selected, a named drop leaves none of the named selected.
+    int32 StillSelected = 0;
+    if (GEditor != nullptr)
+    {
+        const USelection* After = GEditor->GetSelectedActors();
+        if (bClearAll)
+        {
+            StillSelected = After != nullptr ? After->Num() : 0;
+        }
+        else if (NamesToDrop != nullptr && After != nullptr)
+        {
+            for (AActor* Each : UEAgentEditorCommandsImpl::ResolveNameList(
+                     *NamesToDrop, UEAgentEditorCommandsImpl::SnapshotActors(EditorWorld), nullptr))
+            {
+                StillSelected += After->IsSelected(Each) ? 1 : 0;
+            }
+        }
+    }
+
     TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
-    Reply->SetBoolField(TEXT("deselected_all"), bClearAll);
+    Reply->SetBoolField(TEXT("deselected_all"), bClearAll && StillSelected == 0);
     Reply->SetNumberField(TEXT("deselected_count"), Dropped);
+    Reply->SetNumberField(TEXT("still_selected_count"), StillSelected);
+    Reply->SetBoolField(TEXT("success"), StillSelected == 0);
+    if (StillSelected > 0)
+    {
+        Reply->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("deselect_actors: %d actor(s) that should be deselected are still selected when read back."), StillSelected));
+    }
     return Reply;
 }
 
@@ -1360,7 +1443,7 @@ TSharedPtr<FJsonObject> HandleDuplicateActor(const TSharedPtr<FJsonObject>& Para
 // MCP:copy_actors - Put editor-world actors on the editor CLIPBOARD (edactCopySelected), either by name or whatever is currently selected, so paste_actors can drop them back -- the way to clone a group while keeping their relative layout, which duplicate_actor (one actor, in place) does not do. WARNING: naming them REPLACES the current selection as a side effect, and matching is by INTERNAL name only. One of actor_names or copy_selected=true is required.
 //   @param actor_names - Optional array of internal actor names (GetName) to copy; supplying it re-selects exactly those actors first.
 //   @param copy_selected - Optional bool. True (with actor_names omitted) copies whatever is selected right now, leaving the selection alone.
-//   @returns { copied_count: int, success: bool (hardcoded; verify with paste_actors' pasted_count) }
+//   @returns { copied_count: int, success: bool (the copied text names every copied actor), missing_from_copy?: [string] }
 
 TSharedPtr<FJsonObject> HandleCopyActors(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1416,12 +1499,39 @@ TSharedPtr<FJsonObject> HandleCopyActors(const TSharedPtr<FJsonObject>& Params)
     {
         return mcp_common::MakeErrorReply(TEXT("No actors to copy"));
     }
-    GEditor->edactCopySelected(EditorWorld);
+    const TArray<AActor*> ToCopy = UEAgentEditorCommandsImpl::SelectedActorsIn(GEditor->GetSelectedActors(), EditorWorld);
 
-    // `success` is not measured here; paste_actors' pasted_count is the real check.
+    // The copy into a string first, so what reaches the clipboard can be checked: every copied actor is named in it.
+    FString CopiedText;
+    GEditor->edactCopySelected(EditorWorld, &CopiedText);
+    TArray<FString> Missing;
+    for (const AActor* Each : ToCopy)
+    {
+        if (!CopiedText.Contains(Each->GetName()))
+        {
+            Missing.Add(Each->GetName());
+        }
+    }
+    const bool bCopied = !CopiedText.IsEmpty() && Missing.Num() == 0;
+    if (!CopiedText.IsEmpty())
+    {
+        FPlatformApplicationMisc::ClipboardCopy(*CopiedText);
+    }
+
     TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
-    Reply->SetNumberField(TEXT("copied_count"), CopyCount);
-    Reply->SetBoolField(TEXT("success"), true);
+    Reply->SetNumberField(TEXT("copied_count"), CopyCount - Missing.Num());
+    Reply->SetBoolField(TEXT("success"), bCopied);
+    if (!bCopied)
+    {
+        if (Missing.Num() > 0)
+        {
+            Reply->SetArrayField(TEXT("missing_from_copy"), mcp_common::StringsToJson(Missing));
+        }
+        Reply->SetStringField(TEXT("error"), CopiedText.IsEmpty()
+            ? FString(TEXT("copy_actors: the editor copied nothing (the selected actors cannot be copied, or components are selected instead)."))
+            : FString::Printf(TEXT("copy_actors: the copied text does not include %d of the selected actor(s): %s"),
+                Missing.Num(), *FString::Join(Missing, TEXT(", "))));
+    }
     return Reply;
 }
 
@@ -2274,6 +2384,7 @@ TSharedPtr<FJsonObject> HandleBatchSetActorTransform(const TSharedPtr<FJsonObjec
     const TArray<AActor*> Pool = UEAgentEditorCommandsImpl::SnapshotActors(World);
     TArray<TSharedPtr<FJsonValue>> UpdatedJson;
     TArray<FString> Unresolved;
+    TArray<FString> NotHeld;
     int32 Failures = 0;
     for (const TSharedPtr<FJsonValue>& Item : *Requests)
     {
@@ -2302,6 +2413,12 @@ TSharedPtr<FJsonObject> HandleBatchSetActorTransform(const TSharedPtr<FJsonObjec
         FTransform Updated = Target->GetTransform();
         UEAgentEditorCommandsImpl::OverlayTransformFields(*Entry, Updated);
         Target->SetActorTransform(Updated);
+        if (!UEAgentEditorCommandsImpl::TransformHolds(Target, Updated))
+        {
+            NotHeld.Add(WantedName);
+            ++Failures;
+            continue;
+        }
         UpdatedJson.Add(mcp_common::DescribeActorValue(Target));
     }
 
@@ -2321,6 +2438,15 @@ TSharedPtr<FJsonObject> HandleBatchSetActorTransform(const TSharedPtr<FJsonObjec
     // Which world was written: a high failure_count with world='editor' over PIE names is
     // a different diagnosis from "those actors do not exist".
     mcp_common::AddWorldEvidence(Reply, World);
+    // An unresolved name is counted, not an error; a write the actor did not keep is.
+    Reply->SetBoolField(TEXT("success"), NotHeld.Num() == 0);
+    if (NotHeld.Num() > 0)
+    {
+        Reply->SetArrayField(TEXT("not_applied_actors"), mcp_common::StringsToJson(NotHeld));
+        Reply->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("set_actor_transforms: %d actor(s) read back a transform other than the one written: %s"),
+            NotHeld.Num(), *FString::Join(NotHeld, TEXT(", "))));
+    }
     return Reply;
 }
 
@@ -2359,6 +2485,13 @@ TSharedPtr<FJsonObject> HandleBatchDeleteActors(const TSharedPtr<FJsonObject>& P
 
     // Described while they still exist.
     const TArray<TSharedPtr<FJsonValue>> DoomedJson = UEAgentEditorCommandsImpl::ActorsToJson(Doomed);
+    TArray<TWeakObjectPtr<AActor>> DoomedRefs;
+    TArray<FString> DoomedNamesResolved;
+    for (AActor* Each : Doomed)
+    {
+        DoomedRefs.Add(Each);
+        DoomedNamesResolved.Add(Each->GetName());
+    }
 
     // The editor delete works on the selection: select exactly these, then delete them.
     UEAgentEditorCommandsImpl::ClearEditorSelection();
@@ -2368,9 +2501,26 @@ TSharedPtr<FJsonObject> HandleBatchDeleteActors(const TSharedPtr<FJsonObject>& P
     }
     GEditor->edactDeleteSelected(EditorWorld);
 
+    TArray<FString> Survivors;
+    for (int32 Index = 0; Index < DoomedRefs.Num(); ++Index)
+    {
+        if (!UEAgentEditorCommandsImpl::ActorIsGone(DoomedRefs[Index]))
+        {
+            Survivors.Add(DoomedNamesResolved[Index]);
+        }
+    }
+
     TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
-    Reply->SetNumberField(TEXT("deleted_count"), Doomed.Num());
+    Reply->SetNumberField(TEXT("deleted_count"), Doomed.Num() - Survivors.Num());
     Reply->SetArrayField(TEXT("deleted_actors"), DoomedJson);
+    Reply->SetBoolField(TEXT("success"), Survivors.Num() == 0);
+    if (Survivors.Num() > 0)
+    {
+        Reply->SetArrayField(TEXT("not_deleted"), mcp_common::StringsToJson(Survivors));
+        Reply->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("delete_actors: %d actor(s) are still in the world after the editor's delete: %s"),
+            Survivors.Num(), *FString::Join(Survivors, TEXT(", "))));
+    }
     return Reply;
 }
 
@@ -2469,6 +2619,7 @@ TSharedPtr<FJsonObject> HandleSnapActorToGround(const TSharedPtr<FJsonObject>& P
         Snapped.SetRotation(Tilt * Snapped.GetRotation());
     }
     Target->SetActorTransform(Snapped);
+    const bool bHolds = UEAgentEditorCommandsImpl::TransformHolds(Target, Snapped);
 
     if (GEditor != nullptr)
     {
@@ -2478,7 +2629,14 @@ TSharedPtr<FJsonObject> HandleSnapActorToGround(const TSharedPtr<FJsonObject>& P
     TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
     Reply->SetObjectField(TEXT("actor"), mcp_common::DescribeActorObject(Target));
     Reply->SetBoolField(TEXT("hit"), bHit);
-    Reply->SetBoolField(TEXT("landed"), bLanded);
+    Reply->SetBoolField(TEXT("landed"), bLanded && bHolds);
+    Reply->SetBoolField(TEXT("success"), bHolds);
+    if (!bHolds)
+    {
+        Reply->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("snap_actor_to_ground: ground found at Z=%g but '%s' reads back a transform other than the seated one; actor in this payload is the re-read state."),
+            GroundZ, *TargetName));
+    }
     Reply->SetStringField(TEXT("sampled_from"), SampledFrom);
     if (bHit)
     {
@@ -2554,6 +2712,7 @@ TSharedPtr<FJsonObject> HandleAlignActors(const TSharedPtr<FJsonObject>& Params)
     const bool bTakeScale = bEverything || Mode == TEXT("scale");
 
     TArray<TSharedPtr<FJsonValue>> AlignedJson;
+    TArray<FString> NotHeld;
     for (AActor* Member : Group)
     {
         FTransform Pose = Member->GetTransform();
@@ -2572,6 +2731,11 @@ TSharedPtr<FJsonObject> HandleAlignActors(const TSharedPtr<FJsonObject>& Params)
         // Modify() before the write -- see set_actor_transform.
         Member->Modify();
         Member->SetActorTransform(Pose);
+        if (!UEAgentEditorCommandsImpl::TransformHolds(Member, Pose))
+        {
+            NotHeld.Add(Member->GetName());
+            continue;
+        }
         AlignedJson.Add(mcp_common::DescribeActorValue(Member));
     }
 
@@ -2585,6 +2749,14 @@ TSharedPtr<FJsonObject> HandleAlignActors(const TSharedPtr<FJsonObject>& Params)
     Reply->SetStringField(TEXT("align_type"), Mode);
     Reply->SetStringField(TEXT("reference"), Anchor);
     Reply->SetArrayField(TEXT("aligned_actors"), AlignedJson);
+    Reply->SetBoolField(TEXT("success"), NotHeld.Num() == 0);
+    if (NotHeld.Num() > 0)
+    {
+        Reply->SetArrayField(TEXT("not_aligned_actors"), mcp_common::StringsToJson(NotHeld));
+        Reply->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("align_actors: %d actor(s) read back a transform other than the aligned one: %s"),
+            NotHeld.Num(), *FString::Join(NotHeld, TEXT(", "))));
+    }
     return Reply;
 }
 
@@ -2679,7 +2851,16 @@ TSharedPtr<FJsonObject> HandleAddComponentToActor(const TSharedPtr<FJsonObject>&
     Reply->SetStringField(TEXT("requested_component_name"), WantedName);
     Reply->SetStringField(TEXT("component_type"), ComponentClass->GetName());
     Reply->SetBoolField(TEXT("already_existed"), bAlreadyThere);
-    Reply->SetBoolField(TEXT("success"), true);
+    // Read back: the component belongs to the actor and, when added here, is a registered instance component.
+    const bool bOnActor = IsValid(Component) && Component->GetOwner() == Host
+        && (bAlreadyThere || (Component->IsRegistered() && Host->GetInstanceComponents().Contains(Component)));
+    Reply->SetBoolField(TEXT("success"), bOnActor);
+    if (!bOnActor)
+    {
+        Reply->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("add_component_to_actor: component '%s' is not a registered instance component of '%s' when read back."),
+            *Component->GetName(), *HostName));
+    }
     return Reply;
 }
 
@@ -2731,7 +2912,14 @@ TSharedPtr<FJsonObject> HandleRemoveComponentFromActor(const TSharedPtr<FJsonObj
     Reply->SetStringField(TEXT("actor_name"), HostName);
     Reply->SetStringField(TEXT("removed_component"), PartName);
     Reply->SetStringField(TEXT("component_type"), RemovedType);
-    Reply->SetBoolField(TEXT("success"), true);
+    const bool bRemoved = UEAgentEditorCommandsImpl::OwnedComponentNamed(Host, PartName) != Victim;
+    Reply->SetBoolField(TEXT("success"), bRemoved);
+    if (!bRemoved)
+    {
+        Reply->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("remove_component_from_actor: '%s' is still a component of '%s' after DestroyComponent (a component the actor's class creates cannot be removed from an instance)."),
+            *PartName, *HostName));
+    }
     return Reply;
 }
 
@@ -2913,7 +3101,14 @@ TSharedPtr<FJsonObject> HandleSetCurrentLevel(const TSharedPtr<FJsonObject>& Par
     Reply->SetStringField(TEXT("current_level"), After ? After->GetName() : TEXT(""));
     Reply->SetBoolField(TEXT("changed"), bChanged);
     Reply->SetBoolField(TEXT("already_current"), bAlreadyCurrent);
-    Reply->SetBoolField(TEXT("success"), true);
+    const bool bIsCurrent = After == TargetLevel;
+    Reply->SetBoolField(TEXT("success"), bIsCurrent);
+    if (!bIsCurrent)
+    {
+        Reply->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("set_current_level: the current level reads back '%s' instead of '%s'."),
+            After ? *After->GetName() : TEXT("<none>"), *TargetLevel->GetName()));
+    }
     return Reply;
 }
 
@@ -3378,7 +3573,7 @@ TSharedPtr<FJsonObject> HandleGetTransactionHistory(const TSharedPtr<FJsonObject
 
 // MCP:reset_transaction_buffer - IRREVERSIBLE: wipes the editor's ENTIRE undo AND redo history (the human's entries too, not just yours) and drops any open transaction. It does not revert anything -- edits already made stay made, they just stop being undoable. Use only to reclaim memory after a huge batch, or when a corrupt buffer is causing trouble; to undo work use undo (with `count` for several steps). undo_count_before vs after is the evidence.
 //   @param reason - Human-readable reason, logged by the engine so the wipe is traceable. Defaults to 'MCP reset_transaction_buffer'.
-//   @returns { success: bool (hardcoded), undo_count_before: int, undo_count_after: int (0) }
+//   @returns { success: bool (false when entries remain in the buffer), undo_count_before: int, undo_count_after: int (0), queue_length_after: int (0) }
 TSharedPtr<FJsonObject> HandleResetTransactionBuffer(const TSharedPtr<FJsonObject>& Params)
 {
     UTransactor* Trans = GetEditorTransactor();
@@ -3392,10 +3587,20 @@ TSharedPtr<FJsonObject> HandleResetTransactionBuffer(const TSharedPtr<FJsonObjec
     Trans->Reset(FText::FromString(Reason));
     ActiveTransactionIndex = INDEX_NONE; // any open tx is gone after Reset
 
+    const int32 After = UEAgentEditorCommandsImpl::UndoableCount(Trans);
+    const int32 QueueAfter = Trans->GetQueueLength();
+    const bool bEmptied = After == 0 && QueueAfter == 0;
+
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-    ResultObj->SetBoolField(TEXT("success"), true);
+    ResultObj->SetBoolField(TEXT("success"), bEmptied);
     ResultObj->SetNumberField(TEXT("undo_count_before"), Before);
-    ResultObj->SetNumberField(TEXT("undo_count_after"), UEAgentEditorCommandsImpl::UndoableCount(Trans));
+    ResultObj->SetNumberField(TEXT("undo_count_after"), After);
+    ResultObj->SetNumberField(TEXT("queue_length_after"), QueueAfter);
+    if (!bEmptied)
+    {
+        ResultObj->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("reset_transaction_buffer: the buffer still holds %d entries (%d undoable) after the reset."), QueueAfter, After));
+    }
     return ResultObj;
 }
 
@@ -3656,6 +3861,8 @@ TSharedPtr<FJsonObject> HandlePlaceActorOnTerrain(const TSharedPtr<FJsonObject>&
     FString AlignUsed;
     const double NewZ = UEAgentEditorCommandsImpl::GroundedActorZ(Target, Start.Z, LandedZ + ZOffset, Align, AlignUsed);
     UEAgentEditorCommandsImpl::SetActorWorldZ(Target, Start, NewZ);
+    const double ReadZ = Target->GetActorLocation().Z;
+    const bool bPlaced = FMath::IsNearlyEqual(ReadZ, NewZ, 0.01);
 
     if (GEditor != nullptr)
     {
@@ -3673,6 +3880,13 @@ TSharedPtr<FJsonObject> HandlePlaceActorOnTerrain(const TSharedPtr<FJsonObject>&
     Reply->SetStringField(TEXT("align_used"), AlignUsed);
     Reply->SetNumberField(TEXT("z_offset"), ZOffset);
     Reply->SetStringField(TEXT("landscape_actor_name"), Landscape ? Landscape->GetActorLabel() : FString());
+    Reply->SetNumberField(TEXT("read_z"), ReadZ);
+    Reply->SetBoolField(TEXT("success"), bPlaced);
+    if (!bPlaced)
+    {
+        Reply->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("snap_actor_to_landscape: '%s' reads back Z=%g instead of %g."), *TargetName, ReadZ, NewZ));
+    }
     return Reply;
 }
 
@@ -3737,6 +3951,7 @@ TSharedPtr<FJsonObject> HandleBatchPlaceActorsOnTerrain(const TSharedPtr<FJsonOb
     TArray<TSharedPtr<FJsonValue>> PlacedArray;
     TArray<TSharedPtr<FJsonValue>> FailedArray;
     ALandscape* LastLandscape = nullptr;
+    int32 NotHeldCount = 0;
 
     auto MakeFailure = [](const FString& Name, const FString& Label, const FString& Error)
     {
@@ -3825,6 +4040,14 @@ TSharedPtr<FJsonObject> HandleBatchPlaceActorsOnTerrain(const TSharedPtr<FJsonOb
         const double NewActorZ = UEAgentEditorCommandsImpl::GroundedActorZ(
             TargetActor, PreviousZ, LandedZ + ZOffset, Align, AlignUsed);
         UEAgentEditorCommandsImpl::SetActorWorldZ(TargetActor, ActorLocation, NewActorZ);
+        const double ReadZ = TargetActor->GetActorLocation().Z;
+        if (!FMath::IsNearlyEqual(ReadZ, NewActorZ, 0.01))
+        {
+            FailedArray.Add(MakeFailure(ReqName, ReqLabel, FString::Printf(
+                TEXT("The actor reads back Z=%g instead of %g after the write"), ReadZ, NewActorZ)));
+            ++NotHeldCount;
+            continue;
+        }
 
         TSharedPtr<FJsonObject> Placed = MakeShared<FJsonObject>();
         Placed->SetStringField(TEXT("name"), TargetActor->GetName());
@@ -3853,6 +4076,13 @@ TSharedPtr<FJsonObject> HandleBatchPlaceActorsOnTerrain(const TSharedPtr<FJsonOb
     Reply->SetStringField(TEXT("landscape_actor_name"),
         LastLandscape ? LastLandscape->GetActorLabel() : FString());
     Reply->SetStringField(TEXT("world_name"), World->GetName());
+    // An entry that does not resolve or sample is reported in failed; a write the actor did not keep fails the call.
+    Reply->SetBoolField(TEXT("success"), NotHeldCount == 0);
+    if (NotHeldCount > 0)
+    {
+        Reply->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("place_actors_on_terrain: %d actor(s) did not keep the grounded Z; see failed."), NotHeldCount));
+    }
     return Reply;
 }
 

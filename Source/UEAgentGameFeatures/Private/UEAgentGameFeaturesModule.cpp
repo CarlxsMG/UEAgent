@@ -112,6 +112,19 @@ namespace
         }
     }
 
+    // What the completion delegate of a state transition reported, when it ran before the call returned.
+    struct FTransitionOutcome
+    {
+        bool bDone = false;
+        FString Error;
+
+        void Record(const UE::GameFeatures::FResult& Result)
+        {
+            bDone = true;
+            Error = Result.HasError() ? UE::GameFeatures::ToString(Result) : FString();
+        }
+    };
+
     class FGameFeaturesBackend final : public IUEAgentGameFeaturesBackend
     {
     public:
@@ -214,16 +227,44 @@ namespace
                 ResultObj->SetBoolField(TEXT("already_unloaded"), true);
                 AddStateFields(*GFS, URL, ResultObj);
                 ResultObj->SetStringField(TEXT("note"), TEXT("Plugin not loaded; no-op."));
+                mcp_common::AddVerificationEvidence(ResultObj, mcp_common::EMcpVerification::Verified,
+                    TEXT("UGameFeaturesSubsystem::IsGameFeaturePluginLoaded"), TEXT("the plugin is not loaded"));
                 return mcp_common::MakeOkReply(ResultObj);
             }
 
+            // The completion delegate runs inside the call when the state machine settles at once (a refused
+            // transition among them); otherwise it runs later on the game-feature ticker.
+            const TSharedRef<FTransitionOutcome> Outcome = MakeShared<FTransitionOutcome>();
             GFS->UnloadGameFeaturePlugin(URL, FGameFeaturePluginUnloadComplete::CreateLambda(
-                [URL](const UE::GameFeatures::FResult& Result) { LogResult(TEXT("unload_game_feature_plugin"), URL, Result); }),
+                [URL, Outcome](const UE::GameFeatures::FResult& Result)
+                {
+                    LogResult(TEXT("unload_game_feature_plugin"), URL, Result);
+                    Outcome->Record(Result);
+                }),
                 bKeepRegistered);
 
             ResultObj->SetBoolField(TEXT("already_unloaded"), false);
             AddStateFields(*GFS, URL, ResultObj);
+            if (Outcome->bDone && !Outcome->Error.IsEmpty())
+            {
+                return mcp_common::MakeOutcomeReply(ResultObj, false,
+                    FString::Printf(TEXT("unload_game_feature_plugin('%s') failed: %s"), *URL, *Outcome->Error));
+            }
+            if (Outcome->bDone)
+            {
+                const bool bUnloaded = !GFS->IsGameFeaturePluginLoaded(URL);
+                mcp_common::AddVerificationEvidence(ResultObj,
+                    bUnloaded ? mcp_common::EMcpVerification::Verified : mcp_common::EMcpVerification::Failed,
+                    TEXT("UGameFeaturesSubsystem::IsGameFeaturePluginLoaded"),
+                    bUnloaded ? TEXT("the unload completed and the plugin is no longer loaded") : TEXT("the unload completed but the plugin still reads as loaded"));
+                return mcp_common::MakeOutcomeReply(ResultObj, bUnloaded, bUnloaded ? FString()
+                    : FString::Printf(TEXT("unload_game_feature_plugin('%s') completed but the plugin is still loaded (state %s)"),
+                        *URL, *UE::GameFeatures::ToString(GFS->GetPluginState(URL))));
+            }
             ResultObj->SetStringField(TEXT("note"), TEXT("Unload started (async). Poll get_game_feature_plugin_state until state is no longer 'Loaded'."));
+            mcp_common::AddVerificationEvidence(ResultObj, mcp_common::EMcpVerification::NotVerifiable,
+                TEXT("FGameFeaturePluginUnloadComplete"),
+                TEXT("the unload runs on the game-feature ticker after this reply; poll get_game_feature_plugin_state"));
             return mcp_common::MakeOkReply(ResultObj);
         }
 

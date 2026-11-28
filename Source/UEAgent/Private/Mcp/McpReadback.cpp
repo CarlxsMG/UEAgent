@@ -104,7 +104,7 @@ namespace McpReadbackCorePrivate
 	/** Dirty packages under a read-only (vendored library) root, as a sorted set. */
 	static TOptional<TArray<FString>> DirtyLibraryPackages(const FSend& Send)
 	{
-		const FO DirtyList = ProbeOrEmpty(Send, TEXT("list_dirty_packages"), MakeShared<FJsonObject>());
+		const FO DirtyList = ProbeAllPages(Send, TEXT("list_dirty_packages"), MakeShared<FJsonObject>(), TEXT("packages"));
 		if (DirtyList->Values.Num() == 0)
 		{
 			return {};
@@ -320,6 +320,49 @@ namespace McpReadback
 		}
 		const FO Inner = Payload(Reply);
 		return IsFalse(Get(Inner, TEXT("success"))) ? MakeShared<FJsonObject>() : Inner;
+	}
+
+	FO ProbeAllPages(const FSend& Send, const FString& Command, const FO& Params, const FString& ListKey)
+	{
+		constexpr int32 PageSize = 1000; // the largest page a list command serves
+		constexpr int32 MaxPages = 100;
+		FO First;
+		TArray<FV> Entries;
+		int32 Offset = 0;
+		for (int32 PageIndex = 0; PageIndex < MaxPages; ++PageIndex)
+		{
+			const FO PageParams = Clone(Params.IsValid() ? Params : MakeShared<FJsonObject>());
+			PageParams->SetNumberField(TEXT("limit"), PageSize);
+			if (Offset > 0)
+			{
+				PageParams->SetNumberField(TEXT("offset"), Offset);
+			}
+			const FO Page = ProbeOrEmpty(Send, Command, PageParams);
+			if (Page->Values.Num() == 0)
+			{
+				return MakeShared<FJsonObject>(); // a page that cannot be read leaves the whole list unknown
+			}
+			if (!First.IsValid())
+			{
+				First = Page;
+			}
+			const FV List = Get(Page, ListKey);
+			if (IsList(List))
+			{
+				Entries.Append(AsList(List));
+			}
+			const FV Next = Get(Page, TEXT("next_offset"));
+			if (!IsNum(Next) || static_cast<int32>(Next->AsNumber()) <= Offset)
+			{
+				break;
+			}
+			Offset = static_cast<int32>(Next->AsNumber());
+		}
+		if (First.IsValid() && First->HasField(ListKey))
+		{
+			First->SetArrayField(ListKey, Entries);
+		}
+		return First.IsValid() ? First : MakeShared<FJsonObject>();
 	}
 
 	FO Checked(const FO& Finding)
@@ -552,8 +595,9 @@ namespace McpReadback
 		// Compiling does NOT rebuild actors that already exist: remember what was compiled.
 		if (Name.Equals(TEXT("compile_blueprint"), ESearchCase::IgnoreCase))
 		{
+			// A failed compile is an error envelope, its payload under `result` rather than `data`.
 			const FO Data = Payload(Result);
-			if (IsFalse(Get(Data, TEXT("succeeded"))))
+			if (IsFalse(Get(Result, TEXT("success"))) || IsFalse(Get(Data, TEXT("succeeded"))))
 			{
 				return;
 			}

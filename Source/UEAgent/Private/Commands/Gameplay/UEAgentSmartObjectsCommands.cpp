@@ -1552,7 +1552,9 @@ TSharedPtr<FJsonObject> HandleSetSmartObjectSlotRuntimeTags(
 //   @param radius - Half-extent (uu) of the AABB search box around center
 //   @param include_claimed - Optional: also return already-claimed slots (default false)
 //   @param include_disabled - Optional: also return disabled slots (default false)
-//   @returns { center: [number, number, number], radius: number, results: [{ object_handle: string, slot_handle: string, actor_label: string }], count: int, note?: string }
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { center: [number, number, number], radius: number, results: [{ object_handle: string, slot_handle: string, actor_label: string }], count: int (entries in this page), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null, note?: string } -- results sorted by slot_handle
 TSharedPtr<FJsonObject> HandleFindSmartObjects(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -1599,9 +1601,12 @@ TSharedPtr<FJsonObject> HandleFindSmartObjects(
 
 	// HONEST GATE: no fabrication. An empty result (index not initialized
 	// headless, or genuinely nothing in range) is a truthful success + note.
+	const mcp_common::FListPage Page = mcp_common::ReadListPage(Params);
 	if (!bFound || Out.Num() == 0)
 	{
-		Data->SetArrayField(TEXT("results"), TArray<TSharedPtr<FJsonValue>>());
+		TArray<TSharedPtr<FJsonValue>> NoResults;
+		mcp_common::ApplyListPage(NoResults, Page, Data);
+		Data->SetArrayField(TEXT("results"), NoResults);
 		Data->SetNumberField(TEXT("count"), 0);
 		Data->SetStringField(TEXT("note"),
 			TEXT("SmartObject runtime not initialized in editor world (bRuntimeInitialized==false); ")
@@ -1627,6 +1632,8 @@ TSharedPtr<FJsonObject> HandleFindSmartObjects(
 		RO->SetStringField(TEXT("actor_label"), ActorLabel);
 		ResultsJson.Add(MakeShared<FJsonValueObject>(RO));
 	}
+	mcp_common::SortJsonItems(ResultsJson, TEXT("slot_handle"));
+	mcp_common::ApplyListPage(ResultsJson, Page, Data);
 	Data->SetArrayField(TEXT("results"), ResultsJson);
 	Data->SetNumberField(TEXT("count"), ResultsJson.Num());
 	return mcp_common::MakeOkReply(Data);

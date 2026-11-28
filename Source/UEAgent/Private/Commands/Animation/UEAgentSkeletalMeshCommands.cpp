@@ -131,6 +131,72 @@ namespace
 		return nullptr;
 	}
 
+	/**
+	 * The reply of a mutation checked by reading the mesh back: Data[Measured] = bApplied, the mesh is saved,
+	 * and success needs both. The save runs even when the read-back disagrees, so the payload reports the
+	 * state the asset was left in.
+	 */
+	TSharedPtr<FJsonObject> SkMesh_SaveCheckedReply(USkeletalMesh* Mesh, const TSharedPtr<FJsonObject>& Data,
+		bool bApplied, const TCHAR* Command, const TCHAR* Measured)
+	{
+		Data->SetBoolField(Measured, bApplied);
+		FString SaveError;
+		const bool bSaved = mcp_common::SaveAssetPackage(Mesh->GetOutermost(), Mesh, SaveError);
+		if (!bApplied)
+		{
+			mcp_common::AddSaveOutcome(Data, bSaved, SaveError);
+			return mcp_common::MakeOutcomeReply(Data, false, mcp_common::MeasuredOutcomeError(Command, Measured));
+		}
+		return mcp_common::MakeSavedReply(Data, bSaved, Command, SaveError);
+	}
+
+	/** Whether two JSON values carry the same setting: numbers within float precision, strings ignoring case. */
+	bool SkMesh_SameSetting(const TSharedPtr<FJsonValue>& A, const TSharedPtr<FJsonValue>& B)
+	{
+		if (!A.IsValid() || !B.IsValid() || A->Type != B->Type)
+		{
+			return false;
+		}
+		switch (A->Type)
+		{
+		case EJson::Number:
+		{
+			const double X = A->AsNumber();
+			const double Y = B->AsNumber();
+			return FMath::IsNearlyEqual(X, Y, FMath::Max(1e-4, FMath::Abs(X) * 1e-5));
+		}
+		case EJson::Boolean: return A->AsBool() == B->AsBool();
+		case EJson::String: return A->AsString().Equals(B->AsString(), ESearchCase::IgnoreCase);
+		default: return false;
+		}
+	}
+
+	/**
+	 * Data["settings_applied"] = the values of Read for each key of Wanted (what the asset holds now), and
+	 * Data["mismatched"] = the keys whose read value is not the one written. True when every key matches.
+	 */
+	bool SkMesh_AddSettingsReadBack(const TSharedPtr<FJsonObject>& Data, const TSharedPtr<FJsonObject>& Wanted,
+		const TSharedPtr<FJsonObject>& Read)
+	{
+		TSharedPtr<FJsonObject> Applied = MakeShared<FJsonObject>();
+		TArray<TSharedPtr<FJsonValue>> Mismatched;
+		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Wanted->Values)
+		{
+			const TSharedPtr<FJsonValue> ReadValue = Read->TryGetField(Pair.Key);
+			if (ReadValue.IsValid())
+			{
+				Applied->SetField(Pair.Key, ReadValue);
+			}
+			if (!SkMesh_SameSetting(Pair.Value, ReadValue))
+			{
+				Mismatched.Add(MakeShared<FJsonValueString>(Pair.Key));
+			}
+		}
+		Data->SetObjectField(TEXT("settings_applied"), Applied);
+		Data->SetArrayField(TEXT("mismatched"), Mismatched);
+		return Mismatched.Num() == 0;
+	}
+
 #if UE_VERSION_OLDER_THAN(5, 8, 0)
 	/** UE 5.7 has no USkeletalMeshEditorSubsystem::SetAllowCPUAccess: the body it has in 5.8
 	 *  (SkeletalMeshEditorSubsystem.cpp), bAllowCPUAccess set on every LOD and the mesh rebuilt. */
@@ -771,7 +837,7 @@ TSharedPtr<FJsonObject> HandleGetSkeletalMeshLodInfo(
 //   @param high_precision_weights - Use 16-bit instead of 8-bit skin weights for rendering (bUseHighPrecisionSkinWeights).
 //   @param full_precision_uvs - Store UVs at full floating-point precision (bUseFullPrecisionUVs).
 //   @param bone_influence_limit - Maximum bone influences per vertex; 0 uses the DefaultBoneInfluenceLimit project setting, and values above the project limit have no effect.
-//   @returns { lod_index: int, settings_applied: {...}, saved: bool }
+//   @returns { skeletal_mesh_path: string, lod_index: int, settings_applied: {...}, mismatched: [string], applied: bool, saved: bool, save_error?: string } -- settings_applied is read back from the LOD; applied is false (and the call fails) when a written field reads back different
 
 TSharedPtr<FJsonObject> HandleSetSkeletalMeshLodBuildSettings(
 	const TSharedPtr<FJsonObject>& Params)
@@ -849,17 +915,27 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshLodBuildSettings(
 
 	Mesh->Modify();
 
-	if (TSharedPtr<FJsonObject> SaveFailed = SkMesh_SaveOrReply(Mesh))
+	// Read back from the mesh's LOD info, not from the reference written through.
+	const FSkeletalMeshLODInfo* ReadInfo = Mesh->GetLODInfo(LodIndex);
+	TSharedPtr<FJsonObject> ReadObj = MakeShared<FJsonObject>();
+	if (ReadInfo)
 	{
-		return SaveFailed;
+		const FSkeletalMeshBuildSettings& R = ReadInfo->BuildSettings;
+		ReadObj->SetBoolField(TEXT("recompute_normals"), !!R.bRecomputeNormals);
+		ReadObj->SetBoolField(TEXT("recompute_tangents"), !!R.bRecomputeTangents);
+		ReadObj->SetBoolField(TEXT("use_mikk_t_space"), !!R.bUseMikkTSpace);
+		ReadObj->SetBoolField(TEXT("compute_weighted_normals"), !!R.bComputeWeightedNormals);
+		ReadObj->SetBoolField(TEXT("remove_degenerates"), !!R.bRemoveDegenerates);
+		ReadObj->SetBoolField(TEXT("high_precision_tangents"), !!R.bUseHighPrecisionTangentBasis);
+		ReadObj->SetBoolField(TEXT("high_precision_weights"), !!R.bUseHighPrecisionSkinWeights);
+		ReadObj->SetBoolField(TEXT("full_precision_uvs"), !!R.bUseFullPrecisionUVs);
+		ReadObj->SetNumberField(TEXT("bone_influence_limit"), R.BoneInfluenceLimit);
 	}
 
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	TSharedPtr<FJsonObject> Data = SkMesh_NewPayload(MeshPath);
 	Data->SetNumberField(TEXT("lod_index"), LodIndex);
-	Data->SetObjectField(TEXT("settings_applied"), AppliedObj);
-	Data->SetBoolField(TEXT("saved"), true);
-
-	return mcp_common::MakeOkReply(Data);
+	const bool bApplied = ReadInfo && SkMesh_AddSettingsReadBack(Data, AppliedObj, ReadObj);
+	return SkMesh_SaveCheckedReply(Mesh, Data, bApplied, TEXT("set_skeletal_mesh_lod_build_settings"), TEXT("applied"));
 }
 
 // ---------------------------------------------------------------------------
@@ -888,7 +964,7 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshLodBuildSettings(
 //   @param recalc_normals - bool recompute normals.
 //   @param remap_morph_targets - bool remap morph targets onto the reduced LOD.
 //   @param enforce_bone_boundaries - bool penalize collapses across different major bones.
-//   @returns { lod_index: int, settings_applied: {...}, saved: bool }
+//   @returns { skeletal_mesh_path: string, lod_index: int, settings_applied: {...}, mismatched: [string], applied: bool, saved: bool, save_error?: string } -- settings_applied is read back from the LOD; applied is false (and the call fails) when a written field reads back different
 
 TSharedPtr<FJsonObject> HandleSetSkeletalMeshLodReductionSettings(
 	const TSharedPtr<FJsonObject>& Params)
@@ -947,14 +1023,39 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshLodReductionSettings(
 	if (Params->TryGetBoolField(TEXT("enforce_bone_boundaries"), B)) { RS.bEnforceBoneBoundaries = B ? 1 : 0; AppliedObj->SetBoolField(TEXT("enforce_bone_boundaries"), B); }
 
 	Mesh->Modify();
-	if (TSharedPtr<FJsonObject> SaveFailed = SkMesh_SaveOrReply(Mesh))
-		return SaveFailed;
 
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	// Read back from the mesh's LOD info, not from the reference written through.
+	const FSkeletalMeshLODInfo* ReadInfo = Mesh->GetLODInfo(LodIndex);
+	TSharedPtr<FJsonObject> ReadObj = MakeShared<FJsonObject>();
+	if (ReadInfo)
+	{
+		const FSkeletalMeshOptimizationSettings& R = ReadInfo->ReductionSettings;
+		ReadObj->SetStringField(TEXT("termination_criterion"), EnumToName(R.TerminationCriterion.GetValue()));
+		ReadObj->SetStringField(TEXT("reduction_method"), EnumToName(R.ReductionMethod.GetValue()));
+		ReadObj->SetNumberField(TEXT("num_of_triangles_percentage"), R.NumOfTrianglesPercentage);
+		ReadObj->SetNumberField(TEXT("num_of_vert_percentage"), R.NumOfVertPercentage);
+		ReadObj->SetNumberField(TEXT("max_deviation_percentage"), R.MaxDeviationPercentage);
+		ReadObj->SetNumberField(TEXT("max_num_of_triangles"), static_cast<double>(R.MaxNumOfTriangles));
+		ReadObj->SetNumberField(TEXT("max_num_of_verts"), static_cast<double>(R.MaxNumOfVerts));
+		ReadObj->SetNumberField(TEXT("max_num_of_triangles_percentage"), static_cast<double>(R.MaxNumOfTrianglesPercentage));
+		ReadObj->SetNumberField(TEXT("max_num_of_verts_percentage"), static_cast<double>(R.MaxNumOfVertsPercentage));
+		ReadObj->SetNumberField(TEXT("base_lod"), R.BaseLOD);
+		ReadObj->SetStringField(TEXT("silhouette_importance"), EnumToName(R.SilhouetteImportance.GetValue()));
+		ReadObj->SetStringField(TEXT("texture_importance"), EnumToName(R.TextureImportance.GetValue()));
+		ReadObj->SetStringField(TEXT("shading_importance"), EnumToName(R.ShadingImportance.GetValue()));
+		ReadObj->SetStringField(TEXT("skinning_importance"), EnumToName(R.SkinningImportance.GetValue()));
+		ReadObj->SetNumberField(TEXT("max_bones_per_vertex"), R.MaxBonesPerVertex);
+		ReadObj->SetNumberField(TEXT("welding_threshold"), R.WeldingThreshold);
+		ReadObj->SetNumberField(TEXT("normals_threshold"), R.NormalsThreshold);
+		ReadObj->SetBoolField(TEXT("recalc_normals"), !!R.bRecalcNormals);
+		ReadObj->SetBoolField(TEXT("remap_morph_targets"), !!R.bRemapMorphTargets);
+		ReadObj->SetBoolField(TEXT("enforce_bone_boundaries"), !!R.bEnforceBoneBoundaries);
+	}
+
+	TSharedPtr<FJsonObject> Data = SkMesh_NewPayload(MeshPath);
 	Data->SetNumberField(TEXT("lod_index"), LodIndex);
-	Data->SetObjectField(TEXT("settings_applied"), AppliedObj);
-	Data->SetBoolField(TEXT("saved"), true);
-	return mcp_common::MakeOkReply(Data);
+	const bool bApplied = ReadInfo && SkMesh_AddSettingsReadBack(Data, AppliedObj, ReadObj);
+	return SkMesh_SaveCheckedReply(Mesh, Data, bApplied, TEXT("set_skeletal_mesh_lod_reduction_settings"), TEXT("applied"));
 }
 
 // ---------------------------------------------------------------------------
@@ -962,7 +1063,7 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshLodReductionSettings(
 // ---------------------------------------------------------------------------
 // MCP:set_skeletal_mesh_lod_settings - Set the flat per-LOD scalars/enums of FSkeletalMeshLODInfo that no other setter covers (screen size, hysteresis, CPU access, morph error tolerance, skin cache usage, mesh deformer, prioritization weight) on one LOD or, with lod_index -1 or "all", on every LOD of the mesh, then save the mesh. Partial update (idempotent): only fields present are written; a bad skin_cache_usage or lod_index is refused before anything is written. A failed save is an error that leaves the change in memory. Per-platform screen-size overrides are left as they are.
 //   @param skeletal_mesh_path - Content path to the skeletal mesh asset.
-//   @param lod_index - Optional. 0-based LOD index to modify (default 0), or -1 / "all" for every LOD. allow_cpu_access with every LOD goes through USkeletalMeshEditorSubsystem::SetAllowCPUAccess.
+//   @param lod_index [integer|string] - Optional. 0-based LOD index to modify (default 0), or -1 / "all" for every LOD. allow_cpu_access with every LOD goes through USkeletalMeshEditorSubsystem::SetAllowCPUAccess.
 //   @param screen_size - Optional float, ScreenSize.Default: the screen size at which this LOD switches in (e.g. 0.3).
 //   @param lod_hysteresis - float, avoids flickering at the LOD boundary.
 //   @param allow_cpu_access - bool, keep this LOD's data on the CPU (e.g. for FX sampling).
@@ -970,7 +1071,7 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshLodReductionSettings(
 //   @param skin_cache_usage - ESkinCacheUsage by NAME: Auto|Disabled|Enabled (Disabled=255, parsed by name).
 //   @param allow_mesh_deformer - bool, whether a Mesh Deformer is used on this LOD.
 //   @param weight_of_prioritization - float >=0, weight given to BonesToPrioritize/SectionsToPrioritize.
-//   @returns { skeletal_mesh_path: string, lod_index: int (-1 for every LOD), all_lods: bool, applied_lods: int, settings_applied: {...}, old_screen_size?: float (one LOD), old_screen_sizes?: [float] (every LOD), saved: bool }
+//   @returns { skeletal_mesh_path: string, lod_index: int (-1 for every LOD), all_lods: bool, applied_lods: int, settings_applied: {...}, mismatched: [string], mismatched_lods: [int], old_screen_size?: float (one LOD), old_screen_sizes?: [float] (every LOD), applied: bool, saved: bool, save_error?: string } -- settings_applied and mismatched are read back from the first LOD written, mismatched_lods from every one; applied is false (and the call fails) when any differs
 
 TSharedPtr<FJsonObject> HandleSetSkeletalMeshLodSettings(
 	const TSharedPtr<FJsonObject>& Params)
@@ -1027,6 +1128,7 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshLodSettings(
 
 	// The LODs this call writes: the one asked for (refused when out of range), or every LOD.
 	TArray<FSkeletalMeshLODInfo*> Infos;
+	TArray<int32> InfoIndices;
 	if (bAllLods)
 	{
 		for (int32 Index = 0; Index < Mesh->GetLODNum(); ++Index)
@@ -1034,6 +1136,7 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshLodSettings(
 			if (FSkeletalMeshLODInfo* Info = Mesh->GetLODInfo(Index))
 			{
 				Infos.Add(Info);
+				InfoIndices.Add(Index);
 			}
 		}
 	}
@@ -1042,6 +1145,7 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshLodSettings(
 		FSkeletalMeshLODInfo* LODInfo = nullptr;
 		if (TSharedPtr<FJsonObject> Error = SkMesh_FindLODInfo(Mesh, LodIndex, TEXT("LOD index"), LODInfo)) { return Error; }
 		Infos.Add(LODInfo);
+		InfoIndices.Add(LodIndex);
 	}
 
 	Mesh->Modify();
@@ -1073,14 +1177,38 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshLodSettings(
 		AppliedObj->SetBoolField(TEXT("allow_cpu_access"), bCpuAccess);
 	}
 
-	if (TSharedPtr<FJsonObject> SaveFailed = SkMesh_SaveOrReply(Mesh))
-		return SaveFailed;
-
 	TSharedPtr<FJsonObject> Data = SkMesh_NewPayload(MeshPath);
 	Data->SetNumberField(TEXT("lod_index"), LodIndex);
 	Data->SetBoolField(TEXT("all_lods"), bAllLods);
 	Data->SetNumberField(TEXT("applied_lods"), Infos.Num());
-	Data->SetObjectField(TEXT("settings_applied"), AppliedObj);
+
+	// Read every written LOD back by index: SetAllowCPUAccess runs PostEditChange, and the subsystem refuses during PIE.
+	bool bApplied = InfoIndices.Num() > 0;
+	TArray<TSharedPtr<FJsonValue>> AllMismatched;
+	for (int32 Pos = InfoIndices.Num() - 1; Pos >= 0; --Pos)
+	{
+		const int32 Index = InfoIndices[Pos];
+		const FSkeletalMeshLODInfo* R = Mesh->GetLODInfo(Index);
+		TSharedPtr<FJsonObject> ReadObj = MakeShared<FJsonObject>();
+		if (R)
+		{
+			ReadObj->SetNumberField(TEXT("screen_size"), R->ScreenSize.Default);
+			ReadObj->SetNumberField(TEXT("lod_hysteresis"), R->LODHysteresis);
+			ReadObj->SetNumberField(TEXT("weight_of_prioritization"), R->WeightOfPrioritization);
+			ReadObj->SetNumberField(TEXT("morph_target_position_error_tolerance"), R->MorphTargetPositionErrorTolerance);
+			ReadObj->SetBoolField(TEXT("allow_cpu_access"), !!R->bAllowCPUAccess);
+			ReadObj->SetBoolField(TEXT("allow_mesh_deformer"), !!R->bAllowMeshDeformer);
+			ReadObj->SetStringField(TEXT("skin_cache_usage"), EnumToName(R->SkinCacheUsage));
+		}
+		// Written last, settings_applied and mismatched describe the first LOD; mismatched_lods covers all of them.
+		const bool bLodMatches = R && SkMesh_AddSettingsReadBack(Data, AppliedObj, ReadObj);
+		if (!bLodMatches)
+		{
+			AllMismatched.Add(MakeShared<FJsonValueNumber>(Index));
+		}
+		bApplied &= bLodMatches;
+	}
+	Data->SetArrayField(TEXT("mismatched_lods"), AllMismatched);
 	if (bHasScreenSize)
 	{
 		if (bAllLods)
@@ -1092,8 +1220,7 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshLodSettings(
 			Data->SetField(TEXT("old_screen_size"), OldScreenSizes[0]);
 		}
 	}
-	Data->SetBoolField(TEXT("saved"), true);
-	return mcp_common::MakeOkReply(Data);
+	return SkMesh_SaveCheckedReply(Mesh, Data, bApplied, TEXT("set_skeletal_mesh_lod_settings"), TEXT("applied"));
 }
 
 // ===========================================================================
@@ -1275,7 +1402,7 @@ TSharedPtr<FJsonObject> HandleCreateSkeletalMeshMorphTarget(
 // MCP:remove_skeletal_mesh_morph_target - Delete one morph target, by name, from a skeletal mesh asset found by content path, including its data in every LOD's source mesh, in one undo step, then save the mesh. Not idempotent: a name the mesh does not have is an error, so a repeat call fails instead of reporting it already gone. A mesh that does not load is an error, and so is a failed save (refused during PIE or under a read-only root, or a locked file), although the deletion stays in memory. remaining_morph_targets counts the morphs left. List names with get_skeletal_mesh_morph_targets; rename with rename_skeletal_mesh_morph_target; add one with create_skeletal_mesh_morph_target.
 //   @param skeletal_mesh_path - Content path to the skeletal mesh asset, e.g. "/Game/Characters/SKM_Hero"
 //   @param morph_target_name - Name of the morph target to delete, as get_skeletal_mesh_morph_targets lists it
-//   @returns { morph_target_name: string, skeletal_mesh_path: string, removed: bool, remaining_morph_targets: int }
+//   @returns { morph_target_name: string, skeletal_mesh_path: string, removed: bool, remaining_morph_targets: int, saved: bool, save_error?: string } -- removed is read back (the name is no longer found)
 
 TSharedPtr<FJsonObject> HandleRemoveSkeletalMeshMorphTarget(
 	const TSharedPtr<FJsonObject>& Params)
@@ -1306,15 +1433,12 @@ TSharedPtr<FJsonObject> HandleRemoveSkeletalMeshMorphTarget(
 		return mcp_common::MakeErrorReply(TEXT("RemoveMorphTargets failed"));
 	}
 
-	if (TSharedPtr<FJsonObject> SaveFailed = SkMesh_SaveOrReply(Mesh))
-		return SaveFailed;
-
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	TSharedPtr<FJsonObject> Data = SkMesh_NewPayload(MeshPath);
 	Data->SetStringField(TEXT("morph_target_name"), MorphName);
-	Data->SetStringField(TEXT("skeletal_mesh_path"), MeshPath);
-	Data->SetBoolField(TEXT("removed"), true);
 	Data->SetNumberField(TEXT("remaining_morph_targets"), Mesh->GetMorphTargets().Num());
-	return mcp_common::MakeOkReply(Data);
+	// Read back: the mesh no longer finds the name.
+	const bool bRemoved = Mesh->FindMorphTarget(MorphFName) == nullptr;
+	return SkMesh_SaveCheckedReply(Mesh, Data, bRemoved, TEXT("remove_skeletal_mesh_morph_target"), TEXT("removed"));
 }
 
 // ---------------------------------------------------------------------------
@@ -1324,7 +1448,7 @@ TSharedPtr<FJsonObject> HandleRemoveSkeletalMeshMorphTarget(
 //   @param skeletal_mesh_path - Skeletal mesh asset path, e.g. "/Game/Characters/SKM_Hero".
 //   @param old_name - Current morph target name, as get_skeletal_mesh_morph_targets lists it.
 //   @param new_name - New morph target name; must not already exist on the mesh.
-//   @returns { old_name: string, new_name: string, skeletal_mesh_path: string, renamed: bool }
+//   @returns { old_name: string, new_name: string, skeletal_mesh_path: string, renamed: bool, saved: bool, save_error?: string } -- renamed is read back (new_name found, old_name gone)
 
 TSharedPtr<FJsonObject> HandleRenameSkeletalMeshMorphTarget(
 	const TSharedPtr<FJsonObject>& Params)
@@ -1364,15 +1488,12 @@ TSharedPtr<FJsonObject> HandleRenameSkeletalMeshMorphTarget(
 		return mcp_common::MakeErrorReply(TEXT("RenameMorphTarget failed"));
 	}
 
-	if (TSharedPtr<FJsonObject> SaveFailed = SkMesh_SaveOrReply(Mesh))
-		return SaveFailed;
-
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	TSharedPtr<FJsonObject> Data = SkMesh_NewPayload(MeshPath);
 	Data->SetStringField(TEXT("old_name"), OldName);
 	Data->SetStringField(TEXT("new_name"), NewName);
-	Data->SetStringField(TEXT("skeletal_mesh_path"), MeshPath);
-	Data->SetBoolField(TEXT("renamed"), true);
-	return mcp_common::MakeOkReply(Data);
+	// Read back: the new name is found and the old one is gone.
+	const bool bRenamed = Mesh->FindMorphTarget(NewFName) != nullptr && Mesh->FindMorphTarget(OldFName) == nullptr;
+	return SkMesh_SaveCheckedReply(Mesh, Data, bRenamed, TEXT("rename_skeletal_mesh_morph_target"), TEXT("renamed"));
 }
 
 // ---------------------------------------------------------------------------
@@ -1621,7 +1742,7 @@ TSharedPtr<FJsonObject> HandleGetSkeletalMeshSectionInfo(
 //   @param cast_shadow - Optional bool: whether the section casts shadows.
 //   @param recompute_tangent - Optional bool: whether the GPU skin cache recomputes the section's tangents at runtime.
 //   @param visible_in_ray_tracing - Optional bool: whether the section is visible in ray tracing (bVisibleInRayTracing). b_visible is accepted as an alias.
-//   @returns { skeletal_mesh_path: string, lod_index: int, section_index: int, cast_shadow?: bool, recompute_tangent?: bool, visible_in_ray_tracing?: bool, saved: bool }
+//   @returns { skeletal_mesh_path: string, lod_index: int, section_index: int, cast_shadow?: bool, recompute_tangent?: bool, visible_in_ray_tracing?: bool, applied: bool, saved: bool, save_error?: string } -- the flags are read back from the section; applied is false (and the call fails) when one differs
 
 TSharedPtr<FJsonObject> HandleSetSkeletalMeshSectionCastShadow(
 	const TSharedPtr<FJsonObject>& Params)
@@ -1676,26 +1797,40 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshSectionCastShadow(
 			FString::Printf(TEXT("SetSectionVisibleInRayTracing failed for LOD %d section %d"), LodIndex, SectionIndex));
 	}
 
-	if (TSharedPtr<FJsonObject> SaveFailed = SkMesh_SaveOrReply(Mesh))
-		return SaveFailed;
-
 	TSharedPtr<FJsonObject> Data = SkMesh_NewPayload(MeshPath);
 	Data->SetNumberField(TEXT("lod_index"), LodIndex);
 	Data->SetNumberField(TEXT("section_index"), SectionIndex);
-	if (bHasCastShadow)
+
+	// Read back from the section's user data in the imported model, where the subsystem writes the flags.
+	bool bApplied = false;
+	const FSkeletalMeshModel* Model = Mesh->GetImportedModel();
+	if (Model && Model->LODModels.IsValidIndex(LodIndex)
+		&& Model->LODModels[LodIndex].Sections.IsValidIndex(SectionIndex))
 	{
-		Data->SetBoolField(TEXT("cast_shadow"), bCastShadow);
+		const FSkelMeshSection& Section = Model->LODModels[LodIndex].Sections[SectionIndex];
+		const FSkelMeshSourceSectionUserData* UserData =
+			Model->LODModels[LodIndex].UserSectionsData.Find(Section.OriginalDataSectionIndex);
+		const bool bReadCastShadow = UserData ? UserData->bCastShadow : Section.bCastShadow;
+		const bool bReadRecomputeTangent = UserData ? UserData->bRecomputeTangent : Section.bRecomputeTangent;
+		const bool bReadVisibleInRayTracing = UserData ? UserData->bVisibleInRayTracing : Section.bVisibleInRayTracing;
+		bApplied = true;
+		if (bHasCastShadow)
+		{
+			Data->SetBoolField(TEXT("cast_shadow"), bReadCastShadow);
+			bApplied &= bReadCastShadow == bCastShadow;
+		}
+		if (bHasRecomputeTangent)
+		{
+			Data->SetBoolField(TEXT("recompute_tangent"), bReadRecomputeTangent);
+			bApplied &= bReadRecomputeTangent == bRecomputeTangent;
+		}
+		if (bHasVisibleInRayTracing)
+		{
+			Data->SetBoolField(TEXT("visible_in_ray_tracing"), bReadVisibleInRayTracing);
+			bApplied &= bReadVisibleInRayTracing == bVisibleInRayTracing;
+		}
 	}
-	if (bHasRecomputeTangent)
-	{
-		Data->SetBoolField(TEXT("recompute_tangent"), bRecomputeTangent);
-	}
-	if (bHasVisibleInRayTracing)
-	{
-		Data->SetBoolField(TEXT("visible_in_ray_tracing"), bVisibleInRayTracing);
-	}
-	Data->SetBoolField(TEXT("saved"), true);
-	return mcp_common::MakeOkReply(Data);
+	return SkMesh_SaveCheckedReply(Mesh, Data, bApplied, TEXT("set_skeletal_mesh_section_flags"), TEXT("applied"));
 }
 
 // ---------------------------------------------------------------------------
@@ -1745,7 +1880,7 @@ TSharedPtr<FJsonObject> HandleGetSkeletalMeshMaterialSlots(
 //   @param slot_index - Zero-based index of an existing material slot (mutually exclusive with slot_name).
 //   @param slot_name - Name of an existing material slot to resolve to its index (mutually exclusive with slot_index).
 //   @param material_path - Content path to the UMaterialInterface to assign.
-//   @returns { skeletal_mesh_path: string, slot_index: int, slot_name: string, material_path: string, saved: bool }
+//   @returns { skeletal_mesh_path: string, slot_index: int, slot_name: string, material_path: string, applied: bool, saved: bool, save_error?: string } -- material_path is read back from the slot
 
 TSharedPtr<FJsonObject> HandleSetSkeletalMeshMaterialSlot(
 	const TSharedPtr<FJsonObject>& Params)
@@ -1810,10 +1945,7 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshMaterialSlot(
 	Materials[SlotIndex].MaterialInterface = Mat;
 	Mesh->MarkPackageDirty();
 
-	if (TSharedPtr<FJsonObject> SaveFailed = SkMesh_SaveOrReply(Mesh))
-		return SaveFailed;
-
-	// Read back the assigned material off the (now-persisted) slot.
+	// Read back the material the slot holds.
 	const FSkeletalMaterial& WrittenSlot = Mesh->GetMaterials()[SlotIndex];
 	const FString ReadBackPath =
 		WrittenSlot.MaterialInterface ? WrittenSlot.MaterialInterface->GetPathName() : FString();
@@ -1822,8 +1954,8 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshMaterialSlot(
 	Data->SetNumberField(TEXT("slot_index"), SlotIndex);
 	Data->SetStringField(TEXT("slot_name"), WrittenSlot.MaterialSlotName.ToString());
 	Data->SetStringField(TEXT("material_path"), ReadBackPath);
-	Data->SetBoolField(TEXT("saved"), true);
-	return mcp_common::MakeOkReply(Data);
+	return SkMesh_SaveCheckedReply(Mesh, Data, WrittenSlot.MaterialInterface == Mat,
+		TEXT("set_skeletal_mesh_material_slot"), TEXT("applied"));
 }
 // ========================================================================== //
 // Skeletal Mesh LOD authoring
@@ -1852,7 +1984,7 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshMaterialSlot(
 // MCP:add_skeletal_mesh_lod - Append one LOD to a skeletal mesh asset found by content path, its LOD info a copy of LOD 0's (build and reduction settings, material map, flags) with ScreenSize.Default set to screen_size, or 0.5 when omitted. Each call appends another LOD (not idempotent), in one undo step; the mesh is marked dirty but not saved, and its render data is not regenerated: bake_skeletal_mesh_lod with regenerate_even_if_imported=true and new_lod_count omitted builds the new LOD (its defaults skip it, as it copies LOD 0's imported flag; note says which applies), then keep it with save_asset. A mesh that does not load is an error. To append reduced LODs in one call, use bake_skeletal_mesh_lod with a higher new_lod_count instead. Tune this LOD with set_skeletal_mesh_lod_reduction_settings or set_skeletal_mesh_lod_settings (screen_size); take one out with remove_skeletal_mesh_lod; inspect it with get_skeletal_mesh_lod_info.
 //   @param skeletal_mesh_path - Content path to the skeletal mesh asset, e.g. "/Game/Characters/SKM_Hero"
 //   @param screen_size - Optional ScreenSize.Default of the new LOD, the screen size at which it switches in (default 0.5); not clamped
-//   @returns { skeletal_mesh_path: string, lod_index: int, lod_count: int, screen_size: float, added: bool, note: string }
+//   @returns { skeletal_mesh_path: string, lod_index: int, lod_count: int, screen_size: float, added: bool, note: string } -- added is read back (one more LOD, carrying screen_size)
 TSharedPtr<FJsonObject> HandleAddSkeletalMeshLod(const TSharedPtr<FJsonObject>& Params)
 {
     FString MeshPath;
@@ -1879,14 +2011,19 @@ TSharedPtr<FJsonObject> HandleAddSkeletalMeshLod(const TSharedPtr<FJsonObject>& 
         NewLOD.ScreenSize.Default = static_cast<float>(Params->GetNumberField(TEXT("screen_size")));
     }
 
+    const int32 OldLODCount = Mesh->GetLODNum();
     const int32 NewIndex = Mesh->AddLODInfo(NewLOD);
     const int32 NewLODCount = Mesh->GetLODNum();
+    // Read back: the mesh has one more LOD and the new entry carries the screen size.
+    const FSkeletalMeshLODInfo* AddedInfo = Mesh->GetLODInfo(NewIndex);
+    const bool bAdded = NewLODCount == OldLODCount + 1 && AddedInfo
+        && FMath::IsNearlyEqual(AddedInfo->ScreenSize.Default, NewLOD.ScreenSize.Default);
 
     TSharedPtr<FJsonObject> ResultObj = SkMesh_NewPayload(MeshPath);
     ResultObj->SetNumberField(TEXT("lod_index"), NewIndex);
     ResultObj->SetNumberField(TEXT("lod_count"), NewLODCount);
-    ResultObj->SetNumberField(TEXT("screen_size"), NewLOD.ScreenSize.Default);
-    ResultObj->SetBoolField(TEXT("added"), true);
+    ResultObj->SetNumberField(TEXT("screen_size"), AddedInfo ? AddedInfo->ScreenSize.Default : NewLOD.ScreenSize.Default);
+    ResultObj->SetBoolField(TEXT("added"), bAdded);
     // FLODUtilities::RegenerateLOD, keeping the LOD count, reduces a LOD above 0 only when it is flagged
     // bHasBeenSimplified or regenerate_even_if_imported is set; the new LOD copied that flag from LOD 0.
     ResultObj->SetStringField(TEXT("note"), NewLOD.bHasBeenSimplified
@@ -1895,13 +2032,14 @@ TSharedPtr<FJsonObject> HandleAddSkeletalMeshLod(const TSharedPtr<FJsonObject>& 
         : TEXT("Render data NOT regenerated. This LOD copied LOD 0's imported flag, so bake_skeletal_mesh_lod "
                "with its defaults skips it: call it with regenerate_even_if_imported=true and new_lod_count "
                "omitted to build it (that also re-reduces the other LODs above 0)."));
-    return mcp_common::MakeOkReply(ResultObj);
+    return mcp_common::MakeOutcomeReply(ResultObj, bAdded,
+        mcp_common::MeasuredOutcomeError(TEXT("add_skeletal_mesh_lod"), TEXT("added")));
 }
 
 // MCP:remove_skeletal_mesh_lod - Remove one LOD from a skeletal mesh asset, with its source model and cached reduction data; higher LODs shift down one index. lod_index must be 1 or more and below the LOD count, otherwise an error (LOD 0 is never removed). Marks the mesh dirty without saving or rebuilding render data, so follow with save_asset. Use add_skeletal_mesh_lod to append a LOD, get_skeletal_mesh_lod_info to inspect them, set_skeletal_mesh_min_lod to skip the most detailed LODs while keeping them.
 //   @param skeletal_mesh_path - Content path to the skeletal mesh asset
 //   @param lod_index - Index of the LOD to remove (must be > 0)
-//   @returns { skeletal_mesh_path: string, lod_index: int, lod_count: int, removed: bool }
+//   @returns { skeletal_mesh_path: string, lod_index: int, lod_count: int, removed: bool } -- removed is read back (one LOD fewer)
 TSharedPtr<FJsonObject> HandleRemoveSkeletalMeshLod(const TSharedPtr<FJsonObject>& Params)
 {
     FString MeshPath;
@@ -1927,18 +2065,21 @@ Mesh->Modify();
     // re-balances the SourceModels/LODInfo arrays atomically.
     Mesh->RemoveSourceModel(LodIndex);
     const int32 NewLODCount = Mesh->GetLODNum();
+    // Read back: the mesh has one LOD fewer.
+    const bool bRemoved = NewLODCount == NumLODs - 1;
 
     TSharedPtr<FJsonObject> ResultObj = SkMesh_NewPayload(MeshPath);
     ResultObj->SetNumberField(TEXT("lod_index"), LodIndex);
     ResultObj->SetNumberField(TEXT("lod_count"), NewLODCount);
-    ResultObj->SetBoolField(TEXT("removed"), true);
-    return mcp_common::MakeOkReply(ResultObj);
+    ResultObj->SetBoolField(TEXT("removed"), bRemoved);
+    return mcp_common::MakeOutcomeReply(ResultObj, bRemoved,
+        mcp_common::MeasuredOutcomeError(TEXT("remove_skeletal_mesh_lod"), TEXT("removed")));
 }
 
 // MCP:set_skeletal_mesh_min_lod - Set the minimum LOD a skeletal mesh asset (found by content path) renders, so the more detailed LODs below it are skipped while they stay in the asset. It replaces the whole Minimum LOD property with this one value, per-platform overrides included, or the per-quality-level one when the project setting UseSkeletalMeshMinLODPerQualityLevels is on. A missing min_lod, one outside 0 to the LOD count minus 1, or a mesh that does not load is an error. One undo step; the mesh is marked dirty but not saved, so follow with save_asset. old_min_lod is the value in effect before the call. To take a LOD out of the asset use remove_skeletal_mesh_lod; to change switch distances, set_skeletal_mesh_lod_settings with screen_size.
 //   @param skeletal_mesh_path - Content path to the skeletal mesh asset, e.g. "/Game/Characters/SKM_Hero"
 //   @param min_lod - New minimum LOD index, 0-based (must be in [0, NumLODs-1])
-//   @returns { skeletal_mesh_path: string, old_min_lod: int, min_lod: int, lod_count: int, applied: bool }
+//   @returns { skeletal_mesh_path: string, old_min_lod: int, min_lod: int, lod_count: int, applied: bool } -- min_lod is read back (GetMinLodIdx)
 TSharedPtr<FJsonObject> HandleSetSkeletalMeshMinLod(const TSharedPtr<FJsonObject>& Params)
 {
     FString MeshPath;
@@ -1969,11 +2110,15 @@ Mesh->Modify();
     Mesh->SetMinLodIdx(MinLOD);
 
     TSharedPtr<FJsonObject> ResultObj = SkMesh_NewPayload(MeshPath);
+    // Read back the value in effect, which the per-quality-level setting may route elsewhere.
+    const int32 ReadMinLOD = Mesh->GetMinLodIdx();
+    const bool bApplied = ReadMinLOD == MinLOD;
     ResultObj->SetNumberField(TEXT("old_min_lod"), OldMinLOD);
-    ResultObj->SetNumberField(TEXT("min_lod"), MinLOD);
+    ResultObj->SetNumberField(TEXT("min_lod"), ReadMinLOD);
     ResultObj->SetNumberField(TEXT("lod_count"), Mesh->GetLODNum());
-    ResultObj->SetBoolField(TEXT("applied"), true);
-    return mcp_common::MakeOkReply(ResultObj);
+    ResultObj->SetBoolField(TEXT("applied"), bApplied);
+    return mcp_common::MakeOutcomeReply(ResultObj, bApplied,
+        mcp_common::MeasuredOutcomeError(TEXT("set_skeletal_mesh_min_lod"), TEXT("applied")));
 }
 
 // MCP:bake_skeletal_mesh_lod - Regenerate the LODs of a skeletal mesh asset (found by content path) with the engine's mesh reduction, driven by each LOD's reduction settings, then rebuild its render data; nothing is saved, so follow with save_asset. A new_lod_count below the current count drops the LODs above it; above it, appends reduced LODs up to that count; 0, omitted or equal re-reduces the LODs that were generated, plus imported LODs above 0 with regenerate_even_if_imported and LOD 0 with generate_base_lod. A mesh that does not load is an error; during PIE, where the engine regenerates nothing, the call is refused before the mesh is touched, and any other run the engine refuses fails with baked=false and bake_warning. Author the settings first with set_skeletal_mesh_lod_reduction_settings; one empty LOD entry: add_skeletal_mesh_lod; one LOD out by index: remove_skeletal_mesh_lod; triangle counts: get_asset_lod_settings.
@@ -2259,7 +2404,7 @@ TSharedPtr<FJsonObject> HandleRemoveSkeletalMeshSocket(
 //   @param skeletal_mesh_path - Content path to the skeletal mesh asset
 //   @param socket_name - Name of the socket to re-parent
 //   @param parent_bone_name - Bone name to attach the socket to (must exist in skeleton)
-//   @returns { socket_name: string, parent_bone_name: string, skeletal_mesh_path: string, reparented: bool }
+//   @returns { socket_name: string, parent_bone_name: string, skeletal_mesh_path: string, reparented: bool, saved: bool, save_error?: string } -- parent_bone_name is read back from the socket
 
 TSharedPtr<FJsonObject> HandleSetSkeletalMeshSocketParent(
 	const TSharedPtr<FJsonObject>& Params)
@@ -2297,14 +2442,12 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshSocketParent(
 	Mesh->Modify();
 	Socket->SetSocketParent(Mesh, BoneName);
 
-	if (TSharedPtr<FJsonObject> SaveFailed = SkMesh_SaveOrReply(Mesh))
-		return SaveFailed;
-
 	TSharedPtr<FJsonObject> Data = SkMesh_NewPayload(MeshPath);
 	Data->SetStringField(TEXT("socket_name"), SocketName);
-	Data->SetStringField(TEXT("parent_bone_name"), BoneNameStr);
-	Data->SetBoolField(TEXT("reparented"), true);
-	return mcp_common::MakeOkReply(Data);
+	// Read back the bone the socket now names.
+	Data->SetStringField(TEXT("parent_bone_name"), Socket->BoneName.ToString());
+	return SkMesh_SaveCheckedReply(Mesh, Data, Socket->BoneName == BoneName,
+		TEXT("set_skeletal_mesh_socket_parent"), TEXT("reparented"));
 }
 
 // ---------------------------------------------------------------------------
@@ -2453,7 +2596,7 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshSocketTransform(
 // MCP:assign_skeletal_mesh_physics_asset - Assign a physics asset to a skeletal mesh (or pass null/empty to clear it).
 //   @param skeletal_mesh_path - Content path to the skeletal mesh asset
 //   @param physics_asset_path - Content path to the physics asset (e.g. /Game/MyPhysAsset); empty string clears the assignment
-//   @returns { skeletal_mesh_path: string, physics_asset_path: string, assigned: bool, cleared: bool, physics_asset_name: string }
+//   @returns { skeletal_mesh_path: string, physics_asset_path: string, assigned: bool, cleared: bool, physics_asset_name: string, applied: bool, saved: bool, save_error?: string } -- the physics asset is read back from the mesh
 
 TSharedPtr<FJsonObject> HandleAssignSkeletalMeshPhysicsAsset(
 	const TSharedPtr<FJsonObject>& Params)
@@ -2487,17 +2630,17 @@ TSharedPtr<FJsonObject> HandleAssignSkeletalMeshPhysicsAsset(
 		return mcp_common::MakeErrorReply(
 			TEXT("AssignPhysicsAsset failed"));
 
-	if (TSharedPtr<FJsonObject> SaveFailed = SkMesh_SaveOrReply(Mesh))
-		return SaveFailed;
-
+	// Read back the physics asset the mesh holds.
+	const UPhysicsAsset* ReadAsset = Mesh->GetPhysicsAsset();
 	TSharedPtr<FJsonObject> Data = SkMesh_NewPayload(MeshPath);
 	Data->SetStringField(TEXT("physics_asset_path"),
-		PhysAsset ? PhysAsset->GetPathName() : FString());
-	Data->SetBoolField(TEXT("assigned"), PhysAsset != nullptr);
-	Data->SetBoolField(TEXT("cleared"), PhysAsset == nullptr);
+		ReadAsset ? ReadAsset->GetPathName() : FString());
+	Data->SetBoolField(TEXT("assigned"), PhysAsset != nullptr && ReadAsset == PhysAsset);
+	Data->SetBoolField(TEXT("cleared"), PhysAsset == nullptr && ReadAsset == nullptr);
 	Data->SetStringField(TEXT("physics_asset_name"),
-		PhysAsset ? PhysAsset->GetName() : FString());
-	return mcp_common::MakeOkReply(Data);
+		ReadAsset ? ReadAsset->GetName() : FString());
+	return SkMesh_SaveCheckedReply(Mesh, Data, ReadAsset == PhysAsset,
+		TEXT("assign_skeletal_mesh_physics_asset"), TEXT("applied"));
 }
 
 // ---------------------------------------------------------------------------

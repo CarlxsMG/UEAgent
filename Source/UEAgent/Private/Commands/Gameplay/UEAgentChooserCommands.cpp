@@ -1145,7 +1145,9 @@ TSharedPtr<FJsonObject> HandleRemoveChooserRow(const TSharedPtr<FJsonObject>& Pa
 
 // MCP:list_chooser_tables - Lists the Chooser Table assets under a content folder and all its sub-folders, found through the Asset Registry, each with its name, object path, class and row and column counts. Each match is loaded to count its rows and columns; nothing is changed or saved. A folder without Chooser Tables returns total 0, not an error, and only assets of exactly the UChooserTable class are listed. Use it to find the table_path the other chooser tools take; then get_chooser_table_info for one table's columns and result type, evaluate_chooser_table to run one, create_chooser_table to make a new one.
 //   @param package_path - Optional content folder to scan, sub-folders included (default "/Game"; an empty string also means /Game), e.g. "/Game/Animation/Choosers"; plugin content lives under its mount point, such as "/MyPlugin".
-//   @returns { package_path, total, tables:[{ asset_name, asset_path, asset_class, row_count, column_count }] }
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { package_path, tables:[{ asset_name, asset_path, asset_class, row_count, column_count }], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }
 
 TSharedPtr<FJsonObject> HandleListChooserTables(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1180,7 +1182,8 @@ TSharedPtr<FJsonObject> HandleListChooserTables(const TSharedPtr<FJsonObject>& P
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("package_path"), PackagePath);
-	Data->SetNumberField(TEXT("total"), Entries.Num());
+	mcp_common::SortJsonItems(Entries, TEXT("asset_path"));
+	mcp_common::ApplyListPage(Entries, mcp_common::ReadListPage(Params), Data);
 	Data->SetArrayField(TEXT("tables"), Entries);
 	return mcp_common::MakeOkReply(Data);
 }

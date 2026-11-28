@@ -254,11 +254,20 @@ TSharedPtr<FJsonObject> HandleAddStreamingLevel(const TSharedPtr<FJsonObject>& P
     }
     World->BroadcastLevelsChanged();
 
+    // The wrapper must now be listed by the world, with the requested flags.
+    const bool bAdded = World->GetStreamingLevels().Contains(StreamingLevel);
+    const bool bFlagsOk = StreamingLevel->ShouldBeLoaded() == bShouldBeLoaded
+        && StreamingLevel->GetShouldBeVisibleFlag() == bShouldBeVisible;
     TSharedPtr<FJsonObject> Data = StreamingLevelToJson(StreamingLevel);
-    Data->SetBoolField(TEXT("added"), true);
+    Data->SetBoolField(TEXT("added"), bAdded);
     Data->SetBoolField(TEXT("already_present"), false);
     Data->SetNumberField(TEXT("streaming_level_count"), World->GetStreamingLevels().Num());
-    return mcp_common::MakeOkReply(Data);
+    const bool bOk = bAdded && bFlagsOk;
+    return mcp_common::MakeOutcomeReply(Data, bOk, bOk ? FString() : FString::Printf(
+        TEXT("add_streaming_level: %s re-reads added=%s, should_be_loaded=%s, should_be_visible=%s after the add."),
+        *PackageName, bAdded ? TEXT("true") : TEXT("false"),
+        StreamingLevel->ShouldBeLoaded() ? TEXT("true") : TEXT("false"),
+        StreamingLevel->GetShouldBeVisibleFlag() ? TEXT("true") : TEXT("false")));
 }
 
 // ---------------------------------------------------------------------------
@@ -300,7 +309,7 @@ TSharedPtr<FJsonObject> HandleGetStreamingLevels(const TSharedPtr<FJsonObject>& 
 // set_streaming_level_loaded
 // ---------------------------------------------------------------------------
 
-// MCP:set_streaming_level_loaded - Set the should-be-loaded request flag of a streaming sub-level of the editor world (ULevelStreaming::SetShouldBeLoaded), found by package path, object path or short name (case-insensitive; a path matches only the sub-level with exactly that package, and a bare name only when one sub-level has it, two being refused with their list), inside an undo transaction that marks the map dirty without saving. It is a request: this call streams nothing in or out itself, so is_level_loaded may not change. Only a sub-level class that stores the flag honors it, such as ULevelStreamingDynamic (what add_streaming_level creates); an always-loaded sub-level keeps reporting should_be_loaded true, so asking to unload it gives applied false (applied compares ShouldBeLoaded with loaded). Repeating it leaves the same state, though each call still adds an undo step. An unknown level is an error. Visibility: set_streaming_level_visible; current state: get_streaming_levels; detaching a sub-level: remove_streaming_level.
+// MCP:set_streaming_level_loaded - Set the should-be-loaded request flag of a streaming sub-level of the editor world (ULevelStreaming::SetShouldBeLoaded), found by package path, object path or short name (case-insensitive; a path matches only the sub-level with exactly that package, and a bare name only when one sub-level has it, two being refused with their list), inside an undo transaction that marks the map dirty without saving. It is a request: this call streams nothing in or out itself, so is_level_loaded may not change. Only a sub-level class that stores the flag honors it, such as ULevelStreamingDynamic (what add_streaming_level creates); an always-loaded sub-level keeps reporting should_be_loaded true, so asking to unload it is an error with applied false in the reply (applied compares ShouldBeLoaded with loaded). Repeating it leaves the same state, though each call still adds an undo step. An unknown level is an error. Visibility: set_streaming_level_visible; current state: get_streaming_levels; detaching a sub-level: remove_streaming_level.
 //   @param level_package_path - Package path of an existing streaming sub-level, e.g. "/Game/Maps/SubLevel", or its object path; the bare level name also matches when no other sub-level has it.
 //   @param loaded - Desired should-be-loaded state; required.
 //   @returns { package_name: string, name: string, streaming_class: string, should_be_loaded: bool, should_be_visible: bool, is_level_loaded: bool, is_level_visible: bool, requested_loaded: bool, applied: bool }
@@ -326,17 +335,21 @@ TSharedPtr<FJsonObject> HandleSetStreamingLevelLoaded(const TSharedPtr<FJsonObje
     World->BroadcastLevelsChanged();
 
     // Read the applied value back (ShouldBeLoaded() is the authoritative virtual).
+    const bool bApplied = StreamingLevel->ShouldBeLoaded() == bLoaded;
     TSharedPtr<FJsonObject> Data = StreamingLevelToJson(StreamingLevel);
     Data->SetBoolField(TEXT("requested_loaded"), bLoaded);
-    Data->SetBoolField(TEXT("applied"), StreamingLevel->ShouldBeLoaded() == bLoaded);
-    return mcp_common::MakeOkReply(Data);
+    Data->SetBoolField(TEXT("applied"), bApplied);
+    return mcp_common::MakeOutcomeReply(Data, bApplied, bApplied ? FString() : FString::Printf(
+        TEXT("set_streaming_level_loaded: %s still reads should_be_loaded=%s; its streaming class (%s) does not store the request."),
+        *StreamingLevel->GetWorldAssetPackageName(), StreamingLevel->ShouldBeLoaded() ? TEXT("true") : TEXT("false"),
+        *StreamingLevel->GetClass()->GetName()));
 }
 
 // ---------------------------------------------------------------------------
 // set_streaming_level_visible
 // ---------------------------------------------------------------------------
 
-// MCP:set_streaming_level_visible - Set the game-time should-be-visible request flag (ULevelStreaming bShouldBeVisible) of a streaming sub-level of the editor world, found by package path or short name (a path matches only the sub-level with exactly that package, and a bare name only when one sub-level has it, two being refused with their list), inside an undo transaction. It is a request, not an immediate change, and the editor viewport follows the level's separate editor-visibility flag, so is_level_visible may not change. Marks the map dirty without saving; an unknown level is an error. applied compares the flag with visible. Loading: set_streaming_level_loaded; current state: get_streaming_levels; adding a sub-level: add_streaming_level.
+// MCP:set_streaming_level_visible - Set the game-time should-be-visible request flag (ULevelStreaming bShouldBeVisible) of a streaming sub-level of the editor world, found by package path or short name (a path matches only the sub-level with exactly that package, and a bare name only when one sub-level has it, two being refused with their list), inside an undo transaction. It is a request, not an immediate change, and the editor viewport follows the level's separate editor-visibility flag, so is_level_visible may not change. Marks the map dirty without saving; an unknown level is an error. applied compares the flag with visible, and a flag that does not re-read as visible is an error. Loading: set_streaming_level_loaded; current state: get_streaming_levels; adding a sub-level: add_streaming_level.
 //   @param level_package_path - Package path of an existing streaming sub-level, or its object path; the bare level name also matches when no other sub-level has it.
 //   @param visible - Desired should-be-visible state.
 //   @returns { package_name: string, name: string, streaming_class: string, should_be_loaded: bool, should_be_visible: bool, is_level_loaded: bool, is_level_visible: bool, requested_visible: bool, applied: bool }
@@ -362,10 +375,13 @@ TSharedPtr<FJsonObject> HandleSetStreamingLevelVisible(const TSharedPtr<FJsonObj
     World->BroadcastLevelsChanged();
 
     // GetShouldBeVisibleFlag() reads the raw requested-visible flag we just set.
+    const bool bApplied = StreamingLevel->GetShouldBeVisibleFlag() == bVisible;
     TSharedPtr<FJsonObject> Data = StreamingLevelToJson(StreamingLevel);
     Data->SetBoolField(TEXT("requested_visible"), bVisible);
-    Data->SetBoolField(TEXT("applied"), StreamingLevel->GetShouldBeVisibleFlag() == bVisible);
-    return mcp_common::MakeOkReply(Data);
+    Data->SetBoolField(TEXT("applied"), bApplied);
+    return mcp_common::MakeOutcomeReply(Data, bApplied, bApplied ? FString() : FString::Printf(
+        TEXT("set_streaming_level_visible: %s still reads should_be_visible=%s after the request."),
+        *StreamingLevel->GetWorldAssetPackageName(), StreamingLevel->GetShouldBeVisibleFlag() ? TEXT("true") : TEXT("false")));
 }
 
 // ---------------------------------------------------------------------------

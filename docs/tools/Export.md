@@ -141,8 +141,8 @@ Set where and how a Movie Render Queue job writes its frames: resolution, output
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `job_name` | string | yes | Name of a job in the editor's render queue, as create_render_job or get_render_queue returns it. |
-| `resolution_x` | number | no | Output width in pixels, e.g. 1920; give it together with resolution_y, or neither to keep the current resolution. |
-| `resolution_y` | number | no | Output height in pixels, e.g. 1080; give it together with resolution_x. |
+| `resolution_x` | integer | no | Output width in pixels, e.g. 1920; give it together with resolution_y, or neither to keep the current resolution. |
+| `resolution_y` | integer | no | Output height in pixels, e.g. 1080; give it together with resolution_x. |
 | `output_dir` | string | no | Folder the frames are written to, absolute ("D:/Renders/Shot01") or with Movie Render Queue tokens ("{project_dir}/Saved/MovieRenders/"); omit it to keep the current folder. |
 | `format` | string | no | Image format of the frames: "png" (default), "jpg" (or "jpeg"), "exr" or "bmp"; any other value is refused. |
 

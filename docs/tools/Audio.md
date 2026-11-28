@@ -32,7 +32,7 @@ Add a graph input of data_type (default Float) to an existing MetaSound Source t
 | `input_name` | string | yes | Name of the graph input node to add. |
 | `data_type` | string | no | Frontend data type: "Float", "Int32", "Bool", "String", "Audio", "Trigger" (optional, default "Float") |
 | `default_value` | number | no | Float default baked into the literal, a JSON number (optional) |
-| `int_value` | number | no | Int32 default baked into the literal, a whole JSON number (optional, mutually exclusive with other defaults) |
+| `int_value` | integer | no | Int32 default baked into the literal, a whole JSON number (optional, mutually exclusive with other defaults) |
 | `bool_value` | boolean | no | Bool default baked into the literal, JSON true or false (optional, mutually exclusive with other defaults) |
 | `string_value` | string | no | String default baked into the literal, a JSON string (optional, mutually exclusive with other defaults) |
 
@@ -561,7 +561,7 @@ List the MetaSound node classes the editor's MetaSound search engine knows, with
 |---|---|---|---|
 | `include_unloaded` | boolean | no | true (default) also lists the classes of MetaSound assets not loaded into memory yet, from the MetaSound asset manager's tag data; false lists only the classes registered now. |
 | `name_filter` | string | no | Optional text matched, case-insensitively, inside each class_path or asset_path, e.g. "Sine" or "/Game/Audio/MS_"; empty lists every class. |
-| `max_results` | number | no | Optional cap on the classes returned after the filter (default 0, no cap); truncated says whether it cut the list. |
+| `max_results` | integer | no | Optional cap on the classes returned after the filter (default 0, no cap); truncated says whether it cut the list. |
 
 **Returns:** `{ count, matched_count, total_count, truncated, types: [{ class_name, class_path, type, version, access_flags, is_native, asset_path }] }`
 
@@ -569,13 +569,15 @@ List the MetaSound node classes the editor's MetaSound search engine knows, with
 
 *Read-only.*
 
-List every cue of a subtitles asset (USubtitleAssetUserData, the engine's list of timed subtitle cues) in stored order, without changing anything: per cue its 0-based index, text, start_offset and duration in seconds, duration_type (use_sound_duration or use_duration_property), priority, subtitle_type (subtitle, closed_caption or audio_description) and comment, plus count and max_duration (GetMaximumDuration, the latest end time). Use it to find the cue_index that set_subtitle_cue and remove_subtitle_cue take, or to check add_subtitle_cue's result; create the asset with create_subtitles_asset. An asset with no cues is a success with count 0; a path that does not load as a USubtitleAssetUserData is an error.
+List the cues of a subtitles asset (USubtitleAssetUserData, the engine's list of timed subtitle cues) in stored order, a page at a time (offset/limit), without changing anything: per cue its 0-based index, text, start_offset and duration in seconds, duration_type (use_sound_duration or use_duration_property), priority, subtitle_type (subtitle, closed_caption or audio_description) and comment, plus count and max_duration (GetMaximumDuration, the latest end time). Use it to find the cue_index that set_subtitle_cue and remove_subtitle_cue take, or to check add_subtitle_cue's result; create the asset with create_subtitles_asset. An asset with no cues is a success with count 0; a path that does not load as a USubtitleAssetUserData is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `asset_path` | string | yes | Subtitles asset as a package or object path, e.g. "/Game/Audio/Subs/SUB_Intro" or "/Game/Audio/Subs/SUB_Intro.SUB_Intro". |
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ asset_path: string, success: bool, count: int, max_duration: float, cues: [{index, text, start_offset, duration, duration_type, priority, subtitle_type, comment}] }`
+**Returns:** `{ asset_path: string, success: bool, count: int (entries in this page), max_duration: float, total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null, cues: [{index, text, start_offset, duration, duration_type, priority, subtitle_type, comment}] }`
 
 ## `play_sound`
 
@@ -707,7 +709,7 @@ Remove the entry at effect_index from a USoundSubmix's effect chain, in one undo
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `submix_path` | string | yes | Full content path of the target USoundSubmix |
-| `effect_index` | number | yes | 0-based position in the chain, as get_submix_effect_chain lists it |
+| `effect_index` | integer | yes | 0-based position in the chain, as get_submix_effect_chain lists it |
 
 **Returns:** `{ submix_path: string, effect_index: int, removed_effect: string, removed_effect_class: string, removed: bool, chain_length: int, chain: [string], saved: bool, save_error?: string }`
 
@@ -720,7 +722,7 @@ Remove a single FSubtitleAssetData cue by index. Inverse of add_subtitle_cue; us
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `asset_path` | string | yes | /Game path to the USubtitleAssetUserData. |
-| `cue_index` | number | yes | 0-based index into Subtitles[]. |
+| `cue_index` | integer | yes | 0-based index into Subtitles[]. |
 
 **Returns:** `{ asset_path, cue_index, removed, previous_count, new_count }`
 
@@ -785,7 +787,7 @@ Sets the stored target value, and optionally the attack and release fade times i
 
 *Destructive, idempotent.*
 
-Pushes a runtime value into a USoundControlBus through a global bus mix of the editor world (UAudioModulationStatics::SetGlobalBusMixValue), fading over fade_time. Transient: the asset is not modified or saved, and applied is always true, not read back; read the live value with get_control_bus_info.
+Pushes a runtime value into a USoundControlBus through a global bus mix of the editor world (UAudioModulationStatics::SetGlobalBusMixValue), fading over fade_time. Transient: the asset is not modified or saved. An editor world with no audio modulation manager (no audio device) is an error and nothing is pushed. The value is not read back, since the audio render thread applies it after the fade: verification says not_verifiable; read the live value with get_control_bus_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -793,7 +795,7 @@ Pushes a runtime value into a USoundControlBus through a global bus mix of the e
 | `value` | number | yes | New runtime bus value to push (required float) |
 | `fade_time` | number | no | Fade time in seconds; a negative value reuses the last fade time of the global stage, or 0.1 s if none was set (default -1.0) |
 
-**Returns:** `{ bus_path, value, fade_time, applied }`
+**Returns:** `{ bus_path, value, fade_time, verification: { status: "not_verifiable", ... }, verification_checks }`
 
 ## `set_metasound_graph_input_default`
 
@@ -809,7 +811,7 @@ Set the default value of one graph input of a MetaSound Source asset (a preset i
 | `parameter_name` | string | no | Alias of input_name. |
 | `parameter_type` | string | no | Optional literal type of value: "float", "int", "bool" or "string". When given, value must be of that JSON type (a whole number for int) and int_value/bool_value/string_value are ignored; another type name is an error. |
 | `value` | any | no | Float default value, a JSON number (optional, used if no other *_value is provided), or the value as text read as the input's type; with parameter_type, the value in the JSON type it names. Another JSON type is an error |
-| `int_value` | number | no | Int32 default value, a whole JSON number (optional, mutually exclusive with value/bool_value/string_value) |
+| `int_value` | integer | no | Int32 default value, a whole JSON number (optional, mutually exclusive with value/bool_value/string_value) |
 | `bool_value` | boolean | no | Bool default value, JSON true or false (optional, mutually exclusive with value/int_value/string_value) |
 | `string_value` | string | no | String default value, a JSON string (optional, mutually exclusive with value/int_value/bool_value) |
 
@@ -907,7 +909,7 @@ Write one bus send (an entry of BusSends, routing this sound's audio to another 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ssb_path` | string | yes | Asset path of the USoundSourceBus to edit, e.g. "/Game/Audio/SSB_Radio", as create_sound_source_bus returns it (asset_path). |
-| `send_index` | number | yes | 0-based position in the BusSends list, e.g. 0; an existing entry is updated in place, a larger index grows the list (required). |
+| `send_index` | integer | yes | 0-based position in the BusSends list, e.g. 0; an existing entry is updated in place, a larger index grows the list (required). |
 | `send_info` | object | yes | Object of FSoundSourceBusSendInfo fields to merge (sourceBusSendLevelControlMethod(Linear\|CustomCurve\|Manual), soundSourceBus(path), audioBus(path), sendLevel(Manual), minSendLevel/maxSendLevel(Linear), minSendDistance/maxSendDistance(Linear), customSendLevelCurve(object), bEnableLPFCutoff(bool), lPFCutoff(20..20000Hz), bEnableHPFCutoff(bool), hPFCutoff(20..20000Hz)), e.g. {"sourceBusSendLevelControlMethod":"Manual","audioBus":"/Game/Audio/AB_Reverb","sendLevel":0.5} (required). |
 
 **Returns:** `{ ssb_path: string, send_index: int, bus_sends_count: int, send_info: object, applied_keys: [string], saved: bool }`
@@ -921,7 +923,7 @@ Merge a FRuntimeFloatCurve JSON into BusSends[send_index].CustomSendLevelCurve o
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ssb_path` | string | yes | Full content path of the target USoundSourceBus (USoundBase.BusSends is the target array). |
-| `send_index` | number | yes | 0-based index into BusSends; the entry is mutated in place. Resized/extended with default-constructed entries if out of range. |
+| `send_index` | integer | yes | 0-based index into BusSends; the entry is mutated in place. Resized/extended with default-constructed entries if out of range. |
 | `distance_curve` | object | yes | FRuntimeFloatCurve fields by their UPROPERTY names, e.g. {"EditorCurveData": {"Keys": [{"Time": 0.0, "Value": 1.0}, {"Time": 1.0, "Value": 0.0}]}}; Time 0-1 maps to MinSendDistance-MaxSendDistance and Keys replaces the key list. Fields left out keep their current values; unknown keys are ignored without error. |
 
 **Returns:** `{ ssb_path: string, send_index: int, bus_sends_count: int, distance_curve: object, applied_keys: [string], saved: bool }`

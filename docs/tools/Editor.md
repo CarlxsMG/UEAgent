@@ -148,8 +148,8 @@ Screenshot the active editor viewport to a PNG (forcing a fresh draw first), opt
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `width` | number | no | Optional target width to downscale/upscale to (omit to keep native viewport size). |
-| `height` | number | no | Optional target height (only used when width is also supplied). |
+| `width` | integer | no | Optional target width to downscale/upscale to (omit to keep native viewport size). |
+| `height` | integer | no | Optional target height (only used when width is also supplied). |
 | `filename` | string | no | Optional output filename (default MCP_Capture_&lt;timestamp>.png); ".png" extension is added if missing. |
 | `return_base64` | boolean | no | bool, also include image_base64 + image_format in the response (default false). |
 | `return_image` | boolean | no | Also return the picture as an MCP image block next to this JSON (default true); a picture over the size limits is sent as a smaller copy. |
@@ -219,7 +219,7 @@ Put editor-world actors on the editor CLIPBOARD (edactCopySelected), either by n
 | `actor_names` | array | no | Optional array of internal actor names (GetName) to copy; supplying it re-selects exactly those actors first. |
 | `copy_selected` | boolean | no | Optional bool. True (with actor_names omitted) copies whatever is selected right now, leaving the selection alone. |
 
-**Returns:** `{ copied_count: int, success: bool (hardcoded; verify with paste_actors' pasted_count) }`
+**Returns:** `{ copied_count: int, success: bool (the copied text names every copied actor), missing_from_copy?: [string] }`
 
 ## `create_blueprint_interface`
 
@@ -360,7 +360,7 @@ Delete several editor-world actors at once through the editor's own delete path,
 
 *Destructive.*
 
-GUARDED batch asset deletion. ***dry_run DEFAULTS TO TRUE*** (deliberate: it is the most destructive command in the plugin, `delete_assets(["/Game/VendorPack"], recursive=true)` would be a valid unconfirmed call, and agent allowlists may run mutating tools with no prompt). Four independent gates REFUSE per item instead of skipping silently: readonly_roots (default: the project's Read Only Content Roots), protect_paths (wildcards -- the only gate that saves a zero-referencer asset), the currently-open editor world, and the OPT-IN require_zero_referencers gate whose referencer count EXCLUDES referencers that are themselves in this batch (so a self-contained dead subgraph can still be deleted whole). Deletion is a single ObjectTools::ForceDeleteObjects over the whole eligible batch -- resolving each object here via StaticFindObject/StaticLoadObject rather than through UEditorAssetSubsystem::DeleteAsset, whose UE::EditorAssetUtils::LoadAssetFromPath/EnsureAssetsLoaded preamble is a known crash site ("Array index out of bounds", deterministic on corrupted leftovers). deleted_count counts ONLY items that passed BOTH post-delete probes -- the package file is gone (FPackageName::DoesPackageExist) AND the object no longer resolves at its original path (StaticFindObject) -- never the API's own return value. Both are required because for a never-saved, registry-visible asset the disk probe is vacuously true (it was never on disk), so residency is the only real evidence; each failure names which probe still sees the item.
+GUARDED batch asset deletion; dry_run DEFAULTS TO TRUE, so pass dry_run=false to delete. Four gates REFUSE per item rather than skip silently: readonly_roots (default: the project's Read Only Content Roots), protect_paths (wildcards), the currently open editor world, and the opt-in require_zero_referencers, whose count EXCLUDES referencers in the same batch (a self-contained dead subgraph can go whole). The eligible batch is force-deleted in one pass. deleted_count counts ONLY items whose package file is gone AND whose object no longer resolves at its path; each failure names the probe that still sees it.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -461,15 +461,15 @@ Run a console command through the EDITOR (GEditor->Exec against the editor world
 
 Run Python in the running Unreal Editor, with Unreal's `unreal` API, for what no tool does: search find_tools first, since most tools are not in a client's list. A script that raises fails the call, with the traceback in command_result.
 
-`mode` picks how `command` runs: ExecuteFile (the default) runs a script of any length, ExecuteStatement runs one statement and prints its result, and EvaluateStatement returns one expression's value in command_result, as in {"command": "len(unreal.get_editor_subsystem(unreal.EditorActorSubsystem).get_all_level_actors())", "mode": "EvaluateStatement"}. Scripts share the editor console's globals, so a variable one call defines is there for the next.
+`mode`: ExecuteFile runs a script of any length, ExecuteStatement runs one statement and prints its result, EvaluateStatement returns one expression's value in command_result. Scripts share the editor console's globals across calls.
 
-`output` and `log_output` hold what the script prints and logs through unreal.log; what the engine itself logs during the call is only in `engine_log`, warnings and errors by default. When a call reports success and nothing happened, read engine_log first, widen it with engine_log_level=Log, or pass log_cursor_before to get_output_log_lines for the unfiltered rest.
+`output` and `log_output` hold what the script prints and logs; the engine's own log during the call is only in `engine_log`. When a call succeeds and nothing happened, read engine_log, widen it with engine_log_level=Log, or pass log_cursor_before to get_output_log_lines.
 
-"Object has no attribute" is the commonest error, and the field usually exists elsewhere: HitResult's impact_point is only in to_dict(), while Transform.translation is an attribute. Ask the object (dir(x), x.to_dict(), x.get_editor_property(...)) instead of guessing.
+On "Object has no attribute", ask the object (dir(x), x.to_dict(), x.get_editor_property(...)) instead of guessing.
 
-During Play-in-Editor, a call in the script that compiles a Blueprint or saves (compile_blueprint, save_asset, save_loaded_asset, save_packages, save_current_level...) does not run: the script gets a RuntimeError there, and the call fails with pie_refused even if the script catches it. The guard does not see a Blueprint edited without a compile, so stop PIE before editing one. Reading the live world during PIE is safe.
+During Play-in-Editor a compile or save in the script (compile_blueprint, save_asset, save_packages, save_current_level...) raises RuntimeError and the call fails with pie_refused, even if caught; an uncompiled Blueprint edit is not caught, so stop PIE before editing one. Reading the live world is safe.
 
-One call often answers what a loop would: get_actors_by_class for the actors of a class, get_actor_properties_by_class for their properties with the world that answered, get_properties for one object, get_actor_components, raycast_scene, and watch_pie_property for a value over a PIE session. A script that only enumerates actors gets a `hint` naming the tool. Python stays the right answer for several classes in one round trip, values correlated in one tick, or anything that mutates.
+Prefer a tool over an actor loop: get_actors_by_class, get_actor_properties_by_class, get_properties, get_actor_components, raycast_scene, watch_pie_property; a script that only enumerates actors gets a `hint` naming the tool.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -535,9 +535,9 @@ Find groups of assets that share the same asset name under a content folder tree
 |---|---|---|---|
 | `folder_path` | string | no | Content folder to scan, a package path such as /Game/Characters, default /Game |
 | `recursive` | boolean | no | If true, scan subfolders, default true |
-| `min_group_size` | number | no | Minimum number of same-named assets to report as a duplicate group, default 2 (a value below 1 counts as 2) |
+| `min_group_size` | integer | no | Minimum number of same-named assets to report as a duplicate group, default 2 (a value below 1 counts as 2) |
 | `class_filter` | array | no | Optional list of class short names (e.g. "StaticMesh","Material"); only assets whose AssetClassPath short name case-insensitively matches one of these are considered |
-| `max_results` | number | no | Cap on the number of duplicate GROUPS returned (not raw assets), clamped 1..20000, default 2000 |
+| `max_results` | integer | no | Cap on the number of duplicate GROUPS returned (not raw assets), clamped 1..20000, default 2000 |
 
 **Returns:** `{ folder_path, recursive, class_filter, min_group_size, group_count, total_duplicate_assets, assets_scanned, max_results, results_truncated, groups: [{ name, count, classes: [string], assets: [{path, package, class}] }] } (groups sorted by count descending)`
 
@@ -545,7 +545,7 @@ Find groups of assets that share the same asset name under a content folder tree
 
 *Read-only.*
 
-Find assets in a folder with zero referencers, and annotate each survivor with the reasons it should be KEPT anyway. "Zero referencers" is not the same as "safe to delete": there are three common ways an asset stays alive with an empty referencer set -- it is explicitly protected, a Config/Default*.ini names it, or it is a fork descending from a vendored base library. Each becomes a keep_reason string on the entry; deletion_candidates lists only the entries with NO keep_reason. Nothing is ever removed from unused_assets by these flags (hiding a genuinely unreferenced asset would be the same lie in the other direction). NOTE: there is deliberately no `is_world` -- it is already visible in class_name ("World").
+Find assets in a folder with zero referencers, and annotate each survivor with the reasons it should be KEPT anyway. "Zero referencers" is not the same as "safe to delete": there are three common ways an asset stays alive with an empty referencer set -- it is explicitly protected, a Config/Default*.ini names it, or it is a fork descending from a vendored base library. Each becomes a keep_reason string on the entry; deletion_candidates lists only the entries of this page with NO keep_reason (deletion_candidate_count counts all of them). unused_assets come sorted by path, a page at a time (offset/limit). Nothing is ever removed from unused_assets by these flags (hiding a genuinely unreferenced asset would be the same lie in the other direction). NOTE: there is deliberately no `is_world` -- it is already visible in class_name ("World").
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -556,8 +556,10 @@ Find assets in a folder with zero referencers, and annotate each survivor with t
 | `protect_paths` | array | no | Wildcard patterns (FString::MatchesWildcard, case-insensitive, `*` spans '/') matched against the package name and the object path. Default [] . A match adds keep_reason "protected_path". |
 | `include_lineage_reasons` | boolean | no | Default FALSE because it LOADS every candidate Blueprint. When true, a Blueprint whose super chain reaches a class owned by one of base_libraries gets keep_reason "descends_from_base_library" -- the only signal that saves a fork carrying no fork-origin tag (project setting Fork Origin Tag). |
 | `base_libraries` | array | no | Vendored-library content roots for the lineage check. Default: the project's Read Only Content Roots (same default as audit_class_purity). |
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ folder_path, folder_exists, recursive, dependency_type, protect_paths: [string], include_lineage_reasons, base_libraries: [string], unused_assets: [{path, class_name, size_kb, keep_reasons: [string], keep_reason_detail: {...}}], unused_count, total_scanned, deletion_candidates: [string], deletion_candidate_count, assets_with_keep_reason, keep_reason_counts: {protected_path, referenced_by_config, descends_from_base_library}, config_scan: {files_scanned: int, files: [string]}, lineage_scan: {attempted, blueprints_loaded, skipped_non_blueprint, load_failures} }`
+**Returns:** `{ folder_path, folder_exists, recursive, dependency_type, protect_paths: [string], include_lineage_reasons, base_libraries: [string], unused_assets: [{path, class_name, size_kb, keep_reasons: [string], keep_reason_detail: {...}}], unused_count (entries in this page), total_scanned, deletion_candidates: [string], deletion_candidate_count, assets_with_keep_reason, keep_reason_counts: {protected_path, referenced_by_config, descends_from_base_library}, config_scan: {files_scanned: int, files: [string]}, lineage_scan: {attempted, blueprints_loaded, skipped_non_blueprint, load_failures}, total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }`
 
 ## `fixup_redirectors`
 
@@ -596,7 +598,7 @@ What the editor is still compiling in the background, per kind: shaders, texture
 |---|---|---|---|
 | `kinds` | array | no | Optional list of kinds to report, by kind ("textures") or engine type name ("UE-Texture"), case-insensitive; default all. An unknown kind is an error that lists the kinds there are. |
 | `include_assets` | boolean | no | Optional bool (default false): also list the object paths still compiling for textures, static_meshes, skeletal_meshes and sound_waves (the other kinds only have a count). |
-| `max_assets` | number | no | Optional int (default 50, clamped 1..1000): most paths listed per kind; assets_total still counts them all. |
+| `max_assets` | integer | no | Optional int (default 50, clamped 1..1000): most paths listed per kind; assets_total still counts them all. |
 
 **Returns:** `{ compiling: bool, total_remaining: int, kinds: [{ kind: string, type_name: string, remaining: int, assets_listable: bool, assets?: [string], assets_total?: int, assets_truncated?: bool }], shader_jobs?: { outstanding: int, pending: int, remaining: int, compiling: bool } }`
 
@@ -716,7 +718,7 @@ Read the single per-editor-session log buffer UEAgent attaches to GLog (general 
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `count` | number | no | Optional int32 cap on the number of entries returned (default 200, max 4096). |
+| `count` | integer | no | Optional int32 cap on the number of entries returned (default 200, max 4096). |
 | `filter` | string | no | Optional case-insensitive substring on the message text. |
 | `level_filter` | string | no | Optional exact verbosity name filter (Fatal\|Error\|Warning\|Display\|Log\|Verbose\|VeryVerbose), case-insensitive. |
 | `category_filter` | string | no | Optional case-insensitive substring on the log category name. |
@@ -786,7 +788,7 @@ Read the editor's undo buffer as a list, most-recent-first: each entry's title, 
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `max_entries` | number | no | Max entries to return, newest first (default 50, clamped to 1..500). |
+| `max_entries` | integer | no | Max entries to return, newest first (default 50, clamped to 1..500). |
 
 **Returns:** `{ count: int, entries: [{ queue_index: int, title: string, context: string, is_transient: bool, primary_object: string, is_undone: bool }] }`
 
@@ -862,7 +864,7 @@ List the console variables registered in the running editor whose name contains 
 | `filter` | string | no | Text the name must contain, case ignored, e.g. "Shadow" (default empty = no filter). Without prefix, space-separated words must all appear and a single character matches as a name prefix; with prefix, a name must start with prefix and contain the whole filter. |
 | `prefix` | string | no | Text the name must start with, case ignored, e.g. "r.Shadow." or "t." (default empty = any name). |
 | `include_commands` | boolean | no | true to also list console commands (name and help, no value); default false lists variables only. |
-| `max_results` | number | no | Most entries to return, a whole number of at least 1 (default 200); total_matches still counts every match. |
+| `max_results` | integer | no | Most entries to return, a whole number of at least 1 (default 200); total_matches still counts every match. |
 
 **Returns:** `{ filter: string, prefix?: string, include_commands: bool, cvars: [{name, value?, help}], count: int, total_matches: int, max_results: int, truncated: bool }`
 
@@ -879,8 +881,10 @@ What is UNSAVED in the editor right now: every dirty package with its disk path,
 | `readonly_roots` | array | no | Optional array of long-path prefixes treated as vendored/upstream (default: the project's Read Only Content Roots). Only used to CLASSIFY (under_readonly_root / readonly_dirty_count); nothing is ever written. Pass [] to switch the classification off. |
 | `path_prefix` | string | no | Optional long-path prefix filter, e.g. /Game/VendorPack, to ask "is anything of THEIRS dirty". Empty (default) lists everything; what it excluded is counted in filtered_out. |
 | `include_objects` | boolean | no | Optional bool (default false). Also list every object carried by each dirty package. One object-hash walk per package -- a dirty map can hold thousands, so leave it off unless you need the contents. |
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ dirty_count: int, readonly_dirty_count: int, map_dirty_count: int, external_dirty_count: int, asset_dirty_count: int, filtered_out: int, pie_active: bool, current_world_package: string, path_prefix: string, readonly_roots: [string], readonly_roots_defaulted: bool, packages: [{ package_name: string, file_path: string, exists_on_disk: bool, kind: string, contains_map: bool, newly_created: bool, actor_label: string, actor_name: string, asset_name: string, asset_class: string, under_readonly_root: bool, objects?: [string] }], message: string, note: string }`
+**Returns:** `{ dirty_count: int (every dirty package, not only this page), readonly_dirty_count: int, map_dirty_count: int, external_dirty_count: int, asset_dirty_count: int, filtered_out: int, pie_active: bool, current_world_package: string, path_prefix: string, readonly_roots: [string], readonly_roots_defaulted: bool, packages: [{ package_name: string, file_path: string, exists_on_disk: bool, kind: string, contains_map: bool, newly_created: bool, actor_label: string, actor_name: string, asset_name: string, asset_class: string, under_readonly_root: bool, objects?: [string] }] (sorted by package_name), message: string, note: string, total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }`
 
 ## `list_engine_ini_sections`
 
@@ -892,8 +896,10 @@ List the section names of one INI (Engine, Game, Input, Editor, Scalability...) 
 |---|---|---|---|
 | `config_file` | string | no | INI base name, e.g. "Engine" (default), "Game", "Input", "Editor", "Scalability"; a trailing ".ini" is dropped. |
 | `include_base` | boolean | no | true (default) lists the whole in-memory merge, engine Base ini layers included; false lists only the sections in the project's Config/Default&lt;name>.ini and Saved/Config/&lt;Platform>/&lt;name>.ini, as they are on disk. |
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ count, sections: [string], found: bool, include_base: bool, config_file, file_path, files_read?: [string] }`
+**Returns:** `{ count (entries in this page), sections: [string] (sorted by name), found: bool, include_base: bool, config_file, file_path, files_read?: [string], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }`
 
 ## `list_open_asset_editors`
 
@@ -1008,7 +1014,7 @@ Re-apply the transaction that undo just reverted, or `count` of them, and report
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `count` | number | no | Optional. How many transactions to redo, at least 1 (default 1); stops early when the redo stack runs out. Below 1 is refused. |
+| `count` | integer | no | Optional. How many transactions to redo, at least 1 (default 1); stops early when the redo stack runs out. Below 1 is refused. |
 
 **Returns:** `{ applied: bool (THE oracle), requested: int, actually_redone: int (compare against requested), undo_count: int, can_redo: bool, next_redo: string (label of the next redoable entry) }`
 
@@ -1115,7 +1121,7 @@ Move one enumerator to a new position in a Blueprint Enum, shifting the others (
 |---|---|---|---|
 | `enum_path` | string | yes | Full asset path of the UUserDefinedEnum. |
 | `entry_name` | string | yes | Enumerator to move, by display name (or internal name). |
-| `to_index` | number | yes | Target zero-based position among the user entries. |
+| `to_index` | integer | yes | Target zero-based position among the user entries. |
 
 **Returns:** `{ enum_path: string, entry_name: string, from_index: int, to_index: int, moved: bool, entries: [string] }`
 
@@ -1129,7 +1135,7 @@ IRREVERSIBLE: wipes the editor's ENTIRE undo AND redo history (the human's entri
 |---|---|---|---|
 | `reason` | string | no | Human-readable reason, logged by the engine so the wipe is traceable. Defaults to 'MCP reset_transaction_buffer'. |
 
-**Returns:** `{ success: bool (hardcoded), undo_count_before: int, undo_count_after: int (0) }`
+**Returns:** `{ success: bool (false when entries remain in the buffer), undo_count_before: int, undo_count_after: int (0), queue_length_after: int (0) }`
 
 ## `run_automation_test`
 
@@ -1153,11 +1159,11 @@ A test that needs an interactive user, or a real renderer in a headless editor, 
 
 *Destructive.*
 
-Run a Functional Test Blueprint in a Play-in-Editor session and report its verdict: the call starts it and answers verdict running; get_functional_test_status polls it until running is false, with verdict pass, fail, unknown (it finished with Default) or not_run, and timed_out when it outlived timeout_seconds or its own Time Limit.
+Run a Functional Test Blueprint in a Play-in-Editor session: the call answers verdict running; poll get_functional_test_status until running is false, for verdict pass, fail, unknown (finished with Default) or not_run, and timed_out past timeout_seconds or the test's Time Limit.
 
-With no session running, it requests a Play session (with a player, not Simulate), and once that session has begun play it calls RunTest on the test's instance in the play world: the one copied from the editor level, or one it spawns there. A session that was already running is used as it is, with the test spawned into it, and is never ended; one this call requested is ended when the test ends unless auto_stop_pie=false. A session that is still starting is refused: call again once is_play_in_editor_active answers true.
+With no session, it starts one (with a player) and calls RunTest on the test's instance in the play world, copied from the editor level or spawned there; this session is ended when the test ends unless auto_stop_pie=false. A running session is used and never ended; one still starting is refused (retry once is_play_in_editor_active is true).
 
-The actor spawned into the session is removed when the test ends, so the editor level is left as it was; keep_actor=true instead places the test in the editor level (unsaved, no undo step) before the session starts and keeps it there and in the session. While the test runs, a second test, start_play_in_editor, stop_play_in_editor and load_level are refused naming it, cancel_automation_test stops it, and wait_for_pie_completion must not be called (it blocks the ticks the test needs). Create the test first with create_functional_test; a class that is not found, is not a Functional Test, or whose name matches several loaded classes is an error.
+A spawned actor is removed when the test ends; keep_actor=true places it in the editor level instead (unsaved, no undo). While the test runs, a second test, start_play_in_editor, stop_play_in_editor and load_level are refused, cancel_automation_test stops it, and wait_for_pie_completion must not be called (it blocks the ticks the test needs). A class not found, not a Functional Test, or matching several loaded classes is an error (create_functional_test makes one).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1265,7 +1271,7 @@ Sets a console variable via IConsoleManager and reads the value back.  Uses ICon
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | yes | Console variable name, e.g. "r.ScreenPercentage", "r.Shadow.MaxResolution". |
-| `value` | any | yes | New value (string, number, or bool; coerced to the cvar's type). |
+| `value` | string\|number\|boolean | yes | New value (string, number, or bool; coerced to the cvar's type). |
 
 **Returns:** `{ set: bool, requested_value: string, name: string, value: string, string_value: string, int_value: int, float_value: float, bool_value: bool, help: string, flags: int, set_by: string }`
 
@@ -1290,7 +1296,7 @@ Write one key into the GConfig copy of an INI (Engine by default), flush it to t
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `key` | string | yes | Key inside the section, e.g. "r.DefaultFeature.AntiAliasing"; its current value is replaced. |
-| `value` | any | yes | Value to write: a string written verbatim (an empty string is allowed), a JSON bool written as GConfig writes one ("True"/"False"), or a JSON number written as its text (an integer without decimals). |
+| `value` | string\|boolean\|number | yes | Value to write: a string written verbatim (an empty string is allowed), a JSON bool written as GConfig writes one ("True"/"False"), or a JSON number written as its text (an integer without decimals). |
 | `section` | string | no | INI section, e.g. "/Script/Engine.RendererSettings"; created when missing; surrounding brackets are dropped. Required unless plugin_name is given. |
 | `config_file` | string | no | Config base name without extension, e.g. "Engine" (default), "Game", "Input"; "Engine.ini" is not resolved. |
 | `plugin_name` | string | no | Optional plugin, as its .uplugin is named: an unknown one fails with nothing written; a known one adds its identity to the reply and makes section default to /Script/&lt;Plugin>.&lt;Plugin>. |
@@ -1331,7 +1337,7 @@ Set the running editor's scalability quality, every sg.* group at once (category
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `quality` | any | no | Level as a number 0-4 (0 Low, 1 Medium, 2 High, 3 Epic, 4 Cinematic; others clamped) or one of "Low", "Medium", "High", "Epic", "Cinematic", case ignored. Required. |
+| `quality` | number\|string | no | Level as a number 0-4 (0 Low, 1 Medium, 2 High, 3 Epic, 4 Cinematic; others clamped) or one of "Low", "Medium", "High", "Epic", "Cinematic", case ignored. Required. |
 | `category` | string | no | One group, case ignored: "ViewDistance", "AntiAliasing", "Shadows", "GlobalIllumination" (or "GI"), "Reflection", "PostProcess", "Texture", "Effects", "Foliage", "Shading", "Landscape"; or "all" (the default) for every group. |
 
 **Returns:** `{ set: bool, requested_level: int, category: string, ResolutionQuality: int, ViewDistanceQuality: int, AntiAliasingQuality: int, ShadowQuality: int, GlobalIlluminationQuality: int, ReflectionQuality: int, PostProcessQuality: int, TextureQuality: int, EffectsQuality: int, FoliageQuality: int, ShadingQuality: int, LandscapeQuality: int, mismatches?: [string] }`
@@ -1479,7 +1485,7 @@ Example: {"count": 3} undoes the last three transactions. It stops early at the 
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `count` | number | no | Optional. How many transactions to undo, at least 1 (default 1); stops early when the stack runs out or reaches an undo barrier. Below 1 is refused. |
+| `count` | integer | no | Optional. How many transactions to undo, at least 1 (default 1); stops early when the stack runs out or reaches an undo barrier. Below 1 is refused. |
 
 **Returns:** `{ applied: bool, requested: int, actually_undone: int, undo_count: int, can_undo: bool, next_undo: string }`
 
@@ -1497,6 +1503,6 @@ While it waits it does what the engine's tick would: it pumps every asset compil
 | `kinds` | array | no | Optional list of kinds to wait for, by kind ("shaders") or engine type name ("UE-Shader"), case-insensitive; default all. An unknown kind is an error that lists the kinds there are. |
 | `poll_interval_seconds` | number | no | Optional float (default 0.05, clamped 0.01..1): sleep between pumps. |
 | `include_assets` | boolean | no | Optional bool (default false): list the object paths still compiling after the wait, for textures, static_meshes, skeletal_meshes and sound_waves. |
-| `max_assets` | number | no | Optional int (default 50, clamped 1..1000): most paths listed per kind. |
+| `max_assets` | integer | no | Optional int (default 50, clamped 1..1000): most paths listed per kind. |
 
 **Returns:** `{ completed: bool, timed_out: bool, elapsed_seconds: float, pumps: int, remaining_before: int, remaining_after: int, kinds: [{ kind: string, type_name: string, remaining_before: int, remaining_after: int, finished: bool, assets?: [string], assets_total?: int, assets_truncated?: bool }], shader_jobs?: { outstanding: int, pending: int, remaining: int, compiling: bool } }`

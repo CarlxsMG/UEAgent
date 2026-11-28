@@ -95,7 +95,7 @@ namespace McpReadbackFollowUp
 			return nullptr;
 		}
 		const FString Package = Split(OwnerClass, TEXT("."), 1)[0];
-		const FO DirtyList = ProbeOrEmpty(Send, TEXT("list_dirty_packages"), Dict({ { TEXT("path_prefix"), S(Package) } }));
+		const FO DirtyList = ProbeAllPages(Send, TEXT("list_dirty_packages"), Dict({ { TEXT("path_prefix"), S(Package) } }), TEXT("packages"));
 		const FV Packages = Get(DirtyList, TEXT("packages"));
 		if (DirtyList->Values.Num() == 0 || !IsList(Packages))
 		{
@@ -262,7 +262,7 @@ namespace McpReadbackFollowUp
 		{
 			return nullptr;
 		}
-		const FO DirtyList = ProbeOrEmpty(Send, TEXT("list_dirty_packages"), MakeShared<FJsonObject>());
+		const FO DirtyList = ProbeAllPages(Send, TEXT("list_dirty_packages"), MakeShared<FJsonObject>(), TEXT("packages"));
 		if (DirtyList->Values.Num() == 0)
 		{
 			return nullptr;

@@ -106,15 +106,17 @@ Create an Enhanced Input mapping context asset (IMC_): the container that binds 
 
 *Read-only.*
 
-Which keys are still FREE: lists every input key not bound by any Enhanced Input mapping context or legacy mapping, filterable by category (keyboard / gamepad / mouse / touch) and substring, plus the matching keys that are already bound. The complement of list_all_input_mappings and the tool to run before binding a new keyboard shortcut, since a collision compiles silently and only shows up in play. Also the spelling lookup for any key the engine defines: with bindable_only=false and no category, free_keys + bound_keys together are the full engine key list, each with its exact FKey name ("SpaceBar", "Gamepad_FaceButton_Bottom") and its display name. Trustworthy where the Python route is not: InputMappingContext.mappings is deprecated and returns empty, which makes every taken key look available.
+Which keys are still FREE: lists every input key not bound by any Enhanced Input mapping context or legacy mapping, filterable by category (keyboard / gamepad / mouse / touch) and substring, plus the matching keys that are already bound. The complement of list_all_input_mappings and the tool to run before binding a new keyboard shortcut, since a collision compiles silently and only shows up in play. Also the spelling lookup for any key the engine defines: with bindable_only=false and no category, free_keys (paged with offset/limit) + bound_keys together are the full engine key list, each with its exact FKey name ("SpaceBar", "Gamepad_FaceButton_Bottom") and its display name. Trustworthy where the Python route is not: InputMappingContext.mappings is deprecated and returns empty, which makes every taken key look available.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `filter` | string | no | Optional case-insensitive substring matched against the key name or display name. |
 | `category` | string | no | Optional key category filter: one of 'keyboard', 'gamepad', 'mouse', 'touch'. Absent = all categories. |
 | `bindable_only` | boolean | no | When true (default), only keys where FKey::IsBindableInBlueprints() is true are considered (skips AnyKey/gestures/etc.). false lists every valid key the engine defines. |
+| `offset` | integer | no | Index of the first free_keys entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ free_keys:[{name (the FKey name binding calls take), key (same), display_name, is_gamepad, is_mouse, is_analog}], free_key_count, bound_keys:[...same shape], bound_key_count (keys bound anywhere, unfiltered), key_count (free_keys + bound_keys listed) }`
+**Returns:** `{ free_keys:[{name (the FKey name binding calls take), key (same), display_name, is_gamepad, is_mouse, is_analog}] (sorted by name, paged with offset/limit), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null, free_key_count, bound_keys:[...same shape], bound_key_count (keys bound anywhere, unfiltered), key_count (free_keys + bound_keys listed) }`
 
 ## `get_input_action`
 
@@ -138,7 +140,7 @@ Read the live Enhanced Input state of one InputAction for a local player in a ru
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `action` | string | yes | InputAction to read: full object path or short asset name. Aliases: action_path, action_name. |
-| `player_index` | number | no | Local player index (default 0). |
+| `player_index` | integer | no | Local player index (default 0). |
 | `world` | string | no | World selector: 'pie' (default) \| 'server' \| 'client' \| 'pie:N' \| 'game'. |
 | `action_path` | string | no | Alias of action, read when action is absent or empty: InputAction object path or short asset name. |
 | `action_name` | string | no | Alias of action, read only when action is absent or empty and action_path is absent: InputAction object path or short asset name. |
@@ -155,7 +157,7 @@ Read ONE Enhanced Input mapping context asset (IMC): every action-to-key mapping
 |---|---|---|---|
 | `context_path` | string | yes | Full path (e.g., /Game/Input/IMC_Default) or short asset name of the InputMappingContext. |
 | `ctx_path` | string | no | Alias of context_path, read only when context_path is absent. |
-| `mapping_index` | number | no | Optional 0-based index into the context's Mappings[] (the index add_mapping_to_context returns): only that binding is returned, even one without an action. Out of range is an error. |
+| `mapping_index` | integer | no | Optional 0-based index into the context's Mappings[] (the index add_mapping_to_context returns): only that binding is returned, even one without an action. Out of range is an error. |
 
 **Returns:** `{ context_path, context_name, mappings: [{ index, action_name, key (display name), key_name (the FKey name add_mapping_to_context takes), triggers: [{ index, class_name, display_name }], trigger_count }], mapping_count, total_mapping_count }`
 
@@ -167,7 +169,7 @@ Read what a player is pressing RIGHT NOW: resolves the PlayerController for a lo
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `player_index` | number | no | Player controller index to query (default 0). |
+| `player_index` | integer | no | Player controller index to query (default 0). |
 
 **Returns:** `{ player_controller, pressed_keys }`
 
@@ -181,8 +183,10 @@ Which keys are already TAKEN, and which ones CONFLICT: aggregates every key-to-a
 |---|---|---|---|
 | `filter` | string | no | Optional case-insensitive substring on the key name to narrow the returned key_bindings. |
 | `conflicts_only` | boolean | no | When true, return only keys flagged as conflicts (more than one distinct action on the same key). Default false. |
+| `offset` | integer | no | Index of the first key_bindings entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ contexts:[{context_path,context_name,mapping_count}], context_count, key_bindings:[{key,display_name,bindings:[{action,source,context_path}],binding_count,distinct_action_count,conflict}], bound_key_count, conflicts:[...], conflict_count, legacy_action_mapping_count, legacy_axis_mapping_count }`
+**Returns:** `{ contexts:[{context_path,context_name,mapping_count}], context_count, key_bindings:[{key,display_name,bindings:[{action,source,context_path}],binding_count,distinct_action_count,conflict}] (sorted by key, paged with offset/limit), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null, bound_key_count, conflicts:[...], conflict_count, legacy_action_mapping_count, legacy_axis_mapping_count }`
 
 ## `list_input_types`
 
@@ -205,7 +209,7 @@ Rebind a player-mappable Enhanced Input mapping to another key for one local pla
 | `mapping_name` | string | yes | Name of the player-mappable key mapping to rebind, as set in its Player Mappable Key Settings, e.g. "Jump" (required). |
 | `new_key` | string | yes | Unreal key name to bind, e.g. "SpaceBar", "Gamepad_FaceButton_Bottom" or "LeftMouseButton"; must be a valid FKey (required). |
 | `player_controller_name` | string | no | Optional object name or actor label of the PlayerController to remap, e.g. "PlayerController_0" (case-insensitive), searched in every running PIE or game world; when given, player_index is ignored. |
-| `player_index` | number | no | Local player whose binding changes, in the play world: 0 (default) is the first player controller, any other value matches a local player's controller id. |
+| `player_index` | integer | no | Local player whose binding changes, in the play world: 0 (default) is the first player controller, any other value matches a local player's controller id. |
 | `slot` | string | no | Which of the player's key slots to set: "First" (default), "Second", "Third" or "Fourth"; an unknown name silently means "First". |
 
 **Returns:** `{ applied: bool, mapping_name: string, new_key: string, slot: string, failure_tags: [string], player_controller: string, world_name: string, world_package: string, world_type: string, net_mode: string, pie_instance: int }`
@@ -219,8 +223,8 @@ Delete one modifier from a key mapping in an Enhanced Input mapping context, by 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ctx_path` | string | yes | Asset path of the UInputMappingContext |
-| `mapping_index` | number | yes | 0-based index of the FEnhancedActionKeyMapping |
-| `modifier_index` | number | yes | 0-based index of the modifier within Mapping.Modifiers |
+| `mapping_index` | integer | yes | 0-based index of the FEnhancedActionKeyMapping |
+| `modifier_index` | integer | yes | 0-based index of the modifier within Mapping.Modifiers |
 
 **Returns:** `{ applied, removed_class_name, remaining_count, saved, save_error? }`
 
@@ -233,8 +237,8 @@ Delete one trigger from a key mapping in an Enhanced Input mapping context, by m
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ctx_path` | string | yes | Asset path of the UInputMappingContext |
-| `mapping_index` | number | yes | 0-based index of the FEnhancedActionKeyMapping |
-| `trigger_index` | number | yes | 0-based index of the trigger within Mapping.Triggers |
+| `mapping_index` | integer | yes | 0-based index of the FEnhancedActionKeyMapping |
+| `trigger_index` | integer | yes | 0-based index of the trigger within Mapping.Triggers |
 
 **Returns:** `{ applied, removed_class_name, remaining_count, saved, save_error? }`
 
@@ -269,7 +273,7 @@ Set an InputAction's behaviour flags: consume_input, trigger_when_paused, consum
 | `trigger_when_paused` | boolean | no | When set, updates the action's bTriggerWhenPaused flag. |
 | `consumes_action_and_axis_mappings` | boolean | no | When set, updates bConsumesActionAndAxisMappings. |
 | `reserve_all_mappings` | boolean | no | When set, updates bReserveAllMappings. |
-| `trigger_events_that_consume_legacy_keys` | number | no | When set (int32 ETriggerEvent bitmask), updates TriggerEventsThatConsumeLegacyKeys. |
+| `trigger_events_that_consume_legacy_keys` | integer | no | When set (int32 ETriggerEvent bitmask), updates TriggerEventsThatConsumeLegacyKeys. |
 | `accumulation_behavior` | string | no | When set, one of "TakeHighestAbsoluteValue" or "Cumulative". |
 | `action_description` | string | no | When set, updates the action's ActionDescription (FText) shown in the editor. |
 
@@ -285,7 +289,7 @@ Tune HOW an input trigger fires on an InputAction: actuation threshold, hold tim
 |---|---|---|---|
 | `action_path` | string | yes | Asset path of the Input Action (or short asset name). |
 | `action_name` | string | no | Fallback for action_path when action_path is absent. |
-| `trigger_index` | number | no | Index into the action's Triggers array to edit. Mutually exclusive with trigger_class. |
+| `trigger_index` | integer | no | Index into the action's Triggers array to edit. Mutually exclusive with trigger_class. |
 | `trigger_class` | string | no | Select the first trigger of this type (Down\|Pressed\|Released\|Hold\|Tap\|Pulse\|ChordAction) instead of an index. |
 | `actuation_threshold` | string | no | When set, the base UInputTrigger::ActuationThreshold (float). |
 | `hold_time_threshold` | string | no | When set, UInputTriggerHold::HoldTimeThreshold (float). Hold triggers only. |
@@ -319,7 +323,7 @@ Inject a value for an Enhanced Input action into a local player's UEnhancedInput
 |---|---|---|---|
 | `action` | string | yes | Full object path of a UInputAction, or its short asset name (required). |
 | `value_json` | any | no | The value to inject, coerced to the action's ValueType: bool (Boolean), number (Axis1D), or a [x,y]/[x,y,z] array or {x,y,z} object (Axis2D/Axis3D). If omitted, Boolean actions default to true (pressed) and axis actions default to zero. |
-| `player_index` | number | no | Local player index used to resolve the PlayerController (default 0). |
+| `player_index` | integer | no | Local player index used to resolve the PlayerController (default 0). |
 | `hold_seconds` | number | no | Optional float. When > 0, the value is re-injected every tick for this many seconds (so a movement AXIS actually moves the pawn), then a final neutral/zero value is injected to release. Fire-and-forget: the command returns immediately and the hold runs across the next hold_seconds of PIE. Omit (or 0) for a single one-shot sample. |
 | `world` | string | no | Optional world selector: absent/'pie' (default: PlayWorld, else the first PIE context) \| 'server' (the PIE world with authority) \| 'client' \| 'pie:N' \| 'game' (alias of 'pie'). With 2+ players the default may drive the OTHER player's pawn. |
 | `action_path` | string | no | Alias of action, read when action is absent or empty: InputAction object path or short asset name. |
@@ -337,7 +341,7 @@ Reset a player-mappable Enhanced Input mapping of one local player of a running 
 |---|---|---|---|
 | `mapping_name` | string | yes | Name of the player-mappable key mapping to reset, as set in its Player Mappable Key Settings, e.g. "Jump" (required). |
 | `player_controller_name` | string | no | Optional object name or actor label of the PlayerController to reset, e.g. "PlayerController_0" (case-insensitive), searched in every running PIE or game world; when given, player_index is ignored. |
-| `player_index` | number | no | Local player whose binding is reset, in the play world: 0 (default) is the first player controller, any other value matches a local player's controller id. |
+| `player_index` | integer | no | Local player whose binding is reset, in the play world: 0 (default) is the first player controller, any other value matches a local player's controller id. |
 | `slot` | string | no | Which of the player's key slots to reset: "First" (default), "Second", "Third" or "Fourth"; an unknown name silently means "First". |
 
 **Returns:** `{ applied: bool, mapping_name: string, slot: string, failure_tags: [string], player_controller: string, world_name: string, world_package: string, world_type: string, net_mode: string, pie_instance: int }`

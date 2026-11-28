@@ -10,20 +10,20 @@ Back to the [index](README.md).
 
 *Additive, idempotent.*
 
-Adds a UAIPerceptionStimuliSourceComponent to an actor and registers it as a source for the supplied AISense (default Sight). Idempotent: re-run returns the existing component.
+Adds a UAIPerceptionStimuliSourceComponent to an editor-world actor (or reuses its first one) and makes it a source for the supplied AISense (default Sight): the sense joins the component's RegisterAsSourceForSenses with bAutoRegisterAsSource on, which registers the actor when play starts, and is registered at once where the world has a perception system (the editor world has none: registered_with_perception_system says which). One undo step; the level is dirtied, not saved. registered is the read-back of that list and flag, and false makes success false. An unknown sense is an error. Idempotent: a re-run reuses the component and leaves the list as it is.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Display label or internal name of the target editor-world actor (required) |
 | `sense` | string | no | "Sight" \| "Hearing" \| "Damage" (default "Sight") |
 
-**Returns:** `{ actor_name: string, component_name: string, sense: string, registered: bool, already_existed: bool }`
+**Returns:** `{ actor_name: string, component_name: string, sense: string, already_existed: bool, registered: bool, registered_senses: [string], auto_register_as_source: bool, registered_with_perception_system: bool }`
 
 ## `create_ai_controller_blueprint`
 
 *Additive, idempotent.*
 
-Create a Blueprint asset parented to AAIController, compile and save it.  Idempotent: if the asset already exists it is loaded and returned.
+Create a Blueprint asset parented to AAIController, compile and save it.  Idempotent: if the asset already exists it is loaded and returned, created=false; an asset there that is not an AIController Blueprint makes success false (is_ai_controller=false).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -65,9 +65,9 @@ Set the native team id (FGenericTeamId) of an actor in the editor world through 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Object name or label of the actor in the editor world (a pawn, or the AIController itself), e.g. 'BP_Guard_C_0'. |
-| `team_id` | number | yes | Team number, an integer in [0, 254], e.g. 1; 255 is the engine-reserved NoTeam id and is refused. |
+| `team_id` | integer | yes | Team number, an integer in [0, 254], e.g. 1; 255 is the engine-reserved NoTeam id and is refused. |
 
-**Returns:** `{ actor_name, team_id, applied, resolved_on: "actor"|"controller", perception_listeners_refreshed }`
+**Returns:** `{ actor_name, team_id (read back from the agent), applied (the read-back id equals team_id; false makes success false), resolved_on: "actor"|"controller", perception_listeners_refreshed, requested: { team_id } }`
 
 ## `set_ai_sight_radius`
 
@@ -91,8 +91,8 @@ Installs (once per process) a custom FGenericTeamId::AttitudeSolver backed by an
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `team_a` | number | yes | Required int in [0, 255]. |
-| `team_b` | number | yes | Required int in [0, 255]. |
+| `team_a` | integer | yes | Required int in [0, 255]. |
+| `team_b` | integer | yes | Required int in [0, 255]. |
 | `attitude` | string | yes | Required: "Friendly"\|"Neutral"\|"Hostile". |
 
 **Returns:** `{ team_a, team_b, attitude, resolved_attitude, solver_installed }`

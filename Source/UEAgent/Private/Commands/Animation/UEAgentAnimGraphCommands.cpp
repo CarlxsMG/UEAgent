@@ -8,6 +8,7 @@
 #include "Editor.h"
 #include "JsonObjectConverter.h"
 #include "ScopedTransaction.h"
+#include "Misc/ScopeExit.h"
 
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
@@ -124,11 +125,31 @@ namespace
     }
 
     // Marks AnimBP structurally modified, refreshes Graph and saves AnimBP; whether the save reached disk.
-    bool AnimGraph_MarkModifiedAndSave(UAnimBlueprint* AnimBP, UEdGraph* Graph)
+    bool AnimGraph_MarkModifiedAndSave(UAnimBlueprint* AnimBP, UEdGraph* Graph, FString& OutSaveError)
     {
         FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(AnimBP);
         Graph->NotifyGraphChanged();
-        return mcp_common::SaveAssetPackage(AnimBP->GetOutermost(), AnimBP);
+        return mcp_common::SaveAssetPackage(AnimBP->GetOutermost(), AnimBP, OutSaveError);
+    }
+
+    // These mutators reply with a raw payload whose own "success" is the verdict (the handler sets it): the
+    // read-back named Measured AND the save. This adds saved, save_error and the error that says which failed.
+    void AnimGraph_AddVerdictDetail(const TSharedPtr<FJsonObject>& Result, bool bMeasured, bool bSaved,
+                                    const FString& SaveError, const TCHAR* Command, const TCHAR* Measured)
+    {
+        Result->SetBoolField(TEXT("saved"), bSaved);
+        if (!bSaved)
+        {
+            Result->SetStringField(TEXT("save_error"), SaveError);
+        }
+        if (!bMeasured)
+        {
+            Result->SetStringField(TEXT("error"), mcp_common::MeasuredOutcomeError(Command, Measured));
+        }
+        else if (!bSaved)
+        {
+            Result->SetStringField(TEXT("error"), mcp_common::SavedOutcomeError(Command));
+        }
     }
 }
 
@@ -142,7 +163,7 @@ namespace
 //   @param graph_name - Target graph; omit/"AnimGraph" for the top-level AnimGraph, or a nested name like "MainSM > Idle".
 //   @param x - Node X position (optional, default 0).
 //   @param y - Node Y position (optional, default 0).
-//   @returns { node_id, node_class, graph_name, pins[], saved } (NodeToJson of the created node)
+//   @returns { node_id, node_class, graph_name, pins[], added, saved, save_error?, success, error? } (NodeToJson of the created node; added is read back from the graph, and success is added AND saved)
 TSharedPtr<FJsonObject> HandleAddAnimGraphNode(const TSharedPtr<FJsonObject>& Params)
 {
     FString AnimBPPath, NodeClassName;
@@ -184,13 +205,19 @@ TSharedPtr<FJsonObject> HandleAddAnimGraphNode(const TSharedPtr<FJsonObject>& Pa
     NewNode->AllocateDefaultPins();
     NewNode->PostPlacedNewNode();
 
-    const bool bSaved = AnimGraph_MarkModifiedAndSave(AnimBP, Graph);
+    FString SaveError;
+    const bool bSaved = AnimGraph_MarkModifiedAndSave(AnimBP, Graph, SaveError);
+
+    // Read back: the graph finds the node by its new GUID.
+    const bool bAdded = FUEAgentGraphUtils::FindNodeByGuid(Graph, NewNode->NodeGuid.ToString()) == NewNode;
 
     TSharedPtr<FJsonObject> Result = FUEAgentGraphUtils::NodeToJson(NewNode, /*bIncludePins=*/true);
     Result->SetStringField(TEXT("anim_blueprint_path"), AnimBP->GetPathName());
     Result->SetStringField(TEXT("graph_name"), Graph->GetName());
     Result->SetStringField(TEXT("node_class"), NodeClass->GetName());
-    Result->SetBoolField(TEXT("saved"), bSaved);
+    Result->SetBoolField(TEXT("added"), bAdded);
+    Result->SetBoolField(TEXT("success"), bAdded && bSaved);
+    AnimGraph_AddVerdictDetail(Result, bAdded, bSaved, SaveError, TEXT("add_anim_graph_node"), TEXT("added"));
     return Result;
 }
 
@@ -205,7 +232,7 @@ TSharedPtr<FJsonObject> HandleAddAnimGraphNode(const TSharedPtr<FJsonObject>& Pa
 //   @param dst_graph - Destination graph name (optional, default the top-level AnimGraph).
 //   @param offset_x - X offset added to every pasted node (optional, default 0).
 //   @param offset_y - Y offset added to every pasted node (optional, default 0).
-//   @returns { copied_count, id_map:{old->new}, imported_nodes[], missing_node_ids[], saved }
+//   @returns { requested_count, copied_count, copied, id_map:{old->new}, imported_nodes[], missing_node_ids[], saved, save_error?, success, error? } -- copied_count counts the pasted nodes found in the destination graph; copied (and success, with saved) needs every resolved node there
 TSharedPtr<FJsonObject> HandleCopyAnimGraphNodes(const TSharedPtr<FJsonObject>& Params)
 {
     FString SrcPath, DstPath;
@@ -282,18 +309,31 @@ TSharedPtr<FJsonObject> HandleCopyAnimGraphNodes(const TSharedPtr<FJsonObject>& 
         ImportedInfo.Add(MakeShared<FJsonValueObject>(FUEAgentGraphUtils::NodeToJson(N, /*bIncludePins=*/false)));
     }
 
-    const bool bSaved = AnimGraph_MarkModifiedAndSave(DstBP, DstGraph);
+    FString SaveError;
+    const bool bSaved = AnimGraph_MarkModifiedAndSave(DstBP, DstGraph, SaveError);
+
+    // Read back: every pasted node is found in the destination graph by its new GUID. A node the export or the
+    // import skipped (one that cannot be duplicated, such as the graph's root) leaves the count short.
+    int32 FoundCount = 0;
+    for (UEdGraphNode* N : Imported)
+    {
+        if (N && FUEAgentGraphUtils::FindNodeByGuid(DstGraph, N->NodeGuid.ToString()) == N) { ++FoundCount; }
+    }
+    const bool bCopied = FoundCount == NodesToExport.Num();
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-    Result->SetNumberField(TEXT("copied_count"), Imported.Num());
+    Result->SetNumberField(TEXT("requested_count"), NodesToExport.Num());
+    Result->SetNumberField(TEXT("copied_count"), FoundCount);
+    Result->SetBoolField(TEXT("copied"), bCopied);
     Result->SetObjectField(TEXT("id_map"), IdMap);
     Result->SetArrayField(TEXT("imported_nodes"), ImportedInfo);
     Result->SetArrayField(TEXT("missing_node_ids"), MissingIds);
     Result->SetStringField(TEXT("src_graph"), SrcGraph->GetName());
     Result->SetStringField(TEXT("dst_graph"), DstGraph->GetName());
     Result->SetStringField(TEXT("dst_anim_blueprint_path"), DstBP->GetPathName());
-    Result->SetBoolField(TEXT("saved"), bSaved);
-    return Result; // raw payload (matches K2 siblings connect_pins/add_graph_node; uniform across the 7)
+    Result->SetBoolField(TEXT("success"), bCopied && bSaved);
+    AnimGraph_AddVerdictDetail(Result, bCopied, bSaved, SaveError, TEXT("copy_anim_graph_nodes"), TEXT("copied"));
+    return Result;
 }
 
 // ===========================================================================
@@ -307,7 +347,7 @@ TSharedPtr<FJsonObject> HandleCopyAnimGraphNodes(const TSharedPtr<FJsonObject>& 
 //   @param target_node_id - NodeGuid of the target node.
 //   @param target_pin - Input pin name on the target node.
 //   @param graph_name - Target graph (optional, default the top-level AnimGraph).
-//   @returns { connected, source_node_id, target_node_id, saved }
+//   @returns { connected, via_conversion_node, source_node_id, target_node_id, graph_name, saved, save_error?, success, error? } -- connected is read back from the pins' links (direct, or through a conversion node the schema inserted)
 TSharedPtr<FJsonObject> HandleConnectAnimGraphPins(const TSharedPtr<FJsonObject>& Params)
 {
     FString AnimBPPath, SourceNodeId, SourcePin, TargetNodeId, TargetPin;
@@ -337,19 +377,39 @@ TSharedPtr<FJsonObject> HandleConnectAnimGraphPins(const TSharedPtr<FJsonObject>
     FScopedTransaction Transaction(LOCTEXT("ConnectAnimGraphPins", "MCP: Connect AnimGraph Pins"));
     AnimBP->Modify();
     Graph->Modify();
-    const bool bConnected = Schema->TryCreateConnection(PinA, PinB);
-    if (!bConnected)
+    if (!Schema->TryCreateConnection(PinA, PinB))
         return mcp_common::MakeErrorReply(TEXT("TryCreateConnection failed"));
 
-    const bool bSaved = AnimGraph_MarkModifiedAndSave(AnimBP, Graph);
+    FString SaveError;
+    const bool bSaved = AnimGraph_MarkModifiedAndSave(AnimBP, Graph, SaveError);
+
+    // Read back the link: direct, or through the conversion node the schema inserts between pose spaces.
+    const bool bDirect = PinA->LinkedTo.Contains(PinB);
+    bool bViaConversion = false;
+    if (!bDirect)
+    {
+        for (const UEdGraphPin* Linked : PinA->LinkedTo)
+        {
+            const UEdGraphNode* Middle = Linked ? Linked->GetOwningNode() : nullptr;
+            if (!Middle || Middle == PinB->GetOwningNode()) { continue; }
+            for (const UEdGraphPin* MiddlePin : Middle->Pins)
+            {
+                if (MiddlePin && MiddlePin->LinkedTo.Contains(PinB)) { bViaConversion = true; break; }
+            }
+            if (bViaConversion) { break; }
+        }
+    }
+    const bool bConnected = bDirect || bViaConversion;
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-    Result->SetBoolField(TEXT("connected"), true);
+    Result->SetBoolField(TEXT("connected"), bConnected);
+    Result->SetBoolField(TEXT("via_conversion_node"), bViaConversion);
     Result->SetStringField(TEXT("source_node_id"), SourceNodeId);
     Result->SetStringField(TEXT("target_node_id"), TargetNodeId);
     Result->SetStringField(TEXT("graph_name"), Graph->GetName());
-    Result->SetBoolField(TEXT("saved"), bSaved);
-    return Result; // raw payload (matches K2 siblings connect_pins/add_graph_node; uniform across the 7)
+    Result->SetBoolField(TEXT("success"), bConnected && bSaved);
+    AnimGraph_AddVerdictDetail(Result, bConnected, bSaved, SaveError, TEXT("connect_anim_graph_pins"), TEXT("connected"));
+    return Result;
 }
 
 // ===========================================================================
@@ -363,7 +423,7 @@ TSharedPtr<FJsonObject> HandleConnectAnimGraphPins(const TSharedPtr<FJsonObject>
 //   @param target_node_id - NodeGuid of the target node (optional; if omitted, breaks ALL links on source_pin).
 //   @param target_pin - Pin name on the target node (optional; required if target_node_id is given).
 //   @param graph_name - Target graph (optional, default the top-level AnimGraph).
-//   @returns { disconnected, broke_all, source_node_id, source_pin, saved }
+//   @returns { disconnected, broke_all, remaining_links, source_node_id, source_pin, saved, save_error?, success, error? } -- disconnected is read back from the source pin's links
 TSharedPtr<FJsonObject> HandleDisconnectAnimGraphPins(const TSharedPtr<FJsonObject>& Params)
 {
     FString AnimBPPath, SourceNodeId, SourcePin;
@@ -394,6 +454,7 @@ TSharedPtr<FJsonObject> HandleDisconnectAnimGraphPins(const TSharedPtr<FJsonObje
     Graph->Modify();
 
     bool bBrokeAll = false;
+    UEdGraphPin* PinB = nullptr;
     if (bHasTarget)
     {
         if (TargetPin.IsEmpty())
@@ -401,7 +462,7 @@ TSharedPtr<FJsonObject> HandleDisconnectAnimGraphPins(const TSharedPtr<FJsonObje
         UEdGraphNode* TargetNode = FUEAgentGraphUtils::FindNodeByGuid(Graph, TargetNodeId);
         if (!TargetNode)
             return mcp_common::MakeErrorReply(FString::Printf(TEXT("Target node not found: %s"), *TargetNodeId));
-        UEdGraphPin* PinB = FUEAgentGraphUtils::FindPinByName(TargetNode, TargetPin);
+        PinB = FUEAgentGraphUtils::FindPinByName(TargetNode, TargetPin);
         if (!PinB)
             return mcp_common::MakeErrorReply(FString::Printf(TEXT("Target pin not found: %s"), *TargetPin));
         PinA->BreakLinkTo(PinB); // BreakLinkTo removes the link on both pins
@@ -412,15 +473,21 @@ TSharedPtr<FJsonObject> HandleDisconnectAnimGraphPins(const TSharedPtr<FJsonObje
         bBrokeAll = true;
     }
 
-    const bool bSaved = AnimGraph_MarkModifiedAndSave(AnimBP, Graph);
+    FString SaveError;
+    const bool bSaved = AnimGraph_MarkModifiedAndSave(AnimBP, Graph, SaveError);
+
+    // Read back: the named link is gone, or the source pin has no links left.
+    const bool bDisconnected = PinB ? !PinA->LinkedTo.Contains(PinB) : PinA->LinkedTo.Num() == 0;
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-    Result->SetBoolField(TEXT("disconnected"), true);
+    Result->SetBoolField(TEXT("disconnected"), bDisconnected);
     Result->SetBoolField(TEXT("broke_all"), bBrokeAll);
+    Result->SetNumberField(TEXT("remaining_links"), PinA->LinkedTo.Num());
     Result->SetStringField(TEXT("source_node_id"), SourceNodeId);
     Result->SetStringField(TEXT("source_pin"), SourcePin);
-    Result->SetBoolField(TEXT("saved"), bSaved);
-    return Result; // raw payload (matches K2 siblings connect_pins/add_graph_node; uniform across the 7)
+    Result->SetBoolField(TEXT("success"), bDisconnected && bSaved);
+    AnimGraph_AddVerdictDetail(Result, bDisconnected, bSaved, SaveError, TEXT("disconnect_anim_graph_pins"), TEXT("disconnected"));
+    return Result;
 }
 
 // ===========================================================================
@@ -495,7 +562,7 @@ TSharedPtr<FJsonObject> HandleGetAnimGraphNodeProperties(const TSharedPtr<FJsonO
 //   @param value - Text value (UE ImportText form: number, "EnumName", "(X=1,Y=2)"...). Use for scalars/enums/simple structs.
 //   @param value_json [object] - JSON value applied via JsonValueToUProperty. Use for complex/nested types. Takes precedence over value.
 //   @param graph_name - Target graph (optional, default the top-level AnimGraph).
-//   @returns { node_id, property, applied, new_value, saved }
+//   @returns { node_id, property, applied, new_value, saved, save_error?, success, error? } -- new_value is read from the node after the write; applied says it equals the value the input describes
 TSharedPtr<FJsonObject> HandleSetAnimGraphNodeProperty(const TSharedPtr<FJsonObject>& Params)
 {
     FString AnimBPPath, NodeId, PropertyPath;
@@ -556,11 +623,23 @@ TSharedPtr<FJsonObject> HandleSetAnimGraphNodeProperty(const TSharedPtr<FJsonObj
             TEXT("Property '%s' not found on struct '%s'"), *LeafName, *CurStruct->GetName()));
     void* LeafPtr = LeafProp->ContainerPtrToValuePtr<void>(CurMem);
 
+    // The value the write should leave: the current value with the same input applied to a copy, so a partial
+    // struct input keeps the fields it does not name on both sides. Compared with the node after ReconstructNode.
+    void* Expected = FMemory::Malloc(LeafProp->GetSize(), LeafProp->GetMinAlignment());
+    LeafProp->InitializeValue(Expected);
+    LeafProp->CopyCompleteValue(Expected, LeafPtr);
+    ON_SCOPE_EXIT
+    {
+        LeafProp->DestroyValue(Expected);
+        FMemory::Free(Expected);
+    };
+
     FScopedTransaction Transaction(LOCTEXT("SetAnimGraphNodeProperty", "MCP: Set AnimGraph Node Property"));
     AnimBP->Modify();
     Graph->Modify();
     AnimNode->Modify();
 
+    bool bExpectedBuilt = false;
     if (bHasJson)
     {
         const TSharedPtr<FJsonValue> JsonVal = Params->TryGetField(TEXT("value_json"));
@@ -568,6 +647,7 @@ TSharedPtr<FJsonObject> HandleSetAnimGraphNodeProperty(const TSharedPtr<FJsonObj
         if (!FJsonObjectConverter::JsonValueToUProperty(JsonVal, LeafProp, LeafPtr, 0, 0, false, &FailReason))
             return mcp_common::MakeErrorReply(FString::Printf(
                 TEXT("value_json did not apply to '%s': %s"), *LeafName, *FailReason.ToString()));
+        bExpectedBuilt = FJsonObjectConverter::JsonValueToUProperty(JsonVal, LeafProp, Expected, 0, 0);
     }
     else
     {
@@ -575,19 +655,27 @@ TSharedPtr<FJsonObject> HandleSetAnimGraphNodeProperty(const TSharedPtr<FJsonObj
         if (!mcp_common::ImportPropertyTextStrict(LeafProp, ValueStr, LeafPtr, AnimNode, ParseError))
             return mcp_common::MakeErrorReply(FString::Printf(
                 TEXT("Could not parse value for property '%s': %s"), *LeafName, *ParseError));
+        FString ExpectedError;
+        bExpectedBuilt = mcp_common::ImportPropertyTextStrict(LeafProp, ValueStr, Expected, AnimNode, ExpectedError);
     }
 
-    // Property changes can add/remove exposed pins (e.g. Pose History trajectory) -- reconstruct.
+    // Property changes can add/remove exposed pins (e.g. Pose History trajectory) -- reconstruct. The FAnimNode
+    // struct is a member of the node object, so LeafPtr still addresses it afterwards.
     AnimNode->ReconstructNode();
-    const bool bSaved = AnimGraph_MarkModifiedAndSave(AnimBP, Graph);
+    FString SaveError;
+    const bool bSaved = AnimGraph_MarkModifiedAndSave(AnimBP, Graph, SaveError);
+
+    // Read back: the node holds the value the input describes once ReconstructNode and the save have run.
+    const bool bApplied = bExpectedBuilt && LeafProp->Identical(LeafPtr, Expected, PPF_None);
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("node_id"), NodeId);
     Result->SetStringField(TEXT("property"), PropertyPath);
-    Result->SetBoolField(TEXT("applied"), true);
+    Result->SetBoolField(TEXT("applied"), bApplied);
     Result->SetField(TEXT("new_value"), mcp_common::PropertyValueToJson(LeafProp, LeafPtr));
-    Result->SetBoolField(TEXT("saved"), bSaved);
-    return Result; // raw payload (matches K2 siblings connect_pins/add_graph_node; uniform across the 7)
+    Result->SetBoolField(TEXT("success"), bApplied && bSaved);
+    AnimGraph_AddVerdictDetail(Result, bApplied, bSaved, SaveError, TEXT("set_anim_graph_node_property"), TEXT("applied"));
+    return Result;
 }
 
 // ===========================================================================
@@ -597,7 +685,7 @@ TSharedPtr<FJsonObject> HandleSetAnimGraphNodeProperty(const TSharedPtr<FJsonObj
 //   @param blueprint_name - Character/Actor Blueprint (name or path), e.g. "BP_MyCharacter".
 //   @param anim_class - The AnimBlueprint to use: an ABP asset path (resolved to its generated class) or a "..._C" class path/name.
 //   @param component_name - Skeletal mesh component to target (optional). Omit to target the Character's inherited Mesh.
-//   @returns { blueprint, component, anim_class, previous_anim_class, applied, wrote_cdo_archetype, saved }
+//   @returns { blueprint, component, anim_class, previous_anim_class, animation_blueprint_mode, applied, wrote_cdo_archetype, saved, save_error?, success, error? } -- anim_class and animation_blueprint_mode are read back from the component; applied needs both
 TSharedPtr<FJsonObject> HandleSetSkeletalMeshAnimClass(const TSharedPtr<FJsonObject>& Params)
 {
     FString BlueprintName, AnimClassStr;
@@ -708,17 +796,25 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshAnimClass(const TSharedPtr<FJsonObj
     {
         BP->GeneratedClass->GetDefaultObject()->MarkPackageDirty();
     }
-    const bool bSaved = mcp_common::SaveAssetPackage(BP->GetOutermost(), BP);
+    FString SaveError;
+    const bool bSaved = mcp_common::SaveAssetPackage(BP->GetOutermost(), BP, SaveError);
+
+    // Read back both writes off the component: the class, and the mode that lets it drive the mesh.
+    const bool bClassSet = MeshComp->AnimClass == AnimCls;
+    const bool bModeSet = MeshComp->GetAnimationMode() == EAnimationMode::AnimationBlueprint;
+    const bool bApplied = bClassSet && bModeSet;
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("blueprint"), BP->GetPathName());
     Result->SetStringField(TEXT("component"), MeshComp->GetName());
-    Result->SetStringField(TEXT("anim_class"), AnimCls->GetPathName());
+    Result->SetStringField(TEXT("anim_class"), MeshComp->AnimClass ? MeshComp->AnimClass->GetPathName() : FString());
     Result->SetStringField(TEXT("previous_anim_class"), PrevAnimClass);
-    Result->SetBoolField(TEXT("applied"), MeshComp->AnimClass == AnimCls);
+    Result->SetBoolField(TEXT("animation_blueprint_mode"), bModeSet);
+    Result->SetBoolField(TEXT("applied"), bApplied);
     Result->SetBoolField(TEXT("wrote_cdo_archetype"), bWroteCDOArchetype);
-    Result->SetBoolField(TEXT("saved"), bSaved);
-    return Result; // raw payload (matches K2 siblings connect_pins/add_graph_node; uniform across the 7)
+    Result->SetBoolField(TEXT("success"), bApplied && bSaved);
+    AnimGraph_AddVerdictDetail(Result, bApplied, bSaved, SaveError, TEXT("set_skeletal_mesh_anim_class"), TEXT("applied"));
+    return Result;
 }
 
 // ===========================================================================
@@ -795,7 +891,7 @@ namespace
 //   @param graph_name - Target graph (optional; deep-resolved; default the top-level AnimGraph).
 //   @param anim_blueprint - Alias of anim_blueprint_path, used only when anim_blueprint_path is absent or empty.
 //   @param blueprint_name - Alias of anim_blueprint_path, used only when anim_blueprint_path and anim_blueprint are both absent or empty.
-//   @returns { node_id, pin_name, binding_path, applied, binding:{property_name, property_path[], path_as_text, is_bound, is_promotion, binding_type, pin_category}, saved }
+//   @returns { node_id, pin_name, binding_path, applied, binding:{property_name, property_path[], path_as_text, is_bound, is_promotion, binding_type, pin_category}, saved, save_error?, success, error? } -- applied is read back: the stored binding for pin_name is bound to binding_path
 TSharedPtr<FJsonObject> HandleSetAnimGraphNodePinBinding(const TSharedPtr<FJsonObject>& Params)
 {
     const FString AnimBPPath = ReadAnimBPPathAliased(Params);
@@ -854,9 +950,11 @@ TSharedPtr<FJsonObject> HandleSetAnimGraphNodePinBinding(const TSharedPtr<FJsonO
 
     // Reconstruct so the node picks up the binding (and RecalculateBindingType fixes up the type).
     AnimNode->ReconstructNode();
-    const bool bSaved = AnimGraph_MarkModifiedAndSave(AnimBP, Graph);
+    FString SaveError;
+    const bool bSaved = AnimGraph_MarkModifiedAndSave(AnimBP, Graph, SaveError);
 
     // Read the resulting state back (re-fetch the map -- the subobject is stable across ReconstructNode).
+    bool bApplied = false;
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("node_id"), NodeId);
     Result->SetStringField(TEXT("pin_name"), PinName);
@@ -867,16 +965,18 @@ TSharedPtr<FJsonObject> HandleSetAnimGraphNodePinBinding(const TSharedPtr<FJsonO
     {
         if (const FAnimGraphNodePropertyBinding* Stored = ReadMap->Find(PinFName))
         {
-            Result->SetBoolField(TEXT("applied"), true);
+            bApplied = Stored->bIsBound && Stored->PropertyPath == PathParts;
             Result->SetObjectField(TEXT("binding"), PinBindingToJson(*Stored));
         }
-        else
-        {
-            Result->SetBoolField(TEXT("applied"), false);
-        }
     }
-    Result->SetBoolField(TEXT("saved"), bSaved);
-    return Result; // raw payload (matches the other AnimGraph mutators)
+    else
+    {
+        Result->SetStringField(TEXT("read_error"), ReadErr);
+    }
+    Result->SetBoolField(TEXT("applied"), bApplied);
+    Result->SetBoolField(TEXT("success"), bApplied && bSaved);
+    AnimGraph_AddVerdictDetail(Result, bApplied, bSaved, SaveError, TEXT("set_anim_graph_node_pin_binding"), TEXT("applied"));
+    return Result;
 }
 
 // MCP:clear_anim_graph_node_pin_binding - Remove the property binding from one input pin of an AnimGraph node (inverse of set_anim_graph_node_pin_binding), dropping a stale binding without recreating the node. Returns was_bound, is_bound and cleared; an unbound pin gives cleared=false, not an error. Undoable; saves the AnimBP without recompiling (run compile_anim_blueprint).
@@ -886,7 +986,7 @@ TSharedPtr<FJsonObject> HandleSetAnimGraphNodePinBinding(const TSharedPtr<FJsonO
 //   @param graph_name - Target graph (optional; deep-resolved; default the top-level AnimGraph).
 //   @param anim_blueprint - Alias of anim_blueprint_path, used only when anim_blueprint_path is absent or empty.
 //   @param blueprint_name - Alias of anim_blueprint_path, used only when anim_blueprint_path and anim_blueprint are both absent or empty.
-//   @returns { node_id, pin_name, was_bound, is_bound, cleared, saved }
+//   @returns { node_id, pin_name, was_bound, is_bound, cleared, unbound, saved, save_error?, success, error? } -- is_bound is read back after the removal; success needs unbound and saved
 TSharedPtr<FJsonObject> HandleClearAnimGraphNodePinBinding(const TSharedPtr<FJsonObject>& Params)
 {
     const FString AnimBPPath = ReadAnimBPPathAliased(Params);
@@ -925,17 +1025,22 @@ TSharedPtr<FJsonObject> HandleClearAnimGraphNodePinBinding(const TSharedPtr<FJso
     AnimNode->RemoveBindings(PinFName);
 
     AnimNode->ReconstructNode();
-    const bool bSaved = AnimGraph_MarkModifiedAndSave(AnimBP, Graph);
+    FString SaveError;
+    const bool bSaved = AnimGraph_MarkModifiedAndSave(AnimBP, Graph, SaveError);
 
+    // Read back: the pin has no binding left, whether or not it had one before.
     const bool bStillBound = AnimNode->HasBinding(PinFName);
+    const bool bUnbound = !bStillBound;
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("node_id"), NodeId);
     Result->SetStringField(TEXT("pin_name"), PinName);
     Result->SetBoolField(TEXT("was_bound"), bWasBound);
     Result->SetBoolField(TEXT("is_bound"), bStillBound);
-    Result->SetBoolField(TEXT("cleared"), bWasBound && !bStillBound);
-    Result->SetBoolField(TEXT("saved"), bSaved);
-    return Result; // raw payload (matches the other AnimGraph mutators)
+    Result->SetBoolField(TEXT("cleared"), bWasBound && bUnbound);
+    Result->SetBoolField(TEXT("unbound"), bUnbound);
+    Result->SetBoolField(TEXT("success"), bUnbound && bSaved);
+    AnimGraph_AddVerdictDetail(Result, bUnbound, bSaved, SaveError, TEXT("clear_anim_graph_node_pin_binding"), TEXT("unbound"));
+    return Result;
 }
 
 const McpCommandFamilies::FRegistrar Registration =

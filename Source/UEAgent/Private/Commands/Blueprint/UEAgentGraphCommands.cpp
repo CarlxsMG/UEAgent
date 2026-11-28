@@ -508,6 +508,12 @@ TSharedPtr<FJsonObject> NodeReply(UEdGraphNode* Node, const FString& BlueprintNa
     return Reply;
 }
 
+// The error of a node command whose node, read back, is not on its graph (or not set up as asked).
+FString NodeNotPlacedError(const TCHAR* Command, const UEdGraph* Graph, const TCHAR* What)
+{
+    return FString::Printf(TEXT("%s: read back, the %s is not in graph '%s' as requested"), Command, What, Graph ? *Graph->GetName() : TEXT("?"));
+}
+
 // A reply that starts with blueprint_name and Field, which names what the command acted on.
 TSharedPtr<FJsonObject> BlueprintReply(const FString& BlueprintName, const TCHAR* Field, const FString& Value)
 {
@@ -785,11 +791,11 @@ namespace
     }
 }
 
-// MCP:add_graph_node - Create one node in a graph and return it with its node_id and pins, so connect_pins and set_pin_default_value can wire it without another read.
-//   @para Works in a Blueprint graph (Animation and Widget Blueprints included) and in the graph of a material, material function, sound cue, MetaSound Source, PCG graph or Control Rig. To create and wire several Blueprint nodes in one undo step use build_blueprint_graph. Every call adds a new node, except event and custom_event, which give back the one already there; remove_graph_node takes a spare node out.
-//   @para Each value comes from a read: event_name from list_overridable_functions, function_name from get_class_functions (an engine library's list is long enough to come back as a file: get_mcp_audit_report reads its report_path), variable_name from get_blueprint_variables, struct_type from list_structs, enum_path from list_enums, and graph_name from get_blueprint_functions; get_function_pins previews a node's pins before it exists. When a call_function names both, function_library wins over target_class, and node_position wins over position_x and position_y. node_type keywords ignore case. Example: {"asset_path": "/Game/Blueprints/BP_Door", "node_type": "call_function", "function_name": "PrintString", "function_library": "KismetSystemLibrary"}.
-//   @para In another asset, node_type is its editor's own node: a material expression class (/Script/Engine.MaterialExpressionConstant), a sound node type (WavePlayer with sound_wave_path, Mixer, Random...), a MetaSound class path from list_metasound_node_types (UE.Sine.Audio, with major_version), a PCG settings class from list_pcg_node_types (PCGSubgraphSettings with subgraph_path embeds a graph), or a Control Rig unit (SetTransform, TwoBoneIKSimple..., with node_name). Those assets are saved by their editor, and a Control Rig is compiled.
-//   @para A Blueprint is compiled only with compile=true and never saved, and the call is refused during Play-in-Editor (see force). event creates a real override, finding the interface or parent class itself; a name that is not an overridable event is an error, and an interface function with a return value needs add_blueprint_function with override=true. custom_event takes no parameters, so an RPC or anything with arguments must be a function. get_component_by_class makes a node already typed to target_class, so its ReturnValue connects without a cast. Check `class` in the reply: an async or latent node that comes back as K2Node_CallFunction does nothing, though it compiles clean.
+// MCP:add_graph_node - Create one node in a graph and return it with its node_id and pins, ready for connect_pins and set_pin_default_value.
+//   @para Works in Blueprint graphs (Animation and Widget Blueprints included) and in material, material function, sound cue, MetaSound Source, PCG graph and Control Rig graphs; build_blueprint_graph adds and wires several Blueprint nodes in one undo step. Every call adds a node, except event and custom_event, which return the existing one.
+//   @para Names come from reads (list_overridable_functions, get_class_functions, get_blueprint_variables, list_structs, list_enums, get_blueprint_functions); get_function_pins previews a node's pins. Example: {"asset_path": "/Game/Blueprints/BP_Door", "node_type": "call_function", "function_name": "PrintString", "function_library": "KismetSystemLibrary"}.
+//   @para In another asset node_type is that editor's node: a material expression class, a sound node (WavePlayer, Mixer, Random...), a MetaSound class (list_metasound_node_types), a PCG settings class (list_pcg_node_types), or a Control Rig unit; those assets are saved, a Control Rig compiled.
+//   @para A Blueprint is compiled only with compile=true and never saved; refused during Play-in-Editor (see force). A non-overridable event name is an error; an interface function with a return value needs add_blueprint_function with override=true. Check `class` in the reply: an async or latent node that comes back as K2Node_CallFunction does nothing, though it compiles clean.
 //   @core
 //   @hints not-idempotent
 //   @param asset_path - The graph asset: a Blueprint by name (resolved under /Game/Blueprints) or full path, or the path of a material, material function, sound cue, MetaSound Source, PCG graph or Control Rig. Pass the FULL path when a Blueprint short name is ambiguous: a bare name that matches two assets resolves to one of them silently.
@@ -801,8 +807,8 @@ namespace
 //   @param node_name [string] - Control Rig only: the name to give the node (a taken name gets a suffix; the reply's node_id is the real one).
 //   @param event_name - Event name; required for event and custom_event node types (e.g. "ReceiveActorBeginOverlap", "ReceiveBeginPlay" for event)
 //   @param function_name - Function to call; required for call_function node type
-//   @param target_class - Class owning the function or cast/spawn target class; required for cast, create_widget and get_component_by_class. For call_function it is searched STRICTLY: a function that is not on that class is an error, never a silent fallback to another library; it also resolves a user BlueprintFunctionLibrary by asset path ("/Game/Dir/BFL_X"). For get_component_by_class it is the component class to fetch (a UActorComponent subclass). For variable_get/variable_set it names the class that owns the variable, producing a non-self member-access node (with a 'target' pin) instead of a self-context node. For create_widget it names the widget class to construct (e.g. WBP_Foo_C, a full asset path, or the widget Blueprint short name); the node exposes that widget's Expose-On-Spawn pins.
-//   @param function_library - Optional, call_function only: the library class owning function_name, used instead of target_class -- an engine library by name ("KismetMathLibrary", "KismetSystemLibrary", "GameplayStatics", "KismetStringLibrary", with or without the U prefix, or any /Script/Engine class) or a user BlueprintFunctionLibrary asset path ("/Game/Dir/BFL_X", "/Game/Dir/BFL_X.BFL_X" or the "..._C" class). Searched strictly, like target_class.
+//   @param target_class - Class owning the function, or the cast/spawn/widget/component class; required for cast, create_widget and get_component_by_class. call_function searches it STRICTLY (a function not on it is an error) and accepts a BlueprintFunctionLibrary asset path. For variable_get/variable_set it makes a member-access node with a 'target' pin instead of a self node.
+//   @param function_library - Optional, call_function only: the library owning function_name, used instead of target_class: an engine library by name ("KismetMathLibrary", "GameplayStatics", U prefix optional) or a BlueprintFunctionLibrary asset path. Searched strictly, like target_class.
 //   @param variable_name - Variable to get/set; required for variable_get and variable_set
 //   @param scope - Optional scope hint for variable_get/variable_set: 'auto' (default; a function-local variable declared in the target graph wins, else a self/member variable), 'local' (function-local variable ONLY), or 'member' (member variable only -- self, or on target_class when supplied). Ignored by other node types.
 //   @param struct_type - Struct type; required for make_struct and break_struct nodes: a UScriptStruct path (/Game/.../S_Foo.S_Foo), bare name, or engine alias (Vector/Rotator/Transform...)
@@ -812,8 +818,8 @@ namespace
 //   @param num_inputs - Optional input-pin count for make_array/make_set/make_map (added after spawn)
 //   @param cases - Optional string array of case pins for switch_int/switch_string/switch_name
 //   @param arguments - Optional string array of argument names for format_text
-//   @param dispatcher - Event-dispatcher (multicast delegate) name; required for add_delegate node type. Must already exist in the COMPILED class (add_event_dispatcher + compile_blueprint), and it binds on self only -- for a dispatcher on another class use add_object_bound_event.
-//   @param macro_graph_name - Macro graph name; required for node_type=macro_instance. Resolved against this Blueprint's own MacroGraphs first, then the engine StandardMacros; "<library-path>:<MacroGraphName>" (e.g. "/Game/Lib/ML_X.ML_X:MyMacro") resolves it in that macro library instead.
+//   @param dispatcher - Event-dispatcher name; required for add_delegate. Must exist in the COMPILED class (add_event_dispatcher + compile_blueprint); binds on self only (another class: add_object_bound_event).
+//   @param macro_graph_name - Macro graph name; required for node_type=macro_instance. Resolved in this Blueprint's MacroGraphs, then the engine StandardMacros; "<library-path>:<MacroGraphName>" resolves it in that macro library.
 //   @param macro_library - Optional, macro_instance only: asset path of a macro LIBRARY Blueprint to resolve macro_graph_name in -- the only way to reach a third-party or project macro library.
 //   @param macro_source - Set to "standard_macros" to skip this Blueprint's own MacroGraphs and resolve macro_graph_name only in the engine StandardMacros library. Only read for node_type=macro_instance.
 //   @param compile - Optional bool, default false: compile the Blueprint after placing the node. Ignored inside build_blueprint_graph, which never compiles its steps.
@@ -1525,13 +1531,28 @@ TSharedPtr<FJsonObject> HandleAddGraphNode(const TSharedPtr<FJsonObject>& Params
         Result->SetField(Field.Key, Field.Value);
     }
     Result->SetBoolField(TEXT("compiled"), bCompile);
+    // A half-wired graph often fails to compile, so compile errors are reported, not a failure: the node
+    // exists, and failing here would have the caller add it a second time.
+    if (bCompile)
+    {
+        Result->SetBoolField(TEXT("compile_errors"), Blueprint->Status == BS_Error);
+    }
+    // The node must be on its graph under a real id, the one the next tool addresses it by.
+    const bool bInGraph = NodeGraph && NodeGraph->Nodes.Contains(NewNode) && NewNode->NodeGuid.IsValid();
+    Result->SetBoolField(TEXT("success"), bInGraph);
+    if (!bInGraph)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("add_graph_node: the %s node is not in graph '%s' with a valid node_id after it was created"),
+            *NodeTypeAsGiven, NodeGraph ? *NodeGraph->GetName() : TEXT("?")));
+    }
     return Result;
 }
 
 // MCP:connect_pins - Link one node's output pin to another node's input pin, in a Blueprint graph (Animation and Widget Blueprints included) or in the graph of a material, material function, sound cue, MetaSound Source, PCG graph or Control Rig.
-//   @para Use it after add_graph_node, or on nodes that get_graph_nodes lists: both give the node ids and pin names. Not for: testing a pair without linking it (validate_pin_connection), unlinking (disconnect_pin), or creating and linking several Blueprint nodes in one undo step (build_blueprint_graph). Refused during Play-in-Editor (see force).
-//   @para Example: {"asset_path": "/Game/Blueprints/BP_Door", "source_node_id": "<a Branch's node_id>", "source_pin": "then", "target_node_id": "<a PrintString's node_id>", "target_pin": "execute"}. @input and @output stand for the graph's own input and output: target_node_id "@output" with target_pin "BaseColor" feeds a material's main input. On a sound cue, @output makes the source the cue's first node, and target_pin is the parent's input slot index (empty: its first free slot); on a MetaSound they are its graph inputs and outputs, named by the pin; on a PCG graph its input and output nodes.
-//   @para In a Blueprint the graph's schema type-checks the pair, so AnimGraph pose links work too and an incompatible pair is an error, never a silent no-op. An exec output and a data input hold one link each, so linking one that is already linked replaces its old link; each call is one undo step, and undo puts the old link back. A node with a wildcard pin is reconstructed afterwards, so array, ForEach and Select pins take the linked type. A Blueprint is not compiled or saved: compile_blueprint, then save_asset. The other assets are saved by their editor, and a Control Rig is compiled.
+//   @para Node ids and pin names come from add_graph_node or get_graph_nodes. Not for: testing a pair (validate_pin_connection), unlinking (disconnect_pin), or several Blueprint nodes in one undo step (build_blueprint_graph). Refused during Play-in-Editor (see force).
+//   @para Example: {"asset_path": "/Game/Blueprints/BP_Door", "source_node_id": "<Branch node_id>", "source_pin": "then", "target_node_id": "<PrintString node_id>", "target_pin": "execute"}. @input and @output stand for the graph's own input and output: target_node_id "@output" with target_pin "BaseColor" feeds a material's main input; on a sound cue @output makes the source the cue's first node and target_pin is the parent's input slot index (empty: first free).
+//   @para In a Blueprint the schema type-checks the pair (AnimGraph pose links included); an incompatible pair is an error. Linking an already-linked exec output or data input replaces its link; one undo step per call. Wildcard nodes are reconstructed to take the linked type. A Blueprint is not compiled or saved (compile_blueprint, save_asset); the other assets are saved by their editor, and a Control Rig compiled.
 //   @core
 //   @param asset_path - The graph asset: a Blueprint by name or path, or the path of a material, material function, sound cue, MetaSound Source, PCG graph or Control Rig.
 //   @param blueprint_name - Older name of asset_path, still accepted.
@@ -1563,6 +1584,10 @@ TSharedPtr<FJsonObject> HandleConnectPins(const TSharedPtr<FJsonObject>& Params)
     // become dangling afterwards -- the node objects survive, the pins do not.
     UEdGraphNode* NodeA = Pair.SourcePin->GetOwningNode();
     UEdGraphNode* NodeB = Pair.TargetPin->GetOwningNode();
+    const FName SourcePinFName = Pair.SourcePin->PinName;
+    const EEdGraphPinDirection SourcePinDir = Pair.SourcePin->Direction;
+    const FName TargetPinFName = Pair.TargetPin->PinName;
+    const EEdGraphPinDirection TargetPinDir = Pair.TargetPin->Direction;
 
     const bool bConnected = Schema->TryCreateConnection(Pair.SourcePin, Pair.TargetPin);
     if (!bConnected)
@@ -1598,10 +1623,29 @@ TSharedPtr<FJsonObject> HandleConnectPins(const TSharedPtr<FJsonObject>& Params)
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Pair.Blueprint);
     Pair.Graph->NotifyGraphChanged();
 
+    // Read the link back from the pins the reconstruction left. A conversion node sits between the two
+    // pins, so then each side only has to be linked to something.
+    const UEdGraphPin* SourceAfter = NodeA ? NodeA->FindPin(SourcePinFName, SourcePinDir) : nullptr;
+    const UEdGraphPin* TargetAfter = NodeB ? NodeB->FindPin(TargetPinFName, TargetPinDir) : nullptr;
+    bool bLinked = false;
+    if (SourceAfter && TargetAfter)
+    {
+        bLinked = CanConnect.Response == CONNECT_RESPONSE_MAKE_WITH_CONVERSION_NODE
+            ? (SourceAfter->LinkedTo.Num() > 0 && TargetAfter->LinkedTo.Num() > 0)
+            : SourceAfter->LinkedTo.Contains(const_cast<UEdGraphPin*>(TargetAfter));
+    }
+
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-    Result->SetBoolField(TEXT("connected"), true);
+    Result->SetBoolField(TEXT("connected"), bLinked);
     Result->SetStringField(TEXT("source_node_id"), Pair.SourceNodeId);
     Result->SetStringField(TEXT("target_node_id"), Pair.TargetNodeId);
+    Result->SetBoolField(TEXT("success"), bLinked);
+    if (!bLinked)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("connect_pins: TryCreateConnection accepted the link, but %s.%s is not linked to %s.%s when the pins are read back"),
+            *Pair.SourceNodeId, *SourcePinFName.ToString(), *Pair.TargetNodeId, *TargetPinFName.ToString()));
+    }
     return Result;
 }
 
@@ -1670,11 +1714,19 @@ TSharedPtr<FJsonObject> HandleDisconnectPin(const TSharedPtr<FJsonObject>& Param
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
     Graph->NotifyGraphChanged();
 
+    const bool bDisconnected = LinkedPin ? !Pin->LinkedTo.Contains(LinkedPin) : Pin->LinkedTo.Num() == 0;
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-    Result->SetBoolField(TEXT("disconnected"), true);
+    Result->SetBoolField(TEXT("disconnected"), bDisconnected);
     Result->SetStringField(TEXT("node_id"), NodeId);
     Result->SetStringField(TEXT("pin_name"), PinName);
     Result->SetNumberField(TEXT("links_broken"), LinksBroken);
+    Result->SetNumberField(TEXT("links_remaining"), Pin->LinkedTo.Num());
+    Result->SetBoolField(TEXT("success"), bDisconnected);
+    if (!bDisconnected)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("disconnect_pin: pin '%s' of node %s still holds the link after it was broken"), *PinName, *NodeId));
+    }
     return Result;
 }
 
@@ -1817,13 +1869,41 @@ TSharedPtr<FJsonObject> HandleSetPinDefaultValue(const TSharedPtr<FJsonObject>& 
     Blueprint->Modify();
     Node->Modify();
     const UEdGraphSchema_K2* Schema = GetDefault<UEdGraphSchema_K2>();
+    const FString DefaultBefore = Pin->GetDefaultAsString();
     Schema->TrySetDefaultValue(*Pin, FinalValue);
     FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+
+    // TrySetDefaultValue returns nothing and leaves the pin as it was when the schema rejects the value.
+    // The schema may also normalize what it stores (an object path, a float's spelling), so a stored
+    // value that moved off the old one counts as written.
+    const FString DefaultAfter = Pin->GetDefaultAsString();
+    bool bWritten = DefaultAfter.Equals(FinalValue, ESearchCase::IgnoreCase)
+        || DefaultBefore.Equals(FinalValue, ESearchCase::IgnoreCase)
+        || DefaultAfter != DefaultBefore;
+    const FName Category = Pin->PinType.PinCategory;
+    if (!bWritten && (Category == UEdGraphSchema_K2::PC_Object || Category == UEdGraphSchema_K2::PC_Class
+        || Category == UEdGraphSchema_K2::PC_Interface))
+    {
+        // An object pin reads back its object's full path ("/Game/M/M_Foo.M_Foo"), not the text the caller
+        // wrote: what the schema makes of that text is compared instead, so writing the held object again counts.
+        FString ParsedValue;
+        TObjectPtr<UObject> ParsedObject;
+        FText ParsedText;
+        Schema->GetPinDefaultValuesFromString(Pin->PinType, Pin->GetOwningNodeUnchecked(), FinalValue, ParsedValue, ParsedObject, ParsedText);
+        bWritten = ParsedObject != nullptr && ParsedObject == Pin->DefaultObject;
+    }
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("node_id"), NodeId);
     Result->SetStringField(TEXT("pin_name"), PinName);
-    Result->SetStringField(TEXT("default_value"), Pin->GetDefaultAsString());
+    Result->SetStringField(TEXT("default_value"), DefaultAfter);
+    Result->SetBoolField(TEXT("success"), bWritten);
+    if (!bWritten)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("set_pin_default_value: the schema rejected '%s' for pin '%s'; it still reads '%s'"),
+            *FinalValue, *PinName, *DefaultAfter));
+    }
     return Result;
 }
 
@@ -1858,9 +1938,16 @@ TSharedPtr<FJsonObject> HandleDeleteNode(const TSharedPtr<FJsonObject>& Params)
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
     Graph->NotifyGraphChanged();
 
+    const bool bGone = !Graph->Nodes.Contains(Node);
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-    Result->SetBoolField(TEXT("deleted"), true);
+    Result->SetBoolField(TEXT("deleted"), bGone);
     Result->SetStringField(TEXT("node_id"), NodeId);
+    Result->SetBoolField(TEXT("success"), bGone);
+    if (!bGone)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("remove_graph_node: node %s is still in graph '%s' after RemoveNode"), *NodeId, *Graph->GetName()));
+    }
     return Result;
 }
 
@@ -1892,10 +1979,18 @@ TSharedPtr<FJsonObject> HandleMoveNode(const TSharedPtr<FJsonObject>& Params)
     Node->NodePosY = Position.Y;
     Graph->NotifyGraphChanged();
 
+    // The canvas stores whole units: the request is compared as the node stores it.
+    const bool bMoved = Node->NodePosX == static_cast<int32>(Position.X) && Node->NodePosY == static_cast<int32>(Position.Y);
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("node_id"), NodeId);
     Result->SetNumberField(TEXT("pos_x"), Node->NodePosX);
     Result->SetNumberField(TEXT("pos_y"), Node->NodePosY);
+    Result->SetBoolField(TEXT("success"), bMoved);
+    if (!bMoved)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("move_node: node %s reads [%d, %d], not the requested position"), *NodeId, Node->NodePosX, Node->NodePosY));
+    }
     return Result;
 }
 
@@ -1943,14 +2038,21 @@ TSharedPtr<FJsonObject> HandleAddCommentNode(const TSharedPtr<FJsonObject>& Para
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
     Graph->NotifyGraphChanged();
 
-    TSharedPtr<FJsonObject> Result = FUEAgentGraphUtils::NodeToJson(Node, false);
+    const bool bPlaced = Node && Graph->Nodes.Contains(Node) && (Text.IsEmpty() || Node->NodeComment == Text);
+    TSharedPtr<FJsonObject> Result = Node ? FUEAgentGraphUtils::NodeToJson(Node, false) : MakeShared<FJsonObject>();
+    Result->SetBoolField(TEXT("success"), bPlaced);
+    if (!bPlaced)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("add_comment_node: the comment box is not in graph '%s' with the requested text after it was placed"), *Graph->GetName()));
+    }
     return Result;
 }
 
-// MCP:get_graph_nodes - Read the nodes of one graph without changing it: a Blueprint graph (Animation and Widget Blueprints included), or the graph of a material, material function, sound cue, MetaSound Source, PCG graph or Control Rig. It is the read behind add_graph_node, connect_pins and set_pin_default_value, and the way to see what a graph does.
-//   @para Every node has its node_id, which the graph tools take, and its object_path (not in a MetaSound), which get_object_info and set_properties take for the node's own settings. A Blueprint node also lists its class, title, position, comment and pins with their links and defaults; another asset answers with its editor's own view, named by graph_kind.
-//   @para Read a graph, then one node: {"asset_path": "/Game/Blueprints/BP_Door", "compact": true} for the topology, then the same asset_path with "node_id" for every pin of one node. compact leaves out unlinked pins without a default, so a pin missing from a compact listing may still exist: check it by node_id. graph_name picks another graph of a Blueprint, a collapsed graph by its title included, and expand_composites inlines the collapsed graphs instead.
-//   @para It reads the graph as the editor holds it, unsaved edits included, loading the asset from disk if needed, and compiles nothing, so a Blueprint that fails to compile still lists its nodes. A large graph costs many tokens: max_nodes caps the reply, and truncated says whether nodes were left out. Reading a graph under a read-only vendor root leaves its package dirty in memory; reload_asset_package with on_dirty="discard" cleans it.
+// MCP:get_graph_nodes - Read the nodes of one graph without changing it: a Blueprint graph (Animation and Widget Blueprints included), or the graph of a material, material function, sound cue, MetaSound Source, PCG graph or Control Rig. It is the read behind add_graph_node, connect_pins and set_pin_default_value.
+//   @para Every node has its node_id, which the graph tools take, and its object_path (not in a MetaSound), which get_object_info and set_properties take. A Blueprint node also lists class, title, position, comment and pins with links and defaults; another asset answers with its editor's own view, named by graph_kind.
+//   @para Read the topology with compact=true, then one node's pins with node_id. compact leaves out unlinked pins without a default, so a pin missing there may still exist. graph_name picks another graph (a collapsed graph by its title included); expand_composites inlines collapsed graphs.
+//   @para Reads the graph as the editor holds it, unsaved edits included, and compiles nothing, so a Blueprint that fails to compile still lists its nodes. max_nodes caps a large reply; truncated says whether nodes were left out. Reading under a read-only vendor root leaves the package dirty in memory; reload_asset_package with on_dirty="discard" cleans it.
 //   @core
 //   @param asset_path - The graph asset: a Blueprint by name or path, or the path of a material, material function, sound cue, MetaSound Source, PCG graph or Control Rig. Prefer the FULL path: a Blueprint short name with more than one match resolves silently to one of them, and stale backup copies share the original's name.
 //   @param blueprint_name - Older name of asset_path, still accepted.
@@ -2097,9 +2199,19 @@ TSharedPtr<FJsonObject> HandleAddBlueprintVariable(const TSharedPtr<FJsonObject>
     }
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 
+    // The declaration as the Blueprint holds it after the skeleton regeneration.
+    const int32 VarIndex = FBlueprintEditorUtils::FindNewVariableIndex(Blueprint, FName(*VarName));
+    const bool bDeclared = VarIndex != INDEX_NONE && Blueprint->NewVariables[VarIndex].VarType == PinType;
     TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::BlueprintReply(BlueprintName, TEXT("variable_name"), VarName);
-    Result->SetStringField(TEXT("variable_type"), VarType);
-    Result->SetBoolField(TEXT("is_array"), bIsArray);
+    Result->SetStringField(TEXT("variable_type"), VarIndex != INDEX_NONE
+        ? UEdGraphSchema_K2::TypeToText(Blueprint->NewVariables[VarIndex].VarType).ToString() : VarType);
+    Result->SetBoolField(TEXT("is_array"), VarIndex != INDEX_NONE && Blueprint->NewVariables[VarIndex].VarType.IsArray());
+    Result->SetBoolField(TEXT("success"), bDeclared);
+    if (!bDeclared)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("add_blueprint_variable: '%s' is not declared on the Blueprint with type %s after AddMemberVariable"), *VarName, *VarType));
+    }
     return Result;
 }
 
@@ -2275,7 +2387,55 @@ TSharedPtr<FJsonObject> HandleSetBpVariableMetadata(const TSharedPtr<FJsonObject
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 
     TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::BlueprintReply(BlueprintName, TEXT("variable_name"), VarName);
-    Result->SetBoolField(TEXT("updated"), true);
+    // Each field asked for, read back off the variable description.
+    TArray<FString> Mismatched;
+    const int32 VarIndex = FBlueprintEditorUtils::FindNewVariableIndex(Blueprint, VName);
+    if (VarIndex == INDEX_NONE)
+    {
+        Mismatched.Add(TEXT("variable"));
+    }
+    else
+    {
+        const FBPVariableDescription& Desc = Blueprint->NewVariables[VarIndex];
+        if (Params->HasField(TEXT("instance_editable")))
+        {
+            const bool bReadEditable = !(Desc.PropertyFlags & CPF_DisableEditOnInstance);
+            Result->SetBoolField(TEXT("instance_editable"), bReadEditable);
+            if (bReadEditable != bInstanceEditable) { Mismatched.Add(TEXT("instance_editable")); }
+        }
+        if (bSaveGameRequested && ((Desc.PropertyFlags & CPF_SaveGame) != 0) != bSaveGame)
+        {
+            Mismatched.Add(TEXT("save_game"));
+        }
+        if (Params->HasField(TEXT("expose_on_spawn")))
+        {
+            const bool bReadExpose = Desc.HasMetaData(FBlueprintMetadata::MD_ExposeOnSpawn)
+                && Desc.GetMetaData(FBlueprintMetadata::MD_ExposeOnSpawn) == TEXT("true");
+            Result->SetBoolField(TEXT("expose_on_spawn"), bReadExpose);
+            if (bReadExpose != bExpose) { Mismatched.Add(TEXT("expose_on_spawn")); }
+        }
+        if (Params->HasField(TEXT("category")))
+        {
+            Result->SetStringField(TEXT("category"), Desc.Category.ToString());
+            // An empty category is stored as the engine's default one.
+            if (!Category.IsEmpty() && !Desc.Category.ToString().Equals(Category)) { Mismatched.Add(TEXT("category")); }
+        }
+        if (Params->HasField(TEXT("tooltip")))
+        {
+            const FString ReadTooltip = Desc.HasMetaData(FBlueprintMetadata::MD_Tooltip) ? Desc.GetMetaData(FBlueprintMetadata::MD_Tooltip) : FString();
+            Result->SetStringField(TEXT("tooltip"), ReadTooltip);
+            if (ReadTooltip != Tooltip) { Mismatched.Add(TEXT("tooltip")); }
+        }
+    }
+    const bool bUpdated = Mismatched.Num() == 0;
+    Result->SetBoolField(TEXT("updated"), bUpdated);
+    Result->SetBoolField(TEXT("success"), bUpdated);
+    if (!bUpdated)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("set_blueprint_variable_metadata: read back, these fields of '%s' do not hold the requested value: %s"),
+            *VarName, *FString::Join(Mismatched, TEXT(", "))));
+    }
     // `updated:true` measures nothing on its own, so when save_game was asked for, read the flag
     // back off BOTH places it lives -- and expect them to differ. MarkBlueprintAsStructurallyModified
     // recompiles the SKELETON only (BlueprintEditorUtils.cpp, RegenerateSkeletonOnly); the flag
@@ -2329,6 +2489,12 @@ TSharedPtr<FJsonObject> HandleDeleteBpVariable(const TSharedPtr<FJsonObject>& Pa
 
     TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::BlueprintReply(BlueprintName, TEXT("variable_name"), VarName);
     Result->SetBoolField(TEXT("deleted"), bRemoved);
+    Result->SetBoolField(TEXT("success"), bRemoved);
+    if (!bRemoved)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("remove_blueprint_variable: '%s' is still declared on the Blueprint after RemoveMemberVariable"), *VarName));
+    }
     return Result;
 }
 
@@ -2476,7 +2642,9 @@ TSharedPtr<FJsonObject> HandleRenameBpVariable(const TSharedPtr<FJsonObject>& Pa
     return Result;
 }
 
-// MCP:rename_function_parameter - Rename a PARAMETER of a Blueprint function graph -- the parameter counterpart of rename_blueprint_variable, and the only way to rename one that keeps call sites: removing it (remove_function_parameter) and adding it again breaks every link and literal the callers had. It renames the pin on the Entry node and on EVERY Result node of the graph, and registers a CoreRedirect so that call sites re-map themselves. That redirect is not a nicety: it is what stops this from being a PHANTOM PIN FACTORY. With the redirect, the call site's pin takes the new name AND KEEPS ITS LITERAL VALUE; renamed WITHOUT one, the old pin stays alive and ORPHANED on the caller. WARNING: that orphan is silent: it survives compiles that report num_errors:0 -- so `compile_blueprint` is NOT the oracle here. The oracle is get_graph_nodes(compact=false) on the callers, checking that NO pin still carries the old name. The redirect matches on `Class.Function.Param`, so it reaches callers that merely CALL the function (K2Node_Message included) without implementing its interface, and dependents that are not even loaded -- both of which rename_blueprint_variable cannot reach. It does NOT rename anything that names the parameter as TEXT (a DataTable cell, a saved game, Python). Run compile_blueprint afterwards and save_asset on this Blueprint AND on every caller. AND THE COMPILE IS NOT THE END OF IT: what reaches the .uasset is UserDefinedPins, not the EdGraphPins you read back -- a rename checked only on the latter can report renamed:true, compile at num_errors:0, be saved and COMMITTED, and still come back as the OLD name the next time the editor starts. So it also reports entry_user_pins_after/result_user_pins_after (the serialized side, legitimately EMPTY on an interface-override graph) and refuses to claim success while any UserDefinedPin still carries the old name. The end-to-end oracle is still disk: save_asset -> reload_asset_package -> get_function_pins.
+// MCP:rename_function_parameter - Rename a PARAMETER of a Blueprint function graph, keeping call sites: removing and re-adding it (remove_function_parameter) breaks every caller's link and literal.
+//   @para Renames the pin on the Entry node and EVERY Result node and registers a CoreRedirect (Class.Function.Param), so call sites re-map and keep their literal values, including callers that only CALL the function (K2Node_Message) and dependents not loaded. Without the redirect the old pin survives ORPHANED on the caller, and compile_blueprint still reports num_errors:0. Names held as TEXT (a DataTable cell, a saved game, Python) are not renamed.
+//   @para Afterwards compile_blueprint and save_asset this Blueprint AND every caller. Success is refused while any serialized UserDefinedPin (entry_user_pins_after/result_user_pins_after, legitimately empty on an interface-override graph) still carries the old name. Verify on callers with get_graph_nodes(compact=false), and on disk with save_asset -> reload_asset_package -> get_function_pins.
 //   @param blueprint_name - Blueprint asset name or path owning the function graph.
 //   @param function_name - Name of the function graph (an interface's own function graph and an interface-override graph both work).
 //   @param old_name - Current parameter name, matched on the Entry node and on every Result node. A name present on only one of them is fine.
@@ -2773,8 +2941,16 @@ TSharedPtr<FJsonObject> HandleImplementInterface(const TSharedPtr<FJsonObject>& 
         return mcp_common::MakeErrorReply(TEXT("ImplementNewInterface failed (already implemented, or not a valid interface)"));
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 
+    const bool bImplemented = Blueprint->ImplementedInterfaces.ContainsByPredicate(
+        [InterfaceClass](const FBPInterfaceDescription& Desc) { return Desc.Interface == InterfaceClass; });
     TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::BlueprintReply(BlueprintName, TEXT("interface"), InterfaceClass->GetName());
-    Result->SetBoolField(TEXT("implemented"), true);
+    Result->SetBoolField(TEXT("implemented"), bImplemented);
+    Result->SetBoolField(TEXT("success"), bImplemented);
+    if (!bImplemented)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("implement_interface: %s is not in the Blueprint's implemented interfaces after ImplementNewInterface"), *InterfaceClass->GetName()));
+    }
     return Result;
 }
 
@@ -2818,8 +2994,16 @@ TSharedPtr<FJsonObject> HandleRemoveInterface(const TSharedPtr<FJsonObject>& Par
     FBlueprintEditorUtils::RemoveInterface(Blueprint, InterfaceClass->GetClassPathName(), bPreserveFunctions);
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 
+    const bool bGone = !Blueprint->ImplementedInterfaces.ContainsByPredicate(
+        [InterfaceClass](const FBPInterfaceDescription& Desc) { return Desc.Interface == InterfaceClass; });
     TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::BlueprintReply(BlueprintName, TEXT("interface"), InterfaceClass->GetName());
-    Result->SetBoolField(TEXT("removed"), true);
+    Result->SetBoolField(TEXT("removed"), bGone);
+    Result->SetBoolField(TEXT("success"), bGone);
+    if (!bGone)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("remove_interface: %s is still in the Blueprint's implemented interfaces after RemoveInterface"), *InterfaceClass->GetName()));
+    }
     return Result;
 }
 
@@ -3383,9 +3567,17 @@ TSharedPtr<FJsonObject> HandleAddFunctionLocalVariable(const TSharedPtr<FJsonObj
     if (!bOk)
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("AddLocalVariable failed for '%s' (name may already exist)"), *VarName));
 
+    const FBPVariableDescription* Local = FBlueprintEditorUtils::FindLocalVariable(Blueprint, FuncGraph, FName(*VarName));
+    const bool bDeclared = Local && Local->VarType == PinType;
     TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::BlueprintReply(BlueprintName, TEXT("function_name"), FunctionName);
     Result->SetStringField(TEXT("variable_name"), VarName);
-    Result->SetStringField(TEXT("variable_type"), VarType);
+    Result->SetStringField(TEXT("variable_type"), Local ? UEdGraphSchema_K2::TypeToText(Local->VarType).ToString() : VarType);
+    Result->SetBoolField(TEXT("success"), bDeclared);
+    if (!bDeclared)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("add_function_local_variable: '%s' is not a local of '%s' with type %s after AddLocalVariable"), *VarName, *FunctionName, *VarType));
+    }
     return Result;
 }
 
@@ -3458,9 +3650,9 @@ TSharedPtr<FJsonObject> HandleRemoveFunctionParameter(const TSharedPtr<FJsonObje
     return Result;
 }
 
-// MCP:set_function_parameter_type - Change the TYPE of an existing parameter of a Blueprint function, macro or custom event, keeping its name and its place in the signature: what the parameter's type picker in the Details panel does. Adding the parameter again under the same name is not the same: remove_function_parameter breaks every link and literal its callers had, and this keeps the links that still fit.
-//   @para The new type goes on the Entry node (an input), on every Result node (an output), on the macro's tunnel or on the event node, and the parameter's default value is cleared, as the editor clears it, because it rarely fits the new type. Then every LOADED call site is rebuilt, in this Blueprint and in the others that call it (function and event calls, interface messages, macro instances), and each link of the parameter that the new type no longer allows is broken: links_broken lists them, with the node and pin at both ends, so they can be rewired; links_kept counts the rest. A Blueprint that calls it and is not loaded updates when it is compiled.
-//   @para param_type is spelled as for add_function_parameter, containers included ("int[]", "Set<Name>", "Map<Name,int>"); new_type is read back from the pin. The same type again is an honest no-op (changed=false). Nothing is compiled or saved: compile_blueprint this Blueprint and each one in blueprints_to_compile. A graph whose signature comes from an interface or a parent function is refused: change it there (in a Blueprint interface, with this tool: the Blueprints that implement it take the new type when they are compiled), or fit an override with reconcile_function_signature. Refused during PIE unless force=true.
+// MCP:set_function_parameter_type - Change the TYPE of an existing parameter of a Blueprint function, macro or custom event, keeping its name and place, as the Details panel's type picker does; unlike remove_function_parameter + re-add, it keeps the links that still fit.
+//   @para The type changes on the Entry node (input), every Result node (output), the macro tunnel or the event node, and the default value is cleared. Every LOADED call site is rebuilt and each link the new type no longer allows is broken: links_broken lists them with both ends; links_kept counts the rest. Unloaded callers update when compiled.
+//   @para param_type is spelled as for add_function_parameter; new_type is read back from the pin. The same type again is a no-op (changed=false). Nothing is compiled or saved: compile_blueprint this Blueprint and each in blueprints_to_compile. A signature that comes from an interface or parent function is refused: change it there, or use reconcile_function_signature. Refused during PIE unless force=true.
 //   @param blueprint_name - Blueprint name or path.
 //   @param function_name - Name of the function graph, else of a macro graph, else of a custom event.
 //   @param param_name - The parameter to retype, as get_function_pins or add_function_parameter names it.
@@ -4002,7 +4194,7 @@ namespace
 // MCP:add_blueprint_timeline_track - Add a track to a Timeline of a Blueprint, with optional keys, as the Timeline editor's "+ Track" does: a float, vector, color or event track whose curve is made inside the Blueprint, then the timeline node is reconstructed (a float/vector/color track gets an output pin of its name, an event track an exec output) and the Blueprint compiled; one undo step (the compile is not undone). The reply re-reads the timeline (tracks, output_pins). keys is [[time, value], ...]: value a number for float, [x,y,z] for vector, [r,g,b] or [r,g,b,a] for color, nothing for event ([time] or a bare time). A track name already used on the timeline, a malformed key or an unknown track_type is an error and nothing changes; so is a missing Blueprint or timeline. Keys past the timeline length stay but play only if length grows. Refused during PIE unless force=true. Timelines come from add_timeline_to_blueprint; read: get_blueprint_timeline_info; inverse: remove_blueprint_timeline_track.
 //   @param blueprint_name - Name (or full object path) of an Actor Blueprint.
 //   @param timeline_name - The timeline's variable name, as add_timeline_to_blueprint returned it.
-//   @param track_type - float | vector | color | event
+//   @param track_type - float | vector | color | event; linearcolor is accepted as color.
 //   @param track_name - Name of the new track, unique on this timeline; it names the node's output pin.
 //   @param keys [array] - Optional keys, [[time, value], ...] (see the description for value by track type).
 //   @param interpolation - Optional key interpolation for float/vector/color: "linear" (default) | "cubic" | "constant".
@@ -4315,8 +4507,21 @@ TSharedPtr<FJsonObject> HandleAddEventDispatcher(const TSharedPtr<FJsonObject>& 
     Blueprint->DelegateSignatureGraphs.Add(NewGraph);
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 
+    // Both halves of a dispatcher, read back: the delegate variable and its signature graph.
+    const int32 VarIndex = FBlueprintEditorUtils::FindNewVariableIndex(Blueprint, Name);
+    const bool bHasVar = VarIndex != INDEX_NONE && Blueprint->NewVariables[VarIndex].VarType.PinCategory == UEdGraphSchema_K2::PC_MCDelegate;
+    const bool bHasGraph = Blueprint->DelegateSignatureGraphs.ContainsByPredicate(
+        [&Name](const UEdGraph* G) { return G && G->GetFName() == Name; });
+    const bool bCreated = bHasVar && bHasGraph;
     TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::BlueprintReply(BlueprintName, TEXT("dispatcher_name"), DispatcherName);
-    Result->SetBoolField(TEXT("created"), true);
+    Result->SetBoolField(TEXT("created"), bCreated);
+    Result->SetBoolField(TEXT("success"), bCreated);
+    if (!bCreated)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("add_event_dispatcher: read back, '%s' is missing its %s"), *DispatcherName,
+            bHasVar ? TEXT("signature graph") : TEXT("delegate variable")));
+    }
     return Result;
 }
 
@@ -4373,8 +4578,19 @@ TSharedPtr<FJsonObject> HandleRemoveEventDispatcher(const TSharedPtr<FJsonObject
     }
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 
+    const bool bVarLeft = FBlueprintEditorUtils::FindNewVariableIndex(Blueprint, Name) != INDEX_NONE;
+    const bool bGraphLeft = Blueprint->DelegateSignatureGraphs.ContainsByPredicate(
+        [&Name](const UEdGraph* G) { return G && G->GetFName() == Name; });
+    const bool bRemoved = !bVarLeft && !bGraphLeft;
     TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::BlueprintReply(BlueprintName, TEXT("dispatcher_name"), DispatcherName);
-    Result->SetBoolField(TEXT("removed"), true);
+    Result->SetBoolField(TEXT("removed"), bRemoved);
+    Result->SetBoolField(TEXT("success"), bRemoved);
+    if (!bRemoved)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("remove_event_dispatcher: read back, '%s' still has its %s"), *DispatcherName,
+            bVarLeft ? TEXT("delegate variable") : TEXT("signature graph")));
+    }
     return Result;
 }
 
@@ -4504,6 +4720,27 @@ TSharedPtr<FJsonObject> HandleSetEventDispatcherSignature(const TSharedPtr<FJson
     Result->SetArrayField(TEXT("added"), Added);
     Result->SetArrayField(TEXT("params"), ParamsOut);
     Result->SetNumberField(TEXT("param_count"), ParamsOut.Num());
+
+    // Every requested parameter must be on the entry node, with the type it was asked for.
+    TArray<FString> MissingParams;
+    for (const FParamReq& R : Reqs)
+    {
+        const bool bThere = EntryNode->UserDefinedPins.ContainsByPredicate([&R](const TSharedPtr<FUserPinInfo>& PinInfo)
+        {
+            return PinInfo.IsValid() && PinInfo->PinName == FName(*R.Name) && PinInfo->PinType == R.PinType;
+        });
+        if (!bThere)
+        {
+            MissingParams.Add(R.Name);
+        }
+    }
+    Result->SetBoolField(TEXT("success"), MissingParams.Num() == 0);
+    if (MissingParams.Num() > 0)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("set_event_dispatcher_signature: read back, these parameters are not on '%s' with the requested type: %s"),
+            *DispatcherName, *FString::Join(MissingParams, TEXT(", "))));
+    }
     return Result;
 }
 
@@ -4613,6 +4850,16 @@ TSharedPtr<FJsonObject> HandleSetBpVariableReplication(const TSharedPtr<FJsonObj
     Result->SetBoolField(TEXT("is_rep_notify"), bIsRepNotify);
     Result->SetStringField(TEXT("rep_notify_func"), VerifyRepFunc.ToString());
     Result->SetNumberField(TEXT("property_flags"), static_cast<double>(FinalFlags));
+    const bool bMatches = VerifyPtr
+        && bIsNet == (ReplMode != EReplMode::None)
+        && bIsRepNotify == (ReplMode == EReplMode::RepNotify);
+    Result->SetBoolField(TEXT("success"), bMatches);
+    if (!bMatches)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("set_blueprint_variable_replication: after the compile '%s' reads is_replicated=%s, is_rep_notify=%s, which is not mode %s"),
+            *VarName, bIsNet ? TEXT("true") : TEXT("false"), bIsRepNotify ? TEXT("true") : TEXT("false"), *Mode));
+    }
     return Result;
 }
 
@@ -4700,6 +4947,15 @@ TSharedPtr<FJsonObject> HandleSetBpFunctionRpc(const TSharedPtr<FJsonObject>& Pa
     Result->SetBoolField(TEXT("is_net"), bIsNet);
     Result->SetBoolField(TEXT("reliable"), bIsReliable);
     Result->SetNumberField(TEXT("function_flags"), static_cast<double>(VerifyFlags));
+    const bool bMatches = ResolvedType.Equals(RpcType, ESearchCase::IgnoreCase)
+        && bIsReliable == (NetSpecifier != 0 && bReliable);
+    Result->SetBoolField(TEXT("success"), bMatches);
+    if (!bMatches)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("set_blueprint_function_rpc: after the compile '%s' reads rpc_type=%s, reliable=%s, not the requested %s"),
+            *FunctionName, *ResolvedType, bIsReliable ? TEXT("true") : TEXT("false"), *RpcType));
+    }
     return Result;
 }
 
@@ -4774,6 +5030,13 @@ TSharedPtr<FJsonObject> HandleSetBlueprintFunctionPure(const TSharedPtr<FJsonObj
     Result->SetBoolField(TEXT("was_pure"), bWasPure);
     Result->SetBoolField(TEXT("changed"), bIsPure != bWasPure);
     Result->SetNumberField(TEXT("function_flags"), static_cast<double>(FlagsAfter));
+    Result->SetBoolField(TEXT("success"), bIsPure == bWantPure);
+    if (bIsPure != bWantPure)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("set_blueprint_function_pure: after the compile '%s' reads is_pure=%s; the compiler did not keep the change"),
+            *FunctionName, bIsPure ? TEXT("true") : TEXT("false")));
+    }
     return Result;
 }
 
@@ -4827,8 +5090,8 @@ TSharedPtr<FJsonObject> HandleSetBpClassReplication(const TSharedPtr<FJsonObject
 
     // Re-fetch the CDO after compile (compile may reinstance) and read back to verify.
     AActor* VerifyCDO = Cast<AActor>(Blueprint->GeneratedClass ? Blueprint->GeneratedClass->GetDefaultObject(false) : nullptr);
-    const bool bVerifyReplicates = VerifyCDO ? VerifyCDO->GetIsReplicated() : bReplicates;
-    const bool bVerifyAlwaysRelevant = VerifyCDO ? (VerifyCDO->bAlwaysRelevant != 0) : bAlwaysRelevantValue;
+    const bool bVerifyReplicates = VerifyCDO && VerifyCDO->GetIsReplicated();
+    const bool bVerifyAlwaysRelevant = VerifyCDO && VerifyCDO->bAlwaysRelevant != 0;
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("blueprint_name"), BlueprintName);
@@ -4837,6 +5100,15 @@ TSharedPtr<FJsonObject> HandleSetBpClassReplication(const TSharedPtr<FJsonObject
     if (bAlwaysRelevantSet)
     {
         Result->SetBoolField(TEXT("always_relevant"), bVerifyAlwaysRelevant);
+    }
+    const bool bMatches = VerifyCDO && bVerifyReplicates == bReplicates
+        && (!bAlwaysRelevantSet || bVerifyAlwaysRelevant == bAlwaysRelevantValue);
+    Result->SetBoolField(TEXT("success"), bMatches);
+    if (!bMatches)
+    {
+        Result->SetStringField(TEXT("error"), VerifyCDO
+            ? FString(TEXT("set_blueprint_class_replication: the post-compile CDO does not hold the requested replicates/always_relevant"))
+            : FString(TEXT("set_blueprint_class_replication: the Blueprint has no Actor CDO after the compile to read back")));
     }
     return Result;
 }
@@ -4883,10 +5155,17 @@ TSharedPtr<FJsonObject> HandleSetComponentReplication(const TSharedPtr<FJsonObje
     FKismetEditorUtilities::CompileBlueprint(Blueprint, EBlueprintCompileOptions::None);
 
     // Read the value back off the template to verify.
-    const bool bVerify = Template->GetIsReplicated();
+    const bool bVerify = OwnNode->ComponentTemplate && OwnNode->ComponentTemplate->GetIsReplicated();
 
     TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::BlueprintReply(BlueprintName, TEXT("component_name"), ComponentName);
     Result->SetBoolField(TEXT("replicates"), bVerify);
+    Result->SetBoolField(TEXT("success"), bVerify == bReplicates);
+    if (bVerify != bReplicates)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("set_component_replication: the template of '%s' reads replicates=%s after the compile"),
+            *ComponentName, bVerify ? TEXT("true") : TEXT("false")));
+    }
     return Result;
 }
 
@@ -4973,6 +5252,14 @@ TSharedPtr<FJsonObject> HandleAddTimelineToBlueprint(const TSharedPtr<FJsonObjec
     Result->SetNumberField(TEXT("length"), Verify ? Verify->TimelineLength : (float)Length);
     Result->SetBoolField(TEXT("timeline_created"), Verify != nullptr);
     Result->SetStringField(TEXT("timeline_guid"), Node->TimelineGuid.ToString());
+    const bool bCreated = Verify != nullptr && Graph->Nodes.Contains(Node);
+    Result->SetBoolField(TEXT("success"), bCreated);
+    if (!bCreated)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("add_timeline_to_blueprint: after the compile timeline '%s' has %s"), *TimelineVarName.ToString(),
+            Verify ? TEXT("no node in the graph") : TEXT("no template registered on the Blueprint")));
+    }
     return Result;
 }
 
@@ -5064,6 +5351,13 @@ TSharedPtr<FJsonObject> HandleAddComponentBoundEvent(const TSharedPtr<FJsonObjec
     Result->SetStringField(TEXT("delegate"), DelegateName);
     Result->SetStringField(TEXT("custom_function_name"), Node->CustomFunctionName.ToString());
     Result->SetBoolField(TEXT("bound"), bBound);
+    Result->SetBoolField(TEXT("success"), bBound);
+    if (!bBound)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("add_component_bound_event: after the compile no bound event for %s.%s is registered on the Blueprint"),
+            *ComponentName, *DelegateName));
+    }
     return Result;
 }
 
@@ -5163,7 +5457,20 @@ TSharedPtr<FJsonObject> HandleAddObjectBoundEvent(const TSharedPtr<FJsonObject>&
     Result->SetStringField(TEXT("graph_name"), Graph->GetName());
     Result->SetStringField(TEXT("target_class"), TargetClass->GetPathName());
     Result->SetStringField(TEXT("dispatcher"), FoundDispatcher);
-    Result->SetBoolField(TEXT("wired"), bWired);
+    // Read the wire back off the event's delegate pin, and both nodes off the graph.
+    const UEdGraphPin* EventDelegatePin = EventNode->FindPin(UK2Node_CustomEvent::DelegateOutputName, EGPD_Output);
+    const bool bLinked = bWired && EventDelegatePin && EventDelegatePin->LinkedTo.ContainsByPredicate(
+        [BindNode](const UEdGraphPin* Linked) { return Linked && Linked->GetOwningNode() == BindNode; });
+    const bool bPlaced = Graph->Nodes.Contains(BindNode) && Graph->Nodes.Contains(EventNode);
+    Result->SetBoolField(TEXT("wired"), bLinked);
+    Result->SetBoolField(TEXT("success"), bLinked && bPlaced);
+    if (!(bLinked && bPlaced))
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("add_object_bound_event: %s; the nodes made are listed here, remove them with remove_graph_node"),
+            !bPlaced ? TEXT("the AddDelegate or handler event node is not in the graph")
+                     : TEXT("the handler event's delegate pin is not linked to the AddDelegate node")));
+    }
     return Result;
 }
 
@@ -5191,9 +5498,11 @@ TSharedPtr<FJsonObject> MakeBoundEventBinding(const UEdGraph* Graph, const UK2No
 }
 }
 
-// MCP:list_widget_bound_events - List every event-dispatcher BINDING wired in a Blueprint, across the three node kinds that make one in practice: UK2Node_AddDelegate (from add_object_bound_event / add_graph_node node_type="add_delegate"), UK2Node_ComponentBoundEvent (from add_component_bound_event -- a component's dispatcher OR a UMG widget's, e.g. a Button's OnClicked) and UK2Node_ActorBoundEvent (a level actor's, bound from the Level Blueprint). Each entry reports which kind it is (binding_kind), what it is bound ON (bound_to: the component/widget variable, or the actor), the delegate's owner class and name, and the handler on the other end. Despite the name it works on ANY Blueprint -- but it only walks Ubergraph pages and FunctionGraphs, so a binding inside a macro or interface graph is out of scope. Run it BEFORE add_object_bound_event / add_component_bound_event: double-binding one delegate to two handlers compiles fine and silently runs BOTH. A reader that cannot see what the writer wrote is worse than no reader: a 0 reads as "not wired" and sends you to re-wire what is already there.
+// MCP:list_widget_bound_events - List the event-dispatcher BINDINGS wired in a Blueprint, in graph order and a page at a time (offset/limit; kind_counts and total count them all), across the three node kinds that make one in practice: UK2Node_AddDelegate (from add_object_bound_event / add_graph_node node_type="add_delegate"), UK2Node_ComponentBoundEvent (from add_component_bound_event -- a component's dispatcher OR a UMG widget's, e.g. a Button's OnClicked) and UK2Node_ActorBoundEvent (a level actor's, bound from the Level Blueprint). Each entry reports which kind it is (binding_kind), what it is bound ON (bound_to: the component/widget variable, or the actor), the delegate's owner class and name, and the handler on the other end. Despite the name it works on ANY Blueprint -- but it only walks Ubergraph pages and FunctionGraphs, so a binding inside a macro or interface graph is out of scope. Run it BEFORE add_object_bound_event / add_component_bound_event: double-binding one delegate to two handlers compiles fine and silently runs BOTH. A reader that cannot see what the writer wrote is worse than no reader: a 0 reads as "not wired" and sends you to re-wire what is already there.
 //   @param blueprint_name - Blueprint asset name or path (Actor Blueprint, Widget Blueprint or Level Blueprint).
-//   @returns { blueprint_name, bindings:[{ graph_name, node_id, binding_kind, bound_to, delegate_owner_class, delegate_name, delegate_resolved, wired, custom_event_name, custom_event_node_id }], binding_count, kind_counts:{add_delegate,component_bound_event,actor_bound_event} } -- binding_kind names the node class behind the entry. bound_to is the component/widget variable name (component_bound_event), the actor name (actor_bound_event), or empty for add_delegate, whose target pin is left unconnected by design. delegate_resolved=false means the delegate no longer resolves live (renamed/removed). wired=false is a DANGLING add_delegate bind (its Delegate pin has no handler); the two *BoundEvent kinds ARE their own handler, so they are always wired and custom_event_name is the generated BndEvt__ function.
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { blueprint_name, bindings:[{ graph_name, node_id, binding_kind, bound_to, delegate_owner_class, delegate_name, delegate_resolved, wired, custom_event_name, custom_event_node_id }], binding_count (entries in this page), kind_counts:{add_delegate,component_bound_event,actor_bound_event}, total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null } -- binding_kind names the node class behind the entry. bound_to is the component/widget variable name (component_bound_event), the actor name (actor_bound_event), or empty for add_delegate, whose target pin is left unconnected by design. delegate_resolved=false means the delegate no longer resolves live (renamed/removed). wired=false is a DANGLING add_delegate bind (its Delegate pin has no handler); the two *BoundEvent kinds ARE their own handler, so they are always wired and custom_event_name is the generated BndEvt__ function.
 TSharedPtr<FJsonObject> HandleListWidgetBoundEvents(const TSharedPtr<FJsonObject>& Params)
 {
     FString BlueprintName;
@@ -5321,6 +5630,7 @@ TSharedPtr<FJsonObject> HandleListWidgetBoundEvents(const TSharedPtr<FJsonObject
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("blueprint_name"), BlueprintName);
+    mcp_common::ApplyListPage(Bindings, mcp_common::ReadListPage(Params), Result);
     Result->SetArrayField(TEXT("bindings"), Bindings);
     Result->SetNumberField(TEXT("binding_count"), Bindings.Num());
 
@@ -5375,6 +5685,12 @@ TSharedPtr<FJsonObject> HandleAddInputActionEventNode(const TSharedPtr<FJsonObje
     TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::NodeReply(Node, BlueprintName, Graph);
     Result->SetStringField(TEXT("input_action_name"), Node->InputActionName.ToString());
     Result->SetStringField(TEXT("node_class"), Node->GetClass()->GetName());
+    const bool bPlaced = Graph->Nodes.Contains(Node) && Node->InputActionName == FName(*InputActionName);
+    Result->SetBoolField(TEXT("success"), bPlaced);
+    if (!bPlaced)
+    {
+        Result->SetStringField(TEXT("error"), UEAgentGraphCommandsImpl::NodeNotPlacedError(TEXT("add_input_action_event_node"), Graph, TEXT("input action event node")));
+    }
     return Result;
 }
 
@@ -5434,6 +5750,12 @@ TSharedPtr<FJsonObject> HandleAddEnhancedInputActionNode(const TSharedPtr<FJsonO
     TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::NodeReply(Node, BlueprintName, Graph);
     Result->SetStringField(TEXT("input_action"), InputAction->GetPathName());
     Result->SetStringField(TEXT("node_class"), Node->GetClass()->GetName());
+    const bool bPlaced = Graph->Nodes.Contains(Node) && Node->InputAction == InputAction;
+    Result->SetBoolField(TEXT("success"), bPlaced);
+    if (!bPlaced)
+    {
+        Result->SetStringField(TEXT("error"), UEAgentGraphCommandsImpl::NodeNotPlacedError(TEXT("add_enhanced_input_action_node"), Graph, TEXT("Enhanced Input action node")));
+    }
     return Result;
 }
 
@@ -5469,6 +5791,12 @@ TSharedPtr<FJsonObject> HandleAddRerouteNode(const TSharedPtr<FJsonObject>& Para
     Graph->NotifyGraphChanged();
 
     TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::NodeReply(Node, BlueprintName, Graph);
+    const bool bPlaced = Graph->Nodes.Contains(Node);
+    Result->SetBoolField(TEXT("success"), bPlaced);
+    if (!bPlaced)
+    {
+        Result->SetStringField(TEXT("error"), UEAgentGraphCommandsImpl::NodeNotPlacedError(TEXT("add_reroute_node"), Graph, TEXT("reroute node")));
+    }
     return Result;
 }
 
@@ -5586,6 +5914,12 @@ TSharedPtr<FJsonObject> HandleAddBroadcastNode(const TSharedPtr<FJsonObject>& Pa
 
     TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::NodeReply(Node, BlueprintName, Graph);
     Result->SetStringField(TEXT("dispatcher_name"), DispatcherName);
+    const bool bPlaced = Graph->Nodes.Contains(Node) && Node->GetPropertyName() == DelegateProp->GetFName();
+    Result->SetBoolField(TEXT("success"), bPlaced);
+    if (!bPlaced)
+    {
+        Result->SetStringField(TEXT("error"), UEAgentGraphCommandsImpl::NodeNotPlacedError(TEXT("add_broadcast_node"), Graph, TEXT("broadcast node for this dispatcher")));
+    }
     return Result;
 }
 
@@ -5637,6 +5971,12 @@ TSharedPtr<FJsonObject> HandleAddParentCallNode(const TSharedPtr<FJsonObject>& P
     TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::NodeReply(Node, BlueprintName, Graph);
     Result->SetStringField(TEXT("function_name"), FunctionName);
     Result->SetStringField(TEXT("parent_class"), OwnerClass ? OwnerClass->GetName() : TEXT(""));
+    const bool bPlaced = Graph->Nodes.Contains(Node) && Node->FunctionReference.GetMemberName() == ParentFunc->GetFName();
+    Result->SetBoolField(TEXT("success"), bPlaced);
+    if (!bPlaced)
+    {
+        Result->SetStringField(TEXT("error"), UEAgentGraphCommandsImpl::NodeNotPlacedError(TEXT("add_parent_call_node"), Graph, TEXT("parent call node for this function")));
+    }
     return Result;
 }
 
@@ -6112,9 +6452,16 @@ TSharedPtr<FJsonObject> HandleCreateBlueprintMacro(const TSharedPtr<FJsonObject>
         return mcp_common::MakeErrorReply(TEXT("FBlueprintEditorUtils::CreateNewGraph failed"));
     FBlueprintEditorUtils::AddMacroGraph(Blueprint, NewGraph, /*bIsUserCreated=*/true, /*SignatureFromClass=*/nullptr);
 
+    const bool bRegistered = Blueprint->MacroGraphs.Contains(NewGraph);
     TSharedPtr<FJsonObject> Result = UEAgentGraphCommandsImpl::BlueprintReply(BlueprintName, TEXT("macro_name"), MacroName);
     Result->SetStringField(TEXT("graph_name"), NewGraph->GetName());
     Result->SetBoolField(TEXT("already_existed"), false);
+    Result->SetBoolField(TEXT("success"), bRegistered);
+    if (!bRegistered)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("create_blueprint_macro: graph '%s' is not in the Blueprint's macro graphs after AddMacroGraph"), *NewGraph->GetName()));
+    }
     return Result;
 }
 
@@ -6161,9 +6508,16 @@ TSharedPtr<FJsonObject> HandleSplitBlueprintPin(const TSharedPtr<FJsonObject>& P
         }
     }
 
+    const bool bSplit = SubPinNames.Num() > 0;
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-    Result->SetBoolField(TEXT("split"), true);
+    Result->SetBoolField(TEXT("split"), bSplit);
     Result->SetArrayField(TEXT("sub_pins"), SubPinNames);
+    Result->SetBoolField(TEXT("success"), bSplit);
+    if (!bSplit)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("split_blueprint_pin: pin '%s' of node %s has no sub-pins after SplitPin"), *PinName, *NodeId));
+    }
     return Result;
 }
 
@@ -6205,12 +6559,25 @@ TSharedPtr<FJsonObject> HandleRecombineBlueprintPin(const TSharedPtr<FJsonObject
     FScopedTransaction Transaction(LOCTEXT("RecombineBlueprintPin", "MCP: Recombine Pin"));
     Blueprint->Modify();
     Graph->Modify();
+    // RecombinePin destroys the sub-pins, so the parent is found again by name afterwards.
+    const UEdGraphPin* ParentPin = Pin->ParentPin ? Pin->ParentPin : Pin;
+    const FName ParentPinName = ParentPin->PinName;
+    const EEdGraphPinDirection ParentPinDir = ParentPin->Direction;
     Schema->RecombinePin(Pin);
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
     Graph->NotifyGraphChanged();
 
+    const UEdGraphPin* Recombined = Node->FindPin(ParentPinName, ParentPinDir);
+    const bool bRecombined = Recombined && Recombined->SubPins.Num() == 0 && !Recombined->bHidden;
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-    Result->SetBoolField(TEXT("recombined"), true);
+    Result->SetBoolField(TEXT("recombined"), bRecombined);
+    Result->SetBoolField(TEXT("success"), bRecombined);
+    if (!bRecombined)
+    {
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("recombine_blueprint_pin: pin '%s' of node %s is not a single visible pin after RecombinePin"),
+            *ParentPinName.ToString(), *NodeId));
+    }
     return Result;
 }
 
@@ -6927,7 +7294,7 @@ TSharedPtr<FJsonObject> HandleGetPropertyAccessPath(const TSharedPtr<FJsonObject
 // MCP:set_property_access_path - Rewrite a UK2Node_PropertyAccess node's binding Path and reconstruct the node so the leaf property re-resolves and the Value pin re-types, then return the path READ BACK -- so resolved:true is real evidence the new binding points at something. It does NOT recompile: follow with compile_blueprint with return_messages=true. reconstructed:false means the PropertyAccessEditor feature was unavailable: the path WAS written but text_path/resolved_pin stay stale until the graph reopens.
 //   @param blueprint_name - Blueprint name or path (usually an Animation Blueprint).
 //   @param node_id - NodeGuid of the property-access node; any other node class is refused by name.
-//   @param path - The new path: either an array of segment strings (["InAnimInstance","Foo"]) OR a dotted string ("InAnimInstance.Foo"). An empty result is an error, never a cleared binding.
+//   @param path [array|string] - The new path: either an array of segment strings (["InAnimInstance","Foo"]) OR a dotted string ("InAnimInstance.Foo"). An empty result is an error, never a cleared binding.
 //   @param graph_name - Target graph name; defaults to the Blueprint's event graph when omitted.
 //   @returns { node_id, graph_name, reconstructed, path:[string], text_path, resolved, resolved_pin, note? } -- path/text_path/resolved are re-read AFTER the reconstruct, so they are the oracle rather than an echo.
 TSharedPtr<FJsonObject> HandleSetPropertyAccessPath(const TSharedPtr<FJsonObject>& Params)

@@ -46,9 +46,9 @@ Add an event handler to a Niagara emitter (the writer for event_handler_count). 
 | `emitter_name` | string | yes | Display name of the emitter handle within the system. |
 | `source_event_name` | string | yes | Name of the source event this handler consumes (its identity key for idempotency). |
 | `execution_mode` | string | no | Optional EveryParticle \| SpawnedParticles \| SingleParticle (default EveryParticle). |
-| `spawn_number` | number | no | Optional int particles to spawn per event (SpawnedParticles mode). |
-| `max_events_per_frame` | number | no | Optional int cap on events consumed per frame. |
-| `min_spawn_number` | number | no | Optional int minimum spawn when random_spawn_number is set. |
+| `spawn_number` | integer | no | Optional int particles to spawn per event (SpawnedParticles mode). |
+| `max_events_per_frame` | integer | no | Optional int cap on events consumed per frame. |
+| `min_spawn_number` | integer | no | Optional int minimum spawn when random_spawn_number is set. |
 | `random_spawn_number` | boolean | no | Optional bool: spawn a random count in [min_spawn_number, spawn_number]. |
 | `source_emitter_id` | string | no | Optional GUID of the emitter handle that generates the event (default: this emitter). |
 
@@ -66,7 +66,7 @@ Insert an engine module script into a Niagara emitter's particle stack.  Loads t
 | `emitter_name` | string | yes | Display name of the emitter handle to modify. |
 | `module_script_path` | string | yes | Asset path of the module UNiagaraScript (e.g. "/Niagara/Modules/Update/Forces/GravityForce.GravityForce") |
 | `script_group` | string | no | Optional "spawn" (ParticleSpawnScript) or "update" (ParticleUpdateScript); defaults to "update" |
-| `target_index` | number | no | Optional 0-based position in the stack; -1 (INDEX_NONE, the default) and any index past the end append. A value that is not a JSON number is an error. |
+| `target_index` | integer | no | Optional 0-based position in the stack; -1 (INDEX_NONE, the default) and any index past the end append. A value that is not a JSON number is an error. |
 
 **Returns:** `{ system_path: string, emitter_name: string, module_script_path: string, script_group: string, target_index: int, module_node_name: string, added_with_defaults: bool, success: bool, saved: bool, save_error?: string }`
 
@@ -97,7 +97,7 @@ Add a generic simulation stage (UNiagaraSimulationStageGeneric) to one emitter o
 | `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Display name of the emitter handle. |
 | `stage_name` | string | yes | Name for the new simulation stage. |
-| `iteration_count` | number | no | Optional number of times the stage runs in a row, from 0 to 65535 (rounded to a whole number); defaults to 1 |
+| `iteration_count` | integer | no | Optional number of times the stage runs in a row, from 0 to 65535 (rounded to a whole number); defaults to 1 |
 
 **Returns:** `{ system_path: string, emitter_name: string, stage_name: string, requested_iteration_count: int, iteration_count: int, total_simulation_stages: int, success: bool, saved: bool, save_error?: string }`
 
@@ -140,7 +140,7 @@ Add another instance of a module to one emitter of a Niagara System asset: the m
 | `emitter_name` | string | yes | Display name of the emitter handle, as get_niagara_emitter_handles lists it. |
 | `module_name` | string | yes | Function name of the module to duplicate, case-sensitive, as list_niagara_modules gives module_name for that stack, e.g. 'GravityForce'. |
 | `script_group` | string | no | Optional "spawn" or "update" (any case), the stack the module is on; defaults to "update"; any other value is an error and nothing changes. |
-| `target_index_override` | number | no | Optional stack position for the new module, a JSON number (0 runs first; -1 appends; others are clamped into the stack); defaults to the source's stack index plus one. |
+| `target_index_override` | integer | no | Optional stack position for the new module, a JSON number (0 runs first; -1 appends; others are clamped into the stack); defaults to the source's stack index plus one. |
 
 **Returns:** `{ system_path: string, emitter_name: string, script_group: string, source_module_name: string, source_index: int, new_module_name: string, inserted_index: int, module_count: int, duplicated: bool, saved: bool, save_error?: string }`
 
@@ -225,7 +225,7 @@ List every emitter handle of a Niagara System asset, or just one chosen by displ
 |---|---|---|---|
 | `system_path` | string | yes | Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it. |
 | `emitter_name` | string | no | Optional display name of one handle to return (case-insensitive); when non-empty it wins over emitter_index. |
-| `emitter_index` | number | no | Optional 0-based position in the emitter list of the system of one handle to return, used only when emitter_name is absent or empty. |
+| `emitter_index` | integer | no | Optional 0-based position in the emitter list of the system of one handle to return, used only when emitter_name is absent or empty. |
 
 **Returns:** `{ system_path: string, emitter_count: int, emitter_handles: [{ index: int, name: string, id: string, id_name: string, is_enabled: bool, is_valid: bool, emitter_version: string, is_local_space?: bool, is_deprecated?: bool }] }`
 
@@ -293,8 +293,8 @@ Dump the full property set of a specific renderer instance owned by a system emi
 |---|---|---|---|
 | `system_path` | string | yes | Content path to the UNiagaraSystem asset. |
 | `emitter_name` | string | yes | Name of the emitter handle (preferred) or its FName. |
-| `renderer_index` | number | yes | 0-based index into FVersionedNiagaraEmitterData::RendererProperties. |
-| `handle_index` | number | no | Optional fallback when multiple emitters share a name (0-based). |
+| `renderer_index` | integer | yes | 0-based index into FVersionedNiagaraEmitterData::RendererProperties. |
+| `handle_index` | integer | no | Optional fallback when multiple emitters share a name (0-based). |
 
 **Returns:** `{ system_path, emitter_name, renderer_index, renderer_class, renderer_class_path, properties: {...} }`
 
@@ -308,7 +308,7 @@ Read the simulation stages of a Niagara emitter (read-only): every stage of FVer
 |---|---|---|---|
 | `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Name of the emitter handle. |
-| `stage_index` | number | no | Optional 0-based index of a single stage to return. |
+| `stage_index` | integer | no | Optional 0-based index of a single stage to return. |
 | `stage_name` | string | no | Optional SimulationStageName to match if stage_index is not supplied. |
 
 **Returns:** `{ system_path: string, emitter_name: string, simulation_stage_count: int, total_simulation_stages: int, simulation_stages: [{ index, stage_name, class, enabled, object_path, iteration_source? }] }`
@@ -335,7 +335,7 @@ Read a user-exposed parameter's current value from a Niagara System's exposed st
 |---|---|---|---|
 | `system_path` | string | yes | Asset path of the Niagara System. |
 | `parameter_name` | string | yes | User parameter name (without the "User." prefix). |
-| `type` | string | no | Type token: Float\|Vector\|Vec2\|Vec4\|Color\|Bool\|Int (case-insensitive); defaults to Float |
+| `type` | string | no | Type token: Float\|Vector\|Vec2\|Vec4\|Color\|Bool\|Int (case-insensitive); defaults to Float. Vec3, Vector2, Vector4, LinearColor, Boolean, Int32 and Integer are accepted too. |
 
 **Returns:** `{ system_path: string, parameter_name: string, parameter_type: string, found: bool, value_read_back?: number|bool|[number...] }`
 
@@ -343,11 +343,14 @@ Read a user-exposed parameter's current value from a Niagara System's exposed st
 
 *Read-only.*
 
-Enumerate every concrete UNiagaraDataInterface subclass registered in this process via TObjectIterator. Skips Abstract (those are base classes only). Used to discover what data-interface class strings are valid for add_niagara_data_interface.
+Enumerate every concrete UNiagaraDataInterface subclass registered in this process via TObjectIterator. Skips Abstract (those are base classes only). Used to discover what data-interface class strings are valid for add_niagara_data_interface. The classes come sorted by class_path, a page at a time (offset/limit).
 
-No parameters.
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ count: int, classes: [{class_name, class_path, display_name, abstract, class_flags}] }`
+**Returns:** `{ count: int (entries in this page), classes: [{class_name, class_path, display_name, abstract, class_flags}], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }`
 
 ## `list_niagara_modules`
 
@@ -384,8 +387,8 @@ Move one simulation stage of an emitter of a Niagara System asset to target_inde
 |---|---|---|---|
 | `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Display name of the emitter handle owning the stage. |
-| `target_index` | number | yes | Required 0-based target index the stage should occupy after the move, a JSON number in [0, total_simulation_stages). |
-| `stage_index` | number | no | Optional 0-based index into the emitter's simulation stages, a JSON number; takes precedence over stage_name when both are supplied. |
+| `target_index` | integer | yes | Required 0-based target index the stage should occupy after the move, a JSON number in [0, total_simulation_stages). |
+| `stage_index` | integer | no | Optional 0-based index into the emitter's simulation stages, a JSON number; takes precedence over stage_name when both are supplied. |
 | `stage_name` | string | no | Optional SimulationStageName to match if stage_index is not supplied. |
 
 **Returns:** `{ system_path, emitter_name, stage_index, stage_name, stage_class, target_index, moved, already_at_target, before_index, after_index, total_simulation_stages, saved, save_error? }`
@@ -413,7 +416,7 @@ Remove one emitter handle from a Niagara System asset in one undo step, then sav
 |---|---|---|---|
 | `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | no | Optional display name of the emitter handle to remove |
-| `emitter_index` | number | no | Optional zero-based index; used if emitter_name not provided |
+| `emitter_index` | integer | no | Optional zero-based index; used if emitter_name not provided |
 
 **Returns:** `{ system_path: string, removed_emitter_name: string, removed_emitter_id: string, emitters_before: int, emitters_after: int, removed: bool, saved: bool, save_error?: string }`
 
@@ -456,7 +459,7 @@ Take the renderer at renderer_index (0-based, in get_niagara_emitter_renderers o
 |---|---|---|---|
 | `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Name of the emitter handle. |
-| `renderer_index` | number | yes | 0-based index into the emitter's renderers list, a JSON number (use get_niagara_emitter_renderers to find the index) |
+| `renderer_index` | integer | yes | 0-based index into the emitter's renderers list, a JSON number (use get_niagara_emitter_renderers to find the index) |
 
 **Returns:** `{ system_path: string, emitter_name: string, removed_renderer_index: int, removed_renderer_class: string, renderer_count_after: int, saved: bool, save_error?: string }`
 
@@ -470,7 +473,7 @@ Remove one simulation stage from an emitter of a Niagara System asset, found by 
 |---|---|---|---|
 | `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Display name of the emitter handle owning the stage. |
-| `stage_index` | number | no | Optional 0-based index into the emitter's simulation stages, a JSON number; takes precedence over stage_name when both are supplied. |
+| `stage_index` | integer | no | Optional 0-based index into the emitter's simulation stages, a JSON number; takes precedence over stage_name when both are supplied. |
 | `stage_name` | string | no | Optional SimulationStageName to match if stage_index is not supplied (matches add_niagara_simulation_stage's name). |
 
 **Returns:** `{ system_path, emitter_name, stage_index, stage_name, stage_class, removed, already_removed, total_simulation_stages, saved, save_error? }`
@@ -513,7 +516,7 @@ Move one module of a Niagara emitter's particle spawn or update stack to another
 | `system_path` | string | yes | Content path of the UNiagaraSystem asset, e.g. '/Game/FX/NS_Sparks'. |
 | `emitter_name` | string | yes | Display name of the emitter handle, as get_niagara_emitter_handles lists it. |
 | `module_name` | string | yes | Function name of the module to move, case-sensitive, as list_niagara_modules gives module_name for that stack, e.g. 'GravityForce'. |
-| `target_index` | number | yes | New position in the stack, a JSON number of 0 or more (0 runs first), counted as list_niagara_modules counts index; clamped to the last; the call fails without it. |
+| `target_index` | integer | yes | New position in the stack, a JSON number of 0 or more (0 runs first), counted as list_niagara_modules counts index; clamped to the last; the call fails without it. |
 | `script_group` | string | no | Optional "spawn" or "update" (any case), the stack the module is on; defaults to "update"; any other value is an error. |
 
 **Returns:** `{ system_path: string, emitter_name: string, script_group: string, module_name: string, old_index: int, new_index: int, target_index: int, module_count: int, reordered: bool, saved: bool, save_error?: string, note?: string }`
@@ -625,8 +628,8 @@ Change any settings of ONE emitter of a Niagara System asset, found by handle na
 | `bounds_min` | string | no | Optional fixed-bounds minimum corner as an FVector string, e.g. "X=-50 Y=-50 Z=0" |
 | `bounds_max` | string | no | Optional fixed-bounds maximum corner as an FVector string, e.g. "X=50 Y=50 Z=100" |
 | `allocation_mode` | string | no | Optional: "AutomaticEstimate", "ManualEstimate" or "FixedCount" |
-| `pre_allocation_count` | number | no | Optional particle count to allocate up front; needs allocation_mode |
-| `max_gpu_particles` | number | no | Optional cap on GPU particles (0 = no cap) |
+| `pre_allocation_count` | integer | no | Optional particle count to allocate up front; needs allocation_mode |
+| `max_gpu_particles` | integer | no | Optional cap on GPU particles (0 = no cap) |
 | `requires_persistent_ids` | boolean | no | Optional: whether particles carry persistent IDs |
 
 **Returns:** `{ system_path: string, emitter_name: string, applied: { setting: that setting's reply }, failed?: { label, command, error } (when a setting is refused) }`
@@ -641,9 +644,9 @@ Assign a static mesh into a Niagara Mesh renderer's Meshes[] slot.  Resolves (or
 |---|---|---|---|
 | `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Name of the emitter handle. |
-| `renderer_index` | number | yes | 0-based index of the Mesh renderer (use get_niagara_emitter_renderers). |
+| `renderer_index` | integer | yes | 0-based index of the Mesh renderer (use get_niagara_emitter_renderers). |
 | `mesh_path` | string | yes | Asset path of the UStaticMesh to assign (e.g. "/Engine/BasicShapes/Cube"). |
-| `slot` | number | no | Optional 0-based slot index into Meshes[] (default 0). The array is grown with default elements up to this index if needed. |
+| `slot` | integer | no | Optional 0-based slot index into Meshes[] (default 0). The array is grown with default elements up to this index if needed. |
 
 **Returns:** `{ system_path, emitter_name, renderer_index, renderer_class, slot, mesh_path, mesh_count, already_assigned: bool, saved: bool, save_error? }`
 
@@ -675,7 +678,7 @@ Override a Niagara module input by writing the rapid-iteration store. Locates th
 | `emitter_name` | string | yes | Display name of the emitter handle. |
 | `module_node_name` | string | yes | The module function-call node name (from add_niagara_module_to_stack's module_node_name). |
 | `input_name` | string | yes | Leaf name of the module input (e.g. "Drag" for "Module.Drag"). |
-| `value_type` | string | no | One of "float", "int", "vector", or "color"; defaults to "float" |
+| `value_type` | string | no | One of "float", "int", "vector", or "color"; defaults to "float". int32, vec3 and linearcolor are accepted too. |
 | `value` | any | no | Required. For float/int: a JSON number. For vector: [x, y, z], numbers within the float range. For color: [r, g, b] or [r, g, b, a], alpha 1 when omitted. A missing or malformed value is an error. |
 
 **Returns:** `{ system_path: string, emitter_name: string, module_node_name: string, input_name: string, value_type: string, ri_param_name: string, verified: bool, success: bool, saved: bool, save_error?: string }`
@@ -690,7 +693,7 @@ Set the Material UPROPERTY on a Niagara renderer (Sprite, Ribbon, Mesh or Decal:
 |---|---|---|---|
 | `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Name of the emitter handle. |
-| `renderer_index` | number | yes | 0-based index of the renderer (use get_niagara_emitter_renderers to find the index) |
+| `renderer_index` | integer | yes | 0-based index of the renderer (use get_niagara_emitter_renderers to find the index) |
 | `material_path` | string | yes | Asset path of the UMaterialInterface to assign. |
 
 **Returns:** `{ system_path: string, emitter_name: string, renderer_index: int, renderer_class: string, previous_material_path: string, material_path: string, verified: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
@@ -705,7 +708,7 @@ Set the enum, bool, name and FIntPoint properties of one generic simulation stag
 |---|---|---|---|
 | `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Name of the emitter handle owning the stage. |
-| `stage_index` | number | no | Optional 0-based index into the emitter's simulation stages (use add_niagara_simulation_stage / get_niagara_emitter_runtime_summary); takes precedence over stage_name |
+| `stage_index` | integer | no | Optional 0-based index into the emitter's simulation stages (use add_niagara_simulation_stage / get_niagara_emitter_runtime_summary); takes precedence over stage_name |
 | `stage_name` | string | no | Optional SimulationStageName to match if stage_index is not supplied. |
 | `name` | string | no | Optional FName: SimulationStageName (renames the stage; also accepted as simulation_stage_name). |
 | `enabled` | boolean | no | Optional bool: base bEnabled (written via SetEnabled). |
@@ -730,8 +733,8 @@ Set the default value of one user parameter (the User. namespace) of a Niagara S
 |---|---|---|---|
 | `system_path` | string | yes | Asset path of the Niagara System. |
 | `parameter_name` | string | yes | User parameter name (without the "User." prefix). |
-| `type` | string | no | Optional type token: Float\|Vector\|Vec2\|Vec4\|Color\|Bool\|Int (case-insensitive); when omitted a vector, vec2, vec4 or color key picks that type, else Float |
-| `value` | any | no | The value of a Float (a number), Int (a whole number) or Bool (true or false) parameter; those types fail without it or with another JSON type |
+| `type` | string | no | Optional type token: Float\|Vector\|Vec2\|Vec4\|Color\|Bool\|Int (case-insensitive); Vec3, Vector2, Vector4, LinearColor, Boolean, Int32 and Integer are accepted too. When omitted a vector, vec2, vec4 or color key picks that type, else Float |
+| `value` | number\|boolean | no | The value of a Float (a number), Int (a whole number) or Bool (true or false) parameter; those types fail without it or with another JSON type |
 | `vector` | array | no | [X, Y, Z], 3 numbers, the value of a Vector parameter (required for it; also picks type Vector when type is omitted) |
 | `vec2` | array | no | [X, Y], 2 numbers, the value of a Vec2 parameter (required for it) |
 | `vec4` | array | no | [X, Y, Z, W], 4 numbers, the value of a Vec4 parameter (required for it) |

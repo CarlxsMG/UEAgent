@@ -59,13 +59,15 @@ No parameters.
 
 *Read-only.*
 
-List the UGameplayBehaviorConfig assets under package_path, recursively, from the Asset Registry, without changing them: each config path and name with the name of its BehaviorClass (empty when unset), plus total. Each match is loaded to read that protected field, so a big folder costs one load per config. Only assets whose class is exactly UGameplayBehaviorConfig are listed: subclass configs such as GameplayBehaviorConfig_Animation or GameplayBehaviorConfig_BehaviorTree, and Blueprint subclasses, are skipped. There is no paging, and no match is total 0, not an error. One config in detail: get_behavior_config_info; create one: create_behavior_config; set its class: set_behavior_class; delete one: remove_behavior_config.
+List the UGameplayBehaviorConfig assets under package_path, recursively, from the Asset Registry, without changing them: each config path and name with the name of its BehaviorClass (empty when unset), plus total. Each match is loaded to read that protected field, so a big folder costs one load per config. Only assets whose class is exactly UGameplayBehaviorConfig are listed: subclass configs such as GameplayBehaviorConfig_Animation or GameplayBehaviorConfig_BehaviorTree, and Blueprint subclasses, are skipped. The configs come sorted by config_path, a page at a time (offset/limit); no match is total 0, not an error. One config in detail: get_behavior_config_info; create one: create_behavior_config; set its class: set_behavior_class; delete one: remove_behavior_config.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `package_path` | string | no | Optional content folder searched recursively (default "/Game"); an empty string also means /Game, so another mount point needs its own path |
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ package_path, total, configs:[{ config_path, config_name, behavior_class }] }`
+**Returns:** `{ package_path, configs:[{ config_path, config_name, behavior_class }], total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }`
 
 ## `remove_behavior_config`
 

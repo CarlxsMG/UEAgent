@@ -12,6 +12,7 @@
 #include "UsdWrappers/SdfLayer.h"
 #include "UsdWrappers/SdfPath.h"
 #include "UsdWrappers/ForwardDeclarations.h"
+#include "HAL/FileManager.h"           // IFileManager (flatten_usd_stage re-read)
 
 /**
  * USD stage I/O commands.
@@ -206,13 +207,13 @@ TSharedPtr<FJsonObject> HandleListUsdFileFormats(const TSharedPtr<FJsonObject>& 
 // ---------------------------------------------------------------------------
 // open_usd_stage
 // ---------------------------------------------------------------------------
-// MCP:open_usd_stage - Open an existing USD stage from a file path.  Wraps UnrealUSDWrapper::OpenStage with caching and force-reload controls. When use_stage_cache is true (default) and the file is already open in the UnrealUSDWrapper stage cache, the existing stage is returned. When force_reload is true, all local layers are forced-reloaded from disk (useful when the file was modified by another tool since the last open). The opened stage is added to the LLM-facing UEAgent::UsdRegistry::GStageNameCache under either the explicit stage_name or a derived one (basename without extension). The stage_id returned is the root layer's USD identifier — a stable string handle useful as a unique reference across follow-up commands.
+// MCP:open_usd_stage - Open an existing USD stage from a file path.  Wraps UnrealUSDWrapper::OpenStage with caching and force-reload controls. When use_stage_cache is true (default) and the file is already open in the UnrealUSDWrapper stage cache, the existing stage is returned. When force_reload is true, all local layers are forced-reloaded from disk (useful when the file was modified by another tool since the last open). The opened stage is added to the LLM-facing UEAgent::UsdRegistry::GStageNameCache under either the explicit stage_name or a derived one (basename without extension). The stage_id returned is the root layer's USD identifier — a stable string handle useful as a unique reference across follow-up commands. registered says stage_name now resolves to the stage; false fails the call.
 //   @param file_path [string!] - Absolute path to the .usd/.usda/.usdc/.usdz file (or a USD layer identifier).
 //   @param stage_name [string] - LLM-facing name to register the opened stage under. Defaults to the file basename without extension (optional).
 //   @param initial_load_set [string] - "LoadAll" (default; loads payloads) or "LoadNone" (faster; inspect without loading payloads).
 //   @param use_stage_cache [bool] - Use UnrealUSDWrapper's stage cache (default true). When false the stage is re-read and not added to the cache.
 //   @param force_reload [bool] - Force-reload all local layers from disk, bypassing the layer registry (default false).
-//   @returns { stage_name: string, stage_id: string, identifier: string, real_path: string, from_cache: bool, file_path: string, errors: [string]? }
+//   @returns { stage_name: string, stage_id: string, identifier: string, real_path: string, from_cache: bool, file_path: string, registered: bool, errors: [string]? }
 
 TSharedPtr<FJsonObject> HandleOpenUsdStage(const TSharedPtr<FJsonObject>& Params)
 {
@@ -290,16 +291,20 @@ TSharedPtr<FJsonObject> HandleOpenUsdStage(const TSharedPtr<FJsonObject>& Params
     // more useful to the LLM than a pointer hash would be.
     Result->SetStringField(TEXT("stage_id"), RootLayer.GetIdentifier());
 
-    return mcp_common::MakeOkReply(Result);
+    // The re-read: stage_name now resolves to this stage in the registry the other USD tools look it up in.
+    const UE::FUsdStage* Registered = UEAgent::UsdRegistry::GStageNameCache.Find(StageName);
+    const bool bRegistered = Registered != nullptr && *Registered == Stage;
+    Result->SetBoolField(TEXT("registered"), bRegistered);
+    return mcp_common::MakeOutcomeReply(Result, bRegistered, mcp_common::MeasuredOutcomeError(TEXT("open_usd_stage"), TEXT("registered")));
 }
 
 // ---------------------------------------------------------------------------
 // create_usd_stage
 // ---------------------------------------------------------------------------
-// MCP:create_usd_stage - Create a new USD stage (either on-disk or in-memory).  When file_path is provided, UnrealUSDWrapper::NewStage(FilePath) creates a root layer file at that path and opens it as a stage. When file_path is omitted or empty, NewStage() (no args) creates a memory-only stage — this is the only way to author a USD stage that is NOT persisted to disk; the only way to clean it up is close_usd_stage. The new stage is always added to the LLM-facing UEAgent::UsdRegistry::GStageNameCache under stage_name (default "Untitled"), so subsequent calls can refer to it by name. The returned identifier is the root layer's USD identifier (real path for on-disk; an anonymous "anon:0x..." handle for memory stages).
+// MCP:create_usd_stage - Create a new USD stage (either on-disk or in-memory).  When file_path is provided, UnrealUSDWrapper::NewStage(FilePath) creates a root layer file at that path and opens it as a stage. When file_path is omitted or empty, NewStage() (no args) creates a memory-only stage — this is the only way to author a USD stage that is NOT persisted to disk; the only way to clean it up is close_usd_stage. The new stage is always added to the LLM-facing UEAgent::UsdRegistry::GStageNameCache under stage_name (default "Untitled"), so subsequent calls can refer to it by name. The returned identifier is the root layer's USD identifier (real path for on-disk; an anonymous "anon:0x..." handle for memory stages). registered says stage_name now resolves to the stage; false fails the call.
 //   @param file_path [string] - Absolute path for the new USD root layer file (.usd/.usda/.usdc/.usdz). Omit or empty for a memory-only stage (optional).
 //   @param stage_name [string] - LLM-facing name to register the new stage under (optional, default "Untitled").
-//   @returns { stage_name: string, file_path: string, memory: bool, identifier: string, real_path: string, dirty: bool, is_valid: bool, errors: [string]? }
+//   @returns { stage_name: string, file_path: string, memory: bool, identifier: string, real_path: string, dirty: bool, is_valid: bool, registered: bool, errors: [string]? }
 
 TSharedPtr<FJsonObject> HandleCreateUsdStage(const TSharedPtr<FJsonObject>& Params)
 {
@@ -350,7 +355,11 @@ TSharedPtr<FJsonObject> HandleCreateUsdStage(const TSharedPtr<FJsonObject>& Para
     Result->SetBoolField(TEXT("dirty"),       RootLayer.IsDirty());
     Result->SetBoolField(TEXT("is_valid"),    static_cast<bool>(Stage));
 
-    return mcp_common::MakeOkReply(Result);
+    // The re-read: stage_name now resolves to this stage in the registry the other USD tools look it up in.
+    const UE::FUsdStage* Registered = UEAgent::UsdRegistry::GStageNameCache.Find(StageName);
+    const bool bRegistered = Registered != nullptr && *Registered == Stage;
+    Result->SetBoolField(TEXT("registered"), bRegistered);
+    return mcp_common::MakeOutcomeReply(Result, bRegistered, mcp_common::MeasuredOutcomeError(TEXT("create_usd_stage"), TEXT("registered")));
 }
 
 // ---------------------------------------------------------------------------
@@ -676,11 +685,11 @@ TSharedPtr<FJsonObject> HandleSaveUsdStage(const TSharedPtr<FJsonObject>& Params
 // ---------------------------------------------------------------------------
 // flatten_usd_stage
 // ---------------------------------------------------------------------------
-// MCP:flatten_usd_stage - Export a flattened copy of the stage to a .usd/.usda/.usdc/.usdz file (the file writer is chosen by the extension).  Wraps UE::FUsdStage::Export(OutputPath, bAddSourceFileComment, FileFormatArguments) — does NOT alter the in-memory stage. When add_source_file_comment is true (default) the flattened file includes a comment header noting the source file (useful for provenance). The returned 'exported' field reports pxr::'s bool return — false means the file writer could not write the requested path (e.g. invalid extension, permission denied). Realistic gotcha: stage.Export() requires the stage NOT be in a restricted-edit state — under headless cov this is not an issue, but in-editor it can be during PIE.
+// MCP:flatten_usd_stage - Export a flattened copy of the stage to a .usd/.usda/.usdc/.usdz file (the file writer is chosen by the extension).  Wraps UE::FUsdStage::Export(OutputPath, bAddSourceFileComment, FileFormatArguments) — does NOT alter the in-memory stage. When add_source_file_comment is true (default) the flattened file includes a comment header noting the source file (useful for provenance). The returned 'exported' field reports pxr::'s bool return — false means the file writer could not write the requested path (e.g. invalid extension, permission denied). The call fails when exported is false or no file exists at output_path afterwards (file_exists). Realistic gotcha: stage.Export() requires the stage NOT be in a restricted-edit state — under headless cov this is not an issue, but in-editor it can be during PIE.
 //   @param stage_name [string!] - Name the stage was registered under, OR an absolute file path to auto-open.
 //   @param output_path [string!] - Absolute path of the flattened file to write. The file extension picks the writer (.usda=text, .usdc=binary, .usdz=archive).
 //   @param add_source_file_comment [bool] - Include the source-file comment header in the flattened file (default true).
-//   @returns { stage_name: string, resolution: string, output_path: string, exported: bool, add_source_file_comment: bool, errors: [string]? }
+//   @returns { stage_name: string, resolution: string, output_path: string, exported: bool, file_exists: bool, add_source_file_comment: bool, errors: [string]? }
 
 TSharedPtr<FJsonObject> HandleFlattenUsdStage(const TSharedPtr<FJsonObject>& Params)
 {
@@ -715,8 +724,13 @@ TSharedPtr<FJsonObject> HandleFlattenUsdStage(const TSharedPtr<FJsonObject>& Par
         },
         Result);
 
+    // The re-read: the flattened file is on disk at output_path.
+    const bool bFileExists = IFileManager::Get().FileExists(*OutputPath);
     Result->SetBoolField(TEXT("exported"), bExported);
-    return mcp_common::MakeOkReply(Result);
+    Result->SetBoolField(TEXT("file_exists"), bFileExists);
+    return mcp_common::MakeOutcomeReply(Result, bExported && bFileExists, bExported
+        ? FString::Printf(TEXT("flatten_usd_stage: Export returned true but no file exists at '%s'"), *OutputPath)
+        : FString::Printf(TEXT("flatten_usd_stage: Export returned false for '%s' (see errors)"), *OutputPath));
 }
 
 const McpCommandFamilies::FRegistrar Registration =

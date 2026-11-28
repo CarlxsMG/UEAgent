@@ -150,7 +150,9 @@ namespace
 // MCP:list_usd_prim_attributes - List every attribute of one prim on a USD stage this server has open, with each one's name, USD type, C++ type, whether it has a value (fallback values count) or an authored opinion, and how many time samples it has. Read-only: the stage is not changed. Use it to find an attribute name; then read one value with get_usd_attribute_value, its sample times with get_usd_attribute_time_samples, or write it with set_usd_attribute_value. For the prim's own type, specifier and schemas use get_usd_prim_info; to find prim paths use list_usd_prims. A stage that is not open (open_usd_stage or create_usd_stage first) or a prim that does not exist is an error.
 //   @param stage_name [string!] - Name the stage was registered under by open_usd_stage (default the file basename) or create_usd_stage (default "Untitled").
 //   @param prim_path [string!] - Absolute SdfPath of an existing prim on that stage, e.g. "/World/Cube", as list_usd_prims returns it.
-//   @returns { prim_path: string, attributes: [{name, type_name, cpp_type, has_value, has_authored_value, time_sample_count}], count: int }
+//   @param offset [integer] - Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset.
+//   @param limit [integer] - Most entries returned per call, 1..1000 (default 100).
+//   @returns { prim_path: string, attributes: [{name, type_name, cpp_type, has_value, has_authored_value, time_sample_count}], count: int (entries in this page), total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }
 
 TSharedPtr<FJsonObject> HandleListUsdPrimAttributes(const TSharedPtr<FJsonObject>& Params)
 {
@@ -190,6 +192,8 @@ TSharedPtr<FJsonObject> HandleListUsdPrimAttributes(const TSharedPtr<FJsonObject
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("prim_path"), PrimPath);
+	mcp_common::SortJsonItems(AttrArr, TEXT("name"));
+	mcp_common::ApplyListPage(AttrArr, mcp_common::ReadListPage(Params), Data);
 	Data->SetArrayField(TEXT("attributes"), AttrArr);
 	Data->SetNumberField(TEXT("count"), AttrArr.Num());
 	return mcp_common::MakeOkReply(Data);
@@ -198,12 +202,12 @@ TSharedPtr<FJsonObject> HandleListUsdPrimAttributes(const TSharedPtr<FJsonObject
 // ---------------------------------------------------------------------------
 // create_usd_attribute
 // ---------------------------------------------------------------------------
-// MCP:create_usd_attribute - Create an attribute of a given USD type on a prim of an open stage, or return the existing one with created false. Edits the stage in memory; save_usd_stage writes it. Returns name, type_name, cpp_type and created; author its value with set_usd_attribute_value.
+// MCP:create_usd_attribute - Create an attribute of a given USD type on a prim of an open stage, or return the existing one with created false. Edits the stage in memory; save_usd_stage writes it. Returns name, type_name, cpp_type and created; author its value with set_usd_attribute_value. present is the prim re-read; false fails the call.
 //   @param stage_name [string!] - Name the stage was registered under by open_usd_stage (default the file basename) or create_usd_stage (default "Untitled").
 //   @param prim_path [string!] - Absolute SdfPath of an existing prim on that stage, e.g. "/World/Cube".
 //   @param attr_name [string!] - Attribute name (e.g. "size", "displayColor")
 //   @param type_name [string!] - USD type name (e.g. "float", "float3", "token", "asset")
-//   @returns { prim_path: string, name: string, type_name: string, cpp_type: string, created: bool }
+//   @returns { prim_path: string, name: string, type_name: string, cpp_type: string, created: bool, present: bool }
 
 TSharedPtr<FJsonObject> HandleCreateUsdAttribute(const TSharedPtr<FJsonObject>& Params)
 {
@@ -249,17 +253,21 @@ TSharedPtr<FJsonObject> HandleCreateUsdAttribute(const TSharedPtr<FJsonObject>& 
 	Data->SetStringField(TEXT("type_name"), Attr.GetTypeName().ToString());
 	Data->SetStringField(TEXT("cpp_type"), Attr.GetCPPTypeName());
 	Data->SetBoolField(TEXT("created"), !bAlreadyExisted);
-	return mcp_common::MakeOkReply(Data);
+	// The re-read: the prim reports an attribute of that name.
+	const bool bPresent = Prim.HasAttribute(*AttrName);
+	Data->SetBoolField(TEXT("present"), bPresent);
+	return mcp_common::MakeOutcomeReply(Data, bPresent, FString::Printf(
+		TEXT("create_usd_attribute: CreateAttribute('%s') returned an attribute, but prim '%s' does not report it"), *AttrName, *PrimPath));
 }
 
 // ---------------------------------------------------------------------------
 // remove_usd_attribute
 // ---------------------------------------------------------------------------
-// MCP:remove_usd_attribute - Remove one attribute from a prim on a registered USD stage by deleting its scene description in the current edit target layer only, so opinions from other layers or references can keep it composed. Idempotent: an absent attribute gives present=false and removed=false, not an error, and a relationship of that name counts as absent. A stage not registered under stage_name or a missing prim is an error. In memory only: save_usd_stage writes it. To keep the attribute and drop its values use clear_usd_attribute.
+// MCP:remove_usd_attribute - Remove one attribute from a prim on a registered USD stage by deleting its scene description in the current edit target layer only, so opinions from other layers or references can keep it composed. Idempotent: an absent attribute gives present=false and removed=false, not an error, and a relationship of that name counts as absent. A stage not registered under stage_name or a missing prim is an error. In memory only: save_usd_stage writes it. To keep the attribute and drop its values use clear_usd_attribute. A present attribute that RemoveProperty does not remove fails the call; still_composed says whether another layer keeps it.
 //   @param stage_name [string!] - Name the stage was registered under by open_usd_stage (default the file basename) or create_usd_stage (default "Untitled").
 //   @param prim_path [string!] - Absolute SdfPath of an existing prim on that stage, e.g. "/World/Cube".
 //   @param attr_name [string!] - Name of the attribute to remove, e.g. "size"
-//   @returns { prim_path: string, attr_name: string, removed: bool, present: bool }
+//   @returns { prim_path: string, attr_name: string, removed: bool, present: bool, still_composed: bool }
 
 TSharedPtr<FJsonObject> HandleRemoveUsdAttribute(const TSharedPtr<FJsonObject>& Params)
 {
@@ -288,7 +296,10 @@ TSharedPtr<FJsonObject> HandleRemoveUsdAttribute(const TSharedPtr<FJsonObject>& 
 	TSharedPtr<FJsonObject> Data = UsdAttribute_NewPayload(PrimPath, AttrName);
 	Data->SetBoolField(TEXT("removed"), Removed);
 	Data->SetBoolField(TEXT("present"), bWasPresent);
-	return mcp_common::MakeOkReply(Data);
+	// Opinions on other layers can keep the attribute composed, so whether it still resolves is reported, not required.
+	Data->SetBoolField(TEXT("still_composed"), Prim.HasAttribute(*AttrName));
+	return mcp_common::MakeOutcomeReply(Data, Removed || !bWasPresent, FString::Printf(
+		TEXT("remove_usd_attribute: RemoveProperty('%s') returned false: the current edit target layer holds no spec of it to remove"), *AttrName));
 }
 
 // ---------------------------------------------------------------------------

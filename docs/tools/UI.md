@@ -165,7 +165,7 @@ Fire a LIVE UMG widget's event in the running PIE session (game thread): resolve
 | `widget_name` | string | yes | Required. Name of the target UWidget in the live tree (as reported by list_pie_widgets), e.g. "ConfirmButton". Matches a widget inside an active viewport UserWidget's WidgetTree, or a top-level UserWidget by its own name. |
 | `event` | string | no | Optional (default "OnClicked"): BlueprintAssignable multicast delegate to fire (e.g. "OnClicked", "OnPressed", "OnReleased"). |
 | `child_name` | string | no | Optional: after resolving widget_name, drill into a descendant widget with this name (the resolved widget's own WidgetTree if it is a UserWidget, else a named child in its subtree) and fire the event on THAT widget instead. |
-| `player_index` | number | no | Optional (default 0): when set, only consider viewport UserWidgets owned by the local player with this index (single-player PIE resolves globally). |
+| `player_index` | integer | no | Optional (default 0): when set, only consider viewport UserWidgets owned by the local player with this index (single-player PIE resolves globally). |
 | `world` | string | no | Optional world selector: absent/'pie' (default: PlayWorld, else the first PIE context) \| 'server' (the PIE world with authority) \| 'client' \| 'pie:N' \| 'game' (alias of 'pie'). In a 2-player PIE session EVERY client has its OWN widgets, so the default may well read the other player's HUD. |
 
 **Returns:** `{ success: bool, widget_name, resolved_widget, resolved_class, event, is_bound: bool, fired: bool, player_index, child_name?, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number } -- is_bound is false when the delegate exists but has no bound handlers (broadcast is still a safe no-op).`
@@ -331,8 +331,10 @@ CALL THIS FIRST to discover valid widget_name values instead of guessing: it enu
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name_filter` | string | no | Optional substring filter on the owning actor's name (Contains match) |
+| `offset` | integer | no | Index of the first entry returned, counted from 0 (default 0). Read the next page at the reply's next_offset. |
+| `limit` | integer | no | Most entries returned per call, 1..1000 (default 100). |
 
-**Returns:** `{ components: [{ actor_name: string, widget_component_name: string, widget_name: string|null, widget_class: string|null }], component_count: number, actor_name_filter: string|null }`
+**Returns:** `{ components: [{ actor_name: string, widget_component_name: string, widget_name: string|null, widget_class: string|null }], component_count: number (entries in this page), actor_name_filter: string|null, total: int, offset: int, limit: int, returned: int, truncated: bool, next_offset: int|null }`
 
 ## `list_pie_widgets`
 
@@ -405,7 +407,7 @@ Pop the ACTIVE screen off a live CommonUI stack, or clear the whole stack -- the
 |---|---|---|---|
 | `stack_widget_name` | string | yes | Name of the live activatable container in the running session. |
 | `clear_all` | boolean | no | Remove EVERY widget instead of just the active one (default false). |
-| `player_index` | number | no | Optional local player index whose viewport widgets are searched (default 0). |
+| `player_index` | integer | no | Optional local player index whose viewport widgets are searched (default 0). |
 | `world` | string | no | Optional world selector: absent/'pie' \| 'server' \| 'client' \| 'pie:N'. |
 
 **Returns:** `{ stack_widget_name, popped: bool, popped_widget: string, cleared_all: bool, widget_count: int, active_widget: string } -- widget_count and active_widget are read AFTER the operation; popped:false with widget_count:0 means the stack was already empty.`
@@ -420,7 +422,7 @@ Push a screen onto a LIVE CommonUI activatable stack in the running PIE session 
 |---|---|---|---|
 | `stack_widget_name` | string | yes | Name of the live UCommonActivatableWidgetStack (or any activatable container) in the running session. Resolved like click_pie_widget, nested Widget Blueprints included. |
 | `widget_class` | string | yes | The UCommonActivatableWidget class to push: a /Game Widget Blueprint path, its generated-class path, or a native class path. |
-| `player_index` | number | no | Optional local player index whose viewport widgets are searched (default 0). |
+| `player_index` | integer | no | Optional local player index whose viewport widgets are searched (default 0). |
 | `world` | string | no | Optional world selector: absent/'pie' \| 'server' \| 'client' \| 'pie:N'. |
 
 **Returns:** `{ stack_widget_name, pushed_class, pushed_widget: string, widget_count: int, active_widget: string } -- widget_count and active_widget are read off the stack AFTER the push, so they are evidence rather than an echo.`
@@ -477,7 +479,7 @@ Remove the key at time_seconds (or the key_index-th key) from every channel of t
 | `widget_name` | string | yes | name of the animated widget |
 | `property_path` | string | yes | the SAME property_path given to add_widget_animation_track |
 | `time_seconds` | number | no | time of the key to remove, in seconds; give it or key_index |
-| `key_index` | number | no | index of the key among the first channel's keys (in time order); give it or time_seconds |
+| `key_index` | integer | no | index of the key among the first channel's keys (in time order); give it or time_seconds |
 | `tolerance` | number | no | how far from time_seconds a key may be and still match, in seconds (default 0) |
 
 **Returns:** `{ widget_bp_path: string, animation_name: string, widget_name: string, property_path: string, track_type: string, removed_frame: int, removed_time_seconds: number, keys_removed: int, key_count_after: int, saved: bool, save_error: string }`
@@ -550,8 +552,8 @@ Render a Widget Blueprint to a PNG on disk WITHOUT running the game: builds the 
 |---|---|---|---|
 | `widget_bp_path` | string | yes | /Game path of the Widget Blueprint asset to render |
 | `output_path` | string | no | Optional output file. A bare name lands under &lt;ProjectSaved>/MCP/WidgetPreviews/, an absolute path is used verbatim, and .png is appended when missing. Defaults to the asset's name. |
-| `width` | number | no | Optional render width in pixels. Omit BOTH width and height to render at the widget's own desired size (a Slate prepass measures it). |
-| `height` | number | no | Optional render height in pixels. Omit BOTH width and height to render at the widget's own desired size. |
+| `width` | integer | no | Optional render width in pixels. Omit BOTH width and height to render at the widget's own desired size (a Slate prepass measures it). |
+| `height` | integer | no | Optional render height in pixels. Omit BOTH width and height to render at the widget's own desired size. |
 | `scale` | number | no | Optional draw scale applied by the renderer (default 1.0), the equivalent of DPI scaling in the Designer. |
 | `opaque_background` | boolean | no | Optional (default false). Force every pixel's alpha to 255 so the PNG is not transparent where the widget did not paint -- the same trick capture_viewport uses. Leave false to keep real transparency. |
 | `return_image` | boolean | no | Also return the picture as an MCP image block next to this JSON (default true); a picture over the size limits is sent as a smaller copy. |
@@ -583,7 +585,7 @@ Move a widget to a new parent panel (optionally at a specific child index), via 
 | `widget_bp_path` | string | yes | /Game path of the Widget Blueprint asset |
 | `widget_name` | string | yes | name of the widget to move |
 | `new_parent_name` | string | yes | name of the panel widget to become the new parent |
-| `target_index` | number | no | Optional int child index to insert at (default: append at the end) |
+| `target_index` | integer | no | Optional int child index to insert at (default: append at the end) |
 | `slot_properties` | object | no | Optional object of {PropertyName: value} applied to the resulting slot via reflection (best-effort; per-field errors are reported, not fatal) |
 
 **Returns:** `{ widget_bp_path: string, widget_name: string, old_parent_name: string, new_parent_name: string, new_slot_class: string, resolved_child_index: int, reparented: bool, slot_properties_applied: int, slot_property_errors?: [string], saved: bool, save_error: string }`
@@ -629,7 +631,7 @@ Populate a LIVE UListView/UTileView in the running PIE session. Resolves widget_
 | `widget_name` | string | yes | Required. Name of the target UListView/UTileView in the live tree (as reported by list_pie_widgets), resolved the same way click_pie_widget resolves widget_name. |
 | `items` | array | yes | Required array of strings. Each entry is either an actor name/label to resolve in the PIE world, or a /Game asset path to load via FSoftObjectPath::TryLoad. |
 | `child_name` | string | no | Optional: after resolving widget_name, drill into a descendant widget with this name and populate THAT widget instead. |
-| `player_index` | number | no | Optional (default 0): restrict widget resolution to viewport UserWidgets owned by this local player index (single-player PIE resolves globally). |
+| `player_index` | integer | no | Optional (default 0): restrict widget resolution to viewport UserWidgets owned by this local player index (single-player PIE resolves globally). |
 | `append` | boolean | no | Optional (default false). false = SetListItems (replaces the current item list). true = AddItems (appends). |
 | `refresh` | boolean | no | Optional (default true). Accepted for API symmetry: UListView::SetListItems/AddItems call UListViewBase::RequestRefresh() UNCONDITIONALLY, so refresh=false cannot honestly suppress it -- see refresh_note in the response rather than a silent no-op. |
 | `world` | string | no | Optional world selector: absent/'pie' (default) \| 'server' \| 'client' \| 'pie:N' \| 'game' (alias of 'pie'). In a 2-player PIE session each client owns its own widgets. |
@@ -646,7 +648,7 @@ Give keyboard/gamepad FOCUS to a live UMG widget in the running PIE session, so 
 |---|---|---|---|
 | `widget_name` | string | yes | Name of a live UserWidget added to the viewport, or of a widget inside one. |
 | `child_name` | string | no | Optional: after resolving widget_name, drill into this descendant by name (nested Widget Blueprints included). |
-| `player_index` | number | no | Optional local player index whose viewport widgets are searched (default 0). |
+| `player_index` | integer | no | Optional local player index whose viewport widgets are searched (default 0). |
 | `world` | string | no | Optional world selector, same rules as list_pie_widgets: absent/'pie' \| 'server' \| 'client' \| 'pie:N'. |
 
 **Returns:** `{ focused: bool, widget_name: string, widget_class: string, has_keyboard_focus: bool } -- has_keyboard_focus is RE-READ off the widget after the call, so it is evidence and not an echo: false means Slate refused the focus, and the usual cause is that the widget is not focusable (check IsFocusable and its Visibility -- a HitTestInvisible widget cannot take focus).`
@@ -662,7 +664,7 @@ Set a LIVE PIE input widget's REAL value (companion to click_pie_widget, which o
 | `widget_name` | string | yes | Required. Name of the target UWidget in the live tree (as reported by list_pie_widgets). |
 | `value` | object | yes | Required object: {"type":"float"\|"bool"\|"string", "value": &lt;matching JSON type>}. |
 | `child_name` | string | no | Optional: drill into a descendant widget with this name after resolving widget_name. |
-| `player_index` | number | no | Optional (default 0): filter to viewport UserWidgets owned by this local player index. |
+| `player_index` | integer | no | Optional (default 0): filter to viewport UserWidgets owned by this local player index. |
 | `fire_event` | boolean | no | Optional bool (default true): broadcast the widget's change event where the engine does not already do so unconditionally (CheckBox / EditableTextBox / EditableText). |
 | `commit_type` | string | no | Optional "Default" \| "OnEnter" \| "OnUserMovedFocus": when present (EditableTextBox/EditableText only, and fire_event is true), also broadcasts OnTextCommitted with this commit type. |
 | `world` | string | no | Optional world selector: absent/'pie' (default: PlayWorld, else the first PIE context) \| 'server' (the PIE world with authority) \| 'client' \| 'pie:N' \| 'game' (alias of 'pie'). In a 2-player PIE session EVERY client has its OWN widgets, so the default may well read the other player's HUD. |
@@ -768,7 +770,7 @@ Remove one binding from the MVVM view of a Widget Blueprint loaded by asset path
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `widget_blueprint_name` | string | yes | /Game path of the Widget Blueprint asset |
-| `binding_index` | number | no | int index of the binding to remove (primary identifier; one of binding_index / binding_id required) |
+| `binding_index` | integer | no | int index of the binding to remove (primary identifier; one of binding_index / binding_id required) |
 | `binding_id` | string | no | optional GUID string of the binding to remove (alternative to binding_index) |
 
 **Returns:** `{ widget_blueprint_name, binding_index?, binding_id?, already_existed, removed, binding_count, has_mvvm_extension, saved, save_error?, note? }`

@@ -72,7 +72,7 @@ namespace UEAgentSceneCommandsImpl
     }
 }
 
-// MCP:set_actor_label - Set the outliner label of an editor-world actor found by internal name or current label (first match). The engine trims it and keeps the old label when the new one is invalid, for example empty, so check label in the reply. Marks the level dirty without an undo entry.
+// MCP:set_actor_label - Set the outliner label of an editor-world actor found by internal name or current label (first match). The engine trims it and keeps the old label when the new one is invalid, for example empty: then the call fails, and label in the reply is the one the actor kept. Marks the level dirty without an undo entry.
 //   @param actor_name - Current actor name or label in the world outliner
 //   @param new_label - Display label to set, e.g. "Lamp_Kitchen"; leading and trailing spaces are trimmed.
 //   @returns { actor_name: string, label: string }
@@ -86,11 +86,17 @@ TSharedPtr<FJsonObject> HandleSetActorLabel(const TSharedPtr<FJsonObject>& Param
     if (TSharedPtr<FJsonObject> NotFound = UEAgentSceneCommandsImpl::FindEditorActor(ActorName, Actor)) { return NotFound; }
 
     Actor->SetActorLabel(NewLabel, /*bMarkDirty=*/true);
+    // The engine trims the label and keeps the old one when the new one is invalid.
+    const FString WantedLabel = NewLabel.TrimStartAndEnd();
+    const FString LabelNow = Actor->GetActorLabel();
+    const bool bApplied = LabelNow == WantedLabel;
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("actor_name"), Actor->GetName());
-    Result->SetStringField(TEXT("label"), Actor->GetActorLabel());
-    return Result;
+    Result->SetStringField(TEXT("label"), LabelNow);
+    return mcp_common::MakeOutcomeReply(Result, bApplied, bApplied ? FString() : FString::Printf(
+        TEXT("set_actor_label: '%s' still reads label '%s' after asking for '%s'; the engine refused the label."),
+        *Actor->GetName(), *LabelNow, *WantedLabel));
 }
 
 // MCP:get_actor_label - Read an actor's display label from the level (reader twin of set_actor_label)
@@ -128,12 +134,17 @@ TSharedPtr<FJsonObject> HandleSetActorFolder(const TSharedPtr<FJsonObject>& Para
     // Undoable: Modify() records the current folder before it changes.
     const FScopedTransaction Transaction(LOCTEXT("SetActorFolder", "MCP: Set Actor Folder"));
     Found->Modify();
-    Found->SetFolderPath(FName(*Folder));
+    const FName WantedFolder(*Folder);
+    Found->SetFolderPath(WantedFolder);
+    const FName FolderNow = Found->GetFolderPath();
+    const bool bApplied = FolderNow == WantedFolder;
 
     TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
     Reply->SetStringField(TEXT("actor_name"), Found->GetName());
-    Reply->SetStringField(TEXT("folder_path"), Folder);
-    return Reply;
+    Reply->SetStringField(TEXT("folder_path"), FolderNow.IsNone() ? FString() : FolderNow.ToString());
+    return mcp_common::MakeOutcomeReply(Reply, bApplied, bApplied ? FString() : FString::Printf(
+        TEXT("set_actor_folder: '%s' reads folder '%s' after asking for '%s'."),
+        *Found->GetName(), *FolderNow.ToString(), *Folder));
 }
 
 // MCP:get_actor_folder - Read an actor's outliner folder path (reader twin of set_actor_folder)
@@ -290,12 +301,16 @@ TSharedPtr<FJsonObject> HandleSetActorMaterial(const TSharedPtr<FJsonObject>& Pa
     const FScopedTransaction Transaction(LOCTEXT("SetActorMaterial", "MCP: Set Actor Material"));
     MeshComp->Modify();
     MeshComp->SetMaterial(SlotIndex, Material);
+    const UMaterialInterface* MaterialNow = MeshComp->GetMaterial(SlotIndex);
+    const bool bApplied = MaterialNow == Material;
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("actor_name"), Actor->GetName());
-    Result->SetStringField(TEXT("material"), Material->GetName());
+    Result->SetStringField(TEXT("material"), MaterialNow ? MaterialNow->GetName() : FString());
     Result->SetNumberField(TEXT("slot_index"), SlotIndex);
-    return Result;
+    return mcp_common::MakeOutcomeReply(Result, bApplied, bApplied ? FString() : FString::Printf(
+        TEXT("set_actor_material: slot %d of %s renders '%s' after setting '%s'."),
+        SlotIndex, *MeshComp->GetName(), MaterialNow ? *MaterialNow->GetName() : TEXT("None"), *Material->GetName()));
 }
 
 // MCP:focus_viewport - Move the camera of every level editor viewport to frame one actor of the editor world, found by internal name or outliner label (first match), or, when actor_name is omitted, the actors currently selected. Only the viewport cameras change: nothing in the level, no undo entry, nothing saved, and the selection stays as it is. An actor_name that matches nothing, or no actor_name with an empty selection, is an error. The reply has focused_actor (the internal name) in actor mode or focused_count in selection mode, never both. To place the camera at an exact location and rotation use set_viewport_settings, read it back with get_viewport_state, and select actors first with select_actors.
