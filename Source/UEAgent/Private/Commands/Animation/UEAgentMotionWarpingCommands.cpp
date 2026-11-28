@@ -524,9 +524,12 @@ TSharedPtr<FJsonObject> HandleAddWarpTargetToComponent(
     {
         Data->SetArrayField(TEXT("location"), mcp_common::VectorToJsonArray(After->Location));
         Data->SetArrayField(TEXT("rotation"), mcp_common::RotatorToJsonArray(After->Rotation));
+        // The target is stored as a transform and read back as a normalized rotator (pitch 120 reads as
+        // (60,180,180)), so the rotation is compared as a quaternion and both within float tolerance.
         bApplied = (!WantedComponent || After->Component.Get() == WantedComponent)
-            && (!WantedLocation.IsSet() || After->Location.Equals(WantedLocation.GetValue(), KINDA_SMALL_NUMBER))
-            && (!WantedRotation.IsSet() || After->Rotation.Equals(WantedRotation.GetValue(), KINDA_SMALL_NUMBER));
+            && (!WantedLocation.IsSet() || After->Location.Equals(WantedLocation.GetValue(), 1.e-2))
+            && (!WantedRotation.IsSet()
+                || After->Rotation.Quaternion().Equals(WantedRotation.GetValue().Quaternion(), 1.e-4));
         if (Before.IsSet())
         {
             bChanged = !Before->Location.Equals(After->Location) || !Before->Rotation.Equals(After->Rotation)
