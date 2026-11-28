@@ -21,9 +21,9 @@ catalog gives more parameters a type, an enum or a default.
 
   | In the catalog | 2.12.0 | 2.13.0 |
   |---|---|---|
-  | Parameters with an `enum` | 18 | 108 |
-  | Structured `default`s | 0 | 536 |
-  | `integer` parameters | 38 | 380 |
+  | Parameters with an `enum` | 18 | 90 |
+  | Structured `default`s | 0 | 622 |
+  | `integer` parameters | 38 | 460 |
   | Arrays without `items` | 318 | 0 |
   | `any` parameters | 50 | 28 |
   | Parameters with no description | 8 | 0 |
