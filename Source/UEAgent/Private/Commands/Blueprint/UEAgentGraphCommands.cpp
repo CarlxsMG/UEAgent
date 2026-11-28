@@ -1877,9 +1877,21 @@ TSharedPtr<FJsonObject> HandleSetPinDefaultValue(const TSharedPtr<FJsonObject>& 
     // The schema may also normalize what it stores (an object path, a float's spelling), so a stored
     // value that moved off the old one counts as written.
     const FString DefaultAfter = Pin->GetDefaultAsString();
-    const bool bWritten = DefaultAfter.Equals(FinalValue, ESearchCase::IgnoreCase)
+    bool bWritten = DefaultAfter.Equals(FinalValue, ESearchCase::IgnoreCase)
         || DefaultBefore.Equals(FinalValue, ESearchCase::IgnoreCase)
         || DefaultAfter != DefaultBefore;
+    const FName Category = Pin->PinType.PinCategory;
+    if (!bWritten && (Category == UEdGraphSchema_K2::PC_Object || Category == UEdGraphSchema_K2::PC_Class
+        || Category == UEdGraphSchema_K2::PC_Interface))
+    {
+        // An object pin reads back its object's full path ("/Game/M/M_Foo.M_Foo"), not the text the caller
+        // wrote: what the schema makes of that text is compared instead, so writing the held object again counts.
+        FString ParsedValue;
+        TObjectPtr<UObject> ParsedObject;
+        FText ParsedText;
+        Schema->GetPinDefaultValuesFromString(Pin->PinType, Pin->GetOwningNodeUnchecked(), FinalValue, ParsedValue, ParsedObject, ParsedText);
+        bWritten = ParsedObject != nullptr && ParsedObject == Pin->DefaultObject;
+    }
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("node_id"), NodeId);
