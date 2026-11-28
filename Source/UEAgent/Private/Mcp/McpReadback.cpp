@@ -552,8 +552,9 @@ namespace McpReadback
 		// Compiling does NOT rebuild actors that already exist: remember what was compiled.
 		if (Name.Equals(TEXT("compile_blueprint"), ESearchCase::IgnoreCase))
 		{
+			// A failed compile is an error envelope, its payload under `result` rather than `data`.
 			const FO Data = Payload(Result);
-			if (IsFalse(Get(Data, TEXT("succeeded"))))
+			if (IsFalse(Get(Result, TEXT("success"))) || IsFalse(Get(Data, TEXT("succeeded"))))
 			{
 				return;
 			}
