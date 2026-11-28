@@ -124,7 +124,7 @@ _INTEGER_ID_OWNERS = frozenset({"triangle", "vertex", "polygroup", "edge", "elem
 _OBJECT_NOUNS = frozenset({"objects", "dicts", "descriptors", "specs", "rows", "pairs"})
 _FIRST_BRACKET = re.compile(r"\[\s*(\[|\{|'|\"|-?\d|[A-Za-z])")
 _NUMERIC_TUPLE = re.compile(
-    r"\[\s*(?:-?\d+(?:\.\d+)?|[A-Za-z][\w()]*)(?:\s*,\s*(?:-?\d+(?:\.\d+)?|[A-Za-z][\w()]*|\.\.\.|\(?[A-Za-z]\)?))+\s*\]")
+    r"\[\s*(?:-?\d+(?:\.\d+)?|[A-Za-z][\w()]*)(?:\s*,\s*(?:-?\d+(?:\.\d+)?|[A-Za-z][\w()]*|\.\.\.|\([A-Za-z]\)?))+\s*\]")
 _LIST_OF = re.compile(r"\b(?:array|list|set)\s+of\s+((?:[\w-]+\s+){0,5}[\w-]+)", re.IGNORECASE)
 _ELEMENT_OPENER = re.compile(r"\b(?:array|list|set)\s+of\s+(?:\w+\s+){0,2}$|\beach\s+(?:an?\s+)?$", re.IGNORECASE)
 _OR_OBJECT = re.compile(r"\bor\s+(?:an?\s+)?(?:objects?|dicts?)\b|\bor\s+\{", re.IGNORECASE)
