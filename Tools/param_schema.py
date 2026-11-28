@@ -98,10 +98,14 @@ def _listed_enum(description: str) -> list[str]:
     return values
 
 
+# Prose that names spellings the handler takes besides the listed ones ("5.1 is accepted too", "Aliases x, y").
+_ALIASES_ACCEPTED = re.compile(r"\baccepted\b|\baliase?s?\b|\bsynonyms?\b", re.IGNORECASE)
+
+
 def enum_values(description: str) -> list[str]:
     """The closed set of values a string param's description names, or [] unless it is provably one."""
-    if not description:
-        return []
+    if not description or _ALIASES_ACCEPTED.search(description):
+        return []  # an enum of the listed values would refuse the aliases the handler takes
     if _PIPE_RUN.search(description) or _ONE_OF_RUN.search(description):
         return _listed_enum(description)  # a written-out list decides, quoted words elsewhere are not values
     return _legacy_enum(description)

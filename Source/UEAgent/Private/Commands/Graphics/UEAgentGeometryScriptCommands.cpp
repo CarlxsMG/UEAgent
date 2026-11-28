@@ -1547,7 +1547,7 @@ TSharedPtr<FJsonObject> HandleCompactMesh(const TSharedPtr<FJsonObject>& Params)
 //   @param target_edge_length [float] - Target uniform edge length in mesh units (sets TargetType=TargetEdgeLength). Mutually exclusive with target_tri_count; at least one is required.
 //   @param target_tri_count [int] - Approximate target triangle count (sets TargetType=TriangleCount). Mutually exclusive with target_edge_length.
 //   @param preserve_sharp_edges [bool] - Approximate 'preserve sharp edges' by enabling bPreventNormalFlips on the shared RemeshOptions (default true; UE's FGeometryScriptUniformRemeshOptions has no explicit preserve-sharp flag, so the closest equivalent is the shared RemeshOptions.bPreventNormalFlips).
-//   @param smoothing_type [string] - One of 'uniform' | 'uv_preserving' | 'mixed' (default 'mixed'); maps to EGeometryScriptRemeshSmoothingType on the shared RemeshOptions.
+//   @param smoothing_type [string] - One of 'uniform' | 'uv_preserving' | 'mixed' (default 'mixed'), uvpreserving accepted too; maps to EGeometryScriptRemeshSmoothingType on the shared RemeshOptions.
 //   @param auto_compact [bool] - Auto-compact the index space after remesh on the shared RemeshOptions (default true).
 //   @returns { actor_name: string, target_edge_length: number, target_tri_count: int, preserve_sharp_edges: bool, smoothing_type: string, auto_compact: bool, target_type: string, triangle_count: int, triangle_count_before: int, vertex_count: int, remeshed: bool }
 TSharedPtr<FJsonObject> HandleApplyUniformRemesh(const TSharedPtr<FJsonObject>& Params)
@@ -4429,7 +4429,7 @@ TSharedPtr<FJsonObject> HandleGetMeshComponentsDetail(const TSharedPtr<FJsonObje
 
 // MCP:set_mesh_uvs_from_projection - Replace the UVs of one channel on a DynamicMeshActor's live dynamic mesh in the editor world with a box, plane or cylinder projection, optionally only inside a region. Box suits plank-and-post geometry (each face takes the axis it faces), plane only flat pieces, cylinder wrapped shapes; projection 'plane' with scale [1,1,1] is a planar projection down mesh-local Z at 1 UV unit per cm. A uv_channel the mesh does not have yet is added first (the channel count only grows, so higher channels such as a lightmap UV1 are kept); uv_channel 8 or more is an error. One undo step restores the previous UVs and channel count. Returns triangles_affected and applied; when the engine reports an error, applied is false, the call fails and the mesh is left as it was.
 //   @param actor_name [string!] - Label or name of the target DynamicMeshActor.
-//   @param projection [string] - 'box' (default) | 'plane' | 'cylinder'.
+//   @param projection [string] - 'box' (default) | 'plane' | 'cylinder'; planar is accepted as plane.
 //   @param uv_channel [int] - UV channel to write, 0 to 7 (default 0); a channel the mesh lacks is added.
 //   @param location [array] - Local [x,y,z] origin of the projection shape (default the mesh origin).
 //   @param rotation [array] - [pitch, yaw, roll] of the projection shape (default none). For 'plane', this is what chooses which way the plane faces.

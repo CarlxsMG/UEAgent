@@ -4194,7 +4194,7 @@ namespace
 // MCP:add_blueprint_timeline_track - Add a track to a Timeline of a Blueprint, with optional keys, as the Timeline editor's "+ Track" does: a float, vector, color or event track whose curve is made inside the Blueprint, then the timeline node is reconstructed (a float/vector/color track gets an output pin of its name, an event track an exec output) and the Blueprint compiled; one undo step (the compile is not undone). The reply re-reads the timeline (tracks, output_pins). keys is [[time, value], ...]: value a number for float, [x,y,z] for vector, [r,g,b] or [r,g,b,a] for color, nothing for event ([time] or a bare time). A track name already used on the timeline, a malformed key or an unknown track_type is an error and nothing changes; so is a missing Blueprint or timeline. Keys past the timeline length stay but play only if length grows. Refused during PIE unless force=true. Timelines come from add_timeline_to_blueprint; read: get_blueprint_timeline_info; inverse: remove_blueprint_timeline_track.
 //   @param blueprint_name - Name (or full object path) of an Actor Blueprint.
 //   @param timeline_name - The timeline's variable name, as add_timeline_to_blueprint returned it.
-//   @param track_type - float | vector | color | event
+//   @param track_type - float | vector | color | event; linearcolor is accepted as color.
 //   @param track_name - Name of the new track, unique on this timeline; it names the node's output pin.
 //   @param keys [array] - Optional keys, [[time, value], ...] (see the description for value by track type).
 //   @param interpolation - Optional key interpolation for float/vector/color: "linear" (default) | "cubic" | "constant".

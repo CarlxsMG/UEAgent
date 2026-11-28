@@ -3207,13 +3207,7 @@
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "enum": [
-                "BlendSpace",
-                "BlendSpace1D",
-                "AimOffset",
-                "AimOffset1D"
-              ],
-              "description": "Optional class to create: BlendSpace (2D, default) | BlendSpace1D | AimOffset (2D UAimOffsetBlendSpace) | AimOffset1D (UAimOffsetBlendSpace1D), any case. Omitted, is_1d picks BlendSpace1D or BlendSpace."
+              "description": "Optional class to create: BlendSpace (2D, default) | BlendSpace1D | AimOffset (2D UAimOffsetBlendSpace) | AimOffset1D (UAimOffsetBlendSpace1D), any case; BlendSpace2D, AimOffsetBlendSpace and AimOffsetBlendSpace1D are accepted too. Omitted, is_1d picks BlendSpace1D or BlendSpace."
             },
             {
               "name": "is_1d",
@@ -14132,13 +14126,6 @@
               "name": "channels",
               "jsonType": "string",
               "required": true,
-              "enum": [
-                "Mono",
-                "Stereo",
-                "Quad",
-                "FiveDotOne",
-                "SevenDotOne"
-              ],
               "description": "EAudioBusChannels: 'Mono' | 'Stereo' | 'Quad' | 'FiveDotOne' | 'SevenDotOne', case-insensitive; FivePointOne, 5.1, SevenPointOne and 7.1 are accepted too."
             }
           ],
@@ -16859,13 +16846,7 @@
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "enum": [
-                "float",
-                "vector",
-                "color",
-                "event"
-              ],
-              "description": "float | vector | color | event"
+              "description": "float | vector | color | event; linearcolor is accepted as color."
             },
             {
               "name": "track_name",
@@ -18773,11 +18754,6 @@
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "enum": [
-                "all",
-                "functions",
-                "events"
-              ],
               "description": "Optional 'all' (default), 'functions' or 'events' (case-insensitive, singular accepted). 'functions' keeps function, interface, macro and delegate_signature graphs; 'events' keeps the event side (ubergraph pages and compiled event graphs) and lists it without include_ubergraphs.",
               "default": "all"
             },
@@ -29995,17 +29971,7 @@
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "enum": [
-                "Float",
-                "Vector",
-                "Vec2",
-                "Vec4",
-                "Color",
-                "Bool",
-                "Int"
-              ],
-              "description": "Type token: Float|Vector|Vec2|Vec4|Color|Bool|Int (case-insensitive); defaults to Float",
-              "default": "Float"
+              "description": "Type token: Float|Vector|Vec2|Vec4|Color|Bool|Int (case-insensitive); defaults to Float. Vec3, Vector2, Vector4, LinearColor, Boolean, Int32 and Integer are accepted too."
             }
           ],
           "returns": "{ system_path: string, parameter_name: string, parameter_type: string, found: bool, value_read_back?: number|bool|[number...] }",
@@ -31766,13 +31732,7 @@
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "enum": [
-                "float",
-                "int",
-                "vector",
-                "color"
-              ],
-              "description": "One of \"float\", \"int\", \"vector\", or \"color\"; defaults to \"float\"",
+              "description": "One of \"float\", \"int\", \"vector\", or \"color\"; defaults to \"float\". int32, vec3 and linearcolor are accepted too.",
               "default": "float"
             },
             {
@@ -32437,16 +32397,7 @@
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "enum": [
-                "Float",
-                "Vector",
-                "Vec2",
-                "Vec4",
-                "Color",
-                "Bool",
-                "Int"
-              ],
-              "description": "Optional type token: Float|Vector|Vec2|Vec4|Color|Bool|Int (case-insensitive); when omitted a vector, vec2, vec4 or color key picks that type, else Float"
+              "description": "Optional type token: Float|Vector|Vec2|Vec4|Color|Bool|Int (case-insensitive); Vec3, Vector2, Vector4, LinearColor, Boolean, Int32 and Integer are accepted too. When omitted a vector, vec2, vec4 or color key picks that type, else Float"
             },
             {
               "name": "value",
@@ -36485,12 +36436,7 @@
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "enum": [
-                "uniform",
-                "uv_preserving",
-                "mixed"
-              ],
-              "description": "One of 'uniform' | 'uv_preserving' | 'mixed' (default 'mixed'); maps to EGeometryScriptRemeshSmoothingType on the shared RemeshOptions.",
+              "description": "One of 'uniform' | 'uv_preserving' | 'mixed' (default 'mixed'), uvpreserving accepted too; maps to EGeometryScriptRemeshSmoothingType on the shared RemeshOptions.",
               "default": "mixed"
             },
             {
@@ -37690,12 +37636,7 @@
               "name": "projection",
               "jsonType": "string",
               "required": false,
-              "enum": [
-                "box",
-                "plane",
-                "cylinder"
-              ],
-              "description": "'box' (default) | 'plane' | 'cylinder'.",
+              "description": "'box' (default) | 'plane' | 'cylinder'; planar is accepted as plane.",
               "default": "box"
             },
             {
@@ -54804,14 +54745,7 @@
               "jsonType": "string",
               "required": true,
               "nameLike": true,
-              "enum": [
-                "bool",
-                "int",
-                "float",
-                "double",
-                "string"
-              ],
-              "description": "\"bool\" | \"int\" | \"float\" | \"double\" | \"string\" (required)"
+              "description": "\"bool\" | \"int\" | \"float\" | \"double\" | \"string\" (required); int32 and integer are accepted too."
             }
           ],
           "returns": "{ pcg_graph_path, name, type, added, already_existed, parameter_count }",
@@ -59734,15 +59668,6 @@
               "name": "selection_behavior",
               "jsonType": "string",
               "required": true,
-              "enum": [
-                "None",
-                "TryEnterState",
-                "TrySelectChildrenInOrder",
-                "TrySelectChildrenAtRandom",
-                "TrySelectChildrenWithHighestUtility",
-                "TrySelectChildrenAtRandomWeightedByUtility",
-                "TryFollowTransitions"
-              ],
               "description": "One of None | TryEnterState | TrySelectChildrenInOrder | TrySelectChildrenAtRandom | TrySelectChildrenWithHighestUtility | TrySelectChildrenAtRandomWeightedByUtility | TryFollowTransitions; an EStateTreeStateSelectionBehavior:: prefix is accepted"
             }
           ],
@@ -61938,11 +61863,6 @@
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "enum": [
-                "double",
-                "float",
-                "bool"
-              ],
               "description": "Channel value kind: \"double\" (default; transform tracks) | \"float\" (float, color and other property tracks) | \"bool\" (bool and visibility tracks). Aliases transform, scalar, color, boolean, visibility are accepted; anything else is an error.",
               "default": "double"
             },
@@ -62294,12 +62214,7 @@
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "enum": [
-                "double",
-                "float",
-                "bool"
-              ],
-              "description": "Channel value kind: \"double\" (default) | \"float\" | \"bool\".",
+              "description": "Channel value kind: \"double\" (default) | \"float\" | \"bool\". Aliases transform, scalar, color, boolean and visibility are accepted too.",
               "default": "double"
             },
             {
@@ -62547,12 +62462,7 @@
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "enum": [
-                "double",
-                "float",
-                "bool"
-              ],
-              "description": "Channel value kind: \"double\" (default) | \"float\" | \"bool\".",
+              "description": "Channel value kind: \"double\" (default) | \"float\" | \"bool\". Aliases transform, scalar, color, boolean and visibility are accepted too.",
               "default": "double"
             },
             {
@@ -62901,22 +62811,7 @@
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "enum": [
-                "transform",
-                "float",
-                "bool",
-                "vector",
-                "color",
-                "visibility",
-                "audio",
-                "event",
-                "fade",
-                "skeletalanimation",
-                "subsequence",
-                "cameracut",
-                "property"
-              ],
-              "description": "Optional class filter to pick the track (\"transform\"|\"float\"|\"bool\"|\"vector\"|\"color\"|\"visibility\"|\"audio\"|\"event\"|\"fade\"|\"skeletalanimation\"|\"subsequence\"|\"cameracut\"|\"property\"): the first track of that kind on the binding; omitted or unrecognised, track_index picks the track."
+              "description": "Optional class filter to pick the track (\"transform\"|\"float\"|\"bool\"|\"vector\"|\"color\"|\"visibility\"|\"audio\"|\"event\"|\"fade\"|\"skeletalanimation\"|\"subsequence\"|\"cameracut\"|\"property\"; 3dtransform, scalar and boolean are accepted too): the first track of that kind on the binding; omitted or unrecognised, track_index picks the track."
             },
             {
               "name": "section_index",
@@ -63174,7 +63069,7 @@
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "description": "Channel value kind: \"double\" (default) | \"float\". (\"bool\" is rejected -- no interp/tangent.)",
+              "description": "Channel value kind: \"double\" (default) | \"float\"; aliases transform, scalar and color are accepted too. (\"bool\" is rejected -- no interp/tangent.)",
               "default": "double"
             },
             {
@@ -63868,22 +63763,7 @@
               "jsonType": "string",
               "required": false,
               "nameLike": true,
-              "enum": [
-                "transform",
-                "float",
-                "bool",
-                "vector",
-                "color",
-                "visibility",
-                "audio",
-                "event",
-                "fade",
-                "skeletalanimation",
-                "subsequence",
-                "cameracut",
-                "property"
-              ],
-              "description": "Optional class filter (\"transform\"|\"float\"|\"bool\"|\"vector\"|\"color\"|\"visibility\"|\"audio\"|\"event\"|\"fade\"|\"skeletalanimation\"|\"subsequence\"|\"cameracut\"|\"property\"): picks the binding's first track of that kind; omitted or unrecognised, track_index picks the track."
+              "description": "Optional class filter (\"transform\"|\"float\"|\"bool\"|\"vector\"|\"color\"|\"visibility\"|\"audio\"|\"event\"|\"fade\"|\"skeletalanimation\"|\"subsequence\"|\"cameracut\"|\"property\"; 3dtransform, scalar and boolean are accepted too): picks the binding's first track of that kind; omitted or unrecognised, track_index picks the track."
             },
             {
               "name": "track_index",
@@ -64776,11 +64656,6 @@
               "name": "ownership",
               "jsonType": "string",
               "required": true,
-              "enum": [
-                "InnerSequence",
-                "RootSequence",
-                "External"
-              ],
               "description": "One of: InnerSequence | RootSequence | External. MasterSequence is accepted as RootSequence."
             },
             {

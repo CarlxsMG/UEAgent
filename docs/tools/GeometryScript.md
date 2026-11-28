@@ -130,7 +130,7 @@ Remesh the live dynamic mesh of a DynamicMeshActor in the editor world into even
 | `target_edge_length` | number | no | Target uniform edge length in mesh units (sets TargetType=TargetEdgeLength). Mutually exclusive with target_tri_count; at least one is required. |
 | `target_tri_count` | integer | no | Approximate target triangle count (sets TargetType=TriangleCount). Mutually exclusive with target_edge_length. |
 | `preserve_sharp_edges` | boolean | no | Approximate 'preserve sharp edges' by enabling bPreventNormalFlips on the shared RemeshOptions (default true; UE's FGeometryScriptUniformRemeshOptions has no explicit preserve-sharp flag, so the closest equivalent is the shared RemeshOptions.bPreventNormalFlips). |
-| `smoothing_type` | string | no | One of 'uniform' \| 'uv_preserving' \| 'mixed' (default 'mixed'); maps to EGeometryScriptRemeshSmoothingType on the shared RemeshOptions. |
+| `smoothing_type` | string | no | One of 'uniform' \| 'uv_preserving' \| 'mixed' (default 'mixed'), uvpreserving accepted too; maps to EGeometryScriptRemeshSmoothingType on the shared RemeshOptions. |
 | `auto_compact` | boolean | no | Auto-compact the index space after remesh on the shared RemeshOptions (default true). |
 
 **Returns:** `{ actor_name: string, target_edge_length: number, target_tri_count: int, preserve_sharp_edges: bool, smoothing_type: string, auto_compact: bool, target_type: string, triangle_count: int, triangle_count_before: int, vertex_count: int, remeshed: bool }`
@@ -556,7 +556,7 @@ Replace the UVs of one channel on a DynamicMeshActor's live dynamic mesh in the 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Label or name of the target DynamicMeshActor. |
-| `projection` | string | no | 'box' (default) \| 'plane' \| 'cylinder'. |
+| `projection` | string | no | 'box' (default) \| 'plane' \| 'cylinder'; planar is accepted as plane. |
 | `uv_channel` | integer | no | UV channel to write, 0 to 7 (default 0); a channel the mesh lacks is added. |
 | `location` | array | no | Local [x,y,z] origin of the projection shape (default the mesh origin). |
 | `rotation` | array | no | [pitch, yaw, roll] of the projection shape (default none). For 'plane', this is what chooses which way the plane faces. |

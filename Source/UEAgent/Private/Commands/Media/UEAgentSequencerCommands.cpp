@@ -1050,7 +1050,7 @@ ULevelSequence* LoadSequenceByPathOrName(const FString& PathOrName);
 //   @param binding_guid - GUID of the attachee binding that owns the attach track. Omit it (and binding_name_or_guid) for a section of a ROOT track -- shot, camera cut, audio, event, sub-sequence, fade: track_type or track_index then pick among the root tracks in get_sequence_tracks order, camera cut last.
 //   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
 //   @param track_index - Optional index into the binding's tracks (default 0). Without binding_guid it indexes the root tracks.
-//   @param track_type - Optional class filter to pick the track ("transform"|"float"|"bool"|"vector"|"color"|"visibility"|"audio"|"event"|"fade"|"skeletalanimation"|"subsequence"|"cameracut"|"property"): the first track of that kind on the binding; omitted or unrecognised, track_index picks the track.
+//   @param track_type - Optional class filter to pick the track ("transform"|"float"|"bool"|"vector"|"color"|"visibility"|"audio"|"event"|"fade"|"skeletalanimation"|"subsequence"|"cameracut"|"property"; 3dtransform, scalar and boolean are accepted too): the first track of that kind on the binding; omitted or unrecognised, track_index picks the track.
 //   @param section_index - Optional index of the section on the track (default 0).
 //   @param attachment_location_rule - Optional EAttachmentRule: KeepRelative | KeepWorld | SnapToTarget.
 //   @param attachment_rotation_rule - Optional EAttachmentRule: KeepRelative | KeepWorld | SnapToTarget.
@@ -3539,7 +3539,7 @@ static bool StringToBlendType(const FString& Str, EMovieSceneBlendType& OutType)
 //   @param sequence_path - Full /Game path OR bare asset name of the target Level Sequence.
 //   @param sequence_name - Alias for sequence_path.
 //   @param binding_guid - GUID of the object binding whose section to edit (from get_sequence_bindings). Omit it (and binding_name_or_guid) for a section of a ROOT track -- shot, camera cut, audio, event, sub-sequence, fade: track_type or track_index then pick among the root tracks in get_sequence_tracks order, camera cut last.
-//   @param track_type - Optional class filter ("transform"|"float"|"bool"|"vector"|"color"|"visibility"|"audio"|"event"|"fade"|"skeletalanimation"|"subsequence"|"cameracut"|"property"): picks the binding's first track of that kind; omitted or unrecognised, track_index picks the track.
+//   @param track_type - Optional class filter ("transform"|"float"|"bool"|"vector"|"color"|"visibility"|"audio"|"event"|"fade"|"skeletalanimation"|"subsequence"|"cameracut"|"property"; 3dtransform, scalar and boolean are accepted too): picks the binding's first track of that kind; omitted or unrecognised, track_index picks the track.
 //   @param track_index - Index into the binding's tracks (0 = first track, default 0; used when track_type is omitted or unrecognised). Without binding_guid it indexes the root tracks.
 //   @param section_index - Index of the section on the resolved track (default 0).
 //   @param use_manual - bool, default true: true writes the manual duration and turns manual easing on for each side given; false writes the auto duration and turns manual easing off for each side given.
@@ -6909,7 +6909,7 @@ TSharedPtr<FJsonObject> HandleGetChannelKeyframes(const TSharedPtr<FJsonObject>&
 //   @param track_type - Optional class filter (see set_section_properties) selecting the track on the binding.
 //   @param track_index - Index into the binding's tracks (default 0; used when track_type omitted). Without binding_guid it indexes the root tracks.
 //   @param section_index - Index of the section on the resolved track (default 0).
-//   @param channel_type - Channel value kind: "double" (default) | "float" | "bool".
+//   @param channel_type - Channel value kind: "double" (default) | "float" | "bool". Aliases transform, scalar, color, boolean and visibility are accepted too.
 //   @param channel_index [int] - Index of the channel within its proxy view (default 0).
 //   @param index [int] - Index of the key to move (mutually exclusive with frame).
 //   @param frame [int] - Frame of the key to move (resolved via FindKey; provide index OR frame).
@@ -7003,7 +7003,7 @@ TSharedPtr<FJsonObject> HandleMoveKeyframe(const TSharedPtr<FJsonObject>& Params
 //   @param track_type - Optional class filter (see set_section_properties) selecting the track on the binding.
 //   @param track_index - Index into the binding's tracks (default 0; used when track_type omitted). Without binding_guid it indexes the root tracks.
 //   @param section_index - Index of the section on the resolved track (default 0).
-//   @param channel_type - Channel value kind: "double" (default) | "float" | "bool".
+//   @param channel_type - Channel value kind: "double" (default) | "float" | "bool". Aliases transform, scalar, color, boolean and visibility are accepted too.
 //   @param channel_index [int] - Index of the channel within its proxy view (default 0).
 //   @param index [int] - Index of the key to remove (mutually exclusive with frame).
 //   @param frame [int] - Frame of the key to remove (resolved via FindKey; provide index OR frame).
@@ -7071,7 +7071,7 @@ static bool SeqApplyKeyEdit(ValueType& Key, const TSharedPtr<FJsonObject>& Param
 //   @param track_type - Optional class filter (see set_section_properties) selecting the track on the binding.
 //   @param track_index - Index into the binding's tracks (default 0; used when track_type omitted). Without binding_guid it indexes the root tracks.
 //   @param section_index - Index of the section on the resolved track (default 0).
-//   @param channel_type - Channel value kind: "double" (default) | "float". ("bool" is rejected -- no interp/tangent.)
+//   @param channel_type - Channel value kind: "double" (default) | "float"; aliases transform, scalar and color are accepted too. ("bool" is rejected -- no interp/tangent.)
 //   @param channel_index [int] - Index of the channel within its proxy view (default 0).
 //   @param index [int] - Index of the key to edit (mutually exclusive with frame).
 //   @param frame [int] - Frame of the key to edit (resolved via FindKey; provide index OR frame).

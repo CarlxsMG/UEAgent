@@ -297,7 +297,7 @@ namespace
 //   @param name - Asset name (e.g. 'BS_Example').
 //   @param asset_name - Alias of name.
 //   @param package_path - Target content package path where the asset is created (default /Game/Animation)
-//   @param blend_space_type - Optional class to create: BlendSpace (2D, default) | BlendSpace1D | AimOffset (2D UAimOffsetBlendSpace) | AimOffset1D (UAimOffsetBlendSpace1D), any case. Omitted, is_1d picks BlendSpace1D or BlendSpace.
+//   @param blend_space_type - Optional class to create: BlendSpace (2D, default) | BlendSpace1D | AimOffset (2D UAimOffsetBlendSpace) | AimOffset1D (UAimOffsetBlendSpace1D), any case; BlendSpace2D, AimOffsetBlendSpace and AimOffsetBlendSpace1D are accepted too. Omitted, is_1d picks BlendSpace1D or BlendSpace.
 //   @param is_1d - If true create a 1D BlendSpace, else 2D (default false); when blend_space_type is also given they must agree.
 //   @param axis_name - X-axis display name (default 'Speed'; 'Yaw' for an aim offset)
 //   @param axis_min - X-axis minimum value (default 0; -90 for an aim offset); must be below axis_max.

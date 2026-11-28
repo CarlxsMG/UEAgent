@@ -335,7 +335,7 @@ Read a user-exposed parameter's current value from a Niagara System's exposed st
 |---|---|---|---|
 | `system_path` | string | yes | Asset path of the Niagara System. |
 | `parameter_name` | string | yes | User parameter name (without the "User." prefix). |
-| `type` | string | no | Type token: Float\|Vector\|Vec2\|Vec4\|Color\|Bool\|Int (case-insensitive); defaults to Float |
+| `type` | string | no | Type token: Float\|Vector\|Vec2\|Vec4\|Color\|Bool\|Int (case-insensitive); defaults to Float. Vec3, Vector2, Vector4, LinearColor, Boolean, Int32 and Integer are accepted too. |
 
 **Returns:** `{ system_path: string, parameter_name: string, parameter_type: string, found: bool, value_read_back?: number|bool|[number...] }`
 
@@ -678,7 +678,7 @@ Override a Niagara module input by writing the rapid-iteration store. Locates th
 | `emitter_name` | string | yes | Display name of the emitter handle. |
 | `module_node_name` | string | yes | The module function-call node name (from add_niagara_module_to_stack's module_node_name). |
 | `input_name` | string | yes | Leaf name of the module input (e.g. "Drag" for "Module.Drag"). |
-| `value_type` | string | no | One of "float", "int", "vector", or "color"; defaults to "float" |
+| `value_type` | string | no | One of "float", "int", "vector", or "color"; defaults to "float". int32, vec3 and linearcolor are accepted too. |
 | `value` | any | no | Required. For float/int: a JSON number. For vector: [x, y, z], numbers within the float range. For color: [r, g, b] or [r, g, b, a], alpha 1 when omitted. A missing or malformed value is an error. |
 
 **Returns:** `{ system_path: string, emitter_name: string, module_node_name: string, input_name: string, value_type: string, ri_param_name: string, verified: bool, success: bool, saved: bool, save_error?: string }`
@@ -733,7 +733,7 @@ Set the default value of one user parameter (the User. namespace) of a Niagara S
 |---|---|---|---|
 | `system_path` | string | yes | Asset path of the Niagara System. |
 | `parameter_name` | string | yes | User parameter name (without the "User." prefix). |
-| `type` | string | no | Optional type token: Float\|Vector\|Vec2\|Vec4\|Color\|Bool\|Int (case-insensitive); when omitted a vector, vec2, vec4 or color key picks that type, else Float |
+| `type` | string | no | Optional type token: Float\|Vector\|Vec2\|Vec4\|Color\|Bool\|Int (case-insensitive); Vec3, Vector2, Vector4, LinearColor, Boolean, Int32 and Integer are accepted too. When omitted a vector, vec2, vec4 or color key picks that type, else Float |
 | `value` | number\|boolean | no | The value of a Float (a number), Int (a whole number) or Bool (true or false) parameter; those types fail without it or with another JSON type |
 | `vector` | array | no | [X, Y, Z], 3 numbers, the value of a Vector parameter (required for it; also picks type Vector when type is omitted) |
 | `vec2` | array | no | [X, Y], 2 numbers, the value of a Vec2 parameter (required for it) |

@@ -470,7 +470,7 @@ namespace
 // MCP:set_niagara_user_parameter - Set the default value of one user parameter (the User. namespace) of a Niagara System asset in one undo step, adding the parameter when the system has none of that name and type; the asset is marked dirty, not saved (save_asset keeps it). type picks Float, Vector, Vec2, Vec4, Color, Bool or Int; without it a vector, vec2, vec4 or color key picks that type, else Float. A missing value, or one not of the JSON type the parameter takes, is an error with nothing written. A parameter already holding the value is a success with changed=false and value_set=false, nothing written. verified means the value reads back as sent. Read it with get_niagara_user_parameter; inverse: remove_niagara_user_parameter.
 //   @param system_path - Asset path of the Niagara System.
 //   @param parameter_name - User parameter name (without the "User." prefix).
-//   @param type - Optional type token: Float|Vector|Vec2|Vec4|Color|Bool|Int (case-insensitive); when omitted a vector, vec2, vec4 or color key picks that type, else Float
+//   @param type - Optional type token: Float|Vector|Vec2|Vec4|Color|Bool|Int (case-insensitive); Vec3, Vector2, Vector4, LinearColor, Boolean, Int32 and Integer are accepted too. When omitted a vector, vec2, vec4 or color key picks that type, else Float
 //   @param value [number|boolean] - The value of a Float (a number), Int (a whole number) or Bool (true or false) parameter; those types fail without it or with another JSON type
 //   @param vector - [X, Y, Z], 3 numbers, the value of a Vector parameter (required for it; also picks type Vector when type is omitted)
 //   @param vec2 - [X, Y], 2 numbers, the value of a Vec2 parameter (required for it)
@@ -687,7 +687,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraUserParameter(const TSharedPtr<FJsonObje
 // MCP:get_niagara_user_parameter - Read a user-exposed parameter's current value from a Niagara System's exposed store.  Resolves the parameter by short name (no "User." prefix) and the supplied ``type`` token, reads the POD value back. Round-trip companion to set_niagara_user_parameter.
 //   @param system_path - Asset path of the Niagara System.
 //   @param parameter_name - User parameter name (without the "User." prefix).
-//   @param type - Type token: Float|Vector|Vec2|Vec4|Color|Bool|Int (case-insensitive); defaults to Float
+//   @param type - Type token: Float|Vector|Vec2|Vec4|Color|Bool|Int (case-insensitive); defaults to Float. Vec3, Vector2, Vector4, LinearColor, Boolean, Int32 and Integer are accepted too.
 //   @returns { system_path: string, parameter_name: string, parameter_type: string, found: bool, value_read_back?: number|bool|[number...] }
 
 TSharedPtr<FJsonObject> HandleGetNiagaraUserParameter(const TSharedPtr<FJsonObject>& Params)
@@ -3640,7 +3640,7 @@ namespace
 //   @param emitter_name - Display name of the emitter handle.
 //   @param module_node_name - The module function-call node name (from add_niagara_module_to_stack's module_node_name).
 //   @param input_name - Leaf name of the module input (e.g. "Drag" for "Module.Drag").
-//   @param value_type - One of "float", "int", "vector", or "color"; defaults to "float"
+//   @param value_type - One of "float", "int", "vector", or "color"; defaults to "float". int32, vec3 and linearcolor are accepted too.
 //   @param value - Required. For float/int: a JSON number. For vector: [x, y, z], numbers within the float range. For color: [r, g, b] or [r, g, b, a], alpha 1 when omitted. A missing or malformed value is an error.
 //   @returns { system_path: string, emitter_name: string, module_node_name: string, input_name: string, value_type: string, ri_param_name: string, verified: bool, success: bool, saved: bool, save_error?: string }
 

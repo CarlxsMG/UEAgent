@@ -745,7 +745,7 @@ Create and save a blend space asset under /Game -- a 2D UBlendSpace (default), a
 | `name` | string | yes | Asset name (e.g. 'BS_Example'). |
 | `asset_name` | string | no | Alias of name. |
 | `package_path` | string | no | Target content package path where the asset is created (default /Game/Animation) |
-| `blend_space_type` | string | no | Optional class to create: BlendSpace (2D, default) \| BlendSpace1D \| AimOffset (2D UAimOffsetBlendSpace) \| AimOffset1D (UAimOffsetBlendSpace1D), any case. Omitted, is_1d picks BlendSpace1D or BlendSpace. |
+| `blend_space_type` | string | no | Optional class to create: BlendSpace (2D, default) \| BlendSpace1D \| AimOffset (2D UAimOffsetBlendSpace) \| AimOffset1D (UAimOffsetBlendSpace1D), any case; BlendSpace2D, AimOffsetBlendSpace and AimOffsetBlendSpace1D are accepted too. Omitted, is_1d picks BlendSpace1D or BlendSpace. |
 | `is_1d` | boolean | no | If true create a 1D BlendSpace, else 2D (default false); when blend_space_type is also given they must agree. |
 | `axis_name` | string | no | X-axis display name (default 'Speed'; 'Yaw' for an aim offset) |
 | `axis_min` | number | no | X-axis minimum value (default 0; -90 for an aim offset); must be below axis_max. |

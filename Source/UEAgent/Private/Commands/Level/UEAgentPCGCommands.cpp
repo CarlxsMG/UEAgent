@@ -1320,7 +1320,7 @@ TSharedPtr<FJsonObject> HandleGetPCGGraphParameters(const TSharedPtr<FJsonObject
 // MCP:add_pcg_graph_parameter - Expose a tunable on a PCG graph (bool / int / float / double / string) so density, radius or a toggle can be driven from outside instead of being welded into a node. Idempotent (already_existed when the name is taken). Only worth doing on graphs you own -- adding one to a library graph means editing that asset. Set a value with set_pcg_graph_parameter and list them with get_pcg_graph_parameters; inverse: remove_pcg_graph_parameter.
 //   @param pcg_graph_path - /Game/... path to the UPCGGraph (required)
 //   @param name - Parameter name (required)
-//   @param type - "bool" | "int" | "float" | "double" | "string" (required)
+//   @param type - "bool" | "int" | "float" | "double" | "string" (required); int32 and integer are accepted too.
 //   @returns { pcg_graph_path, name, type, added, already_existed, parameter_count }
 TSharedPtr<FJsonObject> HandleAddPCGGraphParameter(const TSharedPtr<FJsonObject>& Params)
 {

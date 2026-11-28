@@ -582,7 +582,7 @@ Move one key of a channel of one section on an object-binding track of a Level S
 | `track_type` | string | no | Optional class filter (see set_section_properties) selecting the track on the binding. |
 | `track_index` | integer | no | Index into the binding's tracks (default 0; used when track_type omitted). Without binding_guid it indexes the root tracks. |
 | `section_index` | integer | no | Index of the section on the resolved track (default 0). |
-| `channel_type` | string | no | Channel value kind: "double" (default) \| "float" \| "bool". |
+| `channel_type` | string | no | Channel value kind: "double" (default) \| "float" \| "bool". Aliases transform, scalar, color, boolean and visibility are accepted too. |
 | `channel_index` | integer | no | Index of the channel within its proxy view (default 0). |
 | `index` | integer | no | Index of the key to move (mutually exclusive with frame). |
 | `frame` | integer | no | Frame of the key to move (resolved via FindKey; provide index OR frame). |
@@ -671,7 +671,7 @@ Delete one key from one channel of a section of a Level Sequence, found by its i
 | `track_type` | string | no | Optional class filter (see set_section_properties) selecting the track on the binding. |
 | `track_index` | integer | no | Index into the binding's tracks (default 0; used when track_type omitted). Without binding_guid it indexes the root tracks. |
 | `section_index` | integer | no | Index of the section on the resolved track (default 0). |
-| `channel_type` | string | no | Channel value kind: "double" (default) \| "float" \| "bool". |
+| `channel_type` | string | no | Channel value kind: "double" (default) \| "float" \| "bool". Aliases transform, scalar, color, boolean and visibility are accepted too. |
 | `channel_index` | integer | no | Index of the channel within its proxy view (default 0). |
 | `index` | integer | no | Index of the key to remove (mutually exclusive with frame). |
 | `frame` | integer | no | Frame of the key to remove (resolved via FindKey; provide index OR frame). |
@@ -783,7 +783,7 @@ Set the attach and detach transform rules of one 3D-attach section on an object-
 | `binding_guid` | string | no | GUID of the attachee binding that owns the attach track. Omit it (and binding_name_or_guid) for a section of a ROOT track -- shot, camera cut, audio, event, sub-sequence, fade: track_type or track_index then pick among the root tracks in get_sequence_tracks order, camera cut last. |
 | `binding_name_or_guid` | string | no | Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved. |
 | `track_index` | integer | no | Optional index into the binding's tracks (default 0). Without binding_guid it indexes the root tracks. |
-| `track_type` | string | no | Optional class filter to pick the track ("transform"\|"float"\|"bool"\|"vector"\|"color"\|"visibility"\|"audio"\|"event"\|"fade"\|"skeletalanimation"\|"subsequence"\|"cameracut"\|"property"): the first track of that kind on the binding; omitted or unrecognised, track_index picks the track. |
+| `track_type` | string | no | Optional class filter to pick the track ("transform"\|"float"\|"bool"\|"vector"\|"color"\|"visibility"\|"audio"\|"event"\|"fade"\|"skeletalanimation"\|"subsequence"\|"cameracut"\|"property"; 3dtransform, scalar and boolean are accepted too): the first track of that kind on the binding; omitted or unrecognised, track_index picks the track. |
 | `section_index` | integer | no | Optional index of the section on the track (default 0). |
 | `attachment_location_rule` | string | no | Optional EAttachmentRule: KeepRelative \| KeepWorld \| SnapToTarget. |
 | `attachment_rotation_rule` | string | no | Optional EAttachmentRule: KeepRelative \| KeepWorld \| SnapToTarget. |
@@ -834,7 +834,7 @@ Set the value, interpolation mode, tangent mode and tangents of one key of a dou
 | `track_type` | string | no | Optional class filter (see set_section_properties) selecting the track on the binding. |
 | `track_index` | integer | no | Index into the binding's tracks (default 0; used when track_type omitted). Without binding_guid it indexes the root tracks. |
 | `section_index` | integer | no | Index of the section on the resolved track (default 0). |
-| `channel_type` | string | no | Channel value kind: "double" (default) \| "float". ("bool" is rejected -- no interp/tangent.) |
+| `channel_type` | string | no | Channel value kind: "double" (default) \| "float"; aliases transform, scalar and color are accepted too. ("bool" is rejected -- no interp/tangent.) |
 | `channel_index` | integer | no | Index of the channel within its proxy view (default 0). |
 | `index` | integer | no | Index of the key to edit (mutually exclusive with frame). |
 | `frame` | integer | no | Frame of the key to edit (resolved via FindKey; provide index OR frame). |

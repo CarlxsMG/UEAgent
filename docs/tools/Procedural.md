@@ -29,7 +29,7 @@ Expose a tunable on a PCG graph (bool / int / float / double / string) so densit
 |---|---|---|---|
 | `pcg_graph_path` | string | yes | /Game/... path to the UPCGGraph (required) |
 | `name` | string | yes | Parameter name (required) |
-| `type` | string | yes | "bool" \| "int" \| "float" \| "double" \| "string" (required) |
+| `type` | string | yes | "bool" \| "int" \| "float" \| "double" \| "string" (required); int32 and integer are accepted too. |
 
 **Returns:** `{ pcg_graph_path, name, type, added, already_existed, parameter_count }`
 

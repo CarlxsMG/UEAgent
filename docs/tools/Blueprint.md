@@ -53,7 +53,7 @@ Add a track to a Timeline of a Blueprint, with optional keys, as the Timeline ed
 |---|---|---|---|
 | `blueprint_name` | string | yes | Name (or full object path) of an Actor Blueprint. |
 | `timeline_name` | string | yes | The timeline's variable name, as add_timeline_to_blueprint returned it. |
-| `track_type` | string | yes | float \| vector \| color \| event |
+| `track_type` | string | yes | float \| vector \| color \| event; linearcolor is accepted as color. |
 | `track_name` | string | yes | Name of the new track, unique on this timeline; it names the node's output pin. |
 | `keys` | array | no | Optional keys, [[time, value], ...] (see the description for value by track type). |
 | `interpolation` | string | no | Optional key interpolation for float/vector/color: "linear" (default) \| "cubic" \| "constant". |
