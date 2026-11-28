@@ -390,11 +390,24 @@ TSharedPtr<FJsonObject> HandleCopyMaterialInstanceParams(const TSharedPtr<FJsonO
 	if (TSharedPtr<FJsonObject> SaveFailed = UEAgentMaterialInstanceImpl::CommitInstance(DestMIC)) { return SaveFailed; }
 
 	// The re-read: a source override counts as copied when the destination now stores the same value for it.
-	auto CountCopied = [](const auto& SourceValues, const auto& DestValues)
+	// A parameter the source lists twice is one override, the later entry being the value written last.
+	auto CountCopied = [](const auto& SourceValues, const auto& DestValues, int32& OutExpected)
 	{
 		int32 Copied = 0;
-		for (const auto& SourceValue : SourceValues)
+		OutExpected = 0;
+		for (int32 Index = SourceValues.Num() - 1; Index >= 0; --Index)
 		{
+			const auto& SourceValue = SourceValues[Index];
+			bool bSeenLater = false;
+			for (int32 Later = Index + 1; Later < SourceValues.Num() && !bSeenLater; ++Later)
+			{
+				bSeenLater = SourceValues[Later].ParameterInfo == SourceValue.ParameterInfo;
+			}
+			if (bSeenLater)
+			{
+				continue;
+			}
+			++OutExpected;
 			for (const auto& DestValue : DestValues)
 			{
 				if (DestValue.ParameterInfo == SourceValue.ParameterInfo && DestValue.ParameterValue == SourceValue.ParameterValue)
@@ -406,12 +419,11 @@ TSharedPtr<FJsonObject> HandleCopyMaterialInstanceParams(const TSharedPtr<FJsonO
 		}
 		return Copied;
 	};
-	const int32 ScalarsCopied = CountCopied(SourceMIC->ScalarParameterValues, DestMIC->ScalarParameterValues);
-	const int32 VectorsCopied = CountCopied(SourceMIC->VectorParameterValues, DestMIC->VectorParameterValues);
-	const int32 TexturesCopied = CountCopied(SourceMIC->TextureParameterValues, DestMIC->TextureParameterValues);
-	const bool bAllCopied = ScalarsCopied == SourceMIC->ScalarParameterValues.Num()
-		&& VectorsCopied == SourceMIC->VectorParameterValues.Num()
-		&& TexturesCopied == SourceMIC->TextureParameterValues.Num();
+	int32 ScalarsExpected = 0, VectorsExpected = 0, TexturesExpected = 0;
+	const int32 ScalarsCopied = CountCopied(SourceMIC->ScalarParameterValues, DestMIC->ScalarParameterValues, ScalarsExpected);
+	const int32 VectorsCopied = CountCopied(SourceMIC->VectorParameterValues, DestMIC->VectorParameterValues, VectorsExpected);
+	const int32 TexturesCopied = CountCopied(SourceMIC->TextureParameterValues, DestMIC->TextureParameterValues, TexturesExpected);
+	const bool bAllCopied = ScalarsCopied == ScalarsExpected && VectorsCopied == VectorsExpected && TexturesCopied == TexturesExpected;
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("source_path"), SourcePath);
