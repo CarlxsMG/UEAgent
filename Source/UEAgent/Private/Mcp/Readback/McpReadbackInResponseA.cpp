@@ -213,7 +213,7 @@ namespace McpReadbackInResponseA
 	static FO CheckInterfaceSweep(const FO& Params, const FO& Result)
 	{
 		const FO Data = Payload(Result);
-		const FV Count = Get(Data, TEXT("count"));
+		const FV Count = Or(Get(Data, TEXT("total")), Get(Data, TEXT("count"))); // count is this page only
 		const FV ScannedClasses = Get(Data, TEXT("scanned_class_count"));
 		if (!IsInt(Count) || !IsNum(ScannedClasses))
 		{
